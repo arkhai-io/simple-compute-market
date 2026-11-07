@@ -1,0 +1,38 @@
+# The VM end-to-end lane's own bindings, beyond the development overlay the full
+# local stack shares: Bob's storefront configured to settle against the payments
+# lane double, and the dispute authority both VM registries recommend.
+#
+# Layered after compose.vms.yml, compose.vms-local.yml and
+# compose.payments-double.yml:
+#
+#     docker compose -p simple-market-service \
+#       -f compose.vms.yml -f compose.vms-local.yml \
+#       -f compose.payments-double.yml -f compose.vms-lane.yml up -d
+#
+# `make -C e2e-tests test-e2e-vm` does exactly this. The full local stack never
+# layers this file. Paths are relative to the repository root, the project
+# directory of every `-f` file, and every value is a public development value
+# that must never be used on a public network; see dev-env/identities/README.md,
+# "The payments lane double".
+services:
+  # Bob publishes to both registries, and a listing offers only the dispute
+  # authorities every one of its destinations recommends, so both layer the
+  # lane's profile recommending its pinned authority over their own.
+  registry:
+    environment:
+      - ACTIVE_PROFILES=registry-a,payments-lane
+  registry-b:
+    environment:
+      - ACTIVE_PROFILES=registry-b,payments-lane
+  bob-storefront:
+    depends_on:
+      payments-double:
+        condition: service_healthy
+    volumes:
+      # Bob's configuration with payments, in place of the full stack's. Its
+      # payments key and dispute credential are in the secret overlay
+      # compose.vms-local.yml mounts.
+      - ./domains/vms/storefront/storefront.bob.lane.toml:/etc/arkhai/storefront.toml:ro
+      # The lane CA, at the ca_bundle_path Bob's lane configuration names: the
+      # only authority its payments client trusts for the double.
+      - ./tools/payments-lane-double/tls/lane-ca.pem:/run/payments-lane-double/lane-ca.pem:ro

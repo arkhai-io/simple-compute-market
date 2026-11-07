@@ -80,7 +80,7 @@ def _incompatible_domains() -> list[tuple[str, object, str]]:
                     build_plan=None,
                 ),
             ),
-            "capability 'settlement' is incomplete",
+            "settlement requires non-empty role tables",
         ),
     ]
 
@@ -91,11 +91,11 @@ def test_vm_storefront_contract_is_validated_without_replacement() -> None:
     assert validate_vm_storefront_domain(domain) is domain
     assert domain.identity == "compute.v1"
     assert domain.codecs.listing(
-        {"gpu_model": "H200", "gpu_count": 1, "virtualization_type": "vm"}
-    ).offer_resource == {
+        {"gpu_model": "H200", "gpu_count": 1, "offering_mode": "vm"}
+    ).listing_resource == {
         "gpu_model": "H200",
         "gpu_count": 1,
-        "virtualization_type": "vm",
+        "offering_mode": "vm",
     }
 
 
@@ -125,6 +125,7 @@ def test_listing_service_validates_offer_through_injected_domain() -> None:
         binding=collaborators.binding,
         domain=collaborators.domain,
         capacity_runtime=collaborators.capacity_runtime,
+        site_projections=collaborators.site_projections,
         sqlite_client=SimpleNamespace(
             domain_registry=registry,
             market_domain=domain,
@@ -134,10 +135,10 @@ def test_listing_service_validates_offer_through_injected_domain() -> None:
         settlement_composition_provider=lambda: object(),
     )
 
-    with pytest.raises(ValueError, match="offer_resource must include gpu_model"):
-        service._parse_offer_and_escrows(
+    with pytest.raises(ValueError, match="gpu.model: is required"):
+        service._parse_listing_resource_and_escrows(
             CreateListingRequest(
-                offer={"gpu_count": 1, "virtualization_type": "vm"},
+                listing_resource={"gpu_count": 1, "offering_mode": "vm"},
                 accepted_escrows=_ACCEPTED_ESCROWS,
             )
         )

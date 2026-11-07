@@ -1,0 +1,338 @@
+"""VM's contribution to the compute family's job-backed fulfillment.
+
+A create builds a VM on the KVM host the settled resource is delivered through,
+naming the guest from the capacity reservation (``guest_names``): the guest is
+the job's ``executor_target`` and the KVM host its ``host_id``. A teardown
+removes that guest from that host, as the fulfillment recorded them.
+
+What is VM's here: sizing from the reservation's committed dimensions through
+the pool's requirement delegate, the playbook and the pool's extra variables,
+and the relay. The playbook is the pool's when it states one and otherwise the
+service's configured VM playbook, written into the job when it is prepared so a
+later configuration change never rewrites an accepted operation. A pool that
+references a relay leases the VM's remote port on it when a create is accepted;
+the lease is the record of where the port is bound, so a teardown takes the
+relay from the lease, not from the pool, which may have been rebound since.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import os
+from collections.abc import Callable, Mapping
+from datetime import datetime
+from typing import Any
+
+from compute_provisioning.job_fulfillment import PreparedJob
+from compute_provisioning.relays import check_relay_usable, reservation_lease_end
+from market_core import VersionedEnvelope
+from market_fulfillment import ProviderConfigInvalidError, SettlementResource
+from sqlalchemy.orm import Session
+
+from vm_provisioning_adapter.guest_names import fulfillment_guest_name
+from vm_provisioning_adapter.models.fulfillment_model import (
+    AnsiblePoolConfig,
+    VmFulfillmentRequirements,
+)
+from vm_provisioning_adapter.models.jobs_model import VmJobParams
+from vm_provisioning_adapter.requirement_delegates import resolve_requirement_delegate
+
+_VM_OFFERING_MODE = "vm"
+
+
+def _prepared(params: VmJobParams) -> PreparedJob:
+    return PreparedJob(
+        offering_mode=params.offering_mode,
+        action=str(params.executor_action),
+        host_id=params.host_id,
+        executor_target=str(params.vm_target),
+        parameters=dataclasses.asdict(params),
+    )
+
+
+class VmFulfillmentPlan:
+    """Prepares a VM's create and teardown jobs for the family's provider."""
+
+    def __init__(
+        self,
+        *,
+        reserved_var_keys: Callable[[VmJobParams], frozenset[str]],
+        vm_playbook_path: str | os.PathLike[str] | None,
+        port_allocator: Any | None = None,
+        lease_end: Callable[[Session, str], datetime | None] = reservation_lease_end,
+    ) -> None:
+        # Required, though it may be None, so no composition can forget the
+        # service's playbook; with none, a pool stating no playbook is refused.
+        self._vm_playbook_path = (
+            None if vm_playbook_path is None else os.fspath(vm_playbook_path)
+        )
+        # The variable names a job sets itself (the VM codec's answer), so a
+        # pool's extra variables that would replace one are refused when the
+        # fulfillment is prepared, before anything is written.
+        self._reserved_var_keys = reserved_var_keys
+        # Optional so a pool with no relay — the direct-NAT path — needs no
+        # allocator at all. A pool that does reference a relay and finds no
+        # allocator is rejected rather than dispatched without a port.
+        self._port_allocator = port_allocator
+        # Reads a reservation's scheduled lease end in the acceptance session,
+        # from which the port's lease records when its grants expire.
+        self._lease_end = lease_end
+
+    @staticmethod
+    def _validate_access_path(config: AnsiblePoolConfig) -> bool:
+        """Decide which access path this pool selects, refusing to select none.
+
+        Exactly one of two paths must apply: direct NAT for a pool with no
+        relay, or a relay tunnel for a pool with one. A relay a tunnel cannot
+        use is refused by the family's check, which names what it lacks —
+        address, window, token, or active grant key — before any host is
+        touched, rather than as a relay refusing a proxy asynchronously in a
+        log.
+        """
+        if not config.relay_id:
+            return False
+        check_relay_usable(config.relay_id, config.model_dump())
+        return True
+
+    def _reservation_lease_end(
+        self, db: Session | None, capacity_reservation_id: str
+    ) -> datetime:
+        """The reservation's scheduled lease end, which a relayed create needs.
+
+        A grant carries an expiry, fixed from the lease end when the port is
+        leased, so a relayed create whose reservation states no end is
+        refused.
+        """
+        if db is None:
+            raise ProviderConfigInvalidError(
+                "relay port allocation requires the fulfillment acceptance session"
+            )
+        lease_end = self._lease_end(db, capacity_reservation_id)
+        if lease_end is None:
+            raise ProviderConfigInvalidError(
+                f"reservation {capacity_reservation_id!r} states no lease end, so "
+                "no relay grant can be given an expiry"
+            )
+        return lease_end
+
+    def _leased_relay_id(self, capacity_reservation_id: str) -> str | None:
+        """The relay this fulfillment's port was leased on, if any.
+
+        Returns None for a direct-NAT VM and for a lease already released, both
+        of which mean there is no relay work left to do at teardown.
+        """
+        if self._port_allocator is None:
+            return None
+        lease = self._port_allocator.find_active_lease(
+            owner_kind="fulfillment", owner_id=capacity_reservation_id
+        )
+        return None if lease is None else lease.relay_id
+
+    def _lease_remote_port(
+        self,
+        *,
+        db: Session | None,
+        config: AnsiblePoolConfig,
+        capacity_reservation_id: str,
+        host_id: str,
+        pool_id: str | None,
+        lease_ends_at: datetime,
+    ) -> int:
+        """Lease a remote port on the relay this pool references.
+
+        ``pool_id`` is recorded on the lease and is not decoration: the rule
+        refusing a pool repoint while its hosts hold tunnels finds those
+        tunnels by pool, so a lease without one leaves that rule unable to see
+        anything and silently permissive.
+        """
+        if self._port_allocator is None:
+            raise ProviderConfigInvalidError(
+                f"pool references relay {config.relay_id!r} but this provider was "
+                "built without a port allocator, so no remote port can be leased"
+            )
+        if db is None:
+            raise ProviderConfigInvalidError(
+                "relay port allocation requires the fulfillment acceptance session"
+            )
+        try:
+            lease = self._port_allocator.allocate_in_session(
+                db,
+                relay_id=config.relay_id,
+                owner_kind="fulfillment",
+                owner_id=capacity_reservation_id,
+                lease_ends_at=lease_ends_at,
+                host_id=host_id,
+                pool_id=pool_id,
+            )
+        except Exception as exc:
+            raise ProviderConfigInvalidError(str(exc)) from exc
+        return lease.remote_port
+
+    @staticmethod
+    def _guest_name(capacity_reservation_id: str) -> str:
+        try:
+            return fulfillment_guest_name(capacity_reservation_id)
+        except ValueError as exc:
+            raise ProviderConfigInvalidError(str(exc)) from exc
+
+    @staticmethod
+    def _pool_config(pool_config: dict[str, Any]) -> AnsiblePoolConfig:
+        try:
+            return AnsiblePoolConfig.model_validate(pool_config)
+        except Exception as exc:
+            raise ProviderConfigInvalidError(
+                f"invalid Ansible pool configuration: {exc}"
+            ) from exc
+
+    def _playbook_path(self, config: AnsiblePoolConfig) -> str:
+        """The playbook a job prepared now runs: the pool's, else the service's."""
+        playbook_path = config.playbook_path or self._vm_playbook_path
+        if not playbook_path:
+            raise ProviderConfigInvalidError(
+                "the pool states no playbook_path and the service configures no "
+                "vm_playbook_path"
+            )
+        return playbook_path
+
+    @staticmethod
+    def _host_id(resource: SettlementResource) -> str:
+        value = resource.host_id
+        if not isinstance(value, str) or not value.strip():
+            raise ProviderConfigInvalidError(
+                "selected VM settlement resource is not delivered through a host"
+            )
+        return value
+
+    def _validate_extra_vars(
+        self,
+        params: VmJobParams,
+        extra: dict[str, Any],
+    ) -> None:
+        collisions = sorted(
+            self._reserved_var_keys(params).intersection(extra)
+        )
+        if collisions:
+            raise ProviderConfigInvalidError(
+                "provider extra_vars override reserved job variables: "
+                + ", ".join(collisions)
+            )
+
+    def prepare_create(
+        self,
+        *,
+        capacity_reservation_id: str,
+        request: VersionedEnvelope[Any],
+        resource: SettlementResource,
+        pool_config: dict[str, Any],
+        allocate: bool,
+        db: Session | None = None,
+    ) -> PreparedJob:
+        """The create job for a settled VM resource.
+
+        ``allocate=False`` makes preparation a pure function of its inputs, for
+        the validation path: every rejection still happens, and no durable
+        state is written.
+        """
+        try:
+            requirements = VmFulfillmentRequirements.model_validate(request.payload)
+        except Exception as exc:
+            raise ProviderConfigInvalidError(
+                f"invalid VM fulfillment requirements: {exc}"
+            ) from exc
+        if resource.offering_mode != _VM_OFFERING_MODE:
+            raise ProviderConfigInvalidError(
+                f"VM provider cannot execute offering mode {resource.offering_mode!r}"
+            )
+        config = self._pool_config(pool_config)
+        derived = resolve_requirement_delegate(
+            config.requirement_delegate
+        ).translate(resource.dimensions)
+        host_id = self._host_id(resource)
+        # Checking which access path a pool selects is a pure read and belongs
+        # in preparation, where a misconfiguration is rejected before anything
+        # is written.
+        uses_relay = self._validate_access_path(config)
+        lease_ends_at = (
+            self._reservation_lease_end(db, capacity_reservation_id)
+            if uses_relay
+            else None
+        )
+        # Leasing is not. Validation prepares in order to decide whether a
+        # request *would* be accepted, so allocating here would let a
+        # validation-only call consume a durable port — and repeated validation
+        # exhaust a finite window without a single accepted fulfillment.
+        #
+        # The lease and accepted operation share a transaction: a later
+        # preparation rejection must not leave a port behind, and a second
+        # writing connection would wait on SQLite's acceptance writer lock.
+        remote_port = (
+            self._lease_remote_port(
+                db=db,
+                config=config,
+                capacity_reservation_id=capacity_reservation_id,
+                host_id=host_id,
+                pool_id=resource.pool_id,
+                lease_ends_at=lease_ends_at,
+            )
+            if uses_relay and allocate
+            else None
+        )
+        params = VmJobParams(
+            host_id=host_id,
+            vm_action="create",
+            offering_mode=resource.offering_mode,
+            vm_target=self._guest_name(capacity_reservation_id),
+            image_setup_type=requirements.image_setup_type,
+            vm_ram=derived.get("vm_ram", config.default_vm_ram),
+            vm_vcpus=derived.get("vm_vcpus", config.default_vm_vcpus),
+            vm_disk_size=derived.get("vm_disk_size", config.default_vm_disk_size),
+            vm_os_variant=requirements.vm_os_variant,
+            ssh_pubkey=requirements.ssh_pubkey,
+            gpu_provisioned=derived.get("gpu_provisioned"),
+            vm_gpu_count=derived.get("vm_gpu_count"),
+            vm_gpu_device=requirements.vm_gpu_device,
+            vm_gpu_devices=requirements.vm_gpu_devices,
+            vm_gpu_partition_size=requirements.vm_gpu_partition_size,
+            # The reference and the leased port, never the endpoint or the
+            # token: this becomes a persisted, readable snapshot. Resolution
+            # happens at execution, through the family's relay resolver.
+            relay_id=config.relay_id if uses_relay else None,
+            vm_remote_port=remote_port,
+            escrow_uid=capacity_reservation_id,
+            playbook_path=self._playbook_path(config),
+        )
+        self._validate_extra_vars(params, config.extra_vars)
+        return _prepared(dataclasses.replace(params, provider_extra_vars=config.extra_vars))
+
+    def prepare_teardown(
+        self,
+        *,
+        capacity_reservation_id: str,
+        resource: SettlementResource,
+        host_id: str,
+        executor_target: str,
+        create_parameters: Mapping[str, Any],
+        pool_config: dict[str, Any],
+    ) -> PreparedJob:
+        """The job removing the guest the create recorded, from its host.
+
+        Reads nothing from the create's parameters: the target is the
+        fulfillment's, the playbook the pool's or else the service's as
+        configured now, and the relay the lease's.
+        """
+        del create_parameters
+        config = self._pool_config(pool_config)
+        params = VmJobParams(
+            host_id=host_id,
+            vm_action="vm_remove",
+            offering_mode=resource.offering_mode,
+            vm_target=executor_target,
+            escrow_uid=capacity_reservation_id,
+            playbook_path=self._playbook_path(config),
+            relay_id=self._leased_relay_id(capacity_reservation_id),
+        )
+        self._validate_extra_vars(params, config.extra_vars)
+        return _prepared(dataclasses.replace(params, provider_extra_vars=config.extra_vars))
+
+
+__all__ = ["VmFulfillmentPlan"]

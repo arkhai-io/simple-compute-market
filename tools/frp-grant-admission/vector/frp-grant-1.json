@@ -1,0 +1,430 @@
+{
+  "specification": "frp-grant 1.0",
+  "warning": "Every key here is a published RFC 8032 test key whose private key anyone can read. These are deterministic test values: never use them on any network.",
+  "keys": [
+    {
+      "name": "RFC 8032 TEST 1",
+      "seed": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "public_key_spki_base64": "MCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "kid": "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"
+    },
+    {
+      "name": "RFC 8032 TEST 2",
+      "seed": "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+      "public_key": "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+      "public_key_spki_base64": "MCowBQYDK2VwAyEAPUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+      "kid": "FtIu-VbGrfe_KB6CH7GNwODB72MNxj_ml11dEvO-7kk"
+    },
+    {
+      "name": "RFC 8032 TEST 3",
+      "seed": "c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7",
+      "public_key": "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
+      "public_key_spki_base64": "MCowBQYDK2VwAyEA/FHNjmIYoaONpH7QAjDwWAgW7RO6MwOsXeuRFUiQgCU=",
+      "kid": "FVV5umTuau890q59V-4Ga_R6qWb7ON_ivJc4EjvCwTM"
+    }
+  ],
+  "configuration": "# RFC 8032 test keys only: never use them on any network.\nlisten = \"127.0.0.1:7300\"\n\n[[issuers]]\nname = \"issuer-a\"\naudience = \"relay-1\"\nports = { start = 6100, end = 6199 }\nkeys = [\n  { public_key = \"MCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\" },  # RFC 8032 TEST 1\n  { public_key = \"MCowBQYDK2VwAyEAPUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\" },  # RFC 8032 TEST 2\n]\n\n[[issuers]]\nname = \"issuer-b\"\naudience = \"relay-1\"\nports = { start = 6200, end = 6249 }\nkeys = [\n  { public_key = \"MCowBQYDK2VwAyEA/FHNjmIYoaONpH7QAjDwWAgW7RO6MwOsXeuRFUiQgCU=\" },  # RFC 8032 TEST 3\n]\n",
+  "verification": [
+    {
+      "name": "valid",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.5dMSbL1kD6w7tNpzgVKnL4nEw9FIKk0DttOx-t_YcpDc3K0lcLQytkjCDqNs-NEnJwtmXRYOEhPuOkJHI-WQBw",
+      "verdict": "admit",
+      "reason": null
+    },
+    {
+      "name": "a second key of the same issuer",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6IkZ0SXUtVmJHcmZlX0tCNkNIN0dOd09EQjcyTU54al9tbDExZEV2Ty03a2siLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.5GVewXPtAwWoY-eBBvDRDATgsBClJjM3FsskH_DR9qyR0jlkbYdAK3fbuTUHvXDJX3mt-quCOTYJyEQzuiDJCQ",
+      "verdict": "admit",
+      "reason": null
+    },
+    {
+      "name": "only the required claims",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJwb3J0Ijo2MTAxfQ.mNXGi5Fsp_ZsnjxZDW9f15yUEBleUBvqCHB0tEy4fYZkkPZyi0d-dY4lLvrMmP06QrPEIoh8TfD4RwkYlkoJDg",
+      "verdict": "admit",
+      "reason": null
+    },
+    {
+      "name": "a padded token",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0=.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ==.ti97XxLfjOfWnOAo2tCfbl-WMnj4NflUTTCO_YfHDjJYopYVDGQvsUFkKEmfhcm6HmYe6ZiIJRZEdzPRGqytAA==",
+      "verdict": "admit",
+      "reason": null
+    },
+    {
+      "name": "an unknown claim is ignored",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJyZWdpb24iOiJldS0xIiwic3ViIjoiaG9zdC0xIn0.DDysbaFUWeh2uJX3dnu81ymiwTF3AsywcB392Fhu7b2S2jScrb5LN-jUaurFfdBUv4KHwVyr9Lxo1NKaQuT7BA",
+      "verdict": "admit",
+      "reason": null
+    },
+    {
+      "name": "one second before exp",
+      "time": 1798765199,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.5dMSbL1kD6w7tNpzgVKnL4nEw9FIKk0DttOx-t_YcpDc3K0lcLQytkjCDqNs-NEnJwtmXRYOEhPuOkJHI-WQBw",
+      "verdict": "admit",
+      "reason": null
+    },
+    {
+      "name": "iat equal to the clock",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE2MDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.AtoGVNrlD57cFw-JWadR-MpoNsrp-pYuJ9OvgpEkGqKyqqHlT-ntKoYzVKIfs9AAzBAjZTh3JEJK0wKpklbCCA",
+      "verdict": "admit",
+      "reason": null
+    },
+    {
+      "name": "nbf equal to the clock",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJuYmYiOjE3OTg3NjE2MDAsInBvcnQiOjYxMDEsInN1YiI6Imhvc3QtMSJ9.fCKxbIodl-YAqloMRNO1IhApF8vtL8BfNI7qj1OD1notmR7-7u55O8qgxknWVbcJweiD069lyygutYW7JkCLBg",
+      "verdict": "admit",
+      "reason": null
+    },
+    {
+      "name": "exactly at exp",
+      "time": 1798765200,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.5dMSbL1kD6w7tNpzgVKnL4nEw9FIKk0DttOx-t_YcpDc3K0lcLQytkjCDqNs-NEnJwtmXRYOEhPuOkJHI-WQBw",
+      "verdict": "refuse",
+      "reason": "grant_expired"
+    },
+    {
+      "name": "after exp",
+      "time": 1798768800,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.5dMSbL1kD6w7tNpzgVKnL4nEw9FIKk0DttOx-t_YcpDc3K0lcLQytkjCDqNs-NEnJwtmXRYOEhPuOkJHI-WQBw",
+      "verdict": "refuse",
+      "reason": "grant_expired"
+    },
+    {
+      "name": "iat one second ahead",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE2MDEsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.XVWZA_mJY7DMAUTO_8MEXxx8qbKuuoWFDAiKR6WcDRbG6lKmGHbiNetSVlI0nCXcGNkgBPSeFgSgZVrgC_mxCA",
+      "verdict": "refuse",
+      "reason": "grant_not_yet_valid"
+    },
+    {
+      "name": "nbf one second ahead",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJuYmYiOjE3OTg3NjE2MDEsInBvcnQiOjYxMDEsInN1YiI6Imhvc3QtMSJ9.X9DNTtTin9MgPEsfGF5D0bj_wLNq__NbypZUNIZq61PA2T_JzokQ8w8a0FZcJ9cQNw2ZKOcdZ9LzA6Fvs9JnBQ",
+      "verdict": "refuse",
+      "reason": "grant_not_yet_valid"
+    },
+    {
+      "name": "the wrong port",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAyLCJzdWIiOiJob3N0LTEifQ.AlR2bjlZ1HUi5IZ8SolMj9jGzHtP_kwCqscnZtx5LiFq-n4WJCtyxXYvClD6tqwjg577OScF15Wtkuws07OlDQ",
+      "verdict": "refuse",
+      "reason": "port_mismatch"
+    },
+    {
+      "name": "port as a string",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0IjoiNjEwMSIsInN1YiI6Imhvc3QtMSJ9.AJwA21C3gLG6Kv1gq_FoRHI1QRxNFh1xRI3efaDzqL7KNYdAqjLpqxQwGvAKjIyY0GG2-2qIM_S5sQkStqPVBA",
+      "verdict": "refuse",
+      "reason": "port_mismatch"
+    },
+    {
+      "name": "port as true",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijp0cnVlLCJzdWIiOiJob3N0LTEifQ.Dy7LWVgOGTgRr5n1Mgz64pFLep-spsS4vHP2zuAr6kswYXJNy6WvzcMrsErR2Pi9rhdSZqyO_AJG7ehLc14cDA",
+      "verdict": "refuse",
+      "reason": "port_mismatch"
+    },
+    {
+      "name": "outside every issuer's range",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6300,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MzAwLCJzdWIiOiJob3N0LTEifQ.985_BPT1_j2TXnl6jG7OB15QFPgQfX5HRGBGibb9PN4pyH14G0i3ejJVsmf39hIe6qNc1cg1FQsx26PIKCe1CQ",
+      "verdict": "refuse",
+      "reason": "port_outside_range"
+    },
+    {
+      "name": "inside the other issuer's range",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6201,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MjAxLCJzdWIiOiJob3N0LTEifQ.mh09C-XAOhDDr7rPjhwgMLbyVI74mDbJk-LyHocBf8xkAG9JUoACAAuxsYF5b9YI_KsyUrBCeoFCt7hIwD3eDQ",
+      "verdict": "refuse",
+      "reason": "port_outside_range"
+    },
+    {
+      "name": "the wrong audience",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0yIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.3R1194G7-JUQF1XlYmndH02-MJKkS72b1JWnQaR4LLndCNlt8iuSe06CMZxBIRZPjmi-2zRvYsIqlpC5upfHBQ",
+      "verdict": "refuse",
+      "reason": "audience_mismatch"
+    },
+    {
+      "name": "aud as a list",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOlsicmVsYXktMSJdLCJleHAiOjE3OTg3NjUyMDAsImlhdCI6MTc5ODc2MTU0MCwianRpIjoiZ3JhbnQtMDAwMSIsInBvcnQiOjYxMDEsInN1YiI6Imhvc3QtMSJ9.8IiEu242vmQw3nzVL2hGeBz_nWwjpRR21_CbDKOAFpw9JDpIoH9ABU4BhWSNlkGMJ5iqSBbpnShdVOR_c6mODA",
+      "verdict": "refuse",
+      "reason": "audience_mismatch"
+    },
+    {
+      "name": "a forged signature",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.h38ZrlI7uR4LMh_qsrCcV4mGHEWKpNyrl2pun6ry7I3yyFYf2_Tj81HYzN85YLaDAOWN3pO1lrRQ1-1NgQvdBw",
+      "verdict": "refuse",
+      "reason": "signature_invalid"
+    },
+    {
+      "name": "alg none",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJub25lIiwia2lkIjoia1ByS19xbXhWV2FZVkE5d3dCRjZJdW8zdlZ6ejdUeEhDVHdYQnlnclM0ayIsInR5cCI6ImZycC1ncmFudCtqd3QifQ.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.",
+      "verdict": "refuse",
+      "reason": "signature_invalid"
+    },
+    {
+      "name": "an unknown kid",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6Im5vdC1hLWNvbmZpZ3VyZWQta2V5IiwidHlwIjoiZnJwLWdyYW50K2p3dCJ9.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.G_WkvQBXmAz5AKUAVuqQfqqOMx97Ds5J7oAJ3AJGxTwVU9Octcz-07nc5jjzs6nCrOwnGp4x6n84ws0tl4CyDg",
+      "verdict": "refuse",
+      "reason": "key_unknown"
+    },
+    {
+      "name": "no kid",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsInR5cCI6ImZycC1ncmFudCtqd3QifQ.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.ODMj2mlMNMdCaHM8SyuWlHYt9sNvHMAckqDdJ3-ifJyXT84LvKsWYd8uoM3yhnxxtTPCjacOsqwdj-_lEtp6Dg",
+      "verdict": "refuse",
+      "reason": "key_unknown"
+    },
+    {
+      "name": "typ JWT",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.xNzxrYpzxsLIbYzC-4mXNkaAdCifwKM38dsGMDRlhnbdlvlAdq-rDY84QO7NNMpkFANaNGtWYDmWO0Xc4znUCw",
+      "verdict": "refuse",
+      "reason": "grant_type_unsupported"
+    },
+    {
+      "name": "typ absent",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsifQ.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.eEQa2B3PmJ7uxik0QQwl4pBvZIa9QC6QcJI4KEf-DqNrT4Hl5yN83WHHkJlDTnyN79tqeGGKjHxS1-MkhJqWAQ",
+      "verdict": "refuse",
+      "reason": "grant_type_unsupported"
+    },
+    {
+      "name": "crit on a correctly signed grant",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImI2NCI6dHJ1ZSwiY3JpdCI6WyJiNjQiXSwia2lkIjoia1ByS19xbXhWV2FZVkE5d3dCRjZJdW8zdlZ6ejdUeEhDVHdYQnlnclM0ayIsInR5cCI6ImZycC1ncmFudCtqd3QifQ.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.PliuFigyGyjgdh8vezhmGRz8OM0Gn5t9yVJpTz4VAx9lIOpkociK8GfnlZdndxlpNfMbdTD09gnxdyv4yfG4Cw",
+      "verdict": "refuse",
+      "reason": "grant_malformed"
+    },
+    {
+      "name": "crit on a forged grant",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImNyaXQiOlsieC11bnN1cHBvcnRlZCJdLCJraWQiOiJrUHJLX3FteFZXYVlWQTl3d0JGNkl1bzN2Vnp6N1R4SENUd1hCeWdyUzRrIiwidHlwIjoiZnJwLWdyYW50K2p3dCJ9.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.WQBWONJvOO3fJDddRIuvaq_2yNxDrLhRKf-nEnrBpSJJ1VlvGKA9VPyPv_p8EN-P2wAfr7nVObbbcsmex272AA",
+      "verdict": "refuse",
+      "reason": "grant_malformed"
+    },
+    {
+      "name": "no exp",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiaWF0IjoxNzk4NzYxNTQwLCJqdGkiOiJncmFudC0wMDAxIiwicG9ydCI6NjEwMSwic3ViIjoiaG9zdC0xIn0.bUZzM50Ei6iVvPHbziOEkBiAi49msb3nOb-hrW2yhOgl0cV6QKdc-K7_mz2-OII0mZ6ZxGlCxZiuJ-95wA5HCQ",
+      "verdict": "refuse",
+      "reason": "claim_missing"
+    },
+    {
+      "name": "no aud",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJleHAiOjE3OTg3NjUyMDAsImlhdCI6MTc5ODc2MTU0MCwianRpIjoiZ3JhbnQtMDAwMSIsInBvcnQiOjYxMDEsInN1YiI6Imhvc3QtMSJ9.1RTm8wqW-PmVQ5-DwAI5z3SGOT0zbLt4ETFQTmqRyntL51C-fU-EDHoGqe1GyMi3djO-s6EL_NnrbPxXUR5IBA",
+      "verdict": "refuse",
+      "reason": "claim_missing"
+    },
+    {
+      "name": "no port",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJzdWIiOiJob3N0LTEifQ.iI74k9r-cS2Qx9zl2eCG5-yijloPWbI6j6_oatLA-PhxgdaRvONU5Z9qvVC_IXCCtZf1ZunC5KyVjUVHdL7bDg",
+      "verdict": "refuse",
+      "reason": "claim_missing"
+    },
+    {
+      "name": "exp as a string",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoiMTc5ODc2NTIwMCIsImlhdCI6MTc5ODc2MTU0MCwianRpIjoiZ3JhbnQtMDAwMSIsInBvcnQiOjYxMDEsInN1YiI6Imhvc3QtMSJ9.bWG-pDR5mhhAIOGCeqCkpEcRQbwWOrzFL_Vk1EWMRUdQdemJ4iAE-_e3Y0CO9Zwu79Tewk6M3W5AYLu-c54iBQ",
+      "verdict": "refuse",
+      "reason": "grant_malformed"
+    },
+    {
+      "name": "exp as a float",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLjUsImlhdCI6MTc5ODc2MTU0MCwianRpIjoiZ3JhbnQtMDAwMSIsInBvcnQiOjYxMDEsInN1YiI6Imhvc3QtMSJ9.7Uv7qF6I5P0xVJwBMCEhhwpHaf6rR84JE8qphJCbuBRjO8OvX7enIdWgYS37fn7JkksDdiqgWnCF4ZujrZVLCQ",
+      "verdict": "refuse",
+      "reason": "grant_malformed"
+    },
+    {
+      "name": "exp as true",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjp0cnVlLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJob3N0LTEifQ.mphWkgv-GFMZVyiFc8OXVKXOLxoAnBckbwXV0lVnQt_807mwegBbO2TSWOFZ0GSWh8dcKluDQ6un9SCfGghiCg",
+      "verdict": "refuse",
+      "reason": "grant_malformed"
+    },
+    {
+      "name": "iat as a string",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOiIxNzk4NzYxNTQwIiwianRpIjoiZ3JhbnQtMDAwMSIsInBvcnQiOjYxMDEsInN1YiI6Imhvc3QtMSJ9.dPHWLxYN0j27k3hZX1MYKWopzo9Hz1HQLOF0GE8QNxcL7Ha-7wVf4uhEfVmD7_N4Hr9VQ_rVpFBJFEM3_i6ZAg",
+      "verdict": "refuse",
+      "reason": "grant_malformed"
+    },
+    {
+      "name": "jti as an integer",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6MSwicG9ydCI6NjEwMSwic3ViIjoiaG9zdC0xIn0.nMVVYp619QsXFYsELvmzcMZ7z7IwhraXMVLfQwNoz-jN0aGZE4ycGS76PR0QRBT4z43GY1IojVL_5dcRpinuCA",
+      "verdict": "refuse",
+      "reason": "grant_malformed"
+    },
+    {
+      "name": "sub as an object",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOnsiaG9zdCI6MX19.h2MJ9ORp3pa1fMZBLqOotnkSgjeO6h3crx8PG2VPeI0EV14LdIVSnf7dglvSRsKMKVfvYgFDbxrwqjoWYcFcCw",
+      "verdict": "refuse",
+      "reason": "grant_malformed"
+    },
+    {
+      "name": "not a JWT",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "not-a-jwt",
+      "verdict": "refuse",
+      "reason": "grant_malformed"
+    },
+    {
+      "name": "claims that are not an object",
+      "time": 1798761600,
+      "proxy_type": "tcp",
+      "remote_port": 6101,
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.W10.9QYC-U2LgNF0C2FuhXvKkYG5A68F5eaXWnJSWgWlrFkycaTGst6_Q8PgVKDmvgIjXg70O5VefGR-C3Ts_GfUCw",
+      "verdict": "refuse",
+      "reason": "grant_malformed"
+    }
+  ],
+  "signing": [
+    {
+      "name": "every claim",
+      "key": "RFC 8032 TEST 1",
+      "header": {
+        "alg": "EdDSA",
+        "kid": "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k",
+        "typ": "frp-grant+jwt"
+      },
+      "claims": {
+        "aud": "relay-1",
+        "port": 6101,
+        "exp": 1798765200,
+        "iat": 1798761540,
+        "sub": "host-1",
+        "jti": "grant-0001",
+        "nbf": 1798761540
+      },
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LTAwMDEiLCJuYmYiOjE3OTg3NjE1NDAsInBvcnQiOjYxMDEsInN1YiI6Imhvc3QtMSJ9.cx6qXW20ohW6YlKm7AkdFXtYIN-8PZQE72lugBxisWQwqIvkhrC1btb-axVpiqmgyZD6Mm59MmDvkf9NqxyqCw"
+    },
+    {
+      "name": "only the required claims",
+      "key": "RFC 8032 TEST 1",
+      "header": {
+        "alg": "EdDSA",
+        "kid": "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k",
+        "typ": "frp-grant+jwt"
+      },
+      "claims": {
+        "aud": "relay-1",
+        "port": 6101,
+        "exp": 1798765200
+      },
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJwb3J0Ijo2MTAxfQ.mNXGi5Fsp_ZsnjxZDW9f15yUEBleUBvqCHB0tEy4fYZkkPZyi0d-dY4lLvrMmP06QrPEIoh8TfD4RwkYlkoJDg"
+    },
+    {
+      "name": "non-ASCII and control characters",
+      "key": "RFC 8032 TEST 1",
+      "header": {
+        "alg": "EdDSA",
+        "kid": "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k",
+        "typ": "frp-grant+jwt"
+      },
+      "claims": {
+        "aud": "relay-1",
+        "port": 6101,
+        "exp": 1798765200,
+        "iat": 1798761540,
+        "sub": "hôte-€-1",
+        "jti": "grant-😀-\u000f-0001"
+      },
+      "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtQcktfcW14VldhWVZBOXd3QkY2SXVvM3ZWeno3VHhIQ1R3WEJ5Z3JTNGsiLCJ0eXAiOiJmcnAtZ3JhbnQrand0In0.eyJhdWQiOiJyZWxheS0xIiwiZXhwIjoxNzk4NzY1MjAwLCJpYXQiOjE3OTg3NjE1NDAsImp0aSI6ImdyYW50LfCfmIAtXHUwMDBmLTAwMDEiLCJwb3J0Ijo2MTAxLCJzdWIiOiJow7R0ZS3igqwtMSJ9.mxA-6qtiiUnm8iGPpM88ZiRG4P31ZShUkLAMROhhgQim6qChzfK0iCD34g7kUn6rsEV0E-47IfbSyWeQ69XWDA"
+    }
+  ],
+  "thumbprint": {
+    "public_key_spki_base64": "MCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+    "kid": "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"
+  }
+}

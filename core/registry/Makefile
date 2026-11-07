@@ -1,5 +1,10 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
+
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
-PYTHON_VERSION := 3.13
+# Appended to the image's tag; the root Makefile's IMAGE_SUFFIX. A suffixed build
+# is tagged per change alone: a commit tag would keep one image per validated commit.
+IMAGE_SUFFIX ?=
 
 # Path to the monorepo .dist/ wheel directory, relative to core/registry/.
 # Used by uv when resolving pure-Python internal packages distributed as wheels
@@ -11,22 +16,20 @@ DIST_DIR ?= ../../.dist
 # Installation & Setup
 # ==============================================================================
 
-init: init-uv
-	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR)
+init: init-uv reinit
 
 reinit:
-	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-kit-identity         --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-core-registry-client --reinstall-package arkhai-core-registry-client
+	python3 ../../scripts/uv_project.py reinit
 
+# The repository's minimum uv (scripts/check_uv_version.py): reinit refuses an older one.
 init-uv:
-	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
+	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.12.22/install.sh | sh; source $HOME/.local/bin/env; }
 
 build: reinit build-images
 
 build-images:
-	docker build --ulimit nofile=65536:65536 -f Dockerfile -t arkhai:registry ../..
-	docker tag arkhai:registry arkhai:registry-$(GIT_SUFFIX)
+	docker build --ulimit nofile=65536:65536 -f Dockerfile -t arkhai:registry$(IMAGE_SUFFIX) ../..
+	$(if $(IMAGE_SUFFIX),,docker tag arkhai:registry arkhai:registry-$(GIT_SUFFIX))
 
 deploy:
 	docker run --rm -d --network market --name registry --env-file ./.env.docker-compose --env-file ../../shared-env/.env -p 8080:8080 arkhai:registry
@@ -88,7 +91,7 @@ serve:
 		echo ZeroTier node ID: $$NODE_ID; \
 		sudo zerotier-cli join $$ZT_NETWORK; \
 	fi; \
-	uv run uvicorn src.main:app --host $$HOST --port $$PORT --reload $$ENV_ARG'
+	uv run uvicorn core_registry.main:app --host $$HOST --port $$PORT --reload $$ENV_ARG'
 
 # ==============================================================================
 # Database Management

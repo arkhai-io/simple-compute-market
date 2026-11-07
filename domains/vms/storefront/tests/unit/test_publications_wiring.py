@@ -15,11 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 from market_identity import Ed25519Signer
 from core_storefront.models.listing_models import CreateListingRequest
-from core_storefront.site_projections import (
-    ProjectionCache,
-    ProjectionIdentity,
-    ProjectionState,
-)
 from market_capacity_publication import BoundListing
 
 from market_storefront.services import publication_service
@@ -29,7 +24,6 @@ from market_storefront.domain_runtime import build_vm_storefront_domain, build_v
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services.listing_service import ListingService
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_storefront.services import site_projection_cache
 from tests._settings_overrides import settings_overrides
 from tests.listing_service_fixtures import vm_listing_collaborators
 from tests.fake_site import TEST_SITE_AUTHORITIES
@@ -66,31 +60,7 @@ def _mock_multi_registry(urls: list[str], results: list[PublishResult]):
 
 
 @pytest.fixture
-def vm_pool_projection():
-    resource_pools = ProjectionCache(client=None)
-    resource_pools._value = [{
-        "resource_pool_id": "pool-vm",
-        "pool_metadata": {
-            "policy_tags": {"deliverable_modes": ["vm"]},
-        },
-        "resources": [],
-    }]
-    resource_pools._state = ProjectionState.loaded
-    resource_pools._identity = ProjectionIdentity(revision=1, digest="vm-pool")
-    caches = site_projection_cache.SiteProjectionCaches(
-        resource_pools=resource_pools,
-        capacity_buckets=ProjectionCache(client=None),
-    )
-    with patch.dict(
-        site_projection_cache._caches,
-        {"site-a": caches},
-        clear=True,
-    ):
-        yield
-
-
-@pytest.fixture
-def db(tmp_path, vm_pool_projection):
+def db(tmp_path):
     domain = build_vm_storefront_domain()
     registry = build_vm_storefront_registry(domain)
     return SQLiteClient(
@@ -105,17 +75,21 @@ def patched_sqlite(db):
 
 
 async def _persist_bound_listing(db: SQLiteClient, order: dict) -> None:
-    from domains.vms.listings.models import Listing
+    from arkhai_vms_listings.models import Listing
 
     listing = Listing.model_validate(order)
     wire = listing.model_dump(mode="json")
     binding = prepare_vm_listing_binding(
         listing_id=listing.listing_id,
         candidate={
+            "capacity_backing": "backed",
             "site_id": "site-a",
             "pool_id": "pool-vm",
-            "resource_id": listing.offer_resource.resource_id,
-            "gpu_count": listing.offer_resource.gpu_count,
+            "resource_id": listing.listing_resource.resource_id,
+            "listing_shape": {"gpu": {
+                "count": listing.listing_resource.gpu_count,
+                "model": listing.listing_resource.gpu_model,
+            }},
         },
     )
     await db.upsert_listing_with_binding(
@@ -123,7 +97,7 @@ async def _persist_bound_listing(db: SQLiteClient, order: dict) -> None:
         status="open",
         created_at="2026-08-11T00:00:00",
         updated_at="2026-08-11T00:00:00",
-        offer_resource=wire["offer_resource"],
+        listing_resource=wire["listing_resource"],
         fulfillment_resource=None,
         max_duration_seconds=listing.max_duration_seconds,
         storefront_url=listing.storefront_url,
@@ -140,13 +114,13 @@ def _compute_order(listing_id: str) -> dict:
         "listing_id": listing_id,
         "storefront_url": BASE_URL_OVERRIDE,
         "seller_principal": _SELLER_PRINCIPAL,
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": f"res-{listing_id}",
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "test",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         "accepted_escrows": [{
             "chain_name": "anvil",
@@ -180,22 +154,23 @@ def test_listing_validation_uses_the_exact_injected_codec(tmp_path) -> None:
         binding=collaborators.binding,
         domain=collaborators.domain,
         capacity_runtime=collaborators.capacity_runtime,
+        site_projections=collaborators.site_projections,
         sqlite_client=db,
         marketplace_signer=_SELLER,
         alkahest_clients={},
         settlement_composition_provider=lambda: object(),
     )
 
-    service._parse_offer_and_escrows(
+    service._parse_listing_resource_and_escrows(
         CreateListingRequest(
-            offer={
+            listing_resource={
                 "resource_type": "compute",
                 "resource_id": "resource-1",
                 "gpu_model": "H200",
                 "gpu_count": 1,
                 "region": "test",
                 "sla": 99.0,
-                "virtualization_type": "vm",
+                "offering_mode": "vm",
             },
             accepted_escrows=[
                 {
@@ -239,6 +214,7 @@ def test_listing_composition_mismatch_fails_before_side_effects() -> None:
             binding=other_collaborators.binding,
             domain=other_collaborators.domain,
             capacity_runtime=other_collaborators.capacity_runtime,
+            site_projections=other_collaborators.site_projections,
             sqlite_client=repository,
             marketplace_signer=_SELLER,
             alkahest_clients={},
@@ -255,18 +231,17 @@ class TestPublishOrderRecordsPublications:
             "listing_id": "legacy-invalid",
             "storefront_url": BASE_URL_OVERRIDE,
             "seller_principal": _SELLER_PRINCIPAL,
-            "offer_resource": {
+            "listing_resource": {
                 "gpu_model": "H200",
                 "gpu_count": 1,
                 "sla": 99.9,
                 "region": "test",
-                "virtualization_type": "vm",
+                "offering_mode": "vm",
             },
             "accepted_escrows": [],
         }
         factory = Mock()
         with settings_overrides(
-            enable_registry_discovery=True,
             registry__urls=["http://r1"],
         ):
             runtime = publication_service.build_publication_runtime(
@@ -279,15 +254,14 @@ class TestPublishOrderRecordsPublications:
 
     @pytest.mark.asyncio
     async def test_mutated_listing_model_is_revalidated_before_publish(self, db):
-        from domains.vms.listings.models import Listing
+        from arkhai_vms_listings.models import Listing
 
         listing = Listing.model_validate(_compute_order("mutated-listing"))
-        listing.offer_resource.resource_id = None
-        listing.offer_resource.pool_id = None
+        listing.listing_resource.resource_id = None
+        listing.listing_resource.pool_id = None
         factory = Mock()
 
         with settings_overrides(
-            enable_registry_discovery=True,
             registry__urls=["http://r1"],
         ):
             runtime = publication_service.build_publication_runtime(
@@ -329,7 +303,6 @@ class TestPublishOrderRecordsPublications:
                 "market_storefront.services.publication_service.stage_event",
             ) as stage_event,
             settings_overrides(
-                enable_registry_discovery=True,
                 registry__urls=["http://r1", "http://r2"],
             ),
         ):
@@ -368,7 +341,6 @@ class TestPublishOrderRecordsPublications:
         await _persist_bound_listing(patched_sqlite, order)
         cm, client = _mock_multi_registry(["http://r1", "http://r3"], [])
         with settings_overrides(
-            enable_registry_discovery=True,
             registry__urls=["http://r1", "http://r2"],
         ):
             runtime = publication_service.build_publication_runtime(
@@ -411,7 +383,6 @@ class TestPublishOrderRecordsPublications:
         cm, _client = _mock_multi_registry(["http://r1", "http://r2"], results)
         factory = Mock(return_value=cm)
         with settings_overrides(
-            enable_registry_discovery=True,
             registry__urls=["http://r1", "http://r2"],
         ):
             runtime = publication_service.build_publication_runtime(
@@ -480,7 +451,6 @@ class TestRegistryTargets:
             results,
         )
         with settings_overrides(
-            enable_registry_discovery=True,
             registry__urls=["http://r1", "http://r2", "http://r3"],
         ):
             runtime = publication_service.build_publication_runtime(
@@ -492,7 +462,8 @@ class TestRegistryTargets:
                 order,
             )
             result = await runtime.close(
-                BoundListing(candidate.listing_id, candidate.binding)
+                BoundListing(candidate.listing_id, candidate.binding),
+                closed_by="seller",
             )
 
         assert result["status"] == "closed"
@@ -529,7 +500,6 @@ class TestRegistryTargets:
         ]
         cm, client = _mock_multi_registry(["http://r1", "http://r2"], results)
         with settings_overrides(
-            enable_registry_discovery=True,
             registry__urls=["http://r1", "http://r2"],
         ):
             runtime = publication_service.build_publication_runtime(
@@ -541,7 +511,8 @@ class TestRegistryTargets:
                 order,
             )
             result = await runtime.close(
-                BoundListing(candidate.listing_id, candidate.binding)
+                BoundListing(candidate.listing_id, candidate.binding),
+                closed_by="seller",
             )
 
         assert result["status"] == "closed"

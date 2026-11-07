@@ -9,10 +9,14 @@ from market_identity import Identity
 
 
 from market_core.schemas import (
+    Agreement,
+    EmbeddedWireRows,
     EscrowProposal,
+    OptionalUint256Amount,
     ProvisionTerms,
     SettlementPlan,
     SettlementSelection,
+    Uint256Amount,
 )
 
 
@@ -47,9 +51,11 @@ class NegotiateNewResponse(BaseModel):
     after the seller validated it.
 
     ``settlement_plan`` is the negotiated outcome's canonical carrier
-    (mechanism-neutral obligations); ``accepted_escrow_terms`` is its
-    LEGACY flat-alkahest mirror, kept for buyers that predate the plan
-    carrier and removed with the client-wheel wire bump.
+    (mechanism-neutral obligations): the seller's committed copy, which a
+    buyer compares with its own derivation and never funds in its place.
+
+    ``settlement_data`` carries an opaque seller-owned payload for the
+    selected settlement stage.
     """
 
     negotiation_id: str
@@ -62,7 +68,9 @@ class NegotiateNewResponse(BaseModel):
     accepted_escrow_proposal: EscrowProposal | None = None
     settlement_selection: SettlementSelection | None = None
     settlement_plan: SettlementPlan | None = None
-    accepted_escrow_terms: list[dict[str, Any]] | None = None
+    agreement: Agreement | None = None
+    agreement_bytes: str | None = None
+    settlement_data: dict[str, Any] | None = None
 
 
 class NegotiateContinueRequest(BaseModel):
@@ -84,7 +92,9 @@ class NegotiateContinueResponse(BaseModel):
     accepted_escrow_proposal: EscrowProposal | None = None
     settlement_plan: SettlementPlan | None = None
     settlement_selection: SettlementSelection | None = None
-    accepted_escrow_terms: list[dict[str, Any]] | None = None
+    agreement: Agreement | None = None
+    agreement_bytes: str | None = None
+    settlement_data: dict[str, Any] | None = None
 
 
 class NegotiationSummary(BaseModel):
@@ -94,7 +104,7 @@ class NegotiationSummary(BaseModel):
     buyer_principal: Identity | None = None
     seller_principal: Identity | None = None
     terminal_state: str | None = None
-    agreed_amount: int | None = None
+    agreed_amount: OptionalUint256Amount = None
     round_count: int = 0
     created_at: str | None = None
     model_config = {"extra": "allow"}
@@ -102,7 +112,7 @@ class NegotiationSummary(BaseModel):
 
 class NegotiationListResponse(BaseModel):
     listing_id: str
-    negotiations: list[dict[str, Any]]
+    negotiations: EmbeddedWireRows
     count: int
     limit: int
     offset: int
@@ -113,7 +123,7 @@ class NegotiationMessage(BaseModel):
     sender_role: Literal["buyer", "seller", "admin", "service"]
     sender_principal: Identity
     action_taken: str
-    proposed_amount: int | None = None
+    proposed_amount: OptionalUint256Amount = None
     model_config = {"extra": "allow"}
 
 
@@ -124,11 +134,14 @@ class NegotiationDetailResponse(BaseModel):
     buyer_principal: Identity | None = None
     seller_principal: Identity | None = None
     terminal_state: str | None = None
-    agreed_amount: int | None = None
+    agreed_amount: OptionalUint256Amount = None
     round_count: int = 0
-    messages: list[dict[str, Any]] = Field(default_factory=list)
-    stage_events: list[dict[str, Any]] = Field(default_factory=list)
-    escrows: list[dict[str, Any]] = Field(default_factory=list)
+    # Persisted rows, not typed fields: an amount read back out of storage
+    # arrives as a Python int, and this response is signed over canonical
+    # JSON. Normalized on the way in rather than at each producer.
+    messages: EmbeddedWireRows = Field(default_factory=list)
+    stage_events: EmbeddedWireRows = Field(default_factory=list)
+    escrows: EmbeddedWireRows = Field(default_factory=list)
     model_config = {"extra": "allow"}
 
 
@@ -143,12 +156,12 @@ class AdvanceRequest(BaseModel):
 class ForceAcceptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    amount: int
+    amount: Uint256Amount
 
 
 class ForceAcceptResponse(BaseModel):
     action: str
-    amount: int
+    amount: Uint256Amount
     source: str = "admin_force_accept"
 
 

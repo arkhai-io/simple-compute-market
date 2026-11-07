@@ -5,7 +5,7 @@
 Verified by inspection 2026-08-06; re-verify before implementing.
 
 - `reserve()` reads `escrow_uid = deal.get("escrow_uid")` and skips its dedupe branch
-  entirely when the key is absent. `_place_capacity_hold` never supplies it.
+  entirely when the key is absent. `_place_capacity_hold` (the VM implementation of the kit's `place_hold` hook) never supplies it.
 - `_expire_stale_holds` queries `state == reserved AND hold_expires_at IS NOT NULL`,
   materializes every match, and evaluates `parse_utc(...) > now` per row in Python.
 - `hold_expires_at` is written as `datetime.now(timezone.utc) + timedelta(...)` rendered
@@ -17,6 +17,16 @@ Verified by inspection 2026-08-06; re-verify before implementing.
 - `CapacityReservationWatchdog` polls it every 60s by default.
 - Terminal states (`released`, `release_failed`, `provisioning_failed`) have no pruning
   path anywhere.
+
+*Corrected 2026-10-05 (`bare-metal-mock-provisioned-deal` slice B).* `release_failed` is
+not terminal. It still holds the reservation's capacity, an operator's retry-release
+moves it back to `releasing`, and only a force-release or a completed retry frees it.
+The terminal states are `released`, `force_released`, and `provisioning_failed`.
+Retention must not prune a `release_failed` (or `unmanaged`) reservation. Slice B also
+made the lease lifecycle's writes conditional transitions in `kit/site`
+(`begin_releasing`, `record_release_failed`, `record_unmanaged`, and `release`, which
+refuses `unmanaged` unless forced), and added `release_requested_at`. A pruning sweep
+should select by those terminal states and leave the transitions' sources alone.
 
 ## Goals / Non-Goals
 
@@ -41,6 +51,19 @@ same listing must each get their own reservation.
 
 Worth stating because the obvious near-miss is keying on `listing_id`, which is present
 in `deal_ref` today and would silently collapse two buyers' holds into one.
+
+### Unresolved reserve replay is not a fresh placement
+
+The reservation-idempotency slice used by compute delivery compares the normalized
+request: dimensions/attributes, selected pool/site, offering mode and lease window.
+Same-key changed reuse refuses. Exact replay recovers the recorded identity and
+state across held, committed and released reservations, including a lost first
+acknowledgement; it never silently allocates replacement capacity. An unresolved
+expired/released result enters repair-required or classified end. Ordinary known
+expired-hold replacement is a distinct explicit placement, with a fresh logical
+identity, not resolution of an unresolved effect. This slice precedes unify's
+reserve recovery and renewable's acknowledgement-gap qualification, independently
+of expiry indexing/retention; coordinate the lease/hold indexes separately.
 
 ### Expiry moves from string comparison in Python to a range query
 

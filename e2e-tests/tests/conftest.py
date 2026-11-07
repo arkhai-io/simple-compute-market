@@ -12,8 +12,8 @@ from decimal import Decimal
 import pytest
 from web3 import Web3
 
-from src.settings import active_profiles, config_directory, settings
-from src.web3_client import OWNABLE_ABI, get_web3
+from e2e_harness.settings import active_profiles, config_directory, settings
+from e2e_harness.web3_client import OWNABLE_ABI, get_web3
 
 log = logging.getLogger(__name__)
 
@@ -44,17 +44,20 @@ def rpc_settings() -> dict:
 def registry_settings() -> dict:
     return {
         "api_url": settings.REGISTRY.API_URL,
+        "authority_id": settings.REGISTRY.get("authority_id", ""),
+        "identifier": settings.REGISTRY.get("identifier", ""),
     }
 
 
 @pytest.fixture(scope="session")
 def buyer_settings() -> dict:
-    """Buyer wallet config. The buyer is a pure HTTP client (domains.vms.buyer
+    """Buyer wallet config. The buyer is a pure HTTP client (arkhai_vms_buyer
     CLI / library) — there is no buyer api_url because no buyer-side
     server runs. Only the wallet keys are exposed: they sign negotiation
     requests against the seller's storefront and on-chain escrow calls.
     """
     return {
+        "marketplace_credential": settings.BUYER.get("marketplace_credential", ""),
         "private_key": settings.BUYER.PRIVATE_KEY,
         "wallet_address": settings.BUYER.WALLET_ADDRESS,
     }
@@ -67,6 +70,8 @@ def seller_settings() -> dict:
         "base_url_override": settings.SELLER.BASE_URL_OVERRIDE,
         "private_key": settings.SELLER.PRIVATE_KEY,
         "wallet_address": settings.SELLER.WALLET_ADDRESS,
+        "admin_scheme": settings.SELLER.get("admin_scheme", "eip191"),
+        "admin_credential": settings.SELLER.get("admin_credential", ""),
         "admin_api_key": str(getattr(settings.SELLER, "ADMIN_API_KEY", None) or "").strip(),
         "agent_id": str(getattr(settings.SELLER, "AGENT_ID", None) or ""),
     }
@@ -81,6 +86,10 @@ def min_eth_balance() -> Decimal:
 def provisioning_settings() -> dict:
     return {
         "api_url": settings.PROVISIONING.API_URL,
+        "admin_scheme": settings.PROVISIONING.get("admin_scheme", "eip191"),
+        "admin_credential": settings.PROVISIONING.get("admin_credential", ""),
+        "authority_scheme": settings.PROVISIONING.get("authority_scheme", "eip191"),
+        "authority_identifier": settings.PROVISIONING.get("authority_identifier", ""),
     }
 
 

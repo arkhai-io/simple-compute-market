@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from market_core import SettlementStageTable
+from market_core.schemas import (
+    Agreement,
+    SettlementObligation,
+    SettlementOption,
+    SettlementPlan,
+    SettlementSelection,
+    derive_settlement_option_id,
+)
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from registry_client import FilterSpecResponse
 
@@ -17,7 +27,12 @@ from core_buyer import (
     query_registry_for_matches_multi,
     run_buy,
 )
-from core_buyer.orchestration import make_publisher_trust_resolver
+from core_buyer.negotiation_client import NegotiationOutcome
+from core_buyer.orchestration import (
+    make_escrow_settle_hook,
+    make_publisher_trust_resolver,
+    make_settle_hook,
+)
 
 
 def _trusted(*signers: Ed25519Signer) -> TrustedIdentitySet:
@@ -151,13 +166,222 @@ def test_run_buy_composes_injected_negotiate_and_settle_hooks() -> None:
     assert ("domain_settle", {"listing_id": "L1"}) in events
 
 
-def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
+@pytest.mark.parametrize("proposal", (None, {"stray": "escrow"}))
+def test_settle_hook_delegates_exact_agreement_to_declared_domain_stage(proposal) -> None:
+    selection = SettlementSelection(
+        option_id="a" * 64, settlement={"schema": "example.payment.v1"}
+    )
+    outcome = NegotiationOutcome(
+        status="agreed",
+        negotiation_id="N1",
+        settlement_selection=selection,
+        accepted_escrow_proposal=proposal,
+        settlement_data={"mandate": {"opaque": "to-core"}},
+        agreement=_agreement(selection.settlement_schema),
+    )
+    negotiation = NegotiationResult(
+        match={"seller": "http://seller"},
+        outcome=outcome,
+    )
+    expected = BuyResult(
+        status="ready", negotiation_id="N1",
+        settlement_ref="txn-1",
+    )
+    delegated: list[NegotiationResult] = []
+    events: list[tuple[str, dict]] = []
+
+    def agreement_settlement(actual, emit):
+        delegated.append(actual)
+        emit("agreement_settlement", {"negotiation_id": actual.outcome.negotiation_id})
+        return expected
+
+    stage = object()
+    hook = make_settle_hook(
+        stages=SettlementStageTable({selection.settlement_schema: stage}),
+        invoke=lambda selected, actual, emit: (
+            agreement_settlement(actual, emit)
+            if selected is stage
+            else pytest.fail("wrong stage")
+        ),
+    )
+
+    result = hook(negotiation, lambda name, body: events.append((name, body)))
+
+    assert result is expected
+    assert delegated == [negotiation]
+    assert delegated[0].outcome.settlement_data == {"mandate": {"opaque": "to-core"}}
+    assert events == [
+        ("agreement_settlement", {"negotiation_id": "N1"}),
+    ]
+    assert result.settlement_ref == "txn-1"
+    assert result.to_dict()["settlement_ref"] == "txn-1"
+
+    legacy = NegotiationResult(
+        match={"seller": "http://seller"},
+        outcome=NegotiationOutcome(status="agreed", negotiation_id="legacy"),
+    )
+    with pytest.raises(ValueError, match="no Agreement"):
+        hook(legacy, lambda _name, _body: None)
+    assert delegated == [negotiation]
+
+
+def _agreement(mechanism: str) -> Agreement:
+    buyer = _config().principal
+    seller = Ed25519Signer(b"\x12" * 32).identity
+    return Agreement(
+        negotiation_id="N1",
+        listing_id="L1",
+        listing_hash="0" * 64,
+        buyer=buyer.model_dump(mode="json"),
+        seller=seller.model_dump(mode="json"),
+        amount=10,
+        duration_seconds=3600,
+        start_utc="2026-01-01T00:00:00Z",
+        accepted_at="2026-01-01T00:00:00Z",
+        settlement=SettlementOption(
+            option_id=derive_settlement_option_id(
+                price={"asset": "usd", "rates": []},
+                settlement={"schema": mechanism, **({} or {})},
+            ),
+            price={"asset": "usd", "rates": []},
+            settlement={"schema": mechanism},
+        ),
+        asset="usd",
+    )
+
+
+def _escrow_settle_hook(*, build, check, create):
+    return make_escrow_settle_hook(
+        config=_config(),
+        unit_count=1.0,
+        duration_seconds=3600,
+        build_escrow_terms=build,
+        check_escrows_fund_plan=check,
+        create_escrow=create,
+        settlement_recipient=lambda _proposal: "0x" + "44" * 20,
+        build_settlement_payload=lambda negotiation_id, _proposal: {
+            "negotiation_id": negotiation_id
+        },
+        confirm_settlement=None,
+        settlement_submit_max_attempts=1,
+        settlement_submit_retryable=lambda _exc: False,
+        settlement_poll_interval=0,
+        settlement_total_timeout=0,
+        sleep=lambda _seconds: None,
+    )
+
+
+_SELLER_PLAN = SettlementPlan(
+    obligations=[
+        SettlementObligation(
+            payer="buyer", claimant="seller", amount=10, asset="0x" + "33" * 20,
+            expiration_unix=2_000_000_000, mechanism="example.escrow.v1", params={},
+        )
+    ]
+)
+
+
+def _escrow_negotiation(plan: SettlementPlan | None) -> NegotiationResult:
+    return NegotiationResult(
+        match={"seller": "http://seller", "listing_id": "L1"},
+        outcome=NegotiationOutcome(
+            status="agreed", negotiation_id="N1", agreed_amount=10,
+            accepted_escrow_proposal={"opaque": "accepted"},
+            settlement_plan=plan,
+        ),
+    )
+
+
+class _DerivedTerms(SimpleNamespace):
+    """An opaque term payload, as a domain's derivation returns one."""
+
+    def model_dump(self) -> dict:
+        return dict(vars(self))
+
+
+def test_the_escrow_helper_funds_only_what_it_derives() -> None:
+    """The derivation is checked against the seller's plan, then funded."""
+    derived = [_DerivedTerms(maker="buyer", term="derived")]
+    checked: list = []
+    funded: list = []
+
+    def create(terms):
+        funded.append(terms)
+        raise RuntimeError("stop before submission")
+
+    hook = _escrow_settle_hook(
+        build=lambda *_args: derived,
+        check=lambda terms, plan: checked.append((terms, plan)),
+        create=create,
+    )
+
+    result = hook(_escrow_negotiation(_SELLER_PLAN), lambda *_args: None)
+
+    assert checked == [(derived, _SELLER_PLAN)]
+    assert funded == [derived]
+    assert result.reason.startswith("escrow_create_failed")
+
+
+def test_the_escrow_helper_funds_nothing_the_sellers_plan_does_not_commit_to() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def mismatch(_terms, _plan):
+        raise ValueError("escrow 0 obligation field 'demand' differs")
+
+    hook = _escrow_settle_hook(
+        build=lambda *_args: [SimpleNamespace(maker="buyer")],
+        check=mismatch,
+        create=lambda _terms: pytest.fail("an escrow was funded against the seller's plan"),
+    )
+
+    result = hook(
+        _escrow_negotiation(_SELLER_PLAN), lambda name, body: events.append((name, body))
+    )
+
+    assert result.status == "exited"
+    assert result.reason.startswith("seller_plan_mismatch")
+    assert "demand" in result.reason
+    assert events[-1][0] == "escrow_create_failed"
+
+
+def test_the_escrow_helper_funds_nothing_when_the_seller_sends_no_plan() -> None:
+    """A seller accepts an escrow only with its plan; without one the check that
+    catches buyer and seller deriving different escrows cannot run."""
+    events: list[tuple[str, dict]] = []
+    hook = _escrow_settle_hook(
+        build=lambda *_args: pytest.fail("derived without a plan to hold it to"),
+        check=lambda *_args: pytest.fail("checked against no plan"),
+        create=lambda _terms: pytest.fail("an escrow was funded without the seller's plan"),
+    )
+
+    result = hook(_escrow_negotiation(None), lambda name, body: events.append((name, body)))
+
+    assert result.status == "exited"
+    assert result.reason.startswith("seller_plan_missing")
+    assert events[-1][0] == "escrow_create_failed"
+
+
+def test_missing_accepted_entry_fails_before_domain_effects() -> None:
+    outcome = NegotiationOutcome(
+        status="agreed", negotiation_id="N1", agreement=_agreement("absent.v1"),
+        accepted_escrow_proposal={"opaque": "must not trigger fallback"},
+    )
+    hook = make_settle_hook(
+        stages=SettlementStageTable({"example.payment.v1": object()}),
+        invoke=lambda *_args: pytest.fail("effect before support lookup"),
+    )
+    with pytest.raises(ValueError, match="unsupported.*absent.v1"):
+        hook(NegotiationResult(match={}, outcome=outcome), lambda *_args: None)
+
+
+@pytest.mark.parametrize("second_authority", ["registry-ha", "registry-independent"])
+def test_query_registry_for_matches_multi_dedupes_within_authority(second_authority) -> None:
     buyer = Ed25519Signer(b"\x07" * 32)
     first = Ed25519Signer(b"\x08" * 32)
     second = Ed25519Signer(b"\x09" * 32)
     authorities = {
         "http://r1": _authority("registry-ha", first),
-        "http://r2": _authority("registry-ha", second),
+        "http://r2": _authority(second_authority, second),
     }
 
     def query(url, *_args, **kwargs):
@@ -180,7 +404,7 @@ def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
             registry_authorities=authorities,
         )
 
-    assert result == [
+    expected = [
         {
             "listing_id": "L1",
             "seller": "http://r1",
@@ -191,9 +415,18 @@ def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
             "listing_id": "L2",
             "seller": "http://r2",
             "source_registry_url": "http://r2",
-            "source_registry_authority": "registry-ha",
+            "source_registry_authority": second_authority,
         },
     ]
+
+    if second_authority != "registry-ha":
+        expected.insert(1, {
+            "listing_id": "L1",
+            "seller": "http://r2",
+            "source_registry_url": "http://r2",
+            "source_registry_authority": second_authority,
+        })
+    assert result == expected
 
 
 def test_registry_query_compiles_resource_and_uses_exact_authority_pin() -> None:
@@ -219,7 +452,7 @@ def test_registry_query_compiles_resource_and_uses_exact_authority_pin() -> None
                     "filters": [
                         {
                             "name": "region",
-                            "path": "$.offer_resource.region",
+                            "path": "$.listing_resource.region",
                             "op": "in",
                             "value_type": "string",
                         }
@@ -314,7 +547,7 @@ def test_multi_registry_query_rejects_partial_vocabulary_before_listing() -> Non
                     "filters": [
                         {
                             "name": field,
-                            "path": f"$.offer_resource.{field}",
+                            "path": f"$.listing_resource.{field}",
                             "op": "in",
                             "value_type": "string",
                         }
@@ -356,12 +589,12 @@ def test_publisher_trust_resolver_accepts_signed_rotation_without_mutating_listi
         "source_registry_url": "http://registry",
         "source_registry_authority": "registry",
         "publisher_principals": _trusted(old).model_dump(mode="json"),
-        "offer_resource": {"price": 10},
+        "listing_resource": {"price": 10},
     }
     refreshed = {
         **listing,
         "publisher_principals": _trusted(replacement).model_dump(mode="json"),
-        "offer_resource": {"price": 999},
+        "listing_resource": {"price": 999},
     }
     updates: list[tuple[str, dict]] = []
     with patch(
@@ -375,7 +608,7 @@ def test_publisher_trust_resolver_accepts_signed_rotation_without_mutating_listi
         )
         assert resolve() == _trusted(replacement)
 
-    assert listing["offer_resource"] == {"price": 10}
+    assert listing["listing_resource"] == {"price": 10}
     assert updates == [
         (
             "publisher_trust_refreshed",
@@ -388,6 +621,42 @@ def test_publisher_trust_resolver_accepts_signed_rotation_without_mutating_listi
             },
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("changed", "accepted"),
+    [
+        ({}, True),
+        ({"publisher_id": 8}, False),
+        ({"storefront_url": "http://other-seller"}, False),
+    ],
+    ids=["same-subject", "changed-publisher", "changed-storefront"],
+)
+def test_publisher_trust_resolver_compares_a_text_publisher_with_its_registry_integer(
+    changed: dict, accepted: bool
+) -> None:
+    # A recovered run retains the registry's integer publisher ID as text. The
+    # key is a deterministic development value, never used on any network.
+    publisher = Ed25519Signer(b"\x1d" * 32)
+    listing = {
+        "listing_id": "L1",
+        "publisher_id": "7",
+        "storefront_url": "http://seller",
+        "source_registry_url": "http://registry",
+        "source_registry_authority": "registry",
+        "publisher_principals": _trusted(publisher).model_dump(mode="json"),
+    }
+    retained = dict(listing)
+    refreshed = {**listing, "publisher_id": 7, **changed}
+    with patch("core_buyer.orchestration.fetch_listing_dict", return_value=refreshed):
+        resolve = make_publisher_trust_resolver(config=_config(), listing=listing)
+        if accepted:
+            assert resolve() == _trusted(publisher)
+        else:
+            with pytest.raises(RuntimeError, match="changed listing subject binding"):
+                resolve()
+    # The retained listing, its publisher ID still text, is never rewritten.
+    assert listing == retained
 
 
 def test_publisher_trust_resolver_rejects_forged_registry_refresh() -> None:

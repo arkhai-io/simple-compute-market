@@ -10,15 +10,27 @@ once-only secret must land durably in the run-log
 from __future__ import annotations
 
 import json
+import base64
+from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 import uuid
 from types import SimpleNamespace
 
 import pytest
+import typer
 
-import domains.apicredits.buyer.settle_cli as settle_cli
+import arkhai_apicredits_buyer.common as common
+import arkhai_apicredits_buyer.settle_cli as settle_cli
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.run_log import read_run
-from market_identity import Eip191Signer, REQUEST_PROTOCOL, TrustedIdentitySet
+from market_alkahest.alkahest import get_recipient_arbiter
+from market_alkahest.dev_chain import anvil_address_book_path
+from market_alkahest.plans import (
+    escrow_terms_from_settlement_plan,
+    materialize_settlement_plan_from_proposal,
+)
+from market_alkahest.release_authorization import release_conditions_record
+from market_alkahest.schemas import EscrowProposal
+from market_identity import REQUEST_PROTOCOL, Eip191Signer, TrustedIdentitySet
 
 
 _PROPOSAL = {
@@ -49,6 +61,29 @@ _CREDENTIALS = {
 
 
 def _run_event(run_id: str, event: str, **fields) -> dict:
+    if fields.get("status") == "agreed":
+        params = {"accepted_escrow": dict(_PROPOSAL)}
+        option = SettlementOption(
+            option_id=derive_settlement_option_id(
+                price={"asset": "token", "rates": []},
+                settlement={"schema": "alkahest.v1", **(params or {})},
+            ),
+            price={"asset": "token", "rates": []},
+            settlement={"schema": "alkahest.v1", **(params or {})},
+        )
+        agreement = Agreement(
+            negotiation_id=fields["negotiation_id"], listing_id="lst-1", listing_hash="0"*64,
+            buyer=_SIGNER.identity.model_dump(mode="json"), seller=_SELLER_SIGNER.identity.model_dump(mode="json"),
+            settlement=option, amount=300, asset="token", duration_seconds=0,
+            start_utc="2025-01-01T00:00:00Z", accepted_at="2025-01-01T00:00:00Z",
+        )
+        fields["agreement"] = agreement.model_dump(mode="json")
+        fields["agreement_bytes"] = base64.b64encode(agreement.model_dump_json().encode()).decode()
+        fields["settlement_selection"] = {
+            "option_id": option.option_id,
+            "settlement": {"schema": option.settlement_schema},
+            "expiration_unix": 1_800_000_000,
+        }
     return {
         "event": event,
         "run_id": run_id,
@@ -92,8 +127,8 @@ def agreed_run(tmp_path, monkeypatch):
             agreed_amount=300,
             accepted_escrow_proposal=_PROPOSAL,
             settlement_selection={
-                "mechanism": "alkahest.v1",
                 "option_id": "legacy-alkahest",
+                "settlement": {"schema": "alkahest.v1"},
                 "expiration_unix": 1_800_000_000,
             },
         ),
@@ -111,15 +146,13 @@ def agreed_run(tmp_path, monkeypatch):
 
 @pytest.fixture
 def fake_chain_config(monkeypatch):
-    import domains.apicredits.buyer.common as common
-
     chain = SimpleNamespace(
         name="anvil",
         rpc_url="http://anvil:8545",
         chain_id=31337,
-        alkahest_address_config_path=None,
     )
     monkeypatch.setattr(common, "chain_by_name", lambda name: chain)
+    monkeypatch.setattr(settle_cli, "chain_address_book", lambda _name: None)
     monkeypatch.setattr(
         common,
         "resolve_buyer_wallet",
@@ -143,10 +176,8 @@ def fake_chain_config(monkeypatch):
     )
     monkeypatch.setattr(common, "resolve_registry_api_keys", lambda: {})
     monkeypatch.setattr(common, "resolve_discovery_timeout", lambda: 5.0)
-    import core_buyer.orchestration as buyer_orchestration
-
     monkeypatch.setattr(
-        buyer_orchestration,
+        settle_cli,
         "make_publisher_trust_resolver",
         lambda **_kwargs: lambda: trust,
     )
@@ -230,8 +261,8 @@ def test_settle_without_agreed_proposal_refuses(
                 identities=(_SELLER_SIGNER.identity,),
             ).model_dump(mode="json"),
             settlement_selection={
-                "mechanism": "alkahest.v1",
                 "option_id": "legacy-alkahest",
+                "settlement": {"schema": "alkahest.v1"},
                 "expiration_unix": 1_800_000_000,
             },
         ),
@@ -239,8 +270,6 @@ def test_settle_without_agreed_proposal_refuses(
     (runs / "run-tok-2.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n"
     )
-
-    import typer
 
     with pytest.raises(typer.Exit):
         settle_cli.run_settle_from_log(
@@ -253,3 +282,196 @@ def test_settle_without_agreed_proposal_refuses(
             poll_interval=0.01,
             settlement_timeout=5.0,
         )
+
+
+_CONDITION = {
+    "chain_name": "anvil",
+    "arbiter": "0x" + "55" * 20,
+    "demand_data": {"recipient": "0x" + "44" * 20},
+}
+
+
+@pytest.mark.parametrize(
+    ("proposal", "reason"),
+    [
+        (_PROPOSAL, "release_conditions_unrecorded"),
+        (
+            {**_PROPOSAL, "demands": None, "demand": _CONDITION},
+            "release_conditions_unrecorded",
+        ),
+    ],
+    ids=["naming no condition", "selecting a condition"],
+)
+def test_settle_creates_no_escrow_from_an_accepted_proposal_alone(
+    tmp_path, monkeypatch, fake_chain_config, proposal, reason
+):
+    """A run accepted before its listing's release conditions were recorded
+    has nothing to derive its escrow from, so the resumed settlement refuses
+    by name and nothing reaches the chain."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    runs = tmp_path / "arkhai" / "buy-runs"
+    runs.mkdir(parents=True)
+    events = [
+        _run_event(
+            "run-tok-3",
+            "run_started",
+            seller_url="http://seller:8002",
+            listing_id="lst-1",
+            chain_name="anvil",
+            publisher_id="publisher-1",
+            source_registry_url="http://registry:8080",
+            source_registry_authority="registry-1",
+        ),
+        _run_event(
+            "run-tok-3",
+            "run_ended",
+            status="agreed",
+            negotiation_id="neg-3",
+            agreed_amount=300,
+            publisher_principals=TrustedIdentitySet(
+                identities=(_SELLER_SIGNER.identity,),
+            ).model_dump(mode="json"),
+            accepted_escrow_proposal=proposal,
+            settlement_selection={
+                "option_id": "legacy-alkahest",
+                "settlement": {"schema": "alkahest.v1"},
+                "expiration_unix": 1_800_000_000,
+            },
+        ),
+    ]
+    (runs / "run-tok-3.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n"
+    )
+
+    def _no_escrow(**_kwargs):
+        def refuse(_terms):
+            raise AssertionError("an escrow was created without its release condition")
+
+        return refuse
+
+    monkeypatch.setattr(settle_cli, "make_create_escrow_fn", _no_escrow)
+
+    with pytest.raises(typer.Exit) as refused:
+        settle_cli.run_settle_from_log(
+            run_id="run-tok-3",
+            escrow_uid=None,
+            identity=_IDENTITY,
+            evm_address=None,
+            evm_private_key=None,
+            chain_name=None,
+            poll_interval=0.01,
+            settlement_timeout=5.0,
+        )
+
+    assert refused.value.exit_code == 3
+    (missing,) = [
+        e for e in read_run("run-tok-3") if e.get("event") == "escrow_release_condition_missing"
+    ]
+    assert reason in missing["error"]
+
+
+_BOOK = str(anvil_address_book_path())
+
+
+def _recipient_condition(recipient: str) -> dict:
+    return {
+        "chain_name": "anvil",
+        "arbiter": get_recipient_arbiter("anvil", config_path=_BOOK),
+        "demand_data": {"recipient": recipient},
+    }
+
+
+def _plan_paying(recipient: str) -> dict:
+    condition = _recipient_condition(recipient)
+    return materialize_settlement_plan_from_proposal(
+        proposal=EscrowProposal.model_validate(
+            {**_PROPOSAL, "demands": None, "demand": condition}
+        ),
+        listing={"demands": [condition]},
+        agreed_amount=300,
+        duration_seconds=0,
+        addr_config_path=_BOOK,
+    ).model_dump(mode="json")
+
+
+_SELLER_WALLET = "0x" + "44" * 20
+
+
+def _settle_recorded_run(tmp_path, monkeypatch, *, plan: dict) -> tuple[int, list]:
+    """Resume a run that recorded its listing's conditions; return its exit and what it funds."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    runs = tmp_path / "arkhai" / "buy-runs"
+    runs.mkdir(parents=True)
+    accepted = {**_PROPOSAL, "demands": None, "demand": _recipient_condition(_SELLER_WALLET)}
+    events = [
+        _run_event(
+            "run-tok-4", "run_started", seller_url="http://seller:8002",
+            listing_id="lst-1", chain_name="anvil", publisher_id="publisher-1",
+            source_registry_url="http://registry:8080",
+            source_registry_authority="registry-1",
+        ),
+        _run_event(
+            "run-tok-4", "run_ended", status="agreed", negotiation_id="neg-4",
+            agreed_amount=300,
+            publisher_principals=TrustedIdentitySet(
+                identities=(_SELLER_SIGNER.identity,),
+            ).model_dump(mode="json"),
+            accepted_escrow_proposal=accepted,
+            listing_record=release_conditions_record(
+                {"demands": [_recipient_condition(_SELLER_WALLET)]}
+            ),
+            settlement_plan=plan,
+        ),
+    ]
+    (runs / "run-tok-4.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    monkeypatch.setattr(
+        common,
+        "chain_by_name",
+        lambda _name: SimpleNamespace(
+            name="anvil", rpc_url="http://anvil:8545", chain_id=31337,
+        ),
+    )
+    monkeypatch.setattr(settle_cli, "chain_address_book", lambda _name: _BOOK)
+    funded: list = []
+
+    def _record(**_kwargs):
+        def create(terms):
+            funded.extend(terms)
+            raise RuntimeError("stop before submission")
+
+        return create
+
+    monkeypatch.setattr(settle_cli, "make_create_escrow_fn", _record)
+    with pytest.raises(typer.Exit) as stopped:
+        settle_cli.run_settle_from_log(
+            run_id="run-tok-4", escrow_uid=None, identity=_IDENTITY,
+            evm_address=None, evm_private_key=None, chain_name=None,
+            poll_interval=0.01, settlement_timeout=5.0,
+        )
+    return stopped.value.exit_code, funded
+
+
+def test_settle_funds_what_it_derives_from_the_recorded_conditions(
+    tmp_path, monkeypatch, fake_chain_config
+):
+    plan = _plan_paying(_SELLER_WALLET)
+
+    exit_code, funded = _settle_recorded_run(tmp_path, monkeypatch, plan=plan)
+
+    assert exit_code == 4  # the recorded create failure, after funding was attempted
+    assert funded == escrow_terms_from_settlement_plan(plan)
+
+
+def test_settle_refuses_a_seller_plan_paying_another_recipient(
+    tmp_path, monkeypatch, fake_chain_config
+):
+    exit_code, funded = _settle_recorded_run(
+        tmp_path, monkeypatch, plan=_plan_paying("0x" + "99" * 20)
+    )
+
+    assert exit_code == 3
+    assert funded == []
+    (missing,) = [
+        e for e in read_run("run-tok-4") if e.get("event") == "escrow_release_condition_missing"
+    ]
+    assert "seller_plan_mismatch" in missing["error"]

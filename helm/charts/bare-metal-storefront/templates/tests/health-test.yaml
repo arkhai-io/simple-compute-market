@@ -3,9 +3,10 @@ kind: Pod
 metadata:
   name: {{ include "bare-metal-storefront.fullname" . }}-health-test
   labels:
-    {{- include "bare-metal-storefront.labels" . | nindent 4 }}
+    {{- include "bare-metal-storefront.testLabels" . | nindent 4 }}
   annotations:
-    helm.sh/hook: test
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   restartPolicy: Never
   containers:
@@ -14,4 +15,4 @@ spec:
       command:
         - wget
         - -qO-
-        - {{ printf "http://%s:%d/health" (include "bare-metal-storefront.fullname" .) (int .Values.service.port) | quote }}
+        - {{ printf "http://%s:%d/health" (include "bare-metal-storefront.fullname" .) (int .Values.port) | quote }}

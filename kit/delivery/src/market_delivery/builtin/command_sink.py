@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..events import DeliveryEvent
-from ..sinks import DeliveryError, DeliverySink, SinkSettings
+from ..sinks import DeclaredSink, DeliveryError, DeliverySink, SinkSettings
 
 
 class CommandSinkSettings(SinkSettings):
@@ -67,4 +67,12 @@ def build_command_sink(settings: Mapping[str, Any]) -> DeliverySink:
     return deliver_to_command
 
 
-__all__ = ["CommandSinkSettings", "build_command_sink"]
+#: The installed sink: its factory with the settings model it declares.
+COMMAND_SINK = DeclaredSink(build_command_sink, CommandSinkSettings)
+
+
+__all__ = [
+    "COMMAND_SINK",
+    "CommandSinkSettings",
+    "build_command_sink",
+]

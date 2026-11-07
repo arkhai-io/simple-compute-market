@@ -1,0 +1,126 @@
+"""Generate the Helm values-schema definition for a VM storefront agent's ``config``.
+
+The generator is ``market_config.values_schema``; this module supplies what is
+the VM storefront's own: the sections it types, the settlement mechanisms it
+registers, the delivery sinks its environment installs, the keys it has
+retired, and the schema files it writes.
+
+``[Delivery]`` is typed by the sinks installed here that declare their settings
+model, found by discovery; no sink is named in this module, and an instance of
+any other sink stays open. The definition is generated in this storefront's
+locked environment, so the sinks it types are the sinks this storefront's image
+installs.
+
+The definition is written, under :data:`DEFINITION`, into the storefront chart's
+schema and into the umbrella's definition of its storefront agents. Run it from
+the repository root, or pass that root as ``--root``.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Any
+
+from market_arkhai_payments import ARKHAI_PAYMENTS_CONFIG_KEY
+from market_config.values_schema import (
+    accepting_null,
+    any_case,
+    config_definition,
+    main as generator_main,
+    model_fragment,
+    settlement_fragment,
+    sink_typed_section,
+)
+from market_delivery import SINK_KEY, discover_sink_settings_models
+
+from market_storefront.settlement_composition import (
+    build_storefront_settlement_registry,
+)
+from market_storefront.retired_settings import RETIRED_KEYS
+from market_storefront.utils.config import (
+    IdentityConfigDeclaration,
+    RegistryConfigDeclaration,
+    WalletConfigDeclaration,
+)
+
+DEFINITION = "storefrontServiceConfig"
+ROLE = "seller"
+
+#: The schema files carrying the definition, relative to the repository root.
+SCHEMA_FILES = (
+    "helm/values.schema.json",
+    "helm/charts/storefront/values.schema.json",
+)
+
+# The keys of the storefront's own configuration that it no longer reads
+# (`market_storefront.retired_settings`) are refused in an agent's ``config`` in
+# any spelling. The chart's own retired values shape is refused by the chart's
+# schema beside this definition, not here.
+
+# ``[Delivery]``'s own settings: one entry per key in the delivery kit's
+# ``RESERVED_SECTION_KEYS``.
+_DELIVERY_SETTINGS: dict[str, Any] = {
+    "enabled": {"type": "array", "items": {"type": "string"}},
+    "timeout_seconds": {"type": "number"},
+    "origins": {
+        "type": "object",
+        "additionalProperties": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+
+def _settlement_section(role: str) -> dict[str, Any]:
+    """``[Settlement]`` as the storefront registers it, its payments key by
+    reference refused.
+
+    A storefront's payments key reaches it only through its secret overlay,
+    never through a variable its configuration names; the chart sets no
+    variable but the configuration directory and the signing credential, so a
+    public ``api_key_env`` could name no key. ``api_key_env`` stays a field
+    of the shared payments model, the form a buyer's provider reads, so it is
+    refused here rather than in the model, whose roles the settlement runtime
+    also enforces at startup.
+    """
+    settlement = settlement_fragment(
+        build_storefront_settlement_registry().registrations, role=role
+    )
+    payments = settlement["patternProperties"][any_case(ARKHAI_PAYMENTS_CONFIG_KEY)]
+    payments["patternProperties"][any_case("api_key_env")] = False
+    return settlement
+
+
+def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
+    """Return the generated definition for an agent's ``config``.
+
+    It accepts ``null`` wherever it accepts a key, since a values file's ``null``
+    removes the key; a key it refuses stays refused.
+    """
+    sinks, _warnings = discover_sink_settings_models()
+    sections: dict[str, Any] = {
+        "delivery": sink_typed_section(
+            sinks, sink_key=SINK_KEY, section_fields=_DELIVERY_SETTINGS, role=role
+        ),
+        # A dispute credential binds a token to an authority, and an entry is
+        # incomplete without one, so the whole entry belongs in the storefront's
+        # secret overlay and none is accepted here.
+        "disputecredential": False,
+        "identity": model_fragment(IdentityConfigDeclaration, role=role),
+        "registry": model_fragment(RegistryConfigDeclaration, role=role),
+        "settlement": _settlement_section(role),
+        "wallet": model_fragment(WalletConfigDeclaration, role=role),
+    }
+    return accepting_null(config_definition(sections, retired=RETIRED_KEYS))
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    return generator_main(
+        argv,
+        build_definition=storefront_config_definition,
+        name=DEFINITION,
+        schema_files=SCHEMA_FILES,
+        description=__doc__.splitlines()[0],
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

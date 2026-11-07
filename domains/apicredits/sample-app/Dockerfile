@@ -15,17 +15,18 @@ WORKDIR /app
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser && chown appuser:appuser /app
 USER appuser
 
-COPY --chown=appuser:appuser .dist/ /home/appuser/dist/
-# Install the app wheel and its arkhai-apicredits-middleware dependency
-# straight from .dist (no project tree needed — the wheel ships the
-# console script and the middleware ships the gate).
+# The lock is used as committed: the project's pyproject and lock sit at the
+# same depth below /repo as below the repository root, so the lock's relative
+# wheelhouse path resolves to /repo/.dist. uv_project.py derives the internal
+# packages from the lock and reinstalls them, so a cached build of a
+# same-version wheel is never reused.
+COPY --chown=appuser:appuser .dist/ /repo/.dist/
+COPY --chown=appuser:appuser scripts/uv_project.py /repo/scripts/uv_project.py
+COPY --chown=appuser:appuser domains/apicredits/sample-app/pyproject.toml domains/apicredits/sample-app/uv.lock /repo/domains/apicredits/sample-app/
+ENV UV_PROJECT_ENVIRONMENT=/home/appuser/.venv
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1000 \
-    uv venv /home/appuser/.venv && \
-    uv pip install --python /home/appuser/.venv/bin/python \
-        --find-links /home/appuser/dist \
-        --refresh-package arkhai-apicredits-sample-app \
-        --refresh-package arkhai-apicredits-middleware \
-        arkhai-apicredits-sample-app arkhai-apicredits-middleware
+    python3 /repo/scripts/uv_project.py image --project /repo/domains/apicredits/sample-app -- --no-dev --no-install-project && \
+    python3 /repo/scripts/uv_project.py install-wheel --project /repo/domains/apicredits/sample-app
 
 # Stage 2: lean runtime.
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime

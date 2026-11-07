@@ -1,0 +1,62 @@
+## Context
+
+An API-credit deal settled through Arkhai payments runs: discover a listing advertising a payment option, select that option, negotiate a scalar amount, approve the payment, have the seller verify the receipt and issue credits. Each repaired defect stopped the run at a different point, and fixing one exposed the next (see `proposal.md`).
+
+The work landed as three stacked pull requests before it had a change directory: #270 (scenario configuration), #271 (scenario invocation and option persistence), and #272 (buyer selection, pricing, principal, and publisher identity). This change records all three retroactively, so the design review and the rounds after it have one home.
+
+## Goals / Non-Goals
+
+**Goals:** a credits payment purchase negotiates from the selected option's advertised rate and settles; payment scenarios are configured explicitly and block only on an unavailable payments target.
+
+**Non-Goals:** new settlement policy or wire fields, migration of stored listings, live payment qualification.
+
+## Decisions
+
+- **D1 — Shared orchestration resolves the selection to the advertised option.** When a domain hook returns a `SettlementSelection`, `core_buyer.orchestration` resolves it against the listing with `market_policy.scalar_policies.selected_settlement_artifact` and hands the resulting `SettlementOption` to negotiation and revalidation. A hook need not return a cached selected option, so every buyer entry point gets the option's rate and acceptance contract. `core_buyer` already declares `arkhai-kit-policy`.
+- **D2 — The credits buy command selects before pricing.** `market credits buy` builds each match's settlement proposal first, resolves its advertised artifact, and keeps the choice on the match, so the existing price resolver prices from the selected artifact and interactive selection is not repeated during negotiation. A match whose proposal or artifact cannot be resolved is dropped before pricing.
+- **D3 — The shared transport owns the buyer principal.** The credits settlement payload names only the negotiation; the transport binds and authenticates the marketplace buyer principal.
+- **D4 — Publisher subjects compare as retained text.** Recovery retains registry subject IDs as text in the run context, so the authenticated refresh compares `str(publisher_id)` on both sides.
+- **D5 — Listing persistence stores JSON values.** The credits storefront stores `model_dump(mode="json")` of each typed `SettlementOption`.
+- **D6 — Payment scenarios share one explicit policy.** `e2e-tests/tests/e2e/roles/helpers/payments.py` reads the `PAYMENTS` settings into an `ArkhaiPaymentsConfig`, checks the target's `/health`, and serializes one named payments table; `livemode` and the authentication choice are always explicit. A blank `SERVICE_URL`, meaning no target is configured, or an unready target is a blocked skip, never an Alkahest fallback. With `SERVICE_URL` set, every other setting — service identity, dispute authority, buyer account, and the buyer and seller marketplace credentials — is required, and a missing one fails, naming it, before readiness is checked: the pipeline, which configures no target, stays a skip, while a misconfigured payments run fails deterministically. `LIVEMODE` and `DEVELOPMENT_AUTH` parse as strict booleans, since a settings value of the string `"false"` would otherwise read as true (01 F3).
+- **D7 — `--max-matches` counts sellers with a usable settlement option.** `market credits buy` selects before capping, as `market vms buy` does, so a listing the buyer cannot settle with never takes one of the N tries; before selection moved, such a listing used a try and exited `no_compatible_settlement_option` without contacting its seller. Selection stops once N usable matches are found, so the capped list is unchanged but no buyer is prompted, and no wallet balance read, for a listing past it. The option's help states this meaning (01 F2). Only the counting is shared with the VM buyer: VM's `select_listings` chooses across the whole discovered set — keeping the earliest clause any listing matches and the most-preferred mechanism any listing offers — so stopping early would change which listings it considers, while the credits buyer chooses per listing. The `buyer-orchestration` delta states the counting rule for every buy command and the early stop for `market credits buy` alone; a kit-owned selection, recorded as unowned work, is where the two would converge (03 N1).
+- **D8 — An unmatched selection exits before negotiating.** When a hook's `SettlementSelection` resolves to no advertised option, `_negotiate_matches` records the attempt and exits `unadvertised_settlement_selection`, before revalidation and without contacting the seller — the neighbour of its `no_compatible_settlement_option` exit (01 F4).
+
+## Evidence boundaries
+
+What each level of evidence proves, settled across the design review (01 F1), the implementation round (03 N3), and section 7's compliance check, and why no higher level was built:
+
+- **Core proves the selected option reaches negotiation, not the amount it opens at.** Shared orchestration's unit tests drive `_negotiate_matches` through `make_negotiate_hook`, as the VM buyer's tests do, with the registry refresh and seller call patched at module level: the hook gives no injection seam for them, so the compliance check's objection to that patching was declined. The tests show revalidation and the policy receive the payment option, that the opening carries an amount only with the option in context, and that an unadvertised selection records `unadvertised_settlement_selection` with no registry or seller call. The hook's result does not expose the exited outcome's reason when no candidate agrees, so the attempt's error is asserted instead. The amount's value is the domain's derived opening price, so the rate derivation is proved in the domain.
+- **The credits opening is proved against served routes, through the buyer's production client.** `market credits buy` negotiates through `core_buyer.negotiation_client`'s signed `urllib` client, which takes no transport, so the planned `StorefrontClient`-over-`ASGITransport` test could not run the command. The test serves the real negotiation routes, response authentication, credit negotiation runtime, and SQLite on loopback, as the neighbouring negotiate-command test does; a 70-per-credit payment option beside a 100-per-token escrow opens and agrees at 210 for three credits, and the stored Agreement names the payment option. It complements `test_exact_selection_api.py`, which drives the typed client against an in-process application. Moving buyers onto the typed client is `buyers-use-the-storefront-client`'s.
+- **Listing persistence is library integration.** `ListingService` publishes against real SQLite with no HTTP application; the stored option reads back as the same typed `SettlementOption`.
+- **The counting rule rests on tests for credits and on code for VM.** The credits buyer's selection is unit-tested for skipping, order, narrowing, and the early stop. The VM buyer meets the counting rule because `select_listings` filters before `run_buy` caps; no VM test asserts it, and bare-metal buy has no limit.
+- **The payments helper is unit-tested with readiness injected.** Skips and failures are caught as values, so a helper that wrongly skips fails the test rather than being reported as skipped.
+- **The pipeline does not exercise the change.** No lane configures a payments target, so `e2e_credits_payment_deal`, the one scenario running `market credits buy` with a payment option, skips; the pipeline is regression evidence that the three lanes deploy and run. The live evidence is #272's run of that scenario against a payments service — purchase and API use, same-settlement re-drive, and seller refund — which this repository cannot repeat; live qualification stays with the payments service, as `docs/development/ROADMAP.md#payment-qualification-boundaries` records.
+- **Each new test was checked by mutation:** restoring the pre-resolution lookup, comparing publisher IDs without `str()`, removing the early stop, removing the narrowing to the selected artifact (the opening becomes 300, not 210), storing options unserialized, skipping on a missing setting, and reading either flag with `bool()` each fail their test.
+
+## Notes for later work
+
+- Never edit an installed package file for a mutation check: `uv` hard-links installed files to its cache, so the edit alters the copy every later reinstall reuses. Mutate source, rebuild the wheel, and reinstall with `reinit`; `uv cache clean <package>` repairs a cache already altered.
+- `docs/development/TESTING.md` does not describe serving routes on loopback for a client that takes no transport, which now has two consumers in the API-credit storefront's tests. No change owns documenting it.
+
+## Risks / Trade-offs
+
+- **[Listings already stored with model-valued options]** → discovery shows them without payment options until republished; no migration (non-goal).
+- **[Preselection over discovered matches]** → bounded by D7: selection stops at N usable matches.
+- **[Buyer selection is carried by rewriting a copy of the advertised listing]** → the credits buyer narrows `settlement_options` and `accepted_escrows` on a working copy, as the VM buyer narrows `settlement_options`; no defect follows today, since only pricing and D1's resolution read them and revalidation re-reads the registry. Representing the selection explicitly beside an unchanged listing, in kit for all three domains, is recorded as unowned work in `openspec/changes/README.md` (01 F6).
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 — orchestration resolves a selection to the advertised option before negotiating | `openspec/specs/buyer-orchestration/spec.md#requirement-negotiation-opens-from-the-selected-advertised-option`, written by the archive from this change's delta |
+| D2 — `market credits buy` selects before pricing and prices from the selected artifact | The same requirement's scenario "A listing advertises differently priced options"; the selection order is code in `buy_cli.py` |
+| D3 — the shared transport binds the buyer principal | `openspec/specs/buyer-orchestration/spec.md#requirement-payment-buyers-approve-and-settle-by-negotiation` (unchanged: settlement already carries only the negotiation ID) |
+| D4 — publisher subjects compare as retained text | Code only: the comparison and its reason in `core_buyer/orchestration.py`; `openspec/specs/registry-discovery/spec.md#requirement-canonical-publisher-ownership` is unchanged |
+| D5 — the credits storefront stores options as JSON values | Code only: `listing_service.py`; `openspec/specs/storefront-publication/spec.md#requirement-payment-publication-discloses-mandate-policy` is unchanged |
+| D6 — payment scenarios block only on an absent or unready target, and fail on a configured run's missing setting | `openspec/specs/test-compatibility/spec.md#requirement-external-payment-qualification-names-its-target`, written by the archive from this change's delta; `openspec/specs/test-compatibility/architecture.md#payment-evidence-ownership`; `docs/development/TESTING.md#private-service-dependencies`; `e2e-tests/README.md#shared-payment-scenario-configuration` |
+| D7 — the match cap counts usable candidates; credit purchases stop selecting at it | `openspec/specs/buyer-orchestration/spec.md#requirement-the-match-cap-counts-candidates-the-buyer-can-settle-with` and `#requirement-credit-purchases-stop-selecting-at-the-match-cap`, written by the archive; `market credits buy --help` |
+| D8 — an unmatched selection exits `unadvertised_settlement_selection` | `openspec/specs/buyer-orchestration/spec.md#requirement-negotiation-opens-from-the-selected-advertised-option` (scenario "A selection names nothing the listing advertises") |
+| Kit-owned buyer settlement selection for all three domains (01 F6) | Unowned work in `openspec/changes/README.md` ("Unowned work found by `fix-credits-payment-opening-amount`") |
+| Roadmap | No change: the change closes no gap row of `docs/development/ROADMAP.md`'s Goal 6, and `#payment-qualification-boundaries` stays true |
+| Campaign index | This change's row under "Roadmap goal — Make the settlement mechanism a composed choice" in `openspec/changes/README.md` |
+| Evidence boundaries and notes for later work | This design (change history) |

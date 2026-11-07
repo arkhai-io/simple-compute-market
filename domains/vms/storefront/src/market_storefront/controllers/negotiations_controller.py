@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
+from market_storefront_kit import DealControlRouteError, NegotiationControlRouteService
 from market_identity import Identity
 
 import market_storefront.container as _container
@@ -152,16 +153,19 @@ class NegotiationsController:
             Identity, Depends(require_administrator_identity)
         ],
     ) -> ForceAcceptResponse:
-        try:
-            result = await self._svc.force_accept(
-                listing_id=listing_id,
-                neg_id=neg_id,
-                amount=body.amount,
-                actor_principal=actor_principal,
+        runtime = _container.resolved_negotiation_runtime
+        if runtime is None:
+            raise HTTPException(
+                status_code=503, detail="storefront negotiation is unavailable"
             )
-        except NegotiationServiceError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=str(exc))
-        except Exception as exc:
-            logger.error("[NEGOTIATIONS] force-accept: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc))
-        return ForceAcceptResponse(**result)
+        controls = NegotiationControlRouteService(
+            runtime=runtime,
+            repository=_container.resolved_sqlite_client,
+            seller_principal=lambda: _container.resolved_marketplace_signer.identity,
+        )
+        try:
+            return await controls.force_accept(
+                listing_id, neg_id, body, actor_principal=actor_principal
+            )
+        except DealControlRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

@@ -1,0 +1,245 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1080" viewBox="0 0 1400 1080">
+<title>Change workflow engine parts</title>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f3350"/></marker>
+</defs>
+<rect x="0" y="0" width="1400" height="1080" fill="#ffffff"/>
+<g stroke-width="1.2">
+<rect x="120" y="72" width="270" height="40" rx="5" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="120" y="140" width="270" height="40" rx="5" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="565" y="72" width="270" height="40" rx="5" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="565" y="140" width="270" height="40" rx="5" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="1000" y="132" width="300" height="55" rx="5" fill="#f4f5f9" stroke="#8a8fa8" stroke-dasharray="6 4"/>
+<rect x="20" y="230" width="310" height="416" rx="4" fill="#ffffff" stroke="#e3a765"/>
+<rect x="30" y="260" width="290" height="40" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="30" y="308" width="290" height="40" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="30" y="356" width="290" height="40" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="30" y="404" width="290" height="40" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="30" y="452" width="290" height="40" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="30" y="500" width="290" height="40" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="30" y="548" width="290" height="40" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="30" y="596" width="290" height="40" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="370" y="230" width="310" height="272" rx="4" fill="#ffffff" stroke="#c98ac4"/>
+<rect x="380" y="260" width="290" height="40" rx="5" fill="#fdf2fb" stroke="#c98ac4"/>
+<rect x="380" y="308" width="290" height="40" rx="5" fill="#fdf2fb" stroke="#c98ac4"/>
+<rect x="380" y="356" width="290" height="40" rx="5" fill="#fdf2fb" stroke="#c98ac4"/>
+<rect x="380" y="404" width="290" height="40" rx="5" fill="#fdf2fb" stroke="#c98ac4"/>
+<rect x="380" y="452" width="290" height="40" rx="5" fill="#fdf2fb" stroke="#c98ac4"/>
+<rect x="370" y="520" width="310" height="128" rx="4" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="380" y="550" width="290" height="40" rx="5" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="380" y="598" width="290" height="40" rx="5" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="720" y="230" width="310" height="272" rx="4" fill="#ffffff" stroke="#6fc2a5"/>
+<rect x="730" y="260" width="290" height="40" rx="5" fill="#eefaf6" stroke="#6fc2a5"/>
+<rect x="730" y="308" width="290" height="40" rx="5" fill="#eefaf6" stroke="#6fc2a5"/>
+<rect x="730" y="356" width="290" height="40" rx="5" fill="#eefaf6" stroke="#6fc2a5"/>
+<rect x="730" y="404" width="290" height="40" rx="5" fill="#eefaf6" stroke="#6fc2a5"/>
+<rect x="730" y="452" width="290" height="40" rx="5" fill="#eefaf6" stroke="#6fc2a5"/>
+<rect x="1070" y="230" width="310" height="416" rx="4" fill="#ffffff" stroke="#9fbf6a"/>
+<rect x="1080" y="260" width="290" height="40" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="1080" y="308" width="290" height="40" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="1080" y="356" width="290" height="40" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="1080" y="404" width="290" height="40" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="1080" y="452" width="290" height="40" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="1080" y="500" width="290" height="40" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="1080" y="548" width="290" height="40" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="1080" y="596" width="290" height="40" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="720" y="540" width="310" height="55" rx="5" fill="#ffffff" stroke="#8a8fa8" stroke-dasharray="6 4"/>
+<rect x="20" y="700" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="20" y="782" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="20" y="864" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8" stroke-dasharray="6 4"/>
+<rect x="20" y="946" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="370" y="700" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="370" y="782" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="370" y="864" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="370" y="946" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="720" y="700" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="720" y="782" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="720" y="864" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="1070" y="700" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8" stroke-dasharray="6 4"/>
+<rect x="1070" y="782" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8" stroke-dasharray="6 4"/>
+<rect x="1070" y="864" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="1070" y="946" width="310" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+</g>
+<g fill="none" stroke="#2f3350" stroke-width="1.2">
+<polyline points="390,86 565,86" marker-end="url(#arrow)"/>
+<polyline points="390,160 470,160 470,102 565,102" marker-end="url(#arrow)"/>
+<polyline points="700,112 700,140" marker-end="url(#arrow)"/>
+<polyline points="640,180 175,230" marker-end="url(#arrow)"/>
+<polyline points="680,180 525,230" marker-end="url(#arrow)"/>
+<polyline points="720,180 875,230" marker-end="url(#arrow)"/>
+<polyline points="760,180 1225,230" marker-end="url(#arrow)"/>
+<polyline points="320,280 380,280" marker-end="url(#arrow)"/>
+<polyline points="380,376 320,376" marker-end="url(#arrow)"/>
+<polyline points="730,280 670,280" marker-end="url(#arrow)"/>
+<polyline points="680,567.5 720,567.5" marker-end="url(#arrow)"/>
+<polyline points="20,632 10,632 10,735 20,735" marker-end="url(#arrow)"/>
+<polyline points="20,632 10,632 10,817 20,817" marker-end="url(#arrow)"/>
+<polyline points="20,632 10,632 10,899 20,899" marker-end="url(#arrow)"/>
+<polyline points="20,632 10,632 10,981 20,981" marker-end="url(#arrow)"/>
+<polyline points="370,488 360,488 360,735 370,735" marker-end="url(#arrow)"/>
+<polyline points="370,488 360,488 360,817 370,817" marker-end="url(#arrow)"/>
+<polyline points="370,488 360,488 360,899 370,899" marker-end="url(#arrow)"/>
+<polyline points="370,488 360,488 360,981 370,981" marker-end="url(#arrow)"/>
+<polyline points="720,488 710,488 710,735 720,735" marker-end="url(#arrow)"/>
+<polyline points="720,488 710,488 710,817 720,817" marker-end="url(#arrow)"/>
+<polyline points="720,488 710,488 710,899 720,899" marker-end="url(#arrow)"/>
+<polyline points="1070,632 1060,632 1060,735 1070,735" marker-end="url(#arrow)"/>
+<polyline points="1070,632 1060,632 1060,817 1070,817" marker-end="url(#arrow)"/>
+<polyline points="1070,632 1060,632 1060,899 1070,899" marker-end="url(#arrow)"/>
+<polyline points="1070,632 1060,632 1060,981 1070,981" marker-end="url(#arrow)"/>
+</g>
+<g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#1f2340">
+<text x="20" y="30" font-size="16" font-weight="bold">The change workflow engine: its parts, and the files they read and write</text>
+<text x="20" y="54" font-size="12">Each small box is a module of scripts/change_workflow/. Each file box below a column says which module, or which step session, writes and reads it.</text>
+<text x="20" y="1052" font-size="12">Arrows: a part acts on what it points to. A rail from a column's frame reaches each file below it. Dashed: outside the checkout's tracked files, or shared by every module.</text>
+<text x="32" y="249" font-size="13" font-weight="bold">Running a step</text>
+<text x="382" y="249" font-size="13" font-weight="bold">The records</text>
+<text x="382" y="539" font-size="13" font-weight="bold">Cost</text>
+<text x="732" y="249" font-size="13" font-weight="bold">Routing</text>
+<text x="1082" y="249" font-size="13" font-weight="bold">Repository work</text>
+</g>
+<g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#1f2340" text-anchor="middle">
+<text x="255" y="89" font-weight="bold">the owner · the orchestrating session</text>
+<text x="255" y="104">start, resume, record, next, note</text>
+<text x="255" y="157" font-weight="bold">make targets</text>
+<text x="255" y="172">workflow.mk, calling the command</text>
+<text x="700" y="89" font-weight="bold">scripts/change-workflow</text>
+<text x="700" y="104">the engine's command</text>
+<text x="700" y="157" font-weight="bold">cli</text>
+<text x="700" y="172">each subcommand dispatched to a module</text>
+<text x="1150" y="149" font-weight="bold">common</text>
+<text x="1150" y="164">what every module shares: the</text>
+<text x="1150" y="179">repository, the engine's error, the clock</text>
+<text x="175" y="277" font-weight="bold">wrapper</text>
+<text x="175" y="292">runs a step unattended; resumes one</text>
+<text x="175" y="325" font-weight="bold">steps</text>
+<text x="175" y="340">the step table: skill and rules</text>
+<text x="175" y="373" font-weight="bold">harness</text>
+<text x="175" y="388">the claude -p and codex exec commands</text>
+<text x="175" y="421" font-weight="bold">stream</text>
+<text x="175" y="436">event stream, transcript, progress</text>
+<text x="175" y="469" font-weight="bold">outcome</text>
+<text x="175" y="484">the outcome, checked against its schema</text>
+<text x="175" y="517" font-weight="bold">subagents</text>
+<text x="175" y="532">the denials a run's subagents met</text>
+<text x="175" y="565" font-weight="bold">running</text>
+<text x="175" y="580">the runs in progress in a checkout</text>
+<text x="175" y="613" font-weight="bold">watch</text>
+<text x="175" y="628">follows progress; a run's denials</text>
+<text x="525" y="277" font-weight="bold">log</text>
+<text x="525" y="292">the workflow log's only writer</text>
+<text x="525" y="325" font-weight="bold">records</text>
+<text x="525" y="340">numbered records, validations, commits</text>
+<text x="525" y="373" font-weight="bold">review</text>
+<text x="525" y="388">a read-only review, published</text>
+<text x="525" y="421" font-weight="bold">convert</text>
+<text x="525" y="436">older records into the log's format</text>
+<text x="525" y="469" font-weight="bold">find</text>
+<text x="525" y="484">a change's directory and its records</text>
+<text x="525" y="567" font-weight="bold">cost</text>
+<text x="525" y="582">what each run cost</text>
+<text x="525" y="615" font-weight="bold">cost_report</text>
+<text x="525" y="630">a change's cost by step and round</text>
+<text x="875" y="277" font-weight="bold">next_step</text>
+<text x="875" y="292">the next-step computation</text>
+<text x="875" y="325" font-weight="bold">graph</text>
+<text x="875" y="340">nodes, exits, joins, guards</text>
+<text x="875" y="373" font-weight="bold">index</text>
+<text x="875" y="388">the change index's rows and check</text>
+<text x="875" y="421" font-weight="bold">tasks</text>
+<text x="875" y="436">every task under its own section</text>
+<text x="875" y="469" font-weight="bold">diagram</text>
+<text x="875" y="484">the graph's diagram against the table</text>
+<text x="1225" y="277" font-weight="bold">clone</text>
+<text x="1225" y="292">a change's own clone of the workspace</text>
+<text x="1225" y="325" font-weight="bold">history</text>
+<text x="1225" y="340">records copied into the workspace</text>
+<text x="1225" y="373" font-weight="bold">push</text>
+<text x="1225" y="388">the guarded push of the branch</text>
+<text x="1225" y="421" font-weight="bold">round_view</text>
+<text x="1225" y="436">a round shown as uncommitted changes</text>
+<text x="1225" y="469" font-weight="bold">skills</text>
+<text x="1225" y="484">every skill loaded from one source</text>
+<text x="1225" y="517" font-weight="bold">hook</text>
+<text x="1225" y="532">what a session re-reads after compaction</text>
+<text x="1225" y="565" font-weight="bold">config</text>
+<text x="1225" y="580">the configuration, read and checked whole</text>
+<text x="1225" y="613" font-weight="bold">hooks</text>
+<text x="1225" y="628">the repository's hooks and parts, run</text>
+<text x="875" y="557" font-weight="bold">~/.claude/projects/&lt;checkout path&gt;/</text>
+<text x="875" y="572">Claude Code's sessions and subagent</text>
+<text x="875" y="587">transcripts; read by cost and subagents</text>
+<text x="175" y="717" font-weight="bold">.claude/change-steps.toml</text>
+<text x="175" y="732">the step table: each step's skill</text>
+<text x="175" y="747">and the permission rules an</text>
+<text x="175" y="762">unattended run is held to; read by steps</text>
+<text x="175" y="799" font-weight="bold">.agents/change-outcome.schema.json</text>
+<text x="175" y="814">the outcome: finished, question,</text>
+<text x="175" y="829">returned, blocked, or stopped</text>
+<text x="175" y="844">read by outcome; harness gives it to a run</text>
+<text x="175" y="881" font-weight="bold">the harness: claude -p · codex exec</text>
+<text x="175" y="896">a headless step session; a review</text>
+<text x="175" y="911">read-only, on Codex first</text>
+<text x="175" y="926">launched by harness for wrapper, review</text>
+<text x="175" y="963" font-weight="bold">.agents/skills/</text>
+<text x="175" y="978">the leaf skills, each from one source</text>
+<text x="175" y="993">loaded by a session as /change-&lt;step&gt;;</text>
+<text x="175" y="1008">checked by skills; named by hook</text>
+<text x="525" y="717" font-weight="bold">reviews/workflow.jsonl</text>
+<text x="525" y="732">the log: one line per run or decision</text>
+<text x="525" y="747">written by log alone; read by next_step,</text>
+<text x="525" y="762">wrapper, round_view, cost_report</text>
+<text x="525" y="799" font-weight="bold">reviews/NN-*.md</text>
+<text x="525" y="814">reviews, triage, validation records</text>
+<text x="525" y="829">written by review and the step sessions;</text>
+<text x="525" y="844">read by records and next_step</text>
+<text x="525" y="881" font-weight="bold">reviews/transcripts/</text>
+<text x="525" y="896">each run's transcript and .progress</text>
+<text x="525" y="911">written by stream and review;</text>
+<text x="525" y="926">followed by watch</text>
+<text x="525" y="963" font-weight="bold">interventions.jsonl</text>
+<text x="525" y="978">the ledger of the owner's corrections,</text>
+<text x="525" y="993">tracked; written by the triage session;</text>
+<text x="525" y="1008">records counts it among the records</text>
+<text x="875" y="717" font-weight="bold">openspec/changes/README.md</text>
+<text x="875" y="732">the change index: rows, status, Depends on</text>
+<text x="875" y="747">read by index, next_step, and hook;</text>
+<text x="875" y="762">status set by the step sessions</text>
+<text x="875" y="799" font-weight="bold">openspec/changes/&lt;change&gt;/tasks.md</text>
+<text x="875" y="814">the plan's sections and their tasks</text>
+<text x="875" y="829">read by tasks and next_step; written</text>
+<text x="875" y="844">by planning and implementation</text>
+<text x="875" y="881" font-weight="bold">diagrams/change-workflow-graph.drawio</text>
+<text x="875" y="896">the graph's hand-laid diagram,</text>
+<text x="875" y="911">held to graph's table by diagram</text>
+<text x="875" y="926">(scripts/change-workflow check graph)</text>
+<text x="1225" y="717" font-weight="bold">Git remotes: workspace, the upstream</text>
+<text x="1225" y="732">workspace, the owner's checkout; the</text>
+<text x="1225" y="747">branch's upstream, from Git's record</text>
+<text x="1225" y="762">set by clone; used by push, find, history</text>
+<text x="1225" y="799" font-weight="bold">the owner's workspace</text>
+<text x="1225" y="814">a cleaned-up change's history, at the</text>
+<text x="1225" y="829">same paths (history); the round view's</text>
+<text x="1225" y="844">branch, reset to its base (round_view)</text>
+<text x="1225" y="881" font-weight="bold">the checkout's Git directory</text>
+<text x="1225" y="896">runs and invocations (running), the</text>
+<text x="1225" y="911">round view (round_view), bootstrap</text>
+<text x="1225" y="926">state (clone), part markers (hooks)</text>
+<text x="1225" y="963" font-weight="bold">.agents/workflow.toml</text>
+<text x="1225" y="978">the repository's configuration: hooks,</text>
+<text x="1225" y="993">parts, models, values; read by config;</text>
+<text x="1225" y="1008">its commands run by hooks, push, clone</text>
+</g>
+<g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#4a4f6a" text-anchor="middle">
+<rect x="461" y="77" width="33" height="18" fill="#ffffff"/>
+<text x="477.5" y="90">runs</text>
+<rect x="453" y="114.5" width="34" height="18" fill="#ffffff"/>
+<text x="470" y="127.5">calls</text>
+<rect x="324.5" y="260" width="51" height="18" fill="#ffffff"/>
+<text x="350" y="273">appends</text>
+<rect x="324.5" y="356" width="51" height="18" fill="#ffffff"/>
+<text x="350" y="369">runs on</text>
+<rect x="680.5" y="260" width="39" height="18" fill="#ffffff"/>
+<text x="700" y="273">reads</text>
+</g>
+</svg>

@@ -241,6 +241,30 @@ def test_escrow_show_prewarm_fails(monkeypatch, runner, app, private_key):
     assert "address config not found" in result.output
 
 
+def test_escrow_show_refuses_a_retired_address_book_key(monkeypatch, runner, app, private_key):
+    """Spec scenario "A retired key is stated", through a command run without
+    the server's startup refusal: the chain is not resolved to the built-in
+    addresses, and the key and the table are named."""
+    monkeypatch.setattr("market_storefront.utils.config.CHAINS", {"anvil": fake_chain("anvil")})
+    monkeypatch.setattr(
+        "market_alkahest.alkahest.prewarm_alkahest_address_config_cache",
+        lambda _path: (_ for _ in ()).throw(AssertionError("a book was resolved")),
+    )
+
+    with settings_overrides(
+        **{
+            "wallet.private_key": private_key,
+            "chains.anvil.alkahest_address_config_path": "/book.json",
+        }
+    ):
+        result = runner.invoke(app, ["escrow", "show", "--escrow-uid", "0xUID"])
+
+    assert result.exit_code == 2
+    assert "[Chains.anvil].alkahest_address_config_path is retired" in result.output
+    assert "[Settlement.alkahest.address_books]" in result.output
+    assert "/book.json" not in result.output
+
+
 def test_escrow_show_get_obligation_fails(patch_escrow_show_prereqs, runner, app, private_key):
     patch_escrow_show_prereqs(error=RuntimeError("escrow not found"))
 

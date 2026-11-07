@@ -1,0 +1,25 @@
+---
+# A GPU guest's operator settings. A pool's operator sets them in its provider
+# configuration's extra_vars, which reach the playbook as extra variables and
+# so override these defaults; no job parameter, buyer term, or storefront
+# request names them. The create checks each one's type before its first host
+# effect (prerequisites.yml). Unset, a create never passes the boot GPU
+# through, waits ten attempts thirty seconds apart, and starts its guest on host
+# boot.
+
+# Whether the host's boot GPU, the one its console runs on, may be passed
+# through. Even when true, the boot GPU is eligible only while the kernel
+# reports it bound to vfio-pci and no defined guest has it attached
+# (files/gpu_eligibility.sh).
+vm_passthrough_boot_gpu: false
+
+# How long a GPU create waits for its guest to confirm setup, which installs a
+# GPU driver and reboots first: at most this many attempts, this many seconds
+# apart. A wait that runs out fails the create, naming both.
+vm_setup_wait_attempts: 10
+vm_setup_wait_interval_seconds: 30
+
+# Whether a created guest starts on host boot. A host passing through its only
+# GPU sets it false, so a guest a teardown has not yet removed cannot take the
+# GPU back from the host when the host reboots.
+vm_autostart: true

@@ -89,6 +89,11 @@ None.
 - **Externally blocked.** Requires an upstream Alkahest release exposing the supported query contract; nothing in this repository can unblock it.
 - Depends on the existing Section 9 versioned recovery envelope and ambiguous-submission checkpoint.
 - Related: `add-settlement-plan-shapes` reworks obligation materialization and claim construction over the same mechanism codec. Reconcile the adapter's placement with that change's per-obligation lifecycle rather than assuming today's single-escrow shape.
+- Related: `bare-metal-mock-provisioned-deal` adds `kit/alkahest`'s fulfillment publisher
+  and bare metal's parked Alkahest submissions, a second consumer of the lookup (see
+  `design.md`, "A second consumer: bare-metal Alkahest delivery (2026-10-07)");
+  `kit-owned-listing-and-fulfillment-lifecycles` proposes moving VM onto the same
+  publisher.
 - Related: `kit-owned-settlement-runtime` moves storefront settlement machinery into the kit layer. If it lands first, the injection point for this adapter is the kit-owned runtime rather than the VM storefront.
 
 ## Permanent documentation impact

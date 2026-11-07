@@ -1,0 +1,82 @@
+---
+- name: Require the relay address and admission token
+  ansible.builtin.assert:
+    that:
+      - frp_server_addr is defined and frp_server_addr | length > 0
+      - frp_auth_token is defined and frp_auth_token | length > 0
+      - frp_admin_port | int > 0 and frp_admin_port | int < 1024
+  no_log: true
+
+- name: Read the host privileged-port boundary
+  ansible.builtin.command: cat /proc/sys/net/ipv4/ip_unprivileged_port_start
+  register: relay_privileged_port_start
+  changed_when: false
+
+- name: Require the admin port to be privileged on this host
+  ansible.builtin.assert:
+    that:
+      - frp_admin_port | int < relay_privileged_port_start.stdout | int
+    fail_msg: The buyer client admin port must require root to bind on this host
+
+- name: Install the pinned buyer client binary
+  ansible.builtin.include_role:
+    name: frp-binary
+  vars:
+    frp_binary_name: frpc
+
+- name: Create the root-only client configuration directory
+  ansible.builtin.file:
+    path: "{{ relay_client_config | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Create the client log directory
+  ansible.builtin.file:
+    path: /var/log/frp
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the client baseline manager
+  ansible.builtin.copy:
+    src: client_config.py
+    dest: "{{ frp_binary_path | dirname | dirname }}/client_config.py"
+    owner: root
+    group: root
+    mode: '0700'
+
+# Updating only top-level fields preserves every leased proxy block.
+- name: Synchronize the client baseline and retain its per-host password
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
+      - "{{ frp_binary_path | dirname | dirname }}/client_config.py"
+      - prepare
+      - "{{ relay_client_config }}"
+    stdin: "{{ {'serverAddr': frp_server_addr, 'serverPort': frp_server_port | int, 'auth.token': frp_auth_token, 'webServer.port': frp_admin_port | int} | to_json }}"
+  register: relay_client_baseline
+  changed_when: relay_client_baseline.stdout == 'changed'
+  no_log: true
+  notify: restart frpc-buyers
+
+- name: Deploy the versioned buyer client unit
+  ansible.builtin.template:
+    src: frpc-buyers.service.j2
+    dest: /etc/systemd/system/frpc-buyers.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart frpc-buyers
+
+- name: Apply a changed baseline before any proxy reload
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the buyer client
+  ansible.builtin.systemd:
+    name: frpc-buyers
+    enabled: true
+    state: started
+    daemon_reload: true

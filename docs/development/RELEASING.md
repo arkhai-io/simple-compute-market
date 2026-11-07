@@ -14,42 +14,86 @@ issue-discovery development tool (`scm-issue-discovery`).
 Distribution names are prefixed `arkhai-`. PyPI does not namespace
 distribution names by organization, so the prefix is the project's
 namespace. Import names and console scripts (`market`,
-`market-storefront`, `market-policy`) are independent of the
-distribution name.
+`market-storefront`) are independent of the distribution name.
 
 ## Published packages
 
-"Internal deps" are dependencies on other packages in this table,
-constrained with lower bounds (see Versioning policy).
+"Internal deps" are a package's dependencies on other repository
+distributions, required ones first and then those an extra adds. Every one of
+them is itself in this table: a published package installs from PyPI alone, so
+a dependency the table omits leaves it uninstallable. Each package's version is
+the one its `pyproject.toml` declares.
 
-| Package | Path | Version | Internal deps |
-|---|---|---|---|
-| `arkhai-core` | `core/` | 0.1.0 | none |
-| `arkhai-core-buyer` | `core/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
-| `arkhai-core-storefront` | `core/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
-| `arkhai-core-storefront-client` | `core/storefront-client/` | 0.15.0 | none |
-| `arkhai-core-registry-client` | `core/registry-client/` | 0.10.0 | none |
-| `arkhai-core-registry` | `core/registry/` | 0.1.0 | `arkhai-kit-identity` |
-| `arkhai-kit-site` | `kit/site/` | 0.1.0 | none |
-| `arkhai-kit-identity` | `kit/identity/` | 0.1.0 | none |
-| `arkhai-kit-policy` | `kit/policy/` | 0.1.0 | none |
-| `arkhai-kit-alkahest` | `kit/alkahest/` | 0.1.0 | none |
-| `arkhai-kit-config` | `kit/config/` | 0.1.0 | `arkhai-kit-alkahest` |
-| `arkhai-bare-metal` | `domains/bare_metal/` | 0.1.0 | none (`storefront` extra: `arkhai-core-storefront`) |
-| `arkhai-vms-buyer` | `domains/vms/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
-| `arkhai-vms-storefront` | `domains/vms/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
-| `arkhai-compute-provisioning-service` | `provisioning/compute/service/` | 0.1.0 | `arkhai-compute-provisioning`, `arkhai-kit-site`, `arkhai-kit-resource-pools`, `arkhai-core-storefront-client` (`adapters` extra installs both current adapters) |
-| `arkhai-vms-provisioning-adapter` | `domains/vms/provisioning/adapter/` | 0.1.0 | compute service, VM operator client, resource pools |
-| `arkhai-bare-metal-provisioning-adapter` | `domains/bare_metal/provisioning/adapter/` | 0.1.0 | compute service, bare-metal domain |
-| `arkhai-apicredits-buyer` | `domains/apicredits/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
-| `arkhai-apicredits-storefront` | `domains/apicredits/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
-| `arkhai-apicredits-service` | `domains/apicredits/service/` | 0.1.0 | `arkhai-kit-site` |
-| `arkhai-apicredits-middleware` | `domains/apicredits/middleware/python/` | 0.1.0 | none |
+| Package | Path | Internal deps |
+|---|---|---|
+| `arkhai-kit-alkahest` | `kit/alkahest/` | `arkhai-core`, `arkhai-kit-config`, `arkhai-kit-settlement-runtime` |
+| `arkhai-kit-config` | `kit/config/` | `arkhai-kit-settlement-runtime` |
+| `arkhai-kit-identity` | `kit/identity/` | none |
+| `arkhai-kit-deal-lifecycle-contracts` | `kit/deal-lifecycle-contracts/` | `arkhai-kit-identity` |
+| `arkhai-kit-deal-lifecycle` | `kit/deal-lifecycle/` | `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
+| `arkhai-kit-deal-lifecycle-client` | `kit/deal-lifecycle-client/` | `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
+| `arkhai-kit-arkhai-mediation` | `kit/arkhai-mediation/` | `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
+| `arkhai-kit-deal-lifecycle-buyer` | `kit/deal-lifecycle-buyer/` | `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
+| `arkhai-kit-arkhai-payments` | `kit/arkhai-payments/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
+| `arkhai-kit-deal-servicing` | `kit/deal-servicing/` | `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
+| `arkhai-kit-policy` | `kit/policy/` | `arkhai-core`, `arkhai-kit-identity` |
+| `arkhai-kit-settlement-runtime` | `kit/settlement-runtime/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity` |
+| `arkhai-kit-negotiation-runtime` | `kit/negotiation-runtime/` | `arkhai-kit-identity`, `arkhai-kit-policy` |
+| `arkhai-core` | `core/` | none |
+| `arkhai-core-buyer` | `core/buyer/` | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-kit-config`, `arkhai-kit-delivery`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-settlement-runtime` |
+| `arkhai-core-storefront` | `core/storefront/` | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-resource-pools-contracts` |
+| `arkhai-core-storefront-client` | `core/storefront-client/` | `arkhai-kit-identity` |
+| `arkhai-core-registry-client` | `core/registry-client/` | `arkhai-core`, `arkhai-kit-identity` |
+| `arkhai-core-registry` | `core/registry/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity` |
+| `arkhai-kit-site` | `kit/site/` | `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts` |
+| `arkhai-kit-site-client` | `kit/site-client/` | `arkhai-kit-identity`, `arkhai-kit-resource-pools-contracts` |
+| `arkhai-kit-capability-shape` | `kit/capability-shape/` | none |
+| `arkhai-kit-capability-admissibility` | `kit/capability-admissibility/` | `arkhai-kit-capability-shape` |
+| `arkhai-kit-capability-pricing` | `kit/capability-pricing/` | `arkhai-kit-capability-shape` |
+| `arkhai-kit-capacity-publication` | `kit/capacity-publication/` | `arkhai-core-storefront`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site-client` |
+| `arkhai-kit-contact-exchange` | `kit/contact-exchange/` | `arkhai-core`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
+| `arkhai-kit-delivery` | `kit/delivery/` | `arkhai-kit-identity` |
+| `arkhai-kit-delivery-apprise` | `kit/delivery-apprise/` | `arkhai-kit-delivery` |
+| `arkhai-kit-fulfillment` | `kit/fulfillment/` | `arkhai-core`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site` |
+| `arkhai-kit-pool-overrides` | `kit/pool-overrides/` | `arkhai-kit-identity`, `arkhai-kit-site-client` |
+| `arkhai-kit-resource-pools` | `kit/resource-pools/` | `arkhai-kit-resource-pools-contracts` |
+| `arkhai-kit-resource-pools-contracts` | `kit/resource-pools-contracts/` | `arkhai-kit-capability-admissibility`, `arkhai-kit-capability-shape` |
+| `arkhai-kit-resource-pools-client` | `kit/resource-pools-client/` | `arkhai-kit-resource-pools-contracts` |
+| `arkhai-kit-storefront` | `kit/storefront/` | `arkhai-core`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime` |
+| `arkhai-compute` | `domains/compute/` | `arkhai-kit-capability-shape` |
+| `arkhai-bare-metal` | `domains/bare_metal/` | `arkhai-compute`, `arkhai-core`, `arkhai-kit-capability-shape`, `arkhai-kit-resource-pools-contracts` (`storefront` extra: `arkhai-core-storefront`) |
+| `arkhai-bare-metal-storefront` | `domains/bare_metal/storefront/` | `arkhai-bare-metal`, `arkhai-compute`, `arkhai-compute-provisioning-client`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-mediation`, `arkhai-kit-arkhai-payments`, `arkhai-kit-capacity-publication`, `arkhai-kit-config`, `arkhai-kit-contact-exchange`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-deal-servicing`, `arkhai-kit-delivery`, `arkhai-kit-delivery-apprise`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-policy`, `arkhai-kit-pool-overrides`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-settlement-runtime`, `arkhai-kit-site-client`, `arkhai-kit-storefront` |
+| `arkhai-bare-metal-buyer` | `domains/bare_metal/buyer/` | `arkhai-bare-metal`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-core-registry-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-mediation`, `arkhai-kit-arkhai-payments`, `arkhai-kit-contact-exchange`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-buyer`, `arkhai-kit-deal-lifecycle-client`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
+| `arkhai-bare-metal-provisioning-adapter` | `domains/bare_metal/provisioning/adapter/` | `arkhai-bare-metal`, `arkhai-compute-provisioning`, `arkhai-compute-provisioning-ansible`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-kit-fulfillment`, `arkhai-kit-resource-pools` |
+| `arkhai-vms` | `domains/vms/domain/` | `arkhai-compute`, `arkhai-core`, `arkhai-kit-capability-admissibility`, `arkhai-kit-capability-pricing`, `arkhai-kit-capability-shape` (`storefront` extra: `arkhai-core-storefront`) |
+| `arkhai-vms-listings` | `domains/vms/listings/` | `arkhai-kit-alkahest`, `arkhai-kit-capability-admissibility`, `arkhai-kit-identity`, `arkhai-kit-resource-pools-contracts`, `arkhai-vms` (`pools` extra: `arkhai-kit-resource-pools`) (`overrides` extra: `arkhai-kit-pool-overrides`) |
+| `arkhai-vms-negotiation` | `domains/vms/negotiation/` | `arkhai-kit-alkahest`, `arkhai-kit-policy`, `arkhai-vms-listings` |
+| `arkhai-vms-settlement` | `domains/vms/settlement/` | `arkhai-kit-alkahest`, `arkhai-vms-listings` |
+| `arkhai-vms-buyer` | `domains/vms/buyer/` | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-mediation`, `arkhai-kit-arkhai-payments`, `arkhai-kit-config`, `arkhai-kit-contact-exchange`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-buyer`, `arkhai-kit-deal-lifecycle-client`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-settlement-runtime`, `arkhai-vms`, `arkhai-vms-listings`, `arkhai-vms-negotiation` |
+| `arkhai-vms-provisioning-operator-client` | `domains/vms/provisioning/client/` | `arkhai-compute-provisioning-contracts` |
+| `arkhai-vms-provisioning-adapter` | `domains/vms/provisioning/adapter/` | `arkhai-compute-provisioning`, `arkhai-compute-provisioning-ansible`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-kit-fulfillment`, `arkhai-kit-resource-pools`, `arkhai-vms`, `arkhai-vms-provisioning-operator-client` |
+| `arkhai-compute-provisioning` | `provisioning/compute/` | `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-kit-config`, `arkhai-kit-fulfillment`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site` |
+| `arkhai-compute-provisioning-contracts` | `provisioning/compute/contracts/` | `arkhai-core`, `arkhai-kit-identity` |
+| `arkhai-compute-provisioning-client` | `provisioning/compute/client/` | `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-kit-identity` |
+| `arkhai-compute-provisioning-ansible` | `provisioning/compute/ansible/` | `arkhai-compute-provisioning`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-kit-config` |
+| `arkhai-compute-provisioning-service` | `provisioning/compute/service/` | `arkhai-compute-provisioning`, `arkhai-compute-provisioning-ansible`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-core-storefront-client`, `arkhai-kit-config`, `arkhai-kit-fulfillment`, `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site` (`adapters` extra: `arkhai-bare-metal-provisioning-adapter`, `arkhai-vms-provisioning-adapter`) |
+| `arkhai-vms-storefront` | `domains/vms/storefront/` | `arkhai-bare-metal`, `arkhai-bare-metal-storefront`, `arkhai-compute`, `arkhai-compute-provisioning-client`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-mediation`, `arkhai-kit-arkhai-payments`, `arkhai-kit-capability-admissibility`, `arkhai-kit-capacity-publication`, `arkhai-kit-config`, `arkhai-kit-contact-exchange`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-deal-servicing`, `arkhai-kit-delivery`, `arkhai-kit-delivery-apprise`, `arkhai-kit-fulfillment`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-policy`, `arkhai-kit-pool-overrides`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-settlement-runtime`, `arkhai-kit-site`, `arkhai-kit-site-client`, `arkhai-kit-storefront`, `arkhai-vms`, `arkhai-vms-listings`, `arkhai-vms-negotiation`, `arkhai-vms-settlement` |
+| `arkhai-apicredits-domain` | `domains/apicredits/` | `arkhai-core`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-settlement-runtime` |
+| `arkhai-apicredits-buyer` | `domains/apicredits/buyer/` | `arkhai-apicredits-domain`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-mediation`, `arkhai-kit-arkhai-payments`, `arkhai-kit-config`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-settlement-runtime` |
+| `arkhai-apicredits-middleware` | `domains/apicredits/middleware/python/` | none (`signed` extra: `arkhai-kit-identity`) |
+| `arkhai-apicredits-storefront` | `domains/apicredits/storefront/` | `arkhai-apicredits-domain`, `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-mediation`, `arkhai-kit-arkhai-payments`, `arkhai-kit-capacity-publication`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-policy`, `arkhai-kit-resource-pools`, `arkhai-kit-settlement-runtime`, `arkhai-kit-site-client`, `arkhai-kit-storefront` |
+| `arkhai-apicredits-service` | `domains/apicredits/service/` | `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site` |
 
 This set is defined once, by the `PACKAGES` table in the workflow's
 `detect-changes` job and the per-package path filters beside it. Adding a
-package means one table row, one filter, and the one-time PyPI setup
-below.
+package means one table row, one filter, a row here, and the one-time PyPI
+setup below; a package outside every directory the workflow's `push.paths`
+names needs an entry there too. `scripts/tests/test_publish_matrix.py` (run by
+`make test-release-tooling`; it reads only the tree) fails when a
+published package depends on a repository distribution the table omits, when a
+package has no filter or push trigger watching its `pyproject.toml`, or when
+this table's packages, paths, or internal deps disagree with the workflow and
+each `pyproject.toml`.
 
 ## How the workflow works
 
@@ -62,11 +106,17 @@ below.
 - Each job builds with `uv build --no-sources` and publishes via OIDC
   trusted publishing.
 
-Most packages publish an sdist and a wheel. The two buyer plugins
-(`arkhai-vms-buyer`, `arkhai-apicredits-buyer`) publish a wheel only: they
-vendor sibling concept modules (`listings`, `negotiation`) through `../`
-force-includes that an sdist cannot carry. They are marked `wheel_only`
-in the table and built with `uv build --wheel`.
+Most packages publish an sdist and a wheel. Packages marked `wheel_only`
+in the table (the two buyer plugins and the VM storefront) are built with
+`uv build --wheel` and publish a wheel only.
+
+No package vendors another's modules. Each package builds exactly one import
+package from `src/<package>` (see
+[`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md#project-layout)), so a module
+added there ships without a packaging edit. Code another package needs is its
+own wheel and a declared dependency: the VM storefront and buyer depend on
+`arkhai-vms-listings`, `arkhai-vms-negotiation`, and `arkhai-vms-settlement`
+rather than carrying their sources.
 
 Build order is not constrained. `uv build --no-sources` builds in an
 isolated environment that installs only the build backend, never the
@@ -99,10 +149,18 @@ release:
 
 ## Cutting a release
 
-1. Bump the package's `version` field in its `pyproject.toml`.
-2. Commit and push to `main` (or merge a PR that touches the package).
-3. The workflow detects the path change, rebuilds, and publishes via OIDC
+1. Run `make audit-secrets` on the commit to be released, and remove — and
+   rotate wherever it was used — any credential it lists that is not a
+   development fixture.
+2. Bump the package's `version` field in its `pyproject.toml`.
+3. Commit and push to `main` (or merge a PR that touches the package).
+4. The workflow detects the path change, rebuilds, and publishes via OIDC
    trusted publishing.
+
+`make audit-secrets` reports what gitleaks' rules find in the tracked tree,
+including the rules the public-content checks turn off, and refuses
+nothing; most of what it lists is the repository's development fixtures
+([`ARCHITECTURE.md`, "Public repository content checks"](ARCHITECTURE.md#public-repository-content-checks)).
 
 `workflow_dispatch` forces a publish attempt for every package whose
 current version is not yet on PyPI — useful for bringing up the whole set
@@ -117,39 +175,70 @@ Each package follows [SemVer](https://semver.org):
 - **Minor** — new public API, backwards compatible.
 - **Patch** — bug fix or internal change.
 
+Before a package reaches 1.0.0 its major version stays at zero: an
+incompatible change to anything the package publishes — its API, a wire
+format it sends or accepts, or the meaning of a configuration key it
+reads — takes a **minor** bump in place of a major one, and the other
+rules apply unchanged. Its users are expected to update; a consumer that
+depends on the incompatible behaviour raises its lower bound to the new
+minor version. Moving a package to 1.0.0 is a deliberate decision that
+sets its compatibility commitment, not a consequence of shipping an
+incompatible change.
+
+A contract that carries its own version — a `VersionedEnvelope`'s
+`(kind, schema_version)`, a contract version, a protocol identifier — is
+never changed in place, before 1.0.0 or after. An incompatible change
+defines a new version, and each party states the versions it accepts and
+refuses the others, naming what it supports. Before 1.0.0 the release that
+introduces a version may stop accepting the one before, so the parties to
+it upgrade, and roll back, together. Persisted state keeps its own
+migration rules. Neither pre-1.0 allowance applies at or above 1.0.0.
+Incompatibility is signalled by the version numbers and the versioned
+contracts alone; no per-release list of incompatible changes is kept.
+
+A change bumps each package it changes at most once, measured against the
+package's version on the branch the change merges into: that is the version a
+release sees. A package already bumped on the change's branch is bumped again
+only when a later edit needs a larger bump than the one it has, such as an
+incompatible edit to a package bumped only for a fix, and exact pins on it move
+only with that bump. Bumping an unreleased version again changes nothing a
+release sees and moves every exact pin on it for nothing.
+
+### Import package renames
+
+These releases moved each package to one import package under `src/`. The old
+import paths were removed without an alias; consumers change their imports and
+raise their lower bound to the version shown.
+
+| Package | Release | Import package before | Import package after |
+|---|---|---|---|
+| `arkhai-vms-buyer` | 0.4.0 | `domains.vms.buyer` | `arkhai_vms_buyer` |
+| `arkhai-vms-listings` | 0.4.0 | `domains.vms.listings` | `arkhai_vms_listings` |
+| `arkhai-vms-negotiation` | 0.2.0 | `domains.vms.negotiation` | `arkhai_vms_negotiation` |
+| `arkhai-vms-settlement` | 0.2.0 | `domains.vms.settlement` | `arkhai_vms_settlement` |
+| `arkhai-apicredits-buyer` | 0.4.0 | `domains.apicredits.buyer` | `arkhai_apicredits_buyer` |
+| `arkhai-apicredits-domain` | 0.4.0 | `domains.apicredits` | `arkhai_apicredits` |
+| `arkhai-core-registry` | 0.3.0 | top-level `api`, `db`, `services`, `types` | `core_registry` |
+| `arkhai-apicredits-service` | 0.4.0 | top-level `controllers`, `db`, `middleware`, `models`, `services` | `apicredits_service` |
+
+`arkhai-vms-storefront` 0.8.0 and `arkhai-apicredits-storefront` 0.5.0 import the
+renamed packages and require the releases above. The entry-point group
+`domains.vms.buyer.aggregation_policies` keeps its name, so installed plugin
+packages continue to register without change.
+
 Cross-package compatibility is enforced via dependency constraints in
 `pyproject.toml`. Use `>=X.Y` (lower bound) for forward compatibility,
 or `>=X.Y,<X+1` when a breaking major release is anticipated.
 
 ## Local development
 
-`tool.uv.sources` workspace path overrides stay in `pyproject.toml` for
-local development — they let `uv sync` pick up sibling-package changes
-without a publish round-trip. `uv build --no-sources` strips those
-overrides so the built wheel records plain PyPI dependencies; the publish
-workflow always passes `--no-sources`.
+Projects consume sibling packages as wheels from the repository wheelhouse,
+never through `tool.uv.sources` path overrides; `make dist` builds the wheels
+and `make reinit` refreshes a project's environment from them without a
+publish round-trip ([`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md)). The
+publish workflow passes `--no-sources`, so the only sources a published wheel
+could record are index pins, such as the PyTorch CPU index.
 
-## Hosted settlement release pin
-
-`arkhai-kit-hosted-settlement` consumes an exact
-`arkhai-hosted-settlement-client` version. A deployable marketplace release
-must additionally pin the hosted service's signed immutable manifest: exact
-client wheel/version/hash, service image digest, OpenAPI/conformance hash,
-migration schema version, SBOM, provenance, and repository signer identity.
-The storefront readiness preflight verifies the manifest digest, API version,
-and required capabilities; a matching major version or floating image tag is
-not a substitute. The hosted repository publishes those artifacts. This
-repository publishes only the thin adapter and marketplace consumers.
-
-Hosted financial system E2E consumes that same ordinary production release; it
-does not acquire a second test distribution or alternate service image. The
-verified release identity records its repository, workflow reference, and
-hosted source commit. Protected reports record the producer workflow run
-identity separately as orchestration evidence and keep all producer
-coordinates separate from the
-marketplace consumer commit. Provider-neutral scripted collaborators exist
-only in the hosted producer's focused tests and are absent from client/service
-wheels, image layers, manifests, capabilities, migrations, and entry points.
 
 ## Troubleshooting
 

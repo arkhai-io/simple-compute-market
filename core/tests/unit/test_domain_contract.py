@@ -15,6 +15,8 @@ from market_core import (
     DomainContractValidationError,
     DomainIdentity,
     ImmutableBuyerCapability,
+    ImmutableSettlementCapability,
+    SettlementStageTable,
     MarketDomainContract,
     assert_domain_conformance,
     validate_domain_contract,
@@ -55,7 +57,10 @@ def _external_domain(identity: str = "external.example") -> MarketDomainContract
         identity=DomainIdentity(identity),
         contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
         codecs=ExternalCodecs(),
-        declared_capabilities=frozenset({DomainCapability.BUYER}),
+        declared_capabilities=frozenset({DomainCapability.BUYER, DomainCapability.SETTLEMENT}),
+        settlement=ImmutableSettlementCapability(
+            buyer_stages=SettlementStageTable({"external.settlement.v1": object()}),
+        ),
         buyer=ImmutableBuyerCapability(
             identity_injection_contract="core.resolved-buyer-identity.v1",
             register_commands=lambda app: None,
@@ -85,7 +90,7 @@ def test_external_domain_passes_reusable_conformance_suite():
     assert_domain_conformance(
         DomainConformanceCase(
             contract=domain,
-            capabilities=frozenset({DomainCapability.BUYER}),
+            capabilities=frozenset({DomainCapability.BUYER, DomainCapability.SETTLEMENT}),
             **examples,
         )
     )
@@ -126,8 +131,27 @@ def test_declared_capability_requires_complete_hook_set():
 
 
 def test_undeclared_capability_is_rejected():
-    domain = replace(_external_domain(), declared_capabilities=frozenset())
+    domain = replace(
+        _external_domain(), declared_capabilities=frozenset({DomainCapability.SETTLEMENT})
+    )
     with pytest.raises(DomainContractValidationError, match="undeclared.*buyer"):
+        validate_domain_contract(domain)
+
+
+@pytest.mark.parametrize(
+    "settlement",
+    (
+        ImmutableSettlementCapability(),
+        ImmutableSettlementCapability(buyer_stages={"external.settlement.v1": object()}),
+        ImmutableSettlementCapability(buyer_stages=SettlementStageTable({})),
+        ImmutableSettlementCapability(
+            seller_stages=SettlementStageTable({"external.settlement.v1": object()})
+        ),
+    ),
+)
+def test_incomplete_role_table_is_rejected_at_composition(settlement):
+    domain = replace(_external_domain(), settlement=settlement)
+    with pytest.raises(DomainContractValidationError, match="role tables|buyer_stages"):
         validate_domain_contract(domain)
 
 

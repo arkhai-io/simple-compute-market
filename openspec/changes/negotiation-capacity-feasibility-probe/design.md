@@ -2,10 +2,14 @@
 
 ## Context
 
-Verified by inspection 2026-08-06; re-verify before implementing.
+Verified against the tree at planning time; re-verify before implementing.
 
-- `_place_capacity_hold` is called only when `decision.action == "accept"`, at three
-  call sites in `sync_negotiation.py`. Nothing consults the site authority earlier.
+- Negotiation is `kit/negotiation-runtime`'s lifecycle; the VM storefront injects
+  `NegotiationDomainHooks` from
+  `domains/vms/storefront/src/market_storefront/negotiation_runtime.py`.
+  `_place_capacity_hold` is reached only through the `place_hold` hook on
+  acceptance, and with the shipped `hold_ttl_seconds = 0` it returns immediately.
+  Nothing consults the site authority before settlement.
 - `kit/site`'s `probe()` runs `_expire_stale_holds`, then the same `_find_candidate`
   used by `reserve()`, and returns the match payload without writing. It is the
   non-consuming twin of the admission path, not an approximation of it.
@@ -13,8 +17,16 @@ Verified by inspection 2026-08-06; re-verify before implementing.
   `vm_job_spec_service` already calls it in the fulfillment path.
 - `probe` takes the ledger's process-wide `threading.RLock`, the same lock as `reserve`,
   `commit`, and `release`.
-- `has_matching_inventory_guard` reads an advisory snapshot and compares two categorical
-  fields.
+- `has_matching_inventory_guard` checks a declared match against the listing's own
+  source for every listing and an advisory availability snapshot for capacity-backed
+  listings only. This change's probe replaces the advisory snapshot; it never runs for
+  an unbacked listing, whose `UnbackedBinding` is on `Acceptance` and on the opening
+  record.
+- Until `negotiation-driven-capacity-resize` lets a round carry a shape, the only shape
+  a round has is the listing's own, and the claim for it is
+  `compute_capacity_claim_from_order` over the listing record. A listing whose site has
+  nothing left is the case the advisory snapshot misses, so the probe is worth running
+  for that shape alone.
 
 ## Goals / Non-Goals
 
@@ -117,3 +129,36 @@ lose the early check and fail at acceptance as they do today.
   into a shape recommender, which needs `capacity-shape-envelope`'s range query and a
   negotiation vocabulary for suggestions. Deferrable and better decided once shape
   counter-offers exist.
+- **The VM storefront's dependency on the site authority package.** *Gates the
+  "admissibility is evaluated first" step.* `domains/vms/storefront` declares
+  `arkhai-kit-site` and imports `market_site.dict_resource_satisfies_claim` in two
+  places: `services/shape_feasibility.py` (the local feasibility check this change
+  replaces with the probe) and `services/capacity_client.py` (the
+  `AggregateCapacityClient` site-ranking matcher). `kit/site` is the server-side
+  authority — FastAPI router, SQLAlchemy ledger, YAML definitions — and a storefront
+  installing it for one predicate is the enforcement-level matcher leaking into the
+  storefront, which `ARCHITECTURE.md`'s "Layered placement ownership" says must
+  *not* be shared: the ranking matcher is "deliberately a coarse, best-effort hint,
+  not shared code with the enforcement-level predicates". The edge passes the layer
+  and scope rules, so no check will ever report it; this change is where it is
+  decided. Suggested resolution: state as an outcome that the VM storefront drops
+  `arkhai-kit-site`. `shape_feasibility.py`'s use goes with the probe;
+  `capacity_client.py`'s ranking uses a storefront-local coarse matcher, or the
+  admissibility capability `capacity-shape-envelope` adds, accepting the divergence
+  the document licenses — and stating the matcher's contract where it lives: it
+  ranks sites by a hint and never decides admission, so a false positive costs one
+  fall-through and a false negative costs one site skipped for one request. If one shared predicate is wanted after all, it moves to a
+  pydantic-only home (`kit/capability-shape` or `kit/resource-pools-contracts`) and
+  is never imported from `kit/site`.
+
+## Placement
+
+The probe runs inside the VM `evaluate_round` composition, after admissibility
+(`capacity-shape-envelope`, if composed) and before the commercial feasibility guard
+and pricing — the order `negotiation-driven-capacity-resize` fixes for a round carrying
+a shape. Whether it is a distinct `NegotiationDomainHooks` member or a step inside the
+domain's `evaluate_round` is decided in task 1.2: a distinct hook lets the kit report
+"not checked" uniformly for a domain that composes none, which that change's contract
+requires. The distinct-outcome rule this change adds is one of the refusal reasons that
+change's "A round may revise the capacity shape" requirement enumerates; the two deltas
+are written to agree.

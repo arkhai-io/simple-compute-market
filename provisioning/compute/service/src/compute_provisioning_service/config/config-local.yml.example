@@ -8,9 +8,11 @@
 # database_url: "postgresql+psycopg2://postgres:postgres@localhost:5432/provisioning"
 
 # Override Ansible paths to your local checkout of domains/vms/provisioning/iac:
-# playbook_path: "/home/you/code/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
-# inventory_path: "/home/you/code/domains/vms/provisioning/iac/ansible/inventory/hosts"
+# vm_playbook_path: "/home/you/code/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
 # management_vars_path: "/home/you/code/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
+
+# Uncomment to register hosts from a host definitions document at startup:
+# host_definitions_path: "/home/you/provisioning/host-definitions.yaml"
 
 # Public marketplace identity and exact storefront trust pin. Supply the
 # matching service signer only through ARKHAI_IDENTITY_CREDENTIAL.

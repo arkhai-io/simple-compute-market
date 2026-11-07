@@ -1,0 +1,553 @@
+from collections.abc import Mapping
+from enum import Enum
+import re
+from typing import Any, Union
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
+
+from arkhai_vms import VM_CAPABILITY_SCHEMA, vm_listing_resource_shape
+from market_alkahest.schemas import AcceptedEscrow, EscrowDemand
+
+from market_alkahest.token import ERC20TokenMetadata
+from market_identity import Identity
+from market_resource_pools_contracts.backing import CapacityBackingLabel
+
+#: The resource types a VM listing resource payload may name explicitly.
+COMPUTE_RESOURCE_TYPE = "compute.gpu"
+TOKEN_RESOURCE_TYPE = "token.erc20"
+
+
+def payload_resource_type(data: Mapping[str, Any]) -> str:
+    """Which resource a VM listing resource payload is, by the one dispatch rule.
+
+    An explicit ``resource_type`` naming a VM resource type decides; otherwise a
+    payload carrying ``token`` is a token resource, and any other mapping is a
+    compute resource. A compute payload is not recognised by a GPU field, since
+    a slice without GPUs carries none: whether its fields state a shape is
+    compute validation's to decide, not dispatch's. ``parse_from_dict``,
+    ``resource_is_compute``, and the buyer CLI's ``format_resource`` apply it;
+    the adapter registry's ``parse_resource_from_dict`` reduces to it over the
+    built-in adapters and lets another registered adapter select itself.
+    """
+    explicit = data.get("resource_type")
+    if explicit in (COMPUTE_RESOURCE_TYPE, TOKEN_RESOURCE_TYPE):
+        return explicit
+    return TOKEN_RESOURCE_TYPE if "token" in data else COMPUTE_RESOURCE_TYPE
+
+# =============================================================================
+# Domain Model Class Hierarchy
+# =============================================================================
+#
+# VM listing models
+# └── Resource                      Base resource model
+#     └── ComputeDomainResource     Parse/coerce helper; extends Resource
+#         ├── ComputeResource       A compute slice (GPU, CPU, RAM, region, ...)
+#         └── TokenResource         ERC-20 token payment
+#
+# Marketplace-layer types (defined here)
+# └── Listing                       A published marketplace listing
+#     ├── listing_resource: ComputeResource | TokenResource
+#     └── accepted_escrows: list[AcceptedEscrow] | None
+#
+# Enumerations
+# ├── GPUModel          Advisory string-enum of common NVIDIA models.
+# │                       Field types are plain `str`; the indexer's
+# │                       filter-spec.yaml is the authoritative vocabulary.
+# ├── Region            Advisory string-enum. Field types are plain `str`;
+# │                       region vocabularies are indexer-local.
+# ├── GpuInterconnect   nvlink | nvswitch | pcie_only | infiniband
+# └── OfferingMode       bare_metal | vm | container
+# =============================================================================
+
+
+class GPUModel(str, Enum):
+    """GPU hardware models available in the marketplace"""
+
+    H200 = "H200"
+    TESLA_V100 = "Tesla V100"
+    RTX_5080 = "RTX 5080"
+    RTX_A5000 = "RTX A5000"
+    RTX_4090 = "RTX 4090"
+
+
+class Region(str, Enum):
+    """Geographic regions for compute resources"""
+
+    CALIFORNIA_US = "California, US"
+    NEW_YORK_US = "New York, US"
+    TOKYO_JP = "Tokyo, JP"
+
+
+class GpuInterconnect(str, Enum):
+    """GPU-to-GPU interconnect topology."""
+
+    NVLINK = "nvlink"
+    NVSWITCH = "nvswitch"
+    PCIE_ONLY = "pcie_only"
+    INFINIBAND = "infiniband"
+
+
+class OfferingMode(str, Enum):
+    """What the seller is offering: how the resource is exposed to the buyer.
+
+    Per-slice (resource-level) — the seller picks the mode for each
+    listing. Two listings on the same host can differ (e.g., one as a
+    GPU-passthrough VM, another as a Docker container) provided the host's
+    deployment configuration supports both.
+
+    This is the same value the capacity claim carries, the Resource Pool
+    declares deliverable, and the durable listing binding records; the
+    published listing's field MUST equal the recorded mode. `bare_metal` is
+    a member because the axis is what is offered, not which virtualization
+    technology is in use -- bare metal is the absence of one.
+    See openspec/specs/storefront-publication/spec.md.
+    """
+
+    BARE_METAL = "bare_metal"
+    VM = "vm"
+    CONTAINER = "container"
+
+
+class Resource(BaseModel):
+    """Base resource model for VM-domain listing resources."""
+
+
+class ComputeDomainResource(Resource):
+    """Compute-domain resource parser extension on top of core Resource."""
+
+    @staticmethod
+    def _resolve_token_metadata(token_value: Any) -> ERC20TokenMetadata:
+        """Materialize ``ERC20TokenMetadata`` from a wire payload.
+
+        Strict address-only on the wire: bare strings must be 0x-prefixed
+        addresses; bare symbols are rejected. Addresses are enriched with
+        symbol/decimals from the chain-resolved cache when present;
+        addresses not yet cached yield an address-only stub
+        (``symbol=""``, ``decimals=0``). For dicts, ``contract_address``
+        is required.
+        """
+        if isinstance(token_value, ERC20TokenMetadata):
+            return token_value
+        if isinstance(token_value, dict):
+            if not token_value.get("contract_address"):
+                raise ValueError("Token dict must include 'contract_address' (0x...)")
+            return ERC20TokenMetadata(**token_value)
+        if isinstance(token_value, str):
+            if not token_value.startswith("0x"):
+                raise ValueError(
+                    f"Token string must be a 0x-prefixed address, got {token_value!r}"
+                )
+            from market_alkahest.token import resolve_token_cached
+
+            looked_up = resolve_token_cached(token_value)
+            if looked_up is not None:
+                return looked_up
+            return ERC20TokenMetadata(
+                symbol="",
+                contract_address=token_value,
+                decimals=0,
+            )
+        raise ValueError(
+            "Token value must be a 0x-address string, ERC20TokenMetadata "
+            "dict (with contract_address), or ERC20TokenMetadata instance"
+        )
+
+    @classmethod
+    def parse_from_dict(cls, data: Any) -> Resource:
+        """Parse a resource from a dictionary or return existing Resource instance.
+
+        Converts dictionary payloads into the appropriate Resource subclass:
+        - If data is already a Resource instance → returns it unchanged
+        - If data is a JSON string → deserializes it first, then dispatches
+        - A dict is dispatched by ``payload_resource_type``: a TokenResource or
+          a ComputeResource
+        - If data is not a dict and not a Resource → returns data unchanged
+
+        Args:
+            data: Dictionary with resource data, JSON string, existing Resource
+                  instance, or other value
+
+        Returns:
+            Resource instance (TokenResource, ComputeResource, or existing Resource)
+
+        Raises:
+            ValueError: If data is a dict its resource refuses, including a
+                        compute mapping whose fields state no shape
+        """
+        # If already a Resource instance, return it unchanged
+        if isinstance(data, Resource):
+            return data
+
+        # Deserialize JSON strings — SQLite stores resources as JSON text
+        if isinstance(data, str):
+            import json as _json
+
+            try:
+                data = _json.loads(data)
+            except (ValueError, TypeError):
+                return data  # not valid JSON; pass through unchanged
+
+        # If not a dict after attempted deserialization, return as-is
+        if not isinstance(data, dict):
+            return data
+
+        if payload_resource_type(data) == TOKEN_RESOURCE_TYPE:
+            data = dict(data)  # copy to avoid mutating caller input
+            data["token"] = cls._resolve_token_metadata(data.get("token"))
+            return TokenResource(**data)
+        return ComputeResource(**data)
+
+
+def _parse_uint256_str(v: Any, field_name: str) -> int | None:
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        raise ValueError(f"{field_name}: expected non-negative decimal, got bool")
+    if isinstance(v, int):
+        if v < 0:
+            raise ValueError(f"{field_name}: must be non-negative, got {v}")
+        return v
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+        if not s.isdigit():
+            raise ValueError(
+                f"{field_name}: must be a non-negative decimal-digit string, got {v!r}"
+            )
+        return int(s)
+    raise ValueError(
+        f"{field_name}: must be int, decimal string, or None; got {type(v).__name__}"
+    )
+
+
+def _serialize_uint256_str(v: int | None) -> str | None:
+    return None if v is None else str(v)
+
+
+class TokenResource(Resource):
+    """ERC-20 token payment resource for the VM market."""
+
+    token: ERC20TokenMetadata = Field(
+        description="Token metadata resolved from registry or local chain cache"
+    )
+    amount: int | None = Field(
+        default=None,
+        description=(
+            "Non-negative amount in base units. On the wire as a "
+            "decimal-digit string; Python int internally."
+        ),
+    )
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _parse_amount(cls, v: Any) -> int | None:
+        return _parse_uint256_str(v, "amount")
+
+    @field_serializer("amount")
+    def _serialize_amount(self, v: int | None) -> str | None:
+        return _serialize_uint256_str(v)
+
+
+class PublishedAskingRate(BaseModel):
+    """A seller's asking price for one listing's whole shape.
+
+    A listing attribute from which nothing is constructed: no settlement option,
+    escrow term, or obligation is derived from it. The parts travel together
+    because an amount means nothing without the asset and period it is quoted
+    in. The storefront validates the declaration it came from before
+    publication; this only carries the published value.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    amount: str
+    asset: str
+    period: str
+
+
+class ComputeResource(ComputeDomainResource):
+    """Describes a compute slice — a sliceable allocation from a host that
+    may be put on the market. The seller decides the slice configuration
+    (gpu_count + vcpu_count + ram_gb + disk_gb) when publishing; one host
+    can be split into multiple concurrent slices.
+
+    Wire format is flat: optional host context fields (cpu_type, motherboard,
+    host_cpu_cores, host_ram_gb, etc.) describe the hardware behind the slice
+    on the same record, so buyers see one record per listing. Physical host
+    identity is provisioning-owned and is not part of a listing.
+
+    Configuration-only — values derivable from another field (VRAM from
+    gpu_model, PCIe lanes/generation from motherboard, AVX from cpu_type)
+    are intentionally omitted; consumers compute them from vendor lookup
+    tables. All optional spec fields default to ``None`` so sparse payloads
+    keep parsing.
+
+    Free-form provider tags belong in ``attributes`` under the ``tag.*``
+    namespace (e.g. ``attributes["tag.datacenter_tier"]``). Tags are opaque
+    to the negotiation policy and matched by exact equality only.
+    """
+
+    resource_id: str | None = Field(
+        default=None,
+        description="The site resource a specific-resource slice is declared against",
+    )
+    pool_id: str | None = Field(
+        default=None,
+        description="Market-facing fungible compute pool identifier, if any",
+    )
+
+    # ---- Slice fields (per-listing; the seller's split of the host) ----
+    gpu_model: str | None = Field(
+        default=None,
+        description="GPU model identifier, absent when the slice has no GPUs. "
+        "The indexer's filter-spec.yaml is the authoritative vocabulary; the "
+        "storefront accepts any string.",
+    )
+    gpu_count: int | None = Field(
+        default=None, description="Number of GPUs in this slice; absent when it has none"
+    )
+    sla: float = Field(description="The SLA of this slice")
+    region: str = Field(
+        description="Geographic region of the slice (matches host region)"
+    )
+    vm_host: str | None = Field(
+        default=None,
+        description=(
+            "Not set by storefronts: which host serves a slice is "
+            "provisioning-owned. Accepted so older payloads still parse."
+        ),
+    )
+    vcpu_count: int | None = Field(
+        default=None, description="vCPUs allocated to this slice"
+    )
+    ram_gb: int | None = Field(
+        default=None, description="RAM allocated to this slice in GB"
+    )
+    disk_gb: int | None = Field(
+        default=None, description="Disk allocated to this slice in GB"
+    )
+    offering_mode: OfferingMode | None = Field(
+        default=None,
+        description="How this slice is exposed: bare_metal | vm | container",
+    )
+
+    capacity_backing: CapacityBackingLabel | None = Field(
+        default=None,
+        description=(
+            "Whether an admission authority stands behind this listing. "
+            "Publication always sets it from the listing's durable binding; it "
+            "is optional here only so a stored listing written before the field "
+            "existed still loads until reconciliation discloses it."
+        ),
+    )
+
+    # ---- Host context: the hardware of the host the slice runs on ----
+    cpu_type: str | None = Field(
+        default=None, description="Host CPU model string, e.g. 'AMD EPYC 9654'"
+    )
+    host_cpu_cores: int | None = Field(
+        default=None, description="Total physical cores on host"
+    )
+    host_ram_gb: int | None = Field(default=None, description="Host total RAM in GB")
+    host_disk_gb: int | None = Field(
+        default=None, description="Host total disk capacity in GB"
+    )
+    host_disk_type: str | None = Field(
+        default=None,
+        description="Host disk model string, e.g. 'Samsung MZTL3T8HEFK'",
+    )
+    motherboard: str | None = Field(
+        default=None, description="Host motherboard model string"
+    )
+    total_gpu_count: int | None = Field(
+        default=None,
+        description="Total GPUs on host (slice fraction = gpu_count / total_gpu_count)",
+    )
+    gpu_interconnect: GpuInterconnect | None = Field(
+        default=None,
+        description="Host GPU-to-GPU interconnect topology",
+    )
+    nic_speed_gbps: int | None = Field(
+        default=None, description="Host primary NIC link speed in Gbps"
+    )
+    internet_download_mbps: int | None = Field(
+        default=None, description="Host internet downlink in Mbps"
+    )
+    internet_upload_mbps: int | None = Field(
+        default=None, description="Host internet uplink in Mbps"
+    )
+    static_ip: bool | None = Field(
+        default=None, description="Whether the host has a static public IP"
+    )
+    open_ports_count: int | None = Field(
+        default=None,
+        description="Number of externally-routable TCP ports the host exposes",
+    )
+    datacenter_grade: bool | None = Field(
+        default=None,
+        description="True for commercial datacenter hosting (vs home/colo)",
+    )
+
+    asking_rate: PublishedAskingRate | None = Field(
+        default=None,
+        description=(
+            "The seller's asking price for this listing's shape; omitted, not "
+            "null, when nothing prices it."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> "ComputeResource":
+        # The slice's shape is read through the compute schema, so a GPU count
+        # without a model, a model without a count, or a slice stating no
+        # quantity at all is refused by the shape kit, not by a rule restated
+        # here.
+        vm_listing_resource_shape(
+            {
+                field.flat_name: getattr(self, field.flat_name)
+                for field in VM_CAPABILITY_SCHEMA.fields
+            }
+        )
+        return self
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_fields(self, handler: Any) -> Any:
+        # Omitted rather than null: a rateless listing publishes no field (the
+        # compute schema types it as an object) and a withdrawn rate refreshes
+        # in place to a listing without one; a slice without GPUs publishes no
+        # GPU key, since the compute schema types a present ``gpu_model`` as a
+        # string and a null would state a value the shape does not.
+        data = handler(self)
+        if isinstance(data, dict):
+            for name in ("asking_rate", "gpu_count", "gpu_model"):
+                if data.get(name) is None:
+                    data.pop(name, None)
+        return data
+
+
+_STOREFRONT_CAPACITY_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
+class Listing(BaseModel):
+    """Marketplace listing for trading compute resources and tokens."""
+
+    listing_id: str = Field(description="The id of the listing")
+    storefront_url: str = Field(
+        description="The public URL of the storefront that posted the listing"
+    )
+    seller_principal: Identity = Field(
+        description="Canonical marketplace principal that owns the listing"
+    )
+    buyer: str | None = Field(
+        default="",
+        description="The card URL of the agent that took the listing",
+    )
+    listing_resource: Union[ComputeResource, TokenResource] = Field(
+        description="The resource being offered, which may be a token or compute resource."
+    )
+    accepted_escrows: list[AcceptedEscrow] | None = Field(
+        default=None,
+        description=(
+            "Per-listing list of accepted on-chain escrow shapes (chain + "
+            "escrow address + advertised partial fields + per-hour price). "
+            "Canonical pricing+escrow advertisement; the buyer's escrow "
+            "proposal must pick one of these entries by (chain_name, "
+            "escrow_address)."
+        ),
+    )
+    settlement_options: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Optional mechanism-neutral settlement choices. Absent preserves "
+            "the legacy accepted_escrows contract."
+        ),
+    )
+    demands: list[EscrowDemand] | None = Field(
+        default=None,
+        description=(
+            "Per-listing arbiter demand criteria, independent of the accepted "
+            "escrow obligation shapes."
+        ),
+    )
+    max_duration_seconds: int | None = Field(
+        default=None,
+        description=(
+            "Optional ceiling on lease duration in seconds. None = unlimited. "
+            "accepted_escrows[i].rates carries the advertised per-hour rate "
+            "for ERC20 escrows; total payment is computed at agreement time "
+            "as primary_rate * agreed_duration_seconds / 3600."
+        ),
+    )
+    oracle_address: str | None = Field(
+        default=None,
+        description="The oracle wallet address used for arbitration and escrow workflows",
+    )
+
+    @model_validator(mode="after")
+    def validate_compute_listing_identity(self) -> "Listing":
+        """Require a valid storefront capacity identity for compute listings.
+
+        ``ComputeResource`` is also used outside listing publication, so this
+        marketplace-specific invariant belongs on ``Listing`` rather than the
+        shared resource model. Surrounding whitespace is normalized; empty or
+        malformed identifiers are rejected. Listings may carry both IDs, with
+        ``resource_id`` taking precedence later when a capacity claim is built.
+        """
+        if not isinstance(self.listing_resource, ComputeResource):
+            return self
+
+        self.listing_resource.pool_id = self.normalize_capacity_identifier(
+            self.listing_resource.pool_id, field_name="pool_id"
+        )
+        self.listing_resource.resource_id = self.normalize_capacity_identifier(
+            self.listing_resource.resource_id, field_name="resource_id"
+        )
+        if (
+            self.listing_resource.pool_id is None
+            and self.listing_resource.resource_id is None
+        ):
+            raise ValueError(
+                "Compute listing listing_resource must provide either pool_id "
+                "or resource_id."
+            )
+        return self
+
+    @staticmethod
+    def normalize_capacity_identifier(
+        value: str | None, *, field_name: str
+    ) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError(f"{field_name} must not be blank")
+        if not _STOREFRONT_CAPACITY_ID_PATTERN.fullmatch(normalized):
+            raise ValueError(
+                f"{field_name} must start with an alphanumeric character and "
+                "contain only letters, digits, '.', '_', ':', or '-' "
+                "(maximum 128 characters)"
+            )
+        return normalized
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_resources(cls, data: Any) -> Any:
+        """Parse resources from dicts to Resource types."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+
+        if "listing_resource" in data:
+            data["listing_resource"] = ComputeDomainResource.parse_from_dict(
+                data["listing_resource"]
+            )
+
+        return data

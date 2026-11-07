@@ -3,9 +3,8 @@
 ### Requirement: Pre-settlement reservation idempotency
 
 A site authority MUST accept a durable pre-settlement identity, in addition to a
-settlement identity, as an idempotency key for reserving capacity. A repeat reserve
-carrying the same pre-settlement identity while a prior reservation for it remains in a
-held state MUST return that reservation rather than admitting a second one. The key MUST
+settlement identity, as an idempotency key for reserving capacity. Exact replay MUST return the recorded identity/state across held, committed or released
+reservations, not allocate replacement capacity. The key MUST
 distinguish separate logical placements: two counterparties negotiating over the same
 listing MUST each receive their own reservation.
 
@@ -23,9 +22,17 @@ listing MUST each receive their own reservation.
 
 #### Scenario: Placement is retried after the prior hold expired
 
-- **WHEN** a hold is placed again with a pre-settlement identity whose only prior
-  reservation has expired or been released
-- **THEN** a new reservation is admitted, exactly as if no prior attempt had occurred
+- **WHEN** a known expired hold is replaced as an explicit new logical placement
+- **THEN** a fresh identity admits new capacity; replay of an unresolved original intent instead returns its recorded terminal identity/state without a new hold
+
+### Requirement: Reservation replay compares normalized requests
+
+A reserve replay MUST compare normalized dimensions/attributes, selected pool/site, offering mode and lease window. Changed reuse of the same identity MUST refuse. A lost acknowledgement MUST resolve the recorded identity/state; expired/released recovery MUST enter repair-required or classified end, not silently place a new hold.
+
+#### Scenario: Reuse changes the lease window
+
+- **WHEN** a reserve retry reuses the identity with a different lease window
+- **THEN** it refuses without changing the original reservation or admitting capacity
 
 ### Requirement: Bounded hold expiry evaluation
 

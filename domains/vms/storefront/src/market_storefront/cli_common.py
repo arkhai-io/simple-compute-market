@@ -1,9 +1,8 @@
 """CLI helpers for the storefront's `market-storefront` console script.
 
-Container-path translation and venv-aware subprocess wrappers, used
-across the per-group CLI modules. The env-file readers that used to
-live here were retired with the TOML-only config migration; the
-`register` / `serve` commands now read CONFIG directly.
+Storefront URL resolution, the administrator client, container-path
+translation, and venv-aware subprocess wrappers, shared across the per-group
+CLI modules. Configuration is read from TOML by the commands that need it.
 """
 
 from __future__ import annotations
@@ -12,7 +11,10 @@ from pathlib import Path
 import os
 import subprocess
 
+import httpx
 import typer
+from market_identity import TrustedIdentitySet
+from storefront_client import StorefrontClientError, SyncStorefrontClient
 
 # parents[2]: market_storefront -> src -> storefront
 STOREFRONT_ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +37,31 @@ def _find_repo_root() -> Path:
 
 REPO_ROOT = _find_repo_root()
 
+#: What a command that calls the storefront reports and exits on, rather than
+#: a traceback: the storefront's refusal, or no storefront answering at all.
+STOREFRONT_FAILURES: tuple[type[Exception], ...] = (
+    StorefrontClientError,
+    httpx.TransportError,
+)
+
+
+def storefront_failure_message(exc: Exception) -> str:
+    """The line a command prints for one of ``STOREFRONT_FAILURES``.
+
+    A request no storefront answered names the scheme, host, and port it was
+    sent to and the transport error's type.
+    """
+    if not isinstance(exc, httpx.TransportError):
+        return f"Storefront error: {exc}"
+    try:
+        url = exc.request.url
+    except RuntimeError:
+        origin = "the storefront URL"
+    else:
+        port = f":{url.port}" if url.port is not None else ""
+        origin = f"{url.scheme}://{url.host}{port}"
+    return f"Storefront error: no storefront answered at {origin} ({type(exc).__name__})"
+
 
 def resolve_storefront_url(
     explicit_url: str | None,
@@ -54,6 +81,26 @@ def resolve_storefront_url(
     if isinstance(base_url, str) and base_url:
         return base_url
     return f"http://localhost:{default_port}"
+
+
+def admin_client(base_url: str) -> SyncStorefrontClient:
+    """A client signing as the storefront's own administrator.
+
+    Administrator routes authenticate a principal the storefront pins under
+    `identity.administrators`, so the storefront's own signer must be
+    configured there for a command using this client to act.
+    """
+    # Resolving the signer loads the storefront's settings, which only a
+    # command that talks to the storefront needs.
+    from .utils.config import resolve_marketplace_signer
+
+    signer = resolve_marketplace_signer()
+    return SyncStorefrontClient(
+        base_url,
+        signer=signer,
+        caller_role="admin",
+        expected_publishers=TrustedIdentitySet(identities=(signer.identity,)),
+    )
 
 
 def _resolve_db_path(db: str | None) -> str | None:

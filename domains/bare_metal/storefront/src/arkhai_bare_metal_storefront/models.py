@@ -1,19 +1,17 @@
 """Bare-metal-owned HTTP carriers that must not imply VM fulfillment."""
 
 from __future__ import annotations
-from datetime import datetime
 
+from datetime import datetime
 from typing import Literal
 
 from arkhai_bare_metal import (
-    BareMetalAcceptedHostedBinding,
-    BareMetalAccessResult,
-    BareMetalLeaseReadyEvidence,
-    BareMetalLeaseReadyResult,
+    BareMetalResult,
     BareMetalReceipt,
 )
+from core_storefront.models.system_models import LoopStatus, ProjectionFamilyStatus
 from market_identity import Identity
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 PhysicalState = Literal[
     "accepted",
@@ -52,55 +50,6 @@ TeardownState = Literal[
 ]
 
 
-class BareMetalHostedLifecycle(BaseModel):
-    """Durable hosted-to-physical state under one accepted seller binding."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    accepted_binding: BareMetalAcceptedHostedBinding
-    accepted_binding_digest: str
-    fulfillment_identity: str
-    physical_state: PhysicalState = "accepted"
-    financial_state: FinancialState = "pending"
-    recovery_state: RecoveryState = "none"
-    teardown_state: TeardownState = "not_started"
-    capacity_reservation_id: str | None = None
-    settlement_resource_id: str | None = None
-    fulfillment_id: str | None = None
-    public_result: BareMetalLeaseReadyResult | None = None
-    public_result_digest: str | None = None
-    portable_evidence: BareMetalLeaseReadyEvidence | None = None
-    portable_evidence_digest: str | None = None
-    portable_evidence_ref: str | None = None
-    failure_reason: str | None = None
-
-    @model_validator(mode="after")
-    def _validate_lifecycle(self) -> "BareMetalHostedLifecycle":
-        if self.accepted_binding_digest != self.accepted_binding.binding_digest:
-            raise ValueError("accepted hosted binding digest does not match")
-        if self.public_result is None:
-            if self.public_result_digest is not None:
-                raise ValueError("public result digest requires its result")
-        elif self.public_result_digest != self.public_result.result_digest:
-            raise ValueError("public result digest does not match")
-        evidence_values = (
-            self.portable_evidence,
-            self.portable_evidence_digest,
-            self.portable_evidence_ref,
-        )
-        if any(value is not None for value in evidence_values):
-            if any(value is None for value in evidence_values):
-                raise ValueError(
-                    "portable evidence payload, digest, and ref are atomic"
-                )
-            assert self.portable_evidence is not None
-            if self.portable_evidence_digest != self.portable_evidence.evidence_digest:
-                raise ValueError("portable evidence digest does not match")
-            if self.portable_evidence.fulfillment_identity != self.fulfillment_identity:
-                raise ValueError("portable evidence changes fulfillment identity")
-        return self
-
-
 class BareMetalHealthResponse(BaseModel):
     """Public-safe readiness and identity projection for this storefront."""
 
@@ -109,15 +58,32 @@ class BareMetalHealthResponse(BaseModel):
     paused: bool | None = None
     principal: Identity
     sites: list[dict[str, object]] = Field(default_factory=list)
-    resource_count: int | None = None
-
-
-class BareMetalFulfillRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    negotiation_id: str = Field(min_length=1)
-    escrow_uid: str = Field(min_length=1)
-    buyer_principal: Identity
+    # Reported per site and outside ``checks``: one site's projection being
+    # unavailable is not a storefront-wide degradation.
+    site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None
+    # Each stored pool override's address and state; administrator status only.
+    pool_overrides: list[dict[str, str]] | None = None
+    # Storefront policies disclosed to anyone before they commit data, keyed by
+    # policy. ``introduction_retention`` is present only while contact exchange
+    # is enabled.
+    disclosures: dict[str, dict[str, object]] = Field(default_factory=dict)
+    # Settlement obligations waiting for an operator, each counted once;
+    # administrator status only.
+    settlement_manual_required: int | None = None
+    # The storefront-to-provisioning contract version this storefront speaks,
+    # from its installed contract wheel; on the status an administrator or a
+    # configured site's authority reads.
+    provisioning_contract_version: str | None = None
+    # Every lifecycle loop by name, its controller state and the outcome of its
+    # last cycle, whether its timer or an operator's step ran it; on status.
+    lifecycle: dict[str, LoopStatus] | None = None
+    # Each configured site's holds, refusals, and reports, each with its reason,
+    # from the latest publication cycle that derived it; on status, and a site
+    # no cycle has derived since start is absent.
+    publication_derivation: dict[str, dict[str, list[dict[str, object]]]] | None = None
+    # Each composed settlement mechanism's readiness as its registration
+    # projects it, each blocker with its kind; on status.
+    settlement: list[dict[str, object]] | None = None
 
 
 class BareMetalFulfillmentResponse(BaseModel):
@@ -129,12 +95,23 @@ class BareMetalFulfillmentResponse(BaseModel):
     fulfillment_id: str | None = None
     state: str
     failure_reason: str | None = None
+    # The digest of the deal's lease-ready evidence once it is stored, which
+    # is what an Alkahest delivery publishes on chain; the buyer resolves the
+    # evidence by it through the evidence route.
+    evidence_digest: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("evidence_digest", "lease_ready_evidence_digest"),
+    )
+    # The on-chain attestation that published the digest, once settlement has
+    # recorded it as the escrow's fulfillment; never reported before the chain
+    # accepted the submission.
+    evidence_attestation_uid: str | None = None
 
 
 class BareMetalFulfillmentResultResponse(BaseModel):
     negotiation_id: str
     receipt: BareMetalReceipt
-    result: BareMetalAccessResult
+    result: BareMetalResult
 
 
 class BareMetalAccessDeliveryResponse(BaseModel):
@@ -155,7 +132,7 @@ class BareMetalSettleRequest(BaseModel):
 
     negotiation_id: str
     buyer_principal: Identity
-    buyer_evm_address: str
+    buyer_evm_address: str | None = None
 
 
 class BareMetalSettleResponse(BaseModel):
@@ -175,4 +152,77 @@ class BareMetalSettleStatusResponse(BaseModel):
     buyer_principal: Identity
     seller_principal: Identity
     obligation_ref: str | None = None
-    fulfillment_available: Literal[True] = True
+    fulfillment_available: bool = True
+
+
+class BareMetalVerifyEscrowRequest(BaseModel):
+    """An administrator's dry-run check of an escrow against the plan the
+    accepted negotiation it names committed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    negotiation_id: str = Field(min_length=1)
+
+
+class BareMetalVerifyEscrowResponse(BaseModel):
+    escrow_uid: str
+    valid: bool
+    reason: str | None = None
+
+
+class BareMetalEvaluateSettleRequest(BaseModel):
+    """An administrator's preview of the fulfillment settlement would start."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    listing_id: str = Field(min_length=1)
+    ssh_public_key: str = ""
+    duration_seconds: int = Field(default=3600, gt=0)
+    negotiation_id: str | None = None
+
+
+class BareMetalEvaluateSettleResponse(BaseModel):
+    escrow_uid: str
+    would_submit: bool
+    reason: str | None = None
+    host_id: str | None = None
+    site_id: str | None = None
+    physical_resource_id: str | None = None
+    required_attributes: dict[str, object] | None = None
+    duration_seconds: int | None = None
+
+
+class BareMetalSettleWaitResponse(BaseModel):
+    """A settle wait's answer. ``last_error`` is the error of its last status
+    read when that read failed and the wait ended unready."""
+
+    ready: bool
+    status: str
+    elapsed_ms: int
+    fulfillment_state: str | None = None
+    last_error: str | None = None
+
+
+class BareMetalReserveCapacityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    required_attributes: dict[str, object] = Field(default_factory=dict)
+    listing_id: str | None = None
+    escrow_uid: str | None = None
+
+
+class BareMetalCapacityReleasedEvent(BaseModel):
+    """A site's report that a reservation's capacity is free again."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    capacity_reservation_id: str = Field(min_length=1)
+    site_id: str = Field(min_length=1)
+    resource_id: str | None = None
+    provider_lease_id: str | None = None
+    released_at: str | None = None
+
+
+class BareMetalCapacityEventResponse(BaseModel):
+    capacity_reservation_id: str
+    state: str

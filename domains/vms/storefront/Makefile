@@ -1,6 +1,12 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
+
 IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= storefront
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+# Appended to the image's tag; the root Makefile's IMAGE_SUFFIX. A suffixed build
+# is tagged per change alone: a commit tag would keep one image per validated commit.
+IMAGE_SUFFIX ?=
 
 # Path to the monorepo .dist/ wheel directory, relative to domains/vms/storefront/.
 # Used by uv when resolving pure-Python internal packages
@@ -12,43 +18,13 @@ DIST_DIR ?= ../../../.dist
 # Podman may reuse cross-stage layers after an internal wheel changes. Make the
 # wheel set an explicit cache key for both image stages.
 DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
-HOSTED_REPO_ROOT := ../../..
-HOSTED_RELEASE_DIR ?= $(DIST_DIR)
-include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
 
-.PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration verify-hosted-release
+.PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration
 
-verify-hosted-release:
-	$(VERIFY_HOSTED_RELEASE)
+init: reinit ## Resolve deps from verified wheels and create .venv.
 
-init: verify-hosted-release ## Resolve deps from verified wheels and create .venv.
-	uv sync --find-links $(DIST_DIR)
-
-reinit: verify-hosted-release ## Force-reinstall verified internal wheels.
-	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-core                    --reinstall-package arkhai-core \
-	--upgrade-package arkhai-core-storefront         --reinstall-package arkhai-core-storefront \
-	--upgrade-package arkhai-kit-capacity-publication --reinstall-package arkhai-kit-capacity-publication \
-	--upgrade-package arkhai-vms-storefront       --reinstall-package arkhai-vms-storefront \
-	--upgrade-package arkhai-bare-metal             --reinstall-package arkhai-bare-metal \
-	--upgrade-package arkhai-bare-metal-storefront  --reinstall-package arkhai-bare-metal-storefront \
-	--upgrade-package arkhai-kit-identity            --reinstall-package arkhai-kit-identity \
-	--upgrade-package arkhai-kit-alkahest            --reinstall-package arkhai-kit-alkahest \
-	--upgrade-package arkhai-kit-config              --reinstall-package arkhai-kit-config \
-	--upgrade-package arkhai-kit-policy              --reinstall-package arkhai-kit-policy \
-	--upgrade-package arkhai-kit-settlement-runtime  --reinstall-package arkhai-kit-settlement-runtime \
-	--upgrade-package arkhai-kit-storefront         --reinstall-package arkhai-kit-storefront \
-	--upgrade-package arkhai-kit-negotiation-runtime --reinstall-package arkhai-kit-negotiation-runtime \
-	--upgrade-package arkhai-hosted-settlement-client --reinstall-package arkhai-hosted-settlement-client \
-	--upgrade-package arkhai-kit-hosted-settlement     --reinstall-package arkhai-kit-hosted-settlement \
-	--upgrade-package arkhai-kit-site                --reinstall-package arkhai-kit-site \
-	--upgrade-package arkhai-kit-resource-pools       --reinstall-package arkhai-kit-resource-pools \
-	--upgrade-package arkhai-kit-fulfillment         --reinstall-package arkhai-kit-fulfillment \
-	--upgrade-package arkhai-vms              --reinstall-package arkhai-vms \
-	--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
-	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
-	--upgrade-package arkhai-kit-site-client         --reinstall-package arkhai-kit-site-client \
-	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client
+reinit: ## Force-reinstall verified internal wheels.
+	python3 ../../../scripts/uv_project.py reinit
 
 # build deliberately does NOT depend on reinit. reinit drives a host-side
 # `uv sync` that resolves the [rl] extra (incl. torch) across whatever
@@ -62,12 +38,12 @@ reinit: verify-hosted-release ## Force-reinstall verified internal wheels.
 build: build-images
 
 build-images:
-	docker build --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) -t ${IMAGE_NAME}:${IMAGE_TAG} ../../..
-	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
+	docker build --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) -t ${IMAGE_NAME}:${IMAGE_TAG}$(IMAGE_SUFFIX) ../../..
+	$(if $(IMAGE_SUFFIX),,docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX))
 
 build-no-cache: ## Full Docker cache bust — use when .dist/ changes are not picked up by build-images.
-	docker build --no-cache --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) -t ${IMAGE_NAME}:${IMAGE_TAG} ../../..
-	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
+	docker build --no-cache --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) -t ${IMAGE_NAME}:${IMAGE_TAG}$(IMAGE_SUFFIX) ../../..
+	$(if $(IMAGE_SUFFIX),,docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX))
 
 test: reinit test-unit test-integration ## Run all tests
 
@@ -81,23 +57,16 @@ test-integration: ## Run integration tests (no real infrastructure required — 
 
 deploy: deploy-storefront
 
-# Buyers are pure HTTP clients (the `market` CLI / domains.vms.buyer
+# Buyers are pure HTTP clients (the `market` CLI / arkhai_vms_buyer
 # library); they don't run a storefront. Use `make deploy-storefront`
 # to bring up the seller; run `market buy ...` from the host or another
 # container against `http://bob-storefront:8001`.
-## RESOURCES_CSV_FILE: host path to the compute resource inventory CSV.
-## Bind-mounted read-only into the container so the storefront can seed
-## its resources table on startup via seller.resources_csv_path in config.
-## Defaults to the dev inventory shipped in the source tree.
-RESOURCES_CSV_FILE ?= $(CURDIR)/src/market_storefront/data/kvm1-machine.csv
-
 deploy-storefront:
 	docker run --rm -d --name bob-storefront \
 	--network market -p 8001:8001 \
 	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
 	-e XDG_CONFIG_HOME=/etc \
 	-v $(CURDIR)/storefront.bob.toml:/etc/arkhai/storefront.toml:ro \
-	-v $(RESOURCES_CSV_FILE):/app/resources.csv:ro \
 	arkhai:storefront
 
 deploy-dev:
@@ -106,7 +75,6 @@ deploy-dev:
 	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
 	-e XDG_CONFIG_HOME=/etc \
 	-v $(CURDIR)/storefront.bob.toml:/etc/arkhai/storefront.toml:ro \
-	-v $(RESOURCES_CSV_FILE):/app/resources.csv:ro \
 	arkhai:storefront
 
 stop:

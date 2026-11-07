@@ -1,19 +1,25 @@
 # Bob (seller) local Compose profile. Public marketplace identity and EVM
-# mechanism address are configuration; signing credentials are injected by
-# Compose Secrets through ARKHAI_IDENTITY_CREDENTIAL and
-# STOREFRONT_WALLET__PRIVATE_KEY.
+# mechanism address are configuration; the signing credential arrives as
+# ARKHAI_IDENTITY_CREDENTIAL, and the wallet key and registry token in the
+# secret overlay, dev-env/identities/bob.storefront.secrets.toml.
 
 agent_id            = "bob"
 port                = 8001
 base_url            = "http://bob-storefront:8001/"
 db_path             = "./src/market_storefront/data/storefront/agent.db"
 log_file_path       = "./logs/bob.log"
-# Seed the resources table from this CSV on startup when the table is empty.
-# The bundled kvm1-machine.csv is the local dev inventory. Bind-mounted into
-# the container at /app/resources.csv by `make deploy-storefront`.
-# For helm deployments, inject via --set-file (RESOURCES_CSV_FILE) instead —
-# the CSV content is delivered through the agent Secret, not a file path.
-resources_csv_path  = "/app/resources.csv"
+
+# Timer-loop intervals, shortened for this stack only. A scenario pauses the
+# storefront and then advances each loop deliberately, and a pause is observed
+# when a loop next reaches its gate -- which it can only do at the end of an
+# interval. The shipped defaults (60s watchdog, 30s sweeps) exceed the pause's
+# own bounded wait, so every loop reports `pausing` and a scenario can never
+# assert that the storefront is idle. Shortening them changes nothing about
+# what a loop does, only how soon it notices it has been asked to stop.
+# Production keeps the shipped values.
+negotiation_watchdog_interval         = 2
+settlement_servicing_interval_seconds = 2
+fulfillment_resume_sweep_interval     = 2
 
 [[storefront_domains]]
 contribution = "vms"
@@ -33,24 +39,59 @@ scheme = "eip191"
 identifier = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
 
 [Identity.administrators.operator]
-principal = { scheme = "eip191", identifier = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc" }
+# Anvil account 6. The operator is deliberately a different principal
+# from Identity.principal above: the seller publishes and the administrator
+# operates, and the two are separately authorized rather than conflated.
+# The loader requires a list: a stable administrator may hold more than one
+# principal, and `principal = {...}` is the pre-list spelling.
+principals = [
+  { scheme = "eip191", identifier = "0x976ea74026e726554db657fa54763abd0c3a0aa9" },
+]
 
 [Identity.service_peers.provisioning_default]
 role = "service"
 site_id = "default"
-principal = { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" }
-
+principals = [
+  { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
+]
 [Settlement]
 schema_version = 1
-priority = ["alkahest.v1"]
+priority = ["alkahest.v1", "contact-exchange.v1"]
 
 [Settlement.alkahest]
 enabled = true
-address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
-oracle_gated = false
+# Each chain's Alkahest address book; the dev chain's is mounted by Compose.
+address_books = { anvil = "/app/alkahest_anvil_addresses.json" }
+release_models = ["recipient"]
 trusted_oracle_addresses = []
-interruptible = false
 interruptible_oracle_addresses = []
+
+# Settlement by introduction. Offered only on listings whose publication
+# clauses select it, such as a pool override's. The contact is ordinary
+# configuration -- never published, revealed only to the accepted buyer --
+# and is keyed by the listing's origin site. A dev value on a reserved domain.
+[Settlement.contact]
+enabled = true
+
+[Settlement.contact.origins.default]
+contact_payload = { email = "bob-sales@seller.invalid" }
+
+[Settlement.contact.profiles.default]
+channel = "email"
+terms = "Quoted per engagement; reply within one business day."
+
+# Seller-side delivery of each revealed buyer contact. Mailpit receives it in
+# this lane; scenarios read it back through Mailpit's API.
+[Delivery]
+enabled = ["seller-mail"]
+
+[Delivery.seller-mail]
+sink = "smtp"
+host = "mailpit"
+port = 1025
+start_tls = false
+sender = "storefront-bob@seller.invalid"
+recipients = ["bob-sales@seller.invalid"]
 
 [Wallet]
 address     = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
@@ -84,11 +125,17 @@ principals = [
 # The private registry bearer token belongs in the mounted
 # storefront.secrets.toml under [registry.auth].
 
-# The site authority is hosted by the provisioning service
-# (authority_url defaults to provisioning.service_url). Poll fast —
+# The site authority is hosted by the provisioning service. Poll fast —
 # the suite waits on delta-driven listing reconciliation.
 [capacity]
 poll_interval    = 1
+# How long a confirmed projection poll lets the inventory guard confirm a
+# listing, widened for this stack only. A scenario that holds the loops keeps
+# trading, and with the shipped window -- three poll intervals -- a round it
+# sends more than a few seconds after its last `site-projections` step would be
+# refused as retryable. An hour covers any one scenario's run; production
+# keeps the shipped window.
+source_confirmation_seconds = 3600
 # Two-phase reserve: acceptance holds capacity until the buyer settles
 # (the e2e deals settle within seconds; 900s is headroom, and unsettled
 # holds lapse on their own). Deliberately overrides the shipped default
@@ -97,19 +144,19 @@ poll_interval    = 1
 # while production defaults to placing no pre-settlement hold.
 hold_ttl_seconds = 900
 
+# Site name -> authority URL. Required: the shipped settings.toml documents
+# this table but does not default it, and `_capacity_settings()` raises when it
+# is empty. The name matches `Identity.service_peers.provisioning_default`'s
+# `site_id`, and the URL is the same provisioning service `[provisioning]`
+# names below.
+[capacity.sites]
+default = "http://provisioning:8081"
+
 [provisioning]
 service_url = "http://provisioning:8081"
-# Compose-stack default. Tests override via PROVISIONING_MODE shell env
-# pulled into compose with ${PROVISIONING_MODE:-http}.
-mode        = "http"
 # Mock provisioning responds in milliseconds; poll frequently so the
 # storefront sees job completion quickly without waiting the 15s production default.
 poll_interval = 1
-
-[provisioning.identity]
-principals = [
-  { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
-]
 
 [negotiation]
 # Ordered policies run per round. Guards short-circuit with
@@ -127,5 +174,4 @@ settlements = [
 # min_price/token/max_duration_seconds. Per-row CSV columns override.
 # default_max_duration_seconds = 0 (or omitted) means "unlimited".
 default_min_price            = "100"
-default_token_address        = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 default_max_duration_seconds = 0

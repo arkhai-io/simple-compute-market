@@ -17,7 +17,9 @@ class VmCapacitySource(BaseModel):
     site_id: str = Field(min_length=1)
     pool_id: str | None = Field(default=None, min_length=1)
     resource_id: str | None = Field(default=None, min_length=1)
-    gpu_count: int = Field(default=1, ge=1)
+    listing_shape: dict[str, dict[str, Any]] = Field(
+        description="The family-grouped VM shape the listing is sold in."
+    )
 
     @model_validator(mode="after")
     def require_capacity_identity(self) -> VmCapacitySource:
@@ -26,10 +28,8 @@ class VmCapacitySource(BaseModel):
         return self
 
 
-
-
 class VmCreateListingRequest(CreateListingRequest):
-    """VM listing request with hosted-fiat composition validation."""
+    """VM listing request with settlement option validation."""
 
     settlements: list[SettlementPublicationClause] = Field(
         default_factory=list,
@@ -53,6 +53,10 @@ class VmCreateListingRequest(CreateListingRequest):
 
     @model_validator(mode="after")
     def require_settlement_choice(self) -> VmCreateListingRequest:
-        if not self.accepted_escrows and not self.settlements and not self.settlement_options:
+        if (
+            not self.accepted_escrows
+            and not self.settlements
+            and not self.settlement_options
+        ):
             raise ValueError("at least one settlement choice is required")
         return self

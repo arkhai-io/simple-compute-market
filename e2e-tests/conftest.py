@@ -7,7 +7,7 @@ config overrides directly through pytest
     pytest --profile staging --config-dir /mnt/config -m contracts
 
 These options set the corresponding environment variables *before* the
-src.settings module is imported, so dynaconf picks them up
+e2e_harness.settings module is imported, so dynaconf picks them up
 through its normal resolution chain.
 """
 
@@ -36,7 +36,7 @@ def pytest_addoption(parser) -> None:
 def pytest_configure(config) -> None:
     """
     Inject CLI option values as env vars early in the pytest lifecycle,
-    before any test module (or conftest) imports src.settings.
+    before any test module (or conftest) imports e2e_harness.settings.
     """
     _setenv("ACTIVE_PROFILES",             config.getoption("--profile",       default=None))
     _setenv("CONFIG_DIRECTORY",            config.getoption("--config-dir",    default=None))

@@ -5,10 +5,30 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import threading
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Iterable, Mapping
+
+logger = logging.getLogger(__name__)
+
+
+def _recorded_pool_id(resource: Mapping[str, Any]) -> str | None:
+    """The pool a resource's declaration records, or ``None``, logged.
+
+    Every declaration is written naming its pool, so a row with none is
+    malformed. It is projected into no pool, neither a default nor one named
+    for the resource, since a storefront would publish it as sellable there.
+    """
+    pool_id = resource.get("pool_id")
+    if pool_id:
+        return str(pool_id)
+    logger.warning(
+        "capacity declaration %r records no pool and is not projected",
+        resource.get("resource_id"),
+    )
+    return None
 
 
 def _canonical(value: Any) -> Any:
@@ -102,7 +122,9 @@ def resource_pool_projection(
     pools: dict[str, list[dict[str, Any]]] = {}
     for raw in resources:
         resource = dict(raw)
-        pool_id = str(resource.get("pool_id") or resource["resource_id"])
+        pool_id = _recorded_pool_id(resource)
+        if pool_id is None:
+            continue
         attrs = dict(resource.get("attributes") or {})
         projected = {
             "physical_resource_id": str(resource["resource_id"]),
@@ -118,11 +140,18 @@ def resource_pool_projection(
             projected["publication_views"] = dict(
                 resource.get("publication_views") or {},
             )
+        # Why a contributed view could not be built, keyed by view identifier.
+        # Carried as the views are, uninterpreted: the domain that reads the
+        # view reads its problems.
+        if resource.get("publication_view_problems") is not None:
+            projected["publication_view_problems"] = dict(
+                resource.get("publication_view_problems") or {},
+            )
         pools.setdefault(pool_id, []).append(projected)
     result: list[dict[str, Any]] = []
     for pool_id in sorted(pools):
         inventory = sorted(pools[pool_id], key=lambda row: row["physical_resource_id"])
-        row: dict[str, Any] = {"resource_pool_id": pool_id, "resources": inventory}
+        row: dict[str, Any] = {"pool_id": pool_id, "resources": inventory}
         meta = (pool_metadata or {}).get(pool_id)
         if meta is not None:
             row["pool_metadata"] = _project_pool_metadata(meta)
@@ -133,7 +162,7 @@ def resource_pool_projection(
 def _grouping_attributes(resource: Mapping[str, Any]) -> dict[str, Any]:
     attrs = dict(resource.get("attributes") or {})
     # Identity and volatile operational details are intentionally excluded.
-    for key in ("resource_id", "physical_resource_id", "vm_host", "updated_at", "created_at"):
+    for key in ("resource_id", "physical_resource_id", "updated_at", "created_at"):
         attrs.pop(key, None)
     return attrs
 
@@ -144,8 +173,11 @@ def capacity_bucket_projection(resources: Iterable[Mapping[str, Any]]) -> list[d
     for resource in resources:
         if not resource.get("enabled", True):
             continue
+        pool_id = _recorded_pool_id(resource)
+        if pool_id is None:
+            continue
         criteria = {
-            "resource_pool_id": str(resource.get("pool_id") or resource["resource_id"]),
+            "pool_id": pool_id,
             "resource_type": resource.get("resource_type"),
             "resource_subtype": resource.get("resource_subtype"),
             "available": dict(resource.get("available") or {}),
@@ -165,7 +197,14 @@ def capacity_bucket_projection(resources: Iterable[Mapping[str, Any]]) -> list[d
 
 
 class SiteProjectionService:
-    """Produce independently versioned resource-pool and capacity projections."""
+    """Produce independently versioned resource-pool and capacity projections.
+
+    Both are built from the ledger's offered read, in which a declaration the
+    site would not admit against for want of a usable host is not enabled, so
+    a storefront mirroring a projection never offers what admission refuses.
+    A mounting service that builds richer resource-pool inventory supplies
+    ``resource_inventory`` built from that same read.
+    """
 
     def __init__(
         self,
@@ -175,7 +214,7 @@ class SiteProjectionService:
         pool_directory: Callable[[], Mapping[str, Mapping[str, Any]]] | None = None,
     ) -> None:
         self._ledger = ledger
-        self._resource_inventory = resource_inventory or ledger.list_resources
+        self._resource_inventory = resource_inventory or ledger.list_offered_resources
         self._pool_directory = pool_directory
         self._resource_pools = ProjectionRevisionTracker()
         self._capacity_buckets = ProjectionRevisionTracker()
@@ -186,5 +225,5 @@ class SiteProjectionService:
         return self._resource_pools.observe(rows), rows
 
     def capacity_buckets(self) -> tuple[ProjectionIdentity, list[dict[str, Any]]]:
-        rows = capacity_bucket_projection(self._ledger.list_resources())
+        rows = capacity_bucket_projection(self._ledger.list_offered_resources())
         return self._capacity_buckets.observe(rows), rows

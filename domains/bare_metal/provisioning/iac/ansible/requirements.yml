@@ -1,0 +1,5 @@
+---
+# Collections the bare-metal access playbook and role use.
+collections:
+  - name: ansible.posix
+    version: "1.5.4"

@@ -16,7 +16,8 @@ def _resources():
             "resource_subtype": "h100",
             "capacity": {"gpu_count": 8, "ram_gb": 512},
             "available": {"gpu_count": 8, "ram_gb": 512},
-            "attributes": {"region": "eu", "vm_host": "host-a"},
+            "attributes": {"region": "eu"},
+            "host_id": "host-a",
             "enabled": True,
         },
         {
@@ -26,10 +27,40 @@ def _resources():
             "resource_subtype": "h100",
             "capacity": {"ram_gb": 512, "gpu_count": 8},
             "available": {"ram_gb": 512, "gpu_count": 8},
-            "attributes": {"vm_host": "host-b", "region": "eu"},
+            "attributes": {"region": "eu"},
+            "host_id": "host-b",
             "enabled": True,
         },
     ]
+
+
+def test_both_projections_name_the_pool_pool_id():
+    """The pool's identifier carries one name on every surface, the site's
+    projections included."""
+    pools = resource_pool_projection(_resources())
+    buckets = capacity_bucket_projection(_resources())
+
+    assert [row["pool_id"] for row in pools] == ["pool-1"]
+    assert {row["pool_id"] for row in buckets} == {"pool-1"}
+    # No second spelling of the pool's identifier rides alongside.
+    assert all(
+        [key for key in row if key.endswith("pool_id")] == ["pool_id"]
+        for row in [*pools, *buckets]
+    )
+
+
+def test_a_resource_recording_no_pool_is_in_neither_projection(caplog):
+    """Not in `default`, nor in a pool named for the resource: both
+    projections are exactly what they are without it, and it is reported."""
+    poolless = {**_resources()[0], "resource_id": "host-c", "pool_id": None}
+
+    with caplog.at_level("WARNING", logger="market_site.projections"):
+        pools = resource_pool_projection([*_resources(), poolless])
+        buckets = capacity_bucket_projection([*_resources(), poolless])
+
+    assert pools == resource_pool_projection(_resources())
+    assert buckets == capacity_bucket_projection(_resources())
+    assert caplog.text.count("'host-c' records no pool and is not projected") == 2
 
 
 def test_canonical_digest_ignores_mapping_order():
@@ -38,7 +69,7 @@ def test_canonical_digest_ignores_mapping_order():
 
 def test_resource_pool_projection_preserves_individual_inventory():
     rows = resource_pool_projection(_resources())
-    assert rows[0]["resource_pool_id"] == "pool-1"
+    assert rows[0]["pool_id"] == "pool-1"
     assert [r["physical_resource_id"] for r in rows[0]["resources"]] == ["host-a", "host-b"]
     assert rows[0]["resources"][0]["available"] == {
         "gpu_count": 8,
@@ -49,10 +80,10 @@ def test_resource_pool_projection_preserves_individual_inventory():
 def test_resource_pool_projection_preserves_allowlisted_publication_views():
     resources = _resources()
     resources[0]["publication_views"] = {
-        "bare_metal.v1": {
+        "bare_metal.v2": {
             "physical_resource_id": "host-a",
             "physical_host_id": "physical-host-a",
-            "machine_id": "machine-a",
+            "host_id": "machine-a",
             "available": True,
         },
     }
@@ -60,22 +91,39 @@ def test_resource_pool_projection_preserves_allowlisted_publication_views():
     rows = resource_pool_projection(resources)
 
     assert rows[0]["resources"][0]["publication_views"] == {
-        "bare_metal.v1": {
+        "bare_metal.v2": {
             "physical_resource_id": "host-a",
             "physical_host_id": "physical-host-a",
-            "machine_id": "machine-a",
+            "host_id": "machine-a",
             "available": True,
         },
     }
 
 
+def test_resource_pool_projection_carries_view_problems_uninterpreted():
+    """Copied as given, whatever a view's problems say, and absent when the
+    resource reports none."""
+    resources = _resources()
+    resources[0]["publication_view_problems"] = {
+        "bare_metal.v2": ["declaration names no host", "anything at all"],
+    }
+
+    rows = resource_pool_projection(resources)
+
+    first, second = rows[0]["resources"]
+    assert first["publication_view_problems"] == {
+        "bare_metal.v2": ["declaration names no host", "anything at all"],
+    }
+    assert "publication_view_problems" not in second
+
+
 def test_resource_pool_digest_changes_with_publication_availability():
     resources = _resources()
     resources[0]["publication_views"] = {
-        "bare_metal.v1": {"available": True},
+        "bare_metal.v2": {"available": True},
     }
     before = canonical_digest(resource_pool_projection(resources))
-    resources[0]["publication_views"]["bare_metal.v1"]["available"] = False
+    resources[0]["publication_views"]["bare_metal.v2"]["available"] = False
 
     after = canonical_digest(resource_pool_projection(resources))
 
@@ -110,14 +158,14 @@ def test_projection_revisions_are_digest_driven():
 def test_resource_pool_revision_tracks_publication_view_changes():
     resources = _resources()
     resources[0]["publication_views"] = {
-        "bare_metal.v1": {"available": True},
+        "bare_metal.v2": {"available": True},
     }
     service = SiteProjectionService(
         object(),
         resource_inventory=lambda: resources,
     )
     first, _ = service.resource_pools()
-    resources[0]["publication_views"]["bare_metal.v1"]["available"] = False
+    resources[0]["publication_views"]["bare_metal.v2"]["available"] = False
 
     changed, _ = service.resource_pools()
 
@@ -160,7 +208,7 @@ def test_pool_absent_from_directory_has_no_pool_metadata_key():
     rows = resource_pool_projection(
         resources, pool_metadata={"pool-1": {"label": "Pool One", "enabled": True}},
     )
-    by_pool = {row["resource_pool_id"]: row for row in rows}
+    by_pool = {row["pool_id"]: row for row in rows}
     assert by_pool["pool-1"]["pool_metadata"] == {"label": "Pool One", "enabled": True}
     assert "pool_metadata" not in by_pool["pool-2"]
 
@@ -238,3 +286,55 @@ def test_service_without_pool_directory_omits_pool_metadata():
     service = SiteProjectionService(object(), resource_inventory=lambda: _resources())
     _, rows = service.resource_pools()
     assert "pool_metadata" not in rows[0]
+
+
+class _OfferingLedger:
+    """A ledger whose offered read can differ from its stored one."""
+
+    def __init__(self) -> None:
+        self.offered = _resources()
+
+    def list_resources(self):
+        # The stored view: every declaration enabled, as the operator declared.
+        return _resources()
+
+    def list_offered_resources(self):
+        return [dict(row) for row in self.offered]
+
+
+def test_capacity_buckets_are_built_from_the_offered_read():
+    ledger = _OfferingLedger()
+    ledger.offered[1]["enabled"] = False
+    service = SiteProjectionService(ledger)
+
+    _, rows = service.capacity_buckets()
+
+    assert [row["resource_count"] for row in rows] == [1]
+
+
+def test_capacity_bucket_revision_advances_when_only_offered_state_changes():
+    ledger = _OfferingLedger()
+    service = SiteProjectionService(ledger)
+    first, rows = service.capacity_buckets()
+    assert [row["resource_count"] for row in rows] == [2]
+
+    ledger.offered[1]["enabled"] = False
+    changed, rows = service.capacity_buckets()
+
+    assert [row["resource_count"] for row in rows] == [1]
+    assert changed.revision == first.revision + 1
+    assert changed.digest != first.digest
+
+
+def test_the_default_resource_pool_inventory_is_the_offered_read():
+    ledger = _OfferingLedger()
+    ledger.offered[1]["enabled"] = False
+    service = SiteProjectionService(ledger)
+
+    _, rows = service.resource_pools()
+
+    enabled = {
+        entry["physical_resource_id"]: entry["enabled"]
+        for entry in rows[0]["resources"]
+    }
+    assert enabled == {"host-a": True, "host-b": False}

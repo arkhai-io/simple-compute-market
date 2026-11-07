@@ -11,10 +11,74 @@ metadata:
 data:
   config-production.yml: |
     {{- $config := deepCopy .Values.config -}}
-    {{- $_ := set $config "identity" (dict "principal" .Values.identity.principal) -}}
-    {{- $_ := set $config "storefront_identity" (dict "principals" .Values.storefrontIdentity.principals) -}}
-    {{- $_ := set $config "admin_identity" (dict "principals" .Values.adminIdentity.principals) -}}
+    {{- $_ := set $config "identity" .Values.identity.principal -}}
+    {{- /*
+      The path is derived from the document's presence, not configured beside
+      it. Two independent settings could disagree, and the failure when they do
+      is silent: the document renders, the volume mounts, and the service skips
+      an unset path while everything looks configured.
+    */}}
+    {{- if .Values.definitions.relays -}}
+      {{- $_ := set $config "relay_definitions_path" "/app/config/relay-definitions.yaml" -}}
+    {{- end -}}
+    {{- if .Values.definitions.pools -}}
+      {{- $_ := set $config "pool_definitions_path" "/app/config/pool-definitions.yaml" -}}
+    {{- end -}}
+    {{- if .Values.definitions.hosts -}}
+      {{- $_ := set $config "host_definitions_path" "/app/config/host-definitions.yaml" -}}
+    {{- end -}}
+    {{- if .Values.definitions.capacity -}}
+      {{- $_ := set $config "capacity_definitions_path" "/app/config/capacity-definitions.yaml" -}}
+    {{- end -}}
+    {{- $_ := set $config "storefront_identity" (first .Values.storefrontIdentity.principals) -}}
+    {{- $_ := set $config "admin_identity" (first .Values.adminIdentity.principals) -}}
     {{- if not $config.storefront_url -}}
       {{- $_ := set $config "storefront_url" (default (printf "http://%s-storefront-%s:%d" .Release.Name .Values.storefront.agentName (int .Values.storefront.port)) .Values.storefront.url) -}}
     {{- end -}}
-    {{- $config | toYaml | nindent 4 }}
+    {{- /* JSON is valid YAML and keeps 0x-prefixed principals as strings. */}}
+    {{- $config | toPrettyJson | nindent 4 }}
+  {{- with .Values.definitions.relays }}
+  {{- /*
+    Relay inventory. An entry may name which key of the provisioning-secrets
+    profile holds its admission token, and must name the key holding its
+    grant-signing key; the keys are named here, the values never are. Each is
+    read once, when the relay is created — a token or a grant key rotated
+    through the relay API is authoritative from then on.
+  */}}
+  relay-definitions.yaml: |
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.definitions.pools }}
+  {{- /*
+    Resource pools. Reconciled as a whole: a pool this document stops naming
+    is disabled. Imported before capacity, whose declarations name pools.
+  */}}
+  pool-definitions.yaml: |
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.definitions.hosts }}
+  {{- /*
+    Hosts. Each entry declares its whole host and names its key by file path,
+    never carrying one; a host this document stops naming is retained.
+    Imported after pools, which an entry names, and before capacity.
+  */}}
+  host-definitions.yaml: |
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.definitions.capacity }}
+  {{- /*
+    Capacity declarations. Each entry replaces the declaration it names; a
+    declaration this document stops naming is retained.
+  */}}
+  capacity-definitions.yaml: |
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- /*
+    Operator files, rendered verbatim and mounted beside the profile. The chart
+    knows nothing of what they mean: a setting in `config` names one by path.
+    toYaml quotes a key YAML would read as another type and picks each block
+    scalar's indentation and chomping, so a file's content survives exactly.
+  */}}
+  {{- with .Values.configFiles }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}

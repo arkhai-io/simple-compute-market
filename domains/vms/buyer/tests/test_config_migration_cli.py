@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import typer
@@ -12,7 +13,7 @@ from typer.testing import CliRunner
 
 
 def _app() -> typer.Typer:
-    from domains.vms.buyer.config_cli import config_app
+    from arkhai_vms_buyer.config_cli import config_app
 
     app = typer.Typer()
     app.add_typer(config_app, name="config")
@@ -20,7 +21,7 @@ def _app() -> typer.Typer:
 
 
 def test_buyer_registers_settlement_migration_check(monkeypatch, tmp_path: Path) -> None:
-    from domains.vms.buyer import config_cli
+    from arkhai_vms_buyer import config_cli
 
     path = tmp_path / "buyer.toml"
     path.write_text("[settlement]\nmechanism_priority = ['alkahest.v1']\n")
@@ -58,10 +59,38 @@ def test_buyer_registers_settlement_migration_check(monkeypatch, tmp_path: Path)
     assert "Settlement.priority" in result.output
 
 
+def test_buyer_migration_moves_the_retired_address_book_keys(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Spec scenario "A configuration is migrated", through the buyer's
+    `market config migrate`, over the real migration."""
+    from arkhai_vms_buyer import config_cli
+
+    path = tmp_path / "buyer.toml"
+    path.write_text(
+        "[Settlement]\nschema_version = 1\npriority = ['alkahest.v1']\n\n"
+        "[Settlement.alkahest]\nenabled = true\n\n"
+        "[chains.anvil]\nrpc_url = 'http://anvil.test'\n"
+        "alkahest_address_config_path = '/etc/arkhai/alkahest/anvil.json'\n"
+    )
+    monkeypatch.setattr(config_cli, "user_config_file", lambda: path)
+
+    result = CliRunner().invoke(
+        _app(), ["config", "migrate", "--scope", "settlement", "--write", "--backup"]
+    )
+
+    assert result.exit_code == 0, result.output
+    document = tomllib.loads(path.read_text())
+    assert document["Settlement"]["alkahest"]["address_books"] == {
+        "anvil": "/etc/arkhai/alkahest/anvil.json"
+    }
+    assert document["chains"]["anvil"] == {"rpc_url": "http://anvil.test"}
+
+
 def test_buyer_config_set_rejects_legacy_path_with_exact_command(
     monkeypatch,
 ) -> None:
-    from domains.vms.buyer import config_cli
+    from arkhai_vms_buyer import config_cli
 
     monkeypatch.setattr(
         config_cli,
@@ -81,7 +110,7 @@ def test_buyer_config_set_rejects_legacy_path_with_exact_command(
 
 
 def test_buyer_config_rejects_removed_marketplace_identity(monkeypatch, tmp_path):
-    from domains.vms.buyer import config_cli
+    from arkhai_vms_buyer import config_cli
 
     path = tmp_path / "buyer.toml"
     path.write_text(

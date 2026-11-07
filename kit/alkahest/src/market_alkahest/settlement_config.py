@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 import re
-from decimal import Decimal, InvalidOperation
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+from market_core.schemas import settlement_option_schema, settlement_option_params
 from market_settlement_runtime import (
     ComparisonOperator,
     FieldDescriptor,
@@ -21,11 +20,22 @@ from market_settlement_runtime import (
     SettlementClauseField,
     SettlementPublicationClause,
     SettlementRole,
+    decimal_rate_to_base_units,
 )
+from market_config.config_loader import derive_wallet_address
+from market_config.setting_types import PositiveSeconds
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .chain_probe import (
+    ADDRESS_CONFIG_INVALID,
+    CHAIN_ID_MISMATCH,
+    CHAIN_UNREACHABLE,
+    CONTRACT_MISSING,
+    DEFAULT_PROBE_INTERVAL_SECONDS,
+    DEFAULT_TIMEOUT_SECONDS,
+)
 from .claim_hooks import AlkahestConditionalEscrowClient
-from .escrow_verification import verify_escrow_for_settlement
+from .escrow_verification import verify_escrow_against_plan
 
 ALKAHEST_MECHANISM_ID = "alkahest.v1"
 ALKAHEST_CONFIG_KEY = "alkahest"
@@ -64,28 +74,103 @@ class AlkahestPublicationInput(BaseModel):
         return value
 
 
+ADDRESS_BOOKS_TABLE = "[Settlement.alkahest.address_books]"
+_RETIRED_SECTION_KEY = "address_config_path"
+_RETIRED_CHAIN_KEY = "alkahest_address_config_path"
+
+
+def retired_address_book_refusal(path: str) -> str:
+    """Why the retired address-book key at ``path`` is refused, and what replaces it."""
+    return (
+        f"{path} is retired: name each chain's Alkahest address book under "
+        f"{ADDRESS_BOOKS_TABLE}"
+    )
+
+
+def retired_address_book_keys(
+    settlement: Mapping[str, Any] | None, chains: Mapping[str, Any] | None
+) -> list[str]:
+    """Each retired address-book key a role's configuration states, as a path.
+
+    ``settlement`` is the role's ``[Settlement]`` table and ``chains`` its
+    ``[Chains]`` table, either absent. Keys match in any case, as the roles'
+    loaders read them. A chain's book is named only in
+    :data:`ADDRESS_BOOKS_TABLE`; every role refuses these keys, before its
+    settlement section is resolved, with :func:`retired_address_book_refusal`.
+    """
+    found: list[str] = []
+    for name, chain in (chains or {}).items():
+        if isinstance(chain, Mapping) and any(
+            str(key).lower() == _RETIRED_CHAIN_KEY for key in chain
+        ):
+            found.append(f"[Chains.{name}].{_RETIRED_CHAIN_KEY}")
+    section = next(
+        (
+            value
+            for key, value in (settlement or {}).items()
+            if str(key).lower() == ALKAHEST_CONFIG_KEY
+        ),
+        None,
+    )
+    if isinstance(section, Mapping) and any(
+        str(key).lower() == _RETIRED_SECTION_KEY for key in section
+    ):
+        found.append(f"[Settlement.alkahest].{_RETIRED_SECTION_KEY}")
+    return found
+
+
 class AlkahestSettlementConfig(BaseModel):
     """Alkahest-owned policy; identity, wallet, and chains are injected resources."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     enabled: bool = False
-    address_config_path: str | None = None
-    oracle_gated: bool = False
+    #: Each configured chain's address book, by chain name; a chain's book is
+    #: resolved through :func:`alkahest_address_book`.
+    address_books: dict[str, str] = Field(default_factory=dict)
+    release_models: tuple[Literal["recipient", "oracle_gated", "interruptible"], ...] = (
+        "recipient",
+    )
     trusted_oracle_addresses: tuple[str, ...] = ()
-    interruptible: bool = False
     interruptible_oracle_addresses: tuple[str, ...] = ()
+    #: How often each configured chain is probed, at most.
+    probe_interval_seconds: PositiveSeconds = Field(
+        default=DEFAULT_PROBE_INTERVAL_SECONDS, json_schema_extra={"roles": ["seller"]}
+    )
+    #: The bound on each JSON-RPC call a probe makes.
+    rpc_timeout_seconds: PositiveSeconds = Field(
+        default=DEFAULT_TIMEOUT_SECONDS, json_schema_extra={"roles": ["seller"]}
+    )
 
-    @field_validator("address_config_path")
+    @model_validator(mode="before")
     @classmethod
-    def validate_address_config_path(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if not value or value != value.strip():
-            raise ValueError("address_config_path must be non-empty and trimmed")
+    def refuse_the_retired_section_key(cls, value: Any) -> Any:
+        if isinstance(value, Mapping) and _RETIRED_SECTION_KEY in value:
+            raise ValueError(
+                retired_address_book_refusal(f"[Settlement.alkahest].{_RETIRED_SECTION_KEY}")
+            )
+        return value
+
+    @field_validator("address_books", mode="before")
+    @classmethod
+    def accept_configuration_tables(cls, value: Any) -> Any:
+        # A layered loader may hand the table over as its own mapping type.
+        return dict(value) if isinstance(value, Mapping) else value
+
+    @field_validator("address_books")
+    @classmethod
+    def validate_address_books(cls, value: dict[str, str]) -> dict[str, str]:
+        for chain_name, path in value.items():
+            if not chain_name or chain_name != chain_name.strip():
+                raise ValueError("address_books keys must be non-empty, trimmed chain names")
+            if not path or path != path.strip():
+                raise ValueError(
+                    f"address_books.{chain_name} must be a non-empty, trimmed path"
+                )
         return value
 
     @field_validator(
+        "release_models",
         "trusted_oracle_addresses",
         "interruptible_oracle_addresses",
         mode="before",
@@ -93,6 +178,13 @@ class AlkahestSettlementConfig(BaseModel):
     @classmethod
     def accept_toml_address_lists(cls, values: Any) -> Any:
         return tuple(values) if isinstance(values, list) else values
+
+    @field_validator("release_models")
+    @classmethod
+    def validate_release_models(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if not values or len(set(values)) != len(values):
+            raise ValueError("release_models must be non-empty and unique")
+        return values
 
     @field_validator("trusted_oracle_addresses", "interruptible_oracle_addresses")
     @classmethod
@@ -110,11 +202,61 @@ class AlkahestSettlementConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_oracle_policy(self) -> AlkahestSettlementConfig:
-        if not self.oracle_gated and self.trusted_oracle_addresses:
+        if ORACLE_GATED_RELEASE not in self.release_models and self.trusted_oracle_addresses:
             raise ValueError("trusted_oracle_addresses requires oracle_gated")
-        if not self.interruptible and self.interruptible_oracle_addresses:
+        if INTERRUPTIBLE_RELEASE not in self.release_models and self.interruptible_oracle_addresses:
             raise ValueError("interruptible_oracle_addresses requires interruptible")
         return self
+
+
+RECIPIENT_RELEASE = "recipient"
+ORACLE_GATED_RELEASE = "oracle_gated"
+INTERRUPTIBLE_RELEASE = "interruptible"
+RELEASE_MODELS: frozenset[str] = frozenset(
+    {RECIPIENT_RELEASE, ORACLE_GATED_RELEASE, INTERRUPTIBLE_RELEASE}
+)
+
+
+class ReleaseModelError(ValueError):
+    """The configured release model is contradictory or cannot be delivered."""
+
+
+def configured_release_models(config: AlkahestSettlementConfig | None) -> tuple[str, ...]:
+    """The ordered models offered by the section; omission offers recipient release."""
+    return config.release_models if config is not None else (RECIPIENT_RELEASE,)
+
+
+def require_deliverable_release_models(
+    config: AlkahestSettlementConfig | None, deliverable: Any
+) -> None:
+    """Refuse startup when the domain cannot deliver an offered release model."""
+    if config is None:
+        return
+    unsupported = set(configured_release_models(config)) - set(deliverable)
+    if unsupported:
+        raise ReleaseModelError(
+            "Settlement.alkahest.release_models contains models this domain cannot "
+            f"deliver: {', '.join(sorted(unsupported))}"
+        )
+
+
+def alkahest_address_book(
+    section: AlkahestSettlementConfig | Mapping[str, Any] | None, chain_name: str
+) -> str | None:
+    """The address book Alkahest uses on ``chain_name``.
+
+    ``section`` is the role's ``[Settlement.alkahest]``, parsed or not, or
+    ``None`` where the role configures none. Answers ``None`` for a chain the
+    section names no book for.
+    """
+    if section is None:
+        return None
+    config = (
+        section
+        if isinstance(section, AlkahestSettlementConfig)
+        else AlkahestSettlementConfig.model_validate(section)
+    )
+    return config.address_books.get(chain_name)
 
 
 def _value(source: Any, name: str, default: Any = None) -> Any:
@@ -123,15 +265,161 @@ def _value(source: Any, name: str, default: Any = None) -> Any:
     return getattr(source, name, default)
 
 
-def _blocker(code: str, message: str) -> ReadinessBlocker:
-    return ReadinessBlocker(code=code, message=message)
+def _configuration_blocker(code: str, message: str) -> ReadinessBlocker:
+    return ReadinessBlocker(code=code, message=message, kind="configuration")
 
 
-async def _await_if_needed(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
+def _reachability_blocker(code: str, message: str) -> ReadinessBlocker:
+    return ReadinessBlocker(code=code, message=message, kind="reachability")
+
+
+def _configured_wallet_address(wallet: Any) -> str:
+    # A composing storefront may pass its wallet as a mapping or object with an
+    # ``address``, or as the bare address string.
+    if isinstance(wallet, str):
+        return wallet.strip()
+    value = _value(wallet, "address")
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _wallet_key(wallet: Any) -> str:
+    if isinstance(wallet, str):
+        return ""
+    value = _value(wallet, "private_key")
+    if hasattr(value, "get_secret_value"):
+        value = value.get_secret_value()
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _signing_address(wallet: Any) -> str:
+    """The address the wallet's key signs as; empty with no key it can read."""
+    return derive_wallet_address(_wallet_key(wallet)) or ""
+
+
+def wallet_account_address(wallet: Any) -> str:
+    """The account a seller wallet names: its address, else its key's.
+
+    ``wallet`` is a mapping or object with ``address`` and ``private_key``, or a
+    bare address. A wallet stating no address is the account its key signs as,
+    so every place that names the seller's address names that account. A wallet
+    stating an address that is not its key's is not reconciled here; Alkahest
+    readiness reports it as ``alkahest.wallet_address_mismatch``.
+    """
+    if wallet is None:
+        return ""
+    return _configured_wallet_address(wallet) or _signing_address(wallet)
+
+
+def _release_model_blockers(
+    config: AlkahestSettlementConfig,
+    *,
+    role: SettlementRole,
+    seller_accounts: frozenset[str],
+    deliverable: Any,
+) -> list[ReadinessBlocker]:
+    """The blockers under which no deal could settle on the configured release model.
+
+    Each is configuration: the section parses, but no escrow released under it
+    could pay the seller, so the mechanism is unready rather than the storefront
+    stopped. Only a seller's wallet is the one an escrow pays, so the oracle is
+    compared with the wallet for the seller role alone, and with both the
+    address it names and the account its key signs as, since either is the
+    party collecting.
+    """
+    blockers: list[ReadinessBlocker] = []
+    accounts = seller_accounts if role == "seller" else frozenset()
+    if ORACLE_GATED_RELEASE in config.release_models and not config.trusted_oracle_addresses:
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.oracle_policy_invalid",
+                "oracle-gated settlement requires a trusted oracle address",
+            )
+        )
+    if INTERRUPTIBLE_RELEASE in config.release_models and not config.interruptible_oracle_addresses:
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.interruptible_policy_invalid",
+                "interruptible settlement requires an oracle address",
+            )
+        )
+    # The party collecting an escrow cannot also decide whether it collects.
+    oracles = (
+        config.trusted_oracle_addresses[:1]
+        if ORACLE_GATED_RELEASE in config.release_models else ()
+    ) + (
+        config.interruptible_oracle_addresses[:1]
+        if INTERRUPTIBLE_RELEASE in config.release_models else ()
+    )
+    if any(oracle in accounts for oracle in oracles):
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.oracle_is_seller_wallet",
+                "the configured release oracle is the seller wallet",
+            )
+        )
+    if deliverable is not None:
+        for model in configured_release_models(config):
+            if model not in set(deliverable):
+                blockers.append(
+                    _configuration_blocker(
+                        "alkahest.release_model_undeliverable",
+                        f"the configured {model!r} release model is not one this "
+                        "storefront's domain delivers",
+                    )
+                )
+    return blockers
+
+
+def _chain_probe_blockers(
+    chain_probe: Any, chain_names: tuple[str, ...]
+) -> list[ReadinessBlocker]:
+    """The blocker each selected chain's last probe result raises.
+
+    Readiness reads the probe's last results and calls no chain. A chain not yet
+    probed, or whose last probe could not reach it, is unknown rather than
+    ruled out. A buyer composes no probe and so reports no chain blocker.
+    """
+    if chain_probe is None:
+        return []
+    blockers: list[ReadinessBlocker] = []
+    for chain_name in chain_names:
+        result = chain_probe.result(chain_name)
+        if result is None:
+            blockers.append(
+                _reachability_blocker(
+                    CHAIN_UNREACHABLE, "a selected settlement chain has not been probed yet"
+                )
+            )
+        elif result.result == CHAIN_UNREACHABLE:
+            blockers.append(
+                _reachability_blocker(
+                    CHAIN_UNREACHABLE, "a selected settlement chain could not be reached"
+                )
+            )
+        elif not result.reachable:
+            blockers.append(
+                _configuration_blocker(result.result, _PROBE_MESSAGES[result.result])
+            )
+    # One blocker per code: two chains failing alike are one public reason.
+    return list({blocker.code: blocker for blocker in blockers}.values())
+
+
+_PROBE_MESSAGES = {
+    CHAIN_ID_MISMATCH: "a selected RPC reports a different chain identity",
+    CONTRACT_MISSING: "one or more required Alkahest contracts are not deployed",
+    ADDRESS_CONFIG_INVALID: "a selected chain's Alkahest address configuration cannot be resolved",
+}
 
 
 def _selected_chain_names(resources: Mapping[str, Any]) -> tuple[str, ...]:
+    """The chains readiness judges.
+
+    What is being published names its chains: escrows a listing publishes, or
+    one ``chain_name``. With no publication input, readiness answers whether
+    Alkahest can serve everything the storefront configures, so it judges every
+    configured chain: servicing an accepted deal needs whichever chain the deal
+    was accepted on. A composition's ``default_chain`` selects nothing here.
+    """
     chains = resources.get("chains")
     if not isinstance(chains, Mapping) or not chains:
         return ()
@@ -145,9 +433,9 @@ def _selected_chain_names(resources: Mapping[str, Any]) -> tuple[str, ...]:
             if name not in names:
                 names.append(name)
         return tuple(names)
-    selected = resources.get("chain_name") or resources.get("default_chain")
-    if selected is None and len(chains) == 1:
-        selected = next(iter(chains))
+    selected = resources.get("chain_name")
+    if selected is None:
+        return tuple(str(name) for name in chains)
     if not isinstance(selected, str) or selected not in chains:
         return ()
     return (selected,)
@@ -161,49 +449,175 @@ def _validate_address_file(path: str) -> bool:
     return isinstance(payload, dict)
 
 
+def _wallet_blockers(
+    wallet: Any, *, role: SettlementRole, signs: bool
+) -> tuple[ReadinessBlocker, ...]:
+    if wallet is None:
+        return (
+            _configuration_blocker(
+                "alkahest.wallet_missing", "an injected settlement wallet is required"
+            ),
+        )
+    blockers: list[ReadinessBlocker] = []
+    configured = _configured_wallet_address(wallet)
+    signing = _signing_address(wallet)
+    if not (configured or signing):
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.wallet_address_missing",
+                "the settlement wallet has no address",
+            )
+        )
+    # A seller's address is the recipient its release conditions name, and its
+    # key signs the attestation, collection, and refunds: two accounts would
+    # leave collection reverting or paying an account the listing never named.
+    # A buyer's address names nothing an escrow pays, so a buyer is not judged.
+    if (
+        role == "seller"
+        and configured
+        and signing
+        and configured.lower() != signing.lower()
+    ):
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.wallet_address_mismatch",
+                "the settlement wallet's address is not the account its key signs as",
+            )
+        )
+    if signs and not _wallet_key(wallet):
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.wallet_key_missing",
+                "the settlement wallet has no private key to sign with",
+            )
+        )
+    return tuple(blockers)
+
+
+def _chains_missing_blocker() -> ReadinessBlocker:
+    return _configuration_blocker(
+        "alkahest.chains_missing",
+        "no settlement chain is configured under [Chains]",
+    )
+
+
+def _address_config_blockers(
+    config: AlkahestSettlementConfig, chains: Any
+) -> tuple[ReadinessBlocker, ...]:
+    """A book that names no configured chain, and a book that cannot be loaded.
+
+    A book under a name no chain carries would be read by nothing, so the
+    chain it was meant for would silently go without it. Where the
+    composition passes no chains mapping there is nothing to compare with.
+    """
+    blockers: list[ReadinessBlocker] = []
+    unknown = (
+        [name for name in config.address_books if name not in chains]
+        if isinstance(chains, Mapping)
+        else []
+    )
+    if unknown:
+        # One blocker per code, naming every such key.
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.address_book_chain_unknown",
+                "Settlement.alkahest.address_books names "
+                + ", ".join(repr(name) for name in sorted(unknown))
+                + ", which is not a configured settlement chain",
+            )
+        )
+    if any(not _validate_address_file(path) for path in config.address_books.values()):
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.address_config_invalid",
+                "the Alkahest address configuration cannot be loaded",
+            )
+        )
+    return tuple(blockers)
+
+
 async def alkahest_preflight(
     section: BaseModel,
     resources: Mapping[str, Any],
     role: SettlementRole,
 ) -> MechanismReadiness:
-    """Observe Alkahest prerequisites without submitting a transaction."""
+    """Observe Alkahest prerequisites without submitting a transaction.
 
-    del role
+    Unusable wallet, oracle and chain inputs are configuration blockers, so
+    other mechanisms can keep running. A domain must refuse models it cannot
+    deliver at startup; preflight also reports those models to diagnostic callers. The composing storefront supplies, beside its wallet and
+    chains:
+
+    - ``deliverable_release_models``: the release models its domain's Alkahest
+      seller stage delivers; a configured model outside them is a blocker;
+    - ``signs_transactions``: true where the storefront submits transactions
+      with the seller wallet's key, so a missing key or no configured chain is
+      a blocker;
+    - ``chain_probe``: its :class:`~market_alkahest.chain_probe.AlkahestChainProbe`,
+      whose last result per selected chain readiness reads; readiness makes no
+      chain call of its own.
+
+    A buyer supplies none of them. A wallet stating no address is read as the
+    account its key signs as (:func:`wallet_account_address`); a seller's wallet
+    whose address and key name two accounts is a blocker, a buyer's is not.
+
+    A seller's disabled section publishes nothing, so it reports only the
+    blockers that do not concern publication: its wallet, key, and chains,
+    which servicing the deals accepted under it needs; its address
+    configuration; and its release model, so a seller re-enabling it learns
+    first that it could not settle. A buyer's disabled section reports none.
+    """
+
     config = AlkahestSettlementConfig.model_validate(section)
+    wallet = resources.get("wallet")
+    seller_accounts = (
+        frozenset(
+            address.lower()
+            for address in (_configured_wallet_address(wallet), _signing_address(wallet))
+            if address
+        )
+        if wallet is not None
+        else frozenset()
+    )
+    signs = bool(resources.get("signs_transactions"))
+    chains = resources.get("chains")
+    chains_missing = signs and not (isinstance(chains, Mapping) and chains)
     if not config.enabled:
         return MechanismReadiness(
             mechanism=ALKAHEST_MECHANISM_ID,
             configured=True,
             enabled=False,
             ready=False,
+            blockers=(
+                (
+                    *_wallet_blockers(wallet, role=role, signs=signs),
+                    *((_chains_missing_blocker(),) if chains_missing else ()),
+                    *_address_config_blockers(config, chains),
+                    *_release_model_blockers(
+                        config,
+                        role=role,
+                        seller_accounts=seller_accounts,
+                        deliverable=resources.get("deliverable_release_models"),
+                    ),
+                )
+                if role == "seller"
+                else ()
+            ),
             capabilities=("conditional-escrow.v1", "evm.v1"),
             contract_version="alkahest.v1",
             schema_version="1",
             public_details={},
         )
 
-    blockers: list[ReadinessBlocker] = []
-    wallet = resources.get("wallet")
-    has_composed_client = bool(resources.get("get_client") or resources.get("clients"))
-    if wallet is None and not resources.get("wallet_ready") and not has_composed_client:
-        blockers.append(
-            _blocker(
-                "alkahest.wallet_missing", "an injected settlement wallet is required"
-            )
-        )
-    elif wallet is not None and not (_value(wallet, "address") or has_composed_client):
-        blockers.append(
-            _blocker(
-                "alkahest.wallet_address_missing",
-                "the settlement wallet has no address",
-            )
-        )
-
-    chains = resources.get("chains")
+    blockers: list[ReadinessBlocker] = list(
+        _wallet_blockers(wallet, role=role, signs=signs)
+    )
     chain_names = _selected_chain_names(resources)
-    if not chain_names or not isinstance(chains, Mapping):
+    if chains_missing:
+        blockers.append(_chains_missing_blocker())
+    elif not chain_names or not isinstance(chains, Mapping):
         blockers.append(
-            _blocker(
+            _configuration_blocker(
                 "alkahest.chain_missing",
                 "each published escrow must select a configured settlement chain",
             )
@@ -221,96 +635,40 @@ async def alkahest_preflight(
                 and not client_present
             ):
                 blockers.append(
-                    _blocker(
+                    _configuration_blocker(
                         "alkahest.rpc_missing",
                         "a selected settlement chain has no RPC client",
                     )
                 )
-            configured_chain_id = _value(chain, "chain_id")
-            observed = resources.get("observed_chain_id")
-            if isinstance(observed, Mapping):
-                observed = observed.get(chain_name)
-            if configured_chain_id is not None and observed is not None:
-                if int(configured_chain_id) != int(observed):
-                    blockers.append(
-                        _blocker(
-                            "alkahest.chain_id_mismatch",
-                            "a selected RPC reports a different chain identity",
-                        )
-                    )
+        blockers.extend(_chain_probe_blockers(resources.get("chain_probe"), chain_names))
 
-    if config.address_config_path and not _validate_address_file(
-        config.address_config_path
-    ):
-        blockers.append(
-            _blocker(
-                "alkahest.address_config_invalid",
-                "the Alkahest address configuration cannot be loaded",
-            )
-        )
-
-    deployed = resources.get("deployed_contracts")
-    if isinstance(deployed, Mapping) and any(
-        value is not True for value in deployed.values()
-    ):
-        blockers.append(
-            _blocker(
-                "alkahest.contract_missing",
-                "one or more required Alkahest contracts are not deployed",
-            )
-        )
-    probe = resources.get("contract_probe")
-    required_addresses = resources.get("required_addresses")
-    if (
-        callable(probe)
-        and isinstance(required_addresses, Mapping)
-        and required_addresses
-    ):
-        for chain_name in chain_names:
-            try:
-                result = await _await_if_needed(
-                    probe(chain_name, dict(required_addresses))
-                )
-            except Exception:
-                result = None
-            if not isinstance(result, Mapping) or any(
-                value is not True for value in result.values()
-            ):
-                blockers.append(
-                    _blocker(
-                        "alkahest.contract_probe_failed",
-                        "required Alkahest deployments could not be verified",
-                    )
-                )
-                break
+    blockers.extend(_address_config_blockers(config, chains))
 
     if resources.get("require_asset") and not resources.get("asset"):
         blockers.append(
-            _blocker("alkahest.asset_missing", "a settlement asset must be selected")
-        )
-    if config.oracle_gated and not config.trusted_oracle_addresses:
-        blockers.append(
-            _blocker(
-                "alkahest.oracle_policy_invalid",
-                "oracle-gated settlement requires a trusted oracle address",
+            _configuration_blocker(
+                "alkahest.asset_missing", "a settlement asset must be selected"
             )
         )
-    if config.interruptible and not config.interruptible_oracle_addresses:
-        blockers.append(
-            _blocker(
-                "alkahest.interruptible_policy_invalid",
-                "interruptible settlement requires an oracle address",
-            )
+    blockers.extend(
+        _release_model_blockers(
+            config,
+            role=role,
+            seller_accounts=seller_accounts,
+            deliverable=resources.get("deliverable_release_models"),
         )
+    )
 
     details: dict[str, Any] = {
-        "oracle_gated": config.oracle_gated,
-        "interruptible": config.interruptible,
+        "release_models": list(config.release_models),
     }
     if len(chain_names) == 1:
         details["chain"] = chain_names[0]
     if isinstance(resources.get("asset"), str):
         details["asset"] = resources["asset"]
+    chain_probe = resources.get("chain_probe")
+    if chain_probe is not None:
+        details["chain_probe"] = chain_probe.public_results()
     return MechanismReadiness(
         mechanism=ALKAHEST_MECHANISM_ID,
         configured=True,
@@ -345,9 +703,12 @@ def alkahest_client_factory(
             return clients.get(chain or "")
 
     chains = resources.get("chains")
+    # Claims on each chain are serviced against that chain's own book.
     chain_config_paths: dict[str, str | None] = {}
     if isinstance(chains, Mapping):
-        chain_config_paths = dict.fromkeys(chains, config.address_config_path)
+        chain_config_paths = {
+            name: alkahest_address_book(config, name) for name in chains
+        }
     return AlkahestConditionalEscrowClient(
         get_client=get_client,
         chain_config_paths=chain_config_paths,
@@ -365,6 +726,7 @@ def _resource_value(value: Any, name: str) -> Any:
 
 
 def _alkahest_escrow_from_clause(
+    config: AlkahestSettlementConfig,
     clause: SettlementPublicationClause,
     resources: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -381,7 +743,7 @@ def _alkahest_escrow_from_clause(
         )
     rpc_url = _resource_value(chain, "rpc_url")
     chain_id = _resource_value(chain, "chain_id")
-    address_config_path = _resource_value(chain, "alkahest_address_config_path")
+    address_book = alkahest_address_book(config, publication.chain)
     # Registration and clause validation remain dependency-light. Load the
     # chain client and token resolver only when materializing a public option.
     from .alkahest import get_erc20_escrow_obligation_default
@@ -401,27 +763,19 @@ def _alkahest_escrow_from_clause(
     rates: list[dict[str, Any]] = []
     if clause.rate is not None:
         try:
-            human = Decimal(clause.rate)
-        except InvalidOperation as exc:
-            raise ValueError(f"invalid Alkahest rate {clause.rate!r}") from exc
-        scaled = human * (Decimal(10) ** token.decimals)
-        if scaled != scaled.to_integral_value():
-            raise ValueError(
-                f"Alkahest rate {clause.rate!r} has more than "
-                f"{token.decimals} decimal places"
-            )
-        if scaled < 0:
-            raise ValueError("Alkahest rate must not be negative")
+            base_units = decimal_rate_to_base_units(clause.rate, token.decimals)
+        except ValueError as exc:
+            raise ValueError(f"Alkahest rate {clause.rate!r}: {exc}") from exc
         rates.append(
             {
                 "field": "amount",
                 "per": clause.per,
-                "value": str(int(scaled)),
+                "value": str(base_units),
             }
         )
     escrow_address = get_erc20_escrow_obligation_default(
         publication.chain,
-        config_path=address_config_path,
+        config_path=address_book,
     )
     return {
         "chain_name": publication.chain,
@@ -448,7 +802,7 @@ def alkahest_option_builder(
         clause = SettlementPublicationClause.model_validate(raw_clause)
         if clause.mechanism != ALKAHEST_MECHANISM_ID:
             raise ValueError("publication clause does not select Alkahest")
-        escrow_wires = [_alkahest_escrow_from_clause(clause, resources)]
+        escrow_wires = [_alkahest_escrow_from_clause(config, clause, resources)]
     else:
         accepted = resources.get("accepted_escrows")
         if not isinstance(accepted, (list, tuple)) or not accepted:
@@ -459,8 +813,24 @@ def alkahest_option_builder(
             else dict(value)
             for value in accepted
         ]
+    # Release-condition derivation reads this module's configuration model, so
+    # import it after configuration initialization rather than forming a cycle.
+    from .release_conditions import release_conditions
+
+    chains = resources.get("chains")
+    conditions = release_conditions(
+        config,
+        chain_names={str(escrow["chain_name"]) for escrow in escrow_wires},
+        chains=chains if isinstance(chains, Mapping) else {},
+        wallet_address=wallet_account_address(resources.get("wallet")),
+    )
     options: list[dict[str, Any]] = []
-    for escrow in escrow_wires:
+    for escrow, condition in (
+        (escrow, condition)
+        for escrow in escrow_wires
+        for condition in conditions
+        if condition["chain_name"] == escrow["chain_name"]
+    ):
         literals = escrow.get("literal_fields")
         if not isinstance(literals, Mapping):
             literals = {}
@@ -480,12 +850,10 @@ def alkahest_option_builder(
             if "value" in rate:
                 rate["value"] = str(rate["value"])
             rates.append(rate)
-        params = {"accepted_escrow": escrow}
+        params = {"accepted_escrow": {**escrow, "demand": condition}}
         identity_payload = {
-            "mechanism": ALKAHEST_MECHANISM_ID,
-            "asset": str(asset),
-            "rates": rates,
-            "params": params,
+            "price": {"asset": str(asset), "rates": rates},
+            "settlement": {"schema": ALKAHEST_MECHANISM_ID, **(params or {})},
         }
         encoded = json.dumps(
             identity_payload,
@@ -508,9 +876,9 @@ def alkahest_buyer_compatibility(
     public_context: Mapping[str, Any],
 ) -> bool:
     config = AlkahestSettlementConfig.model_validate(section)
-    if not config.enabled or _value(option, "mechanism") != ALKAHEST_MECHANISM_ID:
+    if not config.enabled or settlement_option_schema(option) != ALKAHEST_MECHANISM_ID:
         return False
-    params = _value(option, "params", {})
+    params = settlement_option_params(option)
     escrow = params.get("accepted_escrow", {}) if isinstance(params, Mapping) else {}
     chain_name = _value(escrow, "chain_name") or _value(escrow, "chain")
     allowed = public_context.get("chains")
@@ -520,7 +888,7 @@ def alkahest_buyer_compatibility(
 
 
 def _alkahest_escrow(option: Any) -> Mapping[str, Any] | None:
-    params = _value(option, "params", {})
+    params = settlement_option_params(option)
     if not isinstance(params, Mapping):
         return None
     escrow = params.get("accepted_escrow")
@@ -578,7 +946,9 @@ def create_alkahest_registration(
         preflight=alkahest_preflight,
         client_factory=alkahest_client_factory,
         option_builder=alkahest_option_builder,
-        settlement_verifier=verify_escrow_for_settlement,
+        # A deal's escrow is verified against the plan committed when it was
+        # accepted, never the listing as it now stands.
+        settlement_verifier=verify_escrow_against_plan,
         command_group=command_group,
         clause_fields=(
             SettlementClauseField(
@@ -606,22 +976,34 @@ def create_alkahest_registration(
         publication_input_validator=validate_alkahest_publication_input,
         buyer_compatibility=alkahest_buyer_compatibility,
         public_detail_keys=frozenset(
-            {"chain", "asset", "oracle_gated", "interruptible"}
+            {"chain", "asset", "release_models", "chain_probe"}
         ),
     )
 
 
 __all__ = [
+    "INTERRUPTIBLE_RELEASE",
+    "ORACLE_GATED_RELEASE",
+    "RECIPIENT_RELEASE",
+    "RELEASE_MODELS",
+    "ReleaseModelError",
+    "configured_release_models",
+    "require_deliverable_release_models",
     "ALKAHEST_CONFIG_KEY",
     "AlkahestPublicationInput",
     "alkahest_chain_projection",
     "alkahest_escrow_kind_projection",
     "validate_alkahest_publication_input",
     "ALKAHEST_MECHANISM_ID",
+    "ADDRESS_BOOKS_TABLE",
     "AlkahestSettlementConfig",
+    "alkahest_address_book",
     "alkahest_buyer_compatibility",
+    "retired_address_book_keys",
+    "retired_address_book_refusal",
     "alkahest_client_factory",
     "alkahest_option_builder",
     "alkahest_preflight",
     "create_alkahest_registration",
+    "wallet_account_address",
 ]

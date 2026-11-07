@@ -1,4 +1,4 @@
-"""Restart-safe convergence for accepted VM storefront escrows.
+"""Restart-safe convergence for accepted VM storefront deliveries.
 
 The foreground settlement task normally drives fulfillment to completion. This
 runtime recovers unfinished physical fulfillment after process interruption.
@@ -15,32 +15,46 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from typing import Any
 
-from compute_provisioning import FulfillmentRequestBody, FulfillmentScheduleRequest
+from compute_provisioning_contracts import (
+    FulfillmentRequestBody,
+    FulfillmentScheduleRequest,
+)
+from market_core.schemas import settlement_option_schema
+from market_capacity_publication import CapacityEffects, PublicationBinding
+from market_core import SettlementEvidence, VersionedEnvelope
 from market_fulfillment import (
+    CREATE_COMPENSATION,
     FULFILLMENT_RESULT_KIND,
     FULFILLMENT_RESULT_SCHEMA_VERSION,
     FulfillmentResultPayload,
-    VersionedEnvelope,
 )
+from market_resource_pools_contracts.backing import CapacityNotAdmittedError
 
+from market_storefront import container as _container
 from market_storefront.services.capacity_client import (
     build_capacity_client,
     build_fulfillment_client,
+    capacity_binding_for_listing,
 )
 from market_storefront.services.fulfillment_service import (
-    _fulfillment_result_to_legacy_shape,
+    _fulfillment_result_to_connection,
+)
+from market_storefront.services.vm_fulfillment_planner import (
+    VERIFIED_EVIDENCE_STATUSES,
+    build_vm_fulfillment_plan,
 )
 from market_storefront.services.vm_fulfillment_service import (
     _lease_window_strings,
-    persist_escrow_fields_with_retry,
+    persist_delivery_fields_with_retry,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
 
-_TERMINAL_ESCROW_STATUSES = {"ready", "failed", "refunded"}
+_TERMINAL_DELIVERY_STATUSES = {"ready", "failed", "refunded", "ended"}
 
 
 def _validated_context(raw: str | None) -> dict[str, Any] | None:
@@ -58,37 +72,45 @@ def _validated_context(raw: str | None) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-async def _refresh_capacity_lease(
+async def _commit_recovered_reservation(
     *,
-    escrow_uid: str,
+    negotiation_id: str,
     reservation_id: str,
-    resource_id: str,
-    lease_start_utc: str,
-    lease_end_utc: str,
+    context: dict[str, Any],
     capacity_client: Any,
-    site_id: str,
+    binding: PublicationBinding,
 ) -> None:
-    if capacity_client is None or not reservation_id or not resource_id:
+    """Commit the deal's reservation before its fulfillment begins.
+
+    A recovered deal's reservation may never have been committed: a fresh
+    recovery reserve is not, and the settlement path can stop between
+    reserving and committing. A lease with no negotiated start begins at
+    commit, so the deal's window starts here; a reservation already committed
+    keeps the window its first commit recorded, since a repeat commit leaves it
+    unchanged. The commit also names the deal. A failed commit raises, so the
+    pass stops before provisioning and the next one retries.
+    """
+    if capacity_client is None:
         return
-    try:
-        await capacity_client.commit(
-            resource_id=resource_id,
-            capacity_reservation_id=reservation_id,
-            lease_start_utc=lease_start_utc,
-            lease_end_utc=lease_end_utc,
-            idempotency_ref=escrow_uid,
-            site_id=site_id,
-        )
-    except Exception:
-        logger.exception(
-            "[FULFILLMENT_RESUME] Lease refresh failed for escrow %s", escrow_uid
-        )
+    lease_start_utc, lease_end_utc = _lease_window_strings(
+        start_utc=context.get("start_utc"),
+        duration_seconds=int(context.get("duration_seconds") or 3600),
+    )
+    await CapacityEffects(capacity_client).commit(
+        binding,
+        resource_id=None,
+        capacity_reservation_id=reservation_id,
+        lease_start_utc=lease_start_utc,
+        lease_end_utc=lease_end_utc,
+        idempotency_ref=negotiation_id,
+        deal_ref={"negotiation_id": negotiation_id},
+    )
 
 
 async def _store_fulfillment_credentials(
     *,
     sqlite_client: SQLiteClient,
-    escrow_uid: str,
+    negotiation_id: str,
     credential_listing_id: str | None,
     authentication: dict[str, Any] | None,
 ) -> None:
@@ -104,103 +126,22 @@ async def _store_fulfillment_credentials(
                 role=role,
                 granted_to="self",
                 password=data.get("password"),
-                ssh_commands=(
-                    json.dumps(data.get("ssh_commands"))
-                    if data.get("ssh_commands")
-                    else None
-                ),
-                ssh_key_path_host=(
-                    data.get("ssh_key_path_host") if role == "root" else None
-                ),
-                key_type=(data.get("key_type") if role == "tenant" else None),
+                # A delivery carries each credential's allowlisted fields only:
+                # no key path on a provisioner host, and no commands.
+                key_type=data.get("key_type"),
             )
         except Exception:
             logger.exception(
-                "[FULFILLMENT_RESUME] Credential storage failed for escrow %s role %s",
-                escrow_uid,
+                "[FULFILLMENT_RESUME] Credential storage failed for negotiation %s role %s",
+                negotiation_id,
                 role,
             )
-
-
-async def _register_recovered_vm_lease(
-    *,
-    register_lease: Callable[..., Awaitable[Any]] | None,
-    escrow_uid: str,
-    reservation_id: str,
-    resource_id: str,
-    vm_host: Any,
-    vm_target: Any,
-    lease_start_utc: str,
-    lease_end_utc: str,
-) -> None:
-    if not (
-        register_lease and reservation_id and resource_id and vm_host and vm_target
-    ):
-        return
-    try:
-        await register_lease(
-            resource_id=resource_id,
-            capacity_reservation_id=reservation_id,
-            escrow_uid=escrow_uid,
-            vm_host=str(vm_host),
-            vm_target=str(vm_target),
-            lease_start_utc=lease_start_utc,
-            lease_end_utc=lease_end_utc,
-        )
-    except Exception:
-        logger.exception(
-            "[FULFILLMENT_RESUME] Provisioning lease registration failed for escrow %s",
-            escrow_uid,
-        )
-
-
-async def _ensure_onchain_fulfillment(
-    *,
-    escrow: dict[str, Any],
-    sqlite_client: SQLiteClient,
-    submit_fulfillment: Callable[..., Awaitable[str]] | None,
-    alkahest_client: Any | None,
-    connection_json: str,
-) -> str | None:
-    fulfillment_uid = escrow.get("fulfillment_uid")
-    if fulfillment_uid or submit_fulfillment is None:
-        return str(fulfillment_uid) if fulfillment_uid else None
-    escrow_uid = str(escrow["escrow_uid"])
-    ambiguous = escrow.get("fulfillment_phase") == "onchain_submission_started"
-    if not ambiguous:
-        await persist_escrow_fields_with_retry(
-            lambda: sqlite_client,
-            escrow_uid=escrow_uid,
-            fulfillment_phase="onchain_submission_started",
-        )
-    try:
-        fulfillment_uid = await submit_fulfillment(
-            client=alkahest_client,
-            escrow_uid=escrow_uid,
-            connection_details=connection_json,
-            allow_submit=not ambiguous,
-        )
-    except TypeError:
-        if ambiguous:
-            raise
-        fulfillment_uid = await submit_fulfillment(
-            client=alkahest_client,
-            escrow_uid=escrow_uid,
-            connection_details=connection_json,
-        )
-    await persist_escrow_fields_with_retry(
-        lambda: sqlite_client,
-        escrow_uid=escrow_uid,
-        fulfillment_uid=str(fulfillment_uid),
-        fulfillment_phase="onchain_fulfilled",
-    )
-    return str(fulfillment_uid)
 
 
 async def _update_fulfilled_listing(
     *,
     sqlite_client: SQLiteClient,
-    escrow_uid: str,
+    negotiation_id: str,
     listing_id: Any,
     connection_json: str,
 ) -> None:
@@ -212,22 +153,23 @@ async def _update_fulfilled_listing(
         )
     except Exception:
         logger.exception(
-            "[FULFILLMENT_RESUME] Listing update failed for escrow %s", escrow_uid
+            "[FULFILLMENT_RESUME] Listing update failed for negotiation %s",
+            negotiation_id,
         )
 
 
-async def _mark_escrow_delivery_complete(
+async def _mark_delivery_complete(
     *,
     sqlite_client: SQLiteClient,
-    escrow_uid: str,
+    negotiation_id: str,
     fulfillment_uid: str | None,
     connection_json: str,
     authentication: dict[str, Any] | None,
 ) -> None:
     tenant = (authentication or {}).get("tenant") or {}
-    await persist_escrow_fields_with_retry(
+    await persist_delivery_fields_with_retry(
         lambda: sqlite_client,
-        escrow_uid=escrow_uid,
+        negotiation_id=negotiation_id,
         status="ready",
         fulfillment_uid=fulfillment_uid,
         connection_details=connection_json,
@@ -239,106 +181,48 @@ async def _mark_escrow_delivery_complete(
     )
 
 
-async def _bind_recovered_settlement_fulfillment(
-    *,
-    bind_fulfillment_fn: Callable[..., Awaitable[Any]] | None,
-    escrow: dict[str, Any],
-    fulfillment_uid: str | None,
-) -> None:
-    if bind_fulfillment_fn is None:
-        return
-    obligation_ref = escrow.get("obligation_ref")
-    if not obligation_ref:
-        raise RuntimeError(
-            f"escrow {escrow.get('escrow_uid')} has no persisted settlement obligation"
-        )
-    if not fulfillment_uid:
-        raise RuntimeError(
-            f"escrow {escrow.get('escrow_uid')} has no immutable fulfillment UID"
-        )
-    await bind_fulfillment_fn(
-        obligation_ref=str(obligation_ref),
-        fulfillment_ref=str(fulfillment_uid),
-    )
-
-
 async def converge_post_physical_delivery(
     *,
-    escrow: dict[str, Any],
+    delivery: dict[str, Any],
     context: dict[str, Any],
     sqlite_client: SQLiteClient,
     capacity_client: Any,
     connection_details: dict[str, Any],
     authentication: dict[str, Any] | None,
-    register_lease: Callable[..., Awaitable[Any]] | None = None,
-    submit_fulfillment: Callable[..., Awaitable[str]] | None = None,
-    bind_fulfillment_fn: Callable[..., Awaitable[Any]] | None = None,
-    alkahest_client: Any | None = None,
-    site_id: str,
+    continuation: Callable[..., Awaitable[str]] | None = None,
 ) -> bool:
-    """Converge the durable storefront effects after physical success."""
-    escrow_uid = str(escrow["escrow_uid"])
-    reservation_id = str(escrow.get("capacity_reservation_id") or "")
-    resource_id = str(escrow.get("settlement_resource_id") or "")
+    """Converge the durable storefront effects after physical success.
+
+    The lease needs nothing here: its window was recorded at commit, before
+    the fulfillment began, and provisioning recorded its target when the
+    fulfillment became active.
+    """
+    negotiation_id = str(delivery["negotiation_id"])
     listing_id = context.get("listing_id")
-    request = (context.get("fulfillment_request") or {}).get("payload") or {}
-    lease_start_utc, lease_end_utc = _lease_window_strings(
-        start_utc=context.get("start_utc"),
-        duration_seconds=int(context.get("duration_seconds") or 3600),
-    )
-    await _refresh_capacity_lease(
-        escrow_uid=escrow_uid,
-        reservation_id=reservation_id,
-        resource_id=resource_id,
-        lease_start_utc=lease_start_utc,
-        lease_end_utc=lease_end_utc,
-        capacity_client=capacity_client,
-        site_id=site_id,
+    await sqlite_client.update_vm_delivery(
+        negotiation_id=negotiation_id, fulfillment_phase="disclose",
     )
     await _store_fulfillment_credentials(
         sqlite_client=sqlite_client,
-        escrow_uid=escrow_uid,
+        negotiation_id=negotiation_id,
         credential_listing_id=context.get("seller_order_id") or listing_id,
         authentication=authentication,
     )
-    await _register_recovered_vm_lease(
-        register_lease=register_lease,
-        escrow_uid=escrow_uid,
-        reservation_id=reservation_id,
-        resource_id=resource_id,
-        vm_host=connection_details.get("host"),
-        vm_target=request.get("vm_target"),
-        lease_start_utc=lease_start_utc,
-        lease_end_utc=lease_end_utc,
-    )
     connection_json = json.dumps(connection_details, sort_keys=True)
-    if (
-        register_lease is None
-        and submit_fulfillment is None
-        and bind_fulfillment_fn is None
-    ):
+    if continuation is None:
         return True
-    fulfillment_uid = await _ensure_onchain_fulfillment(
-        escrow=escrow,
-        sqlite_client=sqlite_client,
-        submit_fulfillment=submit_fulfillment,
-        alkahest_client=alkahest_client,
-        connection_json=connection_json,
-    )
-    await _bind_recovered_settlement_fulfillment(
-        bind_fulfillment_fn=bind_fulfillment_fn,
-        escrow=escrow,
-        fulfillment_uid=fulfillment_uid,
+    fulfillment_uid = await continuation(
+        delivery=delivery, connection_json=connection_json
     )
     await _update_fulfilled_listing(
         sqlite_client=sqlite_client,
-        escrow_uid=escrow_uid,
+        negotiation_id=negotiation_id,
         listing_id=listing_id,
         connection_json=connection_json,
     )
-    await _mark_escrow_delivery_complete(
+    await _mark_delivery_complete(
         sqlite_client=sqlite_client,
-        escrow_uid=escrow_uid,
+        negotiation_id=negotiation_id,
         fulfillment_uid=fulfillment_uid,
         connection_json=connection_json,
         authentication=authentication,
@@ -348,13 +232,14 @@ async def converge_post_physical_delivery(
 
 async def _ensure_recovery_capacity(
     *,
-    escrow_uid: str,
+    negotiation_id: str,
     context: dict[str, Any],
     sqlite_client: SQLiteClient,
     capacity_client: Any | None,
     reservation_id: Any,
     settlement_resource_id: Any,
     thread_binding: Any,
+    binding: PublicationBinding,
 ) -> tuple[str | None, str | None]:
     if reservation_id:
         return str(reservation_id), (
@@ -362,8 +247,8 @@ async def _ensure_recovery_capacity(
         )
     if capacity_client is None:
         logger.warning(
-            "[FULFILLMENT_RESUME] Escrow %s requires capacity reconciliation",
-            escrow_uid,
+            "[FULFILLMENT_RESUME] Negotiation %s requires capacity reconciliation",
+            negotiation_id,
         )
         return None, None
     listing_id = thread_binding.listing_id
@@ -371,18 +256,20 @@ async def _ensure_recovery_capacity(
     if context.get("listing_id") not in (None, listing_id):
         raise RuntimeError("recovery context listing disagrees with accepted binding")
     claim = dict(context.get("required_attributes") or {})
-    claimed_mode = claim.get("executor_kind")
+    claimed_mode = claim.get("offering_mode")
     if claimed_mode not in (None, thread_binding.binding.offering_mode):
         raise RuntimeError("recovery context offering mode disagrees with binding")
-    claim["executor_kind"] = thread_binding.binding.offering_mode
+    claim["offering_mode"] = thread_binding.binding.offering_mode
     try:
-        reserved = await capacity_client.reserve(
+        reserved = await CapacityEffects(capacity_client).reserve(
+            binding,
             claim=claim,
-            deal_ref={"listing_id": listing_id, "escrow_uid": escrow_uid},
+            deal_ref={"listing_id": listing_id, "negotiation_id": negotiation_id},
             lease_start_utc=context.get("start_utc"),
             lease_duration_seconds=int(context.get("duration_seconds") or 3600),
-            site=site_id,
         )
+    except CapacityNotAdmittedError:
+        raise
     except Exception as exc:
         if site_id is None:
             raise
@@ -391,21 +278,21 @@ async def _ensure_recovery_capacity(
         # refusal already does below rather than as a new, unhandled
         # exception shape during resume.
         logger.warning(
-            "[FULFILLMENT_RESUME] reserve at pinned site %r failed for escrow %s: %s",
+            "[FULFILLMENT_RESUME] reserve at pinned site %r failed for negotiation %s: %s",
             site_id,
-            escrow_uid,
+            negotiation_id,
             exc,
         )
         reserved = None
     if not reserved or not reserved.get("capacity_reservation_id"):
         raise RuntimeError(
-            f"No capacity available while recovering escrow {escrow_uid}"
+            f"No capacity available while recovering negotiation {negotiation_id}"
         )
     reservation = str(reserved["capacity_reservation_id"])
     resource = str(reserved["resource_id"]) if reserved.get("resource_id") else None
-    await persist_escrow_fields_with_retry(
+    await persist_delivery_fields_with_retry(
         lambda: sqlite_client,
-        escrow_uid=escrow_uid,
+        negotiation_id=negotiation_id,
         capacity_reservation_id=reservation,
         settlement_resource_id=resource,
         fulfillment_phase="capacity_reserved",
@@ -415,7 +302,7 @@ async def _ensure_recovery_capacity(
 
 async def _ensure_recovery_fulfillment_started(
     *,
-    escrow_uid: str,
+    negotiation_id: str,
     request_envelope: dict[str, Any],
     sqlite_client: SQLiteClient,
     fulfillment_client: Any,
@@ -435,9 +322,9 @@ async def _ensure_recovery_fulfillment_started(
             site_id=site_id,
         )
         resource_id = str(scheduled.settlement_resource_id)
-        await persist_escrow_fields_with_retry(
+        await persist_delivery_fields_with_retry(
             lambda: sqlite_client,
-            escrow_uid=escrow_uid,
+            negotiation_id=negotiation_id,
             capacity_reservation_id=reservation_id,
             settlement_resource_id=resource_id,
             fulfillment_phase="resource_scheduled",
@@ -451,9 +338,9 @@ async def _ensure_recovery_fulfillment_started(
         site_id=site_id,
     )
     fid = str(accepted.fulfillment_id)
-    await persist_escrow_fields_with_retry(
+    await persist_delivery_fields_with_retry(
         lambda: sqlite_client,
-        escrow_uid=escrow_uid,
+        negotiation_id=negotiation_id,
         capacity_reservation_id=reservation_id,
         settlement_resource_id=resource_id,
         fulfillment_id=fid,
@@ -464,7 +351,7 @@ async def _ensure_recovery_fulfillment_started(
 
 async def _load_active_physical_result(
     *,
-    escrow_uid: str,
+    negotiation_id: str,
     sqlite_client: SQLiteClient,
     fulfillment_client: Any,
     fulfillment_id: str,
@@ -476,15 +363,20 @@ async def _load_active_physical_result(
         capacity_reservation_id=reservation_id,
         site_id=site_id,
     )
-    if status.state == "failed":
-        await persist_escrow_fields_with_retry(
+    # A failed create that provisioning compensates leaves ``failed`` for its
+    # teardown states and keeps ``CREATE_COMPENSATION`` through all of them, to
+    # ``torn_down``. A delivery first read after compensation began has failed
+    # as surely as one read ``failed``; waiting for ``active`` would never end.
+    # Its capacity still returns only through the site's guarded release.
+    if status.state == "failed" or status.failure_reason == CREATE_COMPENSATION:
+        await persist_delivery_fields_with_retry(
             lambda: sqlite_client,
-            escrow_uid=escrow_uid,
+            negotiation_id=negotiation_id,
             status="failed",
             reason=status.failure_message or "physical fulfillment failed",
             fulfillment_phase="physical_failed",
         )
-        return ({"__failed__": True}, None)
+        return ({"__failed__": True, "failure_message": status.failure_message}, None)
     if status.state != "active":
         return None
     result_envelope = await fulfillment_client.get_fulfillment_result(
@@ -515,100 +407,130 @@ async def _load_active_physical_result(
         raise RuntimeError(
             "physical fulfillment result disagrees with active lifecycle"
         )
-    domain_result = result_payload.domain_result
-    if (
-        domain_result is None
-        or domain_result.kind != "vm.fulfillment.result.v1"
-        or domain_result.schema_version != 1
-        or not isinstance(domain_result.payload, dict)
-    ):
-        raise RuntimeError("physical fulfillment returned an unsupported VM result")
-    legacy = _fulfillment_result_to_legacy_shape(result_envelope)
-    authentication = legacy.pop("authentication", None)
-    await persist_escrow_fields_with_retry(
+    connection = _fulfillment_result_to_connection(result_envelope)
+    authentication = connection.pop("authentication", None)
+    checkpoint = await sqlite_client.load_vm_delivery(negotiation_id=negotiation_id)
+    phase = checkpoint.get("fulfillment_phase")
+    await persist_delivery_fields_with_retry(
         lambda: sqlite_client,
-        escrow_uid=escrow_uid,
-        connection_details=json.dumps(legacy, sort_keys=True),
+        negotiation_id=negotiation_id,
+        connection_details=json.dumps(connection, sort_keys=True),
         tenant_credentials=(
             json.dumps((authentication or {}).get("tenant") or {}, sort_keys=True)
             if authentication
             else None
         ),
-        fulfillment_phase="physical_result_recorded",
+        fulfillment_phase=(
+            phase
+            if phase in ("onchain_submission_started", "onchain_fulfilled")
+            else "physical_result_recorded"
+        ),
     )
-    return legacy, authentication
+    return connection, authentication
 
 
-async def converge_escrow_once(
-    escrow: dict[str, Any],
+async def converge_delivery_once(
+    delivery: dict[str, Any],
     *,
     sqlite_client: SQLiteClient,
     fulfillment_client: Any,
     capacity_client: Any | None = None,
-    register_lease: Callable[..., Awaitable[Any]] | None = None,
-    submit_fulfillment: Callable[..., Awaitable[str]] | None = None,
-    bind_fulfillment_fn: Callable[..., Awaitable[Any]] | None = None,
-    alkahest_client: Any | None = None,
+    evidence: SettlementEvidence,
+    continuation: Callable[..., Awaitable[str]] | None = None,
+    failure_policy: Callable[..., Awaitable[Any]] | None = None,
 ) -> bool:
-    """Advance one escrow by at most one externally observable phase."""
-    if escrow.get("status") in _TERMINAL_ESCROW_STATUSES:
+    """Advance one delivery by at most one externally observable phase."""
+    if delivery.get("status") in _TERMINAL_DELIVERY_STATUSES:
         return False
-    if not escrow.get("chain_name"):
-        # This sweep converges chain-settled deals, and it ends by submitting an
-        # on-chain fulfillment. A hosted deal has no chain and already has a
-        # convergence owner -- the settlement runtime, which reserves
-        # fulfillment before it provisions. Sweeping it here gives one deal two
-        # owners racing over the same capacity reservation.
-        return False
-    context = _validated_context(escrow.get("fulfillment_context"))
+    context = _validated_context(delivery.get("fulfillment_context"))
     if context is None:
         logger.error(
-            "[FULFILLMENT_RESUME] Escrow %s has no supported recovery context",
-            escrow.get("escrow_uid"),
+            "[FULFILLMENT_RESUME] Negotiation %s has no supported recovery context",
+            delivery.get("negotiation_id"),
         )
         return False
-    raw_context = json.loads(escrow["fulfillment_context"])
-    negotiation_id = escrow.get("negotiation_id")
+    plan = build_vm_fulfillment_plan(evidence=evidence)
+    if (
+        evidence.negotiation_id != delivery["negotiation_id"]
+        or context.get("settlement_ref") != evidence.settlement_ref
+        or context.get("agreement_sha256") != evidence.evidence["agreement_sha256"]
+        or context.get("listing_id") != plan.order_id
+        or context.get("required_attributes") != plan.required_attributes
+        or context.get("duration_seconds") != plan.duration_seconds
+        or context.get("start_utc") != plan.start_utc
+    ):
+        raise ValueError("delivery context differs from verified evidence")
+    raw_context = json.loads(delivery["fulfillment_context"])
+    negotiation_id = delivery.get("negotiation_id")
     if not negotiation_id:
-        raise RuntimeError(f"escrow {escrow.get('escrow_uid')!r} has no negotiation")
+        raise RuntimeError(
+            f"negotiation {delivery.get('negotiation_id')!r} has no negotiation"
+        )
     thread_binding = await sqlite_client.validate_fulfillment_context_binding(
         negotiation_id=str(negotiation_id),
         context=raw_context,
         registry=sqlite_client.domain_registry,
     )
     site_id = thread_binding.site_id
-    escrow_uid = str(escrow["escrow_uid"])
+    negotiation_id = str(delivery["negotiation_id"])
+    # Every recovery effect passes the listing binding's admission guard.
+    binding = await capacity_binding_for_listing(
+        sqlite_client, thread_binding.listing_id
+    )
+    if binding.site_id != site_id:
+        raise RuntimeError("accepted binding site disagrees with the listing binding")
     request_envelope = context.get("fulfillment_request")
-    if not escrow.get("fulfillment_id") and not isinstance(request_envelope, dict):
+    if not delivery.get("fulfillment_id") and not isinstance(request_envelope, dict):
         logger.error(
-            "[FULFILLMENT_RESUME] Escrow %s recovery context has no fulfillment request",
-            escrow_uid,
+            "[FULFILLMENT_RESUME] Negotiation %s recovery context has no fulfillment request",
+            negotiation_id,
         )
         return False
+    if (
+        isinstance(request_envelope, dict)
+        and (request_envelope.get("payload") or {}).get("ssh_pubkey")
+        != plan.provision_terms.ssh_public_key
+    ):
+        raise ValueError("delivery SSH key differs from verified evidence")
+    await sqlite_client.update_vm_delivery(
+        negotiation_id=negotiation_id, fulfillment_phase="context_persisted",
+    )
     reservation_id, resource_id = await _ensure_recovery_capacity(
-        escrow_uid=escrow_uid,
+        negotiation_id=negotiation_id,
         context=context,
         sqlite_client=sqlite_client,
         capacity_client=capacity_client,
-        reservation_id=escrow.get("capacity_reservation_id"),
-        settlement_resource_id=escrow.get("settlement_resource_id"),
+        reservation_id=delivery.get("capacity_reservation_id"),
+        settlement_resource_id=delivery.get("settlement_resource_id"),
         thread_binding=thread_binding,
+        binding=binding,
     )
     if not reservation_id:
         return False
+    if not delivery.get("fulfillment_id"):
+        await _commit_recovered_reservation(
+            negotiation_id=negotiation_id,
+            reservation_id=reservation_id,
+            context=context,
+            capacity_client=capacity_client,
+            binding=binding,
+        )
+    await sqlite_client.update_vm_delivery(
+        negotiation_id=negotiation_id, fulfillment_phase="dispatch",
+    )
     fulfillment_id, resource_id = await _ensure_recovery_fulfillment_started(
-        escrow_uid=escrow_uid,
+        negotiation_id=negotiation_id,
         request_envelope=request_envelope or {},
         sqlite_client=sqlite_client,
         fulfillment_client=fulfillment_client,
         reservation_id=reservation_id,
         settlement_resource_id=resource_id,
-        fulfillment_id=escrow.get("fulfillment_id"),
+        fulfillment_id=delivery.get("fulfillment_id"),
         site_id=site_id,
     )
     sqlite_client.domain_registry.resolve(thread_binding.binding)
     physical = await _load_active_physical_result(
-        escrow_uid=escrow_uid,
+        negotiation_id=negotiation_id,
         sqlite_client=sqlite_client,
         fulfillment_client=fulfillment_client,
         fulfillment_id=fulfillment_id,
@@ -619,8 +541,18 @@ async def converge_escrow_once(
         return False
     connection_details, authentication = physical
     if connection_details.pop("__failed__", False):
+        if failure_policy is not None:
+            await failure_policy(
+                negotiation_id=negotiation_id,
+                listing_id=plan.order_id,
+                capacity_reservation_id=reservation_id,
+                resource_id=resource_id,
+                reason="provisioning_failed",
+                message=connection_details.get("failure_message"),
+                source="fulfillment_resume",
+            )
         return True
-    current = dict(escrow)
+    current = dict(delivery)
     current.update(
         {
             "capacity_reservation_id": reservation_id,
@@ -629,17 +561,13 @@ async def converge_escrow_once(
         }
     )
     return await converge_post_physical_delivery(
-        escrow=current,
+        delivery=current,
         context=context,
         sqlite_client=sqlite_client,
         capacity_client=capacity_client,
         connection_details=connection_details,
         authentication=authentication,
-        register_lease=register_lease,
-        submit_fulfillment=submit_fulfillment,
-        bind_fulfillment_fn=bind_fulfillment_fn,
-        alkahest_client=alkahest_client,
-        site_id=site_id,
+        continuation=continuation,
     )
 
 
@@ -651,102 +579,93 @@ async def resume_incomplete_fulfillments_once(
     limit: int = 50,
     owner: str | None = None,
     lease_seconds: int = 60,
-    register_lease: Callable[..., Awaitable[Any]] | None = None,
-    submit_fulfillment: Callable[..., Awaitable[str]] | None = None,
-    bind_fulfillment_fn: Callable[..., Awaitable[Any]] | None = None,
-    alkahest_client: Any | None = None,
+    composition: Any | None = None,
 ) -> int:
-    """Run one bounded recovery sweep and return the number progressed."""
+    """Reconstruct selected continuations, revalidate sources, and resume delivery."""
     db = sqlite_client
+    composition = composition or _container.resolved_settlement_composition
+    if composition is None:
+        raise RuntimeError("settlement composition was not initialized")
+    deliveries = await db.list_incomplete_vm_deliveries(limit=limit)
+    if not deliveries:
+        # Nothing to resume needs no site or provisioning client.
+        return 0
     capacity = capacity_client or build_capacity_client(lambda: db)
     remote = fulfillment_client or build_fulfillment_client(capacity)
     worker = owner or f"fulfillment-resume:{uuid.uuid4()}"
-    if register_lease is None or submit_fulfillment is None:
-        from domains.vms.settlement.fulfillment import (
-            reconcile_or_submit_compute_fulfillment,
-        )
-
-        from market_storefront.services.fulfillment_service import (
-            _register_vm_lease_with_settings,
-        )
-
-        register_lease = register_lease or _register_vm_lease_with_settings
-        submit_fulfillment = (
-            submit_fulfillment or reconcile_or_submit_compute_fulfillment
-        )
-    if bind_fulfillment_fn is None:
-        from market_storefront import container
-
-        composition = container.resolved_settlement_composition
-        if composition is None:
-            raise RuntimeError("settlement composition was not initialized")
-
-        async def bind_fulfillment_fn(
-            *, obligation_ref: str, fulfillment_ref: str
-        ) -> None:
-            await composition.runtime.bind_fulfillment(
-                obligation_ref,
-                fulfillment_ref,
-                local_principal=composition.local_principal,
-            )
-            await composition.worker.wake(obligation_ref)
-
     progressed = 0
-    for escrow in await db.list_incomplete_primary_escrows(limit=limit):
-        lease_until = (
-            datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
-        ).isoformat()
-        claimed = await db.claim_escrow_convergence(
-            escrow_uid=str(escrow["escrow_uid"]), owner=worker, lease_until=lease_until
+    for delivery in deliveries:
+        negotiation_id = delivery["negotiation_id"]
+        claimed = await db.claim_vm_delivery(
+            negotiation_id=negotiation_id,
+            owner=worker,
+            lease_until=(
+                datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+            ).isoformat(),
         )
         if not claimed:
             continue
         try:
-            escrow_chain_client = alkahest_client
-            if escrow_chain_client is None and escrow.get("chain_name"):
-                try:
-                    from market_storefront import container
-
-                    escrow_chain_client = container.get_alkahest_client(
-                        str(escrow["chain_name"])
-                    )
-                except Exception:
-                    logger.exception(
-                        "[FULFILLMENT_RESUME] Could not build chain client for escrow %s",
-                        escrow.get("escrow_uid"),
-                    )
-                    continue
-            if await converge_escrow_once(
-                escrow,
+            evidence = await db.load_vm_settlement_evidence(
+                negotiation_id=negotiation_id
+            )
+            thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+            # Refund states retain verified facts for recovery; admission still
+            # prevents further delivery after their durable final request.
+            if (
+                evidence is None
+                or evidence.status not in VERIFIED_EVIDENCE_STATUSES
+                or thread is None
+            ):
+                continue
+            agreement = json.loads(thread["agreement_bytes"])
+            stage = composition.seller_stages[settlement_option_schema(agreement["settlement"])]
+            await stage.recover_evidence(
+                evidence=evidence, thread=thread, composition=composition, db=db
+            )
+            continuation = partial(
+                stage.continue_delivery,
+                evidence=evidence,
+                db=db,
+                composition=composition,
+            )
+            if await converge_delivery_once(
+                delivery,
+                evidence=evidence,
+                continuation=continuation,
+                failure_policy=partial(stage.delivery_failed, evidence=evidence, db=db),
                 sqlite_client=db,
                 fulfillment_client=remote,
                 capacity_client=capacity,
-                register_lease=register_lease,
-                submit_fulfillment=submit_fulfillment,
-                bind_fulfillment_fn=bind_fulfillment_fn,
-                alkahest_client=escrow_chain_client,
             ):
                 progressed += 1
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception(
-                "[FULFILLMENT_RESUME] Failed to converge escrow %s",
-                escrow.get("escrow_uid"),
+                "[FULFILLMENT_RESUME] Failed to converge negotiation %s", negotiation_id
             )
         finally:
-            await db.release_escrow_convergence(
-                escrow_uid=str(escrow["escrow_uid"]), owner=worker
-            )
+            await db.release_vm_delivery(negotiation_id=negotiation_id, owner=worker)
     return progressed
 
 
-async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
-    """Periodically sweep unfinished accepted VM escrows."""
-    from market_storefront.utils.config import settings
+async def _reconcile_payment_deals() -> None:
+    """Advance accepted payment deals a buyer has not settled (none without payments)."""
+    composition = _container.resolved_settlement_composition
+    coordinator = getattr(composition, "payments_coordinator", None)
+    if coordinator is not None:
+        await coordinator.reconcile_once()
 
-    interval = float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
-    db = sqlite_client
-    while True:
-        await resume_incomplete_fulfillments_once(sqlite_client=db)
-        await asyncio.sleep(interval)
+
+async def fulfillment_resume_cycle_once(*, sqlite_client: SQLiteClient) -> None:
+    """One cycle of the fulfillment-resume loop: re-drive every unfinished
+    accepted VM delivery, then advance accepted payment deals.
+
+    The loop's timer and an operator's step both run exactly this. A failure
+    of one delivery is contained inside the sweep; a failure outside it --
+    listing the incomplete deliveries, or building a client -- fails the cycle,
+    which the loop controller records, and the timer carries on.
+    """
+    await resume_incomplete_fulfillments_once(sqlite_client=sqlite_client)
+    await _reconcile_payment_deals()

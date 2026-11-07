@@ -1,0 +1,1994 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:arkhai:mediation:v1",
+  "title": "arkhai.mediation.v1 wire contract",
+  "$defs": {
+    "AccountId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Arkhai account UUID."
+    },
+    "AdjudicationTerms": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "dispute": {
+          "$ref": "#/$defs/DisputeAuthority"
+        },
+        "dispute_window_seconds": {
+          "$ref": "#/$defs/WindowSeconds"
+        },
+        "case_hold_max_seconds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WindowSeconds"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "dispute",
+        "dispute_window_seconds",
+        "case_hold_max_seconds"
+      ],
+      "additionalProperties": {}
+    },
+    "AgreementProjection": {
+      "type": "object",
+      "properties": {
+        "settlement": {
+          "$ref": "#/$defs/MappingSettlement"
+        },
+        "start_utc": {
+          "$ref": "#/$defs/AgreementStart"
+        },
+        "duration_seconds": {
+          "$ref": "#/$defs/TermSeconds"
+        }
+      },
+      "required": [
+        "settlement"
+      ],
+      "additionalProperties": {},
+      "description": "Projection of the hash-checked SCM Agreement carried in the filing, not a replacement Agreement schema. Extra domain fields are ignored. Timed terms need start_utc and duration_seconds, the term's only source (open-ended terms resolve it at acceptance). Missing/unreadable terms are reported for operator handling."
+    },
+    "AgreementStart": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T[0-2]\\d:[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|\\+00:00)$",
+      "description": "RFC 3339 UTC start_utc; mapping validates the date and microsecond precision and rounds the payment boundary up to whole seconds."
+    },
+    "Amount": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,37}$"
+    },
+    "Append": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EvidenceAppend"
+        },
+        {
+          "$ref": "#/$defs/ConcurrenceAppend"
+        }
+      ],
+      "description": "Either party may append evidence to an open case; only the payee may append concurrence. At least nonempty items or concurrence is required. Idempotency-Key is required; retries return the same record. Omitted items are recorded as an empty array."
+    },
+    "AppendAccepted": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "accepted"
+        },
+        "record": {
+          "$ref": "#/$defs/SignedRecordEntry"
+        }
+      },
+      "required": [
+        "status",
+        "record"
+      ],
+      "additionalProperties": false
+    },
+    "AppendAnswer": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/AppendAccepted"
+        },
+        {
+          "$ref": "#/$defs/AppendRefused"
+        },
+        {
+          "$ref": "#/$defs/MediationFailure"
+        }
+      ]
+    },
+    "AppendedEntry": {
+      "type": "object",
+      "properties": {
+        "agreement": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "case_ref": {
+          "$ref": "#/$defs/CaseRef"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "Per Agreement across ALL cases; starts at 1. Never a per-case cursor."
+        },
+        "record_ref": {
+          "$ref": "#/$defs/RecordRef"
+        },
+        "actor": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "at": {
+          "$ref": "#/$defs/MediationTime"
+        },
+        "parts": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PartProtection"
+          }
+        },
+        "issuer": {
+          "$ref": "#/$defs/Identity"
+        },
+        "kind": {
+          "type": "string",
+          "const": "appended"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceItem"
+          }
+        },
+        "concurrence": {
+          "$ref": "#/$defs/SignedDeliveryEndClaim"
+        }
+      },
+      "required": [
+        "agreement",
+        "transaction",
+        "case_ref",
+        "sequence",
+        "record_ref",
+        "actor",
+        "at",
+        "parts",
+        "issuer",
+        "kind",
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "AppendRefused": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "rejected"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "case_not_found",
+            "case_closed",
+            "actor_not_party"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "AwardEffect": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "award"
+        },
+        "part": {
+          "$ref": "#/$defs/PartIndex"
+        },
+        "amount": {
+          "$ref": "#/$defs/Amount"
+        }
+      },
+      "required": [
+        "kind",
+        "part",
+        "amount"
+      ],
+      "additionalProperties": false,
+      "description": "Reserved for bond support. Not executable on arkhai.payments.v1."
+    },
+    "CaseAnswer": {
+      "type": "object",
+      "properties": {
+        "case_ref": {
+          "$ref": "#/$defs/CaseRef"
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "agreement": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "open",
+            "applying",
+            "closed"
+          ]
+        },
+        "parts": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PartProtection"
+          }
+        }
+      },
+      "required": [
+        "case_ref",
+        "transaction",
+        "agreement",
+        "state",
+        "parts"
+      ],
+      "additionalProperties": false,
+      "description": "Mediation's own answer, only after every part's protection is determined. The Agreement id is mandate.deal (SHA-256 of JCS Agreement)."
+    },
+    "CaseConcurrencyPolicy": {
+      "type": "object",
+      "properties": {
+        "repeated_cases": {
+          "type": "string",
+          "const": "allowed"
+        },
+        "concurrent_cases": {
+          "type": "string",
+          "const": "independent"
+        },
+        "extensions": {
+          "type": "string",
+          "const": "per_case"
+        },
+        "case_hold_release": {
+          "type": "string",
+          "const": "after_all_case_extensions_lifted"
+        },
+        "rulings": {
+          "type": "string",
+          "const": "net_prior_effects"
+        }
+      },
+      "required": [
+        "repeated_cases",
+        "concurrent_cases",
+        "extensions",
+        "case_hold_release",
+        "rulings"
+      ],
+      "additionalProperties": false,
+      "description": "Cases on one Agreement are independent; lifting one case never lifts another case’s extensions. Original payments release terms still apply."
+    },
+    "CaseDismissalPolicy": {
+      "type": "object",
+      "properties": {
+        "automatic": {
+          "type": "string",
+          "const": "all_parts_definitively_not_held_at_filing"
+        },
+        "ungrounded": {
+          "type": "string",
+          "const": "operator_may_dismiss"
+        },
+        "inactivity_timeout_seconds": {
+          "type": "null"
+        },
+        "operator_response_max_seconds": {
+          "type": "null"
+        }
+      },
+      "required": [
+        "automatic",
+        "ungrounded",
+        "inactivity_timeout_seconds",
+        "operator_response_max_seconds"
+      ],
+      "additionalProperties": false,
+      "description": "Automatic dismissal only when payments can no longer act on any part. Operators may dismiss ungrounded cases; silence alone never dismisses a case and has no response bound."
+    },
+    "CaseRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Opaque mediation case reference; not a credential."
+    },
+    "ClosedEntry": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NothingHeldClosedEntry"
+        },
+        {
+          "$ref": "#/$defs/DecidedClosedEntry"
+        }
+      ]
+    },
+    "ConcurrenceAppend": {
+      "type": "object",
+      "properties": {
+        "case_ref": {
+          "$ref": "#/$defs/CaseRef"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceItem"
+          }
+        },
+        "concurrence": {
+          "$ref": "#/$defs/SignedDeliveryEndClaim"
+        }
+      },
+      "required": [
+        "case_ref",
+        "concurrence"
+      ],
+      "additionalProperties": false
+    },
+    "DecidedClosedEntry": {
+      "type": "object",
+      "properties": {
+        "agreement": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "case_ref": {
+          "$ref": "#/$defs/CaseRef"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "Per Agreement across ALL cases; starts at 1. Never a per-case cursor."
+        },
+        "record_ref": {
+          "$ref": "#/$defs/RecordRef"
+        },
+        "actor": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "at": {
+          "$ref": "#/$defs/MediationTime"
+        },
+        "parts": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PartProtection"
+          }
+        },
+        "issuer": {
+          "$ref": "#/$defs/Identity"
+        },
+        "kind": {
+          "type": "string",
+          "const": "closed"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "ruled",
+            "dismissed"
+          ]
+        },
+        "basis": {
+          "$ref": "#/$defs/RulingBasis"
+        },
+        "outcome": {
+          "$ref": "#/$defs/Outcome"
+        }
+      },
+      "required": [
+        "agreement",
+        "transaction",
+        "case_ref",
+        "sequence",
+        "record_ref",
+        "actor",
+        "at",
+        "parts",
+        "issuer",
+        "kind",
+        "reason",
+        "basis",
+        "outcome"
+      ],
+      "additionalProperties": false,
+      "description": "Final decision after effects apply and this case’s extensions are lifted; operator dismissal has an empty outcome."
+    },
+    "DeliveryEndClaim": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "delivery_end"
+        },
+        "ended_at": {
+          "$ref": "#/$defs/MediationTime"
+        },
+        "delivered": {
+          "type": "boolean"
+        },
+        "cause": {
+          "type": "string",
+          "enum": [
+            "payee",
+            "payer"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "ended_at",
+        "delivered",
+        "cause"
+      ],
+      "additionalProperties": false
+    },
+    "Description": {
+      "type": "object",
+      "properties": {
+        "dispute": {
+          "$ref": "#/$defs/DisputeAuthority"
+        },
+        "contact": {
+          "type": "string",
+          "pattern": "^(?:mailto:|https:)",
+          "description": "Where parties can reach the authority's people; a mailto: or https: URI."
+        },
+        "payment_mechanisms": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "const": "arkhai.payments.v1"
+          }
+        },
+        "minimum_dispute_window_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "minimum_case_hold_max_seconds": {
+          "type": "null"
+        },
+        "filing_fee": {
+          "type": "string",
+          "const": "0"
+        },
+        "filing_deposit": {
+          "type": "string",
+          "const": "0"
+        },
+        "case_concurrency": {
+          "$ref": "#/$defs/CaseConcurrencyPolicy"
+        },
+        "case_dismissal": {
+          "$ref": "#/$defs/CaseDismissalPolicy"
+        },
+        "record_retention": {
+          "$ref": "#/$defs/RecordRetentionPolicy"
+        },
+        "automatic_rulings": {
+          "type": "string",
+          "const": "payee_endorsed_delivery_end_once_per_agreement"
+        },
+        "default_outcome": {
+          "type": "null"
+        },
+        "agreement_projection": {
+          "type": "string",
+          "const": "AgreementProjection"
+        }
+      },
+      "required": [
+        "dispute",
+        "contact",
+        "payment_mechanisms",
+        "minimum_dispute_window_seconds",
+        "minimum_case_hold_max_seconds",
+        "filing_fee",
+        "filing_deposit",
+        "case_concurrency",
+        "case_dismissal",
+        "record_retention",
+        "automatic_rulings",
+        "default_outcome",
+        "agreement_projection"
+      ],
+      "additionalProperties": false,
+      "description": "Public advertisement. Null minimum case-hold cap requires unbounded holds in new offers. No default ruling on silence; operator review unless a mechanical rule applies."
+    },
+    "DisputeAuthority": {
+      "type": "object",
+      "properties": {
+        "interface": {
+          "type": "string",
+          "const": "arkhai.mediation.v1"
+        },
+        "origin": {
+          "type": "string",
+          "pattern": "^https?:\\/\\/[^/?#\\s]+(?::[0-9]+)?$"
+        },
+        "account": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "record_key": {
+          "$ref": "#/$defs/RecordKey"
+        },
+        "params": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/MediationValue"
+          }
+        }
+      },
+      "required": [
+        "interface",
+        "origin",
+        "account",
+        "record_key",
+        "params"
+      ],
+      "additionalProperties": false,
+      "description": "The authority pinned in the selected option's lifecycle.adjudication.dispute."
+    },
+    "Duration": {
+      "type": "string",
+      "pattern": "^P(?!$)(\\d+Y)?(\\d+M)?(\\d+W)?(\\d+D)?(T(?=\\d)(\\d+H)?(\\d+M)?(\\d+S)?)?$"
+    },
+    "EarlyTerminationProjection": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "premature_stop_penalty": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,37})$"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "additionalProperties": {},
+      "description": "Only premature_stop_penalty (canonical decimal asset minor units; absent or 0 = none) is read here. Entitlements, settles_through and exposure remain the payment adapter's responsibility and pass through unvalidated."
+    },
+    "Effect": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ReverseEffect"
+        },
+        {
+          "$ref": "#/$defs/StopEffect"
+        },
+        {
+          "$ref": "#/$defs/EndDeliveryEffect"
+        },
+        {
+          "$ref": "#/$defs/PenaltyEffect"
+        },
+        {
+          "$ref": "#/$defs/AwardEffect"
+        }
+      ]
+    },
+    "EffectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Stable within the Agreement, including across application retries."
+    },
+    "EffectsRequest": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "effects"
+        },
+        "effects": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Effect"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "effects"
+      ],
+      "additionalProperties": false
+    },
+    "EndDeliveryEffect": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "end_delivery"
+        },
+        "at": {
+          "$ref": "#/$defs/MediationTime"
+        }
+      },
+      "required": [
+        "kind",
+        "at"
+      ],
+      "additionalProperties": false,
+      "description": "Final delivery end at T <= ruling time; consumed from the signed record, not sent to payments."
+    },
+    "EvidenceAppend": {
+      "type": "object",
+      "properties": {
+        "case_ref": {
+          "$ref": "#/$defs/CaseRef"
+        },
+        "items": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceItem"
+          }
+        },
+        "concurrence": {
+          "$ref": "#/$defs/SignedDeliveryEndClaim"
+        }
+      },
+      "required": [
+        "case_ref",
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "EvidenceItem": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "producer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "at": {
+          "$ref": "#/$defs/MediationTime"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "bytes": {
+          "type": "string",
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048]|[A-Za-z0-9_-][AQgw])?$"
+        }
+      },
+      "required": [
+        "kind",
+        "producer",
+        "at",
+        "sha256",
+        "bytes"
+      ],
+      "additionalProperties": false,
+      "description": "Exact original bytes (including a signed authority record), unpadded base64url; sha256 is the lowercase hash of those decoded bytes. Producer/time are the submitter's claims; the entry actor is authenticated. Ordered, not normalized or re-signed."
+    },
+    "ExpectedAfterStop": {
+      "type": "object",
+      "properties": {
+        "afterStop": {
+          "$ref": "#/$defs/Duration"
+        }
+      },
+      "required": [
+        "afterStop"
+      ],
+      "additionalProperties": false
+    },
+    "ExpectedAuthorities": {
+      "type": "object",
+      "properties": {
+        "stop": {
+          "minItems": 1,
+          "maxItems": 1,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StopAuthority"
+          }
+        },
+        "reverse": {
+          "minItems": 1,
+          "maxItems": 1,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          }
+        },
+        "extend": {
+          "minItems": 1,
+          "maxItems": 1,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          }
+        }
+      },
+      "required": [
+        "stop",
+        "reverse",
+        "extend"
+      ],
+      "additionalProperties": false,
+      "description": "stop is required on rate parts; reverse is required on every part. These are mediation entries, not exhaustive lists. extend is exclusive to mediation. This projection does not derive parties' start/stop/refund rights."
+    },
+    "ExpectedLifecycle": {
+      "type": "object",
+      "properties": {
+        "end": {
+          "$ref": "#/$defs/MediationTime"
+        },
+        "hold": {
+          "$ref": "#/$defs/ExpectedAfterStop"
+        },
+        "maxHoldExtension": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authorities": {
+          "$ref": "#/$defs/ExpectedAuthorities"
+        }
+      },
+      "required": [
+        "end",
+        "hold",
+        "maxHoldExtension",
+        "authorities"
+      ],
+      "additionalProperties": false,
+      "description": "Required on EVERY once/rate part; end is the latest permitted absolute part end, independent of rate start. Earlier mandate ends (including setup at Agreement start) are allowed. Payments snapshots expose the effective end, max(mandate end, approval). Payee-cause delivery-end claims use that effective end for ordinary once parts. Setup parts (mandate end at or before Agreement start) are reversed in full iff delivered is false, independent of approval time."
+    },
+    "FiledEntry": {
+      "type": "object",
+      "properties": {
+        "agreement": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "case_ref": {
+          "$ref": "#/$defs/CaseRef"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "Per Agreement across ALL cases; starts at 1. Never a per-case cursor."
+        },
+        "record_ref": {
+          "$ref": "#/$defs/RecordRef"
+        },
+        "actor": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "at": {
+          "$ref": "#/$defs/MediationTime"
+        },
+        "parts": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PartProtection"
+          }
+        },
+        "issuer": {
+          "$ref": "#/$defs/Identity"
+        },
+        "kind": {
+          "type": "string",
+          "const": "filed"
+        },
+        "filing": {
+          "$ref": "#/$defs/Filing"
+        }
+      },
+      "required": [
+        "agreement",
+        "transaction",
+        "case_ref",
+        "sequence",
+        "record_ref",
+        "actor",
+        "at",
+        "parts",
+        "issuer",
+        "kind",
+        "filing"
+      ],
+      "additionalProperties": false
+    },
+    "Filing": {
+      "type": "object",
+      "properties": {
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "agreement": {
+          "$ref": "#/$defs/MediationValue"
+        },
+        "request": {
+          "$ref": "#/$defs/Request"
+        },
+        "concurrence": {
+          "$ref": "#/$defs/SignedDeliveryEndClaim"
+        },
+        "claim": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceItem"
+          }
+        }
+      },
+      "required": [
+        "transaction",
+        "agreement",
+        "request",
+        "claim",
+        "items"
+      ],
+      "additionalProperties": false,
+      "description": "Authenticated party filing carrying the exact Agreement whose JCS SHA-256 must equal mandate.deal. Payments attachments are not read. Idempotency-Key is required."
+    },
+    "FilingAccepted": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "accepted"
+        },
+        "case": {
+          "$ref": "#/$defs/CaseAnswer"
+        }
+      },
+      "required": [
+        "status",
+        "case"
+      ],
+      "additionalProperties": false
+    },
+    "FilingAnswer": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/FilingAccepted"
+        },
+        {
+          "$ref": "#/$defs/FilingRefused"
+        },
+        {
+          "$ref": "#/$defs/FilingPending"
+        },
+        {
+          "$ref": "#/$defs/MediationFailure"
+        }
+      ]
+    },
+    "FilingPending": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "pending"
+        },
+        "case_ref": {
+          "$ref": "#/$defs/CaseRef"
+        }
+      },
+      "required": [
+        "status",
+        "case_ref"
+      ],
+      "additionalProperties": false
+    },
+    "FilingRefusalCode": {
+      "type": "string",
+      "enum": [
+        "not_listed_authority",
+        "filer_not_party",
+        "storefront_not_approved",
+        "agreement_hash_mismatch"
+      ],
+      "description": "Mapping mismatches and unreadable terms are evidence, never filing refusals. Storefront approval is enforced only once approval history is available."
+    },
+    "FilingRefused": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "rejected"
+        },
+        "reason": {
+          "$ref": "#/$defs/FilingRefusalCode"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "HeldPart": {
+      "type": "object",
+      "properties": {
+        "part": {
+          "$ref": "#/$defs/PartIndex"
+        },
+        "status": {
+          "type": "string",
+          "const": "held"
+        },
+        "extension_ref": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "until": {
+          "$ref": "#/$defs/MediationTime"
+        }
+      },
+      "required": [
+        "part",
+        "status",
+        "extension_ref"
+      ],
+      "additionalProperties": false,
+      "description": "Payments accepted this case's extension. extension_ref is the payments extend event sequence; absence of until means until lift or the agreed cap, not necessarily forever."
+    },
+    "Identity": {
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "const": "ed25519"
+        },
+        "identifier": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+        }
+      },
+      "required": [
+        "scheme",
+        "identifier"
+      ],
+      "additionalProperties": false,
+      "description": "Canonical unpadded base64url of a 32-byte Ed25519 public key."
+    },
+    "MappedTerms": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "mapped"
+        },
+        "expected": {
+          "$ref": "#/$defs/ExpectedLifecycle"
+        }
+      },
+      "required": [
+        "status",
+        "expected"
+      ],
+      "additionalProperties": false
+    },
+    "MappingCheck": {
+      "type": "object",
+      "properties": {
+        "mapping": {
+          "$ref": "#/$defs/MappingResult"
+        },
+        "mismatches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MappingMismatch"
+          }
+        }
+      },
+      "required": [
+        "mapping",
+        "mismatches"
+      ],
+      "additionalProperties": false,
+      "description": "A report for filing evidence. An unreadable mapping is not a successful match, even with no field mismatches."
+    },
+    "MappingIssue": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "MappingLifecycle": {
+      "type": "object",
+      "properties": {
+        "adjudication": {
+          "$ref": "#/$defs/AdjudicationTerms"
+        },
+        "early_termination": {
+          "$ref": "#/$defs/EarlyTerminationProjection"
+        }
+      },
+      "required": [
+        "adjudication"
+      ],
+      "additionalProperties": {}
+    },
+    "MappingMismatch": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "expected": {
+          "$ref": "#/$defs/MediationValue"
+        },
+        "actual": {
+          "$ref": "#/$defs/MediationValue"
+        }
+      },
+      "required": [
+        "path",
+        "expected",
+        "actual"
+      ],
+      "additionalProperties": false
+    },
+    "MappingPaymentSettlement": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "arkhai.payments.v1"
+        }
+      },
+      "required": [
+        "schema"
+      ],
+      "additionalProperties": {}
+    },
+    "MappingResult": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/MappedTerms"
+        },
+        {
+          "$ref": "#/$defs/UnreadableTerms"
+        }
+      ]
+    },
+    "MappingSettlement": {
+      "type": "object",
+      "properties": {
+        "settlement": {
+          "$ref": "#/$defs/MappingPaymentSettlement"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/MappingLifecycle"
+        }
+      },
+      "required": [
+        "settlement",
+        "lifecycle"
+      ],
+      "additionalProperties": {}
+    },
+    "MarketEd25519Identity": {
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "const": "ed25519"
+        },
+        "identifier": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+        }
+      },
+      "required": [
+        "scheme",
+        "identifier"
+      ],
+      "additionalProperties": false
+    },
+    "MarketEd25519SignatureProof": {
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "const": "ed25519"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$"
+        }
+      },
+      "required": [
+        "scheme",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "MarketEip191Identity": {
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "const": "eip191"
+        },
+        "identifier": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{40}$"
+        }
+      },
+      "required": [
+        "scheme",
+        "identifier"
+      ],
+      "additionalProperties": false
+    },
+    "MarketEip191SignatureProof": {
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "const": "eip191"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{130}$"
+        }
+      },
+      "required": [
+        "scheme",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "MarketIdentity": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/MarketEd25519Identity"
+        },
+        {
+          "$ref": "#/$defs/MarketEip191Identity"
+        }
+      ]
+    },
+    "MarketSignatureProof": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/MarketEd25519SignatureProof"
+        },
+        {
+          "$ref": "#/$defs/MarketEip191SignatureProof"
+        }
+      ]
+    },
+    "MediationFailure": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "error"
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "protection_incomplete",
+            "temporarily_unavailable",
+            "invalid_request",
+            "idempotency_conflict"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "code",
+        "message"
+      ],
+      "additionalProperties": false,
+      "description": "Mediation's error, not a relayed payments response. Retry an uncertain operation with its original key, never a new one."
+    },
+    "MediationTime": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Integer Unix seconds."
+    },
+    "MediationValue": {
+      "description": "Opaque JSON value; interpretation belongs to its producer."
+    },
+    "NotHeldPart": {
+      "type": "object",
+      "properties": {
+        "part": {
+          "$ref": "#/$defs/PartIndex"
+        },
+        "status": {
+          "type": "string",
+          "const": "not_held"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "paid_out",
+            "reversed",
+            "nothing_held"
+          ]
+        }
+      },
+      "required": [
+        "part",
+        "status",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "description": "A late or empty part does not refuse a case. Money already paid out cannot be recovered by mediation."
+    },
+    "NothingHeldClosedEntry": {
+      "type": "object",
+      "properties": {
+        "agreement": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "case_ref": {
+          "$ref": "#/$defs/CaseRef"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "Per Agreement across ALL cases; starts at 1. Never a per-case cursor."
+        },
+        "record_ref": {
+          "$ref": "#/$defs/RecordRef"
+        },
+        "actor": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "at": {
+          "$ref": "#/$defs/MediationTime"
+        },
+        "parts": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PartProtection"
+          }
+        },
+        "issuer": {
+          "$ref": "#/$defs/Identity"
+        },
+        "kind": {
+          "type": "string",
+          "const": "closed"
+        },
+        "reason": {
+          "type": "string",
+          "const": "dismissed"
+        },
+        "dismissal_reason": {
+          "type": "string",
+          "const": "nothing_held"
+        },
+        "outcome": {
+          "$ref": "#/$defs/Outcome"
+        }
+      },
+      "required": [
+        "agreement",
+        "transaction",
+        "case_ref",
+        "sequence",
+        "record_ref",
+        "actor",
+        "at",
+        "parts",
+        "issuer",
+        "kind",
+        "reason",
+        "dismissal_reason",
+        "outcome"
+      ],
+      "additionalProperties": false,
+      "description": "Automatic dismissal when every part was definitively not_held at filing. No ruling basis, regardless of filer."
+    },
+    "Outcome": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/OutcomeEffect"
+      }
+    },
+    "OutcomeEffect": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/EffectId"
+        },
+        "effect": {
+          "$ref": "#/$defs/Effect"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "prepared",
+            "applied"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "effect",
+        "state"
+      ],
+      "additionalProperties": false,
+      "description": "Immutable snapshot of an effect's application state. prepared means not yet attested applied; retries retain its id. Later ruled/closed entries may attest progress."
+    },
+    "PartialPeriod": {
+      "type": "string",
+      "enum": [
+        "charged",
+        "returned",
+        "prorated"
+      ]
+    },
+    "PartIndex": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 63
+    },
+    "PartProtection": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HeldPart"
+        },
+        {
+          "$ref": "#/$defs/NotHeldPart"
+        }
+      ]
+    },
+    "PenaltyEffect": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "penalty"
+        },
+        "amount": {
+          "$ref": "#/$defs/Amount"
+        }
+      },
+      "required": [
+        "kind",
+        "amount"
+      ],
+      "additionalProperties": false,
+      "description": "The Agreement's premature-stop penalty as a cap. When applied, after every earlier effect, reverse to the payer min(amount, earned amounts still held), taking parts in mandate order. Never needs money beyond what is held."
+    },
+    "PendingAnswer": {
+      "type": "object",
+      "properties": {
+        "case_ref": {
+          "$ref": "#/$defs/CaseRef"
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "agreement": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "filed_at": {
+          "$ref": "#/$defs/MediationTime"
+        },
+        "filer": {
+          "type": "string",
+          "enum": [
+            "payer",
+            "payee"
+          ]
+        },
+        "request": {
+          "$ref": "#/$defs/Request"
+        },
+        "parts": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PartProtection"
+          }
+        },
+        "filed_record_ref": {
+          "$ref": "#/$defs/RecordRef"
+        }
+      },
+      "required": [
+        "case_ref",
+        "transaction",
+        "agreement",
+        "filed_at",
+        "filer",
+        "request",
+        "parts",
+        "filed_record_ref"
+      ],
+      "additionalProperties": false
+    },
+    "ReadAfter": {
+      "type": "object",
+      "properties": {
+        "agreement": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "after": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "agreement",
+        "after"
+      ],
+      "additionalProperties": false,
+      "description": "Authenticated read across all cases for this Agreement; after=0 starts at the beginning. after is exclusive."
+    },
+    "RecordEntry": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FiledEntry"
+        },
+        {
+          "$ref": "#/$defs/AppendedEntry"
+        },
+        {
+          "$ref": "#/$defs/RuledEntry"
+        },
+        {
+          "$ref": "#/$defs/ClosedEntry"
+        }
+      ]
+    },
+    "RecordKey": {
+      "type": "string",
+      "pattern": "^ed25519:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "description": "ed25519: followed by the canonical unpadded base64url public key. Mediation's own key, not the payments key."
+    },
+    "RecordPage": {
+      "type": "object",
+      "properties": {
+        "agreement": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SignedRecordEntry"
+          }
+        },
+        "next_after": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "has_more": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "agreement",
+        "entries",
+        "next_after",
+        "has_more"
+      ],
+      "additionalProperties": false,
+      "description": "Ascending contiguous Agreement sequence after the requested cursor. Empty page retains the cursor. Consumers pin key and Agreement, and advance only after journaling local effects."
+    },
+    "RecordRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Stable opaque reference to one immutable record entry."
+    },
+    "RecordRetentionPolicy": {
+      "type": "object",
+      "properties": {
+        "record_key": {
+          "type": "string",
+          "const": "valid"
+        },
+        "origin": {
+          "type": "string",
+          "const": "reachable"
+        },
+        "through": {
+          "type": "string",
+          "const": "deal_lifetime_and_dispute_window_and_any_open_case"
+        }
+      },
+      "required": [
+        "record_key",
+        "origin",
+        "through"
+      ],
+      "additionalProperties": false,
+      "description": "The record key and origin pinned by an Agreement remain valid and reachable for the life of the deal, its dispute window, and as long as any case remains open."
+    },
+    "RecordWebhook": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "record.appended"
+        },
+        "timestamp": {
+          "$ref": "#/$defs/MediationTime"
+        },
+        "data": {
+          "$ref": "#/$defs/SignedRecordEntry"
+        }
+      },
+      "required": [
+        "type",
+        "timestamp",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "Request": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/DeliveryEndClaim"
+        },
+        {
+          "$ref": "#/$defs/EffectsRequest"
+        }
+      ]
+    },
+    "RespondentAfter": {
+      "type": "object",
+      "properties": {
+        "after": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "after"
+      ],
+      "additionalProperties": false,
+      "description": "Opaque exclusive filing-order cursor; empty string starts the respondent list."
+    },
+    "RespondentPage": {
+      "type": "object",
+      "properties": {
+        "cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PendingAnswer"
+          }
+        },
+        "next_after": {
+          "type": "string"
+        },
+        "has_more": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cases",
+        "next_after",
+        "has_more"
+      ],
+      "additionalProperties": false
+    },
+    "ReverseEffect": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "reverse"
+        },
+        "part": {
+          "$ref": "#/$defs/PartIndex"
+        },
+        "amount": {
+          "$ref": "#/$defs/Amount"
+        }
+      },
+      "required": [
+        "kind",
+        "part",
+        "amount"
+      ],
+      "additionalProperties": false
+    },
+    "RuledEntry": {
+      "type": "object",
+      "properties": {
+        "agreement": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "case_ref": {
+          "$ref": "#/$defs/CaseRef"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "Per Agreement across ALL cases; starts at 1. Never a per-case cursor."
+        },
+        "record_ref": {
+          "$ref": "#/$defs/RecordRef"
+        },
+        "actor": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "at": {
+          "$ref": "#/$defs/MediationTime"
+        },
+        "parts": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PartProtection"
+          }
+        },
+        "issuer": {
+          "$ref": "#/$defs/Identity"
+        },
+        "kind": {
+          "type": "string",
+          "const": "ruled"
+        },
+        "basis": {
+          "$ref": "#/$defs/RulingBasis"
+        },
+        "outcome": {
+          "$ref": "#/$defs/Outcome"
+        }
+      },
+      "required": [
+        "agreement",
+        "transaction",
+        "case_ref",
+        "sequence",
+        "record_ref",
+        "actor",
+        "at",
+        "parts",
+        "issuer",
+        "kind",
+        "basis",
+        "outcome"
+      ],
+      "additionalProperties": false
+    },
+    "RulingBasis": {
+      "type": "string",
+      "enum": [
+        "payee_filed",
+        "payee_signed",
+        "operator"
+      ]
+    },
+    "Sha256Hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "SignatureProof": {
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "const": "ed25519"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$"
+        }
+      },
+      "required": [
+        "scheme",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "SignedDeliveryEndClaim": {
+      "type": "object",
+      "properties": {
+        "agreement": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "claim": {
+          "$ref": "#/$defs/DeliveryEndClaim"
+        },
+        "signer": {
+          "$ref": "#/$defs/MarketIdentity"
+        },
+        "proof": {
+          "$ref": "#/$defs/MarketSignatureProof"
+        }
+      },
+      "required": [
+        "agreement",
+        "claim",
+        "signer",
+        "proof"
+      ],
+      "additionalProperties": false
+    },
+    "SignedRecordEntry": {
+      "type": "object",
+      "properties": {
+        "entry": {
+          "$ref": "#/$defs/RecordEntry"
+        },
+        "proof": {
+          "$ref": "#/$defs/SignatureProof"
+        }
+      },
+      "required": [
+        "entry",
+        "proof"
+      ],
+      "additionalProperties": false
+    },
+    "StopAuthority": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "notice": {
+          "$ref": "#/$defs/Duration"
+        },
+        "partialPeriod": {
+          "$ref": "#/$defs/StopPartialPeriod"
+        }
+      },
+      "required": [
+        "account",
+        "notice",
+        "partialPeriod"
+      ],
+      "additionalProperties": false
+    },
+    "StopEffect": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "stop"
+        },
+        "part": {
+          "$ref": "#/$defs/PartIndex"
+        },
+        "at": {
+          "$ref": "#/$defs/MediationTime"
+        },
+        "partialPeriod": {
+          "$ref": "#/$defs/PartialPeriod"
+        }
+      },
+      "required": [
+        "kind",
+        "part",
+        "at",
+        "partialPeriod"
+      ],
+      "additionalProperties": false,
+      "description": "Desired rate-part stop at T with an explicit cut-period rule. Schedule T if T >= now; a past T is applied as stop now under that rule plus reversal of still-held earnings beyond what a stop at T would earn, never a backdated payments stop."
+    },
+    "StopPartialPeriod": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PartialPeriod"
+        },
+        {
+          "type": "string",
+          "const": "chosen"
+        }
+      ]
+    },
+    "TermSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "UnreadableTerms": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "unreadable"
+        },
+        "issues": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MappingIssue"
+          }
+        }
+      },
+      "required": [
+        "status",
+        "issues"
+      ],
+      "additionalProperties": false,
+      "description": "Evidence for an operator, not a filing refusal. No automatic delivery-end effects can be inferred."
+    },
+    "WebhookEndpoint": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/WebhookEndpointId"
+        },
+        "url": {
+          "$ref": "#/$defs/WebhookUrl"
+        }
+      },
+      "required": [
+        "id",
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "WebhookEndpointCreated": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/WebhookEndpointId"
+        },
+        "url": {
+          "$ref": "#/$defs/WebhookUrl"
+        },
+        "secret": {
+          "$ref": "#/$defs/WebhookSecret"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "secret"
+      ],
+      "additionalProperties": false
+    },
+    "WebhookEndpointId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "WebhookEndpointRequest": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "$ref": "#/$defs/WebhookUrl"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "WebhookEndpoints": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/WebhookEndpoint"
+      }
+    },
+    "WebhookSecret": {
+      "type": "string",
+      "pattern": "^whsec_[A-Za-z0-9+/]{43}=$"
+    },
+    "WebhookUrl": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^https?:\\/\\/[^\\s]+$",
+      "description": "HTTPS receiver URL; development permits HTTP loopback only."
+    },
+    "WindowSeconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  }
+}

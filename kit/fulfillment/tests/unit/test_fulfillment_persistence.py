@@ -6,10 +6,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from market_fulfillment import (
+    CREATE_COMPENSATION,
     FulfillmentConflictError,
     SettlementRecordState,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 from market_fulfillment.fulfillment_persistence import SqlAlchemyFulfillmentTransaction
 
 
@@ -26,16 +27,24 @@ def _record(**overrides):
     return SimpleNamespace(**values)
 
 
-def test_get_pool_uses_callers_session():
+def test_get_pool_uses_callers_session_and_the_execution_read():
+    """Dispatch needs provider secrets the redacted read withholds.
+
+    Asserting which read is used, not merely that a pool comes back: the two
+    differ only in whether credentials are present, so a call to the redacted
+    one would fail later, at the point a tunnel client is configured without a
+    token, rather than here.
+    """
     db = MagicMock()
     pool_service = MagicMock()
-    pool_service.get_pool_in_session.return_value = object()
+    pool_service.get_pool_for_execution.return_value = object()
     tx = SqlAlchemyFulfillmentTransaction(db, pool_service, MagicMock())
 
     result = tx.get_pool("pool-1")
 
-    pool_service.get_pool_in_session.assert_called_once_with(db, "pool-1")
-    assert result is pool_service.get_pool_in_session.return_value
+    pool_service.get_pool_for_execution.assert_called_once_with(db, "pool-1")
+    pool_service.get_pool_in_session.assert_not_called()
+    assert result is pool_service.get_pool_for_execution.return_value
 
 
 def test_identical_prepared_operation_is_idempotent():
@@ -157,3 +166,78 @@ def test_begin_teardown_unknown_fulfillment_id_raises_lookup_error():
             "no-such-fulfillment",
             VersionedEnvelope(kind="teardown-test", schema_version=1, payload={}),
         )
+
+
+def test_begin_compensating_teardown_marks_the_reason_and_keeps_the_message():
+    prepared = VersionedEnvelope(kind="teardown-test", schema_version=1, payload={"x": 1})
+    record = _record(state=SettlementRecordState.failed.value)
+    repository = MagicMock()
+    repository.get_by_fulfillment_id.return_value = record
+    db = MagicMock()
+    tx = SqlAlchemyFulfillmentTransaction(db, MagicMock(), repository)
+
+    tx.begin_compensating_teardown("fulfillment-1", prepared)
+
+    repository.transition.assert_called_once_with(
+        db,
+        "reservation-1",
+        SettlementRecordState.teardown_dispatch_pending.value,
+        prepared_teardown_operation=prepared.model_dump(mode="json"),
+        failure_reason=CREATE_COMPENSATION,
+    )
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        SettlementRecordState.active.value,
+        SettlementRecordState.teardown_failed.value,
+        SettlementRecordState.dispatching.value,
+    ],
+)
+def test_begin_compensating_teardown_refuses_a_record_that_is_not_failed(state):
+    repository = MagicMock()
+    repository.get_by_fulfillment_id.return_value = _record(state=state)
+    tx = SqlAlchemyFulfillmentTransaction(MagicMock(), MagicMock(), repository)
+
+    with pytest.raises(FulfillmentConflictError):
+        tx.begin_compensating_teardown(
+            "fulfillment-1",
+            VersionedEnvelope(kind="teardown-test", schema_version=1, payload={}),
+        )
+    repository.transition.assert_not_called()
+
+
+def test_attach_executor_job_is_a_no_op_without_a_ledger():
+    """A transaction composed without a ledger must not raise.
+
+    The settlement-record half of this transaction is used standalone, and a
+    fulfillment that otherwise succeeded should not fail for want of a
+    cross-reference.
+    """
+    tx = SqlAlchemyFulfillmentTransaction(
+        MagicMock(), MagicMock(), MagicMock(), None
+    )
+
+    tx.attach_executor_job("reservation-1", "ansible-job-7")
+
+
+def test_attach_executor_job_swallows_a_ledger_failure():
+    """Best-effort, and asserted to stay that way.
+
+    The fulfillment is already acknowledged by the time this runs, so a ledger
+    failure must not undo it. The cost is that a failing attachment surfaces
+    only as the warning this logs; database read-back tests prove the
+    attachment lands.
+    """
+    broken = MagicMock()
+    broken.record_create_handle_in_session.side_effect = RuntimeError(
+        "ledger unavailable"
+    )
+    tx = SqlAlchemyFulfillmentTransaction(
+        MagicMock(), MagicMock(), MagicMock(), broken
+    )
+
+    tx.attach_executor_job("reservation-1", "ansible-job-7")
+
+    broken.record_create_handle_in_session.assert_called_once()

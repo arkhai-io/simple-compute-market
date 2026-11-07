@@ -13,13 +13,13 @@ from registry_client.models import (
     ListingSummary,
     UpdateListingRequest,
 )
-from src.main import app
+from core_registry.main import app
 
 
-def _listing_request(listing_id: str | None = None, **offer_extras) -> ListingRequest:
+def _listing_request(listing_id: str | None = None, **listing_resource_extras) -> ListingRequest:
     kwargs = {} if listing_id is None else {"listing_id": listing_id}
     return ListingRequest(
-        offer={"gpu_model": "A100", "region": "us-west", **offer_extras},
+        listing_resource={"gpu_model": "A100", "region": "us-west", **listing_resource_extras},
         accepted_escrows=[
             {
                 "chain_name": "anvil",
@@ -91,23 +91,27 @@ class TestPublishOrder:
         assert result["listing_id"] == "pub-1"
         assert publishers.publishers[0].publisher_id == result["publisher_id"]
 
-    async def test_hosted_settlement_options_round_trip(self, registry_client):
+    async def test_mechanism_options_round_trip(self, registry_client):
         option = {
             "option_id": "a" * 64,
-            "mechanism": "fiat.stripe.v1",
-            "asset": "usd",
-            "rates": [{"field": "amount", "per": "hour", "value": "125"}],
-            "params": {"account_ref": "acct-seller"},
+            "price": {
+                "asset": "usd",
+                "rates": [{"field": "amount", "per": "hour", "value": "125"}],
+            },
+            "settlement": {
+                "schema": "example.payment.v1",
+                **({"account_ref": "acct-seller"} or {}),
+            },
         }
         request = ListingRequest(
-            listing_id="pub-hosted",
-            offer={"gpu_model": "A100", "region": "us-west"},
+            listing_id="pub-mechanism",
+            listing_resource={"gpu_model": "A100", "region": "us-west"},
             accepted_escrows=[],
             settlement_options=[option],
             storefront_url="http://localhost:8001/",
         )
         await registry_client.publish_listing(request)
-        listing = await registry_client.get_listing("pub-hosted")
+        listing = await registry_client.get_listing("pub-mechanism")
         assert listing.accepted_escrows == []
         assert listing.settlement_options == [option]
 

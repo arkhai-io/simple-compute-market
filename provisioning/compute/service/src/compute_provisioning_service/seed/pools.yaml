@@ -1,0 +1,22 @@
+# The pools a fresh site starts with: applied once at startup, only when no
+# pool document is configured and no pool is stored, through the same
+# validation and import as a pool document. Each pool is ordinary and sells
+# nothing until an operator declares capacity into it. Name another document
+# with `pool_seed_path`, or set it empty to start with no pools.
+pools:
+  - id: vm-default
+    label: VM default
+    provider: vm.ansible
+    policy_tags:
+      deliverable_modes: [vm]
+      advertisable_modes: [vm]
+      capacity_backing: backed
+    provider_config: {}
+  - id: bare-metal-default
+    label: Bare-metal default
+    provider: bare_metal.ansible
+    policy_tags:
+      deliverable_modes: [bare_metal]
+      advertisable_modes: [bare_metal]
+      capacity_backing: backed
+    provider_config: {}

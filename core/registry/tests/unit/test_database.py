@@ -22,8 +22,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.db.database import _apply_migrations
-from src.db.models import Base, Publisher, PublisherIdentity
+from core_registry.db.database import _apply_migrations
+from core_registry.db.models import Base, Publisher, PublisherIdentity
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ class TestApplyMigrations:
         fresh = _make_engine()
 
         with (
-            patch("src.db.database.engine", fresh),
+            patch("core_registry.db.database.engine", fresh),
             patch("alembic.command.stamp") as mock_stamp,
             patch("alembic.command.upgrade") as mock_upgrade,
         ):
@@ -82,7 +82,7 @@ class TestApplyMigrations:
         versioned = _engine_with_alembic_version()
 
         with (
-            patch("src.db.database.engine", versioned),
+            patch("core_registry.db.database.engine", versioned),
             patch("alembic.command.stamp") as mock_stamp,
             patch("alembic.command.upgrade") as mock_upgrade,
         ):
@@ -110,7 +110,7 @@ class TestApplyMigrations:
             )
 
         with (
-            patch("src.db.database.engine", legacy),
+            patch("core_registry.db.database.engine", legacy),
             patch("alembic.command.stamp") as mock_stamp,
             patch("alembic.command.upgrade") as mock_upgrade,
         ):
@@ -121,12 +121,12 @@ class TestApplyMigrations:
 
     def test_config_carries_live_database_url(self):
         """The Config passed to stamp/upgrade uses the live settings URL."""
-        from src.config import settings
+        from core_registry.config import settings
 
         captured: list = []
 
         with (
-            patch("src.db.database.engine", _make_engine()),
+            patch("core_registry.db.database.engine", _make_engine()),
             patch("alembic.command.stamp", side_effect=lambda cfg, rev: captured.append(cfg)),
             patch("alembic.command.upgrade"),
         ):
@@ -140,7 +140,7 @@ class TestApplyMigrations:
         captured: list = []
 
         with (
-            patch("src.db.database.engine", _make_engine()),
+            patch("core_registry.db.database.engine", _make_engine()),
             patch("alembic.command.stamp", side_effect=lambda cfg, rev: captured.append(cfg)),
             patch("alembic.command.upgrade"),
         ):

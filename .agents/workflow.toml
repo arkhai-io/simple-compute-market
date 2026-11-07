@@ -1,0 +1,105 @@
+# What the change workflow assumes about this repository. Every field configures one
+# operation of a skill or the engine, and each comment names who uses it. Values Git
+# or the invocation supplies are not here: the branch a change lands on, the remote,
+# the kube context.
+
+[repository]
+# Engine, guarded push: refuses to push these, whichever step asks.
+protected-branches = ["main", "dev"]
+# Engine, next-step computation: after a pre-closeout review, a commit changing only
+# these paths or a change's records needs no new validation. Engine, `run
+# pre-commit`: a commit changing only these runs only `pre-commit`.
+inert-paths = ["openspec/", "docs/"]
+
+[hooks]
+# Engine, `run pre-commit` and `run after-functional-change`, for change-implement,
+# change-triage, and change-merge, the steps its hook table admits: after the step's
+# last functional change (any edit outside `inert-paths`, a merge's resolutions
+# included), before the pre-commit hooks.
+after-functional-change = ["make lock"]
+# Engine, `run pre-commit`, for every step that commits and the review: before each
+# commit, after the workflow's default checks.
+pre-commit = "make check-repository CHANGE={change} CHANGE_BASE={base}"
+# Engine, `run pre-commit`, for change-implement, change-triage, and change-merge:
+# also before a commit that changes a path outside `inert-paths`.
+pre-commit-functional = ["make dist-clean", "make check-packaging", "make test"]
+# Engine, `run pre-archive`, for change-closeout: once, before the archive.
+pre-archive = ["make check-packaging", "make check-architecture-change CHANGE={change}"]
+# Engine, guarded push: before anything is sent, under Git's hook contract. The
+# repository's own Git hook, scripts/hooks/pre-push, runs the same target.
+pre-push = "make pre-push REMOTE={remote}"
+# Engine, `clone`: as a clone is made, in the background; implementation and
+# validation wait for it.
+post-clone = "make init"
+
+[defaults]
+# Engine, `run pre-commit` and `check change`: the workflow's default checks this
+# repository has turned off, each with its reason.
+disable = []
+
+[openspec]
+# Engine, `scripts/change-workflow openspec` and the default pre-commit's strict
+# validation: how the OpenSpec CLI is run.
+command = "scripts/openspec"
+
+[load]
+# Engine, `config load <step>`: the documents every step's skill reads as it
+# starts; the engine's post-compaction hook re-reads them.
+common = ["AGENTS.md", "docs/development/ARCHITECTURE.md", "docs/development/TESTING.md",
+          "docs/development/DEPLOYMENT_AND_CONFIG.md", "openspec/README.md"]
+# Engine, `config load design`: change-design's own addition.
+design = ["docs/development/ROADMAP.md"]
+
+[models]
+# Engine, `start orchestrate`: the orchestrating session's model and effort.
+orchestrator = { model = "claude-opus-5-5", effort = "medium" }
+# Engine, the wrapper and the review: each step's models in order of preference.
+# The review runs on Codex in its read-only sandbox, falling back to Claude when
+# Codex is unavailable.
+review          = [{ harness = "codex",  model = "gpt-6-sol",         effort = "high" },
+                   { harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
+design          = [{ harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
+plan            = [{ harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
+triage          = [{ harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
+implement       = [{ harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
+validate        = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
+merge           = [{ harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
+closeout        = [{ harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
+archive-cleanup = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
+
+[validation]
+# Engine, `run validation <change> preflight`, for change-validate: before any part,
+# a failure ending validation as environmental.
+preflight = ["make check-uv-version"]
+
+# Engine, `config parts <change>` and `run validation <change> <part>
+# run|start|collect`, for change-validate: validation's parts, in order; engine,
+# `history`, copies each part's evidence.
+
+[validation.parts.pipeline]
+# Started first, right after the guarded push: it is the slowest part.
+start    = "make run-e2e"
+collect  = "make fetch-e2e-logs E2E_AFTER_RUN={after}"
+evidence = ".snapshot/e2e-logs/"
+
+[validation.parts.ci]
+# Started once for each `Owed by validation:` line of a complete section, each run
+# named by its workflow (`run validation <change> ci start --owed <workflow>`).
+owed     = true
+start    = "make run-ci WORKFLOW={owed}"
+collect  = "make validate-ci WORKFLOW={owed} CI_AFTER_RUN={after}"
+evidence = ".snapshot/validation/"
+
+[validation.parts.local]
+# The commit's packaging and every suite, on this machine.
+run      = "make validate-local"
+evidence = ".snapshot/validation/"
+
+[validation.parts.helm]
+# After local, never beside it: they share Docker and the CPU.
+after    = "local"
+run      = "make validate-helm CHANGE={change}"
+evidence = ".snapshot/validation/"
+# Engine, `run cleanup <change>`, for change-archive-cleanup: record what the
+# release used, then remove the change's namespace and images.
+cleanup  = ["make record-capacity CHANGE={change}", "make -C helm teardown CHANGE={change}"]

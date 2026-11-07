@@ -5,7 +5,7 @@ hand-constructs a `SettlementRecord` row directly (`_create_active_fulfillment`
 and its siblings in `test_ledger_lease_lifecycle.py`/`test_compute_contract_api.py`),
 which is the right choice for tests whose subject is teardown submission or
 polling -- but none of them prove the actual legacy backfill migration
-(`_apply_legacy_vm_lease_backfill`) produces a row the new teardown path can
+(`_apply_legacy_vm_lease_backfill`) produces a row the teardown path can
 consume. This file runs the real migration entrypoint against a real
 connection, then drives its output through `begin_fulfillment_teardown`,
 simulated convergence (`FulfillmentConvergenceWatchdog` has its own test
@@ -15,14 +15,26 @@ proving a pre-cutover VM lease reaches `released` with capacity returned.
 
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
-from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
+from compute_provisioning.release import (
+    FulfillmentReleaseExecutor,
+    FulfillmentReleaseGuard,
+    FulfillmentReleaseStatusPort,
+    FulfillmentServiceTeardownPort,
+)
 from compute_provisioning_service.db.database import run_migrations
-from compute_provisioning_service.db.migrations import _apply_legacy_vm_lease_backfill
+from compute_provisioning_service.db.migrations import (
+    _apply_legacy_vm_lease_backfill,
+    _migrate_vm_provider_identity,
+)
 from market_fulfillment import (
     FulfillmentOrchestrator,
     ProviderRegistry,
@@ -34,15 +46,11 @@ from market_fulfillment import (
 from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
-from vm_provisioning_adapter.release import (
-    VM_EXECUTOR_KIND,
-    FulfillmentServiceTeardownPort,
-    VmFulfillmentReleaseJobPort,
-    VmReleaseExecutor,
-)
-from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
-    AnsibleFulfillmentProvider,
-)
+from vm_provisioning_adapter.codec import VmAnsibleCodec
+from compute_provisioning.job_fulfillment import JobFulfillmentProvider
+from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
+
+from .legacy_default_pool import add_legacy_default_pool
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
 _INVENTORY_GROUP = "legacy_hosts"
@@ -59,12 +67,18 @@ def _bootstrap_engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(
-        engine,
-        default_playbook_path=_PLAYBOOK_PATH,
-        default_inventory_group=_INVENTORY_GROUP,
-    )
+    run_migrations(engine)
+    add_legacy_default_pool(engine, playbook_path=_PLAYBOOK_PATH)
     with engine.begin() as connection:
+        # The pool configuration a lease-holding database had carried an
+        # inventory group, which the current table no longer has.
+        connection.execute(text(
+            "ALTER TABLE ansible_pool_configs ADD COLUMN inventory_group VARCHAR"
+        ))
+        connection.execute(
+            text("UPDATE ansible_pool_configs SET inventory_group=:group"),
+            {"group": _INVENTORY_GROUP},
+        )
         connection.execute(text(
             """
             CREATE TABLE vm_leases (
@@ -83,8 +97,6 @@ def _bootstrap_engine():
 
 
 def _settings(**overrides):
-    from unittest.mock import MagicMock
-
     s = MagicMock()
     s.lease_watchdog_grace_period_seconds = 300
     s.storefront_url = "http://storefront:8001"
@@ -100,15 +112,17 @@ async def _successful_notification(_reservation):
 def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
     engine = _bootstrap_engine()
 
-    # Representative pre-POOLS data: a VM lease still active (not yet
+    # Representative legacy data: a VM lease still active (not yet
     # released) when the cutover migration ran, exactly the common case a
     # migration must carry forward correctly, not an already-failed edge
     # case that happens to skip the "initiate teardown" step.
     with engine.begin() as connection:
         connection.execute(text(
-            "INSERT INTO hosts (name, kvm_host, ssh_user, ssh_key_type, ssh_key_value, "
-            "gpu_count, enabled, pool_id) "
-            "VALUES ('kvm1', '10.0.0.1', 'root', 'path', '/keys/id_ed25519', 0, 1, 'default')"
+            "INSERT INTO hosts (host_id, connection_kind, connection_version, "
+            "connection_public, connection_protected, enabled, pool_id) "
+            "VALUES ('kvm1', 'ssh', 1, '{\"ssh_host\": \"10.0.0.1\", \"ssh_user\": "
+            "\"root\", \"ssh_port\": 22, \"public_host\": null, \"key_path\": "
+            "\"/keys/id_ed25519\"}', '{}', 1, 'default')"
         ))
         connection.execute(text(
             "INSERT INTO capacity_reservations (capacity_reservation_id, units, state) "
@@ -126,6 +140,7 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
     # The real migration entrypoint -- not a hand-constructed SettlementRecord.
     with engine.begin() as connection:
         _apply_legacy_vm_lease_backfill(connection)
+    _migrate_vm_provider_identity(engine)
 
     session_factory = sessionmaker(bind=engine)
     with session_factory() as db:
@@ -141,8 +156,15 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
     settlement_repository = SettlementRepository()
     fulfillment_service = FulfillmentOrchestrator(
         provider_registry=ProviderRegistry({
-            "ansible": AnsibleFulfillmentProvider(
-                job_service=None, job_queue_provider=lambda: None,
+            # No job authority: a backfilled teardown is dispatched as
+            # persisted, and preparing nothing reads no create job.
+            "vm.ansible": JobFulfillmentProvider(
+                plan=VmFulfillmentPlan(
+                    reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
+                    vm_playbook_path=_PLAYBOOK_PATH,
+                ),
+                submission=None,
+                jobs=None,
             ),
         }),
         unit_of_work=SqlAlchemyFulfillmentUnitOfWork(
@@ -151,40 +173,35 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
             repository=settlement_repository,
         ),
     )
-    ledger = CapacityLedgerService(session_factory=session_factory)
-    executor_release = ExecutorReleaseDispatcher({
-        VM_EXECUTOR_KIND: VmReleaseExecutor(
-            settlement_repository=settlement_repository,
-            session_factory=session_factory,
-            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-        ),
-    })
-    release_jobs = ReleaseJobDispatcher({
-        VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
-            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-        ),
-    })
+    ledger = CapacityLedgerService(
+        session_factory=session_factory,
+        release_guard=FulfillmentReleaseGuard(settlement_repository),
+    )
+    teardown_port = FulfillmentServiceTeardownPort(lambda: fulfillment_service)
     settings = _settings()
     lease_lifecycle = LeaseLifecycleService(
         settings=settings,
         site_authority=LedgerSiteAuthority(ledger),
-        executor_release=executor_release,
-        release_jobs=release_jobs,
+        release_executor=FulfillmentReleaseExecutor(
+            settlement_repository=settlement_repository,
+            session_factory=session_factory,
+            teardown_port=teardown_port,
+        ),
+        release_status=FulfillmentReleaseStatusPort(
+            settlement_repository=settlement_repository,
+            session_factory=session_factory,
+        ),
         capacity_released_notifier=_successful_notification,
     )
 
     # Give the reservation a lease_end_utc in the past so the watchdog
     # picks it up -- the migration itself does not carry lease timing
     # (that's site-ledger data, not fulfillment-aggregate data).
-    from datetime import datetime, timedelta, timezone
-
     with engine.begin() as connection:
         connection.execute(text(
             "UPDATE capacity_reservations SET lease_end_utc = :end WHERE "
             "capacity_reservation_id = 'reservation-legacy-1'"
         ), {"end": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()})
-
-    import asyncio
 
     async def _drive():
         first = await lease_lifecycle.force_check_leases()

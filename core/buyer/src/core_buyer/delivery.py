@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from market_config.config_loader import get_dotted, load_user_config
+from market_config.config_loader import load_user_config
 from market_delivery import (
     DeliveryOutcome,
     DeliverySinkSet,
@@ -37,7 +37,7 @@ def buyer_delivery_section(
     """Read ``[Delivery]`` from the buyer's own layered configuration."""
 
     document = load_user_config(Path(config_path) if config_path else None)
-    section = get_dotted(document, DELIVERY_CONFIG_PATH)
+    section = document.get("Delivery", document.get(DELIVERY_CONFIG_PATH))
     return section if isinstance(section, Mapping) else None
 
 

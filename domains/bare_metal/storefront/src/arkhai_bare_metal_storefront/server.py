@@ -2,34 +2,36 @@
 
 from __future__ import annotations
 
-import asyncio
-import os
+import logging
 from collections.abc import Callable, Iterable
 from importlib import import_module
 from typing import Any
 
 from core_storefront.app_composition import StorefrontAppConfig
+from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.escrow_identity import backfill_escrow_obligation_records
-from core_storefront.domain_registry import (
-    StorefrontDomainRegistry,
-    StorefrontDomainRegistration,
-)
-from core_storefront.stage_log import set_stage_event_db_path, stage_event
+from core_storefront.stage_log import set_stage_event_db_path
 from market_core import MarketDomainContract
+from market_deal_servicing import create_lifecycle_router
+from market_storefront_kit import get_storefront_container
 from market_storefront_kit import (
-    NegotiationWatchdogPolicy,
     StorefrontComposition,
     StorefrontRouteHooks,
     StorefrontServiceHooks,
     build_composed_storefront_app,
-    run_negotiation_watchdog,
 )
 
 from .api import router as http_router
+from .config import load_storefront_settings
 from .domain_runtime import get_market_domain_contract
-from .runtime import BareMetalStorefrontRuntime, build_runtime_from_environment
+from .lifecycle_steps import register_bare_metal_loops
 from .response_auth import authenticate_response
-
+from .runtime import (
+    BareMetalStorefrontRuntime,
+    build_runtime_from_configuration,
+    seed_service_peer_trust,
+)
+from .storefront_registry import build_bare_metal_storefront_registry
 
 DESCRIPTION = (
     "Seller-side storefront for the Arkhai bare-metal marketplace.\n\n"
@@ -38,52 +40,49 @@ DESCRIPTION = (
 )
 
 
-def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
-    return NegotiationWatchdogPolicy(
-        timeout_seconds=float(
-            os.environ.get("BARE_METAL_NEGOTIATION_TIMEOUT_SECONDS", "1800")
-        ),
-        interval_seconds=float(
-            os.environ.get("BARE_METAL_NEGOTIATION_WATCHDOG_INTERVAL", "60")
-        ),
-    )
+logger = logging.getLogger(__name__)
 
 
 async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
-    set_stage_event_db_path(runtime.db.db_path)
-    policy = _negotiation_watchdog_policy()
-    asyncio.create_task(
-        run_negotiation_watchdog(
-            runtime.db,
-            policy,
-            emit_stage_event=stage_event,
+    """Start the storefront's loops over its composed runtime.
+
+    Each site's service peer is seeded first, so the trust every site client
+    verifies against holds the peer before anything calls a site. The first
+    projection load runs before any timer, so neither the site-projection
+    poller nor publication runs its first cycle over projections nothing has
+    loaded, and the escrow backfill before servicing, which reads what it
+    records. Every loop then runs on the controller's timer over its
+    registered step.
+    """
+    if runtime.settlement_composition is not None and runtime.registry_configuration is not None:
+        await runtime.settlement_composition.disputes.refresh(
+            runtime.registry_configuration.client_factory(runtime.marketplace_signer)
         )
-    )
+    seed_service_peer_trust(runtime)
+    set_stage_event_db_path(runtime.db.db_path)
     if runtime.settlement_runtime is not None:
         await backfill_escrow_obligation_records(
             sqlite_client=runtime.db,
             settlement_runtime=runtime.settlement_runtime,
             local_principal=runtime.seller_principal,
         )
-    if runtime.settlement_worker is not None:
-        asyncio.create_task(runtime.settlement_worker.run())
+    if runtime.site_projections is not None:
+        await runtime.site_projections.poll_once()
+    intervals = register_bare_metal_loops(runtime)
+    for name in runtime.loops.start_loops(task_logger=logger):
+        logger.info("[STARTUP] %s started (interval=%ss)", name, intervals.get(name))
 
 
-def build_bare_metal_storefront_registry(
-    *,
-    domain: MarketDomainContract,
-) -> StorefrontDomainRegistry:
-    """Build the explicit one-registration bare-metal storefront registry."""
+async def _stop_runtime(runtime: BareMetalStorefrontRuntime) -> None:
+    """Cancel every loop and wait for each task to end, so none outlives the app.
 
-    return StorefrontDomainRegistry(
-        (
-            StorefrontDomainRegistration(
-                offering_mode="bare_metal",
-                contract=domain,
-                contribution_id="bare_metal",
-            ),
-        )
-    )
+    No cycle is left running against a runtime its app has uninstalled, and an
+    app started again over the same runtime registers and starts its loops
+    afresh. A publication cycle cancelled mid-run stops its worker thread
+    through the kit's cycle driver; this waits for the loop's task only.
+    """
+    await runtime.loops.stop_loops()
+    await runtime.lifecycle.close()
 
 
 def build_bare_metal_storefront_app(
@@ -109,7 +108,7 @@ def build_bare_metal_storefront_app(
         elif runtime is not None:
             selected_runtime = runtime
         else:
-            selected_runtime = build_runtime_from_environment(domain=domain)
+            selected_runtime = build_runtime_from_configuration(domain=domain)
         if selected_runtime.domain is not domain:
             raise RuntimeError(
                 "bare-metal runtime must carry the exact registered domain contract"
@@ -119,6 +118,7 @@ def build_bare_metal_storefront_app(
     service_hooks = StorefrontServiceHooks(
         build=build_services,
         start=_start_runtime,
+        stop=_stop_runtime,
     )
     return build_composed_storefront_app(
         StorefrontComposition(
@@ -133,7 +133,7 @@ def build_bare_metal_storefront_app(
             ),
             services=service_hooks,
             routes=StorefrontRouteHooks(
-                routers=(http_router, *tuple(routers)),
+                routers=(http_router, create_lifecycle_router(lambda request: get_storefront_container(request).lifecycle.routes()), *tuple(routers)),
                 middleware=(authenticate_response,),
             ),
         )
@@ -148,11 +148,17 @@ app = build_bare_metal_storefront_app(
 )
 
 
+def serving_port(port: int | None = None) -> int:
+    """The port ``serve`` binds: ``port`` when given, else the configured ``port``."""
+    return port if port is not None else load_storefront_settings().port
+
+
 def run_serve(
     host: str = "0.0.0.0",
-    port: int = 8000,
+    port: int | None = None,
     root_path: str = "",
 ) -> None:
-    """Run the composed application with uvicorn."""
+    """Run the composed application with uvicorn, on the configured port unless
+    ``port`` overrides it."""
     uvicorn = import_module("uvicorn")
-    uvicorn.run(app, host=host, port=port, root_path=root_path)
+    uvicorn.run(app, host=host, port=serving_port(port), root_path=root_path)

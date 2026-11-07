@@ -57,6 +57,10 @@ docker compose -f compose/registry.yml up -d
 docker compose -f compose/seller.yml -f compose/registry.yml up -d
 ```
 
+Co-deployed, the seller stack needs its own files and environment too — its
+configuration, identity files, and KVM-host SSH key — as the
+[seller quickstart](./seller-quickstart.md#5-bring-it-up) describes.
+
 The compose file mounts a named volume at `/app/data` so the sqlite
 state persists across restarts.
 

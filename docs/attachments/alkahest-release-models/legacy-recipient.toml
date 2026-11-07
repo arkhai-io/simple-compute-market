@@ -1,0 +1,9 @@
+# Public migration fixture. Contains no identity, credential, or network settings.
+[Settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[Settlement.alkahest]
+enabled = true
+oracle_gated = false
+interruptible = false

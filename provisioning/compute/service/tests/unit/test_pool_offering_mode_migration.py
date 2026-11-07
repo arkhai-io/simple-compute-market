@@ -13,7 +13,8 @@ from compute_provisioning_service.db.migrations import (
     SchemaDriftError,
     _migrate_executor_identities_and_pool_modes,
 )
-from compute_provisioning_service.db.models import AnsibleJob, AnsiblePoolConfig
+from compute_provisioning_service.db.models import JobRecord
+from vm_provisioning_adapter.db import AnsiblePoolConfig
 from market_fulfillment.db import SettlementRecord
 from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
 from market_site.db import (
@@ -29,11 +30,24 @@ def _engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(
-        engine,
-        default_playbook_path="/playbooks/vm-operations.yaml",
-        default_inventory_group="kvm_hosts",
-    )
+    run_migrations(engine)
+    # Migration creates no pool: store the VM `default` a database from before
+    # declared offering modes held, with no mode declared and its playbook
+    # configured, which these migrations read.
+    with Session(engine) as db, db.begin():
+        db.add(ResourcePool(
+            id=DEFAULT_POOL_ID,
+            label="Default Pool",
+            provider="ansible",
+            enabled=True,
+            policy_tags={},
+        ))
+        db.flush()
+        db.add(AnsiblePoolConfig(
+            pool_id=DEFAULT_POOL_ID,
+            playbook_path="/playbooks/vm-operations.yaml",
+            extra_vars={},
+        ))
     return engine
 
 
@@ -63,7 +77,6 @@ def test_pool_mode_derivation_is_exact_includes_default_and_is_idempotent(caplog
                 pool_id="vm-pool",
                 playbook_path="/playbooks/vm-operations.yaml",
                 requirement_delegate="vm_management_v1",
-                inventory_group="kvm_hosts",
                 extra_vars={},
             )
         )
@@ -187,13 +200,13 @@ def test_legacy_executor_identity_backfills_proof_and_quarantines_unknown_rows()
         )
         db.add_all(
             (
-                AnsibleJob(
+                JobRecord(
                     id="job-proved",
                     status="queued",
                     params={"vm_host": "kvm1", "vm_action": "create"},
                     capacity_reservation_id="reservation-proved",
                 ),
-                AnsibleJob(
+                JobRecord(
                     id="job-unknown",
                     status="running",
                     params={"vm_action": "unknown"},
@@ -208,15 +221,15 @@ def test_legacy_executor_identity_backfills_proof_and_quarantines_unknown_rows()
         unknown = db.get(CapacityReservation, "reservation-unknown")
         settlement = db.get(SettlementRecord, "reservation-proved")
         unknown_settlement = db.get(SettlementRecord, "reservation-unknown")
-        proved_job = db.get(AnsibleJob, "job-proved")
-        unknown_job = db.get(AnsibleJob, "job-unknown")
+        proved_job = db.get(JobRecord, "job-proved")
+        unknown_job = db.get(JobRecord, "job-unknown")
 
-        assert proved.executor_kind == "vm"
-        assert settlement.scheduling_requirements["executor_kind"] == "vm"
-        assert proved_job.executor_kind == "vm"
-        assert proved_job.params["executor_kind"] == "vm"
+        assert proved.offering_mode == "vm"
+        assert settlement.scheduling_requirements["offering_mode"] == "vm"
+        assert proved_job.offering_mode == "vm"
+        assert proved_job.params["offering_mode"] == "vm"
 
-        assert unknown.executor_kind is None
+        assert unknown.offering_mode is None
         assert unknown.state == "unmanaged"
         assert unknown.failure_reason == "legacy_executor_identity_quarantined"
         assert unknown_settlement.state == "failed"
@@ -224,7 +237,7 @@ def test_legacy_executor_identity_backfills_proof_and_quarantines_unknown_rows()
             unknown_settlement.failure_reason
             == "legacy_executor_identity_quarantined"
         )
-        assert unknown_job.executor_kind is None
+        assert unknown_job.offering_mode is None
         assert unknown_job.status == "failed"
         assert "quarantined" in unknown_job.error
 
@@ -234,7 +247,7 @@ def test_legacy_executor_identity_backfills_proof_and_quarantines_unknown_rows()
         assert connection.execute(
             text(
                 "SELECT COUNT(*) FROM capacity_reservations "
-                "WHERE executor_kind='vm'"
+                "WHERE offering_mode='vm'"
             )
         ).scalar_one() == 1
 
@@ -284,11 +297,11 @@ def test_conflicting_and_unproved_legacy_reservations_are_quarantined_by_state()
     with Session(engine) as db:
         conflict = db.get(CapacityReservation, "reservation-conflict")
         terminal = db.get(CapacityReservation, "reservation-terminal")
-        assert conflict.executor_kind is None
+        assert conflict.offering_mode is None
         assert conflict.state == "unmanaged"
         assert conflict.failure_reason == "legacy_executor_identity_quarantined"
         assert "conflicting evidence: bare_metal, vm" in conflict.failure_message
-        assert terminal.executor_kind is None
+        assert terminal.offering_mode is None
         assert terminal.state == "released"
         assert terminal.failure_reason == "legacy_executor_identity_quarantined"
 
@@ -330,7 +343,7 @@ def test_executor_backfill_combines_all_representable_durable_evidence():
                 capacity_reservation_id="reservation-multi-evidence",
                 market="vms",
                 scheduling_requirements={
-                    "executor_kind": "vm",
+                    "offering_mode": "vm",
                     "resource_kind": "compute.gpu",
                     "dimensions": {"gpu_count": "1"},
                     "attributes": {},
@@ -345,18 +358,18 @@ def test_executor_backfill_combines_all_representable_durable_evidence():
         )
         db.add_all(
             (
-                AnsibleJob(
+                JobRecord(
                     id="job-recorded-kind",
                     status="queued",
                     params={
-                        "executor_kind": "vm",
+                        "offering_mode": "vm",
                         "vm_action": "create",
                     },
                     capacity_reservation_id="reservation-multi-evidence",
                     action_kind="provision",
                     idempotency_key="provision-multi-evidence",
                 ),
-                AnsibleJob(
+                JobRecord(
                     id="job-vm-host",
                     status="queued",
                     params={"vm_host": "kvm1", "vm_action": "remove"},
@@ -378,12 +391,12 @@ def test_executor_backfill_combines_all_representable_durable_evidence():
             SettlementRecord,
             "reservation-multi-evidence",
         )
-        jobs = db.query(AnsibleJob).order_by(AnsibleJob.id).all()
-        assert reservation.executor_kind == "vm"
+        jobs = db.query(JobRecord).order_by(JobRecord.id).all()
+        assert reservation.offering_mode == "vm"
         assert reservation.state == "reserved"
-        assert settlement.scheduling_requirements["executor_kind"] == "vm"
-        assert [job.executor_kind for job in jobs] == ["vm", "vm"]
-        assert all(job.params["executor_kind"] == "vm" for job in jobs)
+        assert settlement.scheduling_requirements["offering_mode"] == "vm"
+        assert [job.offering_mode for job in jobs] == ["vm", "vm"]
+        assert all(job.params["offering_mode"] == "vm" for job in jobs)
 
 
 def test_pool_mode_derivation_rejects_malformed_legacy_policy_tags():

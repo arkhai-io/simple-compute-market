@@ -3,7 +3,9 @@
 Validation is now schema-driven: the ``listing_shape`` in filter-spec.yaml
 defines what a publishable listing looks like.  These tests pin the
 behavior at the boundary — happy path, individual structural failures,
-and the cosmetic offer_resource_type tag the registry-client still reads.
+and that no derived resource-type tag is reported: the accept/reject decision
+is the listing shape's, and a cosmetic tag named for the shape key was dropped
+rather than renamed alongside it.
 """
 
 from __future__ import annotations
@@ -19,9 +21,9 @@ from market_identity import (
     canonical_body_hash,
     sign_request,
 )
+from registry_client.models import ValidatePublishRequest
 
-from src.main import app
-from src.api.validate_model import ValidatePublishRequest
+from core_registry.main import app
 
 
 class _ValidationAuth(httpx.Auth):
@@ -29,9 +31,12 @@ class _ValidationAuth(httpx.Auth):
         self.signer = Ed25519Signer(bytes(range(32)))
 
     def auth_flow(self, request):
-        body = ValidatePublishRequest.model_validate(
-            json.loads(request.content)
-        ).model_dump(mode="json")
+        # Sign the bytes on the wire, as every real client does. Re-serializing
+        # through the request model here would reproduce whatever the server
+        # does to the body, so the pair would agree even when both are wrong --
+        # which is exactly how a defaulted field once broke real callers while
+        # this suite stayed green.
+        body = json.loads(request.content)
         authenticated = sign_request(
             signer=self.signer,
             envelope=RequestEnvelope(
@@ -72,7 +77,7 @@ def _valid_payload(**overrides: object) -> dict:
     base: dict = {
         "listing_id": "test-listing-1",
         "storefront_url": "http://seller.example/",
-        "offer_resource": {"gpu_model": "A100", "region": "us-west"},
+        "listing_resource": {"gpu_model": "A100", "region": "us-west"},
         "accepted_escrows": [
             {
                 "chain_name": "anvil",
@@ -96,20 +101,42 @@ async def test_valid_listing_passes() -> None:
     assert body["errors"] == []
     assert body["listing_id"] == "test-listing-1"
     assert body["accepted_escrows_count"] == 1
-    assert body["offer_resource_type"] == "compute"
+    assert "listing_resource_type" not in body
+
 
 
 @pytest.mark.asyncio
-async def test_hosted_settlement_option_passes_without_alkahest_choice() -> None:
+async def test_payload_omitting_optional_fields_authenticates() -> None:
+    """A caller that omits optional fields is still authenticated.
+
+    The proof binds the document the caller hashed. `demands` and
+    `settlement_options` are optional and default to empty lists, so a server
+    that verified against its own parsed model would compare a body carrying
+    both against one carrying neither, and refuse a well-formed request with a
+    context mismatch.
+    """
+    payload = _valid_payload()
+    assert "demands" not in payload and "settlement_options" not in payload
+    async with _client() as c:
+        resp = await c.post("/api/v1/listings/validate-publish", json=payload)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["valid"] is True
+
+@pytest.mark.asyncio
+async def test_mechanism_option_passes_without_alkahest_choice() -> None:
     payload = _valid_payload(
         accepted_escrows=[],
         settlement_options=[
             {
                 "option_id": "a" * 64,
-                "mechanism": "fiat.stripe.v1",
-                "asset": "usd",
-                "rates": [{"field": "amount", "per": "hour", "value": "125"}],
-                "params": {"account_ref": "acct-seller"},
+                "price": {
+                    "asset": "usd",
+                    "rates": [{"field": "amount", "per": "hour", "value": "125"}],
+                },
+                "settlement": {
+                    "schema": "example.payment.v1",
+                    **({"account_ref": "acct-seller"} or {}),
+                },
             }
         ],
     )
@@ -124,18 +151,35 @@ async def test_hosted_settlement_option_passes_without_alkahest_choice() -> None
 
 
 @pytest.mark.asyncio
-async def test_missing_offer_resource_rejected() -> None:
-    payload = _valid_payload()
-    del payload["offer_resource"]["gpu_model"]
-    del payload["offer_resource"]["region"]
-    async with _client() as c:
-        resp = await c.post("/api/v1/listings/validate-publish", json=payload)
-    body = resp.json()
-    assert body["valid"] is False
-    # Schema requires gpu_model AND region on offer_resource.
-    joined = " ".join(body["errors"])
-    assert "gpu_model" in joined
+async def test_a_listing_without_gpus_is_valid(registry_client) -> None:
+    """A machine without GPUs states neither GPU field; through the canonical
+    client, its dry run is valid."""
+    result = await registry_client.validate_publish_listing(
+        ValidatePublishRequest(
+            **_valid_payload(
+                listing_resource={"region": "us-west", "vcpu_count": 16, "ram_gb": 64}
+            )
+        )
+    )
+
+    assert result.valid, result.errors
+    assert result.errors == []
+
+
+@pytest.mark.asyncio
+async def test_a_listing_without_a_region_is_invalid(registry_client) -> None:
+    """The schema requires only ``region`` of the listing resource, so a GPU
+    field's absence is never among the reasons."""
+    result = await registry_client.validate_publish_listing(
+        ValidatePublishRequest(
+            **_valid_payload(listing_resource={"vcpu_count": 16, "ram_gb": 64})
+        )
+    )
+
+    assert not result.valid
+    joined = " ".join(result.errors)
     assert "region" in joined
+    assert "gpu_model" not in joined
 
 
 @pytest.mark.asyncio
@@ -178,7 +222,7 @@ async def test_blank_listing_id_rejected() -> None:
 @pytest.mark.asyncio
 async def test_invalid_gpu_interconnect_enum_rejected() -> None:
     payload = _valid_payload()
-    payload["offer_resource"]["gpu_interconnect"] = "not-a-real-mode"
+    payload["listing_resource"]["gpu_interconnect"] = "not-a-real-mode"
     async with _client() as c:
         resp = await c.post("/api/v1/listings/validate-publish", json=payload)
     body = resp.json()

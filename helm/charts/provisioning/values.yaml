@@ -20,6 +20,104 @@ global:
 mockMode: false
 
 # ---------------------------------------------------------------------------
+# Declarative relays, pools, hosts, and capacity.
+#
+# Each value is a whole definition document, rendered verbatim into the
+# ConfigMap and mounted into the application container; the service reads a
+# document only when its value is non-empty, so leaving one empty manages that
+# resource entirely through the API. They carry no credentials: a relay entry
+# names *which keys* of the provisioning-secrets profile hold its admission
+# token (`token_secret_key`) and its grant-signing key (`grant_key_secret_key`,
+# required), never the values, and a host entry names its key by the `key_path`
+# of a file mounted into the pod, never the key. Editing a document changes the
+# ConfigMap, whose checksum rolls the pod, so a release that edits one applies
+# it.
+#
+# Reconciled when the document's content changes, not on every start: import is
+# authoritative over the document it is given, so applying one nobody submitted
+# would revert administration done through the API on any pod restart.
+#
+# What a document does to entries it stops naming differs:
+#   relays   - retained. Disabling one would break every pool referencing it
+#              and every live tunnel on it.
+#   pools    - disabled. The pool document is authoritative for the whole set.
+#   hosts    - retained, as relays are, and reported. A host entry declares its
+#              whole host: an omitted `pool_id` unplaces it and an omitted
+#              `enabled` enables it.
+#   capacity - retained, as relays are. A capacity entry replaces the whole
+#              declaration it names, and every declared attribute is published
+#              to storefronts.
+#
+# A host entry and a capacity declaration each name a pool, so a pool they name
+# must exist when they are imported, after pools: one from `pools`, or, on a
+# fresh site with no `pools` document, one from the service's seed (the
+# packaged seed holds `vm-default` and `bare-metal-default`; `configFiles`
+# below replaces it). Hosts are imported before capacity. A document that
+# cannot be applied keeps the service from starting, and the Recreate strategy
+# leaves no pod serving, so submit a changed document to its import route with
+# `validate_only` first: a host document to POST /api/v1/hosts/definitions/import,
+# a capacity document to POST /api/v1/capacity/definitions/import.
+#
+#   pools:
+#     pools:
+#       - id: default
+#         label: Default Pool
+#         provider: vm.ansible
+#         provider_config: {playbook_path: playbooks/vm-operations.yaml}
+#   hosts:
+#     hosts:
+#       - host_id: kvm1
+#         pool_id: default
+#         connection:
+#           kind: ssh
+#           version: 2
+#           public:
+#             ssh_host: 10.0.0.5
+#             ssh_user: ubuntu
+#             key_path: /home/appuser/.ssh/id_ed25519
+#   capacity:
+#     resources:
+#       - resource_id: compute-kvm1
+#         pool_id: default
+#         resource_type: compute.gpu
+#         host_id: kvm1
+#         capacity: {gpu_count: 8}
+#         attributes: {gpu_model: H200}
+# ---------------------------------------------------------------------------
+definitions:
+  relays: {}
+  pools: {}
+  hosts: {}
+  capacity: {}
+
+# ---------------------------------------------------------------------------
+# Operator files — each entry's content is rendered verbatim into the ConfigMap
+# and mounted read-only at /app/config/<name>. The chart gives a file no meaning:
+# a setting under `config` names it by that path. A name must be one file name;
+# names the chart mounts itself, and `config.yml` or `config-*.yml` (or their
+# `.yaml` forms), which the service would load as profiles around `config`, are
+# refused.
+#
+# For example, a fresh site's starting pools in place of the packaged seed
+# (`pool_seed_path: ""` under `config` starts a fresh site with none):
+#
+#   configFiles:
+#     pool-seed.yaml: |
+#       pools:
+#         - id: gpu-h200
+#           label: H200 nodes
+#           provider: vm.ansible
+#           policy_tags:
+#             deliverable_modes: [vm]
+#             advertisable_modes: [vm]
+#             capacity_backing: backed
+#           provider_config: {}
+#   config:
+#     pool_seed_path: /app/config/pool-seed.yaml
+# ---------------------------------------------------------------------------
+configFiles: {}
+
+# ---------------------------------------------------------------------------
 # Helm smoke-test configuration.
 # ---------------------------------------------------------------------------
 tests:
@@ -42,8 +140,9 @@ server:
 # ---------------------------------------------------------------------------
 # Provisioning credentials are always operator-managed Kubernetes Secrets.
 # sshKey.secretName must expose `id_ed25519`; sshDecryptionKey.secretName must
-# expose `config-provisioning-secrets.yml`. The chart never accepts credential,
-# inventory, or callback-token contents as values.
+# expose `config-provisioning-secrets.yml`. The chart never accepts credential
+# or callback-token contents as values; hosts are declared in
+# `definitions.hosts`, which names each key by its file path.
 # ---------------------------------------------------------------------------
 sshKey:
   createSecret: false
@@ -76,11 +175,11 @@ adminIdentity:
       identifier: "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc"
 
 # ---------------------------------------------------------------------------
-# Storefront callback target for the lease watchdog.
+# Storefront callback target for deal-scoped events.
 #
-# The provisioning service owns the vm_leases table. When a lease expires, its
-# watchdog patches the seller storefront resource back to available. The
-# callback credential is supplied inside the operator-managed runtime Secret.
+# When a lease's capacity is released, the provisioning service sends the
+# owning storefront a signed `capacity_released` event. It signs with
+# `identity` and verifies the response against `storefrontIdentity`.
 storefront:
   url: ""
   agentName: "bob"
@@ -96,16 +195,24 @@ storefront:
 config:
   database_url: "sqlite:////app/data/provisioning.db"
 
+  # relay_definitions_path, pool_definitions_path, host_definitions_path, and
+  # capacity_definitions_path are NOT set here. The chart derives each from
+  # its `definitions` value above, so the mount and the path cannot disagree —
+  # a rendered-and-mounted document that the service skips because its path is
+  # unset is a silent no-op that looks like configuration. The schema refuses
+  # every one of them here for that reason.
+
   # Ansible paths — set to the IaC tree location inside the container.
   # Override here for environments that mount the IaC at a different path.
-  playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
-  bare_metal_playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/bare-metal/node-access.yaml"
-  inventory_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/hosts"
+  # The schema refuses the retired `playbook_path`, as the service does, and
+  # the retired `inventory_ini` and `inventory_path`: the service reads no INI
+  # inventory at startup, and hosts are declared in `definitions.hosts`.
+  vm_playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+  bare_metal_playbook_path: "/opt/domains/bare_metal/provisioning/iac/ansible/playbooks/node-access.yaml"
   management_vars_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
 
   # Ansible runtime
   ansible_timeout_seconds: 1800
-  default_vm_host: "kvm1"
 
   # Golden image public settings. Credentials belong in the runtime Secret.
   golden_root_ssh_filename: ""
@@ -113,9 +220,12 @@ config:
   golden_gcs_bucket: ""
   golden_gcs_project: ""
 
-  # FRP tunneling
-  frp_server_addr: ""
-  frp_domain: ""
+  # relay_token is deliberately absent, and the values schema forbids setting
+  # it here. It is a credential: it reaches the service through the
+  # provisioning-secrets profile, and a value in plain chart values would be
+  # rendered into a ConfigMap. It seeds a relay established from
+  # `definitions.relays` and is read only when that relay is created — a token
+  # rotated through the relay API is authoritative from then on.
 
   # Lease watchdog
   lease_watchdog_enabled: true
@@ -150,9 +260,10 @@ affinity: {}
 # state (vm_leases, hosts, ansible inventory snapshots).
 #
 # Without persistence the SQLite DB lives on emptyDir — pod restarts
-# lose all known leases, host registrations seeded from the secret-
-# overlay reseed but anything created via the API is gone. With
-# persistence enabled, restarts are transparent.
+# lose all known leases and every recorded document digest, so the
+# hosts `definitions.hosts` declares are registered again but anything
+# created via the API is gone. With persistence enabled, restarts are
+# transparent.
 #
 # enabled: false keeps the existing emptyDir for kind/CI/local-only
 # setups without a StorageClass. database_url in config above should
@@ -167,6 +278,10 @@ affinity: {}
 # ---------------------------------------------------------------------------
 persistence:
   enabled: true
+  # Annotates the PVC helm.sh/resource-policy: keep, so `helm uninstall` leaves
+  # the volume and a reinstall recovers its state. Local deployments set it false
+  # (helm/local-values.yaml), so an uninstall starts the next deploy from nothing.
+  retainOnUninstall: true
   storageClass: ""
   size: 1Gi
   accessMode: ReadWriteOnce

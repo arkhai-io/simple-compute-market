@@ -2,26 +2,37 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi_utils.cbv import cbv
+from market_storefront_kit import DealControlRouteError, StageEventRouteService
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.middleware.admin_auth import require_admin_principal
-from apicredits_storefront.server import is_globally_paused
+from apicredits_storefront.middleware.admin_auth import authenticate_admin
 from core_storefront.models.system_models import (
+    STAGE_EVENT_PAGE_CAP,
     HealthResponse,
-    StageEventResponse,
+    LoopStatus,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["system"])
+
+
+def _lifecycle_status() -> dict[str, LoopStatus] | None:
+    """Every lifecycle loop by name: its controller state and the outcome of
+    its last cycle, whether its timer or an operator's step ran it."""
+    loops = _container.resolved_loop_controller
+    if loops is None:
+        return None
+    return {
+        name: LoopStatus.model_validate(loop.to_dict())
+        for name, loop in loops.snapshot().items()
+    }
 
 
 @cbv(router)
@@ -51,57 +62,51 @@ class SystemController:
         response_model=HealthResponse,
         summary="Full diagnostic status",
     )
-    async def system_status(self) -> HealthResponse:
+    async def system_status(self, request: Request) -> HealthResponse:
+        # The administrator's read, signed as the other storefronts' is, so the
+        # canonical client reads it: it carries the storefront's principal and
+        # every loop's state.
+        await authenticate_admin(
+            request, operation="admin_system_status", resource="system/status"
+        )
         body = await self._svc.get_health(include_registry=True)
-        body["paused"] = is_globally_paused()
+        body["paused"] = _container.trading_pause.paused
+        body["lifecycle"] = _lifecycle_status()
         return HealthResponse(**body)
 
     @router.get(
         "/api/v1/system/events",
         summary="Stage event log",
-        dependencies=[Depends(require_admin_principal)],
     )
     async def stream_events(
         self,
         request: Request,
         since_id: Annotated[int, Query(ge=0)] = 0,
-        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        limit: Annotated[int, Query(ge=1, le=STAGE_EVENT_PAGE_CAP)] = 100,
         stream: Annotated[bool, Query()] = False,
         stage: Annotated[str | None, Query()] = None,
         listing_id: Annotated[str | None, Query()] = None,
         negotiation_id: Annotated[str | None, Query()] = None,
     ):
-        last_event_id_hdr = request.headers.get("last-event-id")
-        if last_event_id_hdr:
-            try:
-                since_id = int(last_event_id_hdr)
-            except (ValueError, TypeError):
-                pass
-
-        if not stream:
-            rows = await self._db.list_stage_events(
-                after_id=since_id,
-                limit=limit,
-                stage=stage,
-                listing_id=listing_id,
-                negotiation_id=negotiation_id,
+        try:
+            resource = StageEventRouteService.signed_resource(
+                request.query_params.multi_items()
             )
-            return StageEventResponse(events=rows, count=len(rows))
-
-        async def _generate():
-            cursor = since_id
-            while True:
-                rows = await self._db.list_stage_events(
-                    after_id=cursor,
-                    limit=50,
-                    stage=stage,
-                    listing_id=listing_id,
-                    negotiation_id=negotiation_id,
-                )
-                for row in rows:
-                    cursor = row["id"]
-                    yield f"id: {cursor}\ndata: {json.dumps(row, default=str)}\n\n"
-                if not rows:
-                    await asyncio.sleep(0.2)
-
-        return StreamingResponse(_generate(), media_type="text/event-stream")
+        except DealControlRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        await authenticate_admin(
+            request, operation="admin_system_events", resource=resource
+        )
+        events = StageEventRouteService(self._db)
+        since_id = events.resume_point(since_id, request.headers.get("last-event-id"))
+        filters = {
+            "stage": stage,
+            "listing_id": listing_id,
+            "negotiation_id": negotiation_id,
+        }
+        if not stream:
+            return await events.page(since_id=since_id, limit=limit, **filters)
+        return StreamingResponse(
+            events.stream(since_id=since_id, **filters),
+            media_type="text/event-stream",
+        )

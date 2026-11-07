@@ -5,11 +5,15 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
+from market_storefront_kit import DealControlRouteError, NegotiationControlRouteService
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.middleware.admin_auth import require_admin_principal
+from apicredits_storefront.middleware.admin_auth import (
+    authenticate_admin,
+    require_admin_principal,
+)
 from core_storefront.models.negotiation_models import (
     AdvanceRequest,
     AdvanceResponse,
@@ -109,23 +113,34 @@ class NegotiationsController:
         "/{listing_id}/negotiations/{neg_id}/force-accept",
         response_model=ForceAcceptResponse,
         summary="Force-accept a negotiation (admin)",
-        dependencies=[Depends(require_admin_principal)],
     )
     async def force_accept_negotiation(
         self,
         listing_id: str,
         neg_id: str,
         body: ForceAcceptRequest,
+        request: Request,
     ) -> ForceAcceptResponse:
-        try:
-            result = await self._svc.force_accept(
-                listing_id=listing_id,
-                neg_id=neg_id,
-                amount=body.amount,
+        # The canonical storefront client's signed contract, which every
+        # storefront binding this control verifies, not this route's own name.
+        actor_principal = await authenticate_admin(
+            request,
+            operation="admin_force_accept_negotiation",
+            resource=f"{listing_id}/{neg_id}",
+        )
+        runtime = _container.resolved_negotiation_runtime
+        if runtime is None:
+            raise HTTPException(
+                status_code=503, detail="storefront negotiation is unavailable"
             )
-        except NegotiationServiceError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=str(exc))
-        except Exception as exc:
-            logger.error("[NEGOTIATIONS] force-accept: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc))
-        return ForceAcceptResponse(**result)
+        controls = NegotiationControlRouteService(
+            runtime=runtime,
+            repository=_container.resolved_sqlite_client,
+            seller_principal=lambda: _container.resolved_marketplace_signer.identity,
+        )
+        try:
+            return await controls.force_accept(
+                listing_id, neg_id, body, actor_principal=actor_principal
+            )
+        except DealControlRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

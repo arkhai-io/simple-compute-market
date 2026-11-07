@@ -4,7 +4,7 @@
 almost every other storefront test -- and, by its own docstring, does not
 claim to pin the real wire shapes. It does not strip `resource_id` from
 reserve responses the way `kit/site`'s real router does, so a test built
-only against that fake cannot catch a `resource_id`/`vm_host`-required
+only against that fake cannot catch a placement-field-required
 regression on either side of the real wire boundary.
 
 This file mounts the real `market_site.router` into a real FastAPI app and
@@ -82,12 +82,12 @@ def site_app() -> tuple[FastAPI, CapacityLedgerService]:
                 policy_tags={"deliverable_modes": ["vm"]},
             )
         )
-    ledger = CapacityLedgerService(session_factory, unit_claim_keys=("units", "gpu_count"))
+    ledger = CapacityLedgerService(session_factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     ledger.register_resource(
         resource_id="kvm1",
         total_units=1,
         capacity={"gpu_count": 1},
-        attributes={"vm_host": "kvm1", "pool_id": "default"},
+        host_id="kvm1",
         pool_id="default",
     )
 
@@ -157,8 +157,8 @@ def _client(app: FastAPI) -> SiteCapacityClient:
 
 
 class TestOpaqueReservationBoundary:
-    """The real wire contract never carries `resource_id`/`vm_host` as
-    required or populated fields across the reservation boundary."""
+    """The real wire contract never carries placement fields across the
+    reservation boundary."""
 
     async def test_reserve_response_never_carries_placement_fields(self, site_app):
         """Boundary-contract test: protects any future caller, not just the
@@ -167,12 +167,14 @@ class TestOpaqueReservationBoundary:
         client = _client(app)
 
         reservation = await client.reserve(
-            claim={"executor_kind": "vm", "pool_id": "default", "gpu_count": 1},
+            claim={"offering_mode": "vm", "pool_id": "default", "gpu_count": 1},
             deal_ref={"escrow_uid": "escrow-1"},
         )
 
         assert reservation is not None
-        for leaked_field in ("resource_id", "capacity_bucket_id", "backing_resource_id"):
+        for leaked_field in (
+            "resource_id", "capacity_bucket_id", "backing_resource_id", "host_id",
+        ):
             assert leaked_field not in reservation, (
                 f"{leaked_field!r} must not appear in a reservation response "
                 "-- it is the provisioning authority's private placement "
@@ -187,19 +189,15 @@ class TestOpaqueReservationBoundary:
         client = _client(app)
 
         reservation = await client.reserve(
-            claim={"executor_kind": "vm", "pool_id": "default", "gpu_count": 1},
+            claim={"offering_mode": "vm", "pool_id": "default", "gpu_count": 1},
             deal_ref={"escrow_uid": "escrow-1"},
         )
         assert reservation is not None
         capacity_reservation_id = reservation["capacity_reservation_id"]
 
-        # resource_id is deliberately stripped by the wire boundary (see
-        # test_reserve_response_never_carries_placement_fields above).
-        # vm_host is not stripped the same way -- it may or may not be
-        # present depending on the matched resource's own attributes -- so
-        # the fix here is not "vm_host is always absent", it's that
-        # fulfillment must not *require* it. Confirmed below by never
-        # reading it before commit.
+        # The wire boundary strips every placement field, the host included
+        # (see test_reserve_response_never_carries_placement_fields above),
+        # so commit must work from the reservation identity alone.
         assert "resource_id" not in reservation
 
         await client.commit(
@@ -214,8 +212,8 @@ class TestOpaqueReservationBoundary:
         assert committed["state"] == "leased"
 
     async def test_commit_without_capacity_reservation_id_still_rejected(self, site_app):
-        """capacity_reservation_id remains genuinely required -- only
-        resource_id became optional. Confirms the fix didn't overcorrect."""
+        """capacity_reservation_id is required even though resource_id is
+        optional."""
         app, _ = site_app
         client = _client(app)
 

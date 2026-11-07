@@ -38,7 +38,16 @@ class PreparedSettlement:
 
 @dataclass(frozen=True)
 class FulfillmentOutcome:
-    status: Literal["fulfilled", "failed"]
+    """What one fulfillment attempt achieved.
+
+    ``deferred`` means work remains that the domain's own convergence will
+    finish (the workload exists, but a step after it, such as registering it
+    or publishing its evidence, did not complete). It is persisted so the
+    domain can leave the deal open; nothing is bound and servicing is not
+    woken, since there is no fulfillment to service yet.
+    """
+
+    status: Literal["fulfilled", "failed", "deferred"]
     fulfillment_ref: str | None = None
     public_result: dict[str, Any] = field(default_factory=dict)
     private_result: Any = None

@@ -1,43 +1,121 @@
-from __future__ import annotations
+from types import SimpleNamespace
 
-from market_hosted_settlement import StripeSettlementConfig
+from market_alkahest.schemas import EscrowProposal
+from market_arkhai_payments import ARKHAI_PAYMENTS_CONFIG_KEY, ARKHAI_PAYMENTS_MECHANISM
+from market_core.schemas import SettlementOption, SettlementSelection, derive_settlement_option_id
+from dispute_terms import lifecycle, authority
 
-from domains.apicredits.buyer.settlement_composition import (
+from arkhai_apicredits_buyer.payments import payment_selection_for_listing
+from arkhai_apicredits_buyer.settlement_composition import (
+    accepted_listing_record,
     buyer_settlement_registry,
     resolve_buyer_settlement_policy,
 )
+from market_identity import Ed25519Signer
 
 
-def test_hosted_only_registry_resolution_does_not_resolve_wallet(monkeypatch) -> None:
+def test_payments_only_registry_resolution_does_not_resolve_wallet(monkeypatch) -> None:
+    """A wallet-free buyer is never asked for an EVM wallet."""
     monkeypatch.setattr(
-        "domains.apicredits.buyer.settlement_composition.resolve_buyer_wallet",
+        "arkhai_apicredits_buyer.settlement_stages.resolve_buyer_wallet",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("hosted-only policy resolved wallet")
+            AssertionError("payments-only policy resolved wallet")
         ),
     )
-    stripe = StripeSettlementConfig(
-        enabled=True,
-        authority_id="authority-main",
-        environment="test",
-    ).model_dump(mode="json", exclude_defaults=True)
+    payments = {
+        "enabled": True,
+        "service_url": "https://payments.example",
+        "service_identity": Ed25519Signer(bytes(range(32))).identity.model_dump(mode="json"),
+        "fee_bps": 250,
+        "api_key_env": "ARKHAI_PAYMENTS_API_KEY",
+    }
 
     policy = resolve_buyer_settlement_policy(
         {
             "Settlement": {
                 "schema_version": 1,
-                "priority": ["fiat.stripe.v1"],
-                "stripe": stripe,
+                "priority": ["arkhai.payments.v1"],
+                "arkhai_payments": payments,
             }
         }
     )
 
     assert [item.mechanism_id for item in policy.ordered_registrations()] == [
-        "fiat.stripe.v1"
+        "arkhai.payments.v1"
     ]
 
 
-def test_buyer_registry_installs_peer_mechanisms() -> None:
-    assert {item.mechanism_id for item in buyer_settlement_registry().registrations} == {
-        "alkahest.v1",
-        "fiat.stripe.v1",
+_DEMANDS = [{
+    "chain_name": "anvil", "arbiter": "0x" + "cc" * 20,
+    "demand_data": {"recipient": "0x" + "dd" * 20},
+}]
+
+
+def test_an_escrow_proposal_records_its_listings_release_conditions() -> None:
+    proposal = EscrowProposal(
+        chain_name="anvil", escrow_address="0x" + "aa" * 20,
+        literal_fields={"token": "0x" + "bb" * 20}, expiration_unix=1_800_000_000,
+    )
+
+    assert accepted_listing_record({"demands": _DEMANDS}, proposal) == {
+        "release_conditions": _DEMANDS
     }
+
+
+def test_a_payment_selection_records_nothing_about_its_listing() -> None:
+    selection = SettlementSelection(
+        option_id="a" * 64,
+        settlement={"schema": ARKHAI_PAYMENTS_MECHANISM},
+        expiration_unix=1_800_000_000,
+    )
+
+    assert accepted_listing_record({"demands": _DEMANDS}, selection) == {}
+
+
+def test_buyer_registry_installs_alkahest_and_payments() -> None:
+    assert {
+        item.mechanism_id for item in buyer_settlement_registry().registrations
+    } == {
+        "alkahest.v1",
+        "arkhai.payments.v1",
+    }
+
+
+def test_payment_selection_attaches_buyer_account_without_alkahest_resources() -> None:
+    account = "00000000-0000-4000-8000-000000000011"
+    terms = lifecycle()
+    settlement = {"schema": ARKHAI_PAYMENTS_MECHANISM, "payee_account": account}
+    option_id = derive_settlement_option_id(price={"asset": "USD/2", "rates": []}, settlement=settlement, lifecycle=terms)
+    offered = SettlementOption(option_id=option_id, price={"asset": "USD/2", "rates": []},
+                               settlement=settlement, lifecycle=terms).model_dump(mode="json")
+
+    class Config:
+        def mechanism_config(self, key):
+            assert key == ARKHAI_PAYMENTS_CONFIG_KEY
+            return SimpleNamespace(enabled=True)
+
+    class Policy:
+        config = Config()
+        public_context = {"dispute_authorities_by_registry": {"": (authority(),)}}
+
+        def compatible_options(self, advertised, *, listing):
+            assert listing["settlement_options"] == list(advertised)
+            assert tuple(advertised) == (offered,)
+            registration = SimpleNamespace(mechanism_id=ARKHAI_PAYMENTS_MECHANISM)
+            option = SimpleNamespace(
+                settlement_schema=ARKHAI_PAYMENTS_MECHANISM, option_id=option_id
+            )
+            return ((registration, option),)
+
+    selection = payment_selection_for_listing(
+        Policy(),
+        {"settlement_options": [offered]},
+        expiration_unix=1_800_000_000,
+        payer_account=account,
+        prefer_payment=True,
+    )
+
+    assert selection is not None
+    assert selection.settlement_schema == ARKHAI_PAYMENTS_MECHANISM
+    assert selection.option_id == option_id
+    assert selection.settlement_params == {"payer_account": account}

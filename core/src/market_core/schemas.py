@@ -12,32 +12,37 @@ the only exception, and they leave with the client-wheel wire bump) and
 no dependencies beyond pydantic — the wheel must stay importable by
 every role without dragging in role or kit code.
 
-Settlement mechanisms: the negotiated outcome is carried as a
-``SettlementPlan`` — per obligation, lifecycle universals
-(payer/claimant, amount/asset, expiration, conditions) as typed fields
-and everything mechanism-specific behind a ``{mechanism, params}``
-envelope whose deterministic interpretation lives in kit codecs
-(``kit/alkahest`` first; fiat providers later). The flat alkahest
-shapes (``EscrowTerms``; proposals keyed on chain + contract address)
-predate the envelope: ``EscrowTerms`` survives as the typed params
-shape of the ``alkahest.v1`` mechanism and as a marked legacy wire
-coercion into the envelope (work item I.1 of
-``docs/development/ARCHITECTURE.md, "Settlement Lifecycle"``).
+Settlement mechanisms: acceptance produces an ``Agreement``, the exact
+accepted terms both parties keep, which a settle stage consumes. Mechanisms
+that settle from the Agreement alone need nothing else from core.
+Mechanisms serviced through the obligation runtime additionally carry a
+``SettlementPlan`` of obligations, whose fields describe escrow-style
+obligations (payer and claimant, amount and asset, expiration, conditions),
+with mechanism-specific materialization behind a ``{mechanism, params}``
+envelope that kit codecs interpret. ``EscrowTerms`` is the typed params
+shape of the ``alkahest.v1`` mechanism, which the mechanism's kit codec
+converts to and from that envelope; core reads neither shape as the other.
 """
 
 from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
+from datetime import datetime, timezone
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     Field,
+    PlainSerializer,
     SerializeAsAny,
+    SerializerFunctionWrapHandler,
     field_serializer,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -101,6 +106,70 @@ def _serialize_uint256_str(v: int | None) -> str | None:
     return None if v is None else str(v)
 
 
+def _uint256_before(v: Any) -> Any:
+    return _parse_uint256_str(v, "uint256 amount")
+
+
+#: A uint256-domain amount: Python ``int`` in memory, decimal-digit string on
+#: the wire. Use this for any field carrying base units rather than a bare
+#: ``int`` -- a response body is canonicalized for the responder's signature,
+#: and a JSON number above 2^53-1 has no canonical form, so an ordinary
+#: 18-decimal amount in a bare ``int`` field makes the response unsignable.
+Uint256Amount = Annotated[
+    int,
+    BeforeValidator(_uint256_before),
+    PlainSerializer(lambda v: str(v), return_type=str),
+]
+
+#: The same, where absent is a distinct answer from zero.
+OptionalUint256Amount = Annotated[
+    int | None,
+    BeforeValidator(_uint256_before),
+    PlainSerializer(_serialize_uint256_str, return_type=str | None),
+]
+
+
+#: JSON numbers are IEEE-754 doubles to most parsers, and canonical JSON has
+#: no number form for an integer outside this range at all.
+JSON_SAFE_INT_MAX = 2**53 - 1
+
+
+def json_safe_wire_value(value: Any) -> Any:
+    """Rewrite out-of-range integers in an untyped payload as decimal strings.
+
+    For payloads that reach the wire without passing through a typed field:
+    persisted rows embedded in a response, diagnostic event bodies. A
+    response is canonicalized for the responder's signature, so an amount
+    read back out of storage as a Python int makes the whole response
+    unsignable -- and the failure lands on whichever route embeds it rather
+    than on the negotiation that recorded the value.
+
+    Deliberately magnitude-dependent: round numbers, counts and identifiers
+    are genuinely numbers and consumers read them as such. Only a value with
+    no canonical number form changes shape, and it changes to the same
+    decimal-digit string typed uint256 fields serialize to.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if -JSON_SAFE_INT_MAX <= value <= JSON_SAFE_INT_MAX:
+            return value
+        return str(value)
+    if isinstance(value, dict):
+        return {key: json_safe_wire_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe_wire_value(item) for item in value]
+    return value
+
+
+#: Untyped rows embedded in a signed response: normalized on the way in so
+#: the response can be canonicalized whatever storage handed back.
+EmbeddedWireRows = Annotated[
+    list[dict[str, Any]],
+    BeforeValidator(json_safe_wire_value),
+]
+
+
 class Resource(BaseModel):
     """Domain-agnostic base resource model."""
 
@@ -127,7 +196,7 @@ class TokenResource(Resource):
       * positive integer — the public price (the seller advertises this
         floor and uses it as the negotiation anchor).
       * ``0`` — free / public-test offering (the seller advertises zero
-        cost; strategy accepts any non-negative offer).
+        cost; strategy accepts any non-negative listing_resource).
       * ``None`` — hidden reserve (the seller publishes the listing without
         advertising a price; the negotiation strategy falls back to
         ``[seller.pricing].default_min_price`` for the floor; buyer must
@@ -211,10 +280,9 @@ class EscrowTerms(BaseModel):
     outcome travels as a ``SettlementPlan`` whose obligations carry a
     ``{mechanism, params}`` envelope; this type is the *typed params
     shape* of the ``alkahest.v1`` mechanism (its fields minus ``maker``
-    are exactly that envelope's params) and the source shape of the
-    marked legacy coercions on ``SettlementObligation`` /
-    ``SettlementPlan``, which keep pre-plan artifacts (flat terms dicts
-    and bare terms lists) parsing.
+    are exactly that envelope's params). A settlement obligation or plan is
+    never parsed from this flat shape: the mechanism codec in
+    ``kit/alkahest`` converts between them.
     """
 
     maker: Literal["buyer", "seller"] = Field(
@@ -263,26 +331,19 @@ class EscrowTerms(BaseModel):
     )
 
 
-_ALKAHEST_MECHANISM = "alkahest.v1"
-"""Mechanism tag for the legacy flat-``EscrowTerms`` wire coercions below.
-
-A legacy wire tag, not a core interpretation of the params — core never
-dispatches on it. The matching codec lives in ``kit/alkahest``.
-"""
-
-
 class SettlementObligation(BaseModel):
     """One obligation in a settlement plan.
 
-    The lifecycle universals every settlement mechanism shares are typed
-    fields: who funds it, who collects it, how much of what, when the
-    collect-vs-reclaim boundary falls, and what conditions gate
-    collection. Everything needed to *materialize and verify* the
-    obligation under a particular mechanism — chain + contract address
-    and the ``ObligationData`` struct for alkahest; provider + payment
-    refs for a fiat escrow — rides in ``params``, interpreted by the kit
-    codec registered for ``mechanism``. Core code drives obligations
-    through injected per-mechanism hooks and never reads ``params``.
+    Plans and obligations belong to mechanisms serviced through the
+    obligation runtime; a mechanism that settles from the Agreement alone
+    creates none. The typed fields describe an escrow-style obligation: who
+    funds it, who collects it, how much of what, when collection gives way to
+    reclaim, and which conditions gate collection. Everything needed to
+    *materialize and verify* the obligation under its mechanism (for alkahest,
+    the chain, contract address and ``ObligationData`` struct) rides in
+    ``params``, interpreted by the kit codec registered for ``mechanism``.
+    Core code drives obligations through injected per-mechanism hooks and
+    never reads ``params``.
 
     ``amount``/``asset`` are the *display/lifecycle* view of the
     obligation's value (None when the mechanism's value isn't a scalar,
@@ -290,11 +351,10 @@ class SettlementObligation(BaseModel):
     authoritative materialization input, and the codec's verification is
     responsible for their consistency.
 
-    ``conditions`` carries declared condition descriptors for the deal
-    servicing engine (lifecycle doc work item I.3). Opaque to core;
-    empty means "whatever the mechanism params already encode" — for
-    alkahest the arbiter demand tree inside ``params`` is authoritative
-    and is decoded by the kit codec on demand.
+    ``conditions`` carries declared condition descriptors for the servicing
+    engine. Opaque to core; empty means "whatever the mechanism params
+    already encode": for alkahest the arbiter demand tree inside ``params``
+    is authoritative and is decoded by the kit codec on demand.
     """
 
     payer: Literal["buyer", "seller"] = Field(
@@ -382,47 +442,6 @@ class SettlementObligation(BaseModel):
     def _serialize_obligation_amount(self, v: int | None) -> str | None:
         return _serialize_uint256_str(v)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_legacy_escrow_terms(cls, value: Any) -> Any:
-        """LEGACY wire compatibility — not part of the carrier contract.
-
-        Pre-plan artifacts (run logs, negotiation threads, the current
-        client wheels) carry flat ``EscrowTerms`` dicts: ``{maker,
-        chain_name?, escrow_contract, obligation_data, expiration_unix}``.
-        Normalize that shape into the mechanism envelope here so old
-        artifacts keep parsing. Remove once no deployed client sends the
-        flat shape (leaves with the client-wheel wire bump).
-        """
-        if not isinstance(value, dict):
-            return value
-        if "mechanism" in value or "escrow_contract" not in value:
-            return value
-
-        data = dict(value)
-        maker = data.pop("maker", "buyer")
-        obligation_data = data.pop("obligation_data", {}) or {}
-        params: dict[str, Any] = {
-            "escrow_contract": data.pop("escrow_contract"),
-            "obligation_data": obligation_data,
-        }
-        if data.get("chain_name") is not None:
-            params["chain_name"] = data.pop("chain_name")
-        else:
-            data.pop("chain_name", None)
-
-        amount = obligation_data.get("amount")
-        return {
-            "payer": maker,
-            "claimant": "seller" if maker == "buyer" else "buyer",
-            "amount": amount if isinstance(amount, (int, str)) else None,
-            "asset": obligation_data.get("token"),
-            "expiration_unix": data.pop("expiration_unix", None),
-            "mechanism": _ALKAHEST_MECHANISM,
-            "params": params,
-            **data,
-        }
-
 
 class SettlementPlan(BaseModel):
     """The negotiated settlement plan both sides derive identically.
@@ -430,16 +449,18 @@ class SettlementPlan(BaseModel):
     Generalizes the single accepted-escrow handoff: a plan is N
     obligations (payment escrows, interval escrows, penalty bonds —
     possibly under different mechanisms) plus the off-chain duties each
-    party takes on while servicing the deal. The determinism contract
-    extends unchanged in kind: both sides must derive the same plan from
-    the shared message history; for mechanisms whose materialization is
-    not independently derivable (fiat), determinism covers the agreed
-    terms and the codec verifies the materialized object against them.
+    party takes on while servicing the deal. Plans belong to mechanisms
+    serviced through the obligation runtime; a mechanism that settles from
+    the Agreement alone creates none. The determinism contract extends
+    unchanged in kind: both sides must derive the same plan from the shared
+    message history; for mechanisms whose materialization is not
+    independently derivable, determinism covers the agreed terms and the
+    codec verifies the materialized object against them.
 
     ``service_terms`` is the attachment point for heartbeat cadence and
-    schema, oracle identity, evidence format, and interval boundaries
-    (lifecycle doc work items I.4/I.5). Opaque to core; empty for plans
-    with no off-chain duties beyond the mechanism defaults.
+    schema, oracle identity, evidence format, and interval boundaries.
+    Opaque to core; empty for plans with no off-chain duties beyond the
+    mechanism defaults.
     """
 
     obligations: list[SettlementObligation] = Field(
@@ -460,19 +481,6 @@ class SettlementPlan(BaseModel):
             "identity, interval boundaries). Opaque to market core."
         ),
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_legacy_terms_list(cls, value: Any) -> Any:
-        """LEGACY wire compatibility — not part of the carrier contract.
-
-        Pre-plan artifacts carry a bare ``list[EscrowTerms]`` where the
-        plan now travels. Wrap it; the per-obligation legacy coercion
-        handles each entry. Remove with the client-wheel wire bump.
-        """
-        if isinstance(value, list):
-            return {"obligations": value}
-        return value
 
 
 # ---------------------------------------------------------------------------
@@ -528,45 +536,153 @@ class RateValue(BaseModel):
 _SETTLEMENT_OPTION_ID = re.compile(r"^[0-9a-f]{64}$")
 
 
+class SettlementPrice(BaseModel):
+    """The asset and rate slots of a priced settlement option."""
+
+    model_config = {"extra": "forbid"}
+
+    asset: str = Field(min_length=1)
+    rates: list[RateValue] = Field(default_factory=list)
+
+
 def derive_settlement_option_id(
     *,
-    mechanism: str,
-    asset: str,
-    rates: list[RateValue],
-    params: dict[str, Any],
+    settlement: dict[str, Any],
+    price: SettlementPrice | dict[str, Any] | None = None,
+    lifecycle: dict[str, Any] | None = None,
 ) -> str:
-    payload = {
-        "mechanism": mechanism,
-        "asset": asset,
-        "rates": [rate.model_dump(mode="json") for rate in rates],
-        "params": params,
-    }
+    payload: dict[str, Any] = {"settlement": settlement}
+    if price is not None:
+        payload["price"] = SettlementPrice.model_validate(price).model_dump(mode="json")
+    if lifecycle is not None:
+        payload["lifecycle"] = lifecycle
     encoded = json.dumps(
         payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
     ).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
+AGREEMENT_SETTLEMENT_SCHEMA_PATH = "$.settlement.settlement.schema"
+
+
+def _settlement_envelope(option: Any) -> Mapping[str, Any]:
+    value = (
+        option.get("settlement")
+        if isinstance(option, Mapping)
+        else getattr(option, "settlement", None)
+    )
+    return value if isinstance(value, Mapping) else {}
+
+
+def settlement_option_schema(option: Any) -> str | None:
+    """Read the mechanism identifier without admitting an option for selection."""
+    return _settlement_envelope(option).get("schema")
+
+
+def settlement_option_params(option: Any) -> dict[str, Any]:
+    """Read only mechanism-owned parameters, excluding the envelope tag."""
+    return {
+        key: value
+        for key, value in _settlement_envelope(option).items()
+        if key != "schema"
+    }
+
+
+def settlement_option_asset(option: Any) -> str | None:
+    """Read the option's advertised asset identifier, absent when rateless."""
+    price = (
+        option.get("price")
+        if isinstance(option, Mapping)
+        else getattr(option, "price", None)
+    )
+    return (
+        price.get("asset")
+        if isinstance(price, Mapping)
+        else getattr(price, "asset", None)
+    )
+
+
+def settlement_option_lifecycle(option: Any) -> Any:
+    """Read neutral post-commitment rights without interpreting their codec."""
+    if isinstance(option, Mapping):
+        return option.get("lifecycle")
+    return getattr(option, "lifecycle", None)
+
+
+def settlement_option_rates(option: Any) -> list[Any]:
+    """Read rate slots from a model or public carrier, empty when rateless."""
+    price = (
+        option.get("price")
+        if isinstance(option, Mapping)
+        else getattr(option, "price", None)
+    )
+    return list(
+        (
+            price.get("rates")
+            if isinstance(price, Mapping)
+            else getattr(price, "rates", None)
+        )
+        or []
+    )
+
+
+def _validate_settlement_envelope(value: dict[str, Any]) -> dict[str, Any]:
+    schema = value.get("schema")
+    if not isinstance(schema, str) or not schema.strip():
+        raise ValueError("settlement.schema must be a non-empty mechanism identifier")
+    return value
+
+
 class SettlementOption(BaseModel):
-    """One immutable, mechanism-tagged settlement choice on a listing."""
+    """One immutable choice of commercial terms, settlement and lifecycle rights."""
 
     model_config = {"extra": "forbid"}
 
     option_id: str
-    mechanism: str = Field(min_length=1)
-    asset: str = Field(min_length=1)
-    rates: list[RateValue] = Field(default_factory=list)
-    params: dict[str, Any] = Field(default_factory=dict)
+    price: SettlementPrice | None = None
+    settlement: dict[str, Any]
+    lifecycle: dict[str, Any] | None = None
+
+    _validate_settlement = field_validator("settlement")(_validate_settlement_envelope)
+
+    @model_serializer(mode="wrap")
+    def _serialize_option(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        value: dict[str, Any] = handler(self)
+        for key in ("price", "lifecycle"):
+            if value.get(key) is None:
+                value.pop(key, None)
+        return value
+
+    @property
+    def price_asset(self) -> str | None:
+        """The advertised asset identifier, absent on a rateless option."""
+        return self.price.asset if self.price is not None else None
+
+    @property
+    def price_rates(self) -> list[RateValue]:
+        """The option's commercial rate slots, empty when rateless."""
+        return self.price.rates if self.price is not None else []
+
+    @property
+    def settlement_schema(self) -> str:
+        """The mechanism that interprets the settlement parameters."""
+        return cast(str, self.settlement["schema"])
+
+    @property
+    def settlement_params(self) -> dict[str, Any]:
+        """Parameters owned by the settlement mechanism, not lifecycle rights."""
+        return settlement_option_params(self)
 
     @model_validator(mode="after")
     def validate_identity(self) -> "SettlementOption":
         if not _SETTLEMENT_OPTION_ID.fullmatch(self.option_id):
             raise ValueError("settlement option ID must be lowercase SHA-256")
         expected = derive_settlement_option_id(
-            mechanism=self.mechanism,
-            asset=self.asset,
-            rates=self.rates,
-            params=self.params,
+            price=self.price,
+            settlement=self.settlement,
+            lifecycle=self.lifecycle,
         )
         if self.option_id != expected:
             raise ValueError(
@@ -576,13 +692,80 @@ class SettlementOption(BaseModel):
 
 
 class SettlementSelection(BaseModel):
-    """Buyer selection of one exact listing settlement option."""
+    """Buyer selection of one exact listing settlement option.
+
+    ``expiration_unix`` is required by mechanisms that materialize expiring
+    obligations, such as Alkahest. Agreement-only mechanisms omit it.
+    """
 
     model_config = {"extra": "forbid"}
 
-    mechanism: str = Field(min_length=1)
+    settlement: dict[str, Any]
     option_id: str = Field(pattern=r"^[0-9a-f]{64}$")
-    expiration_unix: int = Field(gt=0)
+    expiration_unix: int | None = Field(default=None, gt=0)
+    _validate_settlement = field_validator("settlement")(_validate_settlement_envelope)
+
+    @property
+    def settlement_schema(self) -> str:
+        """The selected mechanism's envelope tag."""
+        return cast(str, self.settlement["schema"])
+
+    @property
+    def settlement_params(self) -> dict[str, Any]:
+        """The buyer's own mechanism parameters, opaque to core."""
+        return settlement_option_params(self)
+
+
+class Agreement(BaseModel):
+    """Accepted deal terms passed unchanged from negotiation to settlement."""
+
+    model_config = {"extra": "forbid"}
+
+    negotiation_id: str = Field(min_length=1)
+    listing_id: str = Field(min_length=1)
+    listing_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    buyer: dict[str, str]
+    seller: dict[str, str]
+    settlement: SettlementOption | None = None
+    settlement_params: dict[str, Any] | None = None
+    amount: int = Field(ge=0)
+    asset: str | None = None
+    duration_seconds: int = Field(ge=0)
+    start_utc: str
+    provision_terms: dict[str, Any] | None = None
+    accepted_at: str
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _parse_agreement_amount(cls, v: Any) -> int:
+        parsed = _parse_uint256_str(v, "amount")
+        if parsed is None:
+            raise ValueError("Agreement.amount must not be null")
+        return parsed
+
+    @field_serializer("amount")
+    def _serialize_agreement_amount(self, v: int) -> str:
+        return _serialize_uint256_str(v) or "0"
+
+    @field_validator("start_utc", "accepted_at")
+    @classmethod
+    def _require_utc_timestamp(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Agreement timestamps must be non-empty UTC strings")
+        text = value.strip()
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("Agreement timestamps must be ISO-8601") from exc
+        if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+            raise ValueError("Agreement timestamps must include a UTC offset")
+        return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    @model_validator(mode="after")
+    def _settlement_asset_matches(self) -> "Agreement":
+        if self.settlement is not None and self.asset != self.settlement.price_asset:
+            raise ValueError("Agreement asset must match its selected settlement option")
+        return self
 
 
 def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:
@@ -741,6 +924,10 @@ def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
 
 
 def _rates_of(entry: Any) -> list[Any]:
+    if isinstance(entry, SettlementOption) or (
+        isinstance(entry, Mapping) and "option_id" in entry
+    ):
+        return settlement_option_rates(entry)
     if isinstance(entry, dict):
         out = entry.get("rates")
         return out if isinstance(out, list) else []

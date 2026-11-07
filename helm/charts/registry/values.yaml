@@ -28,54 +28,76 @@ identity:
     name: arkhai-registry-identity
     key: credential
 
+# Public, operator-authored registry identity. Authority principals and schema
+# identity are derived inside the service from the active signer and filter
+# specification; they are intentionally not duplicated here.
+descriptor:
+  baseUrl: "http://localhost:8080"
+  displayName: "Local VM Compute Registry"
+  operatorIdentity: "Arkhai local development"
+  # Required only when config.requireReadApiKey is true.
+  accessAcquisitionPointer: ""
+  # Public advertisement copies, in preference order; no authority is built in.
+  recommendedDisputeAuthorities: []
+
 service:
   type: ClusterIP
   port: 8080
 
 # ---------------------------------------------------------------------------
-# Application settings — map directly to env vars in the container.
-# Values sourced from global (chainId, rpcUrl, contract addresses) are
-# injected in the deployment template and do not appear here.
+# Application settings. The chart renders these, with the identity, the
+# descriptor and service.port, into the registry's profile env file,
+# config-production.env, mounted under its configuration directory; the pod's
+# environment carries only CONFIG_DIRECTORY and ACTIVE_PROFILES.
 # ---------------------------------------------------------------------------
 config:
+  # Select exactly one filter specification packaged in the registry image.
+  filterSpecPath: "/app/filter-spec.yaml"
   # SQLite path resolves against the persistence mount below by default.
   # Override with an external DSN (e.g. Postgres) when moving off SQLite.
   databaseUrl: "sqlite:////var/lib/arkhai-registry/indexer.db"
   host: "0.0.0.0"
-  enableHealthChecks: true
-  healthCheckInterval: 60
-  endpointCheckTimeout: 10
-  heartbeatTtlSecs: 60
   logLevel: "info"
+  # Gateway path prefix. Empty for host-routed or direct deployments.
+  rootPath: ""
   # API-key gating (both off => fully public registry; write on => open
-  # discovery, gated publishing). See core/registry/src/config.py.
+  # discovery, gated publishing). See core/registry/src/core_registry/config.py.
   requireReadApiKey: false
   requireWriteApiKey: false
 
-# Optional bootstrap API key sourced from an existing Kubernetes Secret
-# (e.g. ESO-synced from Secret Manager) — never from values. When set and
-# the api_keys table is empty at startup, the registry seeds one
-# write-scoped operator key with this value.
-auth:
-  bootstrapKeySecret:
-    name: ""
-    key: ""
-  # Optional shared admin key (REGISTRY_ADMIN_API_KEY) enabling the
-  # /admin/api-keys mint/list/revoke endpoints. Same sourcing rule.
-  adminKeySecret:
-    name: ""
-    key: ""
-  # rootPath: set to the gateway path prefix for this service.
-  # In cloud deployments this is set via the ops repo values overlay.
-  # Leave empty for local dev (direct access, no gateway prefix stripping).
-  rootPath: ""
+# Secret settings, such as the bootstrap API key (REGISTRY_BOOTSTRAP_API_KEY,
+# seeding one write-scoped operator key when the api_keys table is empty at
+# startup) and the shared administrator key (REGISTRY_ADMIN_API_KEY, enabling
+# the /admin/api-keys routes). They arrive as a profile env file,
+# config-<profile>.env, in an existing Secret -- as External Secrets writes one
+# -- never from values: the chart mounts it beside the rendered profile and
+# appends the profile to ACTIVE_PROFILES, so a setting it states overrides the
+# rendered one. With no secretName nothing is mounted. auth.bootstrapKeySecret
+# and auth.adminKeySecret are refused, naming this value.
+secretProfile:
+  secretName: ""
+  profile: ""
 
 # ---------------------------------------------------------------------------
 # Helm smoke-test configuration. Empty activeProfiles derives from
 # global.smokeTests.
 # ---------------------------------------------------------------------------
 tests:
+  # The smoke test's profiles, comma-separated. Empty derives them from
+  # global.smokeTests: its generated profile, then any global smoke Secret's.
   activeProfiles: ""
+  # A pre-existing Secret holding one Dynaconf profile file,
+  # config-<profile>.yml, mounted into the smoke test and appended to its
+  # profiles, whether activeProfiles states them or global.smokeTests derives
+  # them. The test's signed reads need buyer.marketplace_credential, signing
+  # material no values carry; the e2e-tests chart's Secret
+  # (arkhai-e2e-credentials, profile e2e-secret) already carries it in this
+  # form. With no secretName the test runs without it and reports the
+  # credential missing; with one, the pod does not start until the Secret
+  # exists.
+  credentialProfile:
+    secretName: ""
+    profile: e2e-secret
 
 # Number of replicas.
 replicaCount: 1
@@ -111,6 +133,10 @@ affinity: {}
 # ---------------------------------------------------------------------------
 persistence:
   enabled: true
+  # Annotates the PVC helm.sh/resource-policy: keep, so `helm uninstall` leaves
+  # the volume and a reinstall recovers its state. Local deployments set it false
+  # (helm/local-values.yaml), so an uninstall starts the next deploy from nothing.
+  retainOnUninstall: true
   storageClass: ""
   size: 2Gi
   accessMode: ReadWriteOnce

@@ -4,21 +4,39 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
 from types import MappingProxyType
 from typing import Any
 
-from arkhai_bare_metal import (
-    BareMetalHostedPublicationPolicy,
-    build_ready_bare_metal_hosted_options,
-)
-from core_storefront.publication_runner import PublicationPayload
-from market_alkahest import create_alkahest_registration
-from market_contact_exchange import create_contact_exchange_registration
+from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
+from market_core import SettlementStageTable
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core.schemas import SettlementOption
-from market_hosted_settlement import (
-    create_stripe_registration,
-    default_hosted_selection_dispatch,
+from .alkahest_lifecycle import alkahest_servicing
+from .settlement_stages import (
+    ALKAHEST_MECHANISM,
+    AlkahestStage,
+    ContactStage,
+    PaymentStage,
+    declined_servicing,
+    refund_payment,
+    revalidate_alkahest,
+    revalidate_payment,
+    settle_payment,
+    verify_alkahest,
+    verify_payment,
+)
+from market_alkahest import (
+    ALKAHEST_CONFIG_KEY,
+    ORACLE_GATED_RELEASE,
+    RECIPIENT_RELEASE,
+    require_deliverable_release_models,
+    create_alkahest_registration,
+    escrow_release_conditions,
+)
+from market_contact_exchange import (
+    MECHANISM as CONTACT_MECHANISM,
+    create_contact_exchange_registration,
 )
 from market_settlement_runtime import (
     MechanismReadiness,
@@ -27,36 +45,100 @@ from market_settlement_runtime import (
     SettlementPublicationClause,
 )
 
-HOSTED_MECHANISM = "fiat.stripe.v1"
-ALKAHEST_MECHANISM = "alkahest.v1"
+from market_arkhai_payments import (
+    ARKHAI_PAYMENTS_CONFIG_KEY,
+    ARKHAI_PAYMENTS_MECHANISM,
+    ClientForOwner,
+    PaymentSellerStage,
+    create_arkhai_payments_registration,
+    servicing_stage,
+)
+
+SELLER_STAGES = SettlementStageTable(
+    {
+        # A bare-metal deal leases a whole machine that is never preempted, so
+        # the interruptible splitter's refund split has nothing to settle.
+        ALKAHEST_MECHANISM: AlkahestStage(
+            create_alkahest_registration,
+            verify_alkahest,
+            revalidate_alkahest,
+            True,
+            completes_outside_settlement=False,
+            servicing=alkahest_servicing,
+            release_models=frozenset({RECIPIENT_RELEASE, ORACLE_GATED_RELEASE}),
+        ),
+        ARKHAI_PAYMENTS_MECHANISM: PaymentStage(
+            create_arkhai_payments_registration,
+            verify_payment,
+            revalidate_payment,
+            True,
+            completes_outside_settlement=False,
+            refund=refund_payment,
+            reconcile=settle_payment,
+        ),
+        # An introduction delivers nothing through capacity and is completed by
+        # its reveal, so it has no settle operation or recovery gate.
+        CONTACT_MECHANISM: ContactStage(
+            create_contact_exchange_registration,
+            verify=None,
+            revalidate=None,
+            fulfils_through_capacity=False,
+            completes_outside_settlement=True,
+            servicing=declined_servicing,
+        ),
+    }
+)
+
+
+def _wallet_address(wallet: Any) -> str:
+    """The seller wallet's address, given as the address or as a wallet carrying one."""
+    if wallet is None or isinstance(wallet, str):
+        return wallet or ""
+    if isinstance(wallet, Mapping):
+        return str(wallet.get("address") or "")
+    return str(getattr(wallet, "address", "") or "")
 
 
 def build_bare_metal_settlement_registry() -> SettlementConfigurationRegistry:
     """Install the supported mechanisms through their shared facades."""
 
     return SettlementConfigurationRegistry(
-        (
-            create_alkahest_registration(),
-            create_stripe_registration(),
-            create_contact_exchange_registration(),
-        )
+        tuple(stage.registration_factory() for stage in SELLER_STAGES.values())
     )
 
 
 @dataclass(frozen=True, slots=True)
 class BareMetalStorefrontSettlementComposition:
-    """One typed seller composition with no domain-local hosted transport."""
+    """Typed seller composition for the supported settlement mechanisms."""
 
     registry: SettlementConfigurationRegistry
     config: SettlementConfig
     resources: Mapping[str, Any] = field(default_factory=dict, repr=False)
-    publication_policy: BareMetalHostedPublicationPolicy = field(
-        default_factory=BareMetalHostedPublicationPolicy
-    )
+    payments_client_for_owner: ClientForOwner | None = field(default=None, repr=False)
+    payments_stage: PaymentSellerStage | None = field(default=None, init=False, repr=False)
+
+    disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
+    seller_stages: SettlementStageTable[Any] = SELLER_STAGES
 
     def __post_init__(self) -> None:
+        if any(
+            mechanism not in self.seller_stages for mechanism in self.config.priority
+        ):
+            raise ValueError("enabled settlement mechanism has no seller stage")
         self.registry.validate(self.config, role="seller")
+        stage = self.seller_stages.get(ALKAHEST_MECHANISM)
+        require_deliverable_release_models(
+            self.config.mechanisms.get(ALKAHEST_CONFIG_KEY),
+            getattr(stage, "release_models", ()),
+        )
         object.__setattr__(self, "resources", MappingProxyType(dict(self.resources)))
+        # Accepted payment deals are serviced whether or not new payment options
+        # are published, so the stage follows the servicing fields, not `enabled`.
+        stage = servicing_stage(
+            self.config.mechanisms.get(ARKHAI_PAYMENTS_CONFIG_KEY),
+            client_for_owner=self.payments_client_for_owner,
+        )
+        object.__setattr__(self, "payments_stage", stage)
 
     @classmethod
     def from_raw_config(
@@ -64,14 +146,16 @@ class BareMetalStorefrontSettlementComposition:
         raw_settlement: Mapping[str, Any],
         *,
         resources: Mapping[str, Any] | None = None,
-        publication_policy: BareMetalHostedPublicationPolicy | None = None,
+        payments_client_for_owner: ClientForOwner | None = None,
+        disputes: RegistryDisputePolicy | None = None,
     ) -> "BareMetalStorefrontSettlementComposition":
         registry = build_bare_metal_settlement_registry()
         return cls(
             registry=registry,
             config=registry.resolve(raw_settlement, role="seller"),
-            resources=resources or {},
-            publication_policy=publication_policy or BareMetalHostedPublicationPolicy(),
+            resources={**(resources or {}), **({"disputes": disputes} if disputes is not None else {})},
+            disputes=disputes or RegistryDisputePolicy.from_document({}),
+            payments_client_for_owner=payments_client_for_owner,
         )
 
     @property
@@ -79,8 +163,39 @@ class BareMetalStorefrontSettlementComposition:
         return self.config.priority
 
     @property
-    def hosted_only(self) -> bool:
-        return self.config.priority == (HOSTED_MECHANISM,)
+    def chain_clients(self) -> Mapping[str, Any]:
+        """The Alkahest chain clients, as the live map the chain probe updates.
+
+        The map itself, even while empty, so a client the probe builds after
+        startup reaches every holder.
+        """
+        clients = self.resources.get("clients")
+        return clients if isinstance(clients, Mapping) else {}
+
+    def arkhai_payments_stage(self) -> PaymentSellerStage | None:
+        return self.payments_stage
+
+    def settlement_data_dispatch(
+        self,
+    ) -> dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any] | None]]:
+        payment_stage = self.payments_stage
+        return {
+            mechanism: lambda agreement, entry=entry: entry.accepted_data(
+                agreement, payment_stage
+            )
+            for mechanism, entry in self.seller_stages.items()
+        }
+
+    def configures(self, mechanism_id: str) -> bool:
+        """Whether the settlement root has a section for ``mechanism_id``.
+
+        A configured section may be disabled for new deals and still owns the
+        obligations accepted while it was enabled, so whatever services them
+        is built for every configured section, not only the enabled ones.
+        """
+
+        config_key = self.registry.registration(mechanism_id).config_key
+        return config_key in self.config.mechanisms
 
     async def readiness(
         self,
@@ -104,20 +219,25 @@ class BareMetalStorefrontSettlementComposition:
         *,
         candidate: Mapping[str, Any],
         clauses: Sequence[SettlementPublicationClause],
-        offer_expires_at: datetime,
-        funding_deadlines: Mapping[str, datetime],
-        fulfillment_deadline: datetime,
-        demands: Sequence[Mapping[str, Any]] = (),
         max_duration_seconds: int | None = None,
-        now: datetime | None = None,
     ) -> PublicationPayload:
-        """Build independent Alkahest and profile-exact hosted alternatives."""
+        """Build ready settlement publication alternatives.
+
+        A listing publishing an Alkahest escrow advertises, per chain its
+        escrows name, the release condition the Alkahest mechanism derives from
+        the configured section, the seller wallet, and that chain's address
+        book, and only while Alkahest is ready: an unready mechanism's clauses
+        publish no escrow to release.
+
+        ``clauses`` are the candidate's admissible clauses. When none of them
+        builds an option, the candidate is refused with ``NoSettlementOption``,
+        naming their mechanisms and those whose readiness is unknown.
+        """
 
         readiness = await self.readiness(clauses=clauses)
         readiness_by_mechanism = {item.mechanism: item for item in readiness}
         accepted_escrows: list[dict[str, Any]] = []
         settlement_options: list[dict[str, Any]] = []
-        hosted_bases: list[SettlementOption] = []
 
         for clause in clauses:
             mechanism_readiness = readiness_by_mechanism.get(clause.mechanism)
@@ -129,8 +249,14 @@ class BareMetalStorefrontSettlementComposition:
                 role="seller",
                 resources={
                     **self.resources,
+                    "dispute_authorities": self.disputes.for_publication(),
+                    "dispute_interfaces": frozenset({MEDIATION_INTERFACE}), "compute": True,
                     "publication_clause": clause,
                     "candidate": dict(candidate),
+                    # The site the listing binding records, so a mechanism
+                    # resolving anything per origin sees the value its
+                    # negotiation will later inherit.
+                    "origin": str(candidate["site_id"]),
                 },
             )
             if not isinstance(artifacts, Mapping):
@@ -144,29 +270,32 @@ class BareMetalStorefrontSettlementComposition:
             ):
                 raise ValueError("settlement option builder returned invalid carriers")
             accepted_escrows.extend(dict(item) for item in built_escrows)
-            if clause.mechanism == HOSTED_MECHANISM:
-                hosted_bases.extend(
-                    SettlementOption.model_validate(item) for item in built_options
-                )
-            else:
-                settlement_options.extend(
-                    SettlementOption.model_validate(item).model_dump(mode="json")
-                    for item in built_options
-                )
-
-        if hosted_bases:
-            hosted = build_ready_bare_metal_hosted_options(
-                candidate=candidate,
-                base_hosted_options=hosted_bases,
-                policy=self.publication_policy,
-                offer_expires_at=offer_expires_at,
-                funding_deadlines=funding_deadlines,
-                fulfillment_deadline=fulfillment_deadline,
-                now=now,
-            )
             settlement_options.extend(
-                option.model_dump(mode="json") for option in hosted.settlement_options
+                SettlementOption.model_validate(item).model_dump(mode="json")
+                for item in built_options
             )
+
+        if not accepted_escrows and not settlement_options:
+            mechanisms = tuple(dict.fromkeys(clause.mechanism for clause in clauses))
+            # A ready mechanism that built nothing, as contact exchange does
+            # for an origin with no contact, is ruled out like a misconfigured one.
+            unknown = tuple(
+                mechanism
+                for mechanism in mechanisms
+                if mechanism in readiness_by_mechanism
+                and readiness_by_mechanism[mechanism].unknown
+            )
+            detail = (
+                f"pool {candidate.get('pool_id')!r} publishes no settlement option: "
+                + (
+                    f"readiness unknown for {', '.join(unknown)}"
+                    if unknown
+                    else "configuration rules out "
+                    + (", ".join(mechanisms) or "every mechanism")
+                )
+            )
+            raise NoSettlementOption(detail, mechanisms=mechanisms, unknown=unknown)
+
         option_ids = [item["option_id"] for item in settlement_options]
         if len(option_ids) != len(set(option_ids)):
             raise ValueError(
@@ -179,12 +308,26 @@ class BareMetalStorefrontSettlementComposition:
             publication_clauses=tuple(
                 item.model_dump(mode="json", exclude_none=True) for item in clauses
             ),
-            demands=tuple(dict(item) for item in demands),
+            demands=tuple(self._release_conditions(accepted_escrows, readiness)),
             max_duration_seconds=max_duration_seconds,
         )
 
+    def _release_conditions(
+        self,
+        accepted_escrows: Sequence[Mapping[str, Any]],
+        readiness: Sequence[MechanismReadiness],
+    ) -> list[dict[str, Any]]:
+        chains = self.resources.get("chains")
+        return escrow_release_conditions(
+            self.config.mechanisms.get(ALKAHEST_CONFIG_KEY),
+            accepted_escrows,
+            readiness=readiness,
+            chains=chains if isinstance(chains, Mapping) else {},
+            wallet_address=_wallet_address(self.resources.get("wallet")),
+        )
+
     def runtime_clients(self) -> dict[str, Any]:
-        """Build clients only for configured mechanisms; hosted-only needs no chain."""
+        """Build clients for configured conditional settlement mechanisms."""
 
         return self.registry.runtime_clients(
             self.config,
@@ -194,13 +337,17 @@ class BareMetalStorefrontSettlementComposition:
 
     def accepted_obligation_dispatch(
         self,
-    ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]]:
-        """Curried registry dispatch for every enabled obligation-building mechanism."""
+    ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None]:
+        """Curried registry dispatch for obligation-building mechanisms."""
 
-        dispatch: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]] = {}
+        dispatch: dict[
+            str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None
+        ] = {}
         for mechanism_id in self.config.priority:
-            registration = self.registry.registration(mechanism_id)
+            entry = self.seller_stages[mechanism_id]
+            registration = entry.registration_factory()
             if registration.accepted_obligation_builder is None:
+                dispatch[mechanism_id] = None
                 continue
 
             def build(
@@ -219,12 +366,3 @@ class BareMetalStorefrontSettlementComposition:
 
             dispatch[mechanism_id] = build
         return dispatch
-
-
-__all__ = [
-    "ALKAHEST_MECHANISM",
-    "HOSTED_MECHANISM",
-    "BareMetalStorefrontSettlementComposition",
-    "build_bare_metal_settlement_registry",
-    "default_hosted_selection_dispatch",
-]

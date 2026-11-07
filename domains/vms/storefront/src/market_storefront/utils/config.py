@@ -1,14 +1,14 @@
 """Storefront configuration via dynaconf.
 
-Public profile values come from ``storefront.toml`` and environment-specific
-secrets come from ``storefront.secrets.toml`` or an approved environment
-Secret. Marketplace signing material is never loaded into Dynaconf:
+Public values come from an operator's ``storefront.toml`` and, under Helm, the
+chart-rendered ``storefront.json``; environment-specific secrets come from
+``storefront.secrets.toml`` or an approved environment Secret, which win over
+both. Marketplace signing material is never loaded into Dynaconf:
 ``ARKHAI_IDENTITY_CREDENTIAL`` is resolved at the composition root and passed
 directly to the identity signer factory.
 
-Wallet and chain tables are optional EVM-mechanism configuration. Hosted-only
-storefronts leave them absent; Alkahest call sites read them through the
-explicit ``get_evm_wallet_*`` helpers only after that mechanism is selected.
+Wallet and chain tables are EVM-mechanism configuration. Alkahest call sites
+read them through the explicit ``get_evm_wallet_*`` helpers only after that mechanism is selected.
 """
 
 from __future__ import annotations
@@ -22,15 +22,26 @@ from typing import Any
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from dynaconf import Dynaconf
+from market_alkahest import (
+    AlkahestSettlementConfig,
+    alkahest_address_book,
+    retired_address_book_keys,
+    retired_address_book_refusal,
+    wallet_account_address,
+)
 from market_config.config_loader import (  # type: ignore[import-not-found]
     ChainConfig,
-    EscrowTemplate,
     chains_from_config,
-    escrow_templates_from_config,
     storefront_config_files,
 )
 from market_config.registry_url import normalize_registry_url
+from market_config.setting_types import PositiveSeconds, SiteAuthorityUrl
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
+from market_settlement_runtime import (
+    compile_settlement_publication_clause,
+    parse_settlement_publication_clause,
+)
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
 
@@ -102,6 +113,36 @@ def settlement_config_mapping(source: Dynaconf | None = None) -> dict[str, Any]:
         raise ValueError("Settlement must be a table")
     return value
 
+def delivery_config_mapping(source: Dynaconf | None = None) -> dict[str, Any] | None:
+    """Return the storefront's ``[Delivery]`` section, or None when absent.
+
+    Dynaconf merges top-level keys case-insensitively, so ``[Delivery]`` and
+    ``[delivery]`` are the same section.
+    """
+    active = source or settings
+    raw = active.get("delivery")
+    if raw is None:
+        return None
+    value = _detached(raw)
+    if not isinstance(value, dict):
+        raise ValueError("Delivery must be a table")
+    return value
+
+
+def _detached(value: Any) -> Any:
+    """Detach Dynaconf containers keeping key spelling.
+
+    ``[Delivery]`` names its instances both as table keys and as values in
+    ``enabled`` and ``origins``; lowercasing only the keys would separate the
+    two spellings of one name.
+    """
+    if hasattr(value, "items"):
+        return {str(key): _detached(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_detached(item) for item in value]
+    return value
+
+
 def storefront_domain_registry(
     source: Dynaconf | None = None,
     *,
@@ -124,9 +165,14 @@ def storefront_domain_registry(
 def settlement_publication_defaults(
     source: Dynaconf | None = None,
 ) -> tuple[Any, ...]:
-    """Return validated structured publication defaults as complete clauses."""
+    """Return validated structured publication defaults as complete clauses.
 
-    from market_settlement_runtime import compile_settlement_publication_clause
+    A clause naming a mechanism whose section is absent or disabled is read in
+    full but not compiled against its section, which a disabled mechanism has
+    no use for: publication drops it, so the storefront's own configuration
+    rules that mechanism out, and a listing it alone priced closes. A clause
+    that cannot be read, whatever its mechanism, is refused here.
+    """
 
     from market_storefront.settlement_composition import (
         build_storefront_settlement_registry,
@@ -143,15 +189,22 @@ def settlement_publication_defaults(
 
     registry = build_storefront_settlement_registry()
     config = registry.resolve(settlement_config_mapping(active), role="seller")
-    return tuple(
-        compile_settlement_publication_clause(
-            item,
-            registry=registry,
-            config=config,
-            role="seller",
+    clauses = []
+    for item in raw:
+        clause = parse_settlement_publication_clause(item, registry=registry, role="seller")
+        section = config.mechanisms.get(registry.registration(clause.mechanism).config_key)
+        if section is None or getattr(section, "enabled", False) is not True:
+            clauses.append(clause)
+            continue
+        clauses.append(
+            compile_settlement_publication_clause(
+                item,
+                registry=registry,
+                config=config,
+                role="seller",
+            )
         )
-        for item in raw
-    )
+    return tuple(clauses)
 
 
 def _build_chains(s: Dynaconf) -> dict[str, ChainConfig]:
@@ -160,70 +213,64 @@ def _build_chains(s: Dynaconf) -> dict[str, ChainConfig]:
     return chains_from_config({"chains": _coerce_chains_table(raw)})
 
 
-def _coerce_templates_table(raw: Any) -> dict[str, dict[str, Any]]:
-    """Materialise dynaconf's ``settings.escrow_templates`` into a plain dict.
-
-    Mirror of :func:`_coerce_chains_table`. The values can include nested
-    ``literal`` / ``rates`` sub-tables, so recurse one level deep — that's
-    enough for the current schema (no four-level nesting).
-    """
-    if raw is None or not hasattr(raw, "items"):
-        return {}
-    out: dict[str, dict[str, Any]] = {}
-    for name, sub in raw.items():
-        if not isinstance(name, str) or not hasattr(sub, "items"):
-            continue
-        coerced: dict[str, Any] = {}
-        for k, v in sub.items():
-            if hasattr(v, "items") and not isinstance(v, dict):
-                coerced[k] = dict(v.items())
-            else:
-                coerced[k] = v
-        out[name] = coerced
-    return out
-
-
-def _build_escrow_templates(
-    s: Dynaconf, chains: dict[str, ChainConfig]
-) -> dict[str, EscrowTemplate]:
-    """Build the typed templates with the installed Alkahest address resolver."""
-    raw = s.get("escrow_templates")
-    settlement = _plain_config_value(s.get("settlement") or {})
-    alkahest = settlement.get("alkahest", {}) if isinstance(settlement, dict) else {}
-    address_config_path = (
-        alkahest.get("address_config_path") if isinstance(alkahest, dict) else None
-    )
-
-    def resolve_address(key: str, chain: ChainConfig) -> str:
-        from market_alkahest import alkahest as alkahest_module
-
-        resolver = getattr(alkahest_module, f"get_{key}", None)
-        if not callable(resolver):
-            raise ValueError(f"unknown Alkahest address key {key!r}")
-        return str(
-            resolver(
-                chain.name,
-                config_path=address_config_path,
-            )
-        )
-
-    return escrow_templates_from_config(
-        {"escrow_templates": _coerce_templates_table(raw)},
-        chains=chains,
-        address_resolver=resolve_address,
-    )
-
-
 settings: Dynaconf = _build_settings()
 CHAINS: dict[str, ChainConfig] = _build_chains(settings)
-ESCROW_TEMPLATES: dict[str, EscrowTemplate] = _build_escrow_templates(settings, CHAINS)
+
+
+def chain_address_books() -> dict[str, str | None]:
+    """Each configured chain's Alkahest address book, by chain name.
+
+    Resolved from `[Settlement.alkahest.address_books]` through the Alkahest
+    kit, ``None`` for a chain the table names no book for, which uses the
+    SDK's built-in addresses. The storefront hands this mapping to the
+    packages it composes; none of them reads the table itself.
+
+    Raises ``ValueError`` naming each retired address-book key the
+    configuration states. Nothing reads those keys, so a command run without
+    the server, which refuses them at startup, would otherwise resolve a chain
+    the operator gave a book to as using the built-in addresses.
+    """
+    problems = retired_address_book_problems()
+    if problems:
+        raise ValueError("; ".join(problems))
+    raw = settlement_config_mapping().get("alkahest")
+    section = (
+        AlkahestSettlementConfig.model_validate(raw) if isinstance(raw, dict) else None
+    )
+    return {name: alkahest_address_book(section, name) for name in CHAINS}
+
+
+def retired_address_book_problems(source: Dynaconf | None = None) -> list[str]:
+    """Each retired Alkahest address-book key the configuration states, as the
+    refusal naming what replaces it."""
+    active = settings if source is None else source
+    try:
+        settlement = settlement_config_mapping(active)
+    except ValueError:
+        # A [Settlement] that is not a table is reported as unresolvable.
+        settlement = {}
+    return [
+        retired_address_book_refusal(path)
+        for path in retired_address_book_keys(settlement, active.get("chains"))
+    ]
+
+
+def chain_address_book(chain_name: str) -> str | None:
+    """The Alkahest address book of one chain, as :func:`chain_address_books`."""
+    return chain_address_books().get(chain_name)
 
 
 def get_evm_wallet_address(source: Dynaconf | None = None) -> str:
-    """Return the explicitly configured EVM mechanism address, if any."""
+    """The seller's EVM address: `[Wallet].address`, else the account its key
+    signs as, so every place naming the seller names one account."""
 
     active = settings if source is None else source
-    return str(active.get("wallet.address", "") or "").strip()
+    return wallet_account_address(
+        {
+            "address": str(active.get("wallet.address", "") or ""),
+            "private_key": get_evm_wallet_private_key(active),
+        }
+    )
 
 
 def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:
@@ -231,6 +278,203 @@ def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:
 
     active = settings if source is None else source
     return str(active.get("wallet.private_key", "") or "").strip()
+
+
+def settlement_servicing_interval(source: Dynaconf | None = None) -> float:
+    """Seconds between the settlement servicing sweeps:
+    `settlement_servicing_interval_seconds`, thirty unless stated, refused by
+    key unless it is a positive, finite number of seconds that can be applied
+    to an instant."""
+
+    active = settings if source is None else source
+    return _positive_seconds(
+        active.get("settlement_servicing_interval_seconds", 30),
+        key="settlement_servicing_interval_seconds",
+    )
+
+
+def introduction_retention_sweep_interval(seconds: Any) -> float:
+    """The introduction retention sweep's interval,
+    `[Settlement.contact].retention_sweep_interval_seconds`, refused by key
+    unless it is a positive, finite number of seconds that can be applied to an
+    instant."""
+
+    return _positive_seconds(seconds, key="Settlement.contact.retention_sweep_interval_seconds")
+
+
+_POSITIVE_SECONDS: TypeAdapter[float] = TypeAdapter(PositiveSeconds)
+_SITE_AUTHORITY_URL: TypeAdapter[str] = TypeAdapter(SiteAuthorityUrl)
+
+
+def _validated_setting(adapter: TypeAdapter[Any], value: Any) -> tuple[Any, str | None]:
+    """``value`` validated by a shared setting type, and ``None``; or ``None``
+    and the reason the type refused it, which names no configured value.
+
+    The caller raises its refusal outside this handler, so the refusal carries
+    no exception context: a `ValidationError` keeps the value it refused.
+    """
+
+    try:
+        return adapter.validate_python(value), None
+    except ValidationError as exc:
+        return None, "; ".join(
+            str(error.get("ctx", {}).get("error", error["msg"])) for error in exc.errors()
+        )
+
+
+def configured_capacity_sites(source: Dynaconf | None = None) -> dict[str, str]:
+    """`[capacity.sites]`: each stable site ID and its authority URL, an
+    HTTP(S) origin; a URL that is not one is refused under its site's key."""
+
+    active = settings if source is None else source
+    raw_sites = active.get("capacity.sites")
+    if not raw_sites:
+        raise RuntimeError(
+            "No capacity site authority configured: [capacity.sites] must map "
+            "each stable site ID to an authority URL."
+        )
+    sites: dict[str, str] = {}
+    for raw_name, raw_url in dict(raw_sites).items():
+        site_id = str(raw_name).strip()
+        if not site_id:
+            raise RuntimeError("capacity site IDs must be non-empty")
+        url, reason = _validated_setting(_SITE_AUTHORITY_URL, raw_url)
+        if reason is not None:
+            raise RuntimeError(f"[capacity.sites.{site_id}] {reason}")
+        sites[site_id] = url
+    return sites
+
+
+#: The site-projection poller's interval when `[capacity].poll_interval` is unset.
+_DEFAULT_POLL_INTERVAL_SECONDS = 5.0
+
+#: How many poll intervals a confirmed generation confirms a listing-source
+#: check for, when `[capacity].source_confirmation_seconds` is not stated.
+_CONFIRMATION_POLL_INTERVALS = 3
+
+
+def site_projection_poll_interval(source: Dynaconf | None = None) -> float:
+    """`[capacity].poll_interval`: seconds between the projection poller's
+    cycles and the capacity-event pollers', five unless stated.
+
+    A stated value that is not a positive, finite number of seconds that can be
+    applied to an instant is refused by key rather than defaulted: it also sets
+    the default source-confirmation window, which must stay a usable bound.
+    """
+
+    active = settings if source is None else source
+    stated = active.get("capacity.poll_interval")
+    if stated is None:
+        return _DEFAULT_POLL_INTERVAL_SECONDS
+    return _positive_seconds(stated, key="capacity.poll_interval")
+
+
+def source_confirmation_seconds(source: Dynaconf | None = None) -> float:
+    """How old a site's last confirmed poll may be for a listing-source check
+    to rely on it: `[capacity].source_confirmation_seconds`, else three poll
+    intervals.
+
+    A cache turns stale only when a poll fails, so while no poll runs -- the
+    loops held with trading live, or a poller that has stopped -- a generation
+    would stay loaded indefinitely; this window is what bounds how far a
+    source check can lag its site. An operator holding the loops restores it by
+    stepping `site-projections`.
+    """
+
+    active = settings if source is None else source
+    stated = active.get("capacity.source_confirmation_seconds")
+    if stated is not None:
+        return _positive_seconds(stated, key="capacity.source_confirmation_seconds")
+    derived = _CONFIRMATION_POLL_INTERVALS * site_projection_poll_interval(active)
+    window, reason = _validated_setting(_POSITIVE_SECONDS, derived)
+    if reason is not None:
+        # The interval is usable, but three of them are not: refused by the
+        # interval's key, since no window is stated.
+        raise ValueError(
+            "[capacity.poll_interval] sets [capacity].source_confirmation_seconds "
+            f"when it is not stated, to {_CONFIRMATION_POLL_INTERVALS} poll "
+            f"intervals, which {reason}"
+        )
+    return window
+
+
+def _positive_seconds(value: Any, *, key: str) -> float:
+    """A stated duration, refused by key unless it is a positive, finite number
+    of seconds that can be applied to an instant without leaving `datetime`'s
+    range."""
+
+    seconds, reason = _validated_setting(_POSITIVE_SECONDS, value)
+    if reason is not None:
+        raise ValueError(f"[{key}] {reason}")
+    return seconds
+
+
+class AdministratorDeclaration(BaseModel):
+    """One ``[Identity.administrators.<subject>]`` entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    principals: list[Identity] = Field(default_factory=list)
+
+
+class ServicePeerDeclaration(BaseModel):
+    """One ``[Identity.service_peers.<peer_id>]`` entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str = ""
+    site_id: str = ""
+    principals: list[Identity] = Field(default_factory=list)
+
+
+class IdentityConfigDeclaration(BaseModel):
+    """The public shape of ``[Identity]``, read above through Dynaconf.
+
+    Not used to parse the section at runtime; the parsers above do that and
+    use the same identity models for each principal. It declares the keys the
+    section may hold, all public, so a chart's generated values schema refuses
+    anything else under ``Identity`` — private identity material arrives only
+    through ``ARKHAI_IDENTITY_CREDENTIAL``. A key the parsers gain must be
+    added here, or the values schema refuses it; see
+    docs/development/DEPLOYMENT_AND_CONFIG.md.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    principal: IdentityConfig | None = None
+    administrators: dict[str, AdministratorDeclaration] = Field(default_factory=dict)
+    service_peers: dict[str, ServicePeerDeclaration] = Field(default_factory=dict)
+
+
+class WalletConfigDeclaration(BaseModel):
+    """The public and secret shape of ``[Wallet]``, read above through Dynaconf.
+
+    Not used to parse the section at runtime. It declares which of its keys
+    are secret so a chart's generated values schema can keep them out of a
+    ConfigMap; see docs/development/DEPLOYMENT_AND_CONFIG.md. The section is
+    closed: these are the only keys any reader uses.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    address: str = ""
+    ssh_public_key: str = ""
+    private_key: str = Field(default="", json_schema_extra={"secret": True})
+
+
+class RegistryConfigDeclaration(BaseModel):
+    """The secret part of ``[registry]``, whose other keys stay untyped.
+
+    ``auth`` maps a registry URL to its write token and is read through
+    Dynaconf by publication and status. Declared here only so a chart's
+    generated values schema refuses it outside the Secret overlay.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    auth: dict[str, str] = Field(
+        default_factory=dict, json_schema_extra={"secret": True}
+    )
 
 
 def _trusted_identity_set(raw: Any, *, field: str) -> TrustedIdentitySet:
@@ -305,18 +549,6 @@ def get_registry_authorities(
             f"(missing={missing}, unexpected={unexpected})"
         )
     return authorities
-
-
-def get_provisioning_authorities(
-    source: Dynaconf | None = None,
-) -> TrustedIdentitySet:
-    """Return the ordered public trust pins for the provisioning service."""
-
-    active = settings if source is None else source
-    return _trusted_identity_set(
-        active.get("provisioning.identity.principals"),
-        field="provisioning.identity",
-    )
 
 
 def get_service_peer_configs(

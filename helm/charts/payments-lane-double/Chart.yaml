@@ -1,0 +1,6 @@
+apiVersion: v2
+name: payments-lane-double
+description: In-memory double of the arkhai.payments.v1 payments service, for local releases only (dev / CI)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

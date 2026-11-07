@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from .envelopes import VersionedEnvelope
+from market_core import VersionedEnvelope
 
 FULFILLMENT_RESULT_KIND = "fulfillment.result.v1"
 FULFILLMENT_RESULT_SCHEMA_VERSION = 1

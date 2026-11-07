@@ -11,7 +11,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from market_identity import Identity
 
 
-from market_core.schemas import EscrowDemand
+from market_core.schemas import (
+    EscrowDemand,
+    OptionalUint256Amount,
+    ProvisionTerms,
+    SettlementSelection,
+    Uint256Amount,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +31,9 @@ class CreateListingRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    offer: dict[str, Any] = Field(description="Offered compute resource dict")
+    listing_resource: dict[str, Any] = Field(
+        description="The seller's published listing shape"
+    )
     accepted_escrows: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Mechanism-specific Alkahest settlement choices.",
@@ -120,12 +128,15 @@ class ListingResponse(BaseModel):
     listing_id: str
     status: str
     paused: bool = False
-    offer_resource: Any = None  # dict or JSON string from SQLite
+    listing_resource: Any = None  # dict or JSON string from SQLite
     accepted_escrows: list[dict[str, Any]] | None = None
     demands: list[dict[str, Any]] | None = None
     max_duration_seconds: int | None = None
     storefront_url: str
     seller_principal: Identity
+    # Domain-owned resolved rates a listing's prices derive from, when its
+    # domain records them; served here and never published to a registry.
+    rate_structure: dict[str, Any] | None = None
     model_config = ConfigDict(extra="allow")
 
     @model_validator(mode="before")
@@ -180,7 +191,7 @@ class RefundResponse(BaseModel):
     from_address: str | None = None
     to_address: str | None = None
     token: dict[str, Any] | None = None
-    amount_raw: int | None = None
+    amount_raw: OptionalUint256Amount = None
     block_number: int | None = None
 
 
@@ -217,43 +228,41 @@ class ArbitrateResponse(BaseModel):
 
 
 class EvaluateNegotiateRequest(BaseModel):
-    """Body for POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
+    """Body for POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
 
-    proposal: dict[str, Any] = Field(
-        description=(
-            "The buyer's full EscrowProposal-shaped dict to evaluate, with "
-            "``fields['amount']`` carrying the absolute opening amount in base "
-            "units of the payment token."
-        )
-    )
-    requested_duration_seconds: int | None = Field(
-        default=None,
-        description=(
-            "Buyer's requested lease duration in seconds. Used to scale the "
-            "seller's per-hour reference rate into an absolute amount. "
-            "Defaults to 1 hour when omitted."
-        ),
-    )
+    The opening ``POST /api/v1/negotiate/new`` would receive, less the listing
+    (in the path) and the buyer's agent URL: the preview runs the same opening
+    pipeline, so it takes the same input.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     buyer_principal: Identity
+    provision_terms: ProvisionTerms
+    proposal: dict[str, Any] | None = None
+    settlement_selection: SettlementSelection | None = None
 
 
 class EvaluateNegotiateResponse(BaseModel):
     """Response for POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
 
-    Returns what the configured negotiation strategy *would* decide for a
-    buyer's opening proposal at this listing — without creating any negotiation
-    thread or writing to the database.
+    What the opening would decide — without creating a negotiation thread,
+    hold, or artifact. ``refused`` is true when the opening would be refused
+    before or by seller policy; ``decision_reason`` then names the refusal and
+    the amounts are absent.
     """
 
     listing_id: str
-    our_reference_amount: (
-        int  # Seller's absolute reference (per-hour × duration / 3600)
-    )
-    their_proposed_amount: int  # Echoed back from the request's proposal.fields.amount
-    direction: str  # "maximize" (seller always maximises amount)
-    strategy: str  # e.g. "bisection" or "rl"
-    decision: str  # "accept" | "counter" | "exit"
-    decision_amount: int | None = None
+    # Base units, uint256 domain, as decimal-digit strings on the wire: an
+    # 18-decimal reference amount has no JSON number form, and this response
+    # is canonicalized for the seller's signature.
+    our_reference_amount: OptionalUint256Amount = None
+    their_proposed_amount: OptionalUint256Amount = None
+    direction: str = "maximize"  # the seller always maximises amount
+    strategy: str | None = None
+    decision: str  # "accept" | "counter" | "exit" | "refused"
+    decision_amount: OptionalUint256Amount = None
     decision_proposal: dict[str, Any] | None = None
     decision_reason: str | None = None
-    would_negotiate: bool  # True when decision != "exit"
+    would_negotiate: bool  # True when the opening would proceed past round zero
+    refused: bool = False

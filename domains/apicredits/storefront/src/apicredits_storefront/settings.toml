@@ -6,61 +6,70 @@
 # Override via (highest priority first):
 #   1. APICREDITS_STOREFRONT_* environment variables (separator __)
 #   2. $XDG_CONFIG_HOME/arkhai/storefront.secrets.toml  (Secret overlay)
-#   3. $XDG_CONFIG_HOME/arkhai/storefront.toml          (ConfigMap base)
-#   4. This file
+#   3. $XDG_CONFIG_HOME/arkhai/storefront.json          (a chart-rendered document)
+#   4. $XDG_CONFIG_HOME/arkhai/storefront.toml          (an operator's own file)
+#   5. This file
 #
 # The overlay files are shared with the VM storefront's loader on
 # purpose: a deployment runs one storefront per container, each with its
-# own mounted storefront.toml.
+# own mounted configuration.
 # ---------------------------------------------------------------------------
 
 # Public marketplace identity. The matching credential is supplied only through
 # ARKHAI_IDENTITY_CREDENTIAL and is never loaded into Dynaconf.
-[identity]
-scheme     = ""
-identifier = ""
-
-[identity.admin_principals]
-identities = []
-
+# Root-level defaults. These must appear before the first table header: a
+# bare key after one belongs to that table, and these previously sat below
+# [identity.admin_principals], which put every one of them out of reach of
+# the `settings.<key>` lookups that read them.
 # Display/process identity
 agent_id   = ""        # must be a Python identifier; empty → "root_agent"
 agent_name = ""        # display name; falls back to agent_id
 # HTTP server
 port     = 8002
 base_url = "http://localhost:8002"  # advertised in registry publications
-
 # Storage / logging
 db_path       = "./src/apicredits_storefront/data/storefront/agent.db"
 log_level     = "INFO"
-
-
 # Registry discovery (seller-side)
 enable_registry_discovery = true
-
 # Negotiation watchdog
 negotiation_timeout_seconds   = 1800
 negotiation_watchdog_interval = 60
-# Shared settlement-servicing worker cadence (seconds).
-claims_sweep_interval = 30
+# Shared settlement-servicing worker cadence (seconds): how often due
+# obligations are serviced. The earlier name, claims_sweep_interval, refuses
+# startup naming this key.
+settlement_servicing_interval_seconds = 30
 
+[identity]
+scheme     = ""
+identifier = ""
+
+[identity.admin_principals]
+identities = []
 [Settlement]
 schema_version = 1
 priority = []
 
-# Add [Settlement.stripe] and/or [Settlement.alkahest] explicitly. Hosted-only
-# deployments leave [wallet] and [chains] empty; all hosted fields are public
-# release/trust/profile/resolver configuration and provider credentials are
-# rejected by the strict hosted configuration model.
+[Settlement.arkhai_payments]
+enabled = false
+# Public policy: service_url, Ed25519 service_identity and fee_bps.
+# Dispute preferences are root [[Dispute]] entries; the seller
+# account comes from the publication clause.
+# The WorkOS key is resolved only when constructing an owner-scoped client.
+# The storefront's key is api_key in its secret overlay, never in this file.
+# development_auth = true is an alternative for a loopback development service.
 
 [wallet]
 # Sensitive — populated by Secret overlay in k8s, by local file otherwise.
+# The address is optional: omitted, it is the account the key signs as.
 address     = ""
 private_key = ""
 
 # [chains.<name>] tables — one per chain the operator transacts on, same
-# schema as the VM storefront (rpc_url required; chain_id and
-# alkahest_address_config_path optional).
+# schema as the VM storefront (rpc_url required; chain_id optional). A chain
+# on a deployment's own Alkahest contracts names its address book under
+# [settlement.alkahest.address_books]; one it does not name uses the SDK's
+# built-in addresses.
 
 [registry]
 urls              = []
@@ -82,8 +91,6 @@ root_path = ""
 service_url       = "http://localhost:8082"
 admin_key         = ""
 admin_key_file    = ""
-preflight_timeout = 30
-fail_on_unreachable = true
 
 [capacity]
 # Configure one stable table per site under [capacity.sites.<site_id>] with:

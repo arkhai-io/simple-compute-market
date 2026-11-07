@@ -91,140 +91,47 @@ checks stay in `core/`.
 
 ## Running
 
-Bring up the exact domain wrapper and inject every role-scoped prerequisite
-before selecting its marker. The API-credit stack requires
-`APICREDITS_ADMIN_KEY_FILE`; the bare-metal scenario additionally requires the
-installed `market.buyer_domains/bare-metal` wheel, its registry and seller/site
-authorities, a canonical Ed25519 credential in the configured environment
-reference, exact public `BARE_METAL.BUY_ARGS`, and
-`ARKHAI_E2E_BARE_METAL_SSH_PRIVATE_KEY_FILE`.
+Each lane target builds its stack's images, brings the stack up with its
+development bindings, and runs the lane's markers from the test image on the
+stack's network. A domain wrapper alone carries none of those bindings, so
+bring a stack up through its lane rather than with `docker compose -f` on the
+wrapper:
 
 ```bash
-docker compose -f compose.vms.yml up -d
-uv run pytest -m e2e_deal_buyer_cli -v
+make -C e2e-tests test-e2e-vm           # VM scenarios
+make -C e2e-tests test-e2e-apicredits   # e2e_credits_deal, e2e_credits_payment_deal
+make -C e2e-tests test-e2e-bare-metal   # bare-metal publication, introduction, mock deal
 
-docker compose -f compose.apicredits.yml up -d
-uv run pytest -m e2e_credits_deal -v
-
-docker compose -f compose.bare-metal.yml up -d
-uv run pytest -m e2e_bare_metal_deal -v
+# One marker against a stack a lane target brought up:
+make -C e2e-tests test-buyer-machine NETWORK=simple-market-service_default \
+  BUYER_MODULE=e2e_deal_buyer_cli
 ```
 
-The bare-metal scenario performs real SSH, requests teardown through
-`market bare-metal`, waits for the accepted terminal teardown status, and
-requires the same access attempt to fail afterward. If the buyer contribution,
-authority endpoint, selected site, credential, or real access target is absent,
-the scenario names that prerequisite and remains unavailable; static Compose or
-unit results are not substituted.
+The release-qualified bare-metal scenario (`e2e_bare_metal_deal`) is in no lane.
+It additionally requires the installed `market.buyer_domains/bare-metal` wheel,
+its registry and seller/site authorities, a canonical Ed25519 credential in the
+configured environment reference, exact public `BARE_METAL.BUY_ARGS`,
+`ARKHAI_E2E_BARE_METAL_SSH_PRIVATE_KEY_FILE`, and
+`ARKHAI_E2E_BARE_METAL_KNOWN_HOSTS_FILE`, the delivered host's pinned key,
+against a stack whose site provisions a real host (`PROVISIONING_MODE=real`). It
+recovers the purchase with `market bare-metal result`, `access`, and `teardown
+--run-id <id>`, repeats the one idempotent `teardown` until the lifecycle's
+`state` is `released` within `BARE_METAL.TEARDOWN_TIMEOUT_SECONDS`, and fails at
+once on `teardown_failed`. Each SSH attempt is a fresh process that shares no
+connection and trusts only the pinned key; access counts as revoked only when that
+host refuses the public key, and any other SSH failure fails the scenario. If the
+buyer contribution, authority endpoint, selected site, credential, or real access
+target is absent, the scenario names that prerequisite and remains unavailable;
+static Compose or unit results are not substituted.
 
-## Hosted fiat scenarios
-
-Hosted VM system acceptance has one protected provider lane:
-`hosted-stripe-test`. It uses the dedicated hosted state carrier rather than
-branching or reinterpreting the Alkahest full-deal state. A collection,
-reclaim, missed-webhook, API-restart, or worker-restart scenario:
-
-1. binds the exact marketplace commit and ordinary signed hosted production
-   manifest, client wheel, service image, signed release repository/workflow
-   reference/source commit, and the protected producer workflow run identity
-   recorded separately as orchestration evidence;
-2. proves a test-mode secret and non-live Stripe objects, API connectivity, the
-   exact allowlisted connected account's ownership/capabilities/readiness, the
-   fixed loopback webhook path, and Chromium availability;
-3. starts the ordinary hosted migration, API, and reconciliation worker roles
-   and proves wallet, chain, RPC, balance, and gas inputs are absent;
-4. publishes and discovers one `fiat.stripe.v1` option through marketplace
-   clients;
-5. negotiates, materializes one accepted obligation, and captures its opaque
-   durable operation identity;
-6. opens the transient Checkout action in Chromium and completes a supported
-   Stripe test-mode payment outcome;
-7. forwards the real signed event to
-   `http://127.0.0.1:18080/webhooks/stripe` and waits on a named observable
-   state with a declared bound;
-8. completes VM fulfillment and portable condition evidence through ordinary
-   marketplace paths;
-9. lets the ordinary hosted worker collect or reclaim and retrieves the exact
-   related Stripe objects to prove amount, currency, relation, connected
-   destination, operation metadata, and one-effect cardinality; and
-10. restarts only ordinary processes or webhook forwarding while preserving
-    authority state and the original operation/idempotency identity where the
-    selected recovery scenario requires it.
-
-Each operation consumes the prior typed snapshot and returns the next typed
-snapshot. Provider retrieval follows the relationships and unique metadata
-created by this run; an account's latest object cannot satisfy an assertion.
-Setup and read-only polling may retry within bounds. Financial mutations
-remain inside production code and are never reissued by the harness under a
-new identity.
-
-Run from the repository root after installing the Stripe CLI and Chromium:
-
-```console
-make hosted-stripe-test \
-  HOSTED_RELEASE_TRUST=/path/to/release-trust \
-  HOSTED_RELEASE_MANIFEST=/path/to/production-release/release-manifest.json \
-  HOSTED_CLIENT_WHEEL=/path/to/production-release/client.whl \
-  HOSTED_COMPOSE_ENV=.dist/hosted-settlement-compose.env \
-  HOSTED_PRODUCTION_MANIFEST_SHA256=<sha256> \
-  HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256=<sha256> \
-  HOSTED_PRODUCTION_IMAGE_DIGEST=sha256:<digest> \
-  HOSTED_PRODUCTION_SOURCE_COMMIT=<full-hosted-commit> \
-  HOSTED_PRODUCTION_WORKFLOW_REF=<signed-producer-workflow-ref> \
-  HOSTED_PRODUCTION_WORKFLOW_RUN_ID=<producer-run> \
-  HOSTED_MARKETPLACE_COMMIT=<full-marketplace-commit> \
-  HOSTED_STRIPE_TEST_RUN_REF=<unique-run-reference> \
-  HOSTED_STRIPE_TEST_SCENARIO=<scenario> \
-  HOSTED_STRIPE_TEST_ACCOUNT_REF=<allowlisted-account-reference> \
-  HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT=<environment-name> \
-  HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE=/path/to/protected-authority.env
-```
-
-Provide `STRIPE_SECRET_KEY` (a test-mode `sk_test` or least-privilege
-`rk_test`) and `STRIPE_CONNECTED_ACCOUNT_ID` only through the approved
-protected Secret/environment boundary. `HOSTED_STRIPE_TEST_EVIDENCE` may
-select the sanitized report destination. Connect onboarding is a separate
-manual or scheduled account-lifecycle smoke; every transaction run still
-retrieves and validates the maintained allowlisted account before publication.
-The target generates a release-pinned ephemeral storefront config from signed
-authority/manifest coordinates and removes it on every outcome.
-
-An explicit run that lacks a release, credential, network, account, webhook,
-Stripe CLI, or browser prerequisite fails before the applicable mutation
-boundary. Reports classify terminal outcomes as `product`, `account`,
-`environment`, or `timeout` and keep the marketplace repository/commit
-separate from the hosted manifest/client/image and signed
-repository/workflow-reference/source identity. The protected producer workflow
-run identity remains separate orchestration evidence rather than a
-signed-manifest field.
-Their allowlist contains scenario/stage, unique run reference, opaque operation
-identity, normalized state/amount/currency/cardinality, failure class, and
-bounded diagnostics. Credentials, Checkout or Account Link URLs,
-account/customer/card data, raw webhooks, unrestricted provider payloads, and
-unrelated provider objects are excluded from state, process output, and
-reports.
-
-For an authorized recovery that must preserve authority state and the
-maintained connected-account binding, stop the protected processes without
-removing the authority volume:
-
-```console
-make hosted-stripe-test-stop
-```
-
-Deterministic provider failure placement and event ordering are covered in the
-hosted producer's credential-free financial-provider and webhook-inbox
-integration suites. Those tests exercise production journal, retry,
-reconciliation, inbox, and idempotency behavior under provider-neutral
-scripted outcomes and do not establish Stripe behavior.
-
-Alkahest remains an independent mechanism E2E:
+## Alkahest deal scenario
 
 ```console
 make -C e2e-tests test-buyer-machine \
-  BUYER_MODULE=e2e_alkahest_escrow_codecs
+  BUYER_MODULE="e2e_alkahest_escrow_codecs or e2e_alkahest_trusted_oracle"
 ```
 
-Local EAS/allowlisted-arbiter tests are condition-boundary work only. There is
-currently no standalone hosted local-EAS operator target, and focused
-condition evidence does not establish hosted finance or Stripe behavior.
+`e2e_alkahest_trusted_oracle` settles one ERC-20 escrow through the
+trusted-oracle arbiter, the SDK path the oracle-gated release model uses. It is
+the only scenario that runs a real chain for that path; no storefront or local
+suite starts a chain of its own.

@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from market_identity.capture import EnvelopeCapture, capture_envelope
 from market_identity.canonical import (
     EMPTY_BODY,
     canonical_body_hash,
@@ -102,6 +103,9 @@ def verify_request(
     expected_resource: str,
     expected_principals: TrustedIdentitySet,
     existing_replay: ReplayReservation | None = None,
+    capture: EnvelopeCapture | None = None,
+    raw_body: bytes | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> VerificationResult:
     """Verify request context and proof, then classify an optional replay lookup."""
 
@@ -142,6 +146,9 @@ def verify_request(
         return VerificationResult(code=VerificationCode.INVALID_PROOF)
 
     replay = classify_replay(parsed, existing_replay)
+    if replay.code != ReplayCode.CHANGED_REUSE:
+        capture_envelope(capture, envelope=parsed, raw_body=raw_body, headers=headers,
+                         verified_at=now, expected_principals=expected_principals)
     if replay.code == ReplayCode.EXACT_RETRY:
         return VerificationResult(
             code=VerificationCode.EXACT_RETRY,
@@ -170,6 +177,9 @@ def verify_response(
     expected_operation: str,
     expected_resource: str,
     expected_request_id: str,
+    capture: EnvelopeCapture | None = None,
+    raw_body: bytes | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> VerificationResult:
     """Verify one response against the caller's pinned authority and request context."""
 
@@ -210,6 +220,8 @@ def verify_response(
         parsed.proof.to_bytes(),
     ):
         return VerificationResult(code=VerificationCode.INVALID_PROOF)
+    capture_envelope(capture, envelope=parsed, raw_body=raw_body, headers=headers,
+                     verified_at=now, expected_principals=expected_principals)
     return VerificationResult(code=VerificationCode.VERIFIED)
 
 

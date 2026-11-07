@@ -19,6 +19,19 @@ retry_backoff_seconds = 2
 # ---------------------------------------------------------------------------
 [default.registry]
 api_url            = ""
+authority_id       = ""   # REGISTRY_AUTHORITY_ID the service publishes under
+identifier         = ""   # the registry's own signing principal
+authority_scheme   = "eip191"
+# Bearer token for a read/write gated private registry. The stack seeds one
+# write-scoped key at startup; this must be the key it seeded.
+bootstrap_api_key  = ""
+
+# Second, access-gated registry in the multi-registry scenario.
+[default.registry_b]
+api_url            = ""
+authority_id       = ""
+identifier         = ""
+authority_scheme   = "eip191"
 
 # ---------------------------------------------------------------------------
 # Buyer wallet
@@ -26,6 +39,7 @@ api_url            = ""
 [default.buyer]
 api_url           = ""
 base_url_override = ""
+marketplace_scheme = "eip191"
 marketplace_credential = ""  # exact profile-provider secret, independent of wallet
 private_key       = ""
 wallet_address    = ""
@@ -36,10 +50,31 @@ chain_rpc_url     = ""   # RPC URL for on-chain escrow creation; falls back to r
 # ---------------------------------------------------------------------------
 [default.seller]
 api_url           = ""
+marketplace_scheme = "eip191"
+marketplace_credential = ""  # falls back to private_key for local EIP-191 profiles
+# Home site the storefront publishes capacity against; matches
+# [capacity.sites] in the storefront config.
+site_id           = "default"
 base_url_override = ""
 private_key       = ""
 wallet_address    = ""
-admin_api_key     = ""        # X-Admin-Key for /admin/* and the provisioning service
+# The storefront administrator is a separate principal from the seller: the
+# seller publishes listings, the administrator performs the system controls
+# that are not part of a normal deal. Both are pinned in the storefront
+# config, so a credential for the wrong one authenticates as the wrong caller.
+admin_scheme      = "eip191"
+admin_credential  = ""
+
+# ---------------------------------------------------------------------------
+# Second storefront (multi-registry scenario)
+# ---------------------------------------------------------------------------
+[default.alice]
+api_url           = ""
+site_id           = "default"
+private_key       = ""
+wallet_address    = ""
+admin_scheme      = "eip191"
+admin_credential  = ""
 
 # ---------------------------------------------------------------------------
 # Test behaviour
@@ -59,6 +94,21 @@ e2e_poll_interval_s = 3
 # ---------------------------------------------------------------------------
 [default.provisioning]
 api_url = ""
+# Credential for the principal pinned as the provisioning service's admin
+# identity. The operator client asserts the `admin` role on every request and
+# the service resolves the trust set from that role, so a credential for any
+# other principal authenticates as the wrong caller.
+admin_scheme     = "eip191"
+admin_credential = ""
+# The provisioning service's own signing principal, pinned so the client
+# verifies responses. Distinct from both caller principals above.
+authority_scheme     = "eip191"
+authority_identifier = ""
+# The provisioning service's own signing credential. Distinct from the admin
+# credential above: the storefront trusts this principal as its service peer,
+# which is the caller the capacity-released callback must come from.
+service_scheme       = "eip191"
+service_credential   = ""
 
 # ---------------------------------------------------------------------------
 # API-credits topology (item 6)
@@ -67,6 +117,40 @@ api_url = ""
 registry_url    = ""   # second registry, api_credits schema
 service_url     = ""   # credits service (keys/credits/quota)
 storefront_url  = ""   # credits seller storefront
+
+# ---------------------------------------------------------------------------
+# Arkhai payments target shared by the payment scenarios. A blank service_url
+# means no target, and the scenarios report blocked and skip, as they do for an
+# unready external one. With it set, service_identity, buyer_account
+# and both marketplace credentials are required; a missing one fails the
+# scenario, naming it. Each end-to-end lane sets this section in committed
+# profiles, config-payments-lane.yml and its config-<lane>-lane.yml, which mark
+# the target its own with lane_owned; an external run supplies its buyer token in
+# a secret profile.
+# ---------------------------------------------------------------------------
+[default.payments]
+service_url                   = ""   # payments service origin
+service_identity              = ""   # Ed25519 receipt-signing identifier pinned by both roles
+fee_bps                       = 250
+livemode                      = false # sandbox receipts only by default
+development_auth              = false
+ca_bundle_path                = ""   # PEM bundle the probe and payments clients alone trust; blank, the system store
+api_key_env                   = ""   # variable the buyer process reads its bearer key from, when development_auth is false
+buyer_api_key                 = ""   # the buyer's bearer key, from a lane profile or an external run's secret profile; the harness hands it to the buyer under api_key_env
+buyer_account                 = ""   # buyer's Arkhai payer account
+buyer_marketplace_credential  = ""   # wallet-free Ed25519 buyer marketplace seed, unpadded base64url
+seller_marketplace_credential = ""   # the lane storefront's own key, in its scheme, for refunds
+seller_account                = ""   # the seller's payee account, which a scenario's listing names
+# Whether the target is the lane's own, the payments lane double: an unready one
+# then fails the scenario naming it, where an external target's blocks it.
+lane_owned                    = false
+
+# ---------------------------------------------------------------------------
+# The dispute authority a payment scenario's case stages file with. Blank means
+# none is configured, and those stages report blocked and skip; no lane runs one.
+# ---------------------------------------------------------------------------
+[default.mediation]
+service_url = ""   # mediation authority origin
 
 
 # ---------------------------------------------------------------------------
@@ -85,3 +169,7 @@ deal_timeout_seconds = 900
 teardown_timeout_seconds = 300
 poll_interval_seconds = 2
 terminal_teardown_status = "released"
+
+# EVM settlement inputs are independent of the lane's buyer signing credential.
+[default.bare_metal_lane]
+buyer_wallet_private_key = ""  # falls back to buyer_credential for local profiles

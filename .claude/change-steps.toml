@@ -1,0 +1,233 @@
+# The skill and permissions of each step of an OpenSpec change when it runs
+# unattended, through `scripts/change-workflow start --unattended`.
+#
+# An unattended run uses Claude Code's `dontAsk` permission mode with only the
+# project's settings loaded: a tool call no `allow` rule names is denied and
+# recorded in the run's `permission_denials`, so a step needing a tool it was
+# not given ends `stopped` instead of waiting on a prompt nobody will answer. A
+# chained command runs only when every command in it is allowed. `deny`
+# rules win over `allow` rules; they are the "never" lines of each step's skill,
+# and a push other than the guarded `scripts/change-workflow push` is denied to every step.
+#
+# Interactive runs of a step do not read this file: the owner's own permission
+# settings apply to them, with prompts. A step's permissions change here, by the
+# owner, as a tracked change, and no step may edit this file or the project's
+# Claude Code settings; a rule the owner grants for one run, fresh or resumed, is
+# passed on that run's command line and noted on its log line, never added here.
+#
+# Rules use Claude Code's permission rule syntax. Each step's rules are its own
+# plus `common`'s. A file-tool rule's relative path names a path from the
+# checkout's root: the wrapper anchors it there, so a step that changes directory
+# keeps it. Contract: openspec/specs/change-workflow/spec.md, CW-qu42,
+# CW-4yhk, CW-2lvd, CW-2h9t, CW-drf6, CW-tl5v, and CW-56zq.
+
+# Every step reads the repository and its history, and checks the change index.
+[common]
+allow = [
+  "Read", "Glob", "Grep", "Skill",
+  "Bash(scripts/change-workflow find*)",
+  "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
+  "Bash(git rev-parse*)", "Bash(git branch --show-current)", "Bash(git ls-files*)",
+  "Bash(git merge-base*)", "Bash(git check-ignore*)",
+  "Bash(scripts/change-workflow next*)", "Bash(scripts/change-workflow cost*)",
+  "Bash(scripts/change-workflow log*)", "Bash(scripts/change-workflow config *)",
+  "Bash(scripts/change-workflow record*)",
+  "Bash(scripts/change-workflow check round-view)", "Bash(scripts/change-workflow check index)",
+  "Bash(openspec validate *)", "Bash(openspec instructions *)", "Bash(openspec list*)",
+  "Bash(openspec show *)", "Bash(openspec status*)",
+  "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(wc *)",
+  "Bash(grep *)", "Bash(echo *)", "Bash(diff *)", "Bash(find *)",
+  # The rest of the read-only text toolbox the steps reach for, and the git
+  # reads in their `-C <dir>` form. A chain runs only when every command in it
+  # is allowed, so a leading `cd` is allowed as the no-op it is: it grants
+  # nothing to the commands after it.
+  "Bash(sed -n *)", "Bash(awk *)", "Bash(cut *)", "Bash(sort *)", "Bash(uniq *)",
+  "Bash(tr *)", "Bash(cd *)",
+  # Lists a built wheel's or archive's contents; with -l unzip extracts nothing.
+  "Bash(unzip -l *)",
+  # The running session's id, and only that variable: the rest of the
+  # environment may hold credentials.
+  "Bash(printenv CLAUDE_CODE_SESSION_ID)",
+  # The installed uv's version, which decides the lock revision it writes.
+  "Bash(uv --version)", "Bash(uv self version)",
+  # The secret scan and the full-rule audit read the tree and history;
+  # installing their scanner is the operator's, through make install-gitleaks.
+  "Bash(make check-secrets)", "Bash(make check-secrets *)",
+  "Bash(make audit-secrets)", "Bash(python3 scripts/check_secrets.py *)",
+  # The bounded wait on a background command's output; it only reads the file.
+  "Bash(scripts/change-workflow wait *)",
+]
+deny = [
+  "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",
+  "Bash(git stash*)", "Bash(git clean*)", "Bash(git rebase*)",
+  "Bash(make round-view)", "Bash(make round-view *)", "Bash(make round-done*)",
+  "Bash(scripts/change-workflow round-view*)", "Bash(scripts/change-workflow round-done*)",
+  "Edit(.claude/**)", "Write(.claude/**)",
+  "Edit(.agents/workflow.toml)", "Write(.agents/workflow.toml)",
+  # A rule marked "Write-steering" refuses only a shell form that writes a file,
+  # so the write goes through the Edit or Write tool; such a write is a gap, not
+  # a workaround. Every other deny rule forbids the work itself.
+  # Write-steering: find reads unless an action deletes, runs, or writes.
+  "Bash(find * -delete*)", "Bash(find * -exec*)", "Bash(find * -ok*)",
+  "Bash(find * -fprint*)", "Bash(find * -fls*)",
+  # Write-steering: the diff family writes its output to a file with --output.
+  "Bash(git diff*--output*)", "Bash(git show*--output*)", "Bash(git log*--output*)",
+  "Bash(git -C *--output*)",
+  # Write-steering: sed reads only with -n; its in-place forms edit the file.
+  "Bash(sed -i*)", "Bash(sed * -i*)", "Bash(sed *--in-place*)",
+  # Following a file hangs once the line waited for is the last one written, so a
+  # step waits on a background command with `scripts/change-workflow wait`.
+  "Bash(tail -f*)", "Bash(tail -F*)", "Bash(tail --follow*)", "Bash(tail * -f*)",
+  "Bash(tail * -F*)", "Bash(tail *--follow*)",
+]
+
+# Design commits and pushes its own settled design. A design blocked on a
+# prerequisite writes the prerequisite's proposal in a worktree on a new branch
+# from dev, never on the blocked branch.
+# Review runs on Codex in its read-only sandbox, falling back to Claude when Codex is
+# unavailable. The Claude reviewer only reads: no edit, and nothing beyond common's
+# read-only commands.
+[steps.review]
+skill = "change-review"
+allow = ["Bash(make check-doc-citations*)", "Bash(make check-comment-hygiene)",
+         "Bash(make check-tasks*)", "Bash(make check-architecture)",
+         "Bash(make check-agent-skills)", "Bash(scripts/change-workflow run *)"]
+deny = ["Edit"]
+
+[steps.design]
+skill = "change-design"
+allow = [
+  "Edit(openspec/**)", "Edit(docs/**)",
+  # Read-only lens vocabulary extraction from intervention ledgers on stdin.
+  "Bash(python3 -c \"import sys,json; print(sorted({json.loads(l)['lens'] for l in sys.stdin if l.strip()}))\")",
+  "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
+  "Bash(make check-*)",
+  "Bash(git worktree add ../*-proposal -b propose-* origin/dev)",
+  "Bash(make -C ../*-proposal check-change-index)",
+  # A prerequisite's or follow-up's proposal is new files in a new directory of
+  # the sibling worktree, so the step creates them as well as editing them.
+  # Claude Code allows a Write only by an Edit rule, and touches a file outside
+  # the checkout only by a Read rule as well. It never matches a pattern holding
+  # `..`; the wrapper resolves it when anchoring the rule.
+  "Bash(mkdir -p ../*-proposal/openspec/changes/*)",
+  "Read(../*-proposal/**)",
+  "Edit(../*-proposal/openspec/**)", "Edit(../*-proposal/docs/development/ROADMAP.md)",
+  "Bash(helm version*)", "Bash(make helm-values-schema)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
+]
+
+# Planning resumes the design step's session, which holds the design's context.
+[steps.plan]
+skill = "change-plan"
+resume_from = "design"
+allow = [
+  "Edit(openspec/**)", "Edit(docs/**)",
+  "Bash(scripts/change-workflow check tasks *)",
+  "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
+  "Bash(make check-*)",
+  "Bash(make helm-values-schema)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
+]
+
+# Triage fixes what the owner accepts and commits it, so it has implementation's
+# rules beside design's.
+[steps.triage]
+skill = "change-triage"
+allow = [
+  "Edit", "Write", "Task",
+  "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
+  "Bash(make check-*)",
+  "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)", "Bash(make dist*)",
+  "Bash(make reinit*)", "Bash(uv run pytest *)",
+  "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(git rm *)", "Bash(scripts/change-workflow push)",
+  "Bash(git pull --ff-only workspace *)",
+  "Bash(make -C * dist*)", "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)",
+  "Bash(helm version*)", "Bash(make helm-values-schema)",
+]
+# Triage fixes and re-checks one change; running two changes' validations
+# side by side deploys into another change's namespace.
+deny = ["Bash(make run-e2e*)", "Bash(make validate-parallel*)"]
+
+[steps.implement]
+skill = "change-implement"
+allow = [
+  "Edit", "Write", "Task",
+  "Bash(make check-*)", "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)",
+  "Bash(make dist*)", "Bash(make -C * dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
+  "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
+  "Bash(make typecheck*)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",
+  "Bash(scripts/change-workflow run *)",
+  "Bash(git pull --ff-only workspace *)",
+  "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
+  "Bash(make build-*)", "Bash(make -C * e2e-*-down)",
+]
+deny = ["Bash(make run-e2e*)"]
+
+# Validation never changes the commit: it writes only its own record, and its
+# one push is the guarded push of the change's branch.
+[steps.validate]
+skill = "change-validate"
+allow = [
+  "Edit(openspec/changes/**/reviews/*-validation.md)",
+  "Bash(scripts/change-workflow check push)",
+  "Bash(scripts/change-workflow push)", "Bash(scripts/change-workflow run *)",
+  "Bash(make helm-values-schema)",
+  "Bash(gh run list*)", "Bash(gh run view *)", "Bash(gh auth status*)",
+  "Bash(docker *)", "Bash(kubectl *)", "Bash(helm *)",
+]
+deny = ["Bash(make lock*)", "Bash(git commit*)", "Bash(git add*)",
+        "Bash(docker push*)", "Bash(helm push*)"]
+
+# The merge brings the branch the change lands on into its branch after its
+# pre-closeout triage. It resolves every conflict and repairs what that branch's
+# changes broke in the change's own code, so it has implementation's rules, and
+# fetches and merges a branch of the remote that has it: origin, or, in a clone,
+# the owner's workspace. A merge stopped at its conflicts stays in progress for the
+# owner; it is never aborted.
+[steps.merge]
+skill = "change-merge"
+allow = [
+  "Edit", "Write", "Task",
+  "Bash(git fetch origin *)", "Bash(git fetch workspace *)",
+  "Bash(git merge --no-edit origin/*)", "Bash(git merge --no-edit workspace/*)",
+  "Bash(make check-*)", "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)",
+  "Bash(make dist*)", "Bash(make -C * dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
+  "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
+  "Bash(make typecheck*)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",
+  "Bash(scripts/change-workflow run *)",
+  "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
+]
+deny = ["Bash(make run-e2e*)", "Bash(git merge --abort*)", "Bash(git merge --quit*)"]
+
+# Closeout changes documentation only; a part that needs code returns the change
+# to implementation.
+[steps.closeout]
+skill = "change-closeout"
+allow = [
+  "Edit(openspec/**)", "Edit(docs/**)",
+  "Edit(AGENTS.md)",
+  # A README is documentation wherever it sits, so closeout keeps one current
+  # beside the code it describes without gaining any code path.
+  "Edit(**/README.md)",
+  "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
+  "Bash(openspec archive *)",
+  "Bash(make check-*)", "Bash(python3 scripts/check_*)", "Bash(scripts/change-workflow check *)",
+  "Bash(make helm-values-schema)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
+]
+
+# Archive cleanup drafts the pull request; the orchestrating session opens it.
+[steps.archive-cleanup]
+skill = "change-archive-cleanup"
+allow = [
+  "Edit(openspec/changes/README.md)",
+  "Edit(openspec/changes/archive/*/reviews/pull-request.md)",
+  "Edit(openspec/changes/archive/*/interventions.jsonl)",
+  "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
+  "Bash(scripts/change-workflow history*)", "Bash(scripts/change-workflow run *)",
+  "Bash(make helm-values-schema)",
+]
+deny = ["Bash(gh pr create*)"]

@@ -2,10 +2,59 @@
 
 CHART_DIR    := .
 RELEASE      := arkhai-node-operator
+# Every target that takes NAMESPACE= also takes CHANGE=, which derives the
+# change's validation namespace (../scripts/change_namespace.py). Release names do
+# not change with the namespace, so the in-cluster Service names the values
+# files state resolve in every one.
+ifneq ($(CHANGE),)
+ifeq ($(origin NAMESPACE),command line)
+$(error give CHANGE= or NAMESPACE=, not both)
+endif
+NAMESPACE    := $(or $(shell python3 ../scripts/change_namespace.py $(CHANGE)),$(error CHANGE=$(CHANGE) names no validation namespace))
+else
 NAMESPACE    := default
+endif
 VALUES       := values.yaml
+LOCAL_VALUES := local-values.yaml
+# Secrets the release's workloads read with the default values, which the chart
+# never creates: they are provisioned out of band (for local development,
+# `make topology-secrets` creates them). Enabling api-credits-registry adds
+# arkhai-api-credits-registry-identity. Under $(LOCAL_VALUES), which configures
+# Bob for payments, arkhai-bob-runtime's overlay also holds his payments key and
+# his credential toward the pinned dispute authority.
+LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime \
+	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh
+# ConfigMaps the release's workloads read under $(LOCAL_VALUES) and no chart
+# creates, provisioned out of band the same way: the storefronts' CA bundle,
+# which holds the payments lane double's committed lane CA.
+LOCAL_CONFIGMAPS := payments-ca-bundle
+# The payments lane double's committed fixtures topology-secrets reads: the lane
+# CA, and the script that prints the seller's token from its account directory.
+# Public development values, never for a public network.
+PAYMENTS_LANE_CA_FILE := ../tools/payments-lane-double/tls/lane-ca.pem
+PAYMENTS_LANE_ENV := ../tools/payments-lane-double/scripts/lane_env.py
+# Bob's secret overlay in the Compose stacks, whose [[DisputeCredential]] toward
+# the double's pinned dispute authority topology-secrets copies into his runtime
+# Secret's overlay, so one committed copy serves both. A public development
+# value, never for a public network.
+BOB_COMPOSE_SECRETS_FILE := ../dev-env/identities/bob.storefront.secrets.toml
 
-.PHONY: init template deploy test test-render
+# The Secrets the release's `helm test` reads beyond a deploy's: the e2e-tests
+# chart's deal test credentials, which under local-values.yaml the registry smoke
+# test also layers for the buyer's credential, and the buyer CLI's profile
+# credential.
+TEST_SECRETS := arkhai-e2e-credentials arkhai-buyer-profile-credential
+# The PersistentVolumeClaims the release's `helm test` mounts and no chart
+# creates: the deal test's buyer profile store (the e2e-tests chart's
+# buyer.profileStore.existingClaim; a render test holds the two equal), and the
+# size topology-secrets requests for it, enough for a development buyer's
+# profile file.
+TEST_VOLUMES := arkhai-buyer-profiles
+TEST_VOLUME_SIZE := 100Mi
+
+.PHONY: init template deploy deploy-local undeploy check-local-secrets test test-render \
+	topology-up topology-down topology-check topology-secrets forward unforward resume \
+	teardown
 
 ## Update Helm dependencies declared in Chart.yaml
 init:
@@ -14,28 +63,22 @@ init:
 ## Secret values are provisioned out of band. The chart accepts only names of
 ## existing Kubernetes Secrets and never reads credential files into values.
 
-## RESOURCES_CSV_FILE: path to the compute resource inventory CSV to seed
-## into the storefront agent on first deploy. Left empty by default — the
-## storefront starts with no inventory and the operator seeds via the API.
-## Example:
-##   make deploy RESOURCES_CSV_FILE=./domains/vms/storefront/src/market_storefront/data/kvm1-machine.csv
-RESOURCES_CSV_FILE ?=../domains/vms/storefront/src/market_storefront/data/kvm1-machine.csv
-
 ## Render the full parent chart (and all enabled subcharts) to stdout.
 template:
 	helm template $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \
-		--values $(VALUES) \
-		$(if $(RESOURCES_CSV_FILE),--set-file storefront.agents[0].secret.resourcesCsvInline=$(RESOURCES_CSV_FILE),)
+		--values $(VALUES)
 
 ## Verify structural invariants of the rendered chart without needing
 ## a real cluster. Runs `helm template` against the umbrella chart and
 ## asserts the storefront ConfigMap/Secret split layout — per-agent
-## ConfigMap holds storefront.toml, Secret holds storefront.secrets.toml,
+## ConfigMap holds storefront.json, Secret holds storefront.secrets.toml,
 ## Deployment mounts both at /etc/arkhai/ with independent checksums,
 ## and no sensitive keys leak across the boundary. Stable across
 ## cosmetic chart edits (no byte-level snapshots).
-test-render:
+# Repackage every local subchart first: a stale charts/*.tgz would otherwise be
+# rendered in place of the chart directory beside it.
+test-render: init
 	@./scripts/test-render.sh
 
 ## Render a single subchart in isolation.
@@ -48,22 +91,237 @@ endif
 		--namespace $(NAMESPACE) \
 		--values $(CHART_DIR)/charts/$(MODULE)/values.yaml
 
+## Deploy keeping the release's volumes when it is uninstalled. For a local
+## development cluster use deploy-local instead (docs/development/DEPLOYMENT_AND_CONFIG.md,
+## "Stateful service persistence").
 deploy: init
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \
 		--create-namespace \
 		--values $(VALUES) \
-		$(if $(RESOURCES_CSV_FILE),--set-file storefront.agents[0].secret.resourcesCsvInline=$(RESOURCES_CSV_FILE),) \
+		$(EXTRA_VALUES) \
 		--wait
 
-## Run helm tests against the deployed release
+## Deploy for local development: as deploy, with local-values.yaml layered on,
+## so the release's volumes are deleted when it is uninstalled. It first checks
+## that every out-of-band Secret and ConfigMap the release reads exists, since the
+## chart creates none of them and a pod naming a missing one never starts.
+deploy-local:
+	@$(MAKE) --no-print-directory check-local-secrets
+	@$(MAKE) --no-print-directory deploy EXTRA_VALUES="--values $(LOCAL_VALUES)"
+
+## Uninstall the release, waiting for its resources to go. Succeeds when no
+## release is installed.
+undeploy:
+	helm uninstall $(RELEASE) --namespace $(NAMESPACE) --wait --ignore-not-found
+
+## Delete a change's validation namespace, with every release, volume, and Secret
+## in it, and remove each image the change's validation built under its tags
+## (../scripts/change_namespace.py --images); archive cleanup runs it once the
+## change has landed. It takes CHANGE=<change> only, so it never deletes
+## `default`, and deletes only in HELM_CONTEXT, the context validation deploys to,
+## whatever context is current. Succeeds when the namespace or an image is already
+## gone, and fails when any image could not be removed, after trying the rest.
+HELM_CONTEXT ?= docker-desktop
+teardown:
+ifeq ($(CHANGE),)
+	$(error teardown needs CHANGE=<change>: it deletes that change's validation namespace, never $(NAMESPACE))
+endif
+	kubectl delete namespace $(NAMESPACE) --context $(HELM_CONTEXT) --ignore-not-found --wait
+	@status=0; \
+	for image in $$(python3 ../scripts/change_namespace.py $(CHANGE) --images); do \
+		if docker image inspect "$$image" >/dev/null 2>&1; then \
+			docker image rm "$$image" || status=1; \
+		else \
+			echo "$$image is not here"; \
+		fi; \
+	done; \
+	exit $$status
+
+## Fail, naming each one, unless every out-of-band Secret in LOCAL_SECRETS, every
+## ConfigMap in LOCAL_CONFIGMAPS, and every PersistentVolumeClaim in LOCAL_VOLUMES
+## (none unless given) exists.
+check-local-secrets:
+	@missing=""; \
+	for secret in $(LOCAL_SECRETS); do \
+		kubectl get secret --namespace $(NAMESPACE) "$$secret" >/dev/null 2>&1 || missing="$$missing Secret/$$secret"; \
+	done; \
+	for configmap in $(LOCAL_CONFIGMAPS); do \
+		kubectl get configmap --namespace $(NAMESPACE) "$$configmap" >/dev/null 2>&1 || missing="$$missing ConfigMap/$$configmap"; \
+	done; \
+	for claim in $(LOCAL_VOLUMES); do \
+		kubectl get pvc --namespace $(NAMESPACE) "$$claim" >/dev/null 2>&1 || missing="$$missing PersistentVolumeClaim/$$claim"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "ERROR: missing from namespace $(NAMESPACE):$$missing" >&2; \
+		echo "For local development, \`make -C helm topology-secrets\` (\`make helm-topology-secrets\`) creates every one from development values." >&2; \
+		exit 1; \
+	fi; \
+	echo "Every out-of-band Secret, ConfigMap, and volume required here exists in namespace $(NAMESPACE)."
+
+# ---------------------------------------------------------------------------
+# The local two-release topology: several storefronts per registry, each in its
+# own release with its own provisioning service, in one namespace.
+#   $(RELEASE)           as deploy-local installs it: the registry, Bob's VM
+#                        storefront, its provisioning service, and dev-env.
+#   $(TOPOLOGY_RELEASE)  the same chart under $(TOPOLOGY_VALUES): the
+#                        bare-metal storefront and its own provisioning service,
+#                        publishing to $(RELEASE)'s registry.
+# $(TOPOLOGY_VALUES) names both releases' Services by these release names; a
+# render test (tests/test_release_topology.py) holds them equal.
+#
+# No end-to-end scenario requires this topology yet: the Helm validation lane's
+# scenarios (`make validate-helm`) need $(RELEASE) alone. A scenario that needs
+# the bare-metal release says so on its Makefile target and in its suite
+# module's docstring, naming `make helm-topology-up` as what must be active.
+# ---------------------------------------------------------------------------
+TOPOLOGY_RELEASE := arkhai-bare-metal-seller
+TOPOLOGY_VALUES  := bare-metal-release-values.yaml
+# Out-of-band Secrets $(TOPOLOGY_RELEASE) reads beyond $(LOCAL_SECRETS), whose
+# provisioning SSH and runtime Secrets it shares; $(TOPOLOGY_VALUES) says what
+# each holds.
+TOPOLOGY_SECRETS := arkhai-bare-metal-storefront-identity arkhai-bare-metal-storefront-runtime \
+	arkhai-bare-metal-provisioning-identity
+# The components (app.kubernetes.io/name) whose Deployments topology-up restarts
+# after its upgrades, in this order: the registry the storefronts publish to,
+# then the provisioning services they read, then the storefronts. dev-env is
+# not among them: its Anvil reloads its state file, so the contracts survive a
+# restart, but every transaction since start-up -- escrows, attestations,
+# balances -- is lost while the other services' volumes still refer to them. A
+# rebuilt dev-env image therefore does not roll. Nor is payments-lane-double: it
+# keeps every payment in memory, so a restart loses each transaction the
+# storefronts' databases refer to, and its image does not roll either. A render
+# test holds this list to the Deployments both releases render.
+TOPOLOGY_ROLLOUT_ORDER := registry provisioning storefront bare-metal-storefront
+
+# Development values topology-secrets derives every key from, never for a public
+# network: Foundry's published default mnemonic, and the Anvil account index of
+# each principal values.yaml, $(LOCAL_VALUES), and $(TOPOLOGY_VALUES) pin. Change
+# an index only together with the principal those files pin to it.
+DEV_MNEMONIC := test test test test test test test test test test test junk
+DEV_ACCOUNT_PROVISIONING            := 0
+DEV_ACCOUNT_BUYER                   := 1
+DEV_ACCOUNT_BOB                     := 2
+DEV_ACCOUNT_REGISTRY                := 3
+DEV_ACCOUNT_PROVISIONING_ADMIN      := 5
+DEV_ACCOUNT_BARE_METAL_STOREFRONT   := 8
+DEV_ACCOUNT_BARE_METAL_PROVISIONING := 9
+# The SSH key both provisioning services mount. Mock provisioning never opens a
+# connection, so it is the committed placeholder the bare-metal Compose lane
+# mounts; a release provisioning real hosts names its own key file here.
+PROVISIONING_SSH_KEY_FILE := ../dev-env/bare-metal/ssh-key-placeholder
+
+# $(TOPOLOGY_VALUES) names both releases' Services by the release names above,
+# so the topology targets refuse a RELEASE or TOPOLOGY_RELEASE given on the
+# command line (or from the environment under `make -e`) rather than install
+# releases whose storefront, registry, and provisioning URLs name Services that
+# do not exist.
+define TOPOLOGY_NAMES_FIXED
+$(if $(filter command line environment environment override,$(origin RELEASE) $(origin TOPOLOGY_RELEASE)),\
+	$(error $(TOPOLOGY_VALUES) names its Services by this Makefile's RELEASE and TOPOLOGY_RELEASE; do not override them))
+endef
+
+## Install the two-release topology for local development, release 1 then
+## release 2, each waiting for its workloads to be ready; both under
+## local-values.yaml, so their volumes are deleted when they are uninstalled.
+## deploy-local updates the chart's dependencies for both.
+##
+## Then restart both releases' Deployments in $(TOPOLOGY_ROLLOUT_ORDER)'s
+## order, waiting for each rollout. Local images keep their bare tags: a
+## commit-hash tag would change when an image does not, and could name an
+## image the cluster has not loaded. So an upgrade over an installed release
+## leaves each pod template unchanged and its pods on the image they started
+## with, and only a restart rolls a rebuilt image out.
+topology-up:
+	$(TOPOLOGY_NAMES_FIXED)
+	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(LOCAL_SECRETS) $(TOPOLOGY_SECRETS)"
+	@$(MAKE) --no-print-directory deploy-local
+	helm upgrade --install $(TOPOLOGY_RELEASE) $(CHART_DIR) \
+		--namespace $(NAMESPACE) \
+		--values $(VALUES) \
+		--values $(LOCAL_VALUES) \
+		--values $(TOPOLOGY_VALUES) \
+		--wait
+	@set -e; for component in $(TOPOLOGY_ROLLOUT_ORDER); do \
+		selector="app.kubernetes.io/instance in ($(RELEASE),$(TOPOLOGY_RELEASE)),app.kubernetes.io/name=$$component"; \
+		deployments="$$(kubectl get deployment --namespace $(NAMESPACE) --selector "$$selector" --output name)"; \
+		if [ -z "$$deployments" ]; then \
+			echo "ERROR: no Deployment in namespace $(NAMESPACE) matches $$selector" >&2; exit 1; \
+		fi; \
+		for deployment in $$deployments; do \
+			kubectl rollout restart --namespace $(NAMESPACE) "$$deployment"; \
+		done; \
+		for deployment in $$deployments; do \
+			kubectl rollout status --namespace $(NAMESPACE) "$$deployment" --timeout=10m; \
+		done; \
+	done
+
+## Create, or replace the contents of, every out-of-band Secret the topology
+## reads -- $(LOCAL_SECRETS), $(TOPOLOGY_SECRETS), and $(TEST_SECRETS) -- and
+## ConfigMap -- $(LOCAL_CONFIGMAPS) -- from the development values above, the
+## payments lane double's committed fixtures, and Bob's Compose secret overlay
+## ($(BOB_COMPOSE_SECRETS_FILE)), and the buyer-profile volume the
+## deal test mounts ($(TEST_VOLUMES), created if absent), idempotently, in
+## $(NAMESPACE), which it creates if absent (CHANGE=<change> for a change's
+## validation namespace) (scripts/topology-secrets.sh says what each holds).
+## Needs cast (Foundry), kubectl, and python3 3.11 or newer. Development only,
+## never for a public network.
+topology-secrets:
+	NAMESPACE="$(NAMESPACE)" DEV_MNEMONIC="$(DEV_MNEMONIC)" \
+	PAYMENTS_LANE_CA_FILE="$(PAYMENTS_LANE_CA_FILE)" PAYMENTS_LANE_ENV="$(PAYMENTS_LANE_ENV)" \
+	BOB_COMPOSE_SECRETS_FILE="$(BOB_COMPOSE_SECRETS_FILE)" \
+	DEV_ACCOUNT_PROVISIONING="$(DEV_ACCOUNT_PROVISIONING)" DEV_ACCOUNT_BUYER="$(DEV_ACCOUNT_BUYER)" \
+	DEV_ACCOUNT_BOB="$(DEV_ACCOUNT_BOB)" DEV_ACCOUNT_REGISTRY="$(DEV_ACCOUNT_REGISTRY)" \
+	DEV_ACCOUNT_PROVISIONING_ADMIN="$(DEV_ACCOUNT_PROVISIONING_ADMIN)" \
+	DEV_ACCOUNT_BARE_METAL_STOREFRONT="$(DEV_ACCOUNT_BARE_METAL_STOREFRONT)" \
+	DEV_ACCOUNT_BARE_METAL_PROVISIONING="$(DEV_ACCOUNT_BARE_METAL_PROVISIONING)" \
+	PROVISIONING_SSH_KEY_FILE="$(PROVISIONING_SSH_KEY_FILE)" \
+	TEST_VOLUMES="$(TEST_VOLUMES)" TEST_VOLUME_SIZE="$(TEST_VOLUME_SIZE)" \
+		./scripts/topology-secrets.sh
+
+## Uninstall the two-release topology, release 2 first, waiting for each.
+## Succeeds when neither is installed.
+topology-down:
+	$(TOPOLOGY_NAMES_FIXED)
+	helm uninstall $(TOPOLOGY_RELEASE) --namespace $(NAMESPACE) --wait --ignore-not-found
+	@$(MAKE) --no-print-directory undeploy
+
+## Run both releases' helm tests, after checking for the Secrets release 1's
+## tests read beyond a deploy's ($(TEST_SECRETS)) and the deal test's volume
+## ($(TEST_VOLUMES)). Release 1's: contract validation, which checks the chain's ID (its fixtures also read the buyer's
+## and Bob's wallet addresses, from the generated smoke profile); the
+## registry smoke test, which reads health and publishers through the typed
+## client, pinned to the release's registry signer and authority from that
+## profile and signed as the development buyer from arkhai-e2e-credentials'
+## e2e-secret profile; the storefront smoke test, signed as Bob from
+## arkhai-bob-runtime's seller profile; the provisioning smoke test, whose
+## signed cases skip without an administrator credential, the one input its
+## profile does not carry (it pins the service's signer from
+## global.provisioningIdentity); Bob's payments check, `market-storefront
+## check-payments` reading the seller's balance at the payments lane double with
+## Bob's own configuration, CA bundle, and payments key; and the e2e-tests chart's
+## deal test. Release 2's: its provisioning smoke test, which skips the same way,
+## the bare-metal storefront's /health check, the one that proves release 2
+## answers, and its payments check, against release 1's double. None
+## shows the storefronts trade: the topology's evidence (signed requests
+## admitted, callbacks reaching the bare-metal storefront, projections
+## loaded, a publication on release 1's registry) is gathered against the
+## running releases.
+topology-check:
+	$(TOPOLOGY_NAMES_FIXED)
+	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TEST_SECRETS)" LOCAL_VOLUMES="$(TEST_VOLUMES)"
+	helm test $(RELEASE) --namespace $(NAMESPACE) --logs
+	helm test $(TOPOLOGY_RELEASE) --namespace $(NAMESPACE) --logs
+
+## Run helm tests against the deployed release, after checking for the Secrets
+## and volume they read beyond a deploy's ($(TEST_SECRETS), $(TEST_VOLUMES)).
 test:
+	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TEST_SECRETS)" LOCAL_VOLUMES="$(TEST_VOLUMES)"
 	helm test $(RELEASE) \
 		--namespace $(NAMESPACE) \
 		--logs
 
-stop:
-	helm uninstall $(RELEASE)
+stop: undeploy
 ## Run helm tests for a single subchart.
 ## Requires MODULE=<subchart-name>, e.g. make test-module MODULE=validate-contracts
 ## Valid values: validate-contracts, registry, storefront, provisioning, e2e-tests
@@ -79,11 +337,17 @@ TEST_POD_SUFFIX_registry           := smoke-test
 TEST_POD_SUFFIX_storefront         := smoke-test
 TEST_POD_SUFFIX_provisioning       := smoke-test
 TEST_POD_SUFFIX_e2e-tests          := e2e-deal-test
- 
+# The Secrets a module's test reads beyond a deploy's: the deal test's, and the
+# registry smoke test's buyer credential under $(LOCAL_VALUES).
+TEST_MODULE_SECRETS_e2e-tests := $(TEST_SECRETS)
+TEST_MODULE_SECRETS_registry  := arkhai-e2e-credentials
+TEST_MODULE_VOLUMES_e2e-tests := $(TEST_VOLUMES)
+
 test-module:
 ifndef MODULE
 	$(error MODULE is not set. Usage: make test-module MODULE=<subchart-name>)
 endif
+	$(if $(TEST_MODULE_SECRETS_$(MODULE)),@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TEST_MODULE_SECRETS_$(MODULE))" LOCAL_VOLUMES="$(TEST_MODULE_VOLUMES_$(MODULE))")
 	helm test $(RELEASE) \
 		--namespace $(NAMESPACE) \
 		--logs \
@@ -92,29 +356,60 @@ endif
 # PID file used by forward/unforward targets
 FORWARD_PID_FILE := .port-forward.pids
 
-## Forward all service ports to localhost in the background.
-## PIDs are written to $(FORWARD_PID_FILE) so unforward can clean them up.
+## Forward the release's service ports in $(NAMESPACE) (CHANGE=<change> for a
+## change's validation namespace) to localhost in the background, for running
+## e2e targets by hand. PIDs are written to $(FORWARD_PID_FILE) so unforward can
+## clean them up. The ports are the same for every namespace, so one namespace is
+## forwarded at a time: a port another checkout already forwards fails to bind,
+## and forward names it and stops (scripts/port-forward.sh).
 ## Access services at:
 ##   Anvil RPC          http://localhost:8545
 ##   Registry           http://localhost:8080
 ##   Seller Storefront  http://localhost:8001
 ##   Provisioning       http://localhost:8081
 forward: unforward
-	@echo "Starting port-forwards..."
-	@kubectl port-forward --namespace $(NAMESPACE) \
-		svc/$(RELEASE)-dev-env 8545:8545 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
-	@kubectl port-forward --namespace $(NAMESPACE) \
-		svc/$(RELEASE)-registry 8080:8080 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
-	@kubectl port-forward --namespace $(NAMESPACE) \
-		svc/$(RELEASE)-storefront-bob 8001:8001 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
-	@kubectl port-forward --namespace $(NAMESPACE) \
-		svc/$(RELEASE)-provisioning 8081:8081 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
+	@echo "Starting port-forwards from namespace $(NAMESPACE)..."
+	@NAMESPACE="$(NAMESPACE)" PID_FILE="$(FORWARD_PID_FILE)" bash ./scripts/port-forward.sh start \
+		$(RELEASE)-dev-env:8545 $(RELEASE)-registry:8080 \
+		$(RELEASE)-storefront-bob:8001 $(RELEASE)-provisioning:8081
 	@echo "  anvil    → http://localhost:8545"
 	@echo "  registry → http://localhost:8080"
 	@echo "  sell     → http://localhost:8001"
 	@echo "  prov     → http://localhost:8081"
 	@echo "Run 'make unforward' to stop."
 
-## Kill all port-forwards started by 'make forward'
+## Stop the port-forwards 'make forward' started, waiting for them to exit.
 unforward:
-	@test -f $(FORWARD_PID_FILE) && cat $(FORWARD_PID_FILE) | xargs kill 2>/dev/null; rm -f $(FORWARD_PID_FILE); true
+	@PID_FILE="$(FORWARD_PID_FILE)" bash ./scripts/port-forward.sh stop
+
+## Scale every release's Deployments and StatefulSets in $(NAMESPACE) back to the
+## replica counts its installed manifest states (CHANGE=<change> for a change's
+## validation namespace, which validation leaves scaled to zero), or only those
+## of the releases RESUME_RELEASES names. The counts come from `helm get
+## manifest`, so nothing is rendered from the checkout and no release changes.
+RESUME_RELEASES ?=
+resume:
+	@set -e; \
+	releases="$(or $(RESUME_RELEASES),$$(helm list --namespace $(NAMESPACE) --short))"; \
+	workloads=""; \
+	for release in $$releases; do \
+		manifest="$$(helm get manifest "$$release" --namespace $(NAMESPACE))"; \
+		workloads="$$workloads $$(printf '%s\n' "$$manifest" | awk '$(RESUME_REPLICAS)')"; \
+	done; \
+	if [ -z "$$(echo $$workloads)" ]; then \
+		echo "ERROR: no release in namespace $(NAMESPACE) states Deployment or StatefulSet replicas" >&2; exit 1; \
+	fi; \
+	for workload in $$workloads; do \
+		kubectl scale --namespace $(NAMESPACE) "$${workload%=*}" --replicas="$${workload##*=}"; \
+	done
+
+# Each Deployment's and StatefulSet's `kind/name=replicas` in a rendered manifest,
+# which Helm writes with top-level keys at column 0 and their fields indented two.
+RESUME_REPLICAS := \
+	function emit() { if (kind != "" && name != "" && replicas != "") print tolower(kind) "/" name "=" replicas } \
+	/^---/ { emit(); kind = ""; name = ""; replicas = ""; section = "" } \
+	/^kind: (Deployment|StatefulSet)$$/ { kind = $$2 } \
+	/^[a-z]/ { section = $$1 } \
+	section == "metadata:" && /^  name: / && name == "" { name = $$2; gsub(/"/, "", name) } \
+	section == "spec:" && /^  replicas: / { replicas = $$2 } \
+	END { emit() }

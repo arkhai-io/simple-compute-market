@@ -39,6 +39,8 @@ A buy run records selected domain, policy parameters, discovered candidates, acc
 
 Recovery starts from the latest authoritative persisted handoff. If negotiation already produced accepted terms or settlement produced a deal reference, recovery inspects or resumes that stage rather than silently renegotiating and risking a second commercial commitment.
 
+A run also records what its selected settlement entry needs to know about the listing it negotiated, as one opaque `listing_record`. Core writes and reads it without naming its contents: the entry supplies it through the `accepted_listing_record` hook, and for Alkahest it is `kit/alkahest`'s record of the listing's advertised release conditions (`release_conditions_record`, read back by `recorded_release_conditions`). `market buy` writes it when negotiation starts and in an agreed completion; the negotiate commands write it at run start and at run end, whatever the outcome. A resume reads the record of the listing it resumes, per listing, so a run that negotiated several listings cannot fund one under another's conditions. A resumed escrow is derived from the run's recorded accepted proposal and that record, at the amount taken exactly from the recorded Agreement — the run-log's `agreed_amount` passes through a float — and must still equal the seller's recorded plan. Deriving against the listing as the registry now serves it was rejected: it adds a registry read to resume and refuses correct runs whose listing has since changed. A run accepted before release conditions were recorded is refused before funding, naming the reason, so a new run is needed; a run whose escrow exists derives nothing and resumes.
+
 ## Aggregation
 
 Aggregation is buyer-local policy over discovered offers. Settlement-specific aggregation mechanisms may come from kit packages, but core does not assume a particular escrow, token, or market-domain score. Aggregation output is converted through domain codecs before entering negotiation.
@@ -47,45 +49,126 @@ Aggregation is buyer-local policy over discovered offers. Settlement-specific ag
 
 The composition root gives buyer orchestration one marketplace signer. The signer exposes an exact `{scheme, identifier}` principal; matching identifier text under another scheme is a different credential and cannot authorize the buyer. Discovery-authenticated calls, negotiation, storefront settlement, heartbeats, and recovery use that scheme-neutral operation, so core never receives a raw private-key field, infers a principal from wallet material, or branches on the signer's scheme.
 
-Marketplace identity and transaction credentials have independent lifetimes. Wallet and chain settings are optional until domain and settlement selection identifies an EVM effect. A hosted-fiat path therefore uses the same buyer lifecycle with an Ed25519 signer and without wallet derivation, balance or gas checks, RPC or chain configuration, or an Alkahest client. An Alkahest path separately resolves and validates the EVM wallet and chain inputs owned by that adapter; even when marketplace signing and transaction signing use the same underlying EIP-191 key by explicit configuration, core does not infer that coupling.
+Marketplace identity and transaction credentials have independent lifetimes. Wallet and chain settings are optional until domain and settlement selection identifies an EVM effect. A Arkhai payment path therefore uses the same buyer lifecycle with an Ed25519 signer and without wallet derivation, balance or gas checks, RPC or chain configuration, or an Alkahest client. An Alkahest path separately resolves and validates the EVM wallet and chain inputs owned by that adapter; even when marketplace signing and transaction signing use the same underlying EIP-191 key by explicit configuration, core does not infer that coupling.
 
 Run logs persist the canonical public principal, signature-contract version, accepted obligation and operation identities, and domain state required to resume. They do not serialize credential material. Recovery checks the complete recorded principal and permits a different credential only when a completed rotation authorizes it as an active replacement, before submitting another authenticated or settlement mutation.
 
+A protocol `signer` field is public evidence only when it is exactly the canonical
+`{scheme, identifier}` mapping validated by the identity codec. Run-log validation
+preserves that evidence unchanged while refusing signer objects, private fields,
+noncanonical or extended mappings, and secret/provider carriers at every nesting
+level. The field name alone grants no exception.
+
+Settlement polling sends only public status to progress observers. The complete
+authenticated delivery result returns through its private result boundary, so
+credentials cannot enter a run log through a progress callback. Retained journals
+remain recovery evidence; reading or resuming them does not rewrite their events.
+
 ## Configured mechanism choice and buyer actions
 
-The buyer receives installed and enabled mechanisms through the shared settlement configuration registry. With no explicit settlement clause, canonical configured priority is policy input among compatible pre-acceptance choices. Mechanism prerequisites are late-bound after resource and settlement selection: hosted fiat does not resolve wallet, chain, RPC, token, or gas inputs; an EVM selection resolves them through its owning adapter.
+The buyer intersects installed, enabled registration compatibility with its
+explicit buyer-role stage table before applying ordered clauses or priority.
+Registration does not imply execution support. Accepted work resolves only
+`Agreement.settlement.mechanism`, including after a priority change; a missing
+entry is an actionable refusal before effects.
 
-Transient buyer actions use one mechanism-neutral `open`, `print`, or `fail` policy on fresh and resumed runs. An action URL may be opened or printed for the current invocation but is never written to the run log. Raw setup and inspection utilities live below `market settlement <mechanism>`; normal buy, settle, resume, and service commands derive mechanism details from advertised or accepted state.
+`make_settle_hook(stages=..., invoke=...)` invokes the selected opaque stage
+with the unchanged `NegotiationResult`. The domain supplies the invoker and
+entry-specific acceptance validator. The validator receives the exact
+`NegotiationOutcome` after generic Agreement/party/option checks and before
+accepted-round observation or persistence. Alkahest-only artifact requirements
+belong there. An entry can bind `make_escrow_settle_hook` explicitly; neither
+proposal presence nor absence selects it.
 
-Priority and explicit clauses never authorize recovery-time failover. Accepted Terms, the obligation reference, and stable operation identities remain authoritative even if current priority, readiness, enablement, or command inputs change. Generated buyer configuration therefore contains shared selection vocabulary but omits seller account, onboarding, publication, authority-administration, and provider fields.
+What an Agreement and its listing determine the buyer derives for itself, and the
+seller's copy is compared, never used: the accept reply carries no escrow terms,
+and the buyer materializes its escrow through `kit/alkahest` from its accepted
+proposal or selection and the listing's advertised release condition. The plan
+check runs where funds move. `make_escrow_settle_hook` takes a required
+`check_escrows_fund_plan` port, which each buyer fills with `kit/alkahest`'s
+`require_escrow_terms_fund_plan`, run over the buyer's own derivation before any
+escrow is created; an acceptance carrying no seller plan is refused before
+funding as `seller_plan_missing`, since a seller accepts an escrow only with its
+plan. Every resume path derives through `kit/alkahest`'s
+`derive_accepted_escrow_terms`, which holds the derivation to the recorded plan.
+The selection-branch validator, `AdvertisedPlanValidatorFn`, checks the
+selection branch at acceptance; the plan check is a separate port rather than a
+widening of it because API credits opens with escrow
+proposals, which that validator never sees. The plan that stays in the reply is
+the seller's committed copy the buyer compares against, which also exposes
+derivation skew between buyer and seller before funds move. `core/buyer` imports
+no `kit/alkahest`.
 
-## Persistent payer binding and exact authorization
+Prerequisites are late-bound: Arkhai payments uses trusted service policy and
+owner-scoped credentials, while Alkahest resolves its own EVM inputs.
+Mechanism-specific continuations stay with the selected entry, not a common
+buyer-first sequence. Buyer recovery uses the recorded settlement reference,
+exact Agreement bytes and domain settlement data; the buyer keeps no
+SettlementEvidence. Seller delivery is authorized only by the storefront's
+verified evidence.
 
-The marketplace buyer profile and hosted payer profile are separate identities. Owner-restricted local profile metadata keeps only the authority/environment binding, opaque payer reference, bound canonical marketplace principal, and safe lifecycle state. Payer create/setup/instrument administration calls the hosted authority directly through the released client under `market settlement stripe payer`; escrow status, reclaim, fulfillment, and collection remain storefront-mediated.
+The buyer preserves exact Agreement bytes and opaque settlement data in accepted run state. Its `payer_account` travels in selection params, independently of the profile signer. It validates the seller-derived mandate against that Agreement and local policy, approves and polls the same transaction ID, then calls compute seller `commit` (API credits uses settle) with only the negotiation ID. Resume does not reconstruct the Agreement or use current priority to fail over.
 
-After accepted terms are durable, the buyer constructs one authorization from the immutable obligation hash, accepted amount/currency/destination/profile/expiry, deterministic marketplace operation identity, and the user-selected interactive or saved-instrument mode. Only the operation-scoped authorization reference is durable run state. Saved instrument references and transient setup, payment, confirmation, or bank-instruction details remain invocation-local.
+VM `market negotiate` and API-credit `market credits negotiate` use their
+respective buyer tables for selection enrichment, accepted artifacts,
+pricing/prerequisite resolution and proposal construction. Interrupted rounds
+retain the recorded selection, provision terms and scaled opening/ceiling
+rather than applying fresh admission or token scaling. Fresh VM
+acceptance requires an explicit advertised settlement selection; accepted
+recovery uses the exact Agreement and persisted concrete Alkahest proposal when
+applicable, not current publication policy.
 
-Off-session policy evaluation never grants blanket charging authority. A qualifying accepted obligation may be signed without another prompt, while a refusal or hosted `requires_action` continues the same exact obligation through the common transient action policy. Restart re-fetches provider-neutral status/reason/deadline/action metadata and reuses accepted identities rather than persisting a URL or selecting another profile.
+Normal buy and accepted-run settlement commands derive mechanism details from advertised and accepted state. Arkhai payments has no Stripe payer-profile, instrument setup, browser funding, or off-session automation command.
 
 ## Bare-metal accepted authority
 
-The installed bare-metal contribution performs authenticated discovery, selects one exact advertised option, validates the option against the trusted physical listing, signs domain terms from buyer-owned duration and SSH public-key input, and stores the accepted option, parties, plan, obligation, and storefront authority under the persistent run identity. Hosted start/status/reclaim then use the core schema-opaque transport with that recorded signer and trust. CLI projections redact transient URLs; physical reclaim never implies lease termination after collection.
+The installed bare-metal contribution preserves the selected profile signer, exact advertised option, Agreement, settlement data, and registry/storefront trust. Payment approval and seller settlement retain those identities. Physical result and access calls address the accepted selected-site authority; current configuration and caller-supplied URLs cannot redirect them. Buyer-only access coordinates are transient and absent from durable run logs.
 
-## API-credit hosted recovery
 
-Fresh API-credit buys use the shared settlement registry to choose one
-compatible listing option and preserve the accepted plan in the run log.
-Hosted authorization is prepared from that plan and the selected persistent
-profile; core transport sends only accepted negotiation/obligation identifiers
-and the safe authorization reference to the storefront. Status, transient
-actions, resume, and reclaim reuse the recorded signer and storefront trust.
-The domain CLI returns buyer-authenticated credentials separately from public
-settlement state and never treats absence of a returned secret as permission to
-reauthorize or reissue.
+## API-credit payment recovery
+
+API-credit buys preserve the accepted option, exact Agreement, and mandate rather than reconstructing a partial listing. Approval and polling retain transaction identity, and seller settle calls identify only the negotiation. Seller receipt verification precedes recoverable, idempotent credits issuance. Credentials use the private buyer result channel; a missing credential response is not permission to charge or issue again.
+
+## Delivery-only ends and case evidence
+
+VM `market end` and `market bare-metal teardown` compose the same
+`kit/deal-lifecycle-buyer` half and signed canonical client
+`end_delivery(negotiation_id)`. They require an accepted settlement-stage run and
+address its retained storefront, not a current listing. No caller-supplied `at`
+is allowed. The storefront signs its own durable receipt instant; same-key retry
+keeps it and an earlier selected final request still controls. A once-only or
+current Alkahest end is delivery surrender, not a fabricated payment stop/refund.
+The lifecycle read keeps physical progress available even when authority state
+is unsupported or unavailable.
+
+The buyer verifies the seller's acknowledgement through the foundation's neutral
+binding verifier and retains exact request/response bytes under the negotiation.
+If surrender is selected, its embedded mediation `SignedDeliveryEndClaim` binds
+payer cause, delivered=true and the receipt instant. The buyer can file that
+claim as concurrence with exact Agreement and evidence. An uncertain response is
+resolved by same-key surrender retry before fixing the claim; an earlier seller
+end suppresses automatic payer filing. Original case ownership/adoption and
+separate pending/unknown progress survive restart. Payment and dispute calls
+report their own authority's answers; the storefront is no payment-command relay.
+
+Stop-then-hint with priced notice, rate-stop outage retry and buyer watchdog
+execution require the rate adapter. The common retry/evidence structure does not
+claim that production rate path exists. The display separates delivery
+acknowledgement, payment effect and case protection.
+
+The buyer keeps signed acceptance before commitment, peer/site/authority bytes and
+its own delivery/access observations separately from seller assertions. It verifies
+a site report directly only with independent site trust; otherwise it keeps the
+report for adjudication. Prune refreshes each deal's records before applying the
+frozen Agreement window; unavailable/incomplete observations and adapter-less
+deals retain evidence. Export preserves exact bytes and superseded commitments.
+API credits checks full authority identity at selection/approval but composes no
+buyer lifecycle evidence/filing path. See
+[buyer surrender and cases](../deal-lifecycle/architecture.md#buyer-surrender-and-cases).
 
 ## Current limits
 
-The plugin boundary and shipped export contracts do not prove that every arbitrary third-party command composes without collision. Persisted recovery covers documented stages; it is not a universal exactly-once transaction spanning registries, storefronts, and settlement mechanisms.
+The core buyer application refuses at startup a root command name two installed domains register, naming both, because with two domains installed one domain's command would otherwise run as the other's, decided by entry-point discovery order. That check covers root names only; the plugin boundary and shipped export contracts do not prove that every arbitrary third-party command composes without collision. Persisted recovery covers documented stages; it is not a universal exactly-once transaction spanning registries, storefronts, and settlement mechanisms.
 
 ## Related contracts
 

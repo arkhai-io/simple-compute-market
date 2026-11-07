@@ -4,11 +4,19 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from market_resource_pools_contracts.backing import (
+    BACKED,
+    UNBACKED,
+    CapacityNotAdmittedError,
+)
 
-from core_storefront.aggregation import fill_first
+from core_storefront.aggregation import AggregateCapacityClient, fill_first
 from market_capacity_publication import (
-    CapacityBinding,
     CapacityBindingError,
+    CapacityEffects,
+    PublicationBinding,
+    backing_changed,
+    publication_binding,
     CapacityConfigurationError,
     CapacityRuntime,
     CapacitySite,
@@ -21,8 +29,16 @@ class FakeSite:
         self.reserve = AsyncMock(
             return_value={"capacity_reservation_id": "r-1", "resource_id": "gpu-1"}
         )
-        self.commit = AsyncMock()
+        self.commit = AsyncMock(
+            return_value={"capacity_reservation_id": "r-1", "lease_end_utc": "2099-01-01 01:00"}
+        )
         self.release = AsyncMock(return_value={"capacity_reservation_id": "r-1"})
+        self.activate_lease = AsyncMock(
+            return_value={
+                "capacity_reservation_id": "r-1",
+                "activated_at_utc": "2099-01-01T00:07:00+00:00",
+            }
+        )
 
     async def snapshot(self):
         return list(self.rows)
@@ -63,10 +79,10 @@ async def test_projection_and_availability_keep_exact_site_authority(runtime):
 @pytest.mark.asyncio
 async def test_bound_effects_never_fan_out_or_use_reservation_cache(runtime):
     composed, remotes, _ = runtime
-    binding = CapacityBinding("site-b", "vm", "pool-1")
+    binding = PublicationBinding("site-b", "vm", "pool-1", BACKED)
 
-    reserved = await composed.reserve(binding, claim={"executor_kind": "vm"})
-    await composed.commit(
+    reserved = await composed.reserve(binding, claim={"offering_mode": "vm"})
+    committed = await composed.commit(
         binding,
         resource_id="gpu-1",
         capacity_reservation_id="r-after-restart",
@@ -77,6 +93,8 @@ async def test_bound_effects_never_fan_out_or_use_reservation_cache(runtime):
     )
 
     assert reserved["site"] == "site-b"
+    # The site's recorded reservation, tagged with the bound site.
+    assert (committed["site"], committed["lease_end_utc"]) == ("site-b", "2099-01-01 01:00")
     assert released["site"] == "site-b"
     remotes["site-a"].reserve.assert_not_awaited()
     remotes["site-a"].commit.assert_not_awaited()
@@ -91,8 +109,8 @@ async def test_unknown_recorded_site_fails_closed(runtime):
 
     with pytest.raises(CapacityBindingError, match="unconfigured site"):
         await composed.reserve(
-            CapacityBinding("removed-site", "vm", "pool-1"),
-            claim={"executor_kind": "vm"},
+            PublicationBinding("removed-site", "vm", "pool-1", BACKED),
+            claim={"offering_mode": "vm"},
         )
 
     assert all(remote.reserve.await_count == 0 for remote in remotes.values())
@@ -116,3 +134,147 @@ def test_incomplete_or_ambiguous_composition_is_rejected():
             placement=fill_first,
             reconcile=AsyncMock(),
         )
+
+
+@pytest.mark.asyncio
+async def test_capacity_effects_refuse_an_unbacked_binding_before_any_site_call(
+    runtime,
+):
+    composed, remotes, _ = runtime
+    unbacked = PublicationBinding("site-b", "vm", "pool-1", UNBACKED)
+
+    with pytest.raises(CapacityNotAdmittedError, match="reserve"):
+        await composed.reserve(unbacked, claim={"offering_mode": "vm"})
+    with pytest.raises(CapacityNotAdmittedError, match="commit"):
+        await composed.commit(
+            unbacked, resource_id="gpu-1", capacity_reservation_id="r-1"
+        )
+    with pytest.raises(CapacityNotAdmittedError, match="release"):
+        await composed.release(unbacked, capacity_reservation_id="r-1")
+    with pytest.raises(CapacityNotAdmittedError, match="lease truncation"):
+        await composed.truncate_lease(
+            unbacked,
+            capacity_reservation_id="r-1",
+            lease_end_utc="2026-09-23T00:00:00Z",
+        )
+    with pytest.raises(CapacityNotAdmittedError, match="lease activation"):
+        await composed.activate_lease(unbacked, capacity_reservation_id="r-1")
+
+    for remote in remotes.values():
+        remote.reserve.assert_not_awaited()
+        remote.commit.assert_not_awaited()
+        remote.release.assert_not_awaited()
+        remote.activate_lease.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_activation_reaches_only_the_binding_s_site(runtime):
+    composed, remotes, _ = runtime
+    binding = PublicationBinding("site-b", "vm", "pool-1", BACKED)
+
+    activated = await composed.activate_lease(
+        binding, capacity_reservation_id="r-after-restart"
+    )
+
+    assert activated["site"] == "site-b"
+    assert activated["activated_at_utc"] == "2099-01-01T00:07:00+00:00"
+    remotes["site-b"].activate_lease.assert_awaited_once_with(
+        capacity_reservation_id="r-after-restart"
+    )
+    remotes["site-a"].activate_lease.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_activation_under_an_unconfigured_site_fails_closed(runtime):
+    composed, remotes, _ = runtime
+
+    with pytest.raises(CapacityBindingError, match="unconfigured site"):
+        await composed.activate_lease(
+            PublicationBinding("removed-site", "vm", "pool-1", BACKED),
+            capacity_reservation_id="r-1",
+        )
+
+    for remote in remotes.values():
+        remote.activate_lease.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_activation_answered_for_another_site_is_refused():
+    aggregate = AsyncMock()
+    aggregate.site_names = ("site-a", "site-b")
+    aggregate.activate_lease.return_value = {
+        "capacity_reservation_id": "r-1", "site": "site-b",
+    }
+    effects = CapacityEffects(aggregate)
+
+    with pytest.raises(CapacityBindingError, match="mismatched site"):
+        await effects.activate_lease(
+            PublicationBinding("site-a", "vm", "pool-1", BACKED),
+            capacity_reservation_id="r-1",
+        )
+
+    aggregate.activate_lease.assert_awaited_once_with(
+        capacity_reservation_id="r-1", site_id="site-a"
+    )
+
+
+@pytest.mark.asyncio
+async def test_effects_over_any_aggregate_act_only_at_the_sites_it_names():
+    site = AsyncMock()
+    site.reserve.return_value = {"capacity_reservation_id": "r-1"}
+    aggregate = AggregateCapacityClient({"site-a": site}, placement=fill_first)
+    effects = CapacityEffects(aggregate)
+
+    reserved = await effects.reserve(
+        PublicationBinding("site-a", "bare_metal", "res-1", BACKED),
+        claim={"offering_mode": "bare_metal"},
+    )
+    with pytest.raises(CapacityBindingError, match="unconfigured site"):
+        await effects.commit(
+            PublicationBinding("site-b", "bare_metal", "res-1", BACKED),
+            resource_id="res-1",
+            capacity_reservation_id="r-1",
+        )
+
+    assert reserved["site"] == "site-a"
+    # The aggregate records where the reservation lives, as it does for any
+    # reserve it routes.
+    assert aggregate.reservation_sites["r-1"] == "site-a"
+
+
+def test_bindings_differing_only_in_backing_are_unequal():
+    backed = PublicationBinding("site-a", "vm", "pool-a", BACKED)
+    unbacked = PublicationBinding("site-a", "vm", "pool-a", UNBACKED)
+
+    assert backed != unbacked
+    assert backed == PublicationBinding("site-a", "vm", "pool-a", BACKED)
+
+
+@pytest.mark.parametrize("delegate", [BACKED, UNBACKED])
+def test_durable_backing_loads_its_delegate(delegate):
+    binding = publication_binding(
+        capacity_backing=delegate.label,
+        site_id="site-a",
+        offering_mode="vm",
+        source_id="p",
+    )
+
+    assert binding.backing is delegate
+
+
+@pytest.mark.parametrize("value", ["Backed", "", None, "infinite"])
+def test_durable_backing_with_no_delegate_is_refused(value):
+    with pytest.raises(CapacityBindingError, match="capacity_backing"):
+        publication_binding(
+            capacity_backing=value,
+            site_id="site-a",
+            offering_mode="vm",
+            source_id="p",
+        )
+
+
+def test_a_backing_change_is_detected_against_the_source():
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
+
+    assert not backing_changed(binding, BACKED)
+    assert backing_changed(binding, UNBACKED)

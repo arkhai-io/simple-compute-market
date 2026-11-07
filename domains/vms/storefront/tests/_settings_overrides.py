@@ -46,3 +46,29 @@ def settings_overrides(**overrides: Any) -> Iterator[None]:
             settings.unset(root, force=True)
             if existed:
                 settings.set(root, value)
+
+
+@contextmanager
+def replaced_setting(key: str, value: Any) -> Iterator[None]:
+    """Temporarily replace one key on the storefront ``settings`` singleton
+    whole, restoring it (or its absence) on exit.
+
+    Unlike ``settings_overrides``, the value is not merged into what the
+    configuration already holds: a table replaces the table, and a list the
+    list. Dynaconf keeps an empty table set on a dotted key, so to empty a
+    section, replace it at its root.
+
+    The key's root table is what is restored: Dynaconf's `unset` of a dotted
+    key leaves the nested key in place, so a key that was absent would
+    otherwise outlive the test.
+    """
+    settings = _agent_config.settings
+    root = key.split(".", 1)[0]
+    original = deepcopy(settings.get(root))
+    settings.set(key, deepcopy(value), merge=False)
+    try:
+        yield
+    finally:
+        settings.unset(root, force=True)
+        if original is not None:
+            settings.set(root, original, merge=False)

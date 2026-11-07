@@ -1,0 +1,41 @@
+[project]
+name = "arkhai-compute-provisioning-contracts"
+version = "0.13.0"
+license = "MIT"
+description = "Wire models and route contracts of the compute provisioning family, without its service code."
+requires-python = ">=3.12"
+# Models and route contracts only. The service never depends on its own
+# callers' packages, and a caller never installs the service's persistence.
+dependencies = [
+    # VersionedEnvelope.
+    "arkhai-core>=0.4.0",
+    # The empty-body sentinel the route contracts canonicalize with, and the
+    # principal a rotation answer names.
+    "arkhai-kit-identity==0.4.0",
+    # Field(exclude_if=...), with which a schedule response omits an absent host.
+    "pydantic>=2.12",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/compute_provisioning_contracts"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests/unit"]
+asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.23",
+]
+
+# The package allowlist: every distribution this package may declare or import
+# beyond the standard library, because its lightness is part of its contract.
+# make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
+[tool.arkhai.architecture]
+allowed-dependencies = ["arkhai-core", "arkhai-kit-identity", "pydantic"]

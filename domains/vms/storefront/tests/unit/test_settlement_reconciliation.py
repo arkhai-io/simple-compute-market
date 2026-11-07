@@ -5,16 +5,17 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
 from market_storefront.services.listing_service import ListingService
 from tests.fake_site import TEST_MARKETPLACE_SIGNER, TEST_SITE_AUTHORITIES
 from tests.listing_service_fixtures import vm_listing_collaborators
 
 
 @pytest.mark.asyncio
-async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_terms(
-    monkeypatch,
-):
+async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_terms():
     domain = build_vm_storefront_domain()
     registry = build_vm_storefront_registry(domain)
     collaborators = vm_listing_collaborators(
@@ -23,8 +24,8 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         authorities=TEST_SITE_AUTHORITIES,
     )
     accepted_terms = {
-        "mechanism": "fiat.stripe.v1",
         "option_id": "accepted-option",
+        "settlement": {"schema": "example.payment.v1"},
     }
     stored = {
         "listing_id": "listing-stable",
@@ -33,7 +34,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         "updated_at": "2026-08-12T00:00:00",
         "storefront_url": "http://seller.test",
         "seller_principal": TEST_MARKETPLACE_SIGNER.identity.model_dump(mode="json"),
-        "offer_resource": {
+        "listing_resource": {
             "resource_type": "compute",
             "gpu_model": "H200",
             "gpu_count": 1,
@@ -45,7 +46,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         "settlement_options": [],
         "publication_clauses": [
             {
-                "mechanism": "fiat.stripe.v1",
+                "mechanism": "example.payment.v1",
                 "asset": "usd",
                 "rate": "1.25",
                 "per": "hour",
@@ -65,32 +66,32 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         domain_registry=registry,
         market_domain=domain,
         load_listing=AsyncMock(return_value=stored),
+        load_listing_binding=AsyncMock(return_value=None),
         update_listing=AsyncMock(),
     )
     new_option = {
         "option_id": "newly-ready-option",
-        "mechanism": "fiat.stripe.v1",
-        "asset": "usd",
-        "rates": [{"field": "amount", "per": "hour", "value": "125"}],
-        "params": {},
+        "price": {
+            "asset": "usd",
+            "rates": [{"field": "amount", "per": "hour", "value": "125"}],
+        },
+        "settlement": {"schema": "example.payment.v1", **({} or {})},
     }
     composition = SimpleNamespace(
         publication_artifacts=AsyncMock(return_value=([], [new_option], ()))
     )
     publish = AsyncMock(return_value={"status": "published"})
-    monkeypatch.setattr(
-        "market_storefront.services.publication_service.publish_order_to_registry",
-        publish,
-    )
     service = ListingService(
         registry=collaborators.registry,
         binding=collaborators.binding,
         domain=collaborators.domain,
         capacity_runtime=collaborators.capacity_runtime,
+        site_projections=collaborators.site_projections,
         sqlite_client=db,
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
         settlement_composition_provider=lambda: composition,
+        registry_publisher=publish,
     )
 
     result = await service.reconcile_settlement_options(
@@ -111,3 +112,46 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
     assert stored["accepted_terms"] is accepted_terms
     assert stored["accepted_terms"]["option_id"] == "accepted-option"
     assert publish.await_args.args[0].listing_id == "listing-stable"
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_building_no_option_refuses_and_changes_nothing():
+    """With no mechanism ready, reconciliation builds nothing to refresh the
+    listing with, so it refuses rather than storing or publishing a listing
+    with no option."""
+    domain = build_vm_storefront_domain()
+    registry = build_vm_storefront_registry(domain)
+    collaborators = vm_listing_collaborators(
+        registry,
+        signer=TEST_MARKETPLACE_SIGNER,
+        authorities=TEST_SITE_AUTHORITIES,
+    )
+    db = SimpleNamespace(
+        domain_registry=registry,
+        market_domain=domain,
+        load_listing=AsyncMock(
+            return_value={"listing_id": "listing-stable", "publication_clauses": []}
+        ),
+        load_listing_binding=AsyncMock(return_value=None),
+        update_listing=AsyncMock(),
+    )
+    composition = SimpleNamespace(publication_artifacts=AsyncMock(return_value=([], [], ())))
+    publish = AsyncMock()
+    service = ListingService(
+        registry=collaborators.registry,
+        binding=collaborators.binding,
+        domain=collaborators.domain,
+        capacity_runtime=collaborators.capacity_runtime,
+        site_projections=collaborators.site_projections,
+        sqlite_client=db,
+        marketplace_signer=TEST_MARKETPLACE_SIGNER,
+        alkahest_clients={},
+        settlement_composition_provider=lambda: composition,
+        registry_publisher=publish,
+    )
+
+    with pytest.raises(RuntimeError, match="no enabled settlement mechanism is ready"):
+        await service.reconcile_settlement_options("listing-stable")
+
+    db.update_listing.assert_not_awaited()
+    publish.assert_not_awaited()

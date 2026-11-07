@@ -1,0 +1,731 @@
+"""Listing shapes e2e scenario: a stated shape is published and discoverable.
+
+A pool's `listing_shapes` hint states the shape its listings are sold in. This
+scenario proves the cross-service path from that declaration to discovery:
+
+1. A pool states a 1-GPU, 8-vCPU, 32 GiB, 100 GiB shape; its one declaration has
+   2 GPUs, 16 vCPUs, 64 GiB, and 200 GiB.
+2. The provisioning service projects the hint verbatim, and one publication
+   cycle publishes exactly that shape, with every declared quantity, and no
+   default GPU-only shapes.
+3. A buyer discovers it with a typed `ram_gb>=32` resource query and finds
+   nothing at `ram_gb>=33`: the registry's range filters match the published
+   quantities, which a GPU-only listing never carries.
+4. `market buy`, discovering through the same memory query, negotiates, escrows,
+   and settles it; with convergence held, the stage steps the fulfillment to
+   active once the buy's job is submitted, and the buy reaches ready.
+5. The site's reservation holds every declared quantity, and the provisioning
+   job sizes the VM from them rather than from the pool's defaults.
+6. A storefront override, written through the typed administrator client,
+   replaces the pool's stated shape: the storefront checks the pool against the
+   site's live projection and reports the shape feasible, one cycle closes the
+   hint's listing and publishes the override's, and deleting the override
+   restores the hint's shape.
+7. A storefront override stating family rates and rateless settlement clauses
+   makes the pool's listing shape-priced: one cycle refreshes it in place with a
+   rate composed from its shape -- 1 GPU, 8 vCPUs, 32 GiB, and 100 GiB at the
+   override's per-unit rates -- which the registry carries in the existing
+   option fields, while the family rates are served only by the storefront.
+   Deleting the override restores the hint's flat rate.
+8. The pool restates its shape with inline constraints -- `gpu.count`
+   `{offer: 1, max: 4}` and a `memory.gib` maximum but no memory offer. One
+   cycle publishes the base shape alone: one GPU and no `ram_gb`, since a
+   constraint without an offer commits nothing. Neither the storefront's listing
+   nor the registry's carries a constraint: what a seller would also sell stays
+   the storefront's own policy.
+9. A second pool states a shape with no GPUs, 8 vCPUs and 32 GiB, over a machine
+   declaring 16 vCPUs, 64 GiB, and 200 GiB and no GPU. One cycle publishes it
+   with no GPU count or model, and no disk, in the storefront's or the
+   registry's listing; a
+   `vcpu_count>=8` query finds it and a `gpu_count>=1` query does not, since a
+   GPU filter excludes a listing stating no GPUs. `market buy`, discovering it
+   through the vCPU query, settles and provisions it to ready, and the site's
+   reservation holds its vCPUs and memory and no GPU. The pool's terms are keyed
+   by GPU model, which the shape names none of, so a storefront override states
+   its clause.
+
+The listing's terms and region come from the pool's own `pricing` and `region`
+hints, so the scenario does not depend on the storefront's configured defaults.
+The region is stated twice on purpose: a listing advertises its pool's region
+hint, and a reservation matches that region against the declaration's own
+`region` attribute, so a pool whose members did not declare it would publish
+nothing. How many of the shape
+fit, and whether a reservation will be admitted, stay the site's: publication
+judges only that the declaration can serve the shape.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+
+import pytest
+from compute_provisioning_contracts import MockRuleCreate
+from market_pool_overrides import SyncPoolOverrideClient, pool_override_statuses
+from market_resource_pools_contracts import PoolUpdate
+
+from tests.e2e.roles.helpers.buy import buy_to_ready
+from tests.e2e.roles.helpers.compute_deal import (
+    advance_storefront,
+    assert_storefront_loops_held,
+    delete_mock_rules_if_present,
+)
+from tests.e2e.roles.scenarios.vms.conftest import require_state
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_LISTING_SHAPES_CPU_HOST,
+    E2E_LISTING_SHAPES_CPU_POOL_ID,
+    E2E_LISTING_SHAPES_HOST,
+    E2E_LISTING_SHAPES_POOL_ID,
+    provision_e2e_executor,
+    refresh_storefront_projections,
+)
+
+log = logging.getLogger(__name__)
+
+pytestmark = [
+    # Listed first, so the holds are taken before, and released after, every
+    # other fixture of the module; the lane's cleanup follows them, so it runs
+    # while the holds stand. Each buy reaches ready only when its stage steps
+    # convergence.
+    pytest.mark.usefixtures(
+        "storefront_loops_held", "alice_loops_held",
+        "fulfillment_convergence_held", "lease_watchdog_held",
+        "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
+    ),
+    pytest.mark.e2e_listing_shapes,
+]
+
+#: A model no other scenario declares, so discovery counts only this listing.
+GPU_MODEL = "L40S"
+REGION = "California, US"
+RESOURCE_ID = "compute-e2e-listing-shapes-001"
+DECLARED = {"gpu_count": 2, "vcpu_count": 16, "ram_gb": 64, "disk_gb": 200}
+SHAPE = {
+    "gpu": {"count": 1, "model": GPU_MODEL},
+    "cpu": {"count": 8},
+    "memory": {"gib": 32},
+    "storage": {"gib": 100},
+}
+PUBLISHED = {"gpu_count": 1, "vcpu_count": 8, "ram_gb": 32, "disk_gb": 100}
+#: The hint restated with inline constraints: one GPU offered of up to four, and
+#: memory bounded without an offer. Its base shape is the GPU family alone.
+CONSTRAINED_SHAPE = {
+    "gpu": {"count": {"offer": 1, "max": 4}, "model": GPU_MODEL},
+    "memory": {"gib": {"max": 512}},
+}
+#: The storefront's own shape for the pool: the hint's, with half the memory.
+OVERRIDE_SHAPE = {**SHAPE, "memory": {"gib": 16}}
+
+#: MockERC20 at its deterministic development address, pre-funded to the buyer
+#: in the baked development chain; never a public-network token.
+TOKEN = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+#: The pool's own terms: 10 whole tokens an hour, which the Alkahest composition
+#: publishes in base units, as the one-shot buy scenario's listing advertises.
+PRICING = {
+    "gpu": {
+        GPU_MODEL: {
+            "settlements": [{
+                "mechanism": "alkahest.v1",
+                "asset": TOKEN,
+                "rate": "10",
+                "per": "hour",
+                "mechanism_input": {
+                    "chain": "anvil",
+                    "escrow_kind": "erc20_escrow_obligation_default",
+                },
+            }],
+        },
+    },
+}
+#: Per-unit rates in whole tokens an hour for the shape-priced stage. At SHAPE
+#: they compose to 1 x 6 + 8 x 0.25 + 32 x 0.0625 + 100 x 0.01 = 11 tokens an
+#: hour, which the Alkahest composition publishes in the token's 18-decimal
+#: base units.
+FAMILY_RATES = {
+    "gpu": {GPU_MODEL: {"rates": [{"asset": TOKEN, "rate": "6", "per": "hour"}]}},
+    "cpu": {"rates": [{"asset": TOKEN, "rate": "0.25", "per": "hour"}]},
+    "memory": {"rates": [{"asset": TOKEN, "rate": "0.0625", "per": "hour"}]},
+    "storage": {"rates": [{"asset": TOKEN, "rate": "0.01", "per": "hour"}]},
+}
+SHAPE_PRICED_RATE = str(11 * 10**18)
+FLAT_RATE = str(10 * 10**18)
+#: The hint's clause without its rate: a shape-priced clause names how the buyer
+#: pays, and its rate comes from the family rates.
+RATELESS_CLAUSE = {
+    key: value
+    for key, value in PRICING["gpu"][GPU_MODEL]["settlements"][0].items()
+    if key not in ("rate", "per")
+}
+
+#: Whole tokens, as the CLI takes them: an opening bid under the asking rate is
+#: countered, and the ceiling accepts that first counter.
+BUYER_INITIAL_PRICE = 7
+BUYER_MAX_PRICE = 12
+DURATION_HOURS = 1
+CREATE_RULE_ID = "e2e-listing-shapes-create"
+
+#: Stage 09's machine without GPUs, in a pool of its own so its listing's
+#: reservation can land nowhere else. A region no other scenario declares, so
+#: discovery counts only this listing.
+CPU_REGION = "Oregon, US"
+CPU_RESOURCE_ID = "compute-e2e-listing-shapes-cpu-001"
+CPU_DECLARED = {"vcpu_count": 16, "ram_gb": 64, "disk_gb": 200}
+CPU_SHAPE = {"cpu": {"count": 8}, "memory": {"gib": 32}}
+CPU_PUBLISHED = {"vcpu_count": 8, "ram_gb": 32}
+#: The pool hint's clause at its flat rate. A shape stating no GPUs takes no
+#: per-model term, so the storefront states it for the pool.
+CPU_CLAUSE = PRICING["gpu"][GPU_MODEL]["settlements"][0]
+CPU_CREATE_RULE_ID = "e2e-listing-shapes-cpu-create"
+
+
+@dataclass
+class ShapeState:
+    held: bool = False
+    declared: bool = False
+    listing_id: str | None = None
+    provisioning_armed: bool = False
+    escrow_uid: str | None = None
+    negotiation_id: str | None = None
+    reservation_ids: tuple[str, ...] = ()
+    site_id: str | None = None
+    overridden: bool = False
+    shape_priced: bool = False
+    override_cleared: bool = False
+    constrained: bool = False
+    cpu_declared: bool = False
+    cpu_listing_id: str | None = None
+    cpu_provisioning_armed: bool = False
+    cpu_negotiation_id: str | None = None
+
+
+@pytest.fixture(scope="module")
+def shape_state() -> ShapeState:
+    return ShapeState()
+
+
+class TestStage00_Setup:
+    def test_00a_storefront_loops_are_held(self, storefront_admin_client, shape_state):
+        """The timer loops are held for the module, so this scenario's
+        publication cycle is explicit."""
+        assert_storefront_loops_held(storefront_admin_client)
+        shape_state.held = True
+
+    def test_00b_pool_states_a_shape_and_its_declaration_every_dimension(
+        self, provisioning_client, resource_pool_client, site_capacity_admin_client,
+        storefront_admin_client, shape_state,
+    ):
+        require_state(shape_state, "held")
+        provision_e2e_executor(
+            provisioning_client,
+            site_capacity_admin_client,
+            host=E2E_LISTING_SHAPES_HOST,
+            pool_id=E2E_LISTING_SHAPES_POOL_ID,
+            resource_id=RESOURCE_ID,
+            sellable_units=DECLARED["gpu_count"],
+            capacity=DECLARED,
+            # Claims match region and model against the declaration itself.
+            attributes={"gpu_model": GPU_MODEL, "region": REGION},
+            listing_mode="fungible",
+            listing_shapes={"vm": [SHAPE]},
+            pricing=PRICING,
+            # The region the listing advertises; see the module docstring.
+            region=REGION,
+        )
+        pool_row = resource_pool_client.get_pool(E2E_LISTING_SHAPES_POOL_ID)
+        assert pool_row.policy_tags["listing_shapes"] == {"vm": [SHAPE]}
+        assert pool_row.policy_tags["region"] == REGION
+        sites = refresh_storefront_projections(storefront_admin_client)
+        # The storefront configures one site; the override stage addresses it.
+        (shape_state.site_id,) = sites
+        shape_state.declared = True
+
+
+class TestStage01_Publication:
+    def test_01a_one_cycle_publishes_exactly_the_stated_shape(
+        self, storefront_admin_client, shape_state
+    ):
+        require_state(shape_state, "declared")
+        cycle = advance_storefront(storefront_admin_client, "publication")
+        # What the cycle did with this pool's candidates, so a failure says why.
+        this_pool = [
+            action for action in cycle.get("actions") or []
+            if (action.get("source") or {}).get("pool_id") == E2E_LISTING_SHAPES_POOL_ID
+        ]
+
+        page = storefront_admin_client.list_listings(status="open", limit=200)
+        shaped = []
+        for listing in page.listings:
+            resource = listing.listing_resource
+            if isinstance(resource, str):
+                resource = json.loads(resource)
+            if (resource or {}).get("pool_id") == E2E_LISTING_SHAPES_POOL_ID:
+                shaped.append((listing.listing_id, resource))
+
+        # The stated list replaces the default shapes as a whole.
+        assert len(shaped) == 1, (
+            f"expected one listing for the stated shape, got {shaped}; "
+            f"the cycle's actions for this pool: {this_pool}"
+        )
+        listing_id, resource = shaped[0]
+        assert {key: resource.get(key) for key in PUBLISHED} == PUBLISHED
+        assert (resource["gpu_model"], resource["region"]) == (GPU_MODEL, REGION)
+        shape_state.listing_id = listing_id
+        log.info("[01a] published %s with shape %s", listing_id, PUBLISHED)
+
+
+def _survivors(buyer_cli, query: str) -> int:
+    run = buyer_cli.run(["listing", "list", "--resource", query, "--explain"], timeout=60.0)
+    assert run.returncode == 0, (
+        f"`market listing list` exited {run.returncode}\n"
+        f"stdout (tail): {run.stdout()[-2000:]}\nstderr (tail): {run.stderr()[-2000:]}"
+    )
+    lines = run.stdout().splitlines()
+    payload = json.loads(lines[lines.index("Explanation JSON:") + 1])
+    return int(payload["resource"]["survivor_count"])
+
+
+class TestStage02_Discovery:
+    def test_02a_a_memory_query_finds_the_shape_at_its_value(self, buyer_cli, shape_state):
+        require_state(shape_state, "listing_id")
+        assert _survivors(buyer_cli, f'gpu_model="{GPU_MODEL}" ram_gb>=32') == 1
+
+    def test_02b_a_memory_query_above_the_shape_finds_nothing(self, buyer_cli, shape_state):
+        require_state(shape_state, "listing_id")
+        assert _survivors(buyer_cli, f'gpu_model="{GPU_MODEL}" ram_gb>=33') == 0
+
+
+class TestStage03_Provisioning:
+    def test_03a_arm_a_create_rule_that_completes(self, provisioning_test_client, shape_state):
+        """The create job completes without a pause: once the storefront logs
+        the buy's job submitted, stage 04 drains it, then steps convergence."""
+        require_state(shape_state, "listing_id")
+        rules = provisioning_test_client.vm_rules
+        delete_mock_rules_if_present(rules, CREATE_RULE_ID)
+        rules.add_rule(
+            MockRuleCreate(
+                rule_id=CREATE_RULE_ID,
+                match={"vm_action": "create", "host_id": E2E_LISTING_SHAPES_HOST},
+                pause_before_result=False,
+            )
+        )
+        shape_state.provisioning_armed = True
+
+
+class TestStage04_Buy:
+    def test_04a_market_buy_discovers_by_memory_and_reaches_ready(
+        self, buyer_cli, storefront_admin_client, storefront_client,
+        provisioning_client, provisioning_test_client, shape_state,
+    ):
+        require_state(shape_state, "listing_id", "provisioning_armed")
+        _, terminal = buy_to_ready(
+            buyer_cli,
+            [
+                "--resource", f'gpu_model="{GPU_MODEL}" ram_gb>=32',
+                "--settlement", f"mechanism=alkahest.v1 asset={TOKEN}",
+                "--initial-price", str(BUYER_INITIAL_PRICE),
+                "--max-price", str(BUYER_MAX_PRICE),
+                "--duration-hours", str(DURATION_HOURS),
+                "--max-matches", "5",
+                "--max-rounds", "10",
+                "--poll-interval", "1.0",
+                "--settlement-timeout", "300",
+                "--expiration", "3600",
+                "--yes",
+            ],
+            storefront_admin_client=storefront_admin_client,
+            storefront_client=storefront_client,
+            provisioning_client=provisioning_client,
+            provisioning_test_client=provisioning_test_client,
+        )
+        assert terminal.get("status") == "ready", terminal
+        assert terminal.get("listing_id") in (None, shape_state.listing_id)
+        shape_state.escrow_uid = str(terminal["escrow_uid"])
+        shape_state.negotiation_id = str(terminal["negotiation_id"])
+
+
+class TestStage05_Commitment:
+    def test_05a_the_reservation_holds_every_declared_quantity(
+        self, site_capacity, shape_state
+    ):
+        require_state(shape_state, "negotiation_id")
+        reservations = site_capacity.reservations_for_negotiation(shape_state.negotiation_id)
+        assert reservations, f"no reservation for negotiation {shape_state.negotiation_id}"
+        # The claim requests exactly the shape's quantities: no more, and no
+        # dimension the shape omits.
+        assert {r["dimensions"] == PUBLISHED for r in reservations} == {True}, reservations
+        shape_state.reservation_ids = tuple(
+            str(r["capacity_reservation_id"]) for r in reservations
+        )
+
+    def test_05b_the_vm_is_sized_from_the_shape_not_pool_defaults(
+        self, provisioning_client, shape_state
+    ):
+        require_state(shape_state, "reservation_ids")
+        # A fulfillment's jobs are listed by the capacity reservation they serve.
+        jobs = [
+            job
+            for reservation_id in shape_state.reservation_ids
+            for job in provisioning_client.list_jobs(
+                capacity_reservation_id=reservation_id
+            ).jobs
+        ]
+        creates = [job for job in jobs if job.params.get("vm_action") == "create"]
+        assert creates, (
+            f"no create job for reservations {shape_state.reservation_ids}: {jobs}"
+        )
+        params = creates[0].params
+        assert (
+            params.get("vm_gpu_count"),
+            params.get("vm_vcpus"),
+            params.get("vm_ram"),
+            params.get("vm_disk_size"),
+        ) == (1, 8, 32 * 1024, "100G"), params
+
+
+def _pool_listings(
+    storefront_admin_client, pool_id: str = E2E_LISTING_SHAPES_POOL_ID
+) -> dict[str, dict]:
+    page = storefront_admin_client.list_listings(status="open", limit=200)
+    out = {}
+    for listing in page.listings:
+        resource = listing.listing_resource
+        if isinstance(resource, str):
+            resource = json.loads(resource)
+        if (resource or {}).get("pool_id") == pool_id:
+            out[listing.listing_id] = resource
+    return out
+
+
+class TestStage06_StorefrontOverride:
+    def test_06a_an_override_is_checked_against_the_live_site(
+        self, storefront_admin_client, shape_state
+    ):
+        require_state(shape_state, "listing_id")
+        require_state(shape_state, "site_id")
+        written = SyncPoolOverrideClient(storefront_admin_client).put_pool_override(
+            {
+                "site_id": shape_state.site_id,
+                "pool_id": E2E_LISTING_SHAPES_POOL_ID,
+                "offering_mode": "vm",
+                "listing_shapes": [OVERRIDE_SHAPE],
+            }
+        )
+        assert [entry.feasible for entry in written.feasibility] == [True], written
+        assert written.projection.digest, written
+        shape_state.overridden = True
+
+    def test_06b_one_cycle_replaces_the_hints_listing(self, storefront_admin_client, shape_state):
+        require_state(shape_state, "overridden")
+        advance_storefront(storefront_admin_client, "publication")
+
+        listings = _pool_listings(storefront_admin_client)
+        assert shape_state.listing_id not in listings, listings
+        assert [resource["ram_gb"] for resource in listings.values()] == [16], listings
+        statuses = pool_override_statuses(storefront_admin_client.get_system_status()) or []
+        assert {
+            (o["site_id"], o["pool_id"], o["offering_mode"]): o["state"] for o in statuses
+        }.get((shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID, "vm")) == "applied", statuses
+
+    def test_06c_deleting_the_override_restores_the_hints_shape(
+        self, storefront_admin_client, shape_state
+    ):
+        require_state(shape_state, "overridden")
+        deleted = SyncPoolOverrideClient(storefront_admin_client).delete_pool_override(
+            shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID, "vm"
+        )
+        assert deleted.deleted
+        advance_storefront(storefront_admin_client, "publication")
+
+        listings = _pool_listings(storefront_admin_client)
+        assert [resource["ram_gb"] for resource in listings.values()] == [
+            PUBLISHED["ram_gb"]
+        ], listings
+
+
+def _listing_rate(listing) -> str:
+    escrows = listing.extra.get("accepted_escrows") or []
+    return escrows[0]["rates"][0]["value"]
+
+
+class TestStage07_ShapePricing:
+    def test_07a_family_rates_make_the_listing_shape_priced(
+        self, storefront_admin_client, registry_client, shape_state
+    ):
+        require_state(shape_state, "site_id")
+        (listing_id,) = _pool_listings(storefront_admin_client)
+        assert _listing_rate(storefront_admin_client.get_listing(listing_id)) == FLAT_RATE
+
+        SyncPoolOverrideClient(storefront_admin_client).put_pool_override(
+            {
+                "site_id": shape_state.site_id,
+                "pool_id": E2E_LISTING_SHAPES_POOL_ID,
+                "offering_mode": "vm",
+                "settlements": [RATELESS_CLAUSE],
+                "terms": {"pricing": FAMILY_RATES},
+            }
+        )
+        shape_state.shape_priced = True
+        advance_storefront(storefront_admin_client, "publication")
+
+        # A rate is a term of sale: the same listing, refreshed in place.
+        assert list(_pool_listings(storefront_admin_client)) == [listing_id]
+        listing = storefront_admin_client.get_listing(listing_id)
+        assert _listing_rate(listing) == SHAPE_PRICED_RATE
+        assert listing.extra.get("rate_structure") == {
+            "cpu": FAMILY_RATES["cpu"]["rates"],
+            "gpu": FAMILY_RATES["gpu"][GPU_MODEL]["rates"],
+            "memory": FAMILY_RATES["memory"]["rates"],
+            "storage": FAMILY_RATES["storage"]["rates"],
+        }
+
+        published = {
+            str(row.id): row
+            for row in registry_client.list_listings(status="open", limit=200).listings
+        }
+        assert listing_id in published, sorted(published)
+        assert (
+            published[listing_id].accepted_escrows[0]["rates"][0]["value"]
+            == SHAPE_PRICED_RATE
+        )
+        log.info("[07a] %s is shape-priced at %s", listing_id, SHAPE_PRICED_RATE)
+
+    def test_07b_deleting_the_override_restores_the_flat_rate(
+        self, storefront_admin_client, shape_state
+    ):
+        require_state(shape_state, "shape_priced")
+        deleted = SyncPoolOverrideClient(storefront_admin_client).delete_pool_override(
+            shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID, "vm"
+        )
+        assert deleted.deleted
+        advance_storefront(storefront_admin_client, "publication")
+
+        (listing_id,) = _pool_listings(storefront_admin_client)
+        listing = storefront_admin_client.get_listing(listing_id)
+        assert _listing_rate(listing) == FLAT_RATE
+        assert listing.extra.get("rate_structure") is None
+
+    def test_07c_no_override_is_left_for_the_pool(self, storefront_admin_client, shape_state):
+        """Stages 06 and 07 each delete the override they wrote; stage 08 needs the
+        hint to be authoritative whatever became of them, so this stage removes any
+        override left behind and confirms none is stored."""
+        require_state(shape_state, "site_id")
+        overrides = SyncPoolOverrideClient(storefront_admin_client)
+        overrides.delete_pool_override(shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID, "vm")
+        assert overrides.list_pool_overrides(
+            site_id=shape_state.site_id, pool_id=E2E_LISTING_SHAPES_POOL_ID
+        ).overrides == []
+        shape_state.override_cleared = True
+
+
+def _carries_no_constraint(value) -> bool:
+    """No mapping anywhere in a published listing holds a constraint's keys."""
+    if isinstance(value, dict):
+        return not value.keys() & {"offer", "min", "max"} and all(
+            _carries_no_constraint(item) for item in value.values()
+        )
+    if isinstance(value, list):
+        return all(_carries_no_constraint(item) for item in value)
+    return True
+
+
+class TestStage08_ShapeConstraints:
+    def test_08a_the_pool_states_its_shape_with_constraints(
+        self, resource_pool_client, storefront_admin_client, shape_state
+    ):
+        require_state(shape_state, "declared", "override_cleared")
+        tags = dict(resource_pool_client.get_pool(E2E_LISTING_SHAPES_POOL_ID).policy_tags)
+        resource_pool_client.patch_pool(
+            E2E_LISTING_SHAPES_POOL_ID,
+            PoolUpdate(policy_tags={**tags, "listing_shapes": {"vm": [CONSTRAINED_SHAPE]}}),
+        )
+        # The site stores the constraints verbatim.
+        assert resource_pool_client.get_pool(E2E_LISTING_SHAPES_POOL_ID).policy_tags[
+            "listing_shapes"
+        ] == {"vm": [CONSTRAINED_SHAPE]}
+        refresh_storefront_projections(storefront_admin_client)
+        shape_state.constrained = True
+
+    def test_08b_one_cycle_publishes_the_base_shape_and_no_constraint(
+        self, storefront_admin_client, registry_client, shape_state
+    ):
+        require_state(shape_state, "constrained")
+        cycle = advance_storefront(storefront_admin_client, "publication")
+        this_pool = [
+            action for action in cycle.get("actions") or []
+            if (action.get("source") or {}).get("pool_id") == E2E_LISTING_SHAPES_POOL_ID
+        ]
+
+        listings = _pool_listings(storefront_admin_client)
+        assert len(listings) == 1, (
+            f"expected one listing for the constrained shape, got {listings}; "
+            f"the cycle's actions for this pool: {this_pool}"
+        )
+        ((listing_id, resource),) = listings.items()
+        assert (resource["gpu_count"], resource["gpu_model"]) == (1, GPU_MODEL), resource
+        for omitted in ("ram_gb", "vcpu_count", "disk_gb"):
+            assert resource.get(omitted) is None, resource
+        assert _carries_no_constraint(resource), resource
+
+        published = {
+            str(row.id): row
+            for row in registry_client.list_listings(status="open", limit=200).listings
+        }
+        assert listing_id in published, sorted(published)
+        registered = published[listing_id].listing_resource
+        assert registered.get("gpu_count") == 1 and registered.get("ram_gb") is None, registered
+        assert _carries_no_constraint(registered), registered
+        log.info("[08b] %s publishes the constrained shape's base shape", listing_id)
+
+
+class TestStage09_ShapeWithoutGpus:
+    def test_09a_a_pool_states_a_shape_without_gpus_over_a_machine_without_gpus(
+        self, provisioning_client, resource_pool_client, site_capacity_admin_client,
+        storefront_admin_client, shape_state,
+    ):
+        require_state(shape_state, "site_id")
+        provision_e2e_executor(
+            provisioning_client,
+            site_capacity_admin_client,
+            host=E2E_LISTING_SHAPES_CPU_HOST,
+            pool_id=E2E_LISTING_SHAPES_CPU_POOL_ID,
+            resource_id=CPU_RESOURCE_ID,
+            # The machine declares no GPU count and no GPU model.
+            sellable_units=None,
+            capacity=CPU_DECLARED,
+            attributes={"region": CPU_REGION},
+            listing_mode="fungible",
+            listing_shapes={"vm": [CPU_SHAPE]},
+            pricing=PRICING,
+            region=CPU_REGION,
+        )
+        assert resource_pool_client.get_pool(E2E_LISTING_SHAPES_CPU_POOL_ID).policy_tags[
+            "listing_shapes"
+        ] == {"vm": [CPU_SHAPE]}
+        refresh_storefront_projections(storefront_admin_client)
+        # The pool's own terms are keyed by GPU model, which this shape names
+        # none of, so the storefront states the pool's clause itself.
+        written = SyncPoolOverrideClient(storefront_admin_client).put_pool_override(
+            {
+                "site_id": shape_state.site_id,
+                "pool_id": E2E_LISTING_SHAPES_CPU_POOL_ID,
+                "offering_mode": "vm",
+                "settlements": [CPU_CLAUSE],
+            }
+        )
+        assert written.projection.digest, written
+        shape_state.cpu_declared = True
+
+    def test_09b_one_cycle_publishes_the_shape_with_no_gpu_field(
+        self, storefront_admin_client, registry_client, shape_state
+    ):
+        require_state(shape_state, "cpu_declared")
+        cycle = advance_storefront(storefront_admin_client, "publication")
+        this_pool = [
+            action for action in cycle.get("actions") or []
+            if (action.get("source") or {}).get("pool_id") == E2E_LISTING_SHAPES_CPU_POOL_ID
+        ]
+
+        listings = _pool_listings(storefront_admin_client, E2E_LISTING_SHAPES_CPU_POOL_ID)
+        assert len(listings) == 1, (
+            f"expected one listing for the shape without GPUs, got {listings}; "
+            f"the cycle's actions for this pool: {this_pool}"
+        )
+        ((listing_id, resource),) = listings.items()
+
+        published = {
+            str(row.id): row
+            for row in registry_client.list_listings(status="open", limit=200).listings
+        }
+        assert listing_id in published, sorted(published)
+        registered = published[listing_id].listing_resource
+        for listed in (resource, registered):
+            # Exactly the shape's quantities: no GPU field, and not the
+            # declaration's disk, which the shape omits.
+            assert {key: listed.get(key) for key in CPU_PUBLISHED} == CPU_PUBLISHED, listed
+            for omitted in ("gpu_count", "gpu_model", "disk_gb"):
+                assert listed.get(omitted) is None, listed
+            assert "gpu_count" not in listed and "gpu_model" not in listed, listed
+        assert resource["region"] == CPU_REGION
+        shape_state.cpu_listing_id = listing_id
+        log.info("[09b] published %s with no GPU field", listing_id)
+
+    def test_09c_a_vcpu_query_finds_it_and_a_gpu_query_does_not(self, buyer_cli, shape_state):
+        require_state(shape_state, "cpu_listing_id")
+        assert _survivors(buyer_cli, f'region="{CPU_REGION}" vcpu_count>=8') == 1
+        # A GPU filter excludes a listing that states no GPUs.
+        assert _survivors(buyer_cli, f'region="{CPU_REGION}" gpu_count>=1') == 0
+
+    def test_09d_arm_a_create_rule_for_the_machine(self, provisioning_test_client, shape_state):
+        require_state(shape_state, "cpu_listing_id")
+        rules = provisioning_test_client.vm_rules
+        delete_mock_rules_if_present(rules, CPU_CREATE_RULE_ID)
+        rules.add_rule(
+            MockRuleCreate(
+                rule_id=CPU_CREATE_RULE_ID,
+                match={"vm_action": "create", "host_id": E2E_LISTING_SHAPES_CPU_HOST},
+                pause_before_result=False,
+            )
+        )
+        shape_state.cpu_provisioning_armed = True
+
+    def test_09e_market_buy_discovers_by_vcpus_and_reaches_ready(
+        self, buyer_cli, storefront_admin_client, storefront_client,
+        provisioning_client, provisioning_test_client, shape_state,
+    ):
+        require_state(shape_state, "cpu_listing_id", "cpu_provisioning_armed")
+        _, terminal = buy_to_ready(
+            buyer_cli,
+            [
+                "--resource", f'region="{CPU_REGION}" vcpu_count>=8',
+                "--settlement", f"mechanism=alkahest.v1 asset={TOKEN}",
+                "--initial-price", str(BUYER_INITIAL_PRICE),
+                "--max-price", str(BUYER_MAX_PRICE),
+                "--duration-hours", str(DURATION_HOURS),
+                "--max-matches", "5",
+                "--max-rounds", "10",
+                "--poll-interval", "1.0",
+                "--settlement-timeout", "300",
+                "--expiration", "3600",
+                "--yes",
+            ],
+            storefront_admin_client=storefront_admin_client,
+            storefront_client=storefront_client,
+            provisioning_client=provisioning_client,
+            provisioning_test_client=provisioning_test_client,
+        )
+        assert terminal.get("status") == "ready", terminal
+        assert terminal.get("listing_id") in (None, shape_state.cpu_listing_id)
+        shape_state.cpu_negotiation_id = str(terminal["negotiation_id"])
+
+    def test_09f_the_reservation_holds_the_vcpus_and_memory_and_no_gpu(
+        self, site_capacity, provisioning_client, shape_state
+    ):
+        require_state(shape_state, "cpu_negotiation_id")
+        reservations = site_capacity.reservations_for_negotiation(
+            shape_state.cpu_negotiation_id
+        )
+        assert reservations, f"no reservation for negotiation {shape_state.cpu_negotiation_id}"
+        assert {r["dimensions"] == CPU_PUBLISHED for r in reservations} == {True}, reservations
+
+        creates = [
+            job
+            for reservation in reservations
+            for job in provisioning_client.list_jobs(
+                capacity_reservation_id=str(reservation["capacity_reservation_id"])
+            ).jobs
+            if job.params.get("vm_action") == "create"
+        ]
+        assert creates, f"no create job for reservations {reservations}"
+        params = creates[0].params
+        assert (params.get("vm_vcpus"), params.get("vm_ram")) == (8, 32 * 1024), params
+        assert params.get("vm_gpu_count") is None and not params.get("gpu_provisioned"), params
+
+    def test_09g_the_storefronts_clause_for_the_pool_is_removed(
+        self, storefront_admin_client, shape_state
+    ):
+        require_state(shape_state, "cpu_declared")
+        deleted = SyncPoolOverrideClient(storefront_admin_client).delete_pool_override(
+            shape_state.site_id, E2E_LISTING_SHAPES_CPU_POOL_ID, "vm"
+        )
+        assert deleted.deleted

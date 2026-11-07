@@ -30,6 +30,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Labels for this chart's Helm test pod. Every workload selector in the release
+requires app.kubernetes.io/name, so a test pod carries the release's other
+labels but never that one: selecting a workload's pods by its selector, as
+`kubectl logs -l` or `kubectl logs deploy/...` does, never returns a test pod.
+*/}}
+{{- define "provisioning.testLabels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: test
+{{- end }}
+
+{{/*
 Resolve the full image reference for the provisioning container.
 Supports an optional global.imageRepository passed down from the parent chart.
 */}}

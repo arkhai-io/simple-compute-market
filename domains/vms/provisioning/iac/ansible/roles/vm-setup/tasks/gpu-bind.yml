@@ -1,0 +1,187 @@
+---
+# GPU passthrough, phase two: bind devices with a live connection, then verify,
+# then persist.
+#
+# This runs after the reboot that enables the IOMMU, for two reasons.
+#
+# The audit cannot classify anything without an IOMMU. On a machine where it was
+# disabled, the pre-reboot audit reports "cannot assess" and there is no bind
+# list to compute; the groups only exist on the far side of the reboot. Re-running
+# the audit here is what makes a first preparation converge in one pass instead
+# of requiring the operator to notice and run the role again.
+#
+# More importantly, binding is the step that can take the host's network away.
+# Doing it here means it happens while Ansible holds a connection: a wrong bind
+# is a failed task on a reachable machine. The unit is enabled only afterwards,
+# so no boot ever replays a bind list that has not been observed to work on this
+# machine.
+
+- name: Re-audit passthrough viability after the IOMMU reboot
+  include_tasks: passthrough-audit.yml
+  tags:
+    - gpu_bind
+    - gpu_passthrough
+    - host_setup
+
+- name: Report that no GPU can be bound
+  debug:
+    msg:
+      - "No GPU on this host is passthrough-capable."
+      - "{{ passthrough_audit.reason | default('Every GPU shares its IOMMU group with a device the host needs.') }}"
+      - "The host is prepared and provides no GPU capacity."
+  when: (passthrough_audit.bind_addresses | length) == 0
+  tags:
+    - gpu_bind
+    - gpu_passthrough
+    - host_setup
+
+# The audit already refuses a group containing either address. Asserting it
+# again immediately before the dangerous operation costs nothing and means a
+# classifier defect cannot reach the bind list: the two would have to fail the
+# same way for a host to be stranded.
+- name: Refuse to bind a device the host depends on
+  assert:
+    that:
+      - passthrough_audit.route_device not in passthrough_audit.bind_addresses
+      - passthrough_audit.root_device not in passthrough_audit.bind_addresses
+    fail_msg: >-
+      Refusing to bind: the audit produced a bind list containing the device
+      carrying the host's default route ({{ passthrough_audit.route_device | default('unknown') }})
+      or its root filesystem ({{ passthrough_audit.root_device | default('unknown') }}).
+      Binding it would remove the host's own access to that device.
+    success_msg: "Bind list excludes the host's route and root devices."
+  when: (passthrough_audit.bind_addresses | length) > 0
+  tags:
+    - gpu_bind
+    - gpu_passthrough
+    - host_setup
+
+- name: Record the driver bound to the host's route device
+  become: yes
+  shell:
+    cmd: |
+      set -uo pipefail
+      dev="/sys/bus/pci/devices/{{ passthrough_audit.route_device }}/driver"
+      if [ -L "${dev}" ]; then basename "$(readlink -f "${dev}")"; else echo "none"; fi
+    executable: /bin/bash
+  register: route_driver_before
+  changed_when: false
+  when:
+    - (passthrough_audit.bind_addresses | length) > 0
+    - passthrough_audit.route_device is not none
+  tags:
+    - gpu_bind
+    - gpu_passthrough
+    - host_setup
+
+# The bind list is data the unit reads, not code it embeds, so a topology
+# change rewrites a file rather than a script.
+- name: Write the vfio bind list
+  become: yes
+  copy:
+    dest: "{{ vfio_bind_state_path }}"
+    content: |
+      # PCI addresses bound to vfio-pci by vfio-bind.service.
+      # Every address here was reported bindable by the passthrough audit:
+      # its entire IOMMU group is this card and its own functions.
+      {% for address in passthrough_audit.bind_addresses %}
+      {{ address }}
+      {% endfor %}
+    mode: '0644'
+  tags:
+    - gpu_bind
+    - gpu_passthrough
+    - host_setup
+
+# Started, not enabled. A failure here fails the play on a machine that is up
+# and reachable; there is no boot to survive because nothing persists yet.
+- name: Apply the vfio bindings
+  become: yes
+  systemd:
+    name: vfio-bind
+    state: restarted
+  when: (passthrough_audit.bind_addresses | length) > 0
+  tags:
+    - gpu_bind
+    - gpu_passthrough
+    - host_setup
+
+- name: Confirm every audited device is bound to vfio-pci
+  become: yes
+  shell:
+    cmd: |
+      set -uo pipefail
+      rc=0
+      for addr in {{ passthrough_audit.bind_addresses | join(' ') }}; do
+        link="/sys/bus/pci/devices/${addr}/driver"
+        drv=""
+        [ -L "${link}" ] && drv="$(basename "$(readlink -f "${link}")")"
+        if [ "${drv}" != "vfio-pci" ]; then
+          echo "${addr} is bound to '${drv:-nothing}', not vfio-pci" >&2
+          rc=1
+        fi
+      done
+      exit "${rc}"
+    executable: /bin/bash
+  register: bind_confirmed
+  changed_when: false
+  when: (passthrough_audit.bind_addresses | length) > 0
+  tags:
+    - gpu_bind
+    - gpu_passthrough
+    - host_setup
+
+# The host answered this task, so its network survived the bind. Comparing the
+# route device's driver catches the subtler case: the connection persisting on
+# an established socket while the interface's driver has been replaced.
+- name: Confirm the host's route device is untouched
+  become: yes
+  shell:
+    cmd: |
+      set -uo pipefail
+      dev="/sys/bus/pci/devices/{{ passthrough_audit.route_device }}/driver"
+      if [ -L "${dev}" ]; then basename "$(readlink -f "${dev}")"; else echo "none"; fi
+    executable: /bin/bash
+  register: route_driver_after
+  changed_when: false
+  failed_when: route_driver_after.stdout != route_driver_before.stdout
+  when:
+    - (passthrough_audit.bind_addresses | length) > 0
+    - passthrough_audit.route_device is not none
+  tags:
+    - gpu_bind
+    - gpu_passthrough
+    - host_setup
+
+# Only now. Every subsequent boot replays a bind list that has been applied and
+# verified on this machine, rather than one that was merely computed.
+- name: Enable the vfio bind service for subsequent boots
+  become: yes
+  systemd:
+    name: vfio-bind
+    enabled: yes
+  when: (passthrough_audit.bind_addresses | length) > 0
+  tags:
+    - gpu_bind
+    - gpu_passthrough
+    - host_setup
+
+- name: Report GPU passthrough state
+  debug:
+    msg:
+      - "=== GPU passthrough ==="
+      - "Bindable GPUs: {{ passthrough_audit.gpus | selectattr('bindable') | list | length }} of {{ passthrough_audit.gpus | length }}"
+      - "Skipped GPUs: {{ passthrough_audit.gpus | rejectattr('bindable') | map(attribute='address') | list }}"
+      - "Addresses bound to vfio-pci: {{ passthrough_audit.bind_addresses }}"
+      - >-
+        {% if (passthrough_audit.bind_addresses | length) > 0 %}
+        Bindings applied and verified with this connection live, then enabled
+        for subsequent boots.
+        {% else %}
+        Nothing bound; vfio-bind.service remains disabled.
+        {% endif %}
+      - "Rescue boot entry: '{{ rescue_boot_entry_title }}' — select it from the console to boot with no device bound."
+  tags:
+    - gpu_bind
+    - gpu_passthrough
+    - host_setup

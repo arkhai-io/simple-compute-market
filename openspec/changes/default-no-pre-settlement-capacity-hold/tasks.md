@@ -41,26 +41,63 @@
       normal path rather than the exception.
 - [ ] 4.3 Run `openspec validate --all --strict` against the baseline current at
       implementation time.
+- [ ] 4.4 **Comment hygiene and import placement, before the pre-closeout review.** Run
+      `make check-comment-hygiene` and read the comments this change added for any that
+      narrate the review or migration that introduced them; move each import the change
+      added to module level unless a verified circular import or a recorded lazy-load
+      reason keeps it local. Closeout only confirms both. Read `_place_capacity_hold`'s
+      docstring directly: it describes the hold as closing the window where the escrow
+      settles but capacity is gone, which is now the accepted residual risk rather than
+      a solved problem.
 
 ## 5. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 5.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read
-      `_place_capacity_hold`'s docstring directly: it describes the hold as closing the
-      window where the escrow settles but capacity is gone, which is now the accepted
-      residual risk rather than a solved problem.
-- [ ] 5.2 **Import placement.** Not applicable; configuration only.
-- [ ] 5.3 **Documentation compliance.** Confirm the shipped-default rule landed in
-      `openspec/specs/negotiation-protocol/spec.md`, that `ARCHITECTURE.md` states when
-      capacity becomes exclusive, and that the why-shortening-fails reasoning stayed in
-      `design.md`.
-- [ ] 5.4 **Narrative compression.** Compress completed-task notes to final behavior and
-      validation evidence.
-- [ ] 5.5 **Roadmap currency.** Update Goal 5's current-state description in
-      `docs/development/ROADMAP.md` — the vector is closed by denying the capability, and
-      the goal is what buys it back.
-- [ ] 5.6 **Promotion.** Complete the design-promotion record below.
+- [ ] 5.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added for any that narrate the review or migration that
+      introduced them, including `_place_capacity_hold`'s docstring (4.4). Do not edit
+      code here: anything to rewrite returns the change to implementation.
+- [ ] 5.2 **Import placement — confirm.** Check the imports this change added for any
+      still local without a recorded reason; expected none, the change being
+      configuration only. One that should move returns the change to implementation.
+- [ ] 5.3 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe: `ARCHITECTURE.md` states when capacity becomes
+      exclusive, and the why-shortening-fails reasoning stays in `design.md`.
+- [ ] 5.4 **Narrative compression.** Compress completed-task notes to final behavior,
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
+- [ ] 5.5 **Roadmap currency.** Update the affected goal's current state and gap
+      mapping in `docs/development/ROADMAP.md`, or record that no goal is affected.
+      Here Goal 5's current-state description: the vector is closed by denying the
+      capability, and the goal is what buys it back.
+- [ ] 5.6 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 5.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 5.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun.
+- [ ] 5.9 **Promotion.** Write the permanent documents this change owes —
+      `docs/development/ARCHITECTURE.md`, capacity reservation (when capacity becomes
+      exclusive in a deal's lifecycle) — and complete the design-promotion record below.
+      A `spec.md` the deltas cover — here `openspec/specs/negotiation-protocol/spec.md`
+      — is written by the archive in 5.11, not by hand; the record names it all the
+      same.
+- [ ] 5.10 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=default-no-pre-settlement-capacity-hold` and
+      resolve every match, then
+      `openspec validate default-no-pre-settlement-capacity-hold --strict`.
+- [ ] 5.11 **Archival.** Last, once every other part is checked: `openspec archive
+      default-no-pre-settlement-capacity-hold -y` merges the deltas into
+      `openspec/specs/` and moves the change under `openspec/changes/archive/`; point the
+      index row at the archived directory, and run `openspec validate --specs --strict`.
 
 ## Design promotion record
 

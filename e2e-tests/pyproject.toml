@@ -4,11 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arkhai-e2e-tests"
-version = "0.1.0"
+version = "0.3.0"
 license = "MIT"
 description = "End-to-end integration tests for Arkhai deployed blockchain environments"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    "arkhai-compute-provisioning-contracts>=0.12.0",
+    "arkhai-compute-provisioning-client>=0.9.0",
+    "arkhai-kit-resource-pools-client>=0.1.0",
+    "arkhai-kit-resource-pools-contracts>=0.2.0",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-html>=4.0",
@@ -19,32 +23,48 @@ dependencies = [
     "eth-typing>=4.0",
     "alkahest-py==1.1.2",
     "pyyaml>=6.0",
+    # The real-provisioning target's settings model (e2e_harness.real_vm_target).
+    "pydantic>=2.0",
+    # The SSH access helper generates each run's buyer keys with it.
+    "cryptography>=42.0",
     "python-dotenv>=1.0",
     "rich>=13.0",
     "httpx>=0.27",            # used by storefront smoke and canonical service clients
-    # Validates written protected-lane evidence against the published
-    # evidence.schema.json. A base dependency, not a stripe-test extra:
-    # the schema check is a credential-free public check.
     "jsonschema>=4.21",
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with storefront behavior.
-    "arkhai-core-storefront-client>=0.17.0",
-    "arkhai-core-registry-client>=0.11.0",
-    "arkhai-kit-alkahest>=0.1.0",
-    "arkhai-kit-site-client>=0.1.0",
-	"arkhai-vms-storefront>=0.3.0",
-    "arkhai-vms-provisioning-operator-client>=0.3.0",
+    "arkhai-core-storefront-client>=0.27.0",
+    # Stages 06, 07, and 09 of the listing-shapes scenario write storefront pool
+    # overrides through the kit's typed client.
+    "arkhai-kit-pool-overrides>=0.2.0",
+    "arkhai-kit-config",
+    "arkhai-core-registry-client>=0.12.1",
+    "arkhai-kit-alkahest>=0.11.0",
+    "arkhai-kit-site-client>=0.9.0",
+	"arkhai-vms-storefront>=0.16.0",
+    # Its service-unit-name check validates the real-provisioning target's
+    # management unit.
+    "arkhai-vms-provisioning-operator-client>=0.12.0",
+    "arkhai-bare-metal>=0.13.0",
+    # Its settlement commands under `market bare-metal`, which the bare-metal
+    # introduction scenarios run.
+    "arkhai-bare-metal-buyer>=0.6.0",
+    "arkhai-core-buyer>=0.6.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
     # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
     # PATH inside arkhai:e2e-tests when the suite runs in-network.
     # arkhai-kit-policy is the buyer's sibling negotiation-strategy dep,
     # resolved from .dist alongside the other internal wheels.
-    "arkhai-vms-buyer>=0.3.0",
+    "arkhai-vms-buyer>=0.9.0",
     # The API-credits schema plugin, discovered by the same `market`
     # binary (one binary, many registry schemas); its verbs are
     # namespaced under `market credits …`.
-    "arkhai-apicredits-buyer>=0.2.0",
-    "arkhai-kit-policy>=0.1.0",
+    "arkhai-apicredits-buyer>=0.7.0",
+    "arkhai-kit-arkhai-payments>=0.4.0",
+    "arkhai-kit-policy>=0.4.0",
+    # The settlement option and its schema, which the buyer-purchase stages
+    # and the VM listing helper read from a listing.
+    "arkhai-core>=0.5.0",
 ]
 
 [tool.uv]
@@ -56,12 +76,9 @@ dev = [
     "mypy>=1.8",
     "ruff>=0.3",
 ]
-stripe-test = [
-    "playwright==1.54.0",
-]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/e2e_harness"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -85,18 +102,34 @@ markers = [
     "storefront: Smoke tests that validate seller storefront",
     "provisioning: Smoke tests for the deployed provisioning service REST API",
     "provisioning_readonly: Read-only provisioning smoke tests safe for default Helm hooks",
-    "provisioning_write: Provisioning smoke tests that exercise write-path APIs",
+    "provisioning_security: Provisioning smoke tests that an unauthenticated request is refused, writing nothing; run by the default Helm hook",
     "e2e_deal: Full buyer-seller deal lifecycle e2e test (synthetic-buyer + force-accept, follows the dry-run + advance stage pattern)",
+    "e2e_vm_payment_deal: Hosted VM commit, servicing, operator end with mediation case, refund and callback-proven release; commit and servicing run against the VM lane's payments double, and the case and refund stages are blocked without MEDIATION.SERVICE_URL",
+    "e2e_vm_payment_purchase: VM buyer purchase through the shared buyer-purchase stages — `market buy` in arkhai.payments.v1 against the VM lane's payments double, receipt-gated mock delivery, payment records and the payer's balance checked, ending by a back-dated lease and a stepped lease-watchdog cycle",
     "e2e_deal_buyer_cli: Full deal driven by the buyer's `market` CLI subprocess against the live storefront (two-machine production interaction)",
     "e2e_buy: One-shot `market buy` (discovery-driven) lifecycle from the buyer machine, against the live storefront",
     "e2e_compute_dynamic_listings: Compute dynamic listing lifecycle from admin reserve through release callbacks",
+    "e2e_listing_shapes: A pool's stated listing shape publishes every declared quantity and is discoverable by a typed memory query; a shape stating no GPUs publishes, filters, and settles",
     "e2e_pool_declared_modes: Deployed site-authority rejection of an undeclared offering mode before reservation",
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
     "e2e_credits_deal: Full API-credits deal driven by `market credits buy` — discover, negotiate a new key, settle, consume to 402, top up the existing key, consume again",
+    "e2e_credits_payment_deal: API-credit deal settled through arkhai.payments.v1 — approval, receipt-gated issuance, run-log re-drive, and a seller refund; runs against the API-credit lane's payments double, blocked without a configured or ready external target",
     "e2e_bare_metal_deal: Full installed-plugin whole-host deal — discovery, negotiation, settlement, SSH access, teardown, and access revocation",
+    "e2e_vm_real_provisioning: The canonical compute deal provisioned for real on an operator-provided KVM host — real create and teardown jobs, SSH access to the negotiated GPU-less shape, an unrelated key refused, the guest gone from the host's VM list; in no lane, and skips without the real-provisioning-target profile",
+    "e2e_bare_metal_bounded_cleanup: Real bare-metal lifecycle with required bounded cleanup configuration, fresh successor UID and refusal/retry; in no default lane",
+    "e2e_bare_metal_real_provisioning: Canonical whole-host deal through real grant/reclaim jobs and pinned relay SSH; in no lane, skips without a bare-metal real-provisioning target",
+    "e2e_vm_qualification: Runbook observation 2 on the real-provisioning target's KVM host — two CPU-only `market buy` purchases in arkhai.payments.v1 against the run's payments target, the first guest's SSH heartbeat across the second's create and teardown, host diagnostics before, during and after, both leases ended by back-dating and a stepped lease-watchdog cycle; in no lane, blocked without both targets",
+    "e2e_bare_metal_qualification: Runbook observations 4 and 5 on the real-provisioning target's machine — a `market bare-metal buy` purchase in arkhai.payments.v1 ended by the buyer's teardown, with bounded working data seeded and observed absent, then a successor whose reclaim refuses a planted foreign descendant until fixture-only repair; in no lane, blocked without both targets",
+    "e2e_real_provisioning_reapply: Runbook observation 6 — both real hosts' canonical registrations reapplied and a publication cycle stepped, with listings, registrations, relay quarantine and the consumed-UID history unchanged; in no lane, blocked without both targets",
+    "e2e_bare_metal_publication: Bare-metal lane — publication from pool declarations, discovery, withdrawal, reinstatement, and a disabled host's close and reopen against a mock-profile site",
+    "e2e_bare_metal_payment_deal: Bare-metal fixed-term payment purchase through the shared buyer-purchase stages — receipt-gated mock access, same-settlement re-drive, the buyer's CLI teardown, then a separate seller refund of the still-held payment; runs against the bare-metal lane's payments double, blocked without a configured or ready external target",
+    "e2e_bare_metal_mock_deal: Bare-metal lane — the canonical compute deal on a mock-profile site, stage for stage with VM's typed-client deal, then a second deal on the freed machine",
+    "e2e_vm_introduction: VM lane — backed and unbacked VM listings found by one rate-bounded query; an unbacked listing's introduction negotiated and revealed through the `market` CLI, delivered to the buyer's sink and mailed to the seller through Mailpit",
+    "e2e_bare_metal_introduction: Bare-metal lane — an introduction offered by pool override, revealed with its retention disclosed, then deleted by an operator",
+    "e2e_bare_metal_unbacked_introduction: Bare-metal lane — backed and unbacked whole machines found by one rate-bounded `market bare-metal list`, the unbacked one by the backing filter alone; its introduction revealed through the `market bare-metal` CLI, delivered to the buyer's sink and mailed to the seller through Mailpit, with no fulfillment",
     "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
+    "e2e_alkahest_trusted_oracle: An ERC-20 escrow released by the trusted-oracle arbiter and collected, against the dev chain",
     "e2e_non_erc20_settlement: Full settlement path for scalar non-ERC20 Alkahest escrow variants",
-    "e2e_hosted_stripe_test: Protected Stripe test-mode hosted settlement compatibility evidence",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",
     "mock_provisioning: E2E mock provisioning flow tests",
@@ -118,7 +151,7 @@ markers = [
     "roles_post_settlement_buyer: Post-settlement stage, buyer perspective",
     "roles_cli_buy: CLI tests for `market buy` (consumes seller inventory; run separately from roles_stage_*)",
     "roles_cli_provide: CLI tests for `market provide` (imports a throwaway CSV, publishes orders)",
-    
+
 ]
 log_cli = true
 log_cli_level = "INFO"

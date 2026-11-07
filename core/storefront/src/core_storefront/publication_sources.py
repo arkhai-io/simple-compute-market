@@ -21,7 +21,7 @@ class PublicationSource:
     close_stale: Callable[[str, str], list[str]]
     available_candidates: Callable[[str], list[dict[str, Any]]]
     skip_keys: Callable[[dict[str, Any]], set[str]]
-    offer_resource: Callable[[dict[str, Any]], dict[str, Any]]
+    listing_resource: Callable[[dict[str, Any]], dict[str, Any]]
     record_published: Callable[[str, dict[str, Any], str], None]
     reopen_existing: Callable[..., dict[str, Any] | None]
     reopen_error_label: str
@@ -30,4 +30,10 @@ class PublicationSource:
         dict[str, Any],
     ] = field(
         default=lambda candidate, _offer: candidate,
+    )
+    #: Closes the open listing bound under a candidate's identity, if one is,
+    #: for the reason given: ``(db_path, base_url, candidate, reason)``. A
+    #: source whose listings nothing closes this way closes nothing.
+    close_candidate_listing: Callable[[str, str, dict[str, Any], str], None] = field(
+        default=lambda _db_path, _base_url, _candidate, _reason: None,
     )

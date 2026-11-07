@@ -19,7 +19,7 @@ Use a discuss → plan → implement workflow for non-trivial changes.
 - Name the files to touch and why.
 - Identify the permanent documentation destination for every accepted material design decision.
 - Include focused validation and relevant integration suites.
-- End the plan with the closeout task defined in `openspec/README.md#plan-closeout-requirements` — comment hygiene, documentation compliance, and tasks compression. Do not defer this to a later review round. Promotion happens post code-review to reduce file churn.
+- End the plan with the closeout task defined in `openspec/README.md#plan-closeout-requirements` — comment hygiene, import placement, documentation compliance, narrative compression, roadmap currency, campaign index currency, packaging, end-to-end pipeline evidence, promotion, documentation citations, and archival. Do not defer this to a later review round. Promotion happens post code-review to reduce file churn.
 
 ### Implement
 
@@ -32,14 +32,29 @@ Implementation is not complete when code merely passes tests. It is complete whe
 - permanent documentation describes the current system rather than announcing completion;
 - temporary migration and changelog commentary has been removed from production code;
 - the active change records where each material decision was promoted;
-- the relevant focused, integration, packaging, and typing checks have been run or any unrun checks are disclosed.
+- the relevant focused, integration, packaging, and typing checks have been run or any unrun checks are disclosed;
+- `make check-packaging` passes.
+
+### Asking the owner
+
+Ask the owner questions in prose, in the chat, with each option and your
+recommendation written out. Do not use a multiple-choice selector, even where a
+skill names one: a list of buttons invites picking an option over thinking the
+problem through and writing the answer that fits it.
+
+### Amend a rule or comply
+
+When work conflicts with a written rule, amend the rule first or make the work
+comply; never record a private exception to it. The testing levels, for instance,
+change only by changing `docs/development/TESTING.md`.
 
 ## Documentation ownership
 
 - `docs/development/ARCHITECTURE.md` is the repository-wide architecture reference: system shape, dependency layers, authority boundaries, shared vocabulary, major flows, deployment topology, packaging rules, and testing philosophy.
 - `openspec/specs/<subsystem>/spec.md` contains authoritative current subsystem behavior, invariants, ownership, and lifecycle semantics.
-- `openspec/specs/<subsystem>/architecture.md` may contain durable current-state conceptual models, design motivation, trade-offs, relationships, and limitations. It does not replace normative requirements.
+- `openspec/specs/<subsystem>/architecture.md` may contain durable current-state conceptual models, design motivation, trade-offs, relationships, and limitations. It does not replace normative requirements. In a capability organized by an `index.md`, that companion is its `README.md`, the component's human-readable description with its diagrams, and it has no `architecture.md` (`openspec/README.md#a-capability-organized-by-an-index`).
 - `openspec/specs/README.md` is the canonical capability documentation index.
+- `docs/development/DEPLOYMENT_AND_CONFIG.md` holds configuration resolution and deployment conventions; `docs/operator-handbook.md` holds what an operator needs to run a deployment: document formats, procedures, and upgrade and recovery steps. Neither replaces a specification's normative requirements.
 - `openspec/changes/` contains proposed deltas, design exploration, migration notes, implementation tasks, and temporary compatibility concerns.
 - Git history and pull requests contain provenance and change history.
 
@@ -57,6 +72,15 @@ Do not reference:
 - the feature, migration, or review that introduced the code;
 - tombstones or generated-artifact instructions;
 - temporary implementation phases as though they were permanent rationale.
+
+`make check-comment-hygiene` enforces this on `.py`, `.toml`, `.yml` and
+`.yaml`: it rejects task-number and `tasks.md` references, and separately
+rejects any comment naming an OpenSpec change directory — including a change
+that has not landed yet, since a reader of the code cannot see either one and
+the name goes stale as soon as the change is archived. `docs/` is exempt,
+because naming the change that owns a gap is the roadmap's job. Say *why* the
+current invariant holds instead; if the reason is only "a change is coming",
+the comment is describing a plan rather than the system.
 
 Use comments for:
 
@@ -84,12 +108,23 @@ Avoid:
 
 A bare documentation pointer is not a substitute for a useful local explanation.
 
+## Diagrams
+
+A diagram is held to code only when it is generated deterministically from a
+well-structured source. Otherwise it is documentation, maintained by review like the
+prose around it: no check holds its boxes to the modules or files it draws, since
+nothing derives one from the other. A diagram drawing a structured source by hand,
+such as the change workflow's graph drawn from its graph table, may be compared with
+that source until a deterministic layout reads as well as the hand-laid one. Keep a
+diagram's `.drawio` source beside its `.svg` export, and embed the export in the
+document that explains it.
+
 ## Package and dependency discipline
 
-- Follow the dependency layers defined in `ARCHITECTURE.md` and the relevant subsystem specification.
-- `TYPE_CHECKING` imports count as architectural dependencies.
-- Internal Python dependencies are built into `.dist` and installed from wheels. Do not add editable sibling paths merely to make local development work.
-- Reinit targets must explicitly upgrade/reinstall changed internal packages from `.dist`.
+- Follow the package layers, scope, and kind rules in `ARCHITECTURE.md#package-and-dependency-layers` and the relevant subsystem specification. A change whose edges all point a permitted way has answered the direction and knowledge questions, not the ownership one; that one is review's.
+- Any import is an architectural dependency: module-level, function-local, under `TYPE_CHECKING`, or behind `try`/`except`. A "lazy" or "call-path" import does not soften the edge; if the edge is wrong, move the code rather than defer the import.
+- Place a new package where `ARCHITECTURE.md` says its scope puts it, and declare every distribution it imports in its `pyproject.toml`. A declared internal distribution the source never imports is removed or kept for a stated runtime reason.
+- `make check-architecture` enforces the layer, scope, and kind rules over every package, in CI and in `make check-packaging`; a per-package boundary test exists only for what it cannot express, and review answers ownership. A known divergence is an exception row in `docs/development/ARCHITECTURE.toml` naming its owning change — never a comment at the import — and a declaration kept without an import gives its runtime reason in the declaring package's `pyproject.toml`, under `[tool.arkhai.architecture.runtime-dependencies]`, beside the dependency it explains.
 
 ## Tests and diagnostics
 
@@ -98,11 +133,110 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 - When a failure cannot be reproduced locally, report useful diagnostic steps and identify any design decision needed before changing behavior.
 - A difficult-to-test failure is evidence to consider a testability refactor, not permission to bypass the boundary.
 - Run `make check-comment-hygiene` before implementation is considered complete; see `openspec/README.md#plan-closeout-requirements`.
+- Once the tests covering a change pass, run `make check-packaging` and resolve every failure it reports before the work is committed. Passing tests do not prove it: they may have run against an environment a missing or hand-maintained refresh left stale, and the next environment to rebuild will fail instead.
 
-## Generated implementation artifacts
+## Public repository discipline
 
-Return only updated files. Represent a file requiring deletion by replacing its entire contents with a single-line tombstone comment stating the reason, at the file's original path — never a separate manifest file, a suffixed parallel copy, or a silent omission. Tombstones are review artifacts only: final production code and permanent documentation must not contain one.
+This repository is public. Everything in it — code, comments, documentation,
+specifications, change documents, fixtures, test data, commit messages, and pull
+request descriptions — is world-readable, permanently, including after a later
+edit removes it.
 
-```python
-# TOMBSTONE: delete this file — replaced by domains/apicredits/settlement/credits_client.py
+Some work here is paired with work in separate private repositories. That
+pairing never appears here.
+
+### Never enters this repository
+
+- Private repository names, branch names, or commit SHAs.
+- Cloud project, account, cluster, namespace, or host identifiers.
+- Internal endpoints, private URLs, or non-public service addresses.
+- Wallet addresses, keys, or credentials of any kind, including expired ones and
+  including ones believed to be test-only on a private network.
+- Filesystem paths from a private repository or a private working environment.
+- Raw logs, evidence bundles, or run artifacts produced by private tooling.
+- The names or contents of private planning documents.
+
+A change document, a `design.md` rationale, and a task note are as public as
+production code. "It is only in the change directory" is not an exception.
+
+### Test fixtures and local development configuration
+
+Local development configuration in this repository is public by design and must
+stay obviously so. Where a fixture needs an address, a key, or a host, use a
+well-known deterministic development value and say in a comment that it is one
+and must never be used on a public network.
+
+A value that looks plausible and is not obviously a fixture is worse than no
+comment, because a later reader cannot tell whether removing it is safe.
+
+### Referring to work that is not here
+
+When a change here exists because of work elsewhere, describe the requirement in
+terms of this repository's own behaviour, not in terms of the external
+consumer's identity.
+
+Prefer:
+
 ```
+Exposes a stable invocation target so an external test harness can run the
+suite without reproducing the internal command sequence.
+```
+
+Avoid:
+
+```
+Needed by the harness runner in <private repo>, see <private plan document>.
+```
+
+The first is a durable statement about this repository's interface. The second
+is a leak, and it also rots the moment the external caller is renamed.
+
+### Cross-references must resolve
+
+Every `openspec/`, `docs/`, `tools/`, `scripts/`, `e2e-tests/`, and `.agents/`
+path cited by a permanent document must exist on the branch that cites it.
+
+A permanent document describing behaviour this branch does not implement is not
+a harmless forward reference — it is how work from another branch or another
+plan epoch gets treated as inherited without anyone deciding to inherit it. This
+has happened in this repository: a closeout commit promoted a documentation
+section describing a subsystem that has never existed on `dev`, citing a
+specification requirement that has never existed on `dev`.
+
+Note the shape of that failure, because the usual controls do not catch it. The
+commit was inside its author's permitted paths and violated no scope rule; the
+content came from a plan epoch the author had no authority over. Path
+permissions cannot detect that. A cross-reference check can, in one pass — so
+run one before promoting documentation, and treat an unresolvable citation as a
+blocking defect rather than a stale link to fix later.
+
+## Agent skills
+
+### Change workflow
+
+Each step of an OpenSpec change is a leaf skill under `.agents/skills/`, started
+through `make` or a slash command, or carried from step to step by one
+orchestrating session, `make orchestrate CHANGE=<change>`. See
+`docs/agents/change-workflow.md` for which skill each step uses, orchestrating a
+change, the review files, and the intervention ledger.
+
+A change worked in its own clone keeps its records there until archive cleanup
+copies them into the owner's workspace, which holds the history of every
+cleaned-up change. A change's records are untracked: find them with
+`scripts/change-workflow find --records <change>`, which looks in the current
+checkout, then in the owner's workspace.
+
+### Deferred work
+
+Deferred work is recorded in the open change that owns its area, in a new change,
+or as an unowned gap in `openspec/changes/README.md` or
+`docs/development/ROADMAP.md`. This repository does not use GitHub Issues for its
+own work; the issue-discovery harness files its own issues
+(`docs/development/ISSUE_DISCOVERY.md`).
+
+### Domain docs
+
+Terms have named homes: the market's cross-subsystem terms in
+`docs/development/ARCHITECTURE.md`, a subsystem's in its specification, and the
+change workflow's in its specification's "Terms". See `docs/agents/domain.md` for
+the homes and the rule for terms.

@@ -46,24 +46,77 @@
 ## 7. Generated config, deployment, and E2E fixtures
 
 - [x] 7.1 Update typed buyer configuration metadata and generated reference/template drift checks to use XDG profile-store/provider-reference inputs and reject direct buyer `[Identity]`, raw credential, seed, mnemonic, and implicit wallet-derived marketplace identity fields.
-- [x] 7.2 Update `e2e-tests/config/hosted-buyer.toml`, `e2e-tests/tests/e2e/roles/buyer_cli.py`, hosted boundary/driver setup under `e2e-tests/tests/e2e/roles/scenarios/vms/hosted/` and `e2e-tests/src/hosted_real_stripe/`, plus `compose.vms.yml` and `compose.vms-fiat.yml`, to create/mount one persistent buyer profile store and inject the selected headless provider secret only into the buyer process.
+- [x] 7.2 Update the hosted buyer config `hosted-buyer.toml` (removed with hosted settlement by `settle-through-arkhai-payments`), `e2e-tests/tests/e2e/roles/buyer_cli.py`, hosted boundary/driver setup under `e2e-tests/tests/e2e/roles/scenarios/vms/hosted/` and `e2e-tests/src/hosted_real_stripe/`, plus `compose.vms.yml` and `compose.vms-fiat.yml`, to create/mount one persistent buyer profile store and inject the selected headless provider secret only into the buyer process.
 - [x] 7.3 Update API-credit and VM Compose/examples (`compose.apicredits.yml`, `domains/{vms,apicredits}/compose.yml`) and any generated role fixtures to separate mutable XDG metadata from strict file/environment Secret injection; add Podman-compatible `mise` path only if an affected project hardcodes `docker` and lacks the repository convention.
-- [x] 7.4 Extend `e2e-tests/tests/unit/test_hosted_public_boundary.py`, hosted driver/workflow unit tests, Compose config checks, Helm/generated-config tests, and secret-canary artifact scans for profile-store persistence, owner/mode enforcement, provider exactness, legacy rejection, and absence of secrets in TOML/ConfigMaps/arguments/evidence.
+- [x] 7.4 Extend the hosted public-boundary unit test (removed with hosted settlement by `settle-through-arkhai-payments`), hosted driver/workflow unit tests, Compose config checks, Helm/generated-config tests, and secret-canary artifact scans for profile-store persistence, owner/mode enforcement, provider exactness, legacy rejection, and absence of secrets in TOML/ConfigMaps/arguments/evidence.
 
 ## 8. Focused, integration, and package verification
 
-- [ ] 8.1 Run focused identity-kit profile/provider/signing/package tests; core profile CLI/resolver/run-log/plugin tests; VM and API-credit buyer suites; generated-config, Compose, and hosted driver unit tests. Record exact commands and prove create/import/rotate/restart/recovery and all named failure cases.
+- [ ] 8.1 Run focused identity-kit profile/provider/signing/package tests; core profile CLI/resolver/run-log/plugin tests; VM and API-credit buyer suites; generated-config, Compose, and driver unit tests. Record exact commands and prove create/import/rotate/restart/recovery and all named failure cases.
 - [ ] 8.2 Build the changed identity, core buyer, VM buyer, and API-credit buyer wheels into `.dist`; explicitly upgrade/reinstall them through each touched project's reinit target, inspect wheel contents/dependencies, and run typing plus forbidden-import checks without editable sibling paths.
 - [ ] 8.3 Run the ordinary wallet-free Ed25519 VM and API-credit smoke paths with fresh and resumed runs under one persistent profile, then inspect JSONL, TOML, output, reprs, logs, Compose renders, wheels, and images with secret canaries; keep Alkahest wallet regression separate and unchanged.
-- [ ] 8.4 Run the relevant integration/E2E suites for VM and API-credit buyer injection and run-log migration; disclose unavailable external hosted/cluster checks rather than replacing them with narrower focused evidence.
+- [ ] 8.4 Run the relevant integration/E2E suites for VM and API-credit buyer injection and run-log migration; disclose unavailable external cluster checks rather than replacing them with narrower focused evidence.
 
 ## 9. Permanent documentation and cutover
 
 - [x] 9.1 Promote profile/store/provider/lifecycle/rotation/binding requirements and rationale to `openspec/specs/marketplace-identity/{spec.md,architecture.md}`; promote fresh/recovery/plugin behavior to `openspec/specs/buyer-orchestration/spec.md`.
+      Archival uses `--skip-specs`: this task synchronized the specification by hand.
 - [x] 9.2 Promote XDG/permissions/provider/migration/config rules to `openspec/specs/deployment-state/spec.md` and `docs/development/DEPLOYMENT_AND_CONFIG.md`; promote deterministic matrix and secret-canary boundaries to `openspec/specs/test-compatibility/spec.md` and `docs/development/TESTING.md`.
+      Archival uses `--skip-specs`: this task synchronized the specification by hand.
 - [x] 9.3 Update `docs/development/ARCHITECTURE.md`, `docs/buyer-quickstart.md`, and every affected current-state buyer/config reference with the profile flow, exact commands, headless provider setup, clean legacy import, rotation/retention, and recovery semantics.
 - [ ] 9.4 Execute the coordinated preview/import/run-log-v3/config/automation cutover and verify all stores/plugins/deployments before activation; after profile-based effects exist, preserve profile history and recover forward rather than restoring direct identity precedence.
+- [ ] 9.5 **Comment hygiene and import placement, before the pre-closeout review.** Run
+      `make check-comment-hygiene` and read the comments this change added for any that
+      narrate the review or migration that introduced them; move each import the change
+      added to module level unless a verified circular import or a recorded lazy-load
+      reason keeps it local. Closeout only confirms both.
 
 ## 10. Plan closeout
 
-- [ ] 10.1 Close out the change: run `make check-comment-hygiene` and directly inspect touched comments/docstrings for current-state wording; move every safe touched function-local import to module scope and verify any retained local import with an observed circular-import or deliberate lazy-load reason; re-check every accepted decision against `openspec/README.md` documentation placement; compress completed task notes to final behavior, material evidence, unresolved work, and permanent destinations after moving retained rationale into `design.md`; update the affected identity/buyer goal and change mapping in `docs/development/ROADMAP.md`; and finalize the `design.md` promotion record with exact permanent headings after removing temporary migration/review commentary from production artifacts.
+Per `openspec/README.md#plan-closeout-requirements`.
+
+- [ ] 10.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added for any that narrate the review or migration that
+      introduced them. Do not edit code here: anything to rewrite returns the change to
+      implementation.
+- [ ] 10.2 **Import placement — confirm.** Check the imports this change added for any
+      still local without a recorded reason. One that should move returns the change to
+      implementation.
+- [ ] 10.3 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe.
+- [ ] 10.4 **Narrative compression.** Compress completed-task notes to final behavior,
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
+- [ ] 10.5 **Roadmap currency.** Update the affected identity/buyer goal's current
+      state and gap mapping in `docs/development/ROADMAP.md`, or record that no goal is
+      affected.
+- [ ] 10.6 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 10.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 10.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun.
+- [ ] 10.9 **Promotion.** Write the permanent documents this change owes — those 9.1–9.3
+      name: `openspec/specs/marketplace-identity/architecture.md`,
+      `docs/development/DEPLOYMENT_AND_CONFIG.md`, `docs/development/TESTING.md`,
+      `docs/development/ARCHITECTURE.md`, `docs/buyer-quickstart.md`, and every affected
+      current-state buyer/config reference — and complete the design-promotion record in
+      `design.md`, mapping each accepted decision to its exact permanent heading. The
+      `spec.md` files the deltas cover (`marketplace-identity`, `buyer-orchestration`,
+      `deployment-state`, `test-compatibility`) were synchronized by hand in 9.1 and 9.2,
+      not by the archive; the record names them all the same.
+- [ ] 10.10 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=add-persistent-buyer-profiles` and resolve every
+      match, then `openspec validate add-persistent-buyer-profiles --strict`.
+- [ ] 10.11 **Archival.** Last, once every other part is checked: `openspec archive
+      add-persistent-buyer-profiles -y --skip-specs` moves the change under
+      `openspec/changes/archive/` without merging its deltas, which 9.1 and 9.2 already
+      synchronized by hand; point the index row at the archived directory, and run
+      `openspec validate --specs --strict`.

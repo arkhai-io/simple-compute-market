@@ -8,9 +8,12 @@ dicts or temp files.
 
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 
 import pytest
+import tomllib
 from dynaconf import Dynaconf
 from market_identity import TrustedIdentitySet, create_signer
 
@@ -33,7 +36,7 @@ def test_settings_toml_provides_baseline_defaults():
     assert s.registry.discovery_timeout == 5.0
     assert s.provisioning.service_url == "http://localhost:8085"
     assert s.provisioning.timeout == 3600
-    assert list(s.provisioning.identity.principals) == []
+    assert s.provisioning.get("identity") is None
     # Default policy chain ends in "bisection" (not "rl") — prevents
     # silent RL failures when torch is unavailable.
     assert s.negotiation.policies == [
@@ -43,10 +46,10 @@ def test_settings_toml_provides_baseline_defaults():
     ]
     assert s.pricing.publish_priceless is False
     assert list(s.pricing.settlements) == []
-    # On by default -- the projection path has parity with the local-table
-    # path it supersedes. A staged/canary rollout sets this false
-    # explicitly rather than relying on a default that no longer matches.
-    assert s.capacity.use_site_projection_for_listings is True
+    packaged = tomllib.loads(agent_config._DEFAULTS_FILE.read_text())
+    assert "storefront_domains" not in packaged
+    # Listings derive only from site projections; no setting selects a source.
+    assert "use_site_projection_for_listings" not in packaged.get("capacity", {})
 
 
 def test_structured_settlement_publication_defaults_are_validated() -> None:
@@ -86,6 +89,48 @@ def test_structured_settlement_publication_defaults_are_validated() -> None:
     }
 
 
+def _alkahest_clause(**mechanism_input) -> dict:
+    return {
+        "mechanism": "alkahest.v1",
+        "asset": "0x" + "11" * 20,
+        "rate": "2.00",
+        "per": "hour",
+        "mechanism_input": {
+            "chain": "base_sepolia",
+            "escrow_kind": "erc20_escrow_obligation_default",
+            **mechanism_input,
+        },
+    }
+
+
+def test_a_disabled_mechanisms_configured_clause_is_read_for_publication_to_drop() -> None:
+    """Publication drops the clause, ruling the mechanism out, so the defaults
+    keep it rather than refusing the whole configuration."""
+    source = Dynaconf(environments=False)
+    source.set(
+        "settlement",
+        {"schema_version": 1, "priority": [], "alkahest": {"enabled": False}},
+    )
+    source.set("pricing.settlements", [_alkahest_clause()])
+
+    (clause,) = agent_config.settlement_publication_defaults(source)
+
+    assert clause.mechanism == "alkahest.v1"
+    assert clause.mechanism_input["chain"] == "base_sepolia"
+
+
+def test_a_disabled_mechanisms_unreadable_clause_is_still_refused() -> None:
+    source = Dynaconf(environments=False)
+    source.set(
+        "settlement",
+        {"schema_version": 1, "priority": [], "alkahest": {"enabled": False}},
+    )
+    source.set("pricing.settlements", [_alkahest_clause(private_key="must-not-cross")])
+
+    with pytest.raises(ValueError, match="not public metadata"):
+        agent_config.settlement_publication_defaults(source)
+
+
 def test_structured_publication_defaults_reject_partial_or_secret_input() -> None:
     source = Dynaconf(environments=False)
     source.set(
@@ -115,20 +160,6 @@ def test_structured_publication_defaults_reject_partial_or_secret_input() -> Non
 
     with pytest.raises(ValueError, match="not public metadata"):
         agent_config.settlement_publication_defaults(source)
-
-
-def test_use_site_projection_for_listings_can_still_be_disabled_explicitly(
-    tmp_path,
-    monkeypatch,
-):
-    """The default flip doesn't remove the ability to opt back out for a
-    staged/canary rollout -- an explicit override still wins."""
-    monkeypatch.setenv(
-        "STOREFRONT_CAPACITY__USE_SITE_PROJECTION_FOR_LISTINGS",
-        "false",
-    )
-    cfg = _build_isolated(tmp_path, [])
-    assert cfg.capacity.use_site_projection_for_listings is False
 
 
 def test_public_identity_defaults_do_not_include_secret_or_wallet_values():
@@ -190,7 +221,7 @@ def test_public_administrator_binding_is_scheme_tagged():
     }
 
 
-def test_public_provisioning_authorities_and_service_peer_bindings_are_structured():
+def test_service_peer_bindings_are_structured():
     current = create_signer("ed25519", b"\x03" * 32).identity
     next_authority = create_signer("ed25519", b"\x06" * 32).identity
     principals = [
@@ -198,7 +229,6 @@ def test_public_provisioning_authorities_and_service_peer_bindings_are_structure
         next_authority.model_dump(mode="json"),
     ]
     source = Dynaconf(environments=False)
-    source.set("provisioning.identity.principals", principals)
     source.set(
         "identity.service_peers",
         {
@@ -211,7 +241,6 @@ def test_public_provisioning_authorities_and_service_peer_bindings_are_structure
     )
 
     trust = TrustedIdentitySet(identities=(current, next_authority))
-    assert agent_config.get_provisioning_authorities(source) == trust
     assert agent_config.get_service_peer_configs(source) == {
         "provisioning_default": ("service", "default", trust)
     }
@@ -232,6 +261,48 @@ def test_service_peer_binding_rejects_missing_site():
 
     with pytest.raises(ValueError, match="site_id"):
         agent_config.get_service_peer_configs(source)
+
+
+def test_the_servicing_interval_is_read_from_its_key():
+    packaged = tomllib.loads(agent_config._DEFAULTS_FILE.read_text())
+    assert packaged["settlement_servicing_interval_seconds"] == 30
+    assert "claims_sweep_interval" not in packaged
+    assert agent_config.settlement_servicing_interval(Dynaconf(environments=False)) == 30.0
+
+    source = Dynaconf(environments=False)
+    source.set("settlement_servicing_interval_seconds", 2)
+    assert agent_config.settlement_servicing_interval(source) == 2.0
+
+
+@pytest.mark.parametrize("spelling", ["claims_sweep_interval", "CLAIMS_SWEEP_INTERVAL"])
+def test_the_retired_servicing_interval_is_not_read_as_the_interval(spelling):
+    """The startup refusal names the old key with its replacement
+    (tests/unit/test_startup_refusal.py); the loader never reads it in its
+    place."""
+    source = Dynaconf(environments=False)
+    source.set(spelling, 5)
+    assert agent_config.settlement_servicing_interval(source) == 30.0
+
+
+@pytest.mark.parametrize("value", [0, -1, "soon", True, 1e11, 1e-7])
+def test_an_unusable_servicing_interval_is_refused_by_its_key(value):
+    source = Dynaconf(environments=False)
+    source.set("settlement_servicing_interval_seconds", value)
+    with pytest.raises(ValueError, match=r"^\[settlement_servicing_interval_seconds\] ") as refused:
+        agent_config.settlement_servicing_interval(source)
+    assert refused.value.__context__ is None
+
+
+@pytest.mark.parametrize("value", [0, -1, 1e11])
+def test_an_unusable_retention_sweep_interval_is_refused_by_its_key(value):
+    with pytest.raises(
+        ValueError, match=r"^\[Settlement\.contact\.retention_sweep_interval_seconds\] "
+    ):
+        agent_config.introduction_retention_sweep_interval(value)
+
+
+def test_a_retention_sweep_interval_is_read_as_seconds():
+    assert agent_config.introduction_retention_sweep_interval(3600) == 3600.0
 
 
 # ---------------------------------------------------------------------------
@@ -300,10 +371,65 @@ def test_chains_dict_empty_when_no_chains_section(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Layered loading: settings.toml → storefront.toml → storefront.secrets.toml.
-# Tests build a fresh dynaconf instance pointing at a tmp XDG dir to verify
-# the overlay precedence end-to-end.
+# Layered loading: settings.toml → storefront.toml → storefront.json →
+# storefront.secrets.toml. Tests build a fresh dynaconf instance pointing at a
+# tmp XDG dir to verify the overlay precedence end-to-end.
 # ---------------------------------------------------------------------------
+
+
+def test_a_stated_provisioning_mode_loads_beside_the_section_it_sits_in(
+    tmp_path, monkeypatch
+):
+    """`[provisioning]` is untyped, and the storefront reads no mode from it:
+    a file stating one loads, its service URL read as stated."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    config_dir = tmp_path / "arkhai"
+    config_dir.mkdir()
+    (config_dir / "storefront.toml").write_text(
+        '[provisioning]\nservice_url = "http://provisioning.example:8081"\nmode = "mock"\n'
+    )
+
+    s = agent_config._build_settings()
+
+    assert s.get("provisioning.service_url") == "http://provisioning.example:8081"
+
+
+def test_build_settings_reads_a_rendered_json_layer_under_the_overlay(
+    tmp_path, monkeypatch
+):
+    """The runtime path a chart deployment takes: no storefront.toml, a
+    rendered storefront.json, and the Secret overlay winning over it."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    config_dir = tmp_path / "arkhai"
+    config_dir.mkdir()
+    address = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+    (config_dir / "storefront.json").write_text(
+        json.dumps(
+            {
+                "port": 8001,
+                "log_level": "DEBUG",
+                "Wallet": {"address": address},
+                "Chains": {"anvil": {"chain_id": 31337, "rpc_url": "http://public:8545"}},
+            }
+        )
+    )
+    (config_dir / "storefront.secrets.toml").write_text(
+        '[chains.anvil]\nrpc_url = "http://credentialed:8545"\n'
+    )
+
+    s = agent_config._build_settings()
+
+    assert s.port == 8001
+    assert s.log_level == "DEBUG"
+    assert agent_config.get_evm_wallet_address(s) == address
+    assert s.chains.anvil.chain_id == 31337
+    assert s.chains.anvil.rpc_url == "http://credentialed:8545"
+    # Untouched key still has its settings.toml default.
+    assert s.negotiation.policies == [
+        "has_matching_inventory_guard",
+        "escrow_shape_guard",
+        "bisection",
+    ]
 
 
 def _build_isolated(tmp_path: Path, overlay_files: list[Path]) -> Dynaconf:
@@ -344,6 +470,35 @@ rpc_url = "http://localhost:8545"
     ]
 
 
+def test_storefront_domain_overlay_is_the_complete_explicit_selection(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("STOREFRONT_STOREFRONT_DOMAINS")
+    overlay = tmp_path / "storefront.toml"
+    overlay.write_text(
+        """
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
+
+[[storefront_domains]]
+contribution = "bare_metal"
+offering_mode = "bare_metal"
+domain_identity = "bare_metal.v1"
+contract_version = "1.0"
+"""
+    )
+
+    cfg = _build_isolated(tmp_path, [overlay])
+
+    assert [domain.contribution for domain in cfg.storefront_domains] == [
+        "vms",
+        "bare_metal",
+    ]
+
+
 def test_secrets_overlay_wins_over_storefront_toml(tmp_path):
     base = tmp_path / "storefront.toml"
     base.write_text("""
@@ -357,6 +512,24 @@ gemini_api_key = "secret-value"
 """)
     cfg = _build_isolated(tmp_path, [base, secret])
     assert cfg.integrations.gemini_api_key == "secret-value"
+
+
+def test_secrets_overlay_completes_public_chain_configuration(tmp_path):
+    base = tmp_path / "storefront.toml"
+    base.write_text("""
+[Chains.base_sepolia]
+chain_id = 84532
+""")
+    secret = tmp_path / "storefront.secrets.toml"
+    secret.write_text("""
+[chains.base_sepolia]
+rpc_url = "https://rpc.example.invalid"
+""")
+
+    cfg = _build_isolated(tmp_path, [base, secret])
+
+    assert cfg.chains.base_sepolia.chain_id == 84532
+    assert cfg.chains.base_sepolia.rpc_url == "https://rpc.example.invalid"
 
 
 def test_env_var_wins_over_overlay_files(tmp_path, monkeypatch):
@@ -377,25 +550,19 @@ def test_nested_env_var_via_double_underscore(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# EVM wallet settings are optional, explicit mechanism inputs. Marketplace
-# configuration never derives an address from a private key.
+# EVM wallet settings are optional mechanism inputs, apart from the marketplace
+# identity. A stated address is returned as stated; with none, the seller is the
+# account its key signs as.
 # ---------------------------------------------------------------------------
 
 
+# Anvil's first published development key and the address it signs as; never
+# use them on a public network.
 _ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+_ANVIL_ADDRESS = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 
 
-def test_build_settings_leaves_wallet_absent_for_hosted_only_profile(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    cfg = agent_config._build_settings()
-    assert cfg.get("wallet") is None
-    assert agent_config.get_evm_wallet_address(cfg) == ""
-    assert agent_config.get_evm_wallet_private_key(cfg) == ""
-
-
-def test_evm_wallet_helpers_return_only_explicit_values(tmp_path, monkeypatch):
+def test_evm_wallet_helpers_return_the_stated_address(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     cfg_dir = tmp_path / "arkhai"
     cfg_dir.mkdir(parents=True)
@@ -409,6 +576,21 @@ address = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
         "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
     )
     assert agent_config.get_evm_wallet_private_key(cfg) == _ANVIL_KEY
+
+
+def test_an_omitted_wallet_address_is_the_account_its_key_signs_as(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text(f"""
+[wallet]
+private_key = "{_ANVIL_KEY}"
+""")
+    cfg = agent_config._build_settings()
+
+    assert agent_config.get_evm_wallet_address(cfg) == _ANVIL_ADDRESS
 
 
 def test_build_chains_uses_known_chain_id_when_omitted(tmp_path, monkeypatch):

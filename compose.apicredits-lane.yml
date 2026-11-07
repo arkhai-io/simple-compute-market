@@ -1,0 +1,73 @@
+# The API-credit end-to-end lane's own services and bindings: a compute-schema
+# registry, and the credits storefront configured to settle against the payments
+# lane double.
+#
+# The credits scenario reads two registries, so the buyer's schema filter is
+# shown routing discovery to the API-credit one and leaving the compute one
+# alone. In the full local stack that compute registry is VM's; the lane runs
+# no VM services, so it runs this one, layered after compose.apicredits.yml,
+# compose.apicredits-local.yml and compose.payments-double.yml:
+#
+#     docker compose -p simple-market-apicredits \
+#       -f compose.apicredits.yml -f compose.apicredits-local.yml \
+#       -f compose.payments-double.yml -f compose.apicredits-lane.yml up -d
+#
+# The full local stack never layers this file: it would gain a second compute
+# registry beside VM's, and a payments configuration with no double to reach.
+# The compute registry's signer reuses the committed `registry-a.eip191` under
+# the authority `compute-registry`, a well-known development value that must
+# never be used on a public network; see dev-env/identities/README.md, "The
+# API-credit lane" and "The payments lane double". Paths are relative to the
+# repository root, the project directory of the lane's first compose file.
+services:
+  # Both registries the buyer reads layer the lane's profile recommending its
+  # pinned dispute authority over their own.
+  api-credits-registry:
+    environment:
+      - ACTIVE_PROFILES=api-credits-registry,payments-lane
+
+  credits-storefront:
+    depends_on:
+      payments-double:
+        condition: service_healthy
+    volumes:
+      # The storefront's configuration with payments, in place of the full
+      # stack's. Its payments key is in the secret overlay
+      # compose.apicredits-local.yml mounts.
+      - ./domains/apicredits/storefront/storefront.credits.lane.toml:/etc/arkhai/storefront.toml:ro
+      # The lane CA, at the ca_bundle_path the lane configuration names: the
+      # only authority its payments client trusts for the double.
+      - ./tools/payments-lane-double/tls/lane-ca.pem:/run/payments-lane-double/lane-ca.pem:ro
+
+  sample-app:
+    environment:
+      # No verify cache: every request re-verifies its key, so a top-up is
+      # visible to the very next request and the scenario waits on nothing.
+      # The cache's own behaviour, including no service call on a key known
+      # to be exhausted, is proven by the middleware conformance trace.
+      - APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS=0
+
+  compute-registry:
+    # The registry image's default filter specification is the compute one.
+    image: arkhai:registry
+    env_file:
+      - core/registry/.env.docker-compose
+    environment:
+      - CONFIG_DIRECTORY=/etc/arkhai/registry
+      - ACTIVE_PROFILES=compute-registry,payments-lane
+    # No host port: the buyer reaches it on the lane's network, at the address
+    # its descriptor advertises.
+    volumes:
+      - ./dev-env/registry:/etc/arkhai/registry:ro
+      - ./dev-env/identities/registry-a.eip191:/run/secrets/arkhai/registry-identity/credential:ro
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

@@ -9,8 +9,8 @@ the storefront reaches it only through this client interface —
 - an advisory availability ``snapshot`` at negotiation-round start,
 - an authoritative check-and-``reserve`` at fulfillment time (with an
   optional TTL for two-phase reserve),
-- ``commit``/``release``/``truncate_lease`` for the reservation
-  lifecycle, and
+- ``commit``/``activate_lease``/``release``/``truncate_lease`` for the
+  reservation lifecycle, and
 - anonymous, versioned capacity-change events that drive each
   storefront's derived-listing reconciliation (a *different*
   storefront's sale must also invalidate your listings, so closure
@@ -157,8 +157,15 @@ class SiteCapacityAuthority(Protocol):
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
-    ) -> None:
-        """Confirm a reservation into an active lease.
+        deal_ref: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Confirm a reservation into an active lease; the reservation as recorded.
+
+        The returned reservation carries the window the authority recorded,
+        which is not always the one named: a repeat commit leaves the window
+        the first one recorded. ``deal_ref`` correlates the reservation with
+        its deal; an escrow it names is recorded where the reservation has
+        none.
 
         ``resource_id`` is optional: the opaque capacity-reservation
         boundary does not guarantee a caller has one (``reserve()``'s
@@ -183,6 +190,19 @@ class SiteCapacityAuthority(Protocol):
         lease_end_utc: str,
     ) -> dict[str, Any] | None:
         """End a lease early (settlement lifecycle decided the deal is over)."""
+        ...
+
+    async def activate_lease(
+        self,
+        *,
+        capacity_reservation_id: str,
+    ) -> dict[str, Any] | None:
+        """Record that a lease began running; the reservation as the site recorded it.
+
+        Named by the reservation alone: the instant is the authority's, and a
+        retry returns the instant first recorded. A reservation the authority
+        does not hold, or one it refuses to activate, is an error.
+        """
         ...
 
 

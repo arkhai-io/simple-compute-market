@@ -23,9 +23,13 @@ implementation, and a domain that lacked it gains it by composition.
 
 - Move the synchronous negotiation runtime (`sync_negotiation`) into the kit layer, with the domain supplying its contract, its
   configuration, and its domain-specific semantics.
-- Compose all three domains onto the kit implementation and remove every domain-local
-  copy in this change.
-- Give bare metal these concerns, which it does not have today.
+- Compose the VM and API-credit storefronts onto the kit implementation and remove
+  every domain-local copy in this change.
+- Expose the complete opening/continuation resolvers and domain hook set so the
+  bare-metal storefront can compose the same runtime with its own codecs and policy.
+  Bare metal's composition — replacing its domain-local negotiation service and
+  routes — is `bare-metal-and-credits-domain-stacks`', whose acceptance boundary is
+  no domain-local copy of an extracted concern.
 - Record, per concern, where the existing implementations already diverged and which
   behavior was chosen — silently adopting one is how an extraction becomes a behavior
   change.

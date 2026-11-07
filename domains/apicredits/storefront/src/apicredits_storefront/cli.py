@@ -2,20 +2,74 @@
 
 Subcommands:
     serve      Run the storefront HTTP server in-process.
-    publish    Create + publish a listing backed by a quota resource.
-    listings   List the storefront's local listings.
+    publish    Create + publish a listing backed by a quota resource, through
+               the running storefront.
+    listings   List the running storefront's local listings.
+    check-payments
+               Read one account's balance from the payments service with the
+               storefront's own configuration, credential and trust.
+
+``publish`` and ``listings`` are clients of a running storefront: a listing
+created with no storefront serving it is one no buyer can negotiate, so neither
+command builds the storefront's services or opens its database, and neither does
+``check-payments``, which contacts only the payments service.
 """
 
 from __future__ import annotations
 
-import asyncio
+import dataclasses
 import json
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Any
 
+import httpx
 import typer
+from market_alkahest.alkahest import get_erc20_escrow_obligation_default
+from market_arkhai_payments import check_configured_payments_access
+from market_identity import Signer, TrustedIdentitySet
+from storefront_client import StorefrontClientError, SyncStorefrontClient
+
+from apicredits_storefront.listing_publication import SyncApiCreditListingClient
 
 app = typer.Typer(no_args_is_help=True)
+
+_STOREFRONT_URL_HELP = (
+    "The running storefront's origin; the configured base_url, else "
+    "http://localhost:<port>, when omitted."
+)
+
+
+def _open_storefront(url: str, signer: Signer | None) -> SyncStorefrontClient:
+    """The typed client the listing commands reach the storefront through,
+    signing as the storefront's own principal when ``signer`` is given."""
+    if signer is None:
+        return SyncStorefrontClient(url)
+    return SyncStorefrontClient(
+        url,
+        signer=signer,
+        caller_role="seller",
+        expected_publishers=TrustedIdentitySet(identities=(signer.identity,)),
+    )
+
+
+def _storefront_url(explicit: str | None) -> str:
+    # Imported when a command runs, after the root `--config` option: the
+    # storefront's settings resolve when its config module is first imported.
+    from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
+
+    return explicit or BASE_URL_OVERRIDE or f"http://localhost:{settings.port}"
+
+
+def _refused(url: str, exc: Exception) -> typer.Exit:
+    """Report a refusal or an unreachable storefront, naming where it was sent."""
+    if isinstance(exc, httpx.HTTPError):
+        typer.echo(
+            f"no storefront answered at {url} ({type(exc).__name__})", err=True
+        )
+    else:
+        typer.echo(f"the storefront at {url} refused: {exc}", err=True)
+    return typer.Exit(code=1)
 
 
 def version_callback(value: bool) -> None:
@@ -76,26 +130,28 @@ def publish_cmd(
         help="Quota resource in the credits service's ledger the listing derives from.",
     ),
     service_name: str = typer.Option(..., "--service-name"),
-    price_per_token: str = typer.Option(
-        ...,
+    price_per_token: str | None = typer.Option(
+        None,
         "--price-per-token",
-        help="Per-token rate in base units of the payment token.",
+        help=(
+            "Optional Alkahest rate in base units per token; omit to publish "
+            "configured settlement clauses only."
+        ),
     ),
-    token: str = typer.Option(
-        ...,
+    token: str | None = typer.Option(
+        None,
         "--token",
-        help="Payment token contract address (0x…).",
+        help="Alkahest payment token contract address (0x…).",
     ),
-    chain: str = typer.Option(
-        ...,
+    chain: str | None = typer.Option(
+        None,
         "--chain",
-        help="Chain name from [chains.<name>] config.",
+        help="Alkahest chain name from [chains.<name>] config.",
     ),
     escrow_address: str | None = typer.Option(
         None,
         "--escrow-address",
-        help="Escrow contract address; resolved from the chain's alkahest "
-        "config (erc20 non-unconditional) when omitted.",
+        help="Alkahest escrow contract; resolved from the chain config when omitted.",
     ),
     description: str | None = typer.Option(None, "--description"),
     openapi_url: str | None = typer.Option(None, "--openapi-url"),
@@ -105,91 +161,161 @@ def publish_cmd(
         help="Base URL of the token-gated service.",
     ),
     paused: bool = typer.Option(False, "--paused"),
+    storefront_url: str | None = typer.Option(
+        None, "--storefront-url", "-a", help=_STOREFRONT_URL_HELP
+    ),
 ) -> None:
     """Create + publish a listing backed by a quota resource.
 
-    The accepted escrow advertises a unit rate
-    ``{field: "amount", per: "token", value: <price-per-token>}`` — the
-    buyer's quantity scales it to the absolute amount at negotiation.
+    Pass the Alkahest rate, token, and chain together to publish an escrow
+    option. Omit all three to publish configured settlement clauses, such as
+    Arkhai payments, without requiring an EVM chain. The running storefront
+    creates the listing; the command signs as the storefront's own principal,
+    from the configuration and ``ARKHAI_IDENTITY_CREDENTIAL``.
     """
-    from apicredits_storefront.services.listing_service import ListingService
-    from apicredits_storefront.utils.config import CHAINS
-    from apicredits_storefront.utils.sqlite_client import get_sqlite_client
-
-    if not price_per_token.strip().isdigit():
-        typer.echo("--price-per-token must be a base-unit integer", err=True)
-        raise typer.Exit(code=2)
-
-    resolved_escrow = escrow_address
-    if not resolved_escrow:
-        chain_cfg = CHAINS.get(chain)
-        if chain_cfg is None:
-            typer.echo(f"chain {chain!r} is not configured", err=True)
-            raise typer.Exit(code=2)
-        from market_alkahest.alkahest import (
-            get_erc20_escrow_obligation_default,
-        )
-
-        resolved_escrow = get_erc20_escrow_obligation_default(
-            chain,
-            config_path=chain_cfg.alkahest_address_config_path,
-        )
-
-    accepted_escrows = [
-        {
-            "chain_name": chain,
-            "escrow_address": resolved_escrow.lower(),
-            "literal_fields": {"token": token},
-            "rates": [{"field": "amount", "per": "token", "value": price_per_token}],
-        }
-    ]
-
+    # Imported only once ``--config`` has run: the storefront's settings
+    # resolve when its config module is first imported.
     from apicredits_storefront.utils.config import (
-        BASE_URL_OVERRIDE,
-        resolve_identity_config,
+        CHAINS,
+        chain_address_books,
+        resolve_identity_signer,
     )
 
-    principal = resolve_identity_config().principal
-    svc = ListingService(
-        sqlite_client=get_sqlite_client(
-            local_listing_principal=principal,
-            expected_legacy_sellers=(BASE_URL_OVERRIDE,),
-        ),
-        seller_principal=principal,
+    legacy_requested = any(
+        value is not None for value in (price_per_token, token, chain)
     )
-    result = asyncio.run(
-        svc.publish_from_quota(
-            resource_id=resource_id,
-            service_name=service_name,
-            accepted_escrows=accepted_escrows,
-            description=description,
-            openapi_url=openapi_url,
-            base_url=base_url,
-            paused=paused,
+    if escrow_address is not None and not legacy_requested:
+        typer.echo(
+            "--escrow-address requires the Alkahest rate, token, and chain.", err=True
         )
-    )
-    typer.echo(json.dumps(result, indent=2))
+        raise typer.Exit(code=2)
+    accepted_escrows: list[dict[str, Any]] = []
+    if legacy_requested:
+        if price_per_token is None or token is None or chain is None:
+            typer.echo(
+                "Alkahest publication requires --price-per-token, --token, and --chain together.",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        if not price_per_token.strip().isdigit():
+            typer.echo("--price-per-token must be a base-unit integer", err=True)
+            raise typer.Exit(code=2)
+
+        resolved_escrow = escrow_address
+        if not resolved_escrow:
+            if chain not in CHAINS:
+                typer.echo(f"chain {chain!r} is not configured", err=True)
+                raise typer.Exit(code=2)
+            try:
+                address_book = chain_address_books()[chain]
+            except ValueError as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(code=2) from exc
+            resolved_escrow = get_erc20_escrow_obligation_default(
+                chain, config_path=address_book
+            )
+        accepted_escrows = [
+            {
+                "chain_name": chain,
+                "escrow_address": resolved_escrow.lower(),
+                "literal_fields": {"token": token},
+                "rates": [
+                    {"field": "amount", "per": "token", "value": price_per_token}
+                ],
+            }
+        ]
+
+    signer = resolve_identity_signer()
+    url = _storefront_url(storefront_url)
+    request = {
+        "resource_id": resource_id,
+        "service_name": service_name,
+        "accepted_escrows": accepted_escrows,
+        "description": description,
+        "openapi_url": openapi_url,
+        "base_url": base_url,
+        "paused": paused,
+    }
+    try:
+        with _open_storefront(url, signer) as client:
+            result = SyncApiCreditListingClient(
+                client, seller=signer.identity
+            ).publish_from_quota(request)
+    except (StorefrontClientError, httpx.HTTPError) as exc:
+        raise _refused(url, exc) from exc
+    typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
 
 
 @app.command("listings")
 def listings_cmd(
     status: str | None = typer.Option(None, "--status"),
     limit: int = typer.Option(50, "--limit"),
+    storefront_url: str | None = typer.Option(
+        None, "--storefront-url", "-a", help=_STOREFRONT_URL_HELP
+    ),
 ) -> None:
-    """List the storefront's local listings."""
-    from apicredits_storefront.utils.config import (
-        BASE_URL_OVERRIDE,
-        resolve_identity_config,
-    )
-    from apicredits_storefront.utils.sqlite_client import get_sqlite_client
+    """List the running storefront's local listings."""
+    # Imported only once ``--config`` has run, as in ``publish``.
+    from apicredits_storefront.utils.config import resolve_identity_config
 
-    rows = asyncio.run(
-        get_sqlite_client(
-            local_listing_principal=resolve_identity_config().principal,
-            expected_legacy_sellers=(BASE_URL_OVERRIDE,),
-        ).list_listings(status=status, limit=limit),
-    )
-    typer.echo(json.dumps(rows, indent=2, default=str))
+    seller = resolve_identity_config().principal
+    url = _storefront_url(storefront_url)
+    try:
+        # The listing route is public, so the read needs no credential: the
+        # seller's public principal is all the listing client needs.
+        with _open_storefront(url, None) as client:
+            page = SyncApiCreditListingClient(client, seller=seller).list_listings(
+                status=status, limit=limit
+            )
+    except (StorefrontClientError, httpx.HTTPError) as exc:
+        raise _refused(url, exc) from exc
+    typer.echo(json.dumps(dataclasses.asdict(page), indent=2, default=str))
+
+
+def payments_section() -> Any:
+    """The storefront's ``[Settlement.arkhai_payments]`` section, read from the
+    configuration ``serve`` reads, or ``None`` when it configures none.
+
+    A configuration that cannot be read raises ``ValueError``.
+    """
+    # Imported only once ``--config`` has run: the storefront's settings
+    # resolve when its config module is first imported.
+    from apicredits_storefront.utils.config import settlement_config_mapping
+
+    return settlement_config_mapping().get("arkhai_payments")
+
+
+def payments_transport() -> httpx.BaseTransport | None:
+    """The transport the check reaches the payments service through; ``None``
+    gives the payments client its own."""
+    return None
+
+
+@app.command("check-payments")
+def check_payments_cmd(
+    account: str = typer.Option(
+        ...,
+        "--account",
+        help="The payments account whose balance is read, normally the seller's "
+        "payee account: the service answers only for the credential's own account.",
+    ),
+) -> None:
+    """Read one account's balance with the storefront's payments configuration.
+
+    Prints one JSON outcome, which never carries the credential, and exits 1
+    naming the failing step: configuration, credential, transport, or the
+    service's refusal. Starts no server, opens no database, and contacts
+    nothing but the payments service.
+    """
+    try:
+        outcome = check_configured_payments_access(
+            payments_section, account, transport=payments_transport()
+        )
+    except ValueError as exc:
+        raise typer.BadParameter("not a payments account id", param_hint="--account") from exc
+    typer.echo(outcome.json_line())
+    if not outcome.ok:
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

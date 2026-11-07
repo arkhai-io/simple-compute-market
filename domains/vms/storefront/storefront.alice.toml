@@ -1,7 +1,8 @@
 # Alice (seller) local Compose profile. Public marketplace identity and EVM
-# mechanism address are configuration; signing credentials are injected by
-# Compose env files through ARKHAI_IDENTITY_CREDENTIAL and
-# STOREFRONT_WALLET__PRIVATE_KEY. Never use these Anvil values publicly.
+# mechanism address are configuration; the signing credential arrives as
+# ARKHAI_IDENTITY_CREDENTIAL, and the wallet key in the secret overlay,
+# dev-env/identities/alice.storefront.secrets.toml. Never use these Anvil values
+# publicly.
 #
 # Account #4 (not #3): account #3 (0x90F7...b906) is reserved as a
 # sentinel agent. Reusing it for Alice would collide — her
@@ -17,7 +18,18 @@ port                = 8002
 base_url            = "http://alice-storefront:8002/"
 db_path             = "./src/market_storefront/data/storefront/agent.db"
 log_file_path       = "./logs/alice.log"
-resources_csv_path  = "/app/resources.csv"
+
+# Timer-loop intervals, shortened for this stack only. A scenario pauses the
+# storefront and then advances each loop deliberately, and a pause is observed
+# when a loop next reaches its gate -- which it can only do at the end of an
+# interval. The shipped defaults (60s watchdog, 30s sweeps) exceed the pause's
+# own bounded wait, so every loop reports `pausing` and a scenario can never
+# assert that the storefront is idle. Shortening them changes nothing about
+# what a loop does, only how soon it notices it has been asked to stop.
+# Production keeps the shipped values.
+negotiation_watchdog_interval         = 2
+settlement_servicing_interval_seconds = 2
+fulfillment_resume_sweep_interval     = 2
 
 [[storefront_domains]]
 contribution = "vms"
@@ -31,23 +43,31 @@ scheme = "eip191"
 identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"
 
 [Identity.administrators.operator]
-principal = { scheme = "eip191", identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65" }
+# Anvil account 7. The operator is deliberately a different principal
+# from Identity.principal above: the seller publishes and the administrator
+# operates, and the two are separately authorized rather than conflated.
+# The loader requires a list: a stable administrator may hold more than one
+# principal, and `principal = {...}` is the pre-list spelling.
+principals = [
+  { scheme = "eip191", identifier = "0x14dc79964da2c08b23698b3d3cc7ca32193d9955" },
+]
 
 [Identity.service_peers.provisioning_default]
 role = "service"
 site_id = "default"
-principal = { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" }
-
+principals = [
+  { scheme = "ed25519", identifier = "3NPn0gInwKKqVkrFl5_C07yYcjLOfVszbq51kw6EnPw" },
+]
 [Settlement]
 schema_version = 1
 priority = ["alkahest.v1"]
 
 [Settlement.alkahest]
 enabled = true
-address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
-oracle_gated = false
+# Each chain's Alkahest address book; the dev chain's is mounted by Compose.
+address_books = { anvil = "/app/alkahest_anvil_addresses.json" }
+release_models = ["recipient"]
 trusted_oracle_addresses = []
-interruptible = false
 interruptible_oracle_addresses = []
 
 [Wallet]
@@ -73,20 +93,22 @@ principals = [
   { scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906" },
 ]
 
-[provisioning]
-# Shares Bob's provisioning service for now. The multi-registry test
-# stops at negotiation start so we never hit settle/lease/watchdog —
-# if Alice later needs to settle, this needs its own provisioning
-# instance (the provisioning service's PROVISIONING_STOREFRONT_URL
-# callback points at bob-storefront, not alice-storefront).
-service_url   = "http://provisioning:8081"
-mode          = "http"
-poll_interval = 1
+[capacity]
+# How long a confirmed projection poll lets the inventory guard confirm a
+# listing, widened for this stack only. A scenario that holds the loops keeps
+# trading, and with the shipped window -- three poll intervals -- a round it
+# sends more than a few seconds after its last `site-projections` step would be
+# refused as retryable. An hour covers any one scenario's run; production
+# keeps the shipped window.
+source_confirmation_seconds = 3600
 
-[provisioning.identity]
-principals = [
-  { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
-]
+# The site alias is local to this storefront and matches its service peer.
+[capacity.sites]
+default = "http://alice-provisioning:8081"
+
+[provisioning]
+service_url   = "http://alice-provisioning:8081"
+poll_interval = 1
 
 [negotiation]
 policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
@@ -96,5 +118,4 @@ settlements = [
   { mechanism = "alkahest.v1", asset = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0", rate = "100", per = "hour", mechanism_input = { chain = "anvil", escrow_kind = "erc20_escrow_obligation_default" } },
 ]
 default_min_price            = "100"
-default_token_address        = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 default_max_duration_seconds = 0

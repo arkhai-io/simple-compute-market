@@ -1,0 +1,19 @@
+[Unit]
+Description=Buyer relay client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart={{ frp_binary_path }} -c {{ relay_client_config }}
+Restart=always
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/frp
+
+[Install]
+WantedBy=multi-user.target

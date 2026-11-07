@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from market_identity import Ed25519Signer, TrustedIdentitySet
 
-from domains.apicredits.settlement.issuance_evidence import (
+from arkhai_apicredits.settlement.issuance_evidence import (
     ApiCreditsIssuanceEvidenceBodyV1,
     ExpectedApiCreditsIssuanceEvidenceV1,
     IssuanceEvidenceError,

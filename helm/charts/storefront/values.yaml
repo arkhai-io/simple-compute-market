@@ -19,119 +19,106 @@ image:
   tag: storefront
   # Production/release profiles pin sha256:<digest>; local development may use tag.
   digest: ""
-  settlementConfigSchemaVersion: 1
   pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------
-# Storefront agent(s). The list models per-process identity, not role —
-# only sellers run a storefront, so the typical deploy has one entry.
-# Operators running multiple seller identities on one cluster (sharded
-# by region, by hardware fleet, etc.) add more entries. Buyers do not
-# appear here at all: the buyer-side surface is the `market` CLI, run
-# as a one-shot client process (or a Job for E2E tests).
+# Storefront agents, keyed by agent name. The map models per-process identity,
+# not role -- only sellers run a storefront, so the typical deploy has one
+# agent. Operators running multiple seller identities on one cluster (sharded
+# by region, by hardware fleet, etc.) add more keys. Buyers do not appear here
+# at all: the buyer-side surface is the `market` CLI, run as a one-shot client
+# process (or a Job for E2E tests).
 #
-# Each entry renders one Deployment and Service. Public identity configuration
-# is rendered into a ConfigMap; signer material is read only from the referenced
-# Kubernetes Secret.
-agents:
-  - name: bob
-    port: 8001
-    component: seller
-    # agentId: the numeric on-chain agent ID assigned at first registration.
-    # Leave empty on first deploy — the service will register automatically
-    # (requires autoRegister: true) and print the assigned ID in the logs.
-    # Pin this value after first registration to skip re-registration on
-    # subsequent deploys and to guard against accidental new registrations.
-    agentId: ""
-    # autoRegister: controls behaviour when agentId is not set.
-    #   true  → register at startup (default; safe for first deploys).
-    #   false → crash loudly if agentId is missing. Use this once an agent
-    #           has been registered to prevent a misconfigured deploy from
-    #           silently minting a new on-chain identity.
-    autoRegister: true
-    identity:
-      principal:
-        scheme: eip191
-        identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
-      credentialSecret:
-        name: arkhai-bob-identity
-        key: credential
-      servicePeers:
-        provisioning_default:
-          role: service
-          siteId: default
-          principals:
-            - scheme: eip191
-              identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
-      administrators:
-        operator:
-          principals:
-            - scheme: eip191
-              identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
-    # Non-identity runtime secrets remain in a separately managed overlay.
-    # The chart never accepts or renders private signing material.
-    secret:
-      createSecret: false
-      secretName: arkhai-bob-runtime
-      configKey: storefront.secrets.toml
-      # Compute resource inventory as raw CSV content. Injected at startup
-      # when the resources table is empty (idempotent — skipped on restart
-      # if resources are already present). Use make deploy with
-      # RESOURCES_CSV_FILE=/path/to/resources.csv to set this via --set-file.
-      # Leave empty to start with no inventory (seed via the import API later).
-      resourcesCsvInline: ""
-      # Write-scoped API key for the listing registry, rendered into the
-      # secrets TOML as [registry.auth] keyed by the composed registry URL.
-      # Required when the registry sets requireWriteApiKey. Never commit a
-      # real token; inject via --set at render/deploy time.
-      registryAuthToken: ""
-      # Hosted requests use the marketplace signer supplied by
-      # identity.credentialSecret; no second credential is accepted here.
-    # config.* lands in the public storefront.toml ConfigMap. Private identity
-    # and wallet credentials are accepted only through Secret references.
-    config:
-      storefrontDomains:
-        - contribution: vms
-          offeringMode: vm
-          domainIdentity: compute.v1
-          contractVersion: "1.0"
-        - contribution: bare_metal
-          offeringMode: bare_metal
-          domainIdentity: bare_metal.v1
-          contractVersion: "1.0"
-      registryAuthority:
-        principals:
-          - scheme: eip191
-            identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
-      seller:
-        agentId: bob
-        dbPath: "/var/lib/arkhai/agent.db"
-        logFilePath: "./logs/bob.log"
-        resourcesCsvPath: "/app/src/market_storefront/data/kvm1-machine.csv"
-        enableEventQueue: false
-        provisioning:
-          mode: "mock"
-          identity:
-            principals:
-              - scheme: eip191
-                identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
-        negotiation:
-          policies:
-            - "has_matching_inventory_guard"
-            - "escrow_shape_guard"
-            - "bisection"
-        integrations:
-          geminiApiKey: ""
-      settlement:
-        schema_version: 1
-        priority: []
-      # Optional public EVM resources. Keep both mappings empty for fiat-only.
-      wallet: {}
-      chains: {}
+# A map rather than a list because Helm merges maps key by key and replaces
+# lists whole: an overlay states only what it changes in one agent, and setting
+# a key to null removes it, the agent's own name included. The chart ships no
+# agent; the umbrella chart's values declare the release's agents. A list of
+# agents is refused, naming this shape.
+#
+# Each agent renders one Deployment and Service, named for its key. `config` is
+# the storefront's own configuration, in its own key names, and passes through
+# to a ConfigMap as storefront.json: the chart adds only what the release knows
+# (the agent's port and Service URL, the internal registry and provisioning
+# URLs, a `default` capacity site, and db_path under persistence.mountPath)
+# where it is absent, and the storefront validates the rest when it starts.
+# `config` is public: the values schema refuses settings the storefront marks
+# secret, which belong in the Secret overlay named by `secret`. Write integers
+# above 2^53 as strings; every number in a values file passes through a float.
+#
+#   agents:
+#     bob:
+#       port: 8001
+#       component: seller
+#       identity:
+#         credentialSecret:
+#           name: arkhai-bob-identity
+#           key: credential
+#       # Trust for the release's internal registry, which the chart writes
+#       # under that registry's derived URL. Required while `config` names no
+#       # registry.urls; it must include global.registryIdentity.
+#       internalRegistryTrust:
+#         authority: registry-a
+#         principals:
+#           - scheme: eip191
+#             identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+#       # Non-identity runtime secrets remain in a separately managed overlay.
+#       # The chart never accepts or renders private signing material.
+#       secret:
+#         createSecret: false
+#         secretName: arkhai-bob-runtime
+#         configKey: storefront.secrets.toml
+#         # Write-scoped API key for the listing registry, rendered into the
+#         # secrets TOML as [registry.auth] keyed by the first registry URL.
+#         # Required when the registry sets requireWriteApiKey. Never commit a
+#         # real token; inject via --set at render/deploy time.
+#         registryAuthToken: ""
+#       # An existing ConfigMap holding an Alkahest address book, mounted
+#       # read-only at mountPath; an empty name mounts nothing. The chain's
+#       # entry in [Settlement.alkahest.address_books] names <mountPath>/<key>.
+#       alkahestAddressBook:
+#         configMapName: ""
+#         key: alkahest_addresses.json
+#         mountPath: /etc/arkhai/alkahest
+#       # The CA bundle the storefront's payments client trusts its payments
+#       # service under, from an existing ConfigMap key, or alternatively an
+#       # existing Secret key, never both, mounted read-only. The chart sets
+#       # [Settlement.arkhai_payments].ca_bundle_path in the rendered
+#       # configuration to the mounted file, and refuses a config stating
+#       # another path or no such section. Only the payments client reads it;
+#       # the process's own trust store is left as it is. The chart names no CA
+#       # of its own; empty names mount none and set nothing. The payments key
+#       # itself is [Settlement.arkhai_payments].api_key in the runtime secret
+#       # overlay.
+#       caBundle:
+#         configMapName: payments-ca-bundle
+#         secretName: ""
+#         key: ca-bundle.pem
+#       # The account the agent's payments check test pod reads the balance of,
+#       # with `market-storefront check-payments --account`: the seller's payee
+#       # account. The pod renders only when config has
+#       # [Settlement.arkhai_payments] and this names an account.
+#       tests:
+#         paymentsAccount: ""
+#       config:
+#         agent_id: bob
+#         Identity:
+#           principal:
+#             scheme: eip191
+#             identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+#           service_peers:
+#             provisioning_default:
+#               role: service
+#               site_id: default
+#               principals:
+#                 - scheme: eip191
+#                   identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+#         Settlement:
+#           priority: []
+agents: {}
 
 # ---------------------------------------------------------------------------
 # Helm smoke-test configuration.
-# targetAgentName empty = first configured agent. activeProfiles empty =
+# targetAgentName empty = the first agent by name. activeProfiles empty =
 # "helm,<selected-component>-secret". secretName empty = selected agent Secret.
 # ---------------------------------------------------------------------------
 tests:
@@ -167,8 +154,8 @@ affinity: {}
 #
 # enabled: false falls back to an emptyDir mount at the same path so
 # kind/CI and local-iteration setups without a StorageClass keep working
-# (state still ephemeral). dbPath in config above should match the mount
-# point either way.
+# (state still ephemeral). An agent's config.db_path defaults to agent.db
+# under mountPath either way.
 #
 # storageClass: empty string uses the cluster's default StorageClass.
 # Set explicitly when the cluster has multiple classes or you want a
@@ -184,12 +171,16 @@ affinity: {}
 # ---------------------------------------------------------------------------
 persistence:
   enabled: true
+  # Annotates the PVC helm.sh/resource-policy: keep, so `helm uninstall` leaves
+  # the volume and a reinstall recovers its state. Local deployments set it false
+  # (helm/local-values.yaml), so an uninstall starts the next deploy from nothing.
+  retainOnUninstall: true
   storageClass: ""
   size: 1Gi
   accessMode: ReadWriteOnce
-  # Where the PVC mounts inside the pod. dbPath above must point at a
-  # file under this directory; the chart does not enforce this — it's
-  # the operator's responsibility to keep the two aligned.
+  # Where the PVC mounts inside the pod. An agent whose config states no
+  # db_path gets <mountPath>/agent.db; one that states db_path must keep it
+  # under this directory for its state to persist.
   mountPath: /var/lib/arkhai
   # existingClaim: when set, the chart mounts this pre-existing PVC
   # and does not create one of its own. Leave empty to let the
@@ -209,7 +200,7 @@ persistence:
 #                   environment where the agent is reachable via an API gateway
 #                   rather than a ZeroTier overlay network.
 #
-# The application runtime is unaffected when zerotier_network is unset
-# in storefront.toml — all ZeroTier code paths are conditional on that value.
+# The application runtime is unaffected when zerotier_network is unset in an
+# agent's config — all ZeroTier code paths are conditional on that value.
 # ---------------------------------------------------------------------------
 zerotierEnabled: true

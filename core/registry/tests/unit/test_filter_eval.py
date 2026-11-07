@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.api.filter_eval import (
+from core_registry.api.filter_eval import (
     FilterParamError,
     build_criteria,
     evaluate_all,
 )
-from src.api.filter_spec import get_loaded_spec
+from core_registry.api.filter_spec import FilterDecl, FilterSpec, get_loaded_spec
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def spec():
 
 def _listing(**offer_extras) -> dict:
     """Stock compute listing as the registry returns it from order_to_dict."""
-    offer = {
+    listing_resource = {
         "gpu_model": "H200",
         "region": "California, US",
         "gpu_count": 4,
@@ -40,7 +40,7 @@ def _listing(**offer_extras) -> dict:
         "host_disk_type": "Samsung MZTL3T8HEFK",
         "motherboard": "Supermicro H13DSG-O-CPU",
         "gpu_interconnect": "nvswitch",
-        "virtualization_type": "vm",
+        "offering_mode": "vm",
         "static_ip": True,
         "datacenter_grade": True,
         "nic_speed_gbps": 200,
@@ -52,7 +52,7 @@ def _listing(**offer_extras) -> dict:
     return {
         "listing_id": "L1",
         "storefront_url": "",
-        "offer_resource": offer,
+        "listing_resource": listing_resource,
         "accepted_escrows": [
             {
                 "chain_name": "anvil",
@@ -98,10 +98,10 @@ class TestEqualityFilters:
         assert _match(spec, listing, gpu_interconnect="nvswitch") is True
         assert _match(spec, listing, gpu_interconnect="pcie_only") is False
 
-    def test_virtualization_type(self, spec):
-        listing = _listing(virtualization_type="bare_metal")
-        assert _match(spec, listing, virtualization_type="bare_metal") is True
-        assert _match(spec, listing, virtualization_type="vm") is False
+    def test_offering_mode(self, spec):
+        listing = _listing(offering_mode="bare_metal")
+        assert _match(spec, listing, offering_mode="bare_metal") is True
+        assert _match(spec, listing, offering_mode="vm") is False
 
     def test_datacenter_grade_bool(self, spec):
         listing_true = _listing(datacenter_grade=True)
@@ -139,7 +139,7 @@ class TestRangeFilters:
     def test_missing_numeric_field_rejects(self, spec):
         """on_missing=fail in the spec means a missing numeric axis rejects."""
         listing = _listing()
-        del listing["offer_resource"]["vcpu_count"]
+        del listing["listing_resource"]["vcpu_count"]
         assert _match(spec, listing, vcpu_count_min=8) is False
 
     def test_host_context_filters(self, spec):
@@ -377,7 +377,7 @@ class TestStrictOverride:
     def test_strict_false_loosens_gpu_model(self, spec):
         """gpu_model defaults to on_missing: fail; strict=false loosens."""
         listing = _listing()
-        del listing["offer_resource"]["gpu_model"]
+        del listing["listing_resource"]["gpu_model"]
         assert _match(spec, listing, gpu_model="H200") is False
         assert _match(
             spec, listing,
@@ -435,3 +435,188 @@ class TestMixedForms:
                       gpu_model="in:[A100]", ram_gb_min=32) is False
         assert _match(spec, listing,
                       gpu_model="in:[H200,A100]", ram_gb_min=128) is False
+
+
+# ---------------------------------------------------------------------------
+# Capacity backing: exact and fail-on-missing
+# ---------------------------------------------------------------------------
+
+
+class TestCapacityBackingFilter:
+    """A discriminator gets no tolerant reading.
+
+    A listing that does not publish its backing matches neither value, so a
+    buyer asking for unbacked supply never receives a backed listing that
+    simply predates the field, and the reverse.
+    """
+
+    @pytest.mark.parametrize("published", ["backed", "unbacked"])
+    def test_matches_only_its_own_value(self, spec, published):
+        listing = _listing(capacity_backing=published)
+        other = "unbacked" if published == "backed" else "backed"
+
+        assert _match(spec, listing, capacity_backing=published) is True
+        assert _match(spec, listing, capacity_backing=other) is False
+
+    @pytest.mark.parametrize("query", ["backed", "unbacked"])
+    def test_a_listing_without_backing_matches_neither_value(self, spec, query):
+        assert _match(spec, _listing(), capacity_backing=query) is False
+
+    def test_no_backing_query_returns_both_kinds(self, spec):
+        assert _match(spec, _listing(capacity_backing="backed")) is True
+        assert _match(spec, _listing(capacity_backing="unbacked")) is True
+        assert _match(spec, _listing()) is True
+
+
+# ---------------------------------------------------------------------------
+# decimal_text and requires, over constructed specs so each case states exactly
+# the declarations it depends on rather than the deployed compute spec's.
+# ---------------------------------------------------------------------------
+
+def _rate_spec(*extra_filters: FilterDecl) -> FilterSpec:
+    return FilterSpec(
+        version=1,
+        listing_shape={"type": "object"},
+        filters=[
+            FilterDecl(
+                name="asking_rate_max",
+                path="$.listing_resource.asking_rate.amount",
+                query_name="asking_rate",
+                op="range",
+                value_type="decimal_text",
+                alias_kind="upper_bound",
+                on_missing="fail",
+                requires=["asking_rate_asset", "asking_rate_period"],
+            ),
+            FilterDecl(
+                name="asking_rate_min",
+                path="$.listing_resource.asking_rate.amount",
+                op="range",
+                value_type="decimal_text",
+                alias_kind="lower_bound",
+                on_missing="fail",
+                requires=["asking_rate_asset", "asking_rate_period"],
+            ),
+            FilterDecl(
+                name="asking_rate_asset",
+                path="$.listing_resource.asking_rate.asset",
+                op="in",
+                value_type="string",
+                on_missing="fail",
+            ),
+            FilterDecl(
+                name="asking_rate_period",
+                path="$.listing_resource.asking_rate.period",
+                op="in",
+                value_type="string",
+                on_missing="fail",
+            ),
+            *extra_filters,
+        ],
+    )
+
+
+def _rate_listing(amount: str, asset: str = "usd", period: str = "hour") -> dict:
+    return {
+        "listing_resource": {
+            "asking_rate": {"amount": amount, "asset": asset, "period": period},
+        }
+    }
+
+
+def test_decimal_text_range_bound_inclusive_at_equality() -> None:
+    spec = _rate_spec()
+    criteria = build_criteria(
+        spec,
+        {"asking_rate_max": "16.00", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    assert evaluate_all(_rate_listing("16.00"), criteria)
+    assert evaluate_all(_rate_listing("15.99"), criteria)
+    assert not evaluate_all(_rate_listing("16.01"), criteria)
+
+
+def test_decimal_text_holds_precision_a_double_would_lose() -> None:
+    spec = _rate_spec()
+    criteria = build_criteria(
+        spec,
+        {"asking_rate_min": "0.1", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    # 0.1 has no exact double; three decimal-text 0.1s must still sum/compare
+    # exactly rather than drift, which a float coercion would risk.
+    assert evaluate_all(_rate_listing("0.1"), criteria)
+    assert evaluate_all(_rate_listing("0.100000000000000000001"), criteria)
+
+
+def test_decimal_text_resolved_value_of_wrong_shape_excluded() -> None:
+    spec = _rate_spec()
+    criteria = build_criteria(
+        spec,
+        {"asking_rate_max": "16.00", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    listing = {"listing_resource": {"asking_rate": {"amount": 16, "asset": "usd", "period": "hour"}}}
+    # amount is a JSON number, not decimal text — on_missing: fail applies,
+    # since the field doesn't resolve to a decimal-text value at all.
+    assert not evaluate_all(listing, criteria)
+
+
+def test_requires_satisfied_when_asset_and_period_supplied() -> None:
+    spec = _rate_spec()
+    criteria = build_criteria(
+        spec,
+        {"asking_rate_max": "16.00", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    assert len(criteria) == 3
+
+
+def test_requires_refuses_bound_without_asset() -> None:
+    spec = _rate_spec()
+    with pytest.raises(FilterParamError, match="requires"):
+        build_criteria(spec, {"asking_rate_max": "16.00", "asking_rate_period": "hour"})
+
+
+def test_requires_refuses_bound_without_period() -> None:
+    spec = _rate_spec()
+    with pytest.raises(FilterParamError, match="requires"):
+        build_criteria(spec, {"asking_rate_max": "16.00", "asking_rate_asset": "usd"})
+
+
+def test_requires_target_alone_is_a_meaningful_query() -> None:
+    """Supplying only the co-requirement target, with no bound, is fine —
+    the dependency is one-directional."""
+    spec = _rate_spec()
+    criteria = build_criteria(spec, {"asking_rate_asset": "usd"})
+    assert len(criteria) == 1
+
+
+def test_cross_period_query_excludes_rather_than_converts() -> None:
+    spec = _rate_spec()
+    criteria = build_criteria(
+        spec,
+        {"asking_rate_max": "16.00", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    # Listing quoted in a period the query didn't name — excluded by the
+    # (unsatisfied) asking_rate_period `in` criterion, not converted.
+    assert not evaluate_all(_rate_listing("10.00", period="month"), criteria)
+
+
+@pytest.mark.parametrize("bound", ["NaN", "sNaN", "Infinity", "-Infinity", "inf"])
+def test_a_non_finite_decimal_bound_is_refused(bound):
+    with pytest.raises(FilterParamError, match="finite decimal"):
+        build_criteria(
+            _rate_spec(),
+            {"asking_rate_max": bound, "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+        )
+
+
+@pytest.mark.parametrize("stored", ["NaN", "sNaN", "Infinity", "-Infinity"])
+def test_a_non_finite_listing_amount_is_excluded_rather_than_raised_on(stored):
+    upper = build_criteria(
+        _rate_spec(),
+        {"asking_rate_max": "16", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    lower = build_criteria(
+        _rate_spec(),
+        {"asking_rate_min": "0", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    assert not evaluate_all(_rate_listing(stored), upper)
+    assert not evaluate_all(_rate_listing(stored), lower)

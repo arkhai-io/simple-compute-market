@@ -6,17 +6,18 @@ import json
 import uuid
 from pathlib import Path
 
-import pytest
-
 import core_buyer.buyer_config as buyer_config_module
 import core_buyer.run_log as run_log_module
+import pytest
 from core_buyer.buyer_config import BuyerProfileResolver, ResolvedBuyerIdentity
 from core_buyer.deal_helpers import (
-    accepted_settlement_mechanism,
+    accepted_seller_principal,
+    exact_agreed_amount,
     load_deal_context,
     load_negotiation_resume_point,
-    settlement_acceptance_fields,
 )
+from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+import typer
 from core_buyer.profile_service import BuyerProfileService, ProfileServiceError
 from core_buyer.run_log import (
     RUN_LOG_VERSION,
@@ -130,70 +131,313 @@ def test_ed25519_run_log_v3_and_resume_need_no_wallet(
     assert "buyer_address" not in json.dumps(events)
 
 
-def test_hosted_recovery_preserves_every_settlement_identity(
+@pytest.mark.parametrize("repeated_ref", (None, "txn-1", "different"))
+def test_reference_recovery_retains_accepted_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    repeated_ref: str | None,
+) -> None:
+    _state_dir(monkeypatch, tmp_path)
+    signer = Ed25519Signer(b"\x15" * 32)
+    publisher = Ed25519Signer(b"\x16" * 32)
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(
+            price={"asset": "usd", "rates": []},
+            settlement={"schema": "example.payment.v1", **({} or {})},
+        ),
+        price={"asset": "usd", "rates": []},
+        settlement={"schema": "example.payment.v1"},
+    )
+    agreement = Agreement(
+        negotiation_id="neg-1", listing_id="listing-1", listing_hash="0" * 64,
+        buyer=signer.identity.model_dump(mode="json"),
+        seller=publisher.identity.model_dump(mode="json"), amount=12,
+        duration_seconds=3600, start_utc="2026-01-01T00:00:00Z",
+        accepted_at="2026-01-01T00:00:00Z", asset="usd", settlement=option,
+    )
+    log = RunLog.start(
+        profile_id=uuid.uuid4(), principal=signer.identity,
+        seller_url="http://seller", listing_id="listing-1",
+        publisher_principals=_trust(publisher).model_dump(mode="json"),
+        publisher_id="publisher-1", source_registry_url="http://registry",
+        source_registry_authority="registry",
+    )
+    log.event(
+        "negotiation_completed", status="agreed", negotiation_id="neg-1",
+        agreed_amount=12, agreement=agreement.model_dump(mode="json", exclude_none=True),
+        agreement_bytes=base64.b64encode(
+            agreement.model_dump_json(exclude_none=True).encode()
+        ).decode(),
+    )
+    log.event("settlement_started", settlement_ref="txn-1")
+    if repeated_ref is not None:
+        log.event("settlement_completed", settlement_ref=repeated_ref)
+
+    def load():
+        return load_deal_context(
+            log.run_id, signer=signer,
+            refresh_publisher_principals=lambda *_binding: _trust(publisher),
+        )
+
+    if repeated_ref not in (None, "txn-1"):
+        with pytest.raises(typer.BadParameter, match="conflicting settlement references"):
+            load()
+    else:
+        deal = load()
+        assert deal.negotiation_id == agreement.negotiation_id
+        assert deal.agreement == agreement.model_dump(mode="json", exclude_none=True)
+        assert deal.agreement_bytes == base64.b64encode(
+            agreement.model_dump_json(exclude_none=True).encode()
+        ).decode()
+        assert deal.settlement_ref == "txn-1"
+        assert deal.escrow_uid is None
+        assert deal.buyer_principal == signer.identity
+
+
+# What a settlement entry recorded about its listing; core reads it back whole.
+_RECORD = {"inputs": [{"opaque": "to-core"}]}
+
+
+def _accepted_run(signer: Ed25519Signer, publisher: Ed25519Signer, **completed) -> RunLog:
+    log = RunLog.start(
+        profile_id=uuid.uuid4(), principal=signer.identity,
+        seller_url="http://seller", listing_id="listing-1",
+        publisher_principals=_trust(publisher).model_dump(mode="json"),
+        publisher_id="publisher-1", source_registry_url="http://registry",
+        source_registry_authority="registry", initial_price=10, max_price=12,
+    )
+    log.event(
+        "negotiation_completed", status="agreed", negotiation_id="neg-1",
+        agreed_amount=12, **completed,
+    )
+    return log
+
+
+def test_a_deal_carries_the_listing_record_its_run_recorded(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     _state_dir(monkeypatch, tmp_path)
-    buyer = Ed25519Signer(b"\x19" * 32)
-    publisher = Ed25519Signer(b"\x1a" * 32)
-    log = RunLog.start(
-        profile_id=uuid.uuid4(),
-        publisher_id="publisher-2",
-        source_registry_url="http://registry",
-        source_registry_authority="registry",
-        principal=buyer.identity,
-        seller_url="http://seller",
-        listing_id="listing-2",
-        publisher_principals=_trust(publisher).model_dump(mode="json"),
+    signer, publisher = Ed25519Signer(b"\x21" * 32), Ed25519Signer(b"\x22" * 32)
+    recorded = _accepted_run(signer, publisher, listing_record=_RECORD)
+    older = _accepted_run(signer, publisher)
+
+    def load(log: RunLog):
+        return load_deal_context(
+            log.run_id, signer=signer,
+            refresh_publisher_principals=lambda *_binding: _trust(publisher),
+        )
+
+    assert load(recorded).listing_record == _RECORD
+    # A run accepted before its listing was recorded carries nothing; the
+    # selected settlement entry decides whether it can still settle.
+    assert load(older).listing_record is None
+
+
+def test_a_deal_refuses_conflicting_recorded_listing_records(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _state_dir(monkeypatch, tmp_path)
+    signer, publisher = Ed25519Signer(b"\x23" * 32), Ed25519Signer(b"\x24" * 32)
+    log = _accepted_run(signer, publisher, listing_record=_RECORD)
+    log.end("agreed", negotiation_id="neg-1", listing_record={})
+
+    with pytest.raises(typer.BadParameter, match="conflicting recorded listing records"):
+        load_deal_context(
+            log.run_id, signer=signer,
+            refresh_publisher_principals=lambda *_binding: _trust(publisher),
+        )
+
+
+def test_a_deal_refuses_a_listing_record_that_is_not_an_object(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _state_dir(monkeypatch, tmp_path)
+    signer, publisher = Ed25519Signer(b"\x27" * 32), Ed25519Signer(b"\x28" * 32)
+    log = _accepted_run(signer, publisher, listing_record=["not", "an", "object"])
+
+    with pytest.raises(typer.BadParameter, match="malformed recorded listing record"):
+        load_deal_context(
+            log.run_id, signer=signer,
+            refresh_publisher_principals=lambda *_binding: _trust(publisher),
+        )
+
+
+def test_a_deal_reads_its_agreed_amount_exactly_from_the_agreement(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An 18-decimal amount survives, though the run-log's float cannot hold it."""
+    _state_dir(monkeypatch, tmp_path)
+    signer, publisher = Ed25519Signer(b"\x29" * 32), Ed25519Signer(b"\x2a" * 32)
+    amount = 10**21 + 1
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(
+            price={"asset": "usd", "rates": []},
+            settlement={"schema": "example.payment.v1", **({} or {})},
+        ),
+        price={"asset": "usd", "rates": []},
+        settlement={"schema": "example.payment.v1"},
     )
-    acceptance = settlement_acceptance_fields(
-        negotiation_id="neg-2",
-        selection={
-            "mechanism": "fiat.stripe.v1",
-            "option_id": "a" * 64,
-            "expiration_unix": 2_000_000_000,
-        },
-        plan={
-            "obligations": [
-                {
-                    "payer": "buyer",
-                    "claimant": "seller",
-                    "amount": "20",
-                    "asset": "usd",
-                    "expiration_unix": 2_000_000_000,
-                    "mechanism": "fiat.stripe.v1",
-                    "params": {"condition_profile": "vm"},
-                }
-            ]
-        },
+    agreement = Agreement(
+        negotiation_id="neg-1", listing_id="listing-1", listing_hash="0" * 64,
+        buyer=signer.identity.model_dump(mode="json"),
+        seller=publisher.identity.model_dump(mode="json"), amount=amount,
+        duration_seconds=3600, start_utc="2026-01-01T00:00:00Z",
+        accepted_at="2026-01-01T00:00:00Z", asset="usd", settlement=option,
+    )
+    with_agreement = _accepted_run(
+        signer, publisher, agreement=agreement.model_dump(mode="json", exclude_none=True)
+    )
+    without = _accepted_run(signer, publisher)
+
+    def load(log: RunLog):
+        return load_deal_context(
+            log.run_id, signer=signer,
+            refresh_publisher_principals=lambda *_binding: _trust(publisher),
+        )
+
+    deal = load(with_agreement)
+    assert int(deal.agreed_amount) != amount
+    assert exact_agreed_amount(deal) == amount
+    assert exact_agreed_amount(load(without)) == 12
+
+
+def test_a_deals_seller_is_the_one_its_agreement_names_not_a_trusted_publisher(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The listing trusts two publisher identities; the seller accepted as the
+    second, and that one is the deal's counterparty, from the retained bytes or
+    the recorded Agreement alike. A run that recorded no Agreement names none."""
+    _state_dir(monkeypatch, tmp_path)
+    signer = Ed25519Signer(b"\x2b" * 32)
+    other, seller = Ed25519Signer(b"\x2c" * 32), Ed25519Signer(b"\x2d" * 32)
+    trust = TrustedIdentitySet(identities=(other.identity, seller.identity))
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(
+            price={"asset": "usd", "rates": []},
+            settlement={"schema": "example.payment.v1", **({} or {})},
+        ),
+        price={"asset": "usd", "rates": []},
+        settlement={"schema": "example.payment.v1"},
+    )
+    agreement = Agreement(
+        negotiation_id="neg-1", listing_id="listing-1", listing_hash="0" * 64,
+        buyer=signer.identity.model_dump(mode="json"),
+        seller=seller.identity.model_dump(mode="json"), amount=12,
+        duration_seconds=3600, start_utc="2026-01-01T00:00:00Z",
+        accepted_at="2026-01-01T00:00:00Z", asset="usd", settlement=option,
+    )
+
+    def load(**completed):
+        log = RunLog.start(
+            profile_id=uuid.uuid4(), principal=signer.identity,
+            seller_url="http://seller", listing_id="listing-1",
+            publisher_principals=trust.model_dump(mode="json"),
+            publisher_id="publisher-1", source_registry_url="http://registry",
+            source_registry_authority="registry", initial_price=10, max_price=12,
+        )
+        log.event(
+            "negotiation_completed", status="agreed", negotiation_id="neg-1",
+            agreed_amount=12, **completed,
+        )
+        return load_deal_context(
+            log.run_id, signer=signer,
+            refresh_publisher_principals=lambda *_binding: trust,
+        )
+
+    retained = base64.b64encode(agreement.model_dump_json().encode()).decode()
+    recorded = agreement.model_dump(mode="json", exclude_none=True)
+    assert accepted_seller_principal(load(agreement_bytes=retained)) == seller.identity
+    assert accepted_seller_principal(load(agreement=recorded)) == seller.identity
+    assert accepted_seller_principal(load()) is None
+
+
+def test_a_resumed_negotiation_carries_the_record_made_at_its_start(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _state_dir(monkeypatch, tmp_path)
+    signer, publisher = Ed25519Signer(b"\x25" * 32), Ed25519Signer(b"\x26" * 32)
+    log = RunLog.start(
+        profile_id=uuid.uuid4(), principal=signer.identity,
+        seller_url="http://seller", listing_id="listing-1",
+        publisher_principals=_trust(publisher).model_dump(mode="json"),
+        publisher_id="publisher-1", source_registry_url="http://registry",
+        source_registry_authority="registry", initial_price=10, max_price=12,
+        listing_record=_RECORD,
     )
     log.event(
-        "negotiation_completed",
-        status="agreed",
-        seller_url="http://seller",
-        publisher_id="publisher-2",
-        source_registry_url="http://registry",
-        source_registry_authority="registry",
-        listing_id="listing-2",
-        negotiation_id="neg-2",
-        agreed_amount=20,
-        publisher_principals=_trust(publisher).model_dump(mode="json"),
-        **acceptance,
+        "negotiation_round", round=0,
+        our_message={"action": "initial", "proposal": {"fields": {"amount": 10}}},
+        their_reply={
+            "negotiation_id": "neg-1", "action": "counter",
+            "proposal": {"fields": {"amount": 12}},
+        },
     )
-    log.event("settlement_started", settlement_ref="settlement-2")
-    context = load_deal_context(
-        log.run_id,
-        signer=buyer,
+
+    point = load_negotiation_resume_point(
+        log.run_id, signer=signer,
         refresh_publisher_principals=lambda *_binding: _trust(publisher),
     )
-    assert context.publisher_principals == _trust(publisher)
-    assert context.settlement_ref == "settlement-2"
-    assert context.escrow_uid is None
-    assert accepted_settlement_mechanism(context) == "fiat.stripe.v1"
-    assert context.settlement_operation_identities == tuple(
-        acceptance["settlement_operation_identities"]
+
+    assert point.listing_record == _RECORD
+
+
+def test_a_resumed_buy_carries_the_record_of_the_listing_it_resumes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A `market buy` run records each listing it tries; they may differ."""
+    _state_dir(monkeypatch, tmp_path)
+    signer, publisher = Ed25519Signer(b"\x2b" * 32), Ed25519Signer(b"\x2c" * 32)
+    binding = {
+        "publisher_principals": _trust(publisher).model_dump(mode="json"),
+        "publisher_id": "publisher-1",
+        "source_registry_url": "http://registry",
+        "source_registry_authority": "registry",
+    }
+    log = RunLog.start(
+        profile_id=uuid.uuid4(), principal=signer.identity, command="market buy",
+        seller_url="http://seller",
     )
+    log.event(
+        "negotiation_started", listing_id="listing-1", seller_url="http://seller",
+        initial_price=10, max_price=12, listing_record=_RECORD, **binding,
+    )
+    log.event(
+        "negotiation_completed", listing_id="listing-1", status="rejected",
+        negotiation_id="neg-1", **binding,
+    )
+    other = {"inputs": []}
+    log.event(
+        "negotiation_started", listing_id="listing-2", seller_url="http://seller",
+        initial_price=10, max_price=12, listing_record=other, **binding,
+    )
+    log.event(
+        "negotiation_round", round=0, listing_id="listing-2",
+        our_message={"action": "initial", "proposal": {"fields": {"amount": 10}}},
+        their_reply={
+            "negotiation_id": "neg-2", "action": "counter",
+            "proposal": {"fields": {"amount": 12}},
+        },
+        **binding,
+    )
+    log.event(
+        "negotiation_completed", listing_id="listing-2", status="exited",
+        negotiation_id="neg-2", **binding,
+    )
+
+    point = load_negotiation_resume_point(
+        log.run_id, signer=signer,
+        refresh_publisher_principals=lambda *_binding: _trust(publisher),
+    )
+
+    assert point.listing_id == "listing-2"
+    assert point.listing_record == other
 
 
 def test_recovery_rejects_another_signer_or_profile(
@@ -290,7 +534,9 @@ def test_fresh_resolver_tracks_selection_while_recovery_uses_recorded_profile(
         generate=False,
         select=False,
     )
-    monkeypatch.setattr(buyer_config_module, "reject_legacy_buyer_identity_config", lambda: None)
+    monkeypatch.setattr(
+        buyer_config_module, "reject_legacy_buyer_identity_config", lambda: None
+    )
     resolver = BuyerProfileResolver(service)
     assert resolver.fresh().principal == old.identity
     run = RunLog.start(
@@ -431,19 +677,24 @@ def test_ambiguous_migration_rewrites_nothing(
     )
     repository = ProfileRepository((tmp_path / "profiles.json").absolute())
     repository.replace(
-        ProfileStore(revision=1, selected_profile_id=first.profile_id, profiles=(first, retired)),
+        ProfileStore(
+            revision=1, selected_profile_id=first.profile_id, profiles=(first, retired)
+        ),
         expected_revision=0,
     )
     path = directory / "ambiguous.jsonl"
-    original = json.dumps(
-        {
-            "run_id": "ambiguous",
-            "event": "run_started",
-            "log_version": 2,
-            "signature_protocol": REQUEST_PROTOCOL,
-            "buyer_principal": signer.identity.model_dump(mode="json"),
-        }
-    ) + "\n"
+    original = (
+        json.dumps(
+            {
+                "run_id": "ambiguous",
+                "event": "run_started",
+                "log_version": 2,
+                "signature_protocol": REQUEST_PROTOCOL,
+                "buyer_principal": signer.identity.model_dump(mode="json"),
+            }
+        )
+        + "\n"
+    )
     path.write_text(original)
     with pytest.raises(RunLogError, match="exactly one"):
         migrate_run_logs(repository)
@@ -460,16 +711,19 @@ def test_failure_after_first_replacement_restores_every_run(
     originals: dict[Path, str] = {}
     for run_id in ("first", "second"):
         path = directory / f"{run_id}.jsonl"
-        original = json.dumps(
-            {
-                "run_id": run_id,
-                "event": "run_started",
-                "log_version": 2,
-                "signature_protocol": REQUEST_PROTOCOL,
-                "buyer_principal": signer.identity.model_dump(mode="json"),
-                "operation_id": f"operation-{run_id}",
-            }
-        ) + "\n"
+        original = (
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "event": "run_started",
+                    "log_version": 2,
+                    "signature_protocol": REQUEST_PROTOCOL,
+                    "buyer_principal": signer.identity.model_dump(mode="json"),
+                    "operation_id": f"operation-{run_id}",
+                }
+            )
+            + "\n"
+        )
         path.write_text(original)
         originals[path] = original
     real_replace = run_log_module.os.replace

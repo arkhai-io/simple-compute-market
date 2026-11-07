@@ -4,7 +4,7 @@ The [normative contract](spec.md) defines API-credit behavior. This document exp
 
 ## Market shape
 
-API credits are prepaid finite units for a named service. A listing advertises a unit rate and available quota. The buyer negotiates a quantity, settles the resulting obligation, and receives either a new bearer key funded with that quantity or a top-up to an existing key.
+API credits are prepaid finite units for a named service. A listing advertises a unit rate and available quota. The buyer negotiates a quantity, settles the accepted Agreement, and receives either a new bearer key funded with that quantity or a top-up to an existing key.
 
 ```text
 quota-backed listing
@@ -22,12 +22,21 @@ Credits are not a replenishing liability limit. Issuance commits finite quota th
 
 The API-credits domain owns versioned listing, provision-intent, pricing, terms, and result meaning. The storefront composes publication, seller policy, settlement verification, and fulfillment jobs. The credits service is authoritative for API keys, hashed secrets, balances, grants, consumption idempotency, and quota-ledger mutations.
 
+Only the storefront's selected seller stage verifies settlement sources and
+owns delivery authorization. The credits service receives the existing
+operator-authenticated issuance command, not raw receipts, mechanism IDs or
+escrow/obligation references. It validates negotiation-derived fulfillment
+identity, canonical owner, service/resource, quantity, key target and immutable
+request digest, then repeats authoritative key and quota checks. Possession of
+the operator credential is the issuance trust boundary; a second token or
+mechanism-verification protocol is not introduced.
+
 The storefront's quota snapshot is advisory. It can prevent obviously infeasible negotiation and may place a temporary hold, but issuance must commit a live hold or reserve again at the authority. This repeats the same principle used by physical capacity: publication and negotiation views are not admission locks.
 
 ## Commercial and usage identity
 
 A canonical marketplace principal authorizes a market purchase or top-up. It
-may be an Ed25519 identity in a wallet-free hosted deployment or an EVM identity
+may be an Ed25519 identity in a wallet-free payment deployment or an EVM identity
 for Alkahest. A bearer secret authorizes API use. These are deliberately
 different identities:
 
@@ -42,12 +51,15 @@ stale and operator controls may bypass ordinary policy.
 
 ## Idempotency boundaries
 
-Alkahest settlement `escrow_uid` and hosted deterministic `fulfillment_id` each
-identify one credit grant. The credits authority stores the mechanism-neutral
-fulfillment reference plus an immutable canonical request digest; retrying
-unchanged issuance returns the same grant, while changed reuse conflicts before
-quota, key, or balance mutation. A newly issued but unused key may rotate its
-secret on an authorized retry; after use, retries do not reveal a bearer secret.
+Every grant uses the same deterministic fulfillment identity derived from its
+negotiation ID, irrespective of settlement mechanism. Negotiation and fulfillment
+IDs are unique in `credit_grants`. The immutable canonical request digest binds
+owner, service/resource, quantity and key target; changed reuse conflicts before
+quota, key or balance mutation. An operational quota-hold reference is not part
+of that digest: an expired hold can be replaced after authoritative rechecking
+without changing purchase intent. Old grant adoption and old issuance payloads
+are not accepted. A newly issued but unused key may rotate its secret on an
+authorized retry; after use, retries do not reveal a bearer secret.
 
 Online consumption has an independent idempotency boundary scoped to the key and caller-supplied consumption key. This makes middleware retries safe without coupling request admission to settlement identity.
 
@@ -65,7 +77,19 @@ Caching and batching reduce service calls but do not create another balance auth
 
 ## Failure and compensation
 
-Settlement evidence is verified before issuance. If downstream on-chain fulfillment fails after credits were issued, the storefront attempts a compensating balance adjustment and revokes a key created solely for the failed operation. Compensation is best-effort recovery after a split authority transition, not proof that chain and database updates are one atomic transaction.
+Common issuance consumes verified validated purchase facts and a retry policy
+supplied by the selected stage. Alkahest preparation verifies the source once
+before reserving the delivery job; delivery reads the saved matching evidence
+instead of repeating preparation inside terminal failure handling. That stage
+owns signed issuance publication, on-chain attestation and compensation. If
+attestation fails after issuance, it attempts balance adjustment and revokes a
+key created solely for that operation. Compensation is best-effort recovery
+across authorities, not an atomic chain/database transaction.
+
+Failure/rollback context names `settlement_ref` and `negotiation_id`. Capacity
+release retains the exact hold identity and correlates by negotiation, not a
+payment transaction disguised as an escrow. Genuine Alkahest rows, public
+legacy DTOs and the site ledger's existing correlation API retain escrow names.
 
 ## Implementation composition
 
@@ -93,6 +117,58 @@ Every API-credit package resolves its internal dependencies from built
 wheels, not repository-relative editable paths or `pythonpath`
 fallbacks — see `docs/development/ARCHITECTURE.md#wheel-based-development`.
 
+### Listing bindings and the bound pool
+
+An operator creates each API-credit listing over a quota resource, and several
+may sell one resource, so nothing derives a credit listing from its source. Its
+durable listing binding is written with the listing, through the same core write
+the compute storefronts use, and records the site, the `api_credits` mode, the
+quota resource as source, the pool holding it, the domain identity and version,
+and the backing label that pool declares. The derivation identity is the listing
+itself: keying it on the quota resource would refuse a second listing over one
+resource, turning a storage constraint into a product rule nobody decided. Every
+capacity effect, reconciliation, and recheck builds the listing's capacity
+binding from this record, never from the published `listing_resource`.
+
+The pool is read from the credits service's resource-pool projection, which
+carries each pool's declarations because the service hands its pool directory
+to the site's capacity router, through `read_site_declarations`. Both credit
+seller stages declare `fulfils_through_capacity`, since each issues against
+quota, so a pool declaring itself unbacked leaves no option to publish and yields
+no listing through the delegate rather than an API-credit branch. No listing
+publishes its backing label: the API-credit registry schema carries none, every
+published credit listing is backed, and adding the field would change the schema
+identity buyers match on.
+
+The recorded pool is the listing's provenance, which this domain checks; the
+binding's backing delegate decides only whether capacity is admitted and whether
+availability is asked. The listing-source check before every seller decision and
+acceptance, the reopen path, and reconciliation's source pass all read the quota
+resource from the bound pool alone. A resource now in another pool is not the
+source the listing was bound to, even when that pool declares the same backing
+and advertises API credits; a disabled, unresolvable, or no-longer-advertising
+pool, or one now declaring another backing, fails the same way.
+
+API credits has no publication loop: its listings are reconciled when the
+capacity runtime reconciles, on each capacity event and on the full reconcile a
+poller runs when it starts or finds a gap in its feed. Every such pass first
+closes each open listing its bound pool no longer supports, then runs the
+availability close and reopen. The source pass cannot live inside the
+availability close, because a resource moved between pools with its capacity
+unchanged is fed as a release, which only the reopen sees. A site whose pools
+cannot be read closes nothing, so an unreachable authority is never read as a
+withdrawn source. A pool's declarations edited in place emit no capacity event,
+so its listings close on the next pass rather than at once; the listing-source
+check refuses them meanwhile, and closing them sooner would need a periodic loop
+this domain otherwise has no use for.
+
+Negotiation's quota snapshot is read from the bound site alone, through the
+aggregate's `site(site_id)`, because the quota guard matches rows by resource and
+another site may name its resource the same way. The snapshot is captured only
+through the binding's delegate, so for a listing availability does not bound the
+guard reports itself not applicable. A hold at acceptance is placed through the
+delegate's `place_hold`.
+
 ## Current limits
 
 Current metering charges one fixed configured amount per admitted request; route-specific or variable-cost metering is not established. Possession-challenge protocols for existing keys are not implemented. Verification caching means revocation is not globally instantaneous, and optional batching must not be described as a strict zero-overdraft guarantee.
@@ -107,34 +183,66 @@ API credits intentionally has no compute-provisioning capability. A non-physical
 - [Site capacity](../site-capacity/spec.md)
 - [Storefront publication](../storefront-publication/spec.md)
 
-## Hosted issuance and evidence
+## Payment composition and recovery
 
-The shared servicing worker reaches the API-credit fulfillment callback only
-after the hosted adapter projects authoritative `funded`. The callback submits
-one credits-authority issuance request keyed by
-`derive_credit_fulfillment_id(obligation_ref)`, retrieves by that identity
-after uncertain acknowledgement, then stores the authenticated buyer-only
-credential separately from the public result.
+Buyer and seller compose immutable role tables for Alkahest and
+`arkhai.payments.v1`. Registration/readiness admits fresh options only when a
+matching role entry exists; accepted work dispatches from the exact Agreement,
+not current priority, escrow presence or configuration keys. Alkahest and
+`arkhai.payments.v1` are peer registrations. The payment path uses Ed25519 marketplace identity and owner-scoped payment credentials without constructing a wallet or chain client. Acceptance stores exact Agreement bytes and the seller-derived mandate in shared negotiation `settlement_data`.
 
-`ApiCreditsIssuanceEvidenceService` signs a canonical evidence body with the
-marketplace seller signer and publishes the same bytes through the configured
-portable resolver. The public fulfillment reference is the evidence digest and
-condition anchor; it contains service, quantity, public key identity, grant and
-attestation references, but never the bearer secret. The shared runtime cannot
-collect until that evidence resolves and satisfies the accepted condition.
+Standalone `market credits negotiate` uses that buyer table for selection
+preparation, accepted artifacts, price prerequisites and proposal construction.
+Payment prices remain in their advertised asset units and the entry supplies
+`payer_account`; no wallet or chain is needed. The entry projects advertised
+rate fields into the scalar policy's opening shape; the policy still determines
+the bid. The Alkahest entry retains
+chain/token constraints, address and policy guards, token-decimal scaling of
+explicit prices, and the existing escrow proposal shape. Derived prices use only
+the selected option and are already in base units. Interrupted rounds recover
+recorded selection, provision terms and scaled bounds, not current admission.
 
-Reclaim runs through the same shared route service. Its API-credit callback
-queries the credits authority before financial reclaim: an unknown grant leaves
-reclaim eligible, a committed grant is completed into durable fulfillment and
-therefore excludes reclaim, and mismatched reuse is a recovery conflict rather
-than permission to issue or collect again.
+The buyer validates and approves the mandate, polls its deterministic transaction ID, then calls seller settlement with only the negotiation ID. The seller reloads accepted state and verifies the matching signed receipt before credit issuance. A pending transaction returns retryable pending without a grant.
 
-## Hosted composition
+`api_credit_settlement_evidence` stores negotiation-keyed
+`api_credits.settlement-evidence.v1`: exact Agreement digest, mechanism, established
+source reference and validated delivery inputs. Verified status/source/delivery
+is immutable. `api_credit_issuance_progress` separately records delivery phases;
+signed issuance evidence proves the later grant, and owner-only private results
+retain credentials. A payment creates no escrow progress row.
 
-The API-credit buyer registers Alkahest and hosted Stripe through the shared
-settlement configuration registry. A hosted-only policy constructs neither a
-wallet nor a chain client. The API-credit storefront uses
-`HostedSettlementRouteService` with domain callbacks for accepted-state load,
-plan reservation, exact-once issuance, projection, quota cleanup, and
-before-reclaim reconciliation; it does not import VM routes or the hosted
-released client.
+Repeated settlement returns completed state or re-drives nonterminal issuance.
+Recovery revalidates the stored signed receipt against the exact accepted
+Agreement/mandate/reference without replacing verified evidence with pending or
+requiring another payment poll. Authority lookup and immutable grant digests
+reconcile acknowledgement loss under one fulfillment identity. Buyer credentials
+remain in the private result channel, not public settlement evidence. Ledger,
+fees, hold release/extensions and `reverse` remain payments-service operations;
+cases, rulings and their effects belong to the independent dispute authority.
+
+Hosted options carry lifecycle adjudication and derive per-part end/hold from the
+Agreement, separate from approval expiry. Publication and buyer selection/mandate
+checks validate the full accepted dispute identity and interface params against
+registry-specific preferences; matching account text alone is insufficient.
+Local preferences/vetoes precede opt-in registry recommendations and credentials
+bind separately by full identity. These checks do not introduce lifecycle
+servicing: API-credit roles compose no seller evidence/watch/respondent or buyer
+case-filing path. Consequences of reversing already-issued credits are unspecified.
+See [lifecycle limits](../deal-lifecycle/architecture.md#current-limits).
+
+### Explicit database reset
+
+Quiesce settlement, issuance and recovery before resetting incompatible
+disposable storefront and credits-authority databases. Confirm target ownership;
+use new owned SQLite paths or delete only the confirmed disposable databases,
+bootstrap current migrations, republish and renegotiate. Do not adopt historical
+payment escrow rows or grant aliases. Startup rejects missing/current-marker
+schema drift and old grant shapes instead of copying/translating them. Rebuild
+`.dist` and reinit both producer and authority consumers together.
+The storefront also refuses to start against a database holding a listing with
+no durable listing binding, naming the listing and that a fresh database is
+required. There is no backfill, because a listing written without a binding
+records no pool to bind it to.
+`docs/attachments/apicredits-dispatch/first_use.py` creates and cleans fresh
+file-backed databases with controlled payment I/O and real typed credits HTTP;
+it does not qualify a live payment ledger.

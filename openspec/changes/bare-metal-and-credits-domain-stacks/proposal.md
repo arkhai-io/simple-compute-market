@@ -4,20 +4,34 @@ Goal 4's capability is two viable domains: bare metal and API credits, deployabl
 testable end to end. The kit extractions make them buildable by composition; this change
 is what proves they work.
 
-Neither is there today. Bare metal has no compose stack — `domains/vms/compose.yml` and
-`domains/apicredits/compose.yml` exist and there is no bare-metal equivalent — so it
-cannot be stood up at all. And **no end-to-end test mentions either domain**: the e2e
-suite is VM-only, so every deal path the repository actually proves is a VM deal path.
-
-That is what makes "viable domain" currently mean "VM." A domain that cannot be deployed
-and has no end-to-end proof is a set of packages, not a market.
+Bare metal has a compose stack, its own end-to-end lane, an installable buyer
+contribution, a seller composition that starts through the shared shell and composes
+kit publication, and a real-host deal scenario. What it lacks is the part of "viable"
+that is about composition rather than presence: it still carries a domain-local copy
+of the negotiation lifecycle (`negotiation_service.py`, `negotiation.py`, and the
+`/api/v1/negotiate/*` and listing routes in `api.py`) beside the kit that owns it for
+every other domain. API credits completes deals with its own implementations of
+concerns the kit owns. A domain that passes an end-to-end scenario over a parallel
+implementation satisfies the letter of the completion test and none of its value.
 
 ## What Changes
 
-- Add a bare-metal deployable stack, following the compose topology the VM and
-  API-credits domains already use.
+- Move bare metal's negotiation and listing routes onto the shared shell, once
+  `bare-metal-mock-provisioned-deal` has composed bare-metal negotiation onto the kit
+  runtime and removed its parallel service and persistence, so the bare-metal
+  storefront is contribution adapters over the shared shell with no domain-local copy
+  of an extracted concern.
+- Verify the bare-metal buyer command's demand, route refusal, strict decoding, and
+  teardown requirements.
+- Complete the bare-metal deployable stack: the seller quickstart, render coverage
+  for VM-only, bare-metal-only, and combined seller profiles, and operator examples
+  exposing separately composed roles.
+- Verify the bare-metal buyer's negotiation ownership and transcript-exact resume,
+  clean wheel, independent authorities, and package boundary, and promote them.
 - Add end-to-end scenarios covering a complete deal for each of the two domains:
-  discovery, negotiation, settlement, delivery, and teardown.
+  discovery, negotiation, settlement, delivery, and teardown. The bare-metal deal
+  that runs on every pipeline run is `bare-metal-mock-provisioned-deal`'s; the
+  real-host run is the protected lane's.
 - Recompose the API-credits storefront so it retains no local implementation of a concern
   the kit extractions own — the domain becomes configuration and codecs over kit, which
   is what "viable" means under this goal rather than merely "works."
@@ -32,16 +46,27 @@ None.
 
 ### Modified Capabilities
 
-- `deployment-state`: bare metal has a deployable stack alongside the existing domains'.
+- `deployment-state`: bare metal has a deployable stack alongside the existing domains';
+  the bare-metal buyer ships as a clean wheel and addresses independently configured
+  authorities.
 - `test-compatibility`: an end-to-end deal path is proven per market domain rather than
-  for one domain only.
+  for one domain only; the bare-metal buyer wheel's dependencies point downward and
+  a package-boundary suite enforces it.
+- `negotiation-protocol`: a bare-metal opening carries only buyer-owned demand and
+  resumes transcript-exact.
+- `buyer-orchestration`: the bare-metal demand is exact and buyer-bounded, public result
+  and evidence decode strictly, and buyer teardown is authenticated and idempotent.
 
 ## Non-Goals
 
 - Do not extract further concerns. If a domain still needs one, that is a finding for the
-  owning extraction change, not work to absorb here.
-- Do not build the bare-metal buyer — `bare-metal-buyer-domain` owns it, and this change
-  depends on it for the bare-metal deal path.
+  owning extraction change, not work to absorb here. Composing bare metal onto a kit
+  that exists is not extraction.
+- Do not build the bare-metal buyer; it exists. This change verifies it.
+- Do not build the bare-metal mock, the lifecycle pause/step controls, or bare metal's
+  composition onto the kit negotiation runtime (4a.1, 4a.2, and the runtime half of
+  4a.3); `bare-metal-mock-provisioned-deal` owns them and supplies the pipeline deal
+  evidence.
 - Do not add a Kubernetes-pod, inference-token, or model-training domain. This change
   delivers the two named domains; the vision they demonstrate is what makes the next ones
   cheap.
@@ -51,8 +76,10 @@ None.
 
 ## Impact
 
-- Affected code: a bare-metal compose stack; new e2e scenarios; the API-credits
-  storefront's remaining local implementations.
+- Affected code: the bare-metal storefront's `api.py` (negotiation and listing routes)
+  and `runtime.py`, once `bare-metal-mock-provisioned-deal` has put negotiation on the
+  kit runtime; the bare-metal buyer CLI; the API-credits storefront's remaining local
+  implementations; the bare-metal quickstart.
 - Affected tests: the e2e suite gains per-domain deal paths; shared fixtures and helpers
   may need generalizing away from VM assumptions.
 - Affected deployment: a new stack definition; Helm coverage follows the existing
@@ -63,8 +90,10 @@ None.
 
 - [x] `docs/development/TESTING.md` — what an end-to-end deal path proves and that it is
       proven per domain.
-- [x] Existing subsystem specification — `openspec/specs/deployment-state/spec.md` and
-      `openspec/specs/test-compatibility/spec.md`.
+- [x] Existing subsystem specification — `openspec/specs/deployment-state/spec.md`,
+      `openspec/specs/test-compatibility/spec.md`,
+      `openspec/specs/negotiation-protocol/spec.md`, and
+      `openspec/specs/buyer-orchestration/spec.md`.
 - [ ] New subsystem specification — none.
 - [x] `docs/bare-metal-seller-quickstart.md` — standing up the stack.
 
@@ -74,13 +103,33 @@ None.
   `openspec/specs/test-compatibility/spec.md`.
 - Every market domain intended for deployment has a deployable stack —
   `openspec/specs/deployment-state/spec.md`.
+- The bare-metal buyer is a clean wheel that addresses independent authorities —
+  `openspec/specs/deployment-state/spec.md`.
+- A bare-metal opening carries only buyer-owned demand; resume is transcript-exact —
+  `openspec/specs/negotiation-protocol/spec.md`.
+- The bare-metal demand is exact and buyer-bounded; public result and evidence decode
+  strictly; buyer teardown is authenticated and idempotent —
+  `openspec/specs/buyer-orchestration/spec.md`.
+- Why bare metal's composition onto the kit is not an extraction, and how the
+  bare-metal requirements are split between this change and the mock-provisioned
+  deal — this change's `design.md`.
 
 ## Dependencies and Related Changes
 
-- Depends on all four kit extraction changes. A domain missing an extracted concern
-  cannot complete a deal, so this change cannot pass its own completion test early.
-- Depends on `bare-metal-buyer-domain` for the demand side of the bare-metal deal path,
-  and on `market-platform-bare-metal-10-storefront-composition` for its seller side.
-- Depends on `multi-domain-storefront-composition` only if the bare-metal stack is
-  composed into a shared storefront rather than standing alone; either shape satisfies
-  this change, and the choice is recorded in `design.md`.
+- Depends on the kit extraction changes; the seam and the negotiation and
+  capacity/publication kits are in place for VM and API credits. A domain missing an
+  extracted concern cannot pass this change's completion test.
+- `bare-metal-mock-provisioned-deal` supplies the bare-metal deal evidence that runs
+  on every pipeline run, composes bare metal onto the kit negotiation runtime, and owns
+  the storefront half of idempotent teardown and restart recovery. The buyer CLI
+  requirements (exact demand, route refusal, strict decoding, CLI teardown) moved from
+  it to this change's 4b.6–4b.9 on 2026-10-01; 4a.3–4a.6 follow its composition.
+- `multi-domain-storefront-composition` owns the shared shell; bare metal composing
+  the kit negotiation runtime inside it is this change's Section 4a.
+- `market-platform-compute-40-multi-domain-proof` depends on this change: its
+  two-authority topology needs bare metal on the kit, not merely in the shell.
+- The deployment-shape decision (standalone service or a second contract in a shared
+  process) is deferred; either shape satisfies this change.
+- `bare-metal-buyer-domain` and `market-platform-bare-metal-10-storefront-composition`
+  (archived) planned the buyer package and the seller composition this change
+  verifies; their disposition records are in their archived headers.

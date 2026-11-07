@@ -4,30 +4,17 @@ from types import SimpleNamespace
 import pytest
 import typer
 from arkhai_vms import make_vm_provision_terms
-from domains.vms.buyer import (
-    common,
-    settle_cli,
-    settlement_composition,
-)
-import core_buyer.hosted_settlement as hosted_settlement
-from domains.vms.buyer.escrow_selection import select_escrow_entry
-from domains.vms.buyer.settlement_composition import resolve_buyer_settlement_policy
-from domains.vms.settlement import escrow_proposal_from_accepted_entry
-from market_core.schemas import SettlementOption, derive_settlement_option_id
 from core_buyer.buyer_config import ResolvedBuyerIdentity
-from core_buyer.action_policy import BuyerActionPolicy
-from market_hosted_settlement import (
-    FundingMode,
-    FundingProfile,
-    FundingSelection,
-    StripeSettlementConfig,
-    stripe_contract_fingerprint,
-)
 from market_identity import (
-    AuthorityBindingState,
-    AuthorityPayerBinding,
     Ed25519Signer,
 )
+from arkhai_vms_buyer import (
+    common,
+    settle_cli,
+    settlement_stages,
+)
+from arkhai_vms_buyer.escrow_selection import select_escrow_entry
+from arkhai_vms_settlement import escrow_proposal_from_accepted_entry
 
 _ESCROW = "0x" + "11" * 20
 _TOKEN = "0x" + "22" * 20
@@ -42,66 +29,6 @@ def _resolved(signer: Ed25519Signer) -> ResolvedBuyerIdentity:
         signer=signer,
         source="recovery",
     )
-
-
-def test_hosted_start_carries_only_accepted_and_authorization_refs(monkeypatch):
-    buyer = Ed25519Signer(b"\x31" * 32)
-    captured = {}
-    monkeypatch.setattr(
-        hosted_settlement,
-        "_signed_json",
-        lambda url, body, **kwargs: (
-            captured.update(url=url, body=body, kwargs=kwargs)
-            or {"settlement_ref": "settlement-1"}
-        ),
-    )
-
-    result = hosted_settlement.HostedSettlementTransport(
-        seller_url="http://seller/",
-        principal=buyer.identity,
-        signer=buyer,
-        resolve_seller_principals=lambda: None,
-    ).start(
-        negotiation_id="neg-1",
-        obligation_ref="a" * 64,
-        funding_authorization_ref="funding-auth-safe-1",
-    )
-
-    assert result["settlement_ref"] == "settlement-1"
-    assert captured["url"] == "http://seller/api/v1/settlements"
-    assert captured["body"] == {
-        "negotiation_id": "neg-1",
-        "obligation_ref": "a" * 64,
-        "funding_authorization_ref": "funding-auth-safe-1",
-    }
-
-
-def test_hosted_wait_returns_expired_for_explicit_reclaim(monkeypatch):
-    buyer = Ed25519Signer(b"\x31" * 32)
-    monkeypatch.setattr(
-        hosted_settlement,
-        "_signed_json",
-        lambda *_args, **_kwargs: {
-            "settlement_ref": "settlement-1",
-            "status": "expired",
-            "funding_profile": "us_bank_transfer.v1",
-            "funding_reason": "funding_deadline_elapsed",
-        },
-    )
-
-    result = hosted_settlement.HostedSettlementTransport(
-        seller_url="http://seller/",
-        principal=buyer.identity,
-        signer=buyer,
-        resolve_seller_principals=lambda: None,
-    ).wait(
-        settlement_ref="settlement-1",
-        total_timeout=1,
-        sleep=lambda _seconds: None,
-    )
-
-    assert result["status"] == "expired"
-    assert result["settlement_ref"] == "settlement-1"
 
 
 def test_select_escrow_entry_filters_by_chain_and_token():
@@ -176,10 +103,16 @@ def test_make_vm_provision_terms_uses_compute_compat_shape():
     assert terms.kind == "compute.v1"
 
 
-def test_alkahest_resume_preserves_accepted_ssh_after_config_rotation(monkeypatch):
+def test_alkahest_resume_settles_without_restating_negotiated_terms(monkeypatch):
+    """Settlement names the accepted negotiation and the EVM address only.
+
+    The SSH key and chain are the accepted negotiation's, read by the
+    storefront; a rotated local SSH key is never consulted.
+    """
     buyer = Ed25519Signer(b"\x34" * 32)
     accepted_ssh = "ssh-ed25519 accepted-key"
     deal = SimpleNamespace(
+        agreement=None,
         settlement_selection=None,
         settlement_plan={
             "obligations": [
@@ -202,7 +135,7 @@ def test_alkahest_resume_preserves_accepted_ssh_after_config_rotation(monkeypatc
         token_contract=_TOKEN,
         token_decimals=18,
         accepted_escrow_proposal={"chain_name": "anvil"},
-        accepted_escrow_terms=None,
+        listing_record=None,
         escrow_uid="0x" + "55" * 32,
         seller_url="http://seller",
         negotiation_id="neg-accepted-ssh",
@@ -250,17 +183,17 @@ def test_alkahest_resume_preserves_accepted_ssh_after_config_rotation(monkeypatc
     )
     monkeypatch.setattr(settle_cli, "open_run_log", lambda *_a, **_k: _Log())
     monkeypatch.setattr(
-        settlement_composition,
-        "resolve_alkahest_address_config_path",
-        lambda: None,
+        settle_cli,
+        "chain_address_book",
+        lambda _chain: None,
     )
     monkeypatch.setattr(
-        settle_cli,
+        settlement_stages,
         "submit_settlement_request",
         lambda **kwargs: submitted.update(kwargs) or {"status": "provisioning"},
     )
     monkeypatch.setattr(
-        settle_cli,
+        settlement_stages,
         "wait_for_settlement",
         lambda **_kwargs: {"status": "ready"},
     )
@@ -272,15 +205,18 @@ def test_alkahest_resume_preserves_accepted_ssh_after_config_rotation(monkeypatc
     )
 
     assert result == {"status": "ready"}
-    assert submitted["payload"]["ssh_public_key"] == accepted_ssh
+    assert submitted["payload"] == {
+        "negotiation_id": "neg-accepted-ssh",
+        "buyer_evm_address": "0x" + "66" * 20,
+    }
 
 
 def test_current_accepted_state_without_provision_terms_never_uses_config():
     deal = SimpleNamespace(
         accepted_provision_terms=None,
         settlement_selection={
-            "mechanism": "alkahest.v1",
             "option_id": "a" * 64,
+            "settlement": {"schema": "alkahest.v1"},
             "expiration_unix": 2_000_000_000,
         },
         settlement_plan={"obligations": []},
@@ -291,7 +227,7 @@ def test_current_accepted_state_without_provision_terms_never_uses_config():
         typer.BadParameter,
         match="current configuration will not reinterpret this run",
     ):
-        settle_cli._accepted_provision_inputs(deal)
+        settlement_stages._accepted_provision_inputs(deal)
 
 
 def test_recovery_never_falls_back_for_uninstalled_accepted_mechanism(
@@ -299,9 +235,10 @@ def test_recovery_never_falls_back_for_uninstalled_accepted_mechanism(
 ):
     buyer = Ed25519Signer(b"\x31" * 32)
     deal = SimpleNamespace(
+        agreement=None,
         settlement_selection={
-            "mechanism": "future.settlement.v1",
             "option_id": "a" * 64,
+            "settlement": {"schema": "future.settlement.v1"},
             "expiration_unix": 2_000_000_000,
         },
         settlement_plan={
@@ -350,371 +287,3 @@ def test_recovery_never_falls_back_for_uninstalled_accepted_mechanism(
             poll_interval=0,
             settlement_timeout=1,
         )
-
-
-def test_hosted_recovery_is_pinned_and_never_touches_chain_config(monkeypatch, capsys):
-    buyer = Ed25519Signer(b"\x32" * 32)
-    obligation = {
-        "payer": "buyer",
-        "claimant": "seller",
-        "payer_principal": buyer.identity.model_dump(mode="json"),
-        "claimant_principal": Ed25519Signer(b"\x33" * 32).identity.model_dump(
-            mode="json"
-        ),
-        "amount": "25",
-        "asset": "usd",
-        "expiration_unix": 2_000_000_000,
-        "mechanism": "fiat.stripe.v1",
-        "params": {"condition_profile": "vm"},
-    }
-    deal = SimpleNamespace(
-        settlement_selection={
-            "mechanism": "fiat.stripe.v1",
-            "option_id": "b" * 64,
-            "expiration_unix": 2_000_000_000,
-        },
-        settlement_plan={"obligations": [obligation]},
-        settlement_operation_identities=(),
-        negotiation_id="neg-hosted",
-        settlement_ref=None,
-        seller_url="http://seller",
-        buyer_principal=buyer.identity,
-        funding_authorization_ref=lambda _ref: "funding-auth-safe-1",
-    )
-
-    events: list[tuple[tuple, dict]] = []
-
-    class _Log:
-        def event(self, *args, **kwargs):
-            events.append((args, kwargs))
-
-        def end(self, *_args, **_kwargs):
-            return None
-
-    monkeypatch.setattr(
-        common,
-        "resolve_recovery_buyer_identity",
-        lambda _run_id: _resolved(buyer),
-    )
-    monkeypatch.setattr(
-        common,
-        "chain_by_name",
-        lambda *_args: (_ for _ in ()).throw(
-            AssertionError("hosted recovery touched chain config")
-        ),
-    )
-    monkeypatch.setattr(settle_cli, "load_deal_context", lambda *_args, **_kwargs: deal)
-    monkeypatch.setattr(
-        settlement_composition,
-        "load_user_config",
-        lambda: (_ for _ in ()).throw(
-            AssertionError("hosted recovery consulted current settlement priority")
-        ),
-    )
-    monkeypatch.setattr(
-        settle_cli,
-        "make_deal_publisher_trust_resolver",
-        lambda *_args, **_kwargs: lambda: None,
-    )
-    monkeypatch.setattr(settle_cli, "open_run_log", lambda *_args, **_kwargs: _Log())
-    monkeypatch.setattr(
-        settle_cli.HostedSettlementTransport,
-        "start",
-        lambda _transport, **_kwargs: {
-            "settlement_ref": "stripe-operation",
-            "status": "funding",
-            "action": {
-                "kind": "browser_redirect",
-                "url": "https://checkout.invalid/transient",
-                "expires_at_unix": 1_800_000_000,
-            },
-        },
-    )
-    monkeypatch.setattr(
-        settle_cli.HostedSettlementTransport,
-        "resume",
-        lambda _transport, **_kwargs: {"status": "ready"},
-    )
-
-    result = settle_cli.run_settle_from_log(
-        run_id="run-hosted",
-        poll_interval=0,
-        settlement_timeout=1,
-        action_policy=BuyerActionPolicy.PRINT,
-    )
-
-    assert result == {"status": "ready"}
-    assert "https://checkout.invalid/transient" in capsys.readouterr().out
-    assert any(args == ("hosted_checkout_required",) for args, _ in events)
-    assert "checkout.invalid" not in repr(events)
-
-
-def test_inflight_legacy_hosted_recovery_skips_new_authorization(monkeypatch):
-    buyer = Ed25519Signer(b"\x36" * 32)
-    seller = Ed25519Signer(b"\x37" * 32).identity
-    obligation = {
-        "payer": "buyer",
-        "claimant": "seller",
-        "payer_principal": buyer.identity.model_dump(mode="json"),
-        "claimant_principal": seller.model_dump(mode="json"),
-        "amount": "25",
-        "asset": "usd",
-        "expiration_unix": 2_000_000_000,
-        "mechanism": "fiat.stripe.v1",
-        "params": {
-            "account_ref": "seller-main",
-            "condition_profile": "vm",
-            "payment_method_types": ["card"],
-        },
-    }
-    deal = SimpleNamespace(
-        settlement_selection={
-            "mechanism": "fiat.stripe.v1",
-            "option_id": "c" * 64,
-            "expiration_unix": 2_000_000_000,
-        },
-        settlement_plan={"obligations": [obligation]},
-        settlement_operation_identities=(),
-        negotiation_id="neg-legacy",
-        settlement_ref="legacy-settlement-ref",
-        seller_url="http://seller",
-        buyer_principal=buyer.identity,
-        funding_authorization_ref=lambda _ref: None,
-    )
-
-    class Log:
-        def event(self, *_args, **_kwargs):
-            return None
-
-        def end(self, *_args, **_kwargs):
-            return None
-
-    monkeypatch.setattr(
-        common,
-        "resolve_recovery_buyer_identity",
-        lambda _run_id: _resolved(buyer),
-    )
-    monkeypatch.setattr(
-        settle_cli,
-        "load_deal_context",
-        lambda *_args, **_kwargs: deal,
-    )
-    monkeypatch.setattr(
-        settle_cli,
-        "make_deal_publisher_trust_resolver",
-        lambda *_args, **_kwargs: lambda: None,
-    )
-    monkeypatch.setattr(settle_cli, "open_run_log", lambda *_args, **_kwargs: Log())
-    monkeypatch.setattr(
-        settle_cli,
-        "prepare_hosted_funding_authorization",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("in-flight legacy recovery reauthorized funding")
-        ),
-    )
-    monkeypatch.setattr(
-        settle_cli.HostedSettlementTransport,
-        "start",
-        lambda _transport, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("in-flight legacy recovery started a new settlement")
-        ),
-    )
-    waited = []
-    monkeypatch.setattr(
-        settle_cli.HostedSettlementTransport,
-        "resume",
-        lambda _transport, **kwargs: waited.append(kwargs) or {"status": "ready"},
-    )
-
-    result = settle_cli.run_settle_from_log(
-        run_id="run-legacy",
-        poll_interval=0,
-        settlement_timeout=1,
-        action_policy=BuyerActionPolicy.PRINT,
-    )
-    assert result == {"status": "ready"}
-    assert waited[0]["settlement_ref"] == "legacy-settlement-ref"
-
-
-def test_legacy_without_settlement_ref_requires_operator_before_payer_call(
-    monkeypatch,
-):
-    buyer = Ed25519Signer(b"\x38" * 32)
-    seller = Ed25519Signer(b"\x39" * 32).identity
-    obligation = {
-        "payer": "buyer",
-        "claimant": "seller",
-        "payer_principal": buyer.identity.model_dump(mode="json"),
-        "claimant_principal": seller.model_dump(mode="json"),
-        "amount": "25",
-        "asset": "usd",
-        "expiration_unix": 2_000_000_000,
-        "mechanism": "fiat.stripe.v1",
-        "params": {
-            "account_ref": "seller-main",
-            "condition_profile": "vm",
-            "payment_method_types": ["card"],
-        },
-    }
-    deal = SimpleNamespace(
-        settlement_selection={
-            "mechanism": "fiat.stripe.v1",
-            "option_id": "d" * 64,
-            "expiration_unix": 2_000_000_000,
-        },
-        settlement_plan={"obligations": [obligation]},
-        settlement_operation_identities=(),
-        negotiation_id="neg-legacy-unstarted",
-        settlement_ref=None,
-        seller_url="http://seller",
-        buyer_principal=buyer.identity,
-        funding_authorization_ref=lambda _ref: None,
-    )
-
-    class Log:
-        def event(self, *_args, **_kwargs):
-            return None
-
-    monkeypatch.setattr(
-        common,
-        "resolve_recovery_buyer_identity",
-        lambda _run_id: _resolved(buyer),
-    )
-    monkeypatch.setattr(
-        settle_cli,
-        "load_deal_context",
-        lambda *_args, **_kwargs: deal,
-    )
-    monkeypatch.setattr(
-        settle_cli,
-        "make_deal_publisher_trust_resolver",
-        lambda *_args, **_kwargs: lambda: None,
-    )
-    monkeypatch.setattr(settle_cli, "open_run_log", lambda *_args, **_kwargs: Log())
-    monkeypatch.setattr(
-        settle_cli,
-        "prepare_hosted_funding_authorization",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("legacy recovery called the payer authority")
-        ),
-    )
-    monkeypatch.setattr(
-        settle_cli.HostedSettlementTransport,
-        "start",
-        lambda _transport, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("legacy recovery started a new settlement")
-        ),
-    )
-
-    with pytest.raises(typer.BadParameter, match="operator recovery is required"):
-        settle_cli.run_settle_from_log(
-            run_id="run-legacy-unstarted",
-            poll_interval=0,
-            settlement_timeout=1,
-            action_policy=BuyerActionPolicy.PRINT,
-        )
-
-
-def test_fiat_discovery_is_local_only_and_respects_action_capability(monkeypatch):
-    monkeypatch.setattr(
-        common,
-        "buyer_chains",
-        lambda: (_ for _ in ()).throw(
-            AssertionError("fiat selection resolved chain resources")
-        ),
-    )
-    buyer = Ed25519Signer(b"\x35" * 32)
-
-    class Profiles:
-        def authority_payer_binding(self, profile_id, **coordinates):
-            return AuthorityPayerBinding(
-                authority_id=coordinates["authority_id"],
-                environment=coordinates["environment"],
-                binding_ref="payer_binding_opaque",
-                bound_principal=coordinates["principal"],
-                state=AuthorityBindingState.ACTIVE,
-            )
-
-    monkeypatch.setattr(settlement_composition, "BuyerProfileService", Profiles)
-    monkeypatch.setattr(
-        settlement_composition,
-        "payer_command_context_from_config",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("discovery performed a hosted network read")
-        ),
-    )
-    stripe = StripeSettlementConfig(
-        enabled=True,
-        base_url="https://settlement.example",
-        authority_id="authority-main",
-        environment="production",
-        authority={"principals": [buyer.identity.model_dump(mode="json")]},
-        expected_manifest_digest="sha256:" + "ab" * 32,
-    )
-    buyer_stripe_config = stripe.model_dump(mode="json", exclude_defaults=True)
-    assert {
-        "account_ref",
-        "condition_profile",
-        "condition_profiles",
-        "currency",
-        "country",
-        "resolvers",
-    }.isdisjoint(buyer_stripe_config)
-    config = {
-        "Settlement": {
-            "schema_version": 1,
-            "priority": ["fiat.stripe.v1"],
-            "stripe": buyer_stripe_config,
-        }
-    }
-    params = {
-        "account_ref": "seller-main",
-        "authority_id": stripe.authority_id,
-        "country": stripe.country,
-        "environment": stripe.environment,
-        "claimant_principal": Ed25519Signer(b"\x36" * 32).identity.model_dump(
-            mode="json"
-        ),
-        "condition": {
-            "condition_id": "vm-fulfillment",
-            "evaluator": {
-                "kind": "builtin.v1",
-                "version": "trivial.v1",
-                "params": {"kind": "trivial"},
-            },
-            "demand": {"encoding": "application/jcs+json", "value": {}},
-        },
-        "funding_profile": FundingProfile.CARD.value,
-        "interaction": FundingMode.INTERACTIVE.value,
-        "funds_flow": "separate_charges_transfers",
-        "contract_fingerprint": stripe_contract_fingerprint(stripe),
-    }
-    option = SettlementOption(
-        option_id=derive_settlement_option_id(
-            mechanism="fiat.stripe.v1",
-            asset="usd",
-            rates=[],
-            params=params,
-        ),
-        mechanism="fiat.stripe.v1",
-        asset="usd",
-        params=params,
-    )
-    listing = {"settlement_options": [option.model_dump(mode="json")]}
-    policy = resolve_buyer_settlement_policy(
-        config,
-        identity=_resolved(buyer),
-        funding_selection=FundingSelection(mode=FundingMode.INTERACTIVE),
-        action_capable=True,
-    )
-    selected = policy.select(listing, expiration_unix=2_000_000_000)
-    assert selected is not None
-    assert selected.selection.mechanism == "fiat.stripe.v1"
-
-    no_action_policy = resolve_buyer_settlement_policy(
-        config,
-        identity=_resolved(buyer),
-        funding_selection=FundingSelection(mode=FundingMode.INTERACTIVE),
-        action_capable=False,
-    )
-    assert no_action_policy.select(listing, expiration_unix=2_000_000_000) is None

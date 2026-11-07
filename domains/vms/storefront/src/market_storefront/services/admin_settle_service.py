@@ -6,7 +6,7 @@ implement the evaluate→advance→observe pattern:
 
     evaluate (this module)        advance (POST /settle/{uid})
     ────────────────────────────  ───────────────────────────
-    verify_escrow_dry_run         start_settlement_job → verify_escrow_for_settlement
+    verify_escrow_dry_run         start_settlement_job → verify_escrow_against_plan
     evaluate_settle_dry_run       start_settlement_job → _build_provisioning_job_spec
                                                         → _do_provision
 """
@@ -19,11 +19,20 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Imported at module level so unit tests can patch them directly on this module.
+from market_alkahest import ALKAHEST_MECHANISM_ID  # noqa: E402
+from market_core.schemas import EscrowProposal  # noqa: E402
+from market_storefront.settlement_stages import accepted_alkahest_proposal  # noqa: E402
+from market_storefront.utils.config import chain_address_books  # noqa: E402
 from market_storefront.utils.escrow_verification import (  # noqa: E402
     EscrowVerificationError,
-    verify_escrow_for_settlement,
+    verify_escrow_against_plan,
 )
 from market_storefront.services.fulfillment_service import _build_provisioning_job_spec  # noqa: E402
+from market_site_client import SiteCapacityClientError  # noqa: E402
+from market_storefront.services.capacity_client import build_capacity_runtime  # noqa: E402
+from market_storefront.services.vm_job_spec_service import (  # noqa: E402
+    compute_capacity_claim_from_order,
+)
 
 
 class AdminSettleService:
@@ -35,8 +44,8 @@ class AdminSettleService:
     Args:
         sqlite_client: SQLite client for DB lookups (read-only in this service).
         alkahest_clients: Per-chain ``AlkahestClient`` dict, keyed by chain
-            name. ``verify_escrow_dry_run`` picks the entry matching the
-            caller-supplied ``chain_name``; an unknown chain surfaces as
+            name. ``verify_escrow_dry_run`` picks the entry for the chain the
+            accepted proposal names; a chain with no client surfaces as
             ``valid=False, reason="chain '<name>' not configured"`` rather
             than crashing.
     """
@@ -51,26 +60,34 @@ class AdminSettleService:
         self,
         *,
         escrow_uid: str,
-        listing_id: str,
-        seller_wallet: str,
-        agreed_price: int,
-        agreed_duration_seconds: int,
-        chain_name: str,
+        negotiation_id: str,
     ) -> dict:
-        """Read the escrow from chain and confirm it matches the supplied terms.
+        """Read the escrow from chain and confirm it matches the deal's plan.
 
-        Tests getRecordFromChain in isolation — no DB writes, no provisioning.
+        The escrow is checked against the settlement plan the accepted
+        negotiation committed, on the chain and escrow contract its accepted
+        proposal names, exactly as settlement verifies it, so the preview and
+        the real verification cannot disagree. No DB writes, no provisioning.
 
         Returns:
             {"valid": True, "escrow_uid": ...}  on success
             {"valid": False, "escrow_uid": ..., "reason": "<why>"}  on any mismatch
 
         Raises:
-            ValueError  if the listing is not found in SQLite (caller maps to 404)
+            ValueError  if no accepted negotiation is found (caller maps to 404)
         """
-        listing = await self._db.load_listing(listing_id=listing_id)
-        if not listing:
-            raise ValueError(f"Listing {listing_id!r} not found")
+        thread = await self._db.load_negotiation_thread_row(
+            negotiation_id=negotiation_id
+        )
+        if not thread or thread.get("terminal_state") != "success":
+            raise ValueError(f"Accepted negotiation {negotiation_id!r} not found")
+        try:
+            proposal = EscrowProposal.model_validate(
+                accepted_alkahest_proposal(thread, mechanism=ALKAHEST_MECHANISM_ID)
+            )
+        except ValueError as exc:
+            return {"valid": False, "escrow_uid": escrow_uid, "reason": str(exc)}
+        chain_name = proposal.chain_name
 
         alkahest = self._alkahest_clients.get(chain_name)
         if alkahest is None:
@@ -80,10 +97,8 @@ class AdminSettleService:
                 "reason": f"chain {chain_name!r} not configured on this storefront",
             }
 
-        from market_storefront.utils.config import CHAINS
-
-        chain_cfg = CHAINS.get(chain_name)
-        if chain_cfg is None:
+        address_books = chain_address_books()
+        if chain_name not in address_books:
             return {
                 "valid": False,
                 "escrow_uid": escrow_uid,
@@ -91,15 +106,13 @@ class AdminSettleService:
             }
 
         try:
-            await verify_escrow_for_settlement(
+            await verify_escrow_against_plan(
                 escrow_uid=escrow_uid,
-                seller_wallet=seller_wallet,
-                agreed_price=agreed_price,
-                agreed_duration_seconds=agreed_duration_seconds,
-                listing=listing,
+                settlement_plan=thread.get("settlement_plan"),
                 alkahest_client=alkahest,
                 chain_name=chain_name,
-                alkahest_address_config_path=chain_cfg.alkahest_address_config_path,
+                escrow_address=proposal.escrow_address,
+                address_book=address_books[chain_name],
             )
         except EscrowVerificationError as exc:
             return {"valid": False, "escrow_uid": escrow_uid, "reason": str(exc)}
@@ -113,14 +126,21 @@ class AdminSettleService:
         listing_id: str,
         ssh_public_key: str,
         duration_seconds: int,
+        negotiation_id: str | None = None,
     ) -> dict:
-        """Resolve a host from inventory and build the provisioning job spec.
+        """Preview the capacity and job spec settle would use.
 
-        Tests doWork in isolation — no chain reads, no DB writes, no provisioning.
-        Uses the capacity ledger probe (read-only — consumes nothing).
+        Settle commits the capacity hold the negotiation's acceptance placed,
+        and reserves fresh capacity only when there is none. The preview does
+        the same: with a held reservation it reports the held resource's host;
+        otherwise it probes the capacity ledger (read-only — consumes nothing).
+        No chain reads, no DB writes, no provisioning.
 
         Returns:
-            {"would_submit": True, "escrow_uid": ..., "vm_host": ..., "vm_target": ..., "required_attributes": {...}}
+            {"would_submit": True, "escrow_uid": ..., "host_id": ..., "required_attributes": {...}}
+
+        It names no guest: provisioning names the guest from the capacity
+        reservation settle commits, so a preview cannot know it.
             {"would_submit": False, "escrow_uid": ..., "reason": "<why>"}
 
         Raises:
@@ -129,6 +149,17 @@ class AdminSettleService:
         listing = await self._db.load_listing(listing_id=listing_id)
         if not listing:
             raise ValueError(f"Listing {listing_id!r} not found")
+
+        held = await self._held_capacity(negotiation_id)
+        if held is not None:
+            capacity_reservation_id, host_id = held
+            return {
+                "would_submit": True,
+                "escrow_uid": escrow_uid,
+                "host_id": host_id,
+                "required_attributes": compute_capacity_claim_from_order(listing),
+                "capacity_reservation_id": capacity_reservation_id,
+            }
 
         spec = await _build_provisioning_job_spec(
             order_dict=listing,
@@ -150,7 +181,40 @@ class AdminSettleService:
         return {
             "would_submit": True,
             "escrow_uid": escrow_uid,
-            "vm_host": spec["vm_host"],
-            "vm_target": spec["vm_target"],
+            "host_id": spec["host_id"],
             "required_attributes": spec["required_attributes"],
         }
+
+    async def _held_capacity(
+        self, negotiation_id: str | None
+    ) -> tuple[str, str | None] | None:
+        """The reservation and host a negotiation's acceptance hold pins, if any.
+
+        The site keeps a reservation's placement out of what reserving returns,
+        so the stored hold names only its reservation and site; the host is read
+        from the site's own record of that reservation.
+        """
+        if not negotiation_id:
+            return None
+        hold = await self._db.load_capacity_hold(negotiation_id=negotiation_id)
+        if not hold:
+            return None
+        payload = dict(hold.get("payload") or {})
+        reservation_id = str(
+            hold.get("capacity_reservation_id")
+            or payload.get("capacity_reservation_id")
+            or ""
+        )
+        site_id = payload.get("site")
+        host_id = None
+        if reservation_id and site_id:
+            try:
+                reservation = await build_capacity_runtime(
+                    lambda: self._db
+                ).site_client(site_id).get_reservation(reservation_id)
+            except SiteCapacityClientError as exc:
+                if exc.status_code != 404:
+                    raise
+                reservation = None
+            host_id = (reservation or {}).get("host_id")
+        return reservation_id, host_id

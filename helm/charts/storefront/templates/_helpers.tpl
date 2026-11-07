@@ -34,6 +34,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Labels for this chart's Helm test pod. Every workload selector in the release
+requires app.kubernetes.io/name, so a test pod carries the release's other
+labels but never that one: selecting a workload's pods by its selector, as
+`kubectl logs -l` or `kubectl logs deploy/...` does, never returns a test pod.
+*/}}
+{{- define "storefront.testLabels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: test
+{{- end }}
+
+{{/*
 Resolve the full image reference for the agents container.
 Supports an optional global.imageRepository passed down from the parent.
 */}}
@@ -51,24 +67,6 @@ Supports an optional global.imageRepository passed down from the parent.
 {{- else -}}
 {{- printf "%s:%s" $name .Values.image.tag -}}
 {{- end -}}
-{{- end }}
-
-{{/*
-Compose the HTTP RPC URL from global.rpc.host and global.rpc.port.
-Mirrors the definition in the root chart's _helpers.tpl.
-*/}}
-{{- define "rpc.url" -}}
-{{- $scheme := .Values.global.rpc.scheme | default "http" -}}
-{{- printf "%s://%s:%d" $scheme .Values.global.rpc.host (int .Values.global.rpc.port) -}}
-{{- end }}
-
-{{/*
-Compose the WebSocket RPC URL from global.rpc.host and global.rpc.port.
-Agents connect to Anvil over WebSocket for event subscriptions.
-*/}}
-{{- define "rpc.wsUrl" -}}
-{{- $scheme := ternary "wss" "ws" (eq (.Values.global.rpc.scheme | default "http") "https") -}}
-{{- printf "%s://%s:%d" $scheme .Values.global.rpc.host (int .Values.global.rpc.port) -}}
 {{- end }}
 
 {{/*
@@ -98,9 +96,69 @@ Argument: dict with `root` and `agent`.
 {{- end }}
 
 {{/*
-Per-agent fullname: {fullname}-{agent.name}.
+A values file's `null` removes what it names, whether or not Helm's merge removed
+it: under the supported Helm release, a parent's `null` for a subchart is dropped
+only where the subchart's own defaults define the key, and every agent and every
+key under one comes from the parent or an overlay. So the chart removes them
+itself before any template reads an agent, and an agent renders as it would had
+the removed key never been stated. See openspec/specs/deployment-state/spec.md,
+"A storefront chart passes service configuration through".
+
+`storefront.dropNulls`: remove, in place, every key whose value is `null` from the
+mapping `.`, at every depth, inside list elements too. A list element is a value
+rather than a key, so a `null` element stays.
+*/}}
+{{- define "storefront.dropNulls" -}}
+{{- if kindIs "map" . -}}
+  {{- range $key, $value := . -}}
+    {{- if kindIs "invalid" $value -}}
+      {{- $_ := unset $ $key -}}
+    {{- else -}}
+      {{- include "storefront.dropNulls" $value -}}
+    {{- end -}}
+  {{- end -}}
+{{- else if kindIs "slice" . -}}
+  {{- range $item := . -}}
+    {{- include "storefront.dropNulls" $item -}}
+  {{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+`storefront.agents`: the chart's agents with every `null` removed, set by name into
+the mapping `into`: a `null` agent is dropped, and each other agent is a copy with
+its `null` keys removed at every depth. An agent map naming no agent once they are
+removed is refused, as the values schema refuses an empty one: a release running no
+storefront agent disables the storefront instead. An agent stating no port or no
+identity, once its nulls are removed, is refused naming it: the chart has neither to
+default to, and every agent's container, probes, Service, and credential use them.
+Argument: dict with `root` (the chart root) and `into` (an empty dict).
+*/}}
+{{- define "storefront.agents" -}}
+{{- $into := .into -}}
+{{- range $name, $entry := (.root.Values.agents | default dict) -}}
+  {{- if not (kindIs "invalid" $entry) -}}
+    {{- $agent := deepCopy $entry -}}
+    {{- include "storefront.dropNulls" $agent -}}
+    {{- range $key := list "port" "identity" -}}
+      {{- if not (hasKey $agent $key) -}}
+        {{- fail (printf "storefront agent %s states no %s" $name $key) -}}
+      {{- end -}}
+    {{- end -}}
+    {{- $_ := set $into $name $agent -}}
+  {{- end -}}
+{{- end -}}
+{{- if not $into -}}
+  {{- fail "storefront agents names no agent once its nulls are removed; a release runs at least one, or sets the umbrella's storefront.enabled false to run none" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Per-agent fullname: {fullname}-{agent.name}, the agent's name being its key
+under agents:.
 Used as the Deployment / Service / Secret object name.
-Argument: dict with `root` (the chart root) and `agent` (one entry from agents:).
+Argument: dict with `root` (the chart root) and `agent` (one agent, with its
+name).
 */}}
 {{- define "storefront.agentFullname" -}}
 {{- printf "%s-%s" (include "storefront.fullname" .root) .agent.name | trunc 63 | trimSuffix "-" -}}
@@ -129,306 +187,433 @@ can rebind existing state.
 
 {{/*
 Per-agent ConfigMap name — non-sensitive runtime config lives here.
-Mirrors agentSecretName: honors agent.config.configMapName override,
-else auto-generates from the agent fullname.
+Mirrors agentSecretName: honors agent.configMapName, else auto-generates from
+the agent fullname.
 */}}
 {{- define "storefront.agentConfigMapName" -}}
-{{- $cfgName := "" -}}
-{{- if .agent.config -}}
-{{- $cfgName = .agent.config.configMapName | default "" -}}
-{{- end -}}
-{{- if $cfgName -}}
-{{- $cfgName -}}
+{{- if .agent.configMapName -}}
+{{- .agent.configMapName -}}
 {{- else -}}
 {{- printf "%s-config" (include "storefront.agentFullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 {{- end }}
 
 {{/*
-Render the per-agent non-sensitive storefront.toml. The output is a single
-string the ConfigMap template embeds under `storefront.toml`.
+The agent's Alkahest address book, as JSON for fromJson: `configMapName` (empty
+mounts nothing), `key`, and `mountPath`, each defaulted where the agent's
+alkahestAddressBook does not state it.
+*/}}
+{{- define "storefront.agentAddressBook" -}}
+{{- $book := .alkahestAddressBook | default dict -}}
+{{- toJson (dict
+  "configMapName" ($book.configMapName | default "")
+  "key" ($book.key | default "alkahest_addresses.json")
+  "mountPath" ($book.mountPath | default "/etc/arkhai/alkahest")) -}}
+{{- end }}
+
+{{/*
+The agent's CA bundle, as JSON for fromJson: `configMapName` or `secretName`,
+whichever names the source ("" for the other), and its `key`. Both empty is no
+bundle. The chart names no CA of its own: a deployment supplies the ConfigMap or
+Secret, and the storefront's payments client trusts its payments service under
+it, through the `[Settlement.arkhai_payments].ca_bundle_path` the chart derives
+from the mount (`storefront.deriveCaBundlePath`). Naming both sources is
+refused, as is a source without its key.
+Argument: one agent, with its name.
+*/}}
+{{- define "storefront.agentCaBundle" -}}
+{{- $bundle := .caBundle | default dict -}}
+{{- $configMap := $bundle.configMapName | default "" -}}
+{{- $secret := $bundle.secretName | default "" -}}
+{{- if and $configMap $secret -}}
+  {{- fail (printf "storefront agent %s caBundle names both configMapName %q and secretName %q; name one" .name $configMap $secret) -}}
+{{- end -}}
+{{- $key := "" -}}
+{{- if or $configMap $secret -}}
+  {{- $key = required (printf "storefront agent %s caBundle.key is required with its source" .name) $bundle.key -}}
+{{- end -}}
+{{- toJson (dict "configMapName" $configMap "secretName" $secret "key" $key) -}}
+{{- end }}
+
+{{/*
+Where the CA bundle mounts, the file the derived ca_bundle_path names.
+*/}}
+{{- define "storefront.caBundleDirectory" -}}/etc/arkhai/ca{{- end }}
+{{- define "storefront.caBundleFile" -}}/etc/arkhai/ca/ca-bundle.pem{{- end }}
+
+{{/*
+The agent's `[Settlement.arkhai_payments]` section, matched in any spelling at
+each level, as JSON for fromJson, or {} when the configuration has none.
+Argument: one agent.
+*/}}
+{{- define "storefront.agentPaymentsSection" -}}
+{{- $settlement := include "storefront.foldedMap" (dict "doc" (.config | default dict) "name" "settlement") | fromJson -}}
+{{- include "storefront.foldedMap" (dict "doc" $settlement "name" "arkhai_payments") -}}
+{{- end }}
+
+{{/*
+What decides how an agent's storefront process loads its configuration and
+reaches its payments service, rendered once for its Deployment and once for its
+payments check test pod, so the two cannot drift: the container's environment,
+the configuration, overlay, address-book, and CA-bundle mounts, and their
+volumes. Each takes a dict with `root` (the chart root) and `agent` (one agent,
+with its name and a `secret` map), and renders list items at column zero.
+
+`storefront.agentEnv`: XDG_CONFIG_HOME and the signing credential, neither a
+storefront setting: XDG_CONFIG_HOME selects the configuration loaded, and the
+credential must be kept from the loader. Every other value, the payments key and
+the CA bundle's path among them, is in a mounted file.
+*/}}
+{{- define "storefront.agentEnv" -}}
+{{- $agent := .agent -}}
+- name: XDG_CONFIG_HOME
+  value: /etc
+- name: ARKHAI_IDENTITY_CREDENTIAL
+  valueFrom:
+    secretKeyRef:
+      name: {{ required "storefront agent identity.credentialSecret.name is required" $agent.identity.credentialSecret.name | quote }}
+      key: {{ required "storefront agent identity.credentialSecret.key is required" $agent.identity.credentialSecret.key | quote }}
+{{- end }}
+
+{{/*
+`storefront.agentConfigMounts`: storefront.json, the Secret overlay when the agent
+names one, its Alkahest address book when it names one, and its CA bundle when it
+names one, each read-only.
+*/}}
+{{- define "storefront.agentConfigMounts" -}}
+{{- $agent := .agent -}}
+{{- $addressBook := include "storefront.agentAddressBook" $agent | fromJson -}}
+{{- $bundle := include "storefront.agentCaBundle" $agent | fromJson -}}
+- name: arkhai-config
+  mountPath: /etc/arkhai/storefront.json
+  subPath: storefront.json
+  readOnly: true
+{{- if $agent.secret.secretName }}
+- name: arkhai-secrets
+  mountPath: /etc/arkhai/storefront.secrets.toml
+  subPath: {{ $agent.secret.configKey | default "storefront.secrets.toml" }}
+  readOnly: true
+{{- end }}
+{{- if $addressBook.configMapName }}
+- name: alkahest-address-book
+  mountPath: {{ $addressBook.mountPath | quote }}
+  readOnly: true
+{{- end }}
+{{- if or $bundle.configMapName $bundle.secretName }}
+- name: ca-bundle
+  mountPath: {{ include "storefront.caBundleDirectory" . | quote }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{/*
+`storefront.agentConfigVolumes`: the volumes `storefront.agentConfigMounts` mounts.
+*/}}
+{{- define "storefront.agentConfigVolumes" -}}
+{{- $agent := .agent -}}
+{{- $addressBook := include "storefront.agentAddressBook" $agent | fromJson -}}
+{{- $bundle := include "storefront.agentCaBundle" $agent | fromJson -}}
+- name: arkhai-config
+  configMap:
+    name: {{ include "storefront.agentConfigMapName" . }}
+    items:
+      - key: storefront.json
+        path: storefront.json
+{{- if $agent.secret.secretName }}
+- name: arkhai-secrets
+  secret:
+    secretName: {{ $agent.secret.secretName | quote }}
+    items:
+      - key: {{ $agent.secret.configKey | default "storefront.secrets.toml" }}
+        path: storefront.secrets.toml
+{{- end }}
+{{- if $addressBook.configMapName }}
+- name: alkahest-address-book
+  configMap:
+    name: {{ $addressBook.configMapName | quote }}
+    items:
+      - key: {{ $addressBook.key | quote }}
+        path: {{ $addressBook.key | quote }}
+{{- end }}
+{{- if $bundle.configMapName }}
+- name: ca-bundle
+  configMap:
+    name: {{ $bundle.configMapName | quote }}
+    items:
+      - key: {{ $bundle.key | quote }}
+        path: ca-bundle.pem
+{{- else if $bundle.secretName }}
+- name: ca-bundle
+  secret:
+    secretName: {{ $bundle.secretName | quote }}
+    items:
+      - key: {{ $bundle.key | quote }}
+        path: ca-bundle.pem
+{{- end }}
+{{- end }}
+
+{{/*
+Key lookup as the storefront's loader does it. Dynaconf matches configuration
+keys case-insensitively at every level, so every key the chart reads or writes
+is matched the same way; otherwise `Port` or `registry.URLS` would slip past a
+check and sit beside the value the chart writes.
+
+`storefront.foldedKey`: the key under which `doc` holds `name` (lowercase),
+in whatever spelling it was written, or "".
+*/}}
+{{- define "storefront.foldedKey" -}}
+{{- $found := "" -}}
+{{- range $key, $_ := .doc -}}
+{{- if eq (lower $key) $.name -}}{{- $found = $key -}}{{- end -}}
+{{- end -}}
+{{- $found -}}
+{{- end }}
+
+{{/*
+`storefront.foldedMap`: the mapping `doc` holds under `name`, as JSON for
+fromJson, or {} when absent. JSON keeps every value's type through the round
+trip.
+*/}}
+{{- define "storefront.foldedMap" -}}
+{{- $key := include "storefront.foldedKey" . -}}
+{{- $value := dict -}}
+{{- if $key -}}{{- $value = index .doc $key | default dict -}}{{- end -}}
+{{- toJson $value -}}
+{{- end }}
+
+{{/*
+Refuse a mapping, at any depth, that states one key in two spellings: the
+loader would merge them in an order nobody chose.
+Argument: dict with `agent` (name), `path` (dotted, for the message), `value`.
+*/}}
+{{- define "storefront.refuseFoldedDuplicates" -}}
+{{- $agent := .agent -}}
+{{- $path := .path -}}
+{{- if kindIs "map" .value -}}
+  {{- $seen := dict -}}
+  {{- range $key, $item := .value -}}
+    {{- $folded := lower $key -}}
+    {{- if hasKey $seen $folded -}}
+      {{- fail (printf "storefront agent %s %s states both %q and %q; state one" $agent $path (index $seen $folded) $key) -}}
+    {{- end -}}
+    {{- $_ := set $seen $folded $key -}}
+    {{- include "storefront.refuseFoldedDuplicates" (dict "agent" $agent "path" (printf "%s.%s" $path $key) "value" $item) -}}
+  {{- end -}}
+{{- else if kindIs "slice" .value -}}
+  {{- range $index, $item := .value -}}
+    {{- include "storefront.refuseFoldedDuplicates" (dict "agent" $agent "path" (printf "%s[%d]" $path $index) "value" $item) -}}
+  {{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The first registry URL the agent's storefront uses: the first configured URL,
+else the internal registry's.
+*/}}
+{{- define "storefront.effectiveRegistryUrl" -}}
+{{- $registry := include "storefront.foldedMap" (dict "doc" (.agent.config | default dict) "name" "registry") | fromJson -}}
+{{- $urlsKey := include "storefront.foldedKey" (dict "doc" $registry "name" "urls") -}}
+{{- if $urlsKey -}}
+{{- first (index $registry $urlsKey) -}}
+{{- else -}}
+{{- include "storefront.registryUrl" .root -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+`storefront.foldedValue`: the scalar `doc` holds under `name`, matched in any
+spelling, as a string, or "" when absent.
+*/}}
+{{- define "storefront.foldedValue" -}}
+{{- $key := include "storefront.foldedKey" . -}}
+{{- if $key -}}{{- index .doc $key | toString -}}{{- end -}}
+{{- end }}
+
+{{/*
+Whether `principals` (a list of scheme-tagged identities) includes `principal`.
+An entry's `scheme` and `identifier` are matched in any spelling, as the
+storefront's loader reads them. Returns "true" or "".
+*/}}
+{{- define "storefront.includesPrincipal" -}}
+{{- $found := false -}}
+{{- range $candidate := (.principals | default list) -}}
+{{- $scheme := include "storefront.foldedValue" (dict "doc" $candidate "name" "scheme") -}}
+{{- $identifier := include "storefront.foldedValue" (dict "doc" $candidate "name" "identifier") -}}
+{{- if and (eq $scheme $.principal.scheme) (eq $identifier $.principal.identifier) -}}
+{{- $found = true -}}
+{{- end -}}
+{{- end -}}
+{{- if $found -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Render the per-agent public storefront document, `storefront.json`.
+
+The agent's `config` is the storefront's own configuration and passes through
+with its `null` keys removed (`storefront.agents` removes them). The chart
+supplies no service default and does not validate the service's settings, which
+the storefront does at startup. The chart adds only what the release knows — the
+agent's port, its Service URL, the internal registry and provisioning URLs, a
+default capacity site, and the database path under the persistence mount — and,
+except for the port, only where the configuration does not state it. It refuses
+a release whose parts disagree. See openspec/specs/deployment-state/spec.md, "A
+storefront chart passes service configuration through".
+
+Keys are matched case-insensitively at every level, as the storefront's loader
+matches them, so a check cannot be bypassed by spelling a key differently, and
+a configuration stating one key in two spellings is refused. The values schema
+accepts every typed field in any spelling too, so no read here may assume one.
 
 Argument: dict with `root` (chart root) and `agent`.
-
-Pairs with an operator-managed storefront.secrets.toml Secret overlay. Public
-identity values remain in this ConfigMap; identity credential material is
-injected directly from identity.credentialSecret as an environment variable.
-
-Topology-derived values (base_url, registry.urls, and provisioning.service_url)
-are composed from the chart's view of the cluster rather than authored as
-hardcoded strings in values.yaml.
-
-Anything that isn't here (image, replicas, probes, Service objects,
-resources, autoRegister) is k8s-only and never ends up in the agent's
-storefront.toml.
 */}}
-{{- define "storefront.principalsToml" -}}
-{{- $principals := required (printf "%s principals are required" .label) .principals -}}
-{{- if or (lt (len $principals) 1) (gt (len $principals) 2) -}}
-{{- fail (printf "%s principals must contain one or two identities" .label) -}}
-{{- end -}}
-principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ scheme = {{ required (printf "%s principal scheme is required" $.label) $principal.scheme | quote }}, identifier = {{ required (printf "%s principal identifier is required" $.label) $principal.identifier | quote }} }{{ end }}]
-{{- end }}
-
-{{- define "storefront.tomlLiteral" -}}
-{{- $value := . -}}
-{{- if kindIs "map" $value -}}
-{ {{- range $index, $key := (keys $value | sortAlpha) }}{{ if $index }}, {{ end }}{{ $key | quote }} = {{ include "storefront.tomlLiteral" (index $value $key) }}{{- end }} }
-{{- else if kindIs "slice" $value -}}
-[{{- range $index, $item := $value }}{{ if $index }}, {{ end }}{{ include "storefront.tomlLiteral" $item }}{{- end }}]
-{{- else if kindIs "string" $value -}}
-{{ $value | quote }}
-{{- else -}}
-{{ $value }}
-{{- end -}}
-{{- end }}
-
-{{- define "storefront.agentConfigToml" -}}
+{{- define "storefront.agentConfigDocument" -}}
 {{- $root := .root -}}
 {{- $agent := .agent -}}
-{{- $cfg := $agent.config -}}
-{{- $seller := $cfg.seller | default dict -}}
-{{- $identity := $agent.identity | default dict -}}
-{{- $wallet := $cfg.wallet | default dict -}}
-{{- $chains := $cfg.chains | default dict -}}
-{{- $prov := $seller.provisioning | default dict -}}
-{{- $provIdentity := $prov.identity | default dict -}}
-{{- $neg := $seller.negotiation | default dict -}}
-{{- $settlement := $cfg.settlement | default dict -}}
-{{- $pricing := $cfg.pricing | default dict -}}
-{{- $stripe := $settlement.stripe | default dict -}}
-{{- $alkahest := $settlement.alkahest | default dict -}}
-{{- $registryAuthority := $cfg.registryAuthority | default dict -}}
-{{- $domains := required "storefront config.storefrontDomains requires at least one explicit registration" $cfg.storefrontDomains -}}
-{{- if lt (len $domains) 1 -}}
-  {{- fail "storefront config.storefrontDomains requires at least one explicit registration" -}}
-{{- end -}}
-{{- if ne (int ($root.Values.image.settlementConfigSchemaVersion | default 0)) (int ($settlement.schema_version | default 0)) -}}
-  {{- fail "storefront image and Settlement config schema versions must match" -}}
-{{- end -}}
-{{- $registryURL := default (include "storefront.registryUrl" $root) $cfg.registryUrl -}}
-{{- if not $cfg.registryUrl -}}
-  {{- if ne $registryAuthority.authority $root.Values.global.registryIdentity.authority -}}
-    {{- fail "storefront registry authority id must match the internal registry authority id" -}}
+{{- $cfg := deepCopy ($agent.config | default dict) -}}
+{{- include "storefront.refuseFoldedDuplicates" (dict "agent" $agent.name "path" "config" "value" $cfg) -}}
+
+{{- /* The port names the container port, probes, and Service port. */ -}}
+{{- $portKey := include "storefront.foldedKey" (dict "doc" $cfg "name" "port") -}}
+{{- if $portKey -}}
+  {{- $stated := index $cfg $portKey -}}
+  {{- if not (or (kindIs "float64" $stated) (kindIs "int64" $stated) (kindIs "int" $stated)) -}}
+    {{- fail (printf "storefront agent %s config.%s must be a number" $agent.name $portKey) -}}
   {{- end -}}
-  {{- $activeRegistryPrincipal := $root.Values.global.registryIdentity.principal -}}
-  {{- $activeRegistryTrusted := false -}}
-  {{- range $principal := ($registryAuthority.principals | default list) -}}
-    {{- if and (eq $principal.scheme $activeRegistryPrincipal.scheme) (eq $principal.identifier $activeRegistryPrincipal.identifier) -}}
-      {{- $activeRegistryTrusted = true -}}
+  {{- if ne (float64 $stated) (float64 $agent.port) -}}
+    {{- fail (printf "storefront agent %s config.%s %v differs from the agent's port %v" $agent.name $portKey $stated $agent.port) -}}
+  {{- end -}}
+{{- end -}}
+{{- $_ := set $cfg ($portKey | default "port") (int $agent.port) -}}
+{{- if not (include "storefront.foldedKey" (dict "doc" $cfg "name" "base_url")) -}}
+  {{- $_ := set $cfg "base_url" (include "storefront.agentBaseUrl" .) -}}
+{{- end -}}
+{{- if not (include "storefront.foldedKey" (dict "doc" $cfg "name" "db_path")) -}}
+  {{- $_ := set $cfg "db_path" (printf "%s/agent.db" (trimSuffix "/" $root.Values.persistence.mountPath)) -}}
+{{- end -}}
+
+{{- /* Registry: the internal registry's URL, keyed trust stated outside config. */ -}}
+{{- $registryKey := include "storefront.foldedKey" (dict "doc" $cfg "name" "registry") | default "registry" -}}
+{{- $registry := index $cfg $registryKey | default dict -}}
+{{- $trust := $agent.internalRegistryTrust -}}
+{{- if include "storefront.foldedKey" (dict "doc" $registry "name" "urls") -}}
+  {{- if $trust -}}
+    {{- fail (printf "storefront agent %s states internalRegistryTrust and config registry.urls; internalRegistryTrust applies only to the internal registry" $agent.name) -}}
+  {{- end -}}
+{{- else -}}
+  {{- if not $trust -}}
+    {{- fail (printf "storefront agent %s uses the internal registry and requires internalRegistryTrust" $agent.name) -}}
+  {{- end -}}
+  {{- $active := $root.Values.global.registryIdentity -}}
+  {{- if ne ($trust.authority | default "") $active.authority -}}
+    {{- fail (printf "storefront agent %s internalRegistryTrust.authority %q differs from the release's registry authority %q" $agent.name ($trust.authority | default "") $active.authority) -}}
+  {{- end -}}
+  {{- if not (include "storefront.includesPrincipal" (dict "principals" $trust.principals "principal" $active.principal)) -}}
+    {{- fail (printf "storefront agent %s internalRegistryTrust.principals must include the release's registry principal" $agent.name) -}}
+  {{- end -}}
+  {{- $url := include "storefront.registryUrl" $root -}}
+  {{- $authoritiesKey := include "storefront.foldedKey" (dict "doc" $registry "name" "authorities") | default "authorities" -}}
+  {{- $authorities := index $registry $authoritiesKey | default dict -}}
+  {{- if include "storefront.foldedKey" (dict "doc" $authorities "name" (lower $url)) -}}
+    {{- fail (printf "storefront agent %s states internalRegistryTrust and config registry.authorities[%q]; state one" $agent.name $url) -}}
+  {{- end -}}
+  {{- $_ := set $authorities $url (dict "authority" $trust.authority "principals" $trust.principals) -}}
+  {{- $_ := set $registry $authoritiesKey $authorities -}}
+  {{- $_ := set $registry "urls" (list $url) -}}
+  {{- $_ := set $cfg $registryKey $registry -}}
+{{- end -}}
+
+{{- /* Provisioning and the capacity site bound to it. */ -}}
+{{- $internalProvisioningURL := include "provisioning.url" $root -}}
+{{- $provisioningKey := include "storefront.foldedKey" (dict "doc" $cfg "name" "provisioning") | default "provisioning" -}}
+{{- $provisioning := index $cfg $provisioningKey | default dict -}}
+{{- $serviceUrlKey := include "storefront.foldedKey" (dict "doc" $provisioning "name" "service_url") -}}
+{{- if not $serviceUrlKey -}}
+  {{- $serviceUrlKey = "service_url" -}}
+  {{- $_ := set $provisioning $serviceUrlKey $internalProvisioningURL -}}
+  {{- $_ := set $cfg $provisioningKey $provisioning -}}
+{{- end -}}
+{{- $provisioningURL := trimSuffix "/" (toString (index $provisioning $serviceUrlKey)) -}}
+{{- $capacityKey := include "storefront.foldedKey" (dict "doc" $cfg "name" "capacity") | default "capacity" -}}
+{{- $capacity := index $cfg $capacityKey | default dict -}}
+{{- $sitesKey := include "storefront.foldedKey" (dict "doc" $capacity "name" "sites") -}}
+{{- if not $sitesKey -}}
+  {{- $sitesKey = "sites" -}}
+  {{- $_ := set $capacity $sitesKey (dict "default" $provisioningURL) -}}
+  {{- $_ := set $cfg $capacityKey $capacity -}}
+{{- end -}}
+
+{{- /* Trust in the release's provisioning service is stated, then checked:
+every capacity site it serves is verified against that site's service peer,
+which must include the release's provisioning principal. */ -}}
+{{- if eq $provisioningURL (trimSuffix "/" $internalProvisioningURL) -}}
+  {{- $active := $root.Values.global.provisioningIdentity -}}
+  {{- $internalSites := list -}}
+  {{- range $siteID, $siteURL := (index $capacity $sitesKey) -}}
+    {{- if eq (trimSuffix "/" (toString $siteURL)) $provisioningURL -}}
+      {{- $internalSites = append $internalSites $siteID -}}
     {{- end -}}
   {{- end -}}
-  {{- if not $activeRegistryTrusted -}}
-    {{- fail "storefront registry authority principals must include the internal registry signer principal" -}}
-  {{- end -}}
-{{- end -}}
-{{- if $prov -}}
-  {{- $activeProvisioningPrincipal := $root.Values.global.provisioningIdentity -}}
-  {{- $provisioningAuthorityTrusted := false -}}
-  {{- range $principal := ($provIdentity.principals | default list) -}}
-    {{- if and (eq $principal.scheme $activeProvisioningPrincipal.scheme) (eq $principal.identifier $activeProvisioningPrincipal.identifier) -}}
-      {{- $provisioningAuthorityTrusted = true -}}
-    {{- end -}}
-  {{- end -}}
-  {{- if not $provisioningAuthorityTrusted -}}
-    {{- fail "provisioning authority principals must include the active provisioning principal" -}}
-  {{- end -}}
-  {{- $provisioningSiteID := $prov.siteId | default "default" -}}
-  {{- $provisioningPeerTrusted := false -}}
-  {{- range $peerID, $peer := ($identity.servicePeers | default dict) -}}
-    {{- if and (eq ($peer.role | default "") "service") (eq ($peer.siteId | default "") $provisioningSiteID) -}}
-      {{- range $principal := ($peer.principals | default list) -}}
-        {{- if and (eq $principal.scheme $activeProvisioningPrincipal.scheme) (eq $principal.identifier $activeProvisioningPrincipal.identifier) -}}
-          {{- $provisioningPeerTrusted = true -}}
-        {{- end -}}
+  {{- if $internalSites -}}
+    {{- $identity := include "storefront.foldedMap" (dict "doc" $cfg "name" "identity") | fromJson -}}
+    {{- $peers := include "storefront.foldedMap" (dict "doc" $identity "name" "service_peers") | fromJson -}}
+    {{- $peerTrusted := false -}}
+    {{- range $peerID, $peer := $peers -}}
+      {{- $role := include "storefront.foldedValue" (dict "doc" $peer "name" "role") -}}
+      {{- $siteID := include "storefront.foldedValue" (dict "doc" $peer "name" "site_id") -}}
+      {{- $peerPrincipalsKey := include "storefront.foldedKey" (dict "doc" $peer "name" "principals") -}}
+      {{- $peerPrincipals := list -}}
+      {{- if $peerPrincipalsKey -}}{{- $peerPrincipals = index $peer $peerPrincipalsKey -}}{{- end -}}
+      {{- if and (eq $role "service") (has $siteID $internalSites) (include "storefront.includesPrincipal" (dict "principals" $peerPrincipals "principal" $active)) -}}
+        {{- $peerTrusted = true -}}
       {{- end -}}
     {{- end -}}
-  {{- end -}}
-  {{- if not $provisioningPeerTrusted -}}
-    {{- fail "service-peer trust must include the active provisioning principal for the configured site" -}}
-  {{- end -}}
-{{- end -}}
-{{- $expectedAuthority := $stripe.authority | default dict -}}
-{{- if $stripe.enabled -}}
-  {{- $conditionProfile := required "enabled Stripe settlement requires condition_profile" $stripe.condition_profile -}}
-  {{- if not (hasKey ($stripe.condition_profiles | default dict) $conditionProfile) -}}
-    {{- fail "enabled Stripe settlement condition_profile must name a configured condition profile" -}}
-  {{- end -}}
-  {{- $condition := index $stripe.condition_profiles $conditionProfile -}}
-  {{- $evaluator := $condition.evaluator | default dict -}}
-  {{- $resolverID := required "enabled Stripe condition profile evaluator requires resolver_id" $evaluator.resolver_id -}}
-  {{- if not (hasKey ($stripe.resolvers | default dict) $resolverID) -}}
-    {{- fail "enabled Stripe condition profile resolver_id must name a configured resolver" -}}
+    {{- if not $peerTrusted -}}
+      {{- fail (printf "storefront agent %s needs an Identity.service_peers entry with role \"service\" for site %s that includes the release's provisioning principal" $agent.name (join ", " $internalSites)) -}}
+    {{- end -}}
   {{- end -}}
 {{- end -}}
-# Rendered by the storefront helm chart (ConfigMap layer — non-sensitive).
-# Source of truth lives in helm/charts/storefront/values.yaml under agents:.
-# Sensitive values come from the Secret overlay (storefront.secrets.toml).
-
-
-agent_id            = {{ $seller.agentId | quote }}
-port                = {{ $agent.port }}
-base_url            = {{ default (include "storefront.agentBaseUrl" .) $seller.baseUrl | quote }}
-db_path             = {{ $seller.dbPath | quote }}
-log_file_path       = {{ $seller.logFilePath | quote }}
-{{- if $seller.resourcesCsvPath }}
-resources_csv_path  = {{ $seller.resourcesCsvPath | quote }}
-{{- end }}
-auto_register       = {{ $agent.autoRegister | default true }}
-{{- range $index, $domain := $domains }}
-
-[[storefront_domains]]
-contribution = {{ required (printf "storefrontDomains[%d].contribution is required" $index) $domain.contribution | quote }}
-offering_mode = {{ required (printf "storefrontDomains[%d].offeringMode is required" $index) $domain.offeringMode | quote }}
-domain_identity = {{ required (printf "storefrontDomains[%d].domainIdentity is required" $index) $domain.domainIdentity | quote }}
-contract_version = {{ required (printf "storefrontDomains[%d].contractVersion is required" $index) $domain.contractVersion | quote }}
+{{- include "storefront.deriveCaBundlePath" (dict "agent" $agent "cfg" $cfg) -}}
+{{- /* JSON, not YAML: Helm's YAML encoder leaves a string bare unless it
+would read back as a 64-bit number, so a 160-bit EVM address such as
+0x3c44...93bc is emitted unquoted and a YAML loader reads it as an integer.
+JSON quotes every string. */ -}}
+{{- toPrettyJson $cfg -}}
 {{- end }}
 
-[Identity.principal]
-scheme = {{ required "storefront agent identity.principal.scheme is required" $identity.principal.scheme | quote }}
-identifier = {{ required "storefront agent identity.principal.identifier is required" $identity.principal.identifier | quote }}
-{{- range $subject, $administrator := ($identity.administrators | default dict) }}
-
-[Identity.administrators.{{ $subject }}]
-{{ include "storefront.principalsToml" (dict "label" (printf "identity administrator %s" $subject) "principals" $administrator.principals) }}
-{{- end }}
-{{- range $peerID, $peer := ($identity.servicePeers | default dict) }}
-
-[Identity.service_peers.{{ $peerID }}]
-role = {{ required (printf "identity service peer %s role is required" $peerID) $peer.role | quote }}
-site_id = {{ required (printf "identity service peer %s siteId is required" $peerID) $peer.siteId | quote }}
-{{ include "storefront.principalsToml" (dict "label" (printf "identity service peer %s" $peerID) "principals" $peer.principals) }}
-{{- end }}
-
-{{- if $wallet }}
-[Wallet]
-{{- if $wallet.address }}
-address = {{ $wallet.address | quote }}
-{{- end }}
-{{- if $wallet.ssh_public_key }}
-ssh_public_key = {{ $wallet.ssh_public_key | quote }}
-{{- end }}
-{{- end }}
-{{- range $chainName := keys $chains | sortAlpha }}
-{{- $chain := index $chains $chainName }}
-
-[Chains.{{ $chainName }}]
-rpc_url = {{ default (include "rpc.wsUrl" $root) $chain.rpc_url | quote }}
-chain_id = {{ required (printf "chains.%s.chain_id is required" $chainName) $chain.chain_id | int }}
-{{- end }}
-
-[registry]
-urls = [{{ $registryURL | quote }}]
-
-[registry.authorities.{{ $registryURL | quote }}]
-authority = {{ required "storefront registry authority id is required" $registryAuthority.authority | quote }}
-{{ include "storefront.principalsToml" (dict "label" "storefront registry authority" "principals" $registryAuthority.principals) }}
-{{- if $agent.rootPath }}
-
-[gateway]
-# Gateway path prefix for this agent. Used by FastAPI's custom OpenAPI
-# function to inject a servers block so Swagger UI generates correct
-# curl examples when accessed through the API gateway. Empty for local dev.
-root_path = {{ $agent.rootPath | quote }}
-{{- end }}
-
-[provisioning]
-service_url = {{ default (include "provisioning.url" $root) $prov.serviceUrl | quote }}
-{{- if $prov.mode }}
-mode        = {{ $prov.mode | quote }}
-{{- end }}
-{{- if $prov.pollInterval }}
-poll_interval = {{ $prov.pollInterval | int }}
-{{- end }}
-
-[provisioning.identity]
-{{ include "storefront.principalsToml" (dict "label" "provisioning identity" "principals" $provIdentity.principals) }}
-
-{{- if $pricing }}
-[pricing]
-{{- if hasKey $pricing "default_min_price" }}
-default_min_price = {{ include "storefront.tomlLiteral" $pricing.default_min_price }}
-{{- end }}
-{{- if hasKey $pricing "default_token_address" }}
-default_token_address = {{ include "storefront.tomlLiteral" $pricing.default_token_address }}
-{{- end }}
-{{- if hasKey $pricing "default_max_duration_seconds" }}
-default_max_duration_seconds = {{ $pricing.default_max_duration_seconds | int }}
-{{- end }}
-settlements = {{ include "storefront.tomlLiteral" $pricing.settlements }}
-{{- end }}
-
-[Settlement]
-schema_version = {{ $settlement.schema_version | default 1 }}
-priority = [{{ range $i, $mechanism := ($settlement.priority | default list) }}{{ if $i }}, {{ end }}{{ $mechanism | quote }}{{ end }}]
-
-{{- if $stripe }}
-[Settlement.stripe]
-enabled = {{ $stripe.enabled | default false }}
-{{- if $stripe.base_url }}
-base_url = {{ $stripe.base_url | quote }}
-{{- end }}
-{{- if $stripe.authority_id }}
-authority_id = {{ $stripe.authority_id | quote }}
-{{- end }}
-{{- if $stripe.environment }}
-environment = {{ $stripe.environment | quote }}
-{{- end }}
-{{- if $stripe.expected_manifest_digest }}
-expected_manifest_digest = {{ $stripe.expected_manifest_digest | quote }}
-{{- end }}
-expected_api_version = {{ $stripe.expected_api_version | default "0.2.1" | quote }}
-expected_schema_version = {{ $stripe.expected_schema_version | default 5 }}
-required_capabilities = [{{ range $i, $cap := ($stripe.required_capabilities | default list) }}{{ if $i }}, {{ end }}{{ $cap | quote }}{{ end }}]
-{{- if $stripe.account_ref }}
-account_ref = {{ $stripe.account_ref | quote }}
-{{- end }}
-currency = {{ $stripe.currency | default "usd" | quote }}
-country = {{ $stripe.country | default "US" | quote }}
-{{- if $stripe.condition_profile }}
-condition_profile = {{ $stripe.condition_profile | quote }}
-{{- end }}
-request_timeout_seconds = {{ $stripe.request_timeout_seconds | default 10.0 }}
-preflight_timeout_seconds = {{ $stripe.preflight_timeout_seconds | default 5.0 }}
-allow_insecure_loopback = {{ $stripe.allow_insecure_loopback | default false }}
-{{- if $expectedAuthority.principals }}
-
-[Settlement.stripe.authority]
-{{ include "storefront.principalsToml" (dict "label" "Stripe settlement authority" "principals" $expectedAuthority.principals) }}
-{{- end }}
-{{- range $profileID, $profile := ($stripe.condition_profiles | default dict) }}
-
-[Settlement.stripe.condition_profiles.{{ $profileID | quote }}]
-{{ range $field := keys $profile | sortAlpha }}
-{{ $field }} = {{ include "storefront.tomlLiteral" (index $profile $field) }}
-{{ end }}
-{{- end }}
-{{- range $resolverID, $resolver := ($stripe.resolvers | default dict) }}
-
-[Settlement.stripe.resolvers.{{ $resolverID | quote }}]
-chain_name = {{ $resolver.chain_name | quote }}
-evidence_mode = {{ $resolver.evidence_mode | quote }}
-{{- end }}
-{{- end }}
-
-{{- if $alkahest }}
-[Settlement.alkahest]
-enabled = {{ $alkahest.enabled | default false }}
-{{- if $alkahest.address_config_path }}
-address_config_path = {{ $alkahest.address_config_path | quote }}
-{{- end }}
-oracle_gated = {{ $alkahest.oracle_gated | default false }}
-trusted_oracle_addresses = [{{ range $i, $address := ($alkahest.trusted_oracle_addresses | default list) }}{{ if $i }}, {{ end }}{{ $address | quote }}{{ end }}]
-interruptible = {{ $alkahest.interruptible | default false }}
-interruptible_oracle_addresses = [{{ range $i, $address := ($alkahest.interruptible_oracle_addresses | default list) }}{{ if $i }}, {{ end }}{{ $address | quote }}{{ end }}]
-{{- end }}
-
-[negotiation]
-{{- if $neg.policies }}
-policies = [{{ range $i, $mw := $neg.policies }}{{ if $i }}, {{ end }}{{ $mw | quote }}{{ end }}]
-{{- else if $neg.policyMode }}
-policy_mode = {{ $neg.policyMode | quote }}
-{{- end }}
+{{/*
+`storefront.deriveCaBundlePath`: where the agent names a CA bundle, set
+`[Settlement.arkhai_payments].ca_bundle_path` in `cfg`, in place, to the file the
+chart mounts it as; where `cfg` states another path, refuse it naming both. The
+path is derived from the mount's presence rather than configured beside it, so
+the two cannot disagree: a path naming no mounted file would leave the payments
+client with no bundle to load. Only the payments client reads the bundle, so one
+named while `cfg` has no `[Settlement.arkhai_payments]` section is refused rather
+than given a section of its own. Keys are matched in any spelling, as the loader
+matches them. With no bundle named, `cfg` is left as it is.
+Argument: dict with `agent` (one agent, with its name) and `cfg` (its
+configuration, nulls removed).
+*/}}
+{{- define "storefront.deriveCaBundlePath" -}}
+{{- $bundle := include "storefront.agentCaBundle" .agent | fromJson -}}
+{{- if or $bundle.configMapName $bundle.secretName -}}
+  {{- $file := include "storefront.caBundleFile" . -}}
+  {{- $settlement := index .cfg (include "storefront.foldedKey" (dict "doc" .cfg "name" "settlement")) | default dict -}}
+  {{- $sectionKey := include "storefront.foldedKey" (dict "doc" $settlement "name" "arkhai_payments") -}}
+  {{- $payments := dict -}}
+  {{- if $sectionKey -}}{{- $payments = index $settlement $sectionKey | default dict -}}{{- end -}}
+  {{- if not $payments -}}
+    {{- fail (printf "storefront agent %s names caBundle, which only its payments client reads, but its config states no Settlement.arkhai_payments section" .agent.name) -}}
+  {{- end -}}
+  {{- $pathKey := include "storefront.foldedKey" (dict "doc" $payments "name" "ca_bundle_path") -}}
+  {{- if $pathKey -}}
+    {{- $stated := toString (index $payments $pathKey) -}}
+    {{- if ne $stated $file -}}
+      {{- fail (printf "storefront agent %s config Settlement.%s.%s %q differs from %q, where the chart mounts its caBundle; state that path or none" .agent.name $sectionKey $pathKey $stated $file) -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $_ := set $payments "ca_bundle_path" $file -}}
+  {{- end -}}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -437,30 +622,15 @@ Marketplace signer material is never accepted by this helper: the Deployment
 reads it directly from identity.credentialSecret.
 */}}
 {{- define "storefront.agentSecretsToml" -}}
-{{- $root := .root -}}
 {{- $agent := .agent -}}
-{{- $cfg := $agent.config -}}
-{{- $seller := $cfg.seller | default dict -}}
-{{- $integ := $seller.integrations | default dict -}}
 # Rendered by the storefront helm chart (Secret overlay — sensitive only).
-# Deep-merged on top of storefront.toml at runtime by dynaconf.
-
-{{- if $agent.secret.resourcesCsvInline }}
-resources_csv_inline = """
-{{ $agent.secret.resourcesCsvInline }}
-"""
-{{- end }}
+# Deep-merged on top of storefront.json at runtime by dynaconf.
 
 {{- if $agent.secret.registryAuthToken }}
 
 [registry.auth]
-# Key must match the rendered [registry] urls entry exactly.
-{{ default (include "storefront.registryUrl" $root) ($cfg.registryUrl) | quote }} = {{ $agent.secret.registryAuthToken | quote }}
-{{- end }}
-{{- if or $integ.geminiApiKey $integ.gemini_api_key }}
-
-[integrations]
-gemini_api_key = {{ default $integ.geminiApiKey $integ.gemini_api_key | quote }}
+# Key must match the first registry URL the storefront uses exactly.
+{{ include "storefront.effectiveRegistryUrl" . | quote }} = {{ $agent.secret.registryAuthToken | quote }}
 {{- end }}
 {{- end }}
 

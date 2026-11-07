@@ -11,7 +11,12 @@ class ReleaseReservationsResponse(BaseModel):
     """Response from POST /api/v1/admin/portfolio/release-reservations."""
 
     released_count: int
-    resource_ids: list[str]
+    resource_ids: list[str] = Field(
+        description=(
+            "The released site reservations, each as "
+            "``ledger:<site>:<capacity_reservation_id>``."
+        ),
+    )
 
 
 class ReserveCapacityRequest(BaseModel):
@@ -23,104 +28,26 @@ class ReserveCapacityRequest(BaseModel):
 
 
 class ReserveCapacityResponse(BaseModel):
-    """Response from POST /api/v1/admin/portfolio/reservations."""
+    """Response from POST /api/v1/admin/portfolio/reservations.
+
+    No physical resource identity. The capacity boundary strips
+    `resource_id`, `backing_resource_id`, `capacity_bucket_id` and `host_id`
+    from every reservation response, because which physical resource backs a
+    reservation is the provisioning service's fact and not a commercial one.
+    Declaring it required here made the field unsatisfiable for every
+    reservation rather than only for pooled ones: the hold landed in the
+    ledger, the stage event recorded it, and then this model refused to
+    serialize the result as `500 Storefront administrator request failed`.
+    `pool_id` and `member_id` are what the boundary does report.
+    `gpu_count` is null for a reservation that allocates no GPUs.
+    """
 
     capacity_reservation_id: str
     pool_id: str | None = None
     member_id: str | None = None
-    resource_id: str
-    gpu_count: int
+    gpu_count: int | None = None
     resource_state: str | None = None
     closed_listing_ids: list[str] = Field(default_factory=list)
-
-
-class ImportRowError(BaseModel):
-    """One failed CSV row in an /admin/portfolio/resources/import response."""
-
-    row_number: int
-    resource_id: str | None = None
-    resource_type: str | None = None
-    errors: list[str]
-
-
-class ImportResourcesResponse(BaseModel):
-    """Response for POST /api/v1/admin/portfolio/resources/import."""
-
-    imported_count: int
-    failed_count: int
-    total_rows: int
-    errors: list[ImportRowError] = []
-
-
-class ResourcePatchRequest(BaseModel):
-    """Request body for PATCH /api/v1/admin/portfolio/resources/{resource_id}."""
-
-    state: str | None = Field(
-        default=None,
-        description="New resource state. Only written if provided.",
-    )
-    attributes: dict | None = Field(
-        default=None,
-        description=(
-            "Partial attribute patch. Keys present in this dict are merged "
-            "into the existing attributes JSON; absent keys are untouched. "
-            "Pass null values to clear individual attribute keys."
-        ),
-    )
-
-
-class ResourcePatchResponse(BaseModel):
-    """Response from PATCH /api/v1/admin/portfolio/resources/{resource_id}."""
-
-    resource_id: str
-    state: str | None = None
-    attributes: dict | None = None
-    updated: bool = Field(
-        description="True if any field was actually changed; False if the "
-        "row was already in the requested state (idempotent call)."
-    )
-
-
-class FulfillmentStartedEventRequest(BaseModel):
-    capacity_reservation_id: str
-    site_id: str
-    escrow_uid: str | None = None
-    provider_id: str | None = None
-    provider_job_id: str | None = None
-    resource_id: str | None = None
-    gpu_count: int | None = None
-
-
-class FulfillmentFailedEventRequest(BaseModel):
-    capacity_reservation_id: str
-    site_id: str
-    escrow_uid: str | None = None
-    provider_id: str | None = None
-    provider_job_id: str | None = None
-    resource_id: str | None = None
-    reason: str | None = None
-    message: str | None = None
-    logs_ref: str | None = None
-
-
-class UsageStartedEventRequest(BaseModel):
-    capacity_reservation_id: str
-    site_id: str
-    escrow_uid: str | None = None
-    provider_id: str | None = None
-    provider_lease_id: str | None = None
-    resource_id: str | None = None
-    vm_host: str | None = None
-    vm_target: str | None = None
-    gpu_count: int | None = None
-    lease_end_utc: str | None = None
-
-
-class ReleaseStartedEventRequest(BaseModel):
-    capacity_reservation_id: str
-    site_id: str
-    provider_lease_id: str | None = None
-    vm_remove_job_id: str | None = None
 
 
 class CapacityReleasedEventRequest(BaseModel):
@@ -142,7 +69,11 @@ class FulfillmentEventResponse(BaseModel):
 
 
 class InterruptDealRequest(BaseModel):
-    """Request body for POST /api/v1/admin/deals/{escrow_uid}/interrupt."""
+    """Interrupt a hosted negotiation ID or an Alkahest escrow UID.
+
+    Hosted interruptions use receipt time, require a reason and accept no payout
+    amounts. The operation key identifies a retry independently of transport.
+    """
 
     interrupted_at_utc: str | None = Field(
         default=None,
@@ -151,6 +82,7 @@ class InterruptDealRequest(BaseModel):
             "time when omitted."
         ),
     )
+    operation_key: str | None = Field(default=None, min_length=1)
     reason: str | None = None
     seller_amount: int | None = Field(
         default=None,
@@ -183,3 +115,5 @@ class InterruptDealResponse(BaseModel):
     seller_amount: int | None = None
     refund_amount: int | None = None
     reservation: dict[str, Any] | None = None
+    lifecycle_outcome: dict[str, Any] | None = None
+    delivery: dict[str, Any] | None = None

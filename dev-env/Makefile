@@ -1,13 +1,16 @@
 IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= dev-env
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+# Appended to the image's tag; the root Makefile's IMAGE_SUFFIX. A suffixed build
+# is tagged per change alone: a commit tag would keep one image per validated commit.
+IMAGE_SUFFIX ?=
 FOUNDRY_VERSION := v1.5.1
 
 build: build-images
 
 build-images:
-	docker build -f Dockerfile --build-arg FOUNDRY_VERSION=${FOUNDRY_VERSION} -t $(IMAGE_NAME):$(IMAGE_TAG) .
-	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
+	docker build -f Dockerfile --build-arg FOUNDRY_VERSION=${FOUNDRY_VERSION} -t $(IMAGE_NAME):$(IMAGE_TAG)$(IMAGE_SUFFIX) .
+	$(if $(IMAGE_SUFFIX),,docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX))
 
 deploy:
 	-docker network create market

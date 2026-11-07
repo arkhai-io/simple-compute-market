@@ -2,22 +2,31 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional
 
 import yaml
 from sqlalchemy.orm import Session, sessionmaker
 
-from .hints import (
-    DELIVERABLE_MODES_POLICY_TAG,
+from market_resource_pools_contracts.asking_rates import (
+    ASKING_RATES_POLICY_TAG,
+    validate_asking_rates,
+)
+from market_resource_pools_contracts.hints import (
+    CAPACITY_BACKING_POLICY_TAG,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
+    LISTING_SHAPES_POLICY_TAG,
+    PRICING_POLICY_TAG,
     SLA_POLICY_TAG,
-    validate_deliverable_modes,
+    PoolDeclarationProblem,
+    pool_declaration_problems,
     validate_hold_preference,
+    validate_listing_shapes,
+    validate_pricing_rates,
     validate_sla_preference,
 )
 from .pool_config_handler import PoolConfigHandler
-from .pools import (
+from market_resource_pools_contracts import (
     PoolCreate,
     PoolImportDiff,
     PoolReplace,
@@ -25,7 +34,7 @@ from .pools import (
     PoolValidateResponse,
     PoolValidationProblem,
 )
-from .db import DEFAULT_POOL_ID, ResourcePool
+from .db import ResourcePool
 
 
 class PoolNotFoundError(Exception):
@@ -41,6 +50,54 @@ class PoolValidationError(ValueError):
 
 
 @dataclass(frozen=True)
+class PoolImmutabilityProblem:
+    field: str
+    code: str
+    stored: Any
+    supplied: Any
+    message: str
+
+
+def pool_immutability_problems(
+    pool: ResourcePool, provider: str, policy_tags: Mapping[str, Any]
+) -> tuple[PoolImmutabilityProblem, ...]:
+    """Compare routing and admission context without accessing persistence.
+
+    Changing either in place would reinterpret existing members or listings.
+    Missing backing may be supplied to repair a stored declaration; provider
+    identity always belongs to the pool's lifetime.
+    """
+    problems: list[PoolImmutabilityProblem] = []
+    if provider != pool.provider:
+        problems.append(PoolImmutabilityProblem(
+            field="provider",
+            code="provider_immutable",
+            stored=pool.provider,
+            supplied=provider,
+            message=(
+                f"provider of pool '{pool.id}' is fixed at creation as "
+                f"'{pool.provider}' and cannot become '{provider}'; declare a "
+                "second pool with the intended provider and migrate its members instead"
+            ),
+        ))
+    stored = (pool.policy_tags or {}).get(CAPACITY_BACKING_POLICY_TAG)
+    supplied = policy_tags.get(CAPACITY_BACKING_POLICY_TAG)
+    if stored is not None and supplied != stored:
+        problems.append(PoolImmutabilityProblem(
+            field=f"policy_tags.{CAPACITY_BACKING_POLICY_TAG}",
+            code="capacity_backing_immutable",
+            stored=stored,
+            supplied=supplied,
+            message=(
+                f"{CAPACITY_BACKING_POLICY_TAG} of pool '{pool.id}' is fixed at "
+                f"creation as '{stored}' and cannot become '{supplied}'; "
+                "declare a second pool with the intended backing instead"
+            ),
+        ))
+    return tuple(problems)
+
+
+@dataclass(frozen=True)
 class PoolDefinition:
     id: str
     label: str
@@ -48,6 +105,9 @@ class PoolDefinition:
     enabled: bool
     policy_tags: dict[str, Any]
     provider_config: dict[str, Any]
+    # Position of the entry in the submitted document, so a problem found
+    # against stored state can name the entry the operator must edit.
+    source_index: int | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -114,20 +174,82 @@ class ResourcePoolService:
     def _attach_provider_config(self, db: Session, pool: ResourcePool) -> None:
         pool.provider_config = self._handler(pool.provider).read_config(db, pool.id)
 
-    def _require_valid_policy_tag_hints(self, policy_tags: Mapping[str, Any]) -> None:
-        """Reject malformed domain-neutral policy hints before any write.
-
-        Every individual-pool write path and the bulk YAML path uses these
-        same validators, so declaration semantics do not depend on which
-        administration surface an operator chooses.
-        """
-        problems = (
-            validate_deliverable_modes(policy_tags)
-            + validate_hold_preference(policy_tags)
-            + validate_sla_preference(policy_tags)
-        )
+    @staticmethod
+    def _require_immutable_fields_unchanged(
+        pool: ResourcePool, provider: str, policy_tags: Mapping[str, Any]
+    ) -> None:
+        problems = pool_immutability_problems(pool, provider, policy_tags)
         if problems:
-            raise PoolValidationError("; ".join(problems))
+            raise PoolValidationError(problems[0].message)
+
+    def stored_declaration_problems(
+        self, db: Session
+    ) -> list[tuple[str, PoolDeclarationProblem]]:
+        """Every stored pool whose declarations would be refused on write.
+
+        Every write path validates declarations, so a problem here means a row
+        was written by something that did not -- most plausibly an older
+        version replacing a pool's tags without knowing these ones.
+        """
+        found: list[tuple[str, PoolDeclarationProblem]] = []
+        for pool in db.query(ResourcePool).order_by(ResourcePool.id).all():
+            found.extend(
+                (pool.id, problem)
+                for problem in pool_declaration_problems(pool.policy_tags or {})
+            )
+        return found
+
+    def require_valid_stored_declarations(self) -> None:
+        """Raise naming every stored pool whose declarations are invalid.
+
+        Run at service start so a pool without declarations never reaches a
+        projection, where a consumer could not tell it from a producer that
+        predates the tags.
+        """
+        with self._session_factory() as db:
+            problems = self.stored_declaration_problems(db)
+        if problems:
+            raise PoolValidationError(
+                "stored resource pools carry invalid declarations: "
+                + "; ".join(
+                    f"pool '{pool_id}' {problem.tag}: {problem.message}"
+                    for pool_id, problem in problems
+                )
+            )
+
+    def stored_provider_problems(self, db: Session) -> list[tuple[str, str]]:
+        """Every stored pool, enabled or not, whose provider no handler serves.
+
+        Handlers are fixed by the composition and every write refuses an
+        unknown provider, so such a row was written by a build registering
+        other handlers, or from outside the service's write paths. Its records
+        are still read, so a disabled pool counts.
+        """
+        return [
+            (pool.id, pool.provider)
+            for pool in db.query(ResourcePool).order_by(ResourcePool.id).all()
+            if pool.provider not in self._handlers
+        ]
+
+    def require_served_stored_providers(self) -> None:
+        """Raise naming every stored pool whose provider no handler serves.
+
+        Run at service start: such a pool cannot be read, exported, or
+        fulfilled, and no pool document can repair it, since a document cannot
+        change a pool's provider.
+        """
+        with self._session_factory() as db:
+            problems = self.stored_provider_problems(db)
+        if problems:
+            registered = ", ".join(f"'{name}'" for name in sorted(self._handlers)) or "none"
+            raise PoolValidationError(
+                "stored resource pools name providers no registered handler serves: "
+                + "; ".join(
+                    f"pool '{pool_id}' provider '{provider}'"
+                    for pool_id, provider in problems
+                )
+                + f" (registered providers: {registered})"
+            )
 
     def list_pools(
         self, tag_filter: Optional[dict[str, str]] = None, enabled_only: bool = False
@@ -177,10 +299,28 @@ class ResourcePoolService:
             return pool
 
     def get_pool_in_session(self, db: Session, pool_id: str) -> Optional[ResourcePool]:
-        """Load a pool and provider configuration in the caller's transaction."""
+        """Load a pool and its redacted provider configuration.
+
+        Redacted because most callers of a pool read serialize what they get.
+        Fulfillment wants the execution variant below.
+        """
         pool = db.query(ResourcePool).filter(ResourcePool.id == pool_id).one_or_none()
         if pool is not None:
             self._attach_provider_config(db, pool)
+        return pool
+
+    def get_pool_for_execution(self, db: Session, pool_id: str) -> Optional[ResourcePool]:
+        """Load a pool with secrets resolved, for preparing provider input.
+
+        The only caller is the dispatch path. The attached configuration may
+        contain decrypted credentials and must not be serialized into a
+        response, an export, or a persisted job snapshot.
+        """
+        pool = db.query(ResourcePool).filter(ResourcePool.id == pool_id).one_or_none()
+        if pool is not None:
+            pool.provider_config = self._handler(pool.provider).read_config_for_execution(
+                db, pool.id
+            )
         return pool
 
     def _require_pool(self, db: Session, pool_id: str) -> ResourcePool:
@@ -190,7 +330,6 @@ class ResourcePoolService:
         return pool
 
     def create_pool(self, data: PoolCreate) -> ResourcePool:
-        self._require_valid_policy_tag_hints(data.policy_tags)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             if db.query(ResourcePool).filter(ResourcePool.id == data.id).one_or_none():
@@ -208,26 +347,20 @@ class ResourcePoolService:
         return self.get_pool(data.id)  # type: ignore[return-value]
 
     def replace_pool(self, pool_id: str, data: PoolReplace) -> ResourcePool:
-        self._require_valid_policy_tag_hints(data.policy_tags)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
-            old_provider = pool.provider
-            if old_provider != data.provider:
-                self._handler(old_provider).delete_config(db, pool_id)
+            self._require_immutable_fields_unchanged(pool, data.provider, data.policy_tags)
             pool.label = data.label
-            pool.provider = data.provider
             pool.enabled = data.enabled
             pool.policy_tags = data.policy_tags
             self._handler(data.provider).replace_config(db, pool_id, config)
         return self.get_pool(pool_id)  # type: ignore[return-value]
 
     def update_pool(self, pool_id: str, data: PoolUpdate) -> ResourcePool:
-        if data.policy_tags is not None:
-            self._require_valid_policy_tag_hints(data.policy_tags)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
-            provider = data.provider or pool.provider
+            provider = data.provider if data.provider is not None else pool.provider
             current_config = self._handler(pool.provider).read_config(db, pool_id)
             config = (
                 data.provider_config
@@ -235,17 +368,17 @@ class ResourcePoolService:
                 else current_config
             )
             normalized = self._normalize_config(provider, config)
-            if provider != pool.provider:
-                self._handler(pool.provider).delete_config(db, pool_id)
+            self._require_immutable_fields_unchanged(
+                pool, provider,
+                data.policy_tags if data.policy_tags is not None else (pool.policy_tags or {}),
+            )
             if data.label is not None:
                 pool.label = data.label
-            if data.provider is not None:
-                pool.provider = data.provider
             if data.enabled is not None:
                 pool.enabled = data.enabled
             if data.policy_tags is not None:
                 pool.policy_tags = data.policy_tags
-            if data.provider is not None or data.provider_config is not None:
+            if data.provider_config is not None:
                 self._handler(provider).replace_config(db, pool_id, normalized)
         return self.get_pool(pool_id)  # type: ignore[return-value]
 
@@ -313,7 +446,6 @@ class ResourcePoolService:
 
         definitions: list[PoolDefinition] = []
         seen: set[str] = set()
-        declared_ids: set[str] = set()
         for index, entry in enumerate(entries):
             base = f"pools[{index}]"
             if not isinstance(entry, dict):
@@ -349,7 +481,6 @@ class ResourcePoolService:
                 entry_valid = False
                 pool_id = None
             else:
-                declared_ids.add(pool_id)
                 if pool_id in seen:
                     problems.append(
                         PoolValidationProblem(
@@ -402,12 +533,12 @@ class ResourcePoolService:
                 )
                 entry_valid = False
             else:
-                for mode_problem in validate_deliverable_modes(tags):
+                for declaration_problem in pool_declaration_problems(tags):
                     problems.append(
                         PoolValidationProblem(
-                            path=f"{base}.policy_tags.{DELIVERABLE_MODES_POLICY_TAG}",
-                            code="invalid_deliverable_modes",
-                            message=mode_problem,
+                            path=f"{base}.policy_tags.{declaration_problem.tag}",
+                            code=declaration_problem.code,
+                            message=declaration_problem.message,
                         )
                     )
                     entry_valid = False
@@ -426,6 +557,33 @@ class ResourcePoolService:
                             path=f"{base}.policy_tags.{SLA_POLICY_TAG}",
                             code="invalid_sla_preference",
                             message=sla_problem,
+                        )
+                    )
+                    entry_valid = False
+                for shape_problem in validate_listing_shapes(tags):
+                    problems.append(
+                        PoolValidationProblem(
+                            path=f"{base}.policy_tags.{LISTING_SHAPES_POLICY_TAG}",
+                            code="invalid_listing_shapes",
+                            message=shape_problem,
+                        )
+                    )
+                    entry_valid = False
+                for rate_problem in validate_asking_rates(tags):
+                    problems.append(
+                        PoolValidationProblem(
+                            path=f"{base}.policy_tags.{ASKING_RATES_POLICY_TAG}",
+                            code="invalid_asking_rates",
+                            message=rate_problem,
+                        )
+                    )
+                    entry_valid = False
+                for pricing_problem in validate_pricing_rates(tags):
+                    problems.append(
+                        PoolValidationProblem(
+                            path=f"{base}.policy_tags.{PRICING_POLICY_TAG}",
+                            code="invalid_pricing_rates",
+                            message=pricing_problem,
                         )
                     )
                     entry_valid = False
@@ -483,18 +641,44 @@ class ResourcePoolService:
                         enabled,
                         dict(tags),
                         normalized,
+                        source_index=index,
                     )
                 )
 
-        if DEFAULT_POOL_ID not in declared_ids:
-            problems.append(
-                PoolValidationProblem(
-                    path="pools",
-                    code="missing_default_pool",
-                    message=f"authoritative pool definitions must include '{DEFAULT_POOL_ID}'",
-                )
-            )
         return DocumentValidationResult(tuple(definitions), tuple(problems))
+
+    @staticmethod
+    def _immutable_field_problems(
+        db: Session, desired: tuple[PoolDefinition, ...]
+    ) -> list[PoolValidationProblem]:
+        """Adapt stored-state problems to submitted document entry paths."""
+        existing = {p.id: p for p in db.query(ResourcePool).all()}
+        problems: list[PoolValidationProblem] = []
+        for definition in desired:
+            pool = existing.get(definition.id)
+            if pool is None:
+                continue
+            for problem in pool_immutability_problems(
+                pool, definition.provider, definition.policy_tags
+            ):
+                problems.append(
+                    PoolValidationProblem(
+                        path=(
+                            f"pools[{definition.source_index}].{problem.field}"
+                        ),
+                        code=problem.code,
+                        message=problem.message,
+                    )
+                )
+        return problems
+
+    @staticmethod
+    def _problems_error(problems: Any) -> PoolValidationError:
+        # The path names the entry and tag, which is what an operator reading
+        # a refused startup import needs in order to find the line to fix.
+        return PoolValidationError(
+            "; ".join(f"{problem.path}: {problem.message}" for problem in problems)
+        )
 
     def _calculate_reconciliation(
         self, db: Session, desired: tuple[PoolDefinition, ...]
@@ -547,13 +731,7 @@ class ResourcePoolService:
             )
             db.add(pool)
             db.flush()
-            old_provider = None
-        else:
-            old_provider = pool.provider
-        if old_provider and old_provider != definition.provider:
-            self._handler(old_provider).delete_config(db, definition.id)
         pool.label = definition.label
-        pool.provider = definition.provider
         pool.enabled = definition.enabled
         pool.policy_tags = definition.policy_tags
         self._handler(definition.provider).replace_config(
@@ -584,6 +762,11 @@ class ResourcePoolService:
                 valid=False, problems=list(validation.problems), diff=None
             )
         with self._session_factory() as db:
+            stored_problems = self._immutable_field_problems(db, validation.definitions)
+            if stored_problems:
+                return PoolValidateResponse(
+                    valid=False, problems=stored_problems, diff=None
+                )
             diff = self._diff(
                 self._calculate_reconciliation(db, validation.definitions)
             )
@@ -594,16 +777,37 @@ class ResourcePoolService:
     ) -> PoolImportDiff:
         validation = self._validate_document(yaml_text)
         if not validation.valid:
-            message = "; ".join(problem.message for problem in validation.problems)
-            raise PoolValidationError(message)
+            raise self._problems_error(validation.problems)
         if validate_only:
             response = self.validate_pools(yaml_text)
+            if not response.valid:
+                raise self._problems_error(response.problems)
             assert response.diff is not None
             return response.diff
         with self._session_factory() as db, db.begin():
-            plan = self._calculate_reconciliation(db, validation.definitions)
-            diff = self._diff(plan)
-            self._apply_reconciliation(db, plan)
+            return self.import_pools_in_session(db, yaml_text)
+
+    def import_pools_in_session(self, db: Session, yaml_text: str) -> PoolImportDiff:
+        """Reconcile inside the caller's transaction, without committing.
+
+        Exists so an import can be composed with other writes that must land
+        with it or not at all — a startup importer recording which document it
+        applied, most immediately. A digest committed separately from the apply
+        it describes is indistinguishable, at the next startup, from one
+        recorded before a crash.
+
+        ``import_pools`` keeps its own transaction for the API path, which has
+        nothing to compose with.
+        """
+        validation = self._validate_document(yaml_text)
+        if not validation.valid:
+            raise self._problems_error(validation.problems)
+        stored_problems = self._immutable_field_problems(db, validation.definitions)
+        if stored_problems:
+            raise self._problems_error(stored_problems)
+        plan = self._calculate_reconciliation(db, validation.definitions)
+        diff = self._diff(plan)
+        self._apply_reconciliation(db, plan)
         return diff
 
     def export_pools_yaml(self) -> str:

@@ -1,9 +1,3 @@
-# Exclude operator-supplied inventory files from the container image.
-# Resource CSVs are injected at deploy time via:
-#   - Helm: --set-file storefront.agents[0].secret.resourcesCsvInline=<path>
-#   - Compose: bind-mount via RESOURCES_CSV_FILE in storefront/Makefile
-storefront/src/market_storefront/data/*.csv
-
 # Keep repo-root build contexts small: never ship venvs, git history,
 # caches, or local state into images. (.dist/ must stay included — the
 # Dockerfiles resolve internal wheels from it via --find-links.)
@@ -18,3 +12,7 @@ storefront/src/market_storefront/data/*.csv
 **/node_modules
 **/target
 dev-env/state
+# A real host's description, rendered into the e2e config directory on an
+# operator's machine; an image built from that checkout must not carry it.
+e2e-tests/config/config-real-vm-target.yml
+e2e-tests/config/config-real-provisioning-target.yml

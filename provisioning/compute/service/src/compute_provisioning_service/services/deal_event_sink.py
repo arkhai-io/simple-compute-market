@@ -7,8 +7,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 from market_identity import TrustedIdentitySet
+from storefront_client import StorefrontClient, StorefrontClientError
 
-from compute_provisioning import LifecycleEvent
+from compute_provisioning_contracts import (
+    LEASE_ENDED_CALLBACK, LifecycleEvent, LeaseEndedEvent, SignedLeaseEndedReport,
+)
+from .lease_end_reports import ReportDelivery
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -48,8 +52,6 @@ class StorefrontLifecycleEventSink:
         ):
             if self._client is not None:
                 await self._client.close()
-            from storefront_client import StorefrontClient
-
             self._client = StorefrontClient(
                 base_url=self._storefront_url,
                 signer=self._identity.signer,
@@ -64,9 +66,24 @@ class StorefrontLifecycleEventSink:
             await self._client.close()
             self._client = None
 
-    async def deliver(self, event: LifecycleEvent) -> bool:
-        from storefront_client import StorefrontClientError
+    async def deliver_lease_end(self, report: SignedLeaseEndedReport) -> ReportDelivery:
+        event = LeaseEndedEvent.model_validate_json(report.payload)
+        try:
+            answer = await (await self._storefront()).authenticated_request(
+                "POST", LEASE_ENDED_CALLBACK["path"].format(
+                    capacity_reservation_id=event.capacity_reservation_id,
+                ), role="service", operation=LEASE_ENDED_CALLBACK["operation"],
+                resource=event.capacity_reservation_id, body=report.model_dump(mode="json"),
+                request_id="lease-end-" + hashlib.sha256(event.event_id.encode()).hexdigest(),
+            )
+            return "unsupported" if answer.get("status") == "unsupported" else "delivered"
+        except StorefrontClientError as exc:
+            return "unsupported" if exc.status_code in {404, 405, 501} else "retry"
+        except Exception:
+            logger.exception("Lease-ended report delivery failed for event %s", event.event_id)
+            return "retry"
 
+    async def deliver(self, event: LifecycleEvent) -> bool:
         request_id = "capacity-release-" + hashlib.sha256(
             event.event_id.encode("utf-8")
         ).hexdigest()
@@ -168,10 +185,10 @@ async def notify_storefront_capacity_released(
 ) -> bool:
     """Translate a release fact into the versioned narrow event-sink contract."""
     released_at = reservation.get("released_at")
-    executor_kind = reservation.get("executor_kind")
-    if not executor_kind:
+    offering_mode = reservation.get("offering_mode")
+    if not offering_mode:
         raise ValueError(
-            "capacity release cannot be published without executor_kind"
+            "capacity release cannot be published without offering_mode"
         )
     event = LifecycleEvent(
         event_id=(
@@ -180,7 +197,7 @@ async def notify_storefront_capacity_released(
         ),
         capacity_reservation_id=str(reservation["capacity_reservation_id"]),
         deal_ref=dict(reservation.get("deal_ref") or {}),
-        executor_kind=str(executor_kind),
+        offering_mode=str(offering_mode),
         event_kind="capacity_released",
         payload={"released_at": released_at},
         occurred_at=datetime.now(timezone.utc),

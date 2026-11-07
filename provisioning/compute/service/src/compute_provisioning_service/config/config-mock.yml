@@ -1,9 +1,9 @@
 # ---------------------------------------------------------------------------
 # Profile: mock
 #
-# Activates MockAnsibleService instead of the real AnsibleService.
-# No Ansible binary, SSH key, or KVM host is required.
-# Returned VM credentials are deterministic fakes.
+# Each domain runs its jobs through the mock Ansible runner instead of the real
+# one. No Ansible binary, SSH key, or host is required; returned credentials
+# and access facts are deterministic fakes.
 #
 # Usage:
 #   ACTIVE_PROFILES=mock  (docker-compose e2e tests without real hardware)
@@ -15,11 +15,8 @@
 # agent container needs no configuration change.
 # ---------------------------------------------------------------------------
 
-ansible_cfg: ""
-playbook_path: "/dev/null"
+vm_playbook_path: "/dev/null"
 bare_metal_playbook_path: "/dev/null"
-# inventory_path is intentionally not overridden in mock mode.
-# MockAnsibleService never calls ansible-playbook so the path is unused
-# for job execution. Leaving it unset allows the startup seeder to read
-# the real inventory file (docker profile) or inventory_ini (helm profile)
-# and populate the hosts table normally.
+# host_definitions_path is not overridden in mock mode: a host definitions
+# document a deployment configures registers its hosts as it does without the
+# mock, and the mock runner never connects to them.

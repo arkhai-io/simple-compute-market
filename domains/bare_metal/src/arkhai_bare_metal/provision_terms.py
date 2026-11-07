@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-BARE_METAL_PROVISION_KIND = "bare_metal.v1"
+BARE_METAL_PROVISION_KIND = "bare_metal.v2"
 BARE_METAL_PROVISION_VERSION = 1
 SSH_ACCESS_METHOD = "ssh"
 
@@ -44,7 +44,7 @@ class BareMetalProvisionTerms(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["bare_metal.v1"] = BARE_METAL_PROVISION_KIND
+    kind: Literal["bare_metal.v2"] = BARE_METAL_PROVISION_KIND
     version: Literal[1] = BARE_METAL_PROVISION_VERSION
     payload: dict[str, Any]
 

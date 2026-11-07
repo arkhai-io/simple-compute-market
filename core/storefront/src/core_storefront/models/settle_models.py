@@ -16,6 +16,36 @@ class SettleRequest(BaseModel):
     buyer_principal: Identity
 
 
+class AgreementSettleResponse(BaseModel):
+    """Response for agreement settlement through ``POST /api/v1/settle/{negotiation_id}``.
+
+    Every mechanism that settles from the accepted Agreement alone returns these
+    fields. ``escrow_uid`` equals ``negotiation_id`` because the route is keyed by
+    deal; ``settlement_ref`` is the mechanism's own evidence identity. ``pending``
+    is the one status every domain reserves: no payment evidence exists yet and
+    the buyer should retry. Other statuses and extra fields are domain delivery
+    state.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    negotiation_id: str
+    escrow_uid: str
+    settlement_ref: str
+    status: str
+    retryable: bool = False
+    buyer_principal: Identity
+    seller_principal: Identity
+
+
+class RefundSettlementResponse(BaseModel):
+    """Response for ``POST /api/v1/settlements/{negotiation_id}/refund``."""
+
+    negotiation_id: str
+    settlement_ref: str
+    status: str
+
+
 class SettleResponse(BaseModel):
     """Response for POST /api/v1/settle/{escrow_uid} (202 while provisioning).
 
@@ -61,34 +91,20 @@ class SettleStatusResponse(BaseModel):
 class VerifyEscrowRequest(BaseModel):
     """Body for POST /api/v1/admin/settle/{escrow_uid}/verify.
 
-    Caller supplies the expected terms — the endpoint reads the escrow from
-    chain and confirms it matches. No DB writes. Used by e2e stage 7b to
-    test getRecordFromChain in isolation before committing to settle.
+    Names the accepted deal settle will name; the endpoint reads the escrow
+    from chain and confirms it matches that deal's committed settlement plan,
+    on the chain and escrow contract its accepted proposal names, exactly as
+    settlement verifies it. No DB writes. Used by e2e stage 7b to check the
+    escrow in isolation before committing to settle.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    seller_wallet: str = Field(
-        description="Expected seller wallet address (recipient on-chain)"
-    )
-    agreed_price: int = Field(
+    negotiation_id: str = Field(
+        min_length=1,
         description=(
-            "Expected absolute payment amount in base units of the payment "
-            "token (the field name is retained from before the per-hour → "
-            "absolute refactor; semantically it now holds the amount, not "
-            "a rate)."
-        ),
-    )
-    agreed_duration_seconds: int = Field(
-        description="Expected lease duration in seconds"
-    )
-    listing_id: str = Field(
-        description="Listing ID — used to extract token contract from DB"
-    )
-    chain_name: str = Field(
-        description=(
-            "Chain name to dispatch the on-chain read on. The storefront "
-            "verifies the escrow against its [chains.<name>] entry."
+            "The accepted negotiation whose committed settlement plan the "
+            "escrow is checked against."
         ),
     )
 
@@ -119,6 +135,13 @@ class EvaluateSettleRequest(BaseModel):
         default="", description="SSH public key to inject into the VM"
     )
     duration_seconds: int = Field(default=3600, description="Lease duration in seconds")
+    negotiation_id: str | None = Field(
+        default=None,
+        description=(
+            "The negotiation settle will name. When its acceptance holds "
+            "capacity, settle commits that hold, so the preview reports it."
+        ),
+    )
 
 
 class EvaluateSettleResponse(BaseModel):
@@ -126,9 +149,9 @@ class EvaluateSettleResponse(BaseModel):
 
     would_submit: bool
     escrow_uid: str
-    vm_host: str | None = None
-    vm_target: str | None = None
+    host_id: str | None = None
     required_attributes: dict[str, Any] = Field(default_factory=dict)
+    capacity_reservation_id: str | None = None
     reason: str | None = None
 
 
@@ -144,6 +167,10 @@ class SettleWaitResponse(BaseModel):
     fulfillment path (there is no executor job id in that architecture).
     ``fulfillment_id`` is that path's durable identity and is the field a
     caller should prefer once available.
+
+    ``last_error`` is the error of the wait's last status read, when that read
+    failed: a wait polls through a failed read and reports one only when it
+    ends unready.
     """
 
     ready: bool
@@ -151,3 +178,4 @@ class SettleWaitResponse(BaseModel):
     provisioning_job_id: str | None = None
     fulfillment_id: str | None = None
     elapsed_ms: int
+    last_error: str | None = None

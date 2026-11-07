@@ -57,6 +57,13 @@ class SystemService:
             result["principal"] = (
                 signer.identity.model_dump(mode="json") if signer else None
             )
+            # Readiness reads the chain probe's last results and calls no chain.
+            composition = _container.resolved_settlement_composition
+            result["settlement"] = (
+                [status.safe_projection() for status in await composition.readiness()]
+                if composition is not None
+                else None
+            )
         return result
 
     async def _registry_check(self) -> str:

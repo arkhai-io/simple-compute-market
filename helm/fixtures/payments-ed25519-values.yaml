@@ -1,0 +1,116 @@
+global:
+  rpc:
+    enabled: false
+  integrationTests:
+    digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+  registryIdentity:
+    authority: registry-a
+    principal:
+      scheme: ed25519
+      identifier: NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y
+  provisioningIdentity:
+    scheme: ed25519
+    identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+
+registry:
+  image:
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  identity:
+    authority: registry-a
+    principal:
+      scheme: ed25519
+      identifier: NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y
+    credentialSecret:
+      name: payments-registry-identity
+      key: credential
+
+provisioning:
+  server:
+    image:
+      digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  identity:
+    principal:
+      scheme: ed25519
+      identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+    credentialSecret:
+      name: payments-provisioning-identity
+      key: credential
+  storefrontIdentity:
+    principals:
+      - scheme: ed25519
+        identifier: 0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc
+  adminIdentity:
+    principals:
+      - scheme: ed25519
+        identifier: 5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g
+
+dev-env:
+  enabled: false
+
+validate-contracts:
+  enabled: false
+
+e2e-tests:
+  enabled: false
+  createSecret: false
+  secretName: arkhai-e2e-unused
+
+# Bob's agent signing with Ed25519 under its own Secret, with no runtime
+# overlay, selling under Arkhai payments; a deployment of it would state the
+# payments key as api_key in a runtime overlay. Agents are keyed by name, so only what
+# differs from Bob's default agent is stated; every principal list is replaced.
+# Every principal and account here is a deterministic development value, never
+# for a public network.
+storefront:
+  image:
+    digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  agents:
+    bob:
+      identity:
+        credentialSecret:
+          name: payments-bob-marketplace-identity
+      internalRegistryTrust:
+        principals:
+          - scheme: ed25519
+            identifier: NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y
+      secret:
+        secretName: ''
+      config:
+        agent_id: payments_bob
+        log_file_path: ./logs/payments-bob.log
+        Identity:
+          principal:
+            scheme: ed25519
+            identifier: 0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc
+          service_peers:
+            provisioning_default:
+              principals:
+                - scheme: ed25519
+                  identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+          administrators:
+            operator:
+              principals:
+                - scheme: ed25519
+                  identifier: 5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g
+        pricing:
+          default_min_price: '100'
+          default_max_duration_seconds: 0
+          settlements:
+            - mechanism: arkhai.payments.v1
+              asset: USD/2
+              rate: '100'
+              per: hour
+              mechanism_input:
+                payee_account: 22222222-2222-4222-8222-222222222222
+                asset: USD/2
+        Settlement:
+          schema_version: 1
+          priority:
+            - arkhai.payments.v1
+          arkhai_payments:
+            enabled: true
+            service_url: https://payments.example.test
+            service_identity:
+              scheme: ed25519
+              identifier: 6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM
+            fee_bps: 250

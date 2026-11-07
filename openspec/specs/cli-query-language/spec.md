@@ -40,12 +40,12 @@ Each `--settlement` occurrence MUST form one typed conjunction over one `Settlem
 
 #### Scenario: Two settlement alternatives are supplied
 
-- **WHEN** the buyer supplies a Stripe clause followed by an Alkahest clause and both have compatible advertised matches
-- **THEN** selection considers the Stripe clause first and retains the Alkahest clause only as a pre-acceptance alternative
+- **WHEN** the buyer supplies a Arkhai payment clause followed by an Alkahest clause and both have compatible advertised matches
+- **THEN** selection considers the Arkhai payment clause first and retains the Alkahest clause only as a pre-acceptance alternative
 
 #### Scenario: Predicates occur on different options
 
-- **WHEN** one listing has a Stripe USD option and a separate Alkahest option whose fields collectively but not individually satisfy one clause
+- **WHEN** one listing has a Arkhai payment USD/2 option and a separate Alkahest option whose fields collectively but not individually satisfy one clause
 - **THEN** the clause does not match that listing
 
 #### Scenario: Accepted mechanism later becomes unavailable
@@ -53,19 +53,38 @@ Each `--settlement` occurrence MUST form one typed conjunction over one `Settlem
 - **WHEN** accepted Terms pin an option selected through a settlement clause and its mechanism later becomes disabled or unready
 - **THEN** recovery resumes the pinned obligation without evaluating another clause
 
+### Requirement: Common settlement fields include the lifecycle projections
+
+The settlement DSL MUST reserve common fields for option identity and mechanism-neutral values (mechanism, option ID, asset) and for the lifecycle codec's projections: `adjudication.dispute.interface`, `adjudication.dispute.account`, `early_termination.payer`, `early_termination.payee`, `early_termination.payee.notice_seconds`, `early_termination.premature_stop_penalty` and `delivery_deadline_seconds`. A registration MAY add typed fields only under its configuration-key namespace.
+
+#### Scenario: A clause filters on a lifecycle term and a mechanism field
+
+- **WHEN** a buyer compiles a clause on `adjudication.dispute.account` and `alkahest.chain`
+- **THEN** the first is evaluated as a common lifecycle projection for every mechanism's options, and the second only through the Alkahest registration's typed projection
+
 ### Requirement: Settlement fields have common and mechanism-owned namespaces
 
-The settlement DSL MUST reserve common fields for immutable option identity and mechanism-neutral values, including mechanism, option ID, and asset. A settlement registration MAY contribute typed public projection fields only under its configuration-key namespace, such as `stripe.method` or `alkahest.chain`. Unknown, role-inapplicable, secret, credential, provider-administrator, raw RPC, or non-public fields MUST be rejected. Shared parsing and selection MUST treat contributed values as typed projections and MUST NOT interpret opaque mechanism parameters.
+The settlement DSL MUST separate immutable common fields, lifecycle-codec projections and namespaced typed public mechanism projections. It MUST reject unknown, role-inapplicable, secret, credential, provider-administrator, raw RPC or other non-public fields, and shared parsing and selection MUST treat contributed values as typed projections, never interpreting opaque mechanism parameters.
 
-#### Scenario: Qualified Stripe field is used
+#### Scenario: Qualified Arkhai payment field is used
 
-- **WHEN** a clause contains `mechanism=stripe stripe.method=card`
-- **THEN** the Stripe registration validates and projects the public method field while shared selection only evaluates the typed result
+- **WHEN** a clause contains `mechanism=arkhai_payments arkhai_payments.deposit_agreement=true`
+- **THEN** the Arkhai payments registration validates and projects the public deposit setting while shared selection only evaluates the typed result
 
 #### Scenario: Provider field is requested
 
-- **WHEN** a clause names a Stripe provider ID, credential, webhook value, or authority-administrator field
-- **THEN** validation rejects the field without contacting the hosted authority or exposing any provider data
+- **WHEN** a clause names a payment provider ID, credential, webhook value, or authority-administrator field
+- **THEN** validation rejects the field without contacting the payment service or exposing any provider data
+
+#### Scenario: An option omits the premature-stop penalty
+
+- **WHEN** a valid option has no premature_stop_penalty or explicitly sets zero
+- **THEN** the codec projects zero in that option asset's minor units, with comparisons correlated to that same asset and option
+
+#### Scenario: A buyer asks for buyer-stoppable options
+
+- **WHEN** a clause contains `early_termination.payer=true` and a listing has one option with a payer entitlement and one without
+- **THEN** only the option with the entitlement matches
 
 ### Requirement: Publication rates are asset-scoped human quantities
 
@@ -73,8 +92,8 @@ A settlement publication clause that sets a rate MUST name its asset and unit an
 
 #### Scenario: Equal displayed rates use different scales
 
-- **WHEN** a seller publishes `2/hour` for USD and separately `2/hour` for a six-decimal token
-- **THEN** the Stripe option records 200 minor units and the token option records 2000000 base units without sharing an intermediate `min_price`
+- **WHEN** a seller publishes `2/hour` for USD/2 and separately `2/hour` for a six-decimal token
+- **THEN** the Arkhai payment option records 200 minor units and the token option records 2000000 base units without sharing an intermediate `min_price`
 
 #### Scenario: Decimal cannot be represented exactly
 

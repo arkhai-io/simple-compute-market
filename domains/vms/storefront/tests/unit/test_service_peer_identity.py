@@ -17,9 +17,10 @@ from market_identity import (
 
 import market_storefront.container as container
 from core_storefront.auth import AuthError
-from core_storefront.identity_authority import StorefrontIdentityAuthority
+from core_storefront.service_peers import ServicePeerTrust
 from core_storefront.sqlite_client import SQLiteClient
 from market_storefront.middleware.service_peer_auth import (
+    _CALLBACK_OPERATIONS,
     _authenticate,
     _callback,
 )
@@ -81,52 +82,53 @@ def _compose(tmp_path, monkeypatch):
     db = SQLiteClient(str(tmp_path / "storefront.db"))
     service = _SERVICE_SIGNER
     seller = _SELLER_SIGNER
-    StorefrontIdentityAuthority(db.db_path).register_service_peer(
-        peer_id="provisioning-home",
-        role="service",
-        site_id="home",
-        principal=_SERVICE_PRINCIPAL,
-        now=int(time.time()),
+    # The trust the composition root builds from configuration, seeded and
+    # loaded as the lifespan seeds it, and injected through the container.
+    trust = ServicePeerTrust(
+        db.db_path,
+        {"provisioning-home": ("service", "home", _SERVICE_AUTHORITIES)},
     )
+    trust.seed()
     monkeypatch.setattr(container, "resolved_sqlite_client", db)
     monkeypatch.setattr(container, "resolved_marketplace_signer", seller)
-    monkeypatch.setattr(
-        "market_storefront.middleware.service_peer_auth.get_service_peer_configs",
-        lambda: {
-            "provisioning-home": (
-                "service",
-                "home",
-                _SERVICE_AUTHORITIES,
-            )
-        },
-    )
+    monkeypatch.setattr(container, "resolved_service_peer_trust", trust)
     return db, service
 
 
+_CAPACITY_RELEASED = "/api/v1/admin/fulfillment/events/capacity-released"
+_CAPACITY_RELEASED_OPERATION = "fulfillment_capacity_released"
+
+
+async def test_static_service_callback_is_capacity_released():
+    assert _CALLBACK_OPERATIONS == {_CAPACITY_RELEASED: _CAPACITY_RELEASED_OPERATION}
+
+
 @pytest.mark.parametrize(
-    ("path", "operation"),
+    "path",
     [
-        (
-            "/api/v1/admin/fulfillment/events/capacity-released",
-            "fulfillment_capacity_released",
-        ),
-        (
-            "/api/v1/admin/fulfillment/events/usage-started",
-            "fulfillment_usage_started",
-        ),
-        ("/api/v1/admin/fulfillment/events/failed", "fulfillment_failed"),
+        "/api/v1/admin/fulfillment/events/started",
+        "/api/v1/admin/fulfillment/events/usage-started",
+        "/api/v1/admin/fulfillment/events/release-started",
+        "/api/v1/admin/fulfillment/events/failed",
     ],
 )
+async def test_a_path_with_no_sender_is_no_service_callback(path):
+    """The service-peer middleware does not take these paths, so a site's
+    service peer has no operation to sign for them."""
+    body = {"capacity_reservation_id": "reservation-1", "site_id": "home"}
+    assert _callback(_request(path, {}), body) is None
+
+
 async def test_ed25519_service_callback_binds_site_role_body_and_replay(
-    tmp_path, monkeypatch, path, operation
+    tmp_path, monkeypatch
 ):
     db, service = _compose(tmp_path, monkeypatch)
     body = {"capacity_reservation_id": "reservation-1", "site_id": "home"}
     request = _request(
-        path,
+        _CAPACITY_RELEASED,
         _headers(
             signer=service,
-            operation=operation,
+            operation=_CAPACITY_RELEASED_OPERATION,
             resource="reservation-1",
             body=body,
         ),
@@ -153,15 +155,15 @@ async def test_service_callback_rejects_body_mutation_cross_role_and_unknown_sit
     tmp_path, monkeypatch
 ):
     _, service = _compose(tmp_path, monkeypatch)
-    path = "/api/v1/admin/fulfillment/events/failed"
+    path = _CAPACITY_RELEASED
     signed_body = {"capacity_reservation_id": "reservation-1", "site_id": "home"}
 
-    mutated = {**signed_body, "reason": "mutated after signing"}
+    mutated = {**signed_body, "released_at": "mutated after signing"}
     request = _request(
         path,
         _headers(
             signer=service,
-            operation="fulfillment_failed",
+            operation=_CAPACITY_RELEASED_OPERATION,
             resource="reservation-1",
             body=signed_body,
         ),
@@ -175,7 +177,7 @@ async def test_service_callback_rejects_body_mutation_cross_role_and_unknown_sit
         path,
         _headers(
             signer=service,
-            operation="fulfillment_failed",
+            operation=_CAPACITY_RELEASED_OPERATION,
             resource="reservation-1",
             body=signed_body,
             role="seller",
@@ -191,7 +193,7 @@ async def test_service_callback_rejects_body_mutation_cross_role_and_unknown_sit
         path,
         _headers(
             signer=service,
-            operation="fulfillment_failed",
+            operation=_CAPACITY_RELEASED_OPERATION,
             resource="reservation-1",
             body=unknown_site_body,
         ),

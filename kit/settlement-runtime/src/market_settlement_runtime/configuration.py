@@ -29,11 +29,17 @@ from pydantic import (
 )
 
 from market_core.query_dsl import FieldDescriptor, field_reference_json
-from market_core.schemas import SettlementOption
+from market_core.schemas import SettlementOption, settlement_option_rates
+from market_deal_lifecycle.projections import LIFECYCLE_QUERY_FIELDS
 from .ports import ConditionalEscrowClient
 
 SETTLEMENT_CONFIG_SCHEMA_VERSION = 1
 SettlementRole = Literal["buyer", "seller"]
+# ``configuration``: the storefront's own configuration causes the blocker, and
+# only an operator can clear it. ``reachability``: a dependency the mechanism
+# needs could not be reached, or has not yet been probed, so its readiness is
+# unknown rather than ruled out.
+ReadinessBlockerKind = Literal["configuration", "reachability"]
 
 
 class SettlementConfigurationError(ValueError):
@@ -41,12 +47,19 @@ class SettlementConfigurationError(ValueError):
 
 
 class ReadinessBlocker(BaseModel):
-    """A stable, public reason that a mechanism is not ready."""
+    """A stable, public reason that a mechanism is not ready.
+
+    ``kind`` has no default: whoever raises a blocker knows whether the
+    storefront's configuration rules the mechanism out or a dependency could not
+    be reached, and publication decides between closing and holding a listing on
+    that difference.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     code: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=512)
+    kind: ReadinessBlockerKind
 
     @field_validator("code")
     @classmethod
@@ -101,6 +114,21 @@ class MechanismReadiness(BaseModel):
         if self.ready and self.blockers:
             raise ValueError("a ready mechanism cannot have blockers")
         return self
+
+    @property
+    def unknown(self) -> bool:
+        """Whether this readiness could not be determined.
+
+        True when the mechanism is unready and every blocker it reports is a
+        reachability blocker: a dependency it needs could not be reached. Any
+        configuration blocker rules the mechanism out instead, whatever else it
+        reports, since reaching the dependency would not clear it.
+        """
+        return (
+            not self.ready
+            and bool(self.blockers)
+            and all(blocker.kind == "reachability" for blocker in self.blockers)
+        )
 
     def safe_projection(self) -> dict[str, Any]:
         """Return the complete public status representation."""
@@ -197,11 +225,7 @@ def reject_scalar_rates_for_non_scalar(mechanism_id: str, built: Any) -> None:
     if not isinstance(built, Mapping):
         return
     for option in built.get("settlement_options") or []:
-        rates = (
-            option.get("rates")
-            if isinstance(option, Mapping)
-            else getattr(option, "rates", None)
-        )
+        rates = settlement_option_rates(option)
         for rate in rates or []:
             field = (
                 rate.get("field")
@@ -224,7 +248,7 @@ class MechanismRegistration:
     config_model: type[BaseModel]
     roles: frozenset[SettlementRole]
     preflight: PreflightCallback
-    client_factory: ClientFactory
+    client_factory: ClientFactory | None
     option_builder: OptionBuilder
     buyer_compatibility: BuyerCompatibilityHook
     clause_fields: tuple[SettlementClauseField, ...]
@@ -244,7 +268,7 @@ class MechanismRegistration:
     # exclude); the mechanism owns everything obligation-shaped.
     accepted_obligation_builder: AcceptedObligationBuilder | None = None
     # Mechanism-owned settlement verification: reads the mechanism's own
-    # truth source (chain, hosted authority) and asserts a claimed
+    # truth source (chain, payments service) and asserts a claimed
     # settlement matches the negotiated terms. The call signature is
     # mechanism-specific — callers reach it from the mechanism's own
     # surface — but its ownership lives here so domains resolve it from
@@ -309,6 +333,8 @@ class MechanismRegistration:
                 clause_field.descriptor.name,
                 *clause_field.descriptor.aliases,
             )
+            if any(name in LIFECYCLE_QUERY_FIELDS for name in names):
+                raise SettlementConfigurationError("lifecycle clause fields are reserved common fields")
             unqualified = sorted(
                 name for name in names if not name.startswith(expected_prefix)
             )
@@ -637,6 +663,7 @@ class SettlementConfigurationRegistry:
                             ReadinessBlocker(
                                 code="not_configured",
                                 message="mechanism is not configured",
+                                kind="configuration",
                             ),
                         ),
                     )
@@ -644,16 +671,8 @@ class SettlementConfigurationRegistry:
                 continue
             if not _section_enabled(section):
                 results.append(
-                    MechanismReadiness(
-                        mechanism=registration.mechanism_id,
-                        configured=True,
-                        enabled=False,
-                        ready=False,
-                        blockers=(
-                            ReadinessBlocker(
-                                code="disabled", message="mechanism is disabled"
-                            ),
-                        ),
+                    await self._disabled_readiness(
+                        registration, section, shared_resources, role
                     )
                 )
                 continue
@@ -675,7 +694,7 @@ class SettlementConfigurationRegistry:
         role: SettlementRole,
         resources: Mapping[str, Any] | None = None,
     ) -> ConditionalEscrowClient:
-        """Dispatch one installed client factory without checking enabled/readiness."""
+        """Dispatch one installed conditional-servicing client factory."""
         registration = self.registration(mechanism_id)
         if role not in registration.roles:
             raise SettlementConfigurationError(
@@ -686,6 +705,10 @@ class SettlementConfigurationRegistry:
             raise SettlementConfigurationError(
                 f"settlement mechanism {mechanism_id!r} has no configured section"
             )
+        if registration.client_factory is None:
+            raise SettlementConfigurationError(
+                f"settlement mechanism {mechanism_id!r} has no runtime client"
+            )
         return registration.client_factory(section, resources or {}, role)
 
     def runtime_clients(
@@ -695,7 +718,7 @@ class SettlementConfigurationRegistry:
         role: SettlementRole,
         resources: Mapping[str, Any] | None = None,
     ) -> dict[str, ConditionalEscrowClient]:
-        """Build the existing runtime client map, including disabled sections."""
+        """Build clients only for mechanisms that own conditional servicing."""
         self.validate(config, role=role)
         return {
             registration.mechanism_id: self.create_client(
@@ -703,7 +726,9 @@ class SettlementConfigurationRegistry:
             )
             for registration in self.ordered_registrations(config, role=role)
             if registration.config_key in config.mechanisms
+            and registration.client_factory is not None
         }
+
 
     def build_option(
         self,
@@ -856,6 +881,60 @@ class SettlementConfigurationRegistry:
         ).encode("utf-8")
         return f"sha256:{hashlib.sha256(payload).hexdigest()}"
 
+    async def _disabled_readiness(
+        self,
+        registration: MechanismRegistration,
+        section: BaseModel,
+        resources: Mapping[str, Any],
+        role: SettlementRole,
+    ) -> MechanismReadiness:
+        """A disabled section's readiness: ``disabled``, then its own blockers.
+
+        A disabled section publishes nothing, but its configuration is still
+        the operator's to correct, so the configuration blockers its
+        mechanism's preflight reports for it are listed beside ``disabled``
+        rather than hidden by it; each preflight decides which it reports for a
+        disabled section. Reachability blockers are dropped: whether a disabled
+        mechanism can be reached says nothing about publication.
+        """
+        pending = registration.preflight(section, resources, role)
+        observed = await pending if inspect.isawaitable(pending) else pending
+        if not isinstance(observed, MechanismReadiness):
+            raise SettlementConfigurationError(
+                f"preflight for {registration.mechanism_id!r} returned invalid status"
+            )
+        if observed.mechanism != registration.mechanism_id:
+            raise SettlementConfigurationError(
+                f"preflight for {registration.mechanism_id!r} returned status for {observed.mechanism!r}"
+            )
+        readiness = MechanismReadiness(
+            mechanism=registration.mechanism_id,
+            configured=True,
+            enabled=False,
+            ready=False,
+            blockers=(
+                ReadinessBlocker(
+                    code="disabled",
+                    message="mechanism is disabled",
+                    kind="configuration",
+                ),
+                *(
+                    blocker
+                    for blocker in observed.blockers
+                    if blocker.kind == "configuration"
+                ),
+            ),
+        )
+        secret_values = _secret_values(section)
+        public_payload = json.dumps(
+            readiness.safe_projection(), sort_keys=True, ensure_ascii=True
+        )
+        if any(value and value in public_payload for value in secret_values):
+            raise SettlementConfigurationError(
+                f"preflight for {registration.mechanism_id!r} exposed a secret value"
+            )
+        return readiness
+
     def _validate_readiness(
         self,
         registration: MechanismRegistration,
@@ -995,11 +1074,35 @@ def _field_is_secret(field_info: Any) -> bool:
     )
 
 
+def _field_is_never_published(field_info: Any) -> bool:
+    """A field any configuration layer may carry but no public output may show."""
+
+    extra = field_info.json_schema_extra
+    return isinstance(extra, Mapping) and extra.get("never_published") is True
+
+
+def _withheld_strings(value: Any) -> set[str]:
+    if isinstance(value, Mapping):
+        return {str(item) for item in value.values() if item is not None}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return {str(item) for item in value if item is not None}
+    return set()
+
+
 def _secret_values(model: BaseModel) -> set[str]:
+    """Every value public output must not contain: secret or never published.
+
+    A never-published value is configuration rather than a credential, so it
+    may arrive through any layer; a readiness projection that showed it would
+    still be a disclosure, so it is withheld exactly as a secret is. A mapping
+    or sequence value contributes each of its items, since an item can leak
+    alone.
+    """
+
     values: set[str] = set()
     for name, field_info in type(model).model_fields.items():
         value = getattr(model, name)
-        if _field_is_secret(field_info):
+        if _field_is_secret(field_info) or _field_is_never_published(field_info):
             revealed = (
                 value.get_secret_value()
                 if isinstance(value, (SecretStr, SecretBytes))
@@ -1009,6 +1112,7 @@ def _secret_values(model: BaseModel) -> set[str]:
                 values.add(revealed.decode("utf-8", errors="ignore"))
             elif revealed is not None:
                 values.add(str(revealed))
+                values.update(_withheld_strings(revealed))
         elif isinstance(value, BaseModel):
             values.update(_secret_values(value))
         elif isinstance(value, Mapping):

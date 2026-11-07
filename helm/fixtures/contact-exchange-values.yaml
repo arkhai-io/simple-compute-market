@@ -1,0 +1,53 @@
+# Overlay for a test release that settles VM deals by introduction and
+# verifies seller-side delivery: Bob offers contact exchange with a contact for
+# his `default` site, delivers each revealed buyer contact by SMTP to the
+# dev-env Mailpit, and Mailpit is enabled so a scenario can read it back.
+#
+# Apply on top of helm/values.yaml:
+#   helm upgrade --install arkhai-node-operator helm \
+#     --values helm/values.yaml --values helm/fixtures/contact-exchange-values.yaml
+#
+# Agents are keyed by name and Helm merges maps key by key, so this states only
+# what differs from Bob's default agent: his advertised URL, Settlement,
+# pricing, and Delivery.
+
+dev-env:
+  mailpit:
+    enabled: true
+
+storefront:
+  agents:
+    bob:
+      config:
+        # The local-profile buyer reaches the advertised seller through a port-forward.
+        base_url: http://localhost:8001/
+        pricing:
+          settlements:
+            - mechanism: contact-exchange.v1
+              asset: introduction
+              mechanism_input:
+                profile: default
+        Settlement:
+          priority:
+            - contact-exchange.v1
+          contact:
+            enabled: true
+            origins:
+              default:
+                contact_payload:
+                  email: bob-sales@seller.invalid
+            profiles:
+              default:
+                channel: email
+                terms: Quoted per engagement; reply within one business day.
+        Delivery:
+          enabled:
+            - seller-mail
+          seller-mail:
+            sink: smtp
+            host: arkhai-node-operator-dev-env-mailpit
+            port: 1025
+            start_tls: false
+            sender: storefront-bob@seller.invalid
+            recipients:
+              - bob-sales@seller.invalid

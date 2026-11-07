@@ -1,0 +1,36 @@
+{
+  "readiness": "credits /health=200",
+  "pending_grants": 0,
+  "lost_ack_grants": 1,
+  "final_grants": 2,
+  "final_balance": 5,
+  "payment_escrows": 0,
+  "source_revalidations": 4,
+  "schema": {
+    "api_credit_settlement_evidence": [
+      "negotiation_id",
+      "mechanism",
+      "agreement_digest",
+      "settlement_ref",
+      "status",
+      "evidence"
+    ],
+    "api_credit_issuance_progress": [
+      "negotiation_id",
+      "public_ref",
+      "status",
+      "fulfillment_uid",
+      "public_result",
+      "credentials_ref",
+      "reason",
+      "created_at",
+      "updated_at"
+    ]
+  },
+  "constraints": {
+    "api_credit_settlement_evidence": "CREATE TABLE api_credit_settlement_evidence (\n          negotiation_id TEXT PRIMARY KEY,\n          mechanism TEXT NOT NULL,\n          agreement_digest TEXT NOT NULL,\n          settlement_ref TEXT UNIQUE,\n          status TEXT NOT NULL CHECK(status IN ('pending', 'verified', 'failed')),\n          evidence TEXT NOT NULL\n        )",
+    "api_credit_issuance_progress": "CREATE TABLE api_credit_issuance_progress (\n          negotiation_id TEXT PRIMARY KEY,\n          public_ref TEXT NOT NULL UNIQUE,\n          status TEXT NOT NULL CHECK(status IN ('provisioning', 'ready', 'failed')),\n          fulfillment_uid TEXT,\n          public_result TEXT NOT NULL DEFAULT '{}',\n          credentials_ref TEXT,\n          reason TEXT,\n          created_at TEXT NOT NULL,\n          updated_at TEXT NOT NULL\n        )"
+  },
+  "qualification": "controlled only; synthetic payment I/O, real credits HTTP app and SQLite",
+  "temporary_databases_removed": true
+}

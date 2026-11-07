@@ -6,35 +6,14 @@ Define the dependency direction and role/domain/plugin boundaries that keep mark
 
 ## Requirements
 
-### Requirement: Hosted payer calls bypass storefront without bypassing authority
-
-Composition roots MAY expose exact released-client payer profile/setup/instrument operations and one accepted-obligation funding authorization directly from buyer to hosted authority. Those calls MUST use the selected persistent marketplace signer and authority/environment-scoped opaque binding. Storefronts MUST NOT proxy, choose, or persist payer/instrument state, and buyers MUST NOT call hosted escrow status, reclaim, condition, collection, provider, recovery, or operator surfaces directly.
-
-#### Scenario: Buyer sets a default instrument
-
-- **WHEN** the selected buyer profile performs a released payer instrument operation
-- **THEN** the call goes directly to the hosted authority and marketplace state retains only the opaque binding and safe lifecycle projection
-
-#### Scenario: Buyer polls a funded escrow
-
-- **WHEN** a marketplace purchase needs hosted settlement status after start
-- **THEN** the buyer uses the authenticated seller storefront rather than the hosted authority
-
-### Requirement: Hosted consumer remains provider-neutral
-
-Marketplace packages, schemas, config, persistence, logs, tests, and deployment MUST use released hosted payer/profile/authorization and conditional-escrow models only. They MUST NOT import Stripe SDK/types, model Customer, PaymentMethod, mandate, charge, debit, bank instruction, transfer, return, refund, dispute, webhook, provider credential/ID, hosted database/migration, reconciliation, or operator recovery behavior.
-
-#### Scenario: Provider behavior changes behind the hosted contract
-
-- **WHEN** the hosted authority changes Stripe adapter implementation without changing its released public contract
-- **THEN** marketplace code and configuration require no provider-specific change
-
 ### Requirement: Schema-opaque core orchestration
-Core role packages MUST own discovery, negotiation, settlement, and servicing control flow without importing a concrete market domain or settlement mechanism.
+
+Core role packages MUST own discovery and negotiation control flow without importing a concrete market domain or settlement mechanism. Core MUST expose the accepted Agreement, settlement-option carriers, a mechanism-to-stage table carrier and SettlementEvidence, but MUST NOT impose a shared mechanism-stage API, actor order or escrow lifecycle on mechanism and domain compositions.
 
 #### Scenario: Installing core without a domain plugin
+
 - **WHEN** the core buyer CLI runs without a domain entry-point plugin
-- **THEN** it exposes generic discovery behavior and no concrete market verbs
+- **THEN** it exposes generic discovery and negotiation behavior and no concrete market verbs or settlement implementation
 
 ### Requirement: Domain-owned deterministic semantics
 A domain package MUST own the listing, message, terms, materialization, receipt, result vocabulary, and pure interpretation required for independent implementations of that market to agree.
@@ -44,11 +23,43 @@ A domain package MUST own the listing, message, terms, materialization, receipt,
 - **THEN** its deterministic codecs and reference semantics can be installed without modifying core orchestration
 
 ### Requirement: From-below kit dependencies
-Kit and domain concept modules MUST NOT depend on core composition packages; role implementations MAY depend on both the relevant core role and domain/kit contracts.
+Every package MUST depend only on packages in its own layer or a lower one, without a cycle inside a layer, and only on packages whose scope is a subset of its own. Layer, kind, and scope MUST be read from the package's path and name, never inferred from its imports. Any import and any declared internal distribution is a dependency. One repository-wide check MUST hold these rules over every project, and every divergence it reports MUST be an owned exception that expires with its cause.
 
 #### Scenario: Architecture boundary tests run
-- **WHEN** imports are checked for core, kit, and domain concept packages
-- **THEN** core has no domain imports and from-below modules have no upward composition imports
+- **WHEN** the repository architecture check runs over every project outside the tooling paths
+- **THEN** every project is classified by layer, kind, and scope, and every dependency a rule forbids is reported unless an owned exception row excuses it
+
+#### Scenario: A lower layer depends on a higher one
+- **WHEN** a kit or specialization imports a composition, at module level, inside a function, under `TYPE_CHECKING`, or behind `try`
+- **THEN** the architecture check fails and names the importing file and line and the imported distribution
+
+#### Scenario: Packages in one layer import each other
+- **WHEN** two packages in the same layer depend on each other directly or through others in that layer
+- **THEN** the architecture check fails and names the cycle
+
+#### Scenario: A package knows a scope it is not placed in
+- **WHEN** a package depends on one whose scope is not a subset of its own, such as a domain composition declaring a sibling domain's contribution without importing it
+- **THEN** the architecture check fails and names the dependency and the scope elements it adds
+
+#### Scenario: A package imports an internal distribution it does not declare
+- **WHEN** a project's source imports a repository distribution its `pyproject.toml` does not declare
+- **THEN** the architecture check fails and names the importing file and line
+
+#### Scenario: A package imports a plugin
+- **WHEN** any package imports a package that registers into a plugin entry-point group
+- **THEN** the architecture check fails, while a declaration that installs the plugin passes
+
+#### Scenario: A light kind depends outside its kind allowlist
+- **WHEN** a contracts or client package depends on a distribution its kind allowlist does not name
+- **THEN** the architecture check fails and names the dependency
+
+#### Scenario: An exception outlives its cause
+- **WHEN** an exception row's edge is gone, or the edge no longer breaks the rule the row names
+- **THEN** the architecture check fails and names the row and its owning change
+
+#### Scenario: An override outlives its cause
+- **WHEN** an override row's project now classifies the same from its path alone, or the row grants a scope element none of the project's dependencies uses
+- **THEN** the architecture check fails and names the row
 
 ### Requirement: Role-owned executable composition
 The buyer executable MUST be core-owned and load domain plugins, and registry behavior MUST be core-owned and schema-configured. VM, bare-metal, and API-credit storefront executables and the VM provisioning executable are domain-owned composition roots. Each storefront contribution MUST provide one validated `MarketDomainContract` plus its domain-owned runtime builder without importing another domain implementation.
@@ -91,14 +102,30 @@ A domain MUST declare optional capabilities and supply the typed hook set requir
 The signed synchronous negotiation lifecycle MUST live in a foundation kit and MUST be
 composed by storefront domain roots. The kit MUST own round ordering, canonical-principal
 checks, transcript persistence, terminal-state transitions, exact continuation recovery,
-and the acceptance chokepoint. A domain MUST inject its listing resolver, schema codecs,
+and the acceptance chokepoint, through which administrative acceptance also passes, and
+MUST offer a side-effect-free preview of an opening. A domain MUST inject its listing resolver, schema codecs,
 seller policy, configuration-derived values, accepted-artifact builder, and domain
 persistence/effect hooks; neither the kit nor core may import a concrete domain or infer a
 domain by inspecting terms, proposals, listings, or persisted payloads.
 
+A domain whose listings derive from a declaration MAY contribute a listing-source check.
+The runtime MUST obtain its verdict before every seller decision and before a buyer's or
+an administrator's acceptance, never on a buyer's exit, and MUST enforce it itself, whatever
+the domain's policy chain contains: a declared mismatch or taken capacity refuses the
+round or acceptance, and a source that cannot be confirmed is a retryable refusal raised
+before any write. A seller decision that would counter or accept is subject to the
+verdict; one that independently rejects or exits keeps its own reason, so a malformed
+request is refused for what is wrong with it rather than as retryable.
+
+A thread MUST be recorded as successful only after its agreed terms, any hold, and its
+accepted artifacts are recorded. The runtime MUST NOT counter, accept, or force-accept a
+non-terminal thread unless its transcript ends with the seller's counter, nor one whose
+agreement or plan is recorded; a buyer MAY still exit it.
+
 #### Scenario: A domain runs a negotiation round
 
-- **WHEN** a VM or API-credit storefront processes a signed negotiation request
+- **WHEN** a VM, API-credit, or bare-metal storefront processes a signed negotiation
+  request
 - **THEN** the shared kit state machine advances the round while the selected domain
   contract alone decodes terms, evaluates policy, and constructs accepted artifacts
 
@@ -120,108 +147,54 @@ domain by inspecting terms, proposals, listings, or persisted payloads.
 - **WHEN** the domain supplies the negotiation resolver and complete domain hook set
 - **THEN** it obtains the same protocol guards without copying a VM or API-credit runtime
 
-### Requirement: Kit-owned single settlement runtime
-The mechanism-neutral commercial-settlement lifecycle MUST live in a foundation kit and
-MUST be composed by role/domain roots. It MUST use one stable per-obligation identity and
-one operation journal for materialization, authoritative status reconciliation, condition
-checking, collection, expired reclaim, retries, and uncertain acknowledgements. A domain
-MUST supply accepted-plan semantics, fulfillment, configuration, status projection, and
-real failure actions; a mechanism kit MUST supply the conditional-escrow adapter. Neither
-core carrier packages nor the runtime kit may import a concrete domain or deployed
-service.
+#### Scenario: An administrator force-accepts a negotiation
 
-#### Scenario: A domain settles a deal
+- **WHEN** an authenticated administrator accepts a non-terminal negotiation at an amount
+- **THEN** the runtime builds the acceptance through the recorded domain's hooks, records
+  the administrator as the accepting author, and commits through the same acceptance path
+  as a negotiated acceptance, so the domain's hold and accepted artifacts are recorded
 
-- **WHEN** a composing domain accepts and fulfills a settlement obligation
-- **THEN** lifecycle transitions and idempotency come from the shared runtime, while the
-  domain supplies only its plan, fulfillment, projection, configuration, and actions
+#### Scenario: An opening is previewed
 
-#### Scenario: A second settlement mechanism is installed
+- **WHEN** an administrator previews a negotiation opening
+- **THEN** the runtime runs the same decode, opening validation, principal, listing,
+  settlement-selection, and round-zero policy steps as a real opening and records no
+  thread, message, hold, or artifact
 
-- **WHEN** a composition registers another conditional-escrow adapter
-- **THEN** it uses the same obligation records, operation leases, worker, and aggregate
-  status rather than introducing a mechanism-specific lifecycle
+#### Scenario: A listing's source changed before acceptance
 
-#### Scenario: Settlement is interrupted and resumed
+- **WHEN** a buyer accepts, or an administrator force-accepts, a negotiation whose
+  listing's source check now reports a declared mismatch or taken capacity
+- **THEN** the runtime refuses the acceptance before recording anything, even where the
+  domain's chain has no inventory guard
 
-- **WHEN** a process stops after an operation is reserved or its acknowledgement is
-  uncertain
-- **THEN** recovery reloads the exact obligation and stable operation identity and
-  reconciles or retries without guessing an obligation or duplicating a financial effect
+#### Scenario: A listing's source cannot be confirmed
 
-#### Scenario: A domain has no fulfillment authority
+- **WHEN** a domain's source check reports that the listing's source cannot be confirmed
+- **THEN** a seller decision that would counter or accept, and a buyer's or an
+  administrator's acceptance, are refused as retryable before any write, an opening
+  preview reports the refusal, and a buyer's exit still succeeds
 
-- **WHEN** a domain can verify settlement but cannot produce a real immutable fulfillment
-  reference
-- **THEN** composition exposes that verified-only boundary and does not install a no-op
-  executor, synthetic fulfillment, or collectable claim
+#### Scenario: A seller's own rejection keeps its reason
 
-### Requirement: No parallel settlement lifecycle
+- **WHEN** seller policy rejects or exits a round for its own reason while the listing's
+  source cannot be confirmed
+- **THEN** the round ends with the policy's reason, not a retryable refusal
 
-A production composition MUST NOT retain an escrow-UID claim engine, dual-write claim
-projection, domain-local settlement orchestration copy, or compatibility alias that can
-advance the same obligation outside the shared runtime.
+#### Scenario: An acceptance is interrupted
 
-#### Scenario: Legacy claim state is migrated
+- **WHEN** the process stops after an acceptance recorded its message or agreement but
+  before the thread was recorded as successful
+- **THEN** the thread is not successful, settlement never reads it, and a later counter,
+  accept, or force-accept on it is refused
 
-- **WHEN** existing claim rows are converted into stable obligation records
-- **THEN** every immutable snapshot is validated before one atomic conversion, conflicts
-  roll back the conversion, and subsequent writes use only the shared runtime
+#### Scenario: A round is interrupted before the seller answers
 
-#### Scenario: Domain compensation differs
-
-- **WHEN** VM provisioning, API-credit issuance, or another domain effect fails
-- **THEN** the shared ordered dispatcher invokes that domain's registered real actions at
-  the existing side-effect boundary and does not interpret domain payloads or invent a
-  generic money-movement action
-
-### Requirement: Thin hosted consumer boundary
-
-The hosted-settlement kit MUST contain only the exact manifest-pinned released client dependency, marketplace-to-client configuration conversion, signature injection, safe payer/profile/authorization helpers, and the conditional-escrow adapter. It MUST NOT contain provider logic, copy client wire models or canonicalization, import a service-local module, or own authority persistence/recovery. Core and domain packages MUST depend on the kit/provider-neutral contracts rather than the hosted client or Stripe. Buyer composition MAY use kit-owned direct payer/authorization helpers; storefront composition MUST mediate escrow operations.
-
-#### Scenario: Hosted settlement is installed
-
-- **WHEN** a buyer or storefront enables `fiat.stripe.v1`
-- **THEN** it registers the thin kit/client integration in the same settlement runtime or payer namespace and imports no hosted service implementation, marketplace-internal wire copy, or provider code
-
-#### Scenario: Buyer manages payer state
-
-- **WHEN** the Stripe payer command is registered
-- **THEN** its implementation is supplied by the hosted kit and persistent identity layer rather than by a domain or core provider model
-
-### Requirement: Thin hosted settlement composition
-
-The marketplace MUST integrate hosted fiat through a foundation-kit adapter registered with the existing settlement runtime. The adapter MAY depend on the released hosted client, core carriers, and settlement runtime, but MUST NOT contain or import the Stripe SDK, EVM/RPC gateway, webhook handling, financial database models, provider credentials/IDs, or duplicate hosted wire/signature implementations.
-
-#### Scenario: VM composition enables hosted settlement
-- **WHEN** the pinned hosted client and adapter are configured
-- **THEN** VM settlement uses the same obligation records, operation journal, worker, and failure dispatcher as Alkahest with mechanism effects supplied by the adapter
-
-#### Scenario: Other domains are installed
-- **WHEN** API-credit or bare-metal packages run without hosted settlement enabled
-- **THEN** they acquire no hosted-client or Stripe dependency and their composition remains unchanged
-
-### Requirement: Cross-repository authority boundary
-
-Marketplace code MUST call hosted settlement only through the exact released client; it MUST NOT import, mount, install, or copy the hosted service source, provider adapters, settings, migrations, or financial state. The hosted service MUST remain provider/domain neutral and MUST NOT import marketplace domains. The client package MUST remain the only shared contract and MAY include provider-neutral payer profile, instrument readiness, funding authorization, action metadata, and conditional-escrow wire models.
-
-#### Scenario: Marketplace composes hosted settlement
-
-- **WHEN** a buyer or storefront enables `fiat.stripe.v1`
-- **THEN** it supplies typed public config, selected marketplace identity, persistent opaque payer binding where applicable, and domain condition input through the released client without receiving provider credentials or storage access
-
-#### Scenario: Hosted contract changes
-
-- **WHEN** the service publishes a new incompatible contract
-- **THEN** marketplace CI and readiness reject it until the exact client/manifest pin and conformance fixtures are updated together
-
-### Requirement: Independent request authentication
-
-The hosted client and service MUST use their released body-bound request-signing contract. Existing marketplace registry, storefront, and signed-operation authentication modules and development behavior MUST remain unchanged and MUST NOT become a cross-repository source dependency.
-
-#### Scenario: Hosted request is signed
-- **WHEN** the adapter invokes the external authority
-- **THEN** signing binds operation, resource, canonical body hash, and timestamp under the released client contract without importing an internal marketplace auth module
+- **WHEN** the process stops after recording a buyer's opening or counter but before the
+  seller's decision
+- **THEN** a later counter, accept, or force-accept on the thread is refused, so no
+  buyer accepts an offer the seller never made; the buyer may exit it, and the
+  negotiation watchdog abandons it
 
 ### Requirement: From-below identity capability
 
@@ -239,55 +212,55 @@ Canonical principal, signer/verifier dispatch, authenticated-envelope, replay, a
 
 ### Requirement: Composition roots inject signers
 
-Buyer, registry, storefront, provisioning, and domain composition roots MUST load one selected signer from secret-bound identity configuration and construct only the counterparty verifier registry needed for the role. Hosted buyer composition MUST bind payer/profile and authorization calls to the selected or recorded persistent signer; hosted storefront composition MUST verify accepted buyer identity and use its own signer for mediated escrow calls. Public config, process arguments, logs, and durable public carriers MUST remain credential-free.
+Buyer, registry, storefront, provisioning, and domain composition roots MUST load one selected signer from secret-bound identity configuration and construct only the counterparty verifier registry needed for the role. Arkhai payment calls MUST use the appropriate owner's WorkOS user-scoped API credential separately from the marketplace signer. Public config, process arguments, logs, and durable public carriers MUST remain credential-free.
 
 #### Scenario: Buyer starts with an Ed25519 profile
 
 - **WHEN** buyer config names an Ed25519 principal and its Secret supplies the matching seed
-- **THEN** the buyer composition constructs an Ed25519 signer, selects the matching opaque hosted payer binding, and uses it for payer/authorization calls without loading an EVM private key
+- **THEN** buyer composition constructs an Ed25519 signer for marketplace requests without loading an EVM private key
 
 #### Scenario: Storefront rotates its signer
 
 - **WHEN** storefront configuration resolves a replacement principal with an old overlapping verifier
-- **THEN** the composition signs new hosted escrow requests with the replacement and accepts authenticated peer requests under the declared overlap without changing accepted buyer profile ownership
+- **THEN** the composition signs new marketplace requests with the replacement and accepts authenticated peer requests under the declared overlap without changing accepted buyer ownership
 
 #### Scenario: Registry serves mixed consumer schemes
 
 - **WHEN** buyer and storefront principals use different supported schemes
-- **THEN** the registry verifies both through the marketplace identity kit without selecting a shared secret, wallet, or hosted payer model
+- **THEN** the registry verifies both through the marketplace identity kit without selecting a shared secret or wallet
 
-#### Scenario: VM composition selects hosted fiat
+#### Scenario: VM composition selects Arkhai payments
 
-- **WHEN** the VM root receives an Ed25519 signer and a manifest-compatible hosted adapter
-- **THEN** the same scheme-neutral core lifecycle runs without an Alkahest client, wallet derivation, or chain preflight
+- **WHEN** the VM buyer and storefront select `arkhai.payments.v1` with their marketplace signers and owner-scoped payment credentials
+- **THEN** the payment calls use the Arkhai account credentials without loading an Alkahest wallet or chain configuration
 
 #### Scenario: A chain mechanism is selected
 
 - **WHEN** a composition selects an Alkahest or other EVM effect
-- **THEN** its concrete mechanism adapter resolves the required wallet, chain, and provider dependencies without exposing them to scheme-neutral core orchestration
+- **THEN** its concrete mechanism resolves the required wallet, chain, and provider dependencies without exposing them to scheme-neutral core orchestration
 
-#### Scenario: Hosted fiat is published
+#### Scenario: Arkhai payments is published
 
-- **WHEN** a composition installs the hosted adapter with a manifest-pinned hosted client
-- **THEN** the adapter verifies the required identity capability and delegates the hosted wire contract to that client rather than copying canonicalization, headers, signatures, or response verification
+- **WHEN** a composition installs the Arkhai payments kit
+- **THEN** it uses the published HTTP and receipt contracts without duplicating their wire encoding, canonicalization, or signature verification
 
 ### Requirement: Explicit settlement configuration registration
 
-Composition roots MUST register installed settlement mechanisms with canonical ID, typed config schema, preflight, client factory, option builder, buyer compatibility, and optional operator commands. Core role packages MUST consume only the shared registration/status contract and MUST NOT branch on mechanism IDs or import concrete mechanism configuration.
+Composition roots MUST register installed settlement mechanisms with canonical ID, typed config schema, preflight, option builder, buyer compatibility, and optional operator commands; obligation-runtime client factories are optional for Agreement-based stages. Core role packages MUST consume only the shared registration/status contract and MUST NOT branch on mechanism IDs or import concrete mechanism configuration.
 
-#### Scenario: Composition omits hosted client
+#### Scenario: Composition omits payments client
 
-- **WHEN** a domain composition installs only Alkahest
-- **THEN** common settlement status, publication, and buyer selection expose only that registration without hosted placeholders or no-op hooks
+- **WHEN** a domain installs only the Alkahest registration and omits the Arkhai payments kit
+- **THEN** common status, publication, and buyer selection expose only the installed Alkahest registration without payment placeholders or no-op hooks
 
 ### Requirement: Shared resources are injected on demand
 
 Identity, wallet, and chain resources MUST be composed independently of settlement mechanism configuration and injected only into registrations that declare them. Installing a non-EVM mechanism MUST NOT require placeholder wallet or chain resources.
 
-#### Scenario: Fiat-only VM storefront starts
+#### Scenario: Payment-only VM storefront starts
 
-- **WHEN** VM composition installs hosted non-EVM settlement with Ed25519 identity and no Alkahest registration
-- **THEN** startup, readiness, publication, and servicing succeed without constructing a wallet or chain client
+- **WHEN** VM composition installs only `arkhai.payments.v1` with its required payment-service credential
+- **THEN** startup, readiness, publication, and payment settlement succeed without constructing an Alkahest wallet or chain client
 
 ### Requirement: Storefront roots inject a frozen domain registry
 
@@ -343,6 +316,126 @@ concrete domain, or depend on a deployed service.
 - **THEN** the dependency is inverted through the validated contract or an
   explicit composition hook rather than a domain import
 
+### Requirement: Storefront timer loops are held and stepped through one kit controller
+
+Each storefront process MUST hold exactly one kit-owned loop controller and MUST
+register with it every timer-driven loop the process runs. A domain MUST NOT
+implement its own pause flag, gate, or loop-state reporting. A loop whose tasks are
+created by a kit runtime the storefront composes, such as a per-site fan-out, MUST be
+declared to the controller by name so that a pause waits for it.
+
+A registration MUST bind the loop's name to the step that runs exactly one cycle of
+it, and MAY bind a read-only preview of that cycle. The step MUST invoke the same
+operation the loop's timer invokes, so a manual cycle cannot exercise behaviour the
+timer does not. A loop MUST register in one of two forms: a timer loop, whose timer
+the controller runs over its step, or a fan-out, whose task a composed kit runtime
+owns and which runs independent per-child cycles, each child under its own declared
+name. A fan-out MUST register with its step and the names of its children, and each
+child MUST be declared as the fan-out's child when it registers, so status lists every
+child before its first cycle; a child the fan-out's task reaches later MUST be declared
+then. A name registered in one form MUST be refused in the other. A storefront MAY
+register a loop's step before the loop itself, so every step is invocable from the
+moment the storefront serves, but a step registration runs no loop. Starting the
+registered loops MUST be the only way a loop's task starts, and it MUST start every
+registered timer and fan-out together; it MUST name every fan-out's children before
+starting any task, so a fan-out whose children cannot be named leaves no loop started.
+
+One pause MUST hold every registered loop at a cycle boundary without cancelling it:
+a cycle either completes or never starts, and loop-local state survives the pause.
+While held, every registered step MUST remain invocable. Resuming MUST return every
+held loop to work. Holding loops MUST NOT affect whether the storefront accepts new
+negotiations, which is a separate control.
+
+A loop body MUST read its gate when it starts, so a pause is observable from the
+moment the loop runs, and MUST read its gate immediately before doing any work. It
+MUST wait out its interval through the controller, which returns early when a pause
+is requested. A pause requested at any point in a loop's interval MUST therefore be
+observed before that loop's next cycle's work, independently of the interval's
+length.
+
+The loop pause MUST be process-local. A restarted storefront MUST resume its loops.
+
+#### Scenario: Every storefront loop is held by one pause
+
+- **WHEN** an operator pauses the lifecycle loops of a storefront
+- **THEN** every timer-driven loop that storefront runs, including loops created by a
+  composed kit runtime, stops at its next cycle boundary
+- **AND** the storefront continues to accept new negotiations
+
+#### Scenario: A held loop is stepped
+
+- **WHEN** the loops are held and an operator runs one cycle of a registered loop
+- **THEN** exactly the operation the loop's timer invokes runs once and its result is
+  returned
+- **AND** the loops remain held
+
+#### Scenario: A pause arrives during a long interval
+
+- **WHEN** a loop with a long interval is waiting between cycles and a pause is
+  requested
+- **THEN** the loop reaches its gate without waiting out the interval and performs no
+  further work until resumed or stepped
+
+#### Scenario: A fan-out's children are listed before their first cycle
+
+- **WHEN** a storefront registers its capacity-event fan-out for its configured sites
+- **THEN** status lists each site's poller before the fan-out starts, and starting the
+  storefront's loops starts the fan-out's task with the timers
+
+#### Scenario: A name is registered in both forms
+
+- **WHEN** a loop name registered as a timer loop is registered as a fan-out, or the
+  reverse
+- **THEN** the second registration is refused and the first stands
+
+#### Scenario: An unregistered loop is stepped
+
+- **WHEN** an operator runs one cycle of a name no loop registered
+- **THEN** the request is refused as not found and no work runs
+
+#### Scenario: A storefront restarts while paused
+
+- **WHEN** a storefront whose loops were held restarts
+- **THEN** its loops run on their timers until an operator pauses them again
+
+### Requirement: A loop's reported state is established by the loop
+
+A loop's reported state MUST be derived from what the loop has itself acknowledged
+at its gate, never from the existence of the task running it. The controller MUST
+report each registered or declared loop as one of:
+
+- `starting` — the loop has not yet reached its gate, and so cannot yet observe a
+  pause;
+- `running` — no pause is requested and the loop has reached its gate;
+- `pausing` — a pause is requested and the loop has not yet acknowledged it, so a
+  cycle that began before the request may still be writing;
+- `paused` — the loop has acknowledged the pause at its gate;
+- `exited` or `cancelled` — the loop's task has ended.
+
+A pause request MUST wait, within a bounded window, for every live loop to
+acknowledge and MUST then report each loop's state as it stands. A loop that has not
+acknowledged within the window MUST be reported `pausing` or `starting`, never
+`paused`. The controller MUST be able to name which loops are `starting` and which have
+`exited` or been `cancelled`, so a health surface can distinguish a loop that has not
+begun from one that has ended.
+
+#### Scenario: A loop is mid-cycle when a pause is requested
+
+- **WHEN** a pause is requested while a loop is part-way through a cycle
+- **THEN** that loop is reported `pausing` until it reaches its gate, and `paused`
+  only afterwards
+
+#### Scenario: A loop has not yet begun cycling
+
+- **WHEN** a pause is requested before a newly started loop has reached its gate
+- **THEN** that loop is reported `starting`, not `paused`
+
+#### Scenario: A loop ends on an exception
+
+- **WHEN** a registered loop's task ends on its own
+- **THEN** the loop is reported `exited` rather than `paused` or `running`
+- **AND** the controller names it among the loops that have ended
+
 ### Requirement: An extracted concern leaves no domain-local implementation
 
 When a storefront concern moves into kit, every domain that implemented it
@@ -375,21 +468,26 @@ binding lookup hooks. The kit MUST NOT import a concrete domain, provider, or
 deployed service, and a composing domain MUST NOT retain a parallel capacity or
 publication lifecycle.
 
-Every capacity-backed publication candidate MUST carry one exact durable
-`CapacityBinding(site_id, offering_mode, source_id)`: trusted `site_id`,
-pool-declared `offering_mode`, and opaque domain-owned `source_id`. The public
-offer's mode MUST equal the binding's
-mode. Reservation, commit, release, close, reopen, and restart recovery MUST
-reload and compare the same binding and MUST NOT infer a home site, default an
-offering mode, choose an authority from response data, or fan out after a
-binding is recorded.
+Every publication candidate MUST carry one exact durable
+`PublicationBinding(site_id, offering_mode, source_id, backing)`: trusted
+`site_id`, pool-declared `offering_mode`, opaque domain-owned `source_id`, and the
+backing delegate its pool's declared label selects. Every domain MUST build it from
+the durable listing binding through the kit's one constructor, never from a
+published payload. The public offer's mode MUST equal the binding's mode.
+Reservation, commit, lease activation, release, lease truncation, close, reopen, and
+restart recovery MUST reload and compare the same binding and MUST NOT infer a home
+site, default an offering mode, choose an authority from response data, or fan out
+after a binding is recorded. Every storefront capacity effect MUST go through the
+kit's capacity effects, whose guard is the binding's backing delegate, whether a
+domain composes the kit's capacity runtime or its own aggregate capacity client.
 
 #### Scenario: A domain publishes a capacity-backed candidate
 
 - **WHEN** the domain derives a schema-valid candidate from a trusted site
   projection
 - **THEN** the kit publishes it only after the domain hook confirms that its
-  exact site, source, and advertised offering mode equal durable local state
+  exact site, source, advertised offering mode, and backing equal durable local
+  state
 
 #### Scenario: An authenticated seller creates a capacity-backed listing
 
@@ -412,13 +510,22 @@ binding is recorded.
   capacity delta
 - **THEN** the kit obtains exact site-keyed projections, asks the domain hooks
   for the affected candidates, and executes deterministic close-before-reopen
-  reconciliation
+  reconciliation over the listings whose backing is reconciled by availability
 
 #### Scenario: Recovery loses an in-memory routing cache
 
 - **WHEN** commit, release, or fulfillment resumes after restart
-- **THEN** the effect is sent only to the site in the persisted binding, and a
-  missing or unconfigured binding fails closed without authority fan-out
+- **THEN** the effect is sent only to the site in the persisted binding, through
+  the kit's capacity effects, and a missing or unconfigured binding fails closed
+  without authority fan-out
+
+#### Scenario: A lease is activated
+
+- **WHEN** a storefront activates a lease, on its first attempt or on a retry after
+  restart
+- **THEN** the activation is sent only to the site in the persisted binding, through
+  the kit's capacity effects, and a missing or unconfigured binding fails closed
+  without authority fan-out
 
 #### Scenario: A pool cannot deliver the advertised mode
 
@@ -426,62 +533,30 @@ binding is recorded.
   offering mode or its listing codec projects another mode
 - **THEN** publication is rejected before registry or capacity effects
 
-### Requirement: Bare-metal adopts the shared hosted lifecycle
+#### Scenario: Two bindings differ only in backing
 
-The bare-metal buyer MUST be an installed `market.buyer_domains` contribution and the storefront MUST register Alkahest and hosted Stripe through `SettlementConfigurationRegistry`. Bare-metal composition MAY interpret trusted listings and physical lifecycle records, but MUST consume the core `HostedSettlementTransport` and shared `HostedSettlementRouteService`; it MUST NOT import `hosted_settlement_client` outside the hosted kit or copy VM transport/routes.
-
-#### Scenario: Domain callback injection
-
-- **WHEN** the shared route service prepares, reserves, fulfills, projects, or cleans a hosted obligation
-- **THEN** injected bare-metal callbacks derive accepted physical authority, perform selected-site fulfillment, and project lease evidence
-- **AND** the shared service retains signing, replay, mechanism runtime, collect, and reclaim mechanics
-
-### Requirement: API-credit hosted composition uses shared seams
-
-API-credit buyer and storefront roots MUST install Alkahest and
-`fiat.stripe.v1` through the shared settlement configuration registry and
-mechanism-neutral runtime. Buyer lifecycle calls MUST use
-`core_buyer.HostedSettlementTransport`; storefront lifecycle routes MUST use
-`HostedSettlementRouteService` with API-credit callbacks. Core and API-credit
-domain packages MUST remain provider opaque and MUST NOT import VM, bare-metal,
-or the released hosted client directly.
-
-#### Scenario: Hosted-only API-credit storefront starts
-- **WHEN** only a ready hosted clause and Ed25519 seller signer are configured
-- **THEN** publication, negotiation, start, issuance, evidence, status, and reclaim routes initialize without a wallet or Alkahest client
-
-#### Scenario: Both mechanisms are enabled
-- **WHEN** one API-credit listing has complete Alkahest and hosted configuration
-- **THEN** both alternatives share domain pricing/fulfillment semantics while retaining independent mechanism state and failure outcomes
+- **WHEN** a supplied binding equals a persisted binding in site, mode, and source
+  but carries a different backing
+- **THEN** the two are unequal, and the kit refuses to publish, close, or reopen
+  under the persisted binding
 
 ### Requirement: Pre-terms mechanism dispatch is registration-owned
 
-The settlement mechanism for a deal MUST be resolved exactly once, from the buyer's
-settlement selection or the legacy flat-proposal coercion, and every subsequent
-mechanism-shaped decision — proposal interpretation, verification, accepted-artifact
-construction, settle-route and status projection — MUST reach the resolved mechanism's
-registration hooks. Domain code MUST NOT branch on a concrete mechanism identifier at
-these decision points.
+The settlement mechanism for a deal MUST be resolved exactly once, from the buyer's settlement selection or the existing legacy flat-proposal coercion. Pre-terms option interpretation MUST use that registration and the domain's corresponding supported-stage entry. Domain composition MUST dispatch the accepted Agreement through its role table; mechanism-specific validation, mandate construction and settlement translations belong to that entry, not schema-opaque core or common delivery.
 
 #### Scenario: A third mechanism is composed
 
-- **WHEN** a new mechanism registration is added to a domain's composition root and
-  enabled in `[Settlement]`
-- **THEN** its deals negotiate, verify, settle, and report through the registration
-  hooks with no new conditional arms in any domain
+- **WHEN** a new mechanism registration and supporting role stage are added to a domain and enabled in `[Settlement]`
+- **THEN** its options use the registration and its accepted Agreements use that domain's declared stage without another mechanism conditional
 
 #### Scenario: A mechanism conditional is sought in domain code
 
 - **WHEN** the pre-terms path of any composed domain is inspected
-- **THEN** no `if <mechanism> … else` branch on a concrete mechanism identifier exists
-  outside the composition root's registration list
+- **THEN** concrete-mechanism dispatch exists only in its role table, and any mechanism-specific validation is inside the selected entry's owned hooks
 
 ### Requirement: Deal identity is mechanism-neutral for every mechanism
 
-Every deal, regardless of mechanism, MUST have a durable `settlement_obligations`
-record keyed by its `obligation_ref`, with any mechanism-issued identifier (such as an
-escrow uid) recorded as that mechanism's `mechanism_ref`. Cross-mechanism tooling MUST
-correlate deals by `obligation_ref`.
+Every accepted deal MUST retain its negotiation ID and exact Agreement. Mechanisms using the obligation runtime MUST have a durable `settlement_obligations` record keyed by `obligation_ref`, with the mechanism's identifier as `mechanism_ref`. Arkhai payments MUST instead correlate its accepted mandate and transaction evidence by negotiation ID; its transaction ID MUST NOT be represented as an escrow obligation.
 
 #### Scenario: An Alkahest deal is recorded neutrally
 
@@ -511,9 +586,711 @@ command assembly.
 - **THEN** market orchestration on that side proceeds unchanged and the sink is
   reported as a local delivery fault
 
+### Requirement: Arkhai payment request and receipt authentication
+
+Headless calls to the Arkhai payments service MUST authenticate with WorkOS user-scoped API keys issued for the caller's Arkhai account. Arkhai payment receipts MUST use the service's Ed25519 `arkhai.payments.receipt.v1` signature framing and be verified through the identity kit. A receipt MUST verify only when its signed `livemode` equals the verifying role's configured `livemode`: a test-mode receipt never proves a live payment, and a live receipt never satisfies a test deployment. Marketplace registry, storefront, and negotiation request authentication MUST remain on their existing contracts and MUST NOT become a cross-repository source dependency.
+
+#### Scenario: Arkhai payment request is authenticated
+
+- **WHEN** a buyer or seller kit calls the Arkhai payments service
+- **THEN** the request uses the owner's WorkOS user-scoped API credential, and the caller verifies a returned receipt with the published signature contract rather than copying marketplace request-signing code
+
+#### Scenario: A receipt from the other mode proves nothing
+
+- **WHEN** a buyer or seller stage receives a correctly signed receipt for the accepted mandate whose signed `livemode` differs from the stage's configured `livemode`
+- **THEN** the receipt does not verify, the stage produces no verified settlement evidence, and delivery or issuance stays blocked
+
+### Requirement: Arkhai payments registers as a peer settlement mechanism
+
+A domain composition that supports Arkhai payments MUST register `arkhai.payments.v1` beside `alkahest.v1` through the shared typed settlement registration surface. Selection MUST pin one exact mechanism and option, and core MUST dispatch without a mechanism-specific branch. A domain MUST NOT require or install the Arkhai payments client when that registration is absent.
+
+#### Scenario: A domain registers both peer mechanisms
+
+- **WHEN** a domain installs `alkahest.v1` and `arkhai.payments.v1`
+- **THEN** both options appear through their registrations and each accepted Agreement dispatches to its selected settlement stage
+
+#### Scenario: A domain omits Arkhai payments
+
+- **WHEN** a domain installs Alkahest without the Arkhai payments kit
+- **THEN** it publishes no Arkhai payment option and acquires no Arkhai payment-service dependency
+
+### Requirement: Domains compose the stages they support
+
+Core MUST NOT prescribe the actors' order or require separate buyer-confirm and seller-verify steps. Domains MUST compose only supported stages; settlement and delivery MAY be fused.
+
+#### Scenario: A domain fuses settlement and delivery
+
+- **WHEN** a domain composes settlement and delivery as one stage
+- **THEN** core accepts the composition without a separate buyer-confirm or seller-verify step
+
+### Requirement: Deals compose negotiate, settle, and provision stages
+
+Negotiation MUST pass its exact accepted Agreement to the domain's selected settlement stage, the post-commitment handoff by which the seller learns of and verifies the mechanism's commitment; it is not a protocol step. Protected delivery MUST consume that stage's verified SettlementEvidence rather than compare mechanism IDs or infer payment from an escrow's presence.
+
+#### Scenario: Arkhai payment gates domain provisioning
+
+- **WHEN** a VM seller receives `commit` for an Agreement settled through `arkhai.payments.v1`
+- **THEN** delivery remains blocked until its stage verifies a signed receipt matching the transaction ID and Agreement deal hash and produces verified evidence
+
+### Requirement: Domains compose only the stages they support
+
+A domain MUST compose only mechanism stages it supports, and each stage MUST understand its predecessor's output rather than a shared escrow adapter API. Settlement and provisioning MAY be fused when one mechanism provides both, as `contact-exchange.v1` does.
+
+#### Scenario: A domain composes two settlement mechanisms
+
+- **WHEN** a domain advertises both Alkahest and Arkhai payment options
+- **THEN** its role table routes each accepted Agreement to the selected stage and compatible delivery reads normalized evidence without a new core or delivery mechanism conditional
+
+#### Scenario: A settlement mechanism also provides the service
+
+- **WHEN** a deal selects `contact-exchange.v1`
+- **THEN** the composed stage may fuse settlement and delivery, produce its introduction evidence and invoke no payment or physical-provisioning phase
+
+#### Scenario: A mechanism requires seller action first
+
+- **WHEN** a supporting domain composes a stage whose first effect belongs to the seller
+- **THEN** core dispatches that role's entry without requiring a prior buyer deposit, confirmation or escrow proposal
+
+### Requirement: The payments service and dispute authority keep their authority
+
+The payments service MUST remain the authority for its ledger, account credentials, fees, hold release and hold extensions, and payment-provider operations. Cases and their outcomes MUST belong to the agreement's dispute authority, an independent party that acts at the payments service only through its own authorities and answers parties in its own protocol.
+
+#### Scenario: A hosted case's outcome is observed
+
+- **WHEN** a buyer's case on an `arkhai.payments.v1` deal is ruled
+- **THEN** the buyer half reads the outcome from the dispute authority's signed record, not from a payments-service response
+
+### Requirement: Arkhai payments authority remains external
+
+`kit/arkhai-payments` MUST consume the payments service's published HTTP and JSON Schema contract, vendored with its conformance vectors and identified by content hash rather than by source location, and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract.
+
+#### Scenario: A payments contract revision is vendored
+
+- **WHEN** `kit/arkhai-payments` vendors a published payments contract revision
+- **THEN** the revision is identified by its content hash, not a source location, and the kit's Python wire models are generated from its JSON Schemas
+
+#### Scenario: Payments service owns the ledger
+
+- **WHEN** a marketplace domain composes `arkhai.payments.v1`
+- **THEN** it uses the external payments API and signed receipt as authority and keeps no local ledger, payment-provider integration, or settlement daemon
+
+#### Scenario: A case is filed on a hosted deal
+
+- **WHEN** a buyer files a case on an `arkhai.payments.v1` deal
+- **THEN** it files with the agreement's dispute authority and sends the payments service no case or effect of its own
+
+#### Scenario: Published payment snapshots contain an effective end or zero gross
+
+- **WHEN** the selected published contract permits an effective part end or a zero gross amount in a payment snapshot or receipt
+- **THEN** the generated consumer accepts those fields and values without accepting unknown fields or weakening unrelated constraints
+
+#### Scenario: A contract publication is refreshed
+
+- **WHEN** the payment consumer selects a newer standalone JSON Schema and producer conformance vectors
+- **THEN** it records their content hashes, regenerates reproducible strict models, verifies current producer signatures and transaction identities, and preserves historical raw signed-byte verification separately
+
+#### Scenario: Nullable required values remain distinct from optional omissions
+
+- **WHEN** a published mandate includes a required nullable duration or an omitted optional end
+- **THEN** serialization retains the required null and omits an unset optional end consistently for the approval body, canonical transaction identity and receipt verification
+
+#### Scenario: An explicit null for an optional property is normalized away
+
+- **WHEN** a mandate, receipt or snapshot states `null` for an optional property whose schema does not allow null, such as a part's `end` or a receipt part's `rate`
+- **THEN** the generated consumer accepts it and treats it as omitted, so the transaction identity and receipt signature verification use the normalized body, and settlement data pairing such a mandate with the hash of its raw JSON is refused
+
+### Requirement: Marketplace roles hold no payment ledger
+
+Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe top-ups, payouts, or provider recovery. Mechanism kits MUST keep no settlement servicing state or daemon; headless callers supply owner-scoped credentials per request and verify service-signed receipts through the identity kit. A storefront MAY keep lifecycle observation state (watch cursors, funding timers, the end-service journal, and evidence records), which records what an authority reported and never a balance.
+
+#### Scenario: A headless caller checks a payment
+
+- **WHEN** a buyer or seller process checks a payment
+- **THEN** it supplies its owner-scoped credential for that request and verifies the service-signed receipt through the identity kit, keeping no servicing state between calls
+
+#### Scenario: A storefront watches a deal
+
+- **WHEN** a storefront watches a hosted deal
+- **THEN** it stores the payment authority's event sequence and the dispute authority's record sequence as its cursors and stores no balance or settled amount of its own
+
+### Requirement: Buyer dispatch preserves Agreement-only settlement
+
+Core buyer settlement MUST select the composing domain's role-table entry using `Agreement.settlement.mechanism` and pass the accepted outcome unchanged. It MUST NOT choose a path from escrow-proposal presence, infer escrow terms, synthesize an obligation or select a replacement mechanism. A missing accepted entry MUST fail before settlement effects.
+
+#### Scenario: Payments outcome has no escrow proposal
+
+- **WHEN** an accepted Agreement selects Arkhai payments and its outcome contains no escrow proposal
+- **THEN** the declared Arkhai buyer entry receives the exact accepted outcome
+
+#### Scenario: Alkahest outcome contains its proposal
+
+- **WHEN** an accepted Agreement selects Alkahest
+- **THEN** its declared buyer entry reads the proposal from the outcome and core does not use that field to choose the entry
+
+#### Scenario: Accepted mechanism has no stage
+
+- **WHEN** accepted durable work names an unavailable role-table entry
+- **THEN** settlement fails actionably before a mutation and never falls through to another mechanism
+
+### Requirement: One settlement declaration per domain role
+
+Each settlement-capable domain role MUST declare one immutable table from canonical mechanism ID to domain-owned stage. Core MUST require only the table and evidence carrier, not shared stage methods. Mechanism IDs MUST NOT select behavior elsewhere in domain orchestration; mechanism-owned input validation inside an entry remains permitted. Fresh admission MUST expose only supported entries.
+
+#### Scenario: Role support differs
+
+- **WHEN** a domain's seller supports several stages but its buyer supports one
+- **THEN** each role exposes exactly its declared support and neither role inherits another role's stage or default
+
+#### Scenario: Composition is incomplete
+
+- **WHEN** a settlement-capable role supplies no valid table or duplicate/invalid entry identities
+- **THEN** composition rejects it before publication, negotiation or settlement effects
+
+### Requirement: Core evidence shape and domain payload ownership
+
+SettlementEvidence MUST carry `negotiation_id`, `mechanism`, opaque `settlement_ref`, domain-defined `status` and domain-owned `evidence`. Core MUST preserve identities and validate shared shape without interpreting the payload, prescribing status transitions or treating a mechanism ID as delivery permission. Stages MUST keep credentials out of evidence.
+
+#### Scenario: Evidence crosses the domain delivery boundary
+
+- **WHEN** a selected stage hands evidence to delivery
+- **THEN** the accepted negotiation and established reference remain unchanged and only the domain interprets its validated payload
+
+#### Scenario: Buyer progress is not seller authorization
+
+- **WHEN** a buyer reports local settlement completion but the seller has not verified authoritative evidence
+- **THEN** seller protected delivery remains blocked
+
+### Requirement: Mechanism continuation stays stage-owned
+
+Mechanism-specific post-delivery attestation, claim binding, compensation and source-evidence revalidation MUST remain in the selected stage's continuation. Common delivery and restart runtimes MUST consume validated evidence and domain results without comparing mechanism IDs. Recovery MUST resolve the stage from accepted state, not current priority or serialized executable objects.
+
+#### Scenario: Physical delivery needs an Alkahest attestation
+
+- **WHEN** common physical delivery returns its result to an Alkahest stage
+- **THEN** that stage handles its attestation and claim binding while the common delivery runtime recognizes no mechanism ID
+
+#### Scenario: Receipt-backed work resumes
+
+- **WHEN** a payment stage resumes delivery after restart
+- **THEN** it revalidates its stored receipt before passing evidence to common recovery and reuses accepted operation identities
+
+#### Scenario: A servicing worker's hook needs a stage continuation
+
+- **WHEN** a generic settlement servicing worker reports an obligation ready or ended
+- **THEN** the domain resolves the continuation from the seller entry the accepted Agreement selected, and the hook compares no mechanism ID
+
+#### Scenario: A stage requires seller action first
+
+- **WHEN** a domain composes a supporting stage whose first effect belongs to the seller
+- **THEN** core dispatches its role entry without requiring a prior buyer deposit, confirmation or escrow proposal
+
+### Requirement: Family-grouped capability shapes share one flattening contract
+
+A capability shape MUST be expressed in the family-grouped form: a mapping of family name to
+a mapping of field name to a scalar value. One shared utility in a foundation kit that imports
+only the standard library MUST validate that form's structure, flatten a shape into
+quantities and attributes, and compute a canonical digest of a shape. The utility is capacity
+vocabulary rather than part of the market core, because only markets that admit capacity
+against declared supply have shapes; the market core MUST NOT carry it.
+
+- **Schema.** Flattening MUST be driven by a schema the owning domain supplies. For each
+  family field the schema states whether it is a quantity or an attribute, whether it is
+  required, and its flat name. A required field MUST be required only in a shape that names
+  its family: a shape that omits the family states nothing about it. The utility MUST NOT
+  contain any domain's family or field names.
+- **Digest.** The canonical digest MUST be taken over the family-grouped form, so changing a
+  schema's flat names does not change a shape's digest.
+- **Refusals.** A shape naming a family or field its schema does not define, naming a family
+  without one of that family's required fields, or carrying a value of the wrong kind MUST be
+  refused with the offending path named.
+- **Inverse.** The utility MUST build a family-grouped shape from flat quantities and
+  attributes through a schema, as the exact inverse of flattening, refusing every flat name
+  the schema does not define and every problem flattening would refuse.
+- **One implementation.** Kit, role, and domain code that needs to validate, flatten,
+  unflatten, or digest a capability shape MUST use this utility rather than a local
+  implementation.
+
+#### Scenario: The VM domain flattens a shape
+
+- **WHEN** a VM shape `{gpu: {count: 1, model: H100}, memory: {gib: 64}}` is flattened with
+  the VM schema
+- **THEN** the result's quantities are `gpu_count: 1` and `ram_gb: 64` and its attributes
+  are `gpu_model: H100`
+
+#### Scenario: A schema renames a flat field
+
+- **WHEN** a domain's schema changes the flat name of a field
+- **THEN** the digest of every shape using that field is unchanged
+
+#### Scenario: A shape names an undefined field
+
+- **WHEN** a shape names a field the supplied schema does not define
+- **THEN** flattening refuses it and names the family and field
+
+#### Scenario: A shape omits a family whose fields are required
+
+- **WHEN** a shape names no field of a family whose fields its schema marks required
+- **THEN** the utility accepts it, and its flattening carries nothing for that family
+
+#### Scenario: A shape names a family without one of its required fields
+
+- **WHEN** a shape names a family but omits a field the schema marks required in it
+- **THEN** the utility refuses it, naming the missing `family.field`
+
+#### Scenario: Structure is checked without a schema
+
+- **WHEN** a shared kit validates a shape's structure without a domain schema
+- **THEN** it accepts any well-formed family-grouped mapping and refuses only malformed
+  structure
+
+#### Scenario: A declaration is read back into a shape
+
+- **WHEN** flat quantities `gpu_count: 8`, `ram_gb: 2048` and attribute `gpu_model: H200` are
+  unflattened with the compute-family schema
+- **THEN** the shape is `{gpu: {count: 8, model: H200}, memory: {gib: 2048}}`, and flattening
+  it returns the same flat values
+
+#### Scenario: A flat name is outside the schema
+
+- **WHEN** a flat quantity the schema does not name is unflattened
+- **THEN** the utility refuses it, naming the flat field
+
+### Requirement: The compute family shares one capability schema
+
+The compute-family capability schema — the families `gpu`, `cpu`, `memory`, and `storage`,
+their fields, and each field's flat name — MUST be owned by one compute-family domain package
+that every compute domain binds. The VM and bare-metal domains MUST NOT each define a schema,
+and neither MUST obtain the schema by importing the other. The package MUST depend only on
+the standard library and the capability-shape foundation kit.
+
+No family of the compute schema is required. The `gpu` family's `count` and `model` MUST
+both be required within it, so a compute shape states a GPU count and model together or
+states no GPUs, and every compute shape carries at least one quantity.
+
+#### Scenario: Two compute domains flatten one shape
+
+- **WHEN** the VM and bare-metal domains each flatten `{gpu: {count: 8, model: H200}, memory: {gib: 2048}}`
+- **THEN** both produce `gpu_count: 8`, `ram_gb: 2048`, and `gpu_model: H200` through the
+  same schema object
+
+#### Scenario: A shape states no GPUs
+
+- **WHEN** the compute schema validates `{cpu: {count: 8}, memory: {gib: 32}}`
+- **THEN** the shape is accepted and flattens to `vcpu_count: 8` and `ram_gb: 32` with no
+  attribute
+
+#### Scenario: A shape states a GPU model without a count
+
+- **WHEN** the compute schema validates `{gpu: {model: H100}, cpu: {count: 8}}`
+- **THEN** the shape is refused, naming `gpu.count` as required
+
+#### Scenario: A shape states a GPU count without a model
+
+- **WHEN** the compute schema validates `{gpu: {count: 2}}`
+- **THEN** the shape is refused, naming `gpu.model` as required
+
+#### Scenario: The bare-metal storefront binds the schema
+
+- **WHEN** the bare-metal storefront's import boundary is checked
+- **THEN** it imports the compute-family package and no VM package
+
+### Requirement: Capability shape admissibility is owned by one kit
+
+A foundation kit SHALL own the admissibility of capability shapes, depending only on the
+capability-shape kit and the standard library, so storefronts, buyers, and pool
+administration can all depend on it. It SHALL be the only reader of a shape constraint:
+every other caller SHALL hold a parsed declaration and a resolved policy as opaque
+values, and SHALL obtain a stated listing shape's base shape from the kit rather than by
+reading its constraints.
+
+The kit SHALL expose two groups of operations.
+
+**Declaration handling**, each given a tier label that every problem it returns, and
+every problem resolution later returns about it, SHALL carry:
+
+- splitting a stated listing shape into its base shape and either its declaration or its
+  constraint problems. Without a schema it SHALL check structure only; given a domain's
+  capability schema it SHALL also check that every constrained path is a quantity field
+  the schema defines. The kit SHALL know no family or field name. It SHALL read the base
+  shape first: a constraint that leaves the base shape unreadable under the schema SHALL
+  be reported as a base-shape problem with no declaration, and only a constraint error
+  on a readable base shape SHALL be a constraint problem.
+- splitting a stated list of listing shapes entry by entry, and reporting each base shape
+  that two entries state with different constraints, naming each conflicting entry,
+  without needing a schema. Entries identical in base shape and constraints SHALL
+  collapse to one. No caller SHALL compare two entries itself.
+- parsing a constraint-only declaration, which states no offer.
+- resolving declarations given highest tier first, with a schema, into a resolved policy
+  or every problem found. Each constraint form SHALL own its merge rule. An empty range
+  SHALL be a problem naming each tier's conflicting value.
+
+**Evaluation on a resolved policy**, neither returning unconditional bounds:
+
+- a check of a whole shape that returns every problem found, empty when the shape is
+  admissible, each problem naming every `family.field` path it involves, a code, a
+  message, and its tier. A shape malformed under the policy's schema SHALL be reported
+  as problems; the schema's required fields SHALL NOT be checked.
+- the values one dimension may take given a partial shape: those for which the partial
+  shape, with that dimension set to the value, can still be completed to an admissible
+  shape. Dimensions the partial shape does not state are free; a value it states for the
+  requested dimension is ignored; an empty partial shape is valid. A dimension that is
+  not a quantity the schema defines, or a partial shape malformed under the schema,
+  SHALL raise an error carrying every problem.
+
+The returned values SHALL be an opaque set answering membership, emptiness, the greatest
+admissible value not above a given value, the least not below it, and its minimum and
+maximum, where an absent maximum means unbounded. An empty set SHALL report itself
+empty and contain no value, and each of its value-returning accessors SHALL answer
+nothing. No operation SHALL return a range for a dimension independent of the rest of a
+shape. An answer SHALL be valid only for the partial shape it was computed
+from. Fixing dimensions one at a time, in any order, each to a value from the current
+answer SHALL never leave a later answer empty and SHALL end at an admissible shape.
+
+A shape SHALL be admissible exactly when it can be completed to an admissible shape, so
+a dimension a shape omits never makes it inadmissible by its absence.
+
+#### Scenario: A shape outside one bound
+
+- **WHEN** a shape states a quantity above the resolved maximum for that field
+- **THEN** the check returns one problem naming that field's path and the tier that set
+  the maximum, and no problem for any field within its bounds
+
+#### Scenario: A shape inside every bound
+
+- **WHEN** every quantity a shape states lies within its field's resolved bounds
+- **THEN** the check returns no problems
+
+#### Scenario: A shape omits a bounded field
+
+- **WHEN** a resolved policy bounds a field with a minimum and a shape does not state
+  that field
+- **THEN** the shape is admissible
+
+#### Scenario: Admissible values are requested for one dimension
+
+- **WHEN** the values for a bounded dimension are requested with a partial shape whose
+  stated dimensions are admissible
+- **THEN** the answer contains exactly the resolved range for that dimension and answers
+  the greatest admissible value not above a requested one
+
+#### Scenario: The partial shape is already inadmissible
+
+- **WHEN** the values for one dimension are requested with a partial shape that states
+  another dimension outside its bounds
+- **THEN** the answer is empty
+
+#### Scenario: Values are requested for a field that is not a quantity
+
+- **WHEN** the values are requested for an attribute, or for a path the schema does not
+  define
+- **THEN** the request raises an error naming the path, and no empty answer is returned
+
+#### Scenario: Values are requested from an empty partial shape
+
+- **WHEN** the values for a bounded dimension are requested with a partial shape stating
+  nothing
+- **THEN** the answer is that dimension's resolved range
+
+#### Scenario: A counter-shape is built one dimension at a time
+
+- **WHEN** a policy fixes each dimension in turn to a value from the current answer for
+  that dimension
+- **THEN** no answer along the way is empty and the resulting shape has no problems
+
+#### Scenario: Tiers merge per field
+
+- **WHEN** a higher tier bounds only the maximum of a field and a lower tier bounds its
+  minimum and maximum
+- **THEN** the resolved policy takes the higher tier's maximum and the lower tier's
+  minimum
+
+#### Scenario: A higher tier omits a lower tier's bound
+
+- **WHEN** a lower tier bounds a field and a higher tier states nothing for it
+- **THEN** the resolved policy keeps the lower tier's bound
+
+#### Scenario: Tiers merge to an empty range
+
+- **WHEN** a lower tier states a minimum above a higher tier's maximum for one field
+- **THEN** resolution returns a problem naming the field and both tiers with their
+  values, and no policy
+
+#### Scenario: The kit is used by a domain it does not know
+
+- **WHEN** declarations and shapes are expressed in a schema with no compute vocabulary
+- **THEN** every operation behaves as for any other schema, and the kit imports nothing
+  beyond the capability-shape kit and the standard library
+
+### Requirement: Shape constraints are stated inline and strictly
+
+A stated listing shape SHALL be able to give any quantity field a constraint mapping in
+place of its scalar value. The mapping SHALL hold `offer`, `min`, `max`, or any of them
+but not none; each SHALL be a positive integer, `min` SHALL NOT be above `max`, and an
+`offer` SHALL lie within the field's own `min` and `max`. A plain scalar SHALL be
+shorthand for a mapping holding only `offer`. The listing's base shape SHALL hold each
+field's offer and SHALL omit a field whose mapping states none. An offer without `min`
+or `max` SHALL NOT constrain the field. A constraint-only declaration SHALL use the same
+field syntax without `offer`. Under the `min`/`max` merge rule, for each field's `min`
+and `max` the highest tier stating it SHALL win, and a tier that does not state one SHALL
+leave a lower tier's value in place. The admissible region SHALL be the intersection of
+every constraint. A key the kit does not define SHALL make the shape's constraints
+unreadable rather than be ignored.
+
+#### Scenario: A field carries an unknown key
+
+- **WHEN** a constraint mapping holds a key other than `offer`, `min`, and `max`
+- **THEN** splitting returns a constraint problem naming the path and no declaration
+
+#### Scenario: A constraint names an attribute
+
+- **WHEN** a shape is split with a domain's schema and gives a constraint mapping to a
+  field the schema defines as an attribute, or does not define
+- **THEN** splitting returns a constraint problem naming that path
+
+#### Scenario: An offer lies outside its own range
+
+- **WHEN** a constraint mapping states an `offer` above its `max` or below its `min`
+- **THEN** splitting returns a constraint problem, with or without a schema
+
+#### Scenario: A constraint mapping is empty
+
+- **WHEN** a field's constraint mapping states no key
+- **THEN** splitting returns a constraint problem naming the path
+
+#### Scenario: A field constrains without offering
+
+- **WHEN** a shape gives `memory.gib` only a `max`
+- **THEN** the base shape omits `memory.gib`, and the policy bounds a shape that states it
+
+#### Scenario: An offer alone does not constrain
+
+- **WHEN** a shape states `cpu.count` as a plain scalar and no tier bounds it
+- **THEN** the base shape states that count, and a shape stating any other count is
+  admissible on that field
+
+#### Scenario: A constraint removes a required field from the base shape
+
+- **WHEN** a shape is split with a schema that requires a field, and the shape gives that
+  field a constraint mapping with no `offer`
+- **THEN** splitting returns a base-shape problem naming the field as required, and no
+  declaration
+
+#### Scenario: A list states one base shape with different constraints
+
+- **WHEN** a stated list is split, with or without a schema, and two entries share a base
+  shape but differ in their constraints
+- **THEN** the split reports that base shape as conflicting, naming both entries
+
+#### Scenario: A list repeats an identical entry
+
+- **WHEN** a stated list holds two entries identical in base shape and constraints
+- **THEN** the split yields that entry once and reports no problem
+
+### Requirement: Storefront deal controls are kit-owned route services
+
+The storefront's deal controls MUST be framework-free route services in the kit that
+composes or owns the mechanism each exposes, bound by every storefront behind its own
+authentication: the stage-event read, evaluate-negotiate, and force-accept (storefront
+kit); settle verify, evaluate-settle, and settle wait (settlement runtime kit); and admin
+reserve and the capacity-released callback (capacity and publication kit).
+Evaluate-negotiate MUST call the negotiation runtime's opening preview and force-accept
+its administrative acceptance; neither may record negotiation state through any other
+path. Evaluate-settle MUST call a per-domain fulfillment-preview hook. Evaluate-negotiate,
+evaluate-settle, and settle verify MUST make no durable write. Wire paths and canonical
+client methods MUST be the same for every domain that binds a control. A storefront MUST NOT carry a domain-local
+implementation of a control it binds. The stage-event read's route service MUST rebuild
+the resource the canonical client signs and refuse a query parameter that resource does
+not bind, a repeated one, or a stream request. Force-accept MUST answer a listing-source
+refusal as every negotiation route does: 409 for a declared mismatch or taken capacity,
+503 for a source that cannot be confirmed.
+
+#### Scenario: A storefront previews settlement
+
+- **WHEN** an administrator requests evaluate-settle for an escrow on a VM or bare-metal
+  storefront
+- **THEN** the settlement runtime returns the domain's fulfillment preview without
+  reserving, scheduling, or persisting anything
+
+#### Scenario: A domain gains a control
+
+- **WHEN** a storefront that lacked a deal control needs it
+- **THEN** it binds the kit route service and reaches it through the canonical client
+  method every other domain uses
+
+#### Scenario: An event read carries a parameter the signature does not bind
+
+- **WHEN** an administrator's stage-event read carries an unknown or repeated query
+  parameter, or asks for a stream
+- **THEN** every storefront refuses it with 400 before reading the log
+
+### Requirement: The trading pause is one process-local kit mechanism
+
+A storefront's trading pause MUST be one process-local mechanism owned by the storefront
+kit, separate from the lifecycle pause that holds its loops, set and cleared through one
+kit route service every storefront binds at the same paths. While it is set, the
+negotiation runtime MUST refuse a new negotiation, and an opening preview MUST report
+that refusal. A restarted storefront MUST start with trading resumed.
+
+#### Scenario: A storefront is paused and restarted
+
+- **WHEN** an authenticated operator pauses a storefront's trading and the process
+  restarts
+- **THEN** the restarted storefront accepts new negotiations without a resume
+
+#### Scenario: Trading and loop pauses are separate
+
+- **WHEN** an operator pauses a storefront's trading
+- **THEN** its loops keep running, and pausing its loops leaves trading open
+
+### Requirement: Compute mock executors share one compute-family mechanism
+
+Under the provisioning mock profile, each compute provisioning adapter MUST register a
+mock executor for its own actions built on one rule and gate mechanism owned by compute
+provisioning beside the job lifecycle: rule matching, pause gates, a deterministic
+signal when a job reaches a gate, the evaluate-job dry run, and a
+framework-free test route service. A mock executor MUST be assembled from shared
+execution mechanics and the adapter's contributed default output; no adapter's mock MAY
+derive from another adapter's. The mechanism MUST NOT be presented as a foundation kit,
+and a non-compute domain's executor mock MUST NOT be added to it. Each adapter MUST
+mount its rule and evaluate-job routes under its own prefix, contributing their route
+contracts from the family's template instantiated with its mount; job draining and
+waiting MUST stay shared.
+The test route service MUST answer with response models the compute family's contracts
+distribution owns, so every adapter's rule routes answer the same typed shapes.
+
+#### Scenario: A bare-metal grant runs under the mock profile
+
+- **WHEN** a bare-metal grant job runs with the mock profile active
+- **THEN** the bare-metal mock returns output bare metal's codec reads as a grant, unless
+  a bare-metal rule shapes, pauses, or fails it
+
+#### Scenario: A test waits for a held job
+
+- **WHEN** a test needs a job held at a rule's gate
+- **THEN** it waits on the gate-reached signal, not on elapsed time
+
+#### Scenario: A VM rule is installed
+
+- **WHEN** a scenario installs a VM mock rule
+- **THEN** it matches VM jobs only and never a bare-metal job
+
+#### Scenario: Two adapters' rule routes answer one shape
+
+- **WHEN** a scenario lists the rules installed through VM's and through bare metal's rule
+  routes
+- **THEN** both answers are the family's typed rule models
+
+### Requirement: Per-site projection state is kit-owned and held once per process
+
+The storefront-side capacity and publication kit MUST own per-site projection state: for
+every site a storefront's aggregate capacity client names, the resource-pool and
+capacity-bucket projections, their poller, a per-site refresh, the poller's cycle on demand,
+the drift check a topology-sensitive error triggers, and a per-site, per-family status. A
+storefront that derives listings from site projections MUST compose exactly one instance per
+process, built by its composition root and injected into every
+consumer; the kit MUST NOT keep that state at module level, and a domain MUST NOT keep a
+projection cache of its own. The poller MUST run as a loop registered with the storefront's
+loop controller, and its step MUST run exactly the poller's cycle. The state MUST be
+domain-neutral: it holds whatever generation a site serves, and a domain's acceptance rules
+for a generation apply when that domain reads it. It MUST run one operation at a time on a
+site's family, including its version check, so a caller arriving during an operation waits for
+it and a failed operation never replaces a confirmation that completed after it began.
+
+#### Scenario: Two consumers read one site
+
+- **WHEN** a storefront's publication cycle and its opening recheck both read one site's
+  resource-pool projection
+- **THEN** both read the same held generation from the one instance their composition root
+  built, and neither fetches the site
+
+#### Scenario: The projection step is run while held
+
+- **WHEN** an operator runs one cycle of the site-projection loop while the loops are held
+- **THEN** exactly the poller's cycle runs, waking publication if a resource-pool
+  generation changed, and the loops remain held
+
+#### Scenario: One domain refuses a generation
+
+- **WHEN** a site serves a generation one domain's acceptance rule refuses
+- **THEN** the state holds that generation, the refusing domain holds that site's listings,
+  and any other reader of the state still reads it
+
+### Requirement: A loop records each cycle's outcome with the controller
+
+A storefront loop whose cycle can fail MUST record each cycle's outcome with the kit loop
+controller, whether its timer or an operator's step ran the cycle: when it finished,
+whether it completed, and, for a failure, the stage that failed and its error. Each
+invocation MUST record exactly one terminal outcome, including one that raised, and a
+preview MUST record none; a step cancelled while it waits for the loop's lock records a
+cancelled outcome naming no stage, because no stage began. A recorded error MUST carry the exception's type and MUST carry its
+message only when the storefront's own configuration or publication error raised it, so no
+credential, secret, or private URL reaches status. The controller MUST be the one place a loop's cycle runs: a loop
+registers its step and its interval, the controller's timer runs the step through the same
+operation an operator's step does, and that operation holds the loop's lock, so the timer and a
+step never run a cycle concurrently. A kit runtime that fans one loop out into independent
+per-site cycles MUST serialize each site's cycle and that site's step instead, and MUST record
+each site's timer cycle with the controller under that site's own loop name.
+The controller MUST report, in one snapshot, every loop's state and the last outcome each loop
+recorded, for a storefront's system status to read; a loop that has exited or been cancelled
+MUST remain distinguishable from a running loop whose last cycle failed.
+
+#### Scenario: A stepped cycle fails
+
+- **WHEN** an operator steps the publication loop and the cycle fails
+- **THEN** the controller's snapshot reports that cycle as failed with its error, as it
+  would for a timer-run cycle
+
+#### Scenario: A step is requested while the timer's cycle runs
+
+- **WHEN** an operator steps a loop whose timer cycle is in progress
+- **THEN** the step runs after that cycle completes, never alongside it, and each records its
+  own outcome
+
+#### Scenario: One site's capacity-event feed fails
+
+- **WHEN** one site's capacity-event poller cycle fails while another site's succeeds
+- **THEN** the controller's snapshot reports the failing site's loop with that cycle failed, by
+  its error's type, and the other site's loop with its own outcome
+
+#### Scenario: A cycle fails on an unexpected exception
+
+- **WHEN** a publication cycle raises an exception that is not one of the storefront's own
+  errors, with a message naming a site URL
+- **THEN** the recorded outcome names the failing stage and the exception's type, and not its
+  message
+
+### Requirement: The payments kit reads an account's own balance
+
+`PaymentsClient` MUST offer `get_balance(account)`, calling the payments service's `GET /balances/{account}` and returning the published `Balance` model, with the account validated as an account identifier. The kit's `PaymentsAuthority` engine MUST offer the same view, and `FakePaymentsClient` MUST serve it from that engine. Before projecting, the view MUST advance every transaction the account is a party to, to the engine's clock, as a transaction snapshot does. It MUST report `available` by asset, and one `held` entry per part and distinct maturity among that part's held lots where the account is the payee, timed by that maturity, with the part's lots that have no maturity yet in one entry held until stop or lift.
+
+#### Scenario: A payer reads its balance
+
+- **WHEN** a payer's client reads the payer's own balance
+- **THEN** it receives the published `Balance`, whose `available` already excludes the payer's outgoing escrow
+
+#### Scenario: A caller reads another account's balance
+
+- **WHEN** a client reads a balance for an account other than its own
+- **THEN** the service refuses it with 403 `caller_not_authorized`, and the client raises the refusal with that code
+
+#### Scenario: A payee has held money
+
+- **WHEN** the engine holds a once part's money for a payee until its hold matures
+- **THEN** the payee's balance lists that part once, with its held amount and its effective `releaseAt`
+
+#### Scenario: A payee's hold matures between reads
+
+- **WHEN** a payee reads its balance just before a once part's hold matures, and again just after, with no other operation on the transaction between
+- **THEN** the first read lists the part as held, and the second lists nothing held for it and includes the payee's earnings, net of fee, in `available`
+
 ## Evidence
 
-- Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
+- Layer, scope, and kind rules over every project: `make check-architecture`, `docs/development/ARCHITECTURE.toml`, `scripts/architecture.py`, and `scripts/tests/test_architecture.py`; VM concept-module and contract-construction guardrails: `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
 - Core CLI fallback and shipped plugin contracts: `core/buyer/tests/unit/test_cli.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
 - Distribution entry points: `core/buyer/pyproject.toml`, `domains/vms/buyer/pyproject.toml`, and `domains/apicredits/buyer/pyproject.toml`.
 - Frozen storefront registry, startup discovery, record-bound lifecycle carriers, and exact-object resolution: `core/storefront/tests/unit/test_domain_registry.py`, `test_domain_plugins.py`, `test_app_composition.py`, and `test_domain_lifecycle.py`.
+
+- One schema-driven flattening of family-grouped capability shapes, its canonical digest, and its standard-library-only boundary: `kit/capability-shape/tests/unit/test_capability_shape.py`, with its empty `allowed-dependencies` in `kit/capability-shape/pyproject.toml`; the VM family schema against `DIMENSION_KEYS`: `domains/vms/domain/tests/test_capability_shapes.py` and `test_schema.py`.
+- The schema-driven inverse of flattening: `kit/capability-shape/tests/unit/test_capability_shape.py`.
+- Capability shape admissibility — splitting, list-level conflicts, labelled resolution, evaluation, the opaque value set, the one-dimension-at-a-time guarantee as a property test, and neutrality against a synthetic schema: `kit/capability-admissibility/tests/unit/test_admissibility.py`; its dependency on the shape kit and the standard library alone is its package allowlist, held by `make check-architecture`.
+- One compute-family capability schema bound by both compute domains: `domains/compute/tests/test_capability_schema.py`, `domains/vms/domain/tests/test_compute_requirements.py`, and the compute vocabulary's `allowed-dependencies` and the sibling-domain scope rule, both held by `make check-architecture`.

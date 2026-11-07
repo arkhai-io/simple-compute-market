@@ -52,7 +52,18 @@ class ProjectionCacheView(Generic[T]):
 
 
 class ProjectionCache(Generic[T]):
-    """Refresh one projection family without exposing partial generations."""
+    """Refresh one projection family without exposing partial generations.
+
+    Every operation -- a version poll, a forced snapshot, a drift check -- runs
+    under one lock, its version check included, so operations on the family
+    never overlap. A poll that arrives while another operation runs does not
+    queue: it waits for that operation and returns its result rather than
+    polling again, because a confirmation already in progress answers it. A
+    forced refresh queues behind the running operation and then fetches,
+    because its caller asked for a snapshot taken after its own change. Either
+    way, a failed operation never replaces a confirmation that completed after
+    it began.
+    """
 
     def __init__(
         self,
@@ -67,7 +78,8 @@ class ProjectionCache(Generic[T]):
         self._state = ProjectionState.not_loaded
         self._last_error: str | None = None
         self._fetched_at: datetime | None = None
-        self._refresh_lock = asyncio.Lock()
+        self._lock = asyncio.Lock()
+        self._running: asyncio.Future[ProjectionCacheView[T]] | None = None
 
     def view(self) -> ProjectionCacheView[T]:
         return ProjectionCacheView(
@@ -78,6 +90,52 @@ class ProjectionCache(Generic[T]):
         return await self.refresh(force=True)
 
     async def poll_once(self) -> ProjectionCacheView[T]:
+        running = self._running
+        if running is not None:
+            try:
+                return await asyncio.shield(running)
+            except asyncio.CancelledError:
+                # Only when the joined operation was cancelled and this caller
+                # was not does the caller poll for itself, rather than report a
+                # result nobody produced.
+                current = asyncio.current_task()
+                if not running.cancelled() or (
+                    current is not None and current.cancelling()
+                ):
+                    raise
+        return await self._exclusive(self._poll_locked)
+
+    async def refresh(self, *, force: bool = False) -> ProjectionCacheView[T]:
+        if not force:
+            return await self.poll_once()
+        return await self._exclusive(self._refresh_locked)
+
+    async def refresh_after_topology_error(
+        self, observed_identity: ProjectionIdentity | None
+    ) -> bool:
+        """Coalesce one reactive version check and report whether drift existed."""
+        before = observed_identity or self._identity
+        view = await self.poll_once()
+        return view.identity is not None and before is not None and view.identity != before
+
+    async def _exclusive(
+        self, operation: Callable[[], Awaitable[ProjectionCacheView[T]]]
+    ) -> ProjectionCacheView[T]:
+        async with self._lock:
+            running: asyncio.Future[ProjectionCacheView[T]] = (
+                asyncio.get_running_loop().create_future()
+            )
+            self._running = running
+            try:
+                view = await operation()
+                running.set_result(view)
+                return view
+            finally:
+                self._running = None
+                if not running.done():
+                    running.cancel()
+
+    async def _poll_locked(self) -> ProjectionCacheView[T]:
         try:
             remote = await self._client.version()
         except Exception as exc:
@@ -89,30 +147,19 @@ class ProjectionCache(Generic[T]):
             self._state = ProjectionState.loaded
             self._fetched_at = datetime.now(timezone.utc)
             return self.view()
-        return await self.refresh(force=True)
+        return await self._refresh_locked()
 
-    async def refresh(self, *, force: bool = False) -> ProjectionCacheView[T]:
-        async with self._refresh_lock:
-            if not force:
-                return await self.poll_once()
-            try:
-                identity, value = await self._client.snapshot()
-                self._validate(value)
-            except Exception as exc:
-                self._last_error = str(exc)
-                self._state = ProjectionState.stale if self._value is not None else ProjectionState.invalid
-                return self.view()
-            self._identity = identity
-            self._value = value
-            self._last_error = None
-            self._state = ProjectionState.loaded
-            self._fetched_at = datetime.now(timezone.utc)
+    async def _refresh_locked(self) -> ProjectionCacheView[T]:
+        try:
+            identity, value = await self._client.snapshot()
+            self._validate(value)
+        except Exception as exc:
+            self._last_error = str(exc)
+            self._state = ProjectionState.stale if self._value is not None else ProjectionState.invalid
             return self.view()
-
-    async def refresh_after_topology_error(
-        self, observed_identity: ProjectionIdentity | None
-    ) -> bool:
-        """Coalesce one reactive version check and report whether drift existed."""
-        before = observed_identity or self._identity
-        view = await self.poll_once()
-        return view.identity is not None and before is not None and view.identity != before
+        self._identity = identity
+        self._value = value
+        self._last_error = None
+        self._state = ProjectionState.loaded
+        self._fetched_at = datetime.now(timezone.utc)
+        return self.view()

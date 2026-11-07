@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
+
 DIST_DIR ?= ../../.dist
 
 .PHONY: build reinit test typecheck
@@ -6,7 +9,7 @@ build: ## Build the wheel into the shared .dist/
 	uv build --wheel --out-dir $(DIST_DIR)
 
 reinit: ## Refresh released identity, core, and registry-client packages
-	uv sync --dev --find-links $(DIST_DIR) --upgrade-package arkhai-core --reinstall-package arkhai-core --upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity --reinstall-package arkhai-core-registry-client
+	python3 ../../scripts/uv_project.py reinit
 
 test: reinit ## Run the test suite
 	uv run --find-links $(DIST_DIR) pytest tests -q

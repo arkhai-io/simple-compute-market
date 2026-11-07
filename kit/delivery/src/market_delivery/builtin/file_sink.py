@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..events import DeliveryEvent
-from ..sinks import DeliveryError, DeliverySink, SinkSettings
+from ..sinks import DeclaredSink, DeliveryError, DeliverySink, SinkSettings
 
 
 class FileSinkSettings(SinkSettings):
@@ -32,4 +32,12 @@ def build_file_sink(settings: Mapping[str, Any]) -> DeliverySink:
     return deliver_to_file
 
 
-__all__ = ["FileSinkSettings", "build_file_sink"]
+#: The installed sink: its factory with the settings model it declares.
+FILE_SINK = DeclaredSink(build_file_sink, FileSinkSettings)
+
+
+__all__ = [
+    "FILE_SINK",
+    "FileSinkSettings",
+    "build_file_sink",
+]

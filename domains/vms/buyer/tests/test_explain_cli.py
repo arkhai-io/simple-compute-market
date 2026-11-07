@@ -8,8 +8,8 @@ from core_buyer import (
     RegistryDiscovery,
     RegistryQueryPlan,
 )
-from domains.vms.buyer import listing_cli
-from domains.vms.buyer.cli import app
+from arkhai_vms_buyer import listing_cli
+from arkhai_vms_buyer.cli import app
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -103,11 +103,10 @@ def test_listing_explain_emits_stable_json_and_stops_before_normal_selection(
     assert payload["settlement"]["rejection_categories"] == {"no_settlement_options": 1}
     assert payload["mutation_boundary"]["stopped_before"][-1] == "run_persistence"
 
-
 def test_listing_rejects_clause_with_generated_fields_before_registry(
     monkeypatch,
 ) -> None:
-    from domains.vms.buyer.settlement_composition import (
+    from arkhai_vms_buyer.settlement_composition import (
         resolve_buyer_settlement_policy,
     )
 
@@ -115,8 +114,8 @@ def test_listing_rejects_clause_with_generated_fields_before_registry(
         {
             "Settlement": {
                 "schema_version": 1,
-                "priority": ["fiat.stripe.v1"],
-                "stripe": {"enabled": True},
+                "priority": ["alkahest.v1"],
+                "alkahest": {"enabled": True},
             }
         }
     )
@@ -142,4 +141,3 @@ def test_listing_rejects_clause_with_generated_fields_before_registry(
     assert "Accepted settlement fields:" in result.output
     assert "asset" in result.output
     assert "alkahest.chain" in result.output
-    assert "stripe.funding_profile" in result.output

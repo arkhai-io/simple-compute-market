@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 
 import pytest
 
-from core_buyer.negotiation_client import _authenticated_json
+from core_buyer.negotiation_client import AuthenticatedHTTPError, _authenticated_json
 from core_buyer.orchestration import submit_settlement_request
 from market_identity import (
     Ed25519Signer,
@@ -101,6 +101,7 @@ def test_ed25519_request_and_signed_response_need_no_wallet(monkeypatch) -> None
     seller = Ed25519Signer(b"\x02" * 32)
     response = {"action": "accept", "negotiation_id": "neg-1"}
     captured = {}
+    envelopes = []
 
     def open_request(request, **kwargs):
         captured["request"] = request
@@ -127,11 +128,16 @@ def test_ed25519_request_and_signed_response_need_no_wallet(monkeypatch) -> None
         request_id="request.1",
         timestamp=_NOW,
         expected_response_principals=_trust(seller),
+        capture=envelopes.append,
     )
 
     request = captured["request"]
     headers = {key.lower(): value for key, value in request.header_items()}
     assert result == response
+    assert envelopes[0].body == json.dumps(response).encode("utf-8")
+    assert envelopes[0].headers["X-Market-Signature"]
+    assert envelopes[0].envelope.resource == "listing-1"
+    assert envelopes[1].body == request.data
     assert headers["x-market-signature-version"] == "arkhai.market-request-signature.v2"
     assert headers["x-market-identity-scheme"] == "ed25519"
     assert headers["x-market-identity-identifier"] == buyer.identity.identifier
@@ -191,6 +197,7 @@ def test_signed_response_body_mutation_is_rejected(monkeypatch) -> None:
         ),
     )
 
+    envelopes = []
     with pytest.raises(RuntimeError, match="response authentication failed"):
         _authenticated_json(
             "http://seller/api/v1/negotiate/new",
@@ -203,7 +210,10 @@ def test_signed_response_body_mutation_is_rejected(monkeypatch) -> None:
             request_id="request.1",
             timestamp=_NOW,
             expected_response_principals=_trust(seller),
+            capture=envelopes.append,
         )
+    assert envelopes == []
+
 
 
 def test_response_replay_under_another_request_id_is_rejected(monkeypatch) -> None:
@@ -329,7 +339,7 @@ def test_valid_signed_http_error_is_verified_before_status_propagation(
         ),
     )
 
-    with pytest.raises(RuntimeError, match="authenticated HTTP 409"):
+    with pytest.raises(RuntimeError, match="authenticated HTTP 409") as raised:
         _authenticated_json(
             "http://seller/api/v1/negotiate/new",
             {},
@@ -342,6 +352,10 @@ def test_valid_signed_http_error_is_verified_before_status_propagation(
             timestamp=_NOW,
             expected_response_principals=_trust(seller),
         )
+    # Typed, carrying the verified status and body, and still a RuntimeError.
+    assert isinstance(raised.value, AuthenticatedHTTPError)
+    assert raised.value.status_code == 409
+    assert raised.value.body == payload
 
 
 @pytest.mark.parametrize(

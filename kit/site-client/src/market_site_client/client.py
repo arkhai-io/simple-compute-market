@@ -3,6 +3,8 @@
 Every request uses the market-identity v2 envelope.  The injected signer is the
 configured seller/storefront identity; responses are accepted only from the
 bounded trusted set of site-authority principals acting with the ``service`` role.
+That set is either fixed when the client is built or read from a provider at
+each response's verification.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping, TypeAlias
 
 import httpx
 from market_identity import (
@@ -27,7 +29,11 @@ from market_identity import (
     verify_response,
 )
 
-from market_site_client.models import ResourceRegistration
+from market_site_client.models import (
+    CapacityDefinitionsImportRequest,
+    CapacityDefinitionsImportResponse,
+    ResourceRegistration,
+)
 
 
 SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
@@ -37,6 +43,14 @@ ROLE_HEADER = "X-Market-Role"
 REQUEST_ID_HEADER = "X-Market-Request-ID"
 TIMESTAMP_HEADER = "X-Market-Timestamp"
 SIGNATURE_HEADER = "X-Market-Signature"
+
+
+#: The site-authority principals a response must come from: a fixed set, or a
+#: provider called at each response's verification. A provider lets trust that
+#: rotates in durable state reach a long-lived client without rebuilding it.
+#: It is called synchronously, on an async client's event loop too, so it
+#: should read only local state.
+AuthorityTrust: TypeAlias = TrustedIdentitySet | Callable[[], TrustedIdentitySet]
 
 
 class SiteCapacityClientError(Exception):
@@ -53,6 +67,16 @@ class SiteCapacityAdminClientError(SiteCapacityClientError):
 
 class SiteCapacityAuthenticationError(SiteCapacityAdminClientError):
     """A response did not carry a valid acknowledgement from the authority."""
+
+
+class SiteCapacityUnauthenticatedResponseError(SiteCapacityAuthenticationError):
+    """The answer carried no response authentication at all.
+
+    Refused like any unverifiable answer, and reported by its status alone:
+    an unsigned answer is what a site gives a request it cannot route, and
+    also what anything between the client and the site may give, so nothing
+    it says is repeated.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +179,14 @@ CAPACITY_ROUTE_CONTRACTS = (
         path_resource="reservation_id",
     ),
     CapacityRouteContract(
+        "POST",
+        re.compile(
+            r"/api/v1/capacity/reservations/(?P<reservation_id>[^/]+)/activate-lease"
+        ),
+        "capacity_activate_lease",
+        path_resource="reservation_id",
+    ),
+    CapacityRouteContract(
         "GET",
         re.compile(r"/api/v1/capacity/reservations"),
         "capacity_reservations_list",
@@ -171,6 +203,17 @@ CAPACITY_ROUTE_CONTRACTS = (
 )
 
 
+#: Capacity-definition import, which a site hosted inside another service may
+#: serve beside its capacity routes; only ``admin`` reaches it.
+CAPACITY_DEFINITION_ROUTE_CONTRACTS = (
+    CapacityRouteContract(
+        "POST",
+        re.compile(r"/api/v1/capacity/definitions/import"),
+        "provisioning_capacity_definitions_import",
+    ),
+)
+
+
 def resolve_capacity_route(
     method: str,
     path: str,
@@ -178,7 +221,7 @@ def resolve_capacity_route(
 ) -> tuple[str, str]:
     """Return the server-owned semantic operation and resource for a route."""
 
-    for contract in CAPACITY_ROUTE_CONTRACTS:
+    for contract in CAPACITY_ROUTE_CONTRACTS + CAPACITY_DEFINITION_ROUTE_CONTRACTS:
         resource = contract.match(method, path, body)
         if resource is not None:
             return contract.operation, resource
@@ -192,17 +235,24 @@ class _AuthenticatedSiteClient:
         self,
         base_url: str,
         signer: Signer,
-        expected_authorities: TrustedIdentitySet,
+        expected_authorities: AuthorityTrust,
         *,
         timeout: float,
         transport: httpx.AsyncBaseTransport | None,
         max_timestamp_skew: int,
+        caller_role: str = "seller",
     ) -> None:
         if not isinstance(signer, Signer):
             raise TypeError("signer must implement market_identity.Signer")
-        if not isinstance(expected_authorities, TrustedIdentitySet):
+        if caller_role not in {"seller", "admin"}:
+            raise ValueError("caller_role must be 'seller' or 'admin'")
+        if not (
+            isinstance(expected_authorities, TrustedIdentitySet)
+            or callable(expected_authorities)
+        ):
             raise TypeError(
-                "expected_authorities must be a market_identity.TrustedIdentitySet"
+                "expected_authorities must be a market_identity.TrustedIdentitySet "
+                "or a callable returning one"
             )
         if max_timestamp_skew < 0:
             raise ValueError("max_timestamp_skew must not be negative")
@@ -212,6 +262,7 @@ class _AuthenticatedSiteClient:
         self._timeout = timeout
         self._transport = transport
         self._max_timestamp_skew = max_timestamp_skew
+        self._caller_role = caller_role
         self._request_contexts: dict[
             str, tuple[str, str, str, str]
         ] = {}
@@ -250,7 +301,7 @@ class _AuthenticatedSiteClient:
         authenticated = sign_request(
             signer=self._signer,
             envelope=RequestEnvelope(
-                role="seller",
+                role=self._caller_role,
                 principal=self._signer.identity,
                 method=method,
                 operation=operation,
@@ -272,6 +323,29 @@ class _AuthenticatedSiteClient:
         self._request_contexts[request_id] = context
         return dict(headers)
 
+    def _current_authorities(self, status_code: int) -> TrustedIdentitySet:
+        """The principals this response must come from, read now.
+
+        A provider that fails, or returns anything but a trusted set, fails the
+        response closed, as an untrusted signer would.
+        """
+
+        if isinstance(self._expected_authorities, TrustedIdentitySet):
+            return self._expected_authorities
+        try:
+            authorities = self._expected_authorities()
+        except Exception as exc:
+            raise SiteCapacityAuthenticationError(
+                "site-authority trust could not be resolved",
+                status_code=status_code,
+            ) from exc
+        if not isinstance(authorities, TrustedIdentitySet):
+            raise SiteCapacityAuthenticationError(
+                "site-authority trust provider returned no trusted identity set",
+                status_code=status_code,
+            )
+        return authorities
+
     def _verify_response(
         self,
         response: httpx.Response,
@@ -282,6 +356,12 @@ class _AuthenticatedSiteClient:
         request_id: str,
         body: Any,
     ) -> None:
+        if SIGNATURE_HEADER not in response.headers:
+            raise SiteCapacityUnauthenticatedResponseError(
+                f"site authority answered HTTP {response.status_code} "
+                "without response authentication",
+                status_code=response.status_code,
+            )
         try:
             principal = Identity(
                 scheme=response.headers[IDENTITY_SCHEME_HEADER],
@@ -315,7 +395,7 @@ class _AuthenticatedSiteClient:
             now=int(time.time()),
             max_skew=self._max_timestamp_skew,
             expected_role="service",
-            expected_principals=self._expected_authorities,
+            expected_principals=self._current_authorities(response.status_code),
             expected_method=method,
             expected_operation=operation,
             expected_resource=resource,
@@ -412,11 +492,12 @@ class SiteCapacityAdminClient(_AuthenticatedSiteClient):
         self,
         base_url: str,
         signer: Signer,
-        expected_authorities: TrustedIdentitySet,
+        expected_authorities: AuthorityTrust,
         *,
         timeout: float = 10.0,
         transport: httpx.AsyncBaseTransport | None = None,
         max_timestamp_skew: int = 300,
+        caller_role: str = "seller",
     ) -> None:
         super().__init__(
             base_url,
@@ -425,19 +506,21 @@ class SiteCapacityAdminClient(_AuthenticatedSiteClient):
             timeout=timeout,
             transport=transport,
             max_timestamp_skew=max_timestamp_skew,
+            caller_role=caller_role,
         )
 
     async def register_resource(
         self,
         resource_id: str,
         *,
-        total_units: int,
+        pool_id: str,
+        total_units: int | None = None,
         resource_type: str = "compute.gpu",
-        pool_id: str | None = None,
         resource_subtype: str | None = None,
         attributes: dict[str, Any] | None = None,
         capacity: dict[str, Any] | None = None,
         enabled: bool = True,
+        host_id: str | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         body = ResourceRegistration(
@@ -448,6 +531,7 @@ class SiteCapacityAdminClient(_AuthenticatedSiteClient):
             attributes=attributes or {},
             capacity=capacity,
             enabled=enabled,
+            host_id=host_id,
         )
         result = await self._request(
             "PUT",
@@ -465,6 +549,29 @@ class SiteCapacityAdminClient(_AuthenticatedSiteClient):
         )
         return list(result.get("resources") or [])
 
+    async def import_capacity_definitions(
+        self,
+        yaml_text: str,
+        *,
+        validate_only: bool = False,
+        request_id: str | None = None,
+    ) -> CapacityDefinitionsImportResponse:
+        """Reconcile a capacity-definitions document; ``admin`` only.
+
+        A refused import raises with status 422, its message carrying every
+        problem; ``validate_only`` returns them as structured problems, with
+        the diff an import would produce.
+        """
+        result = await self._request(
+            "POST",
+            "/api/v1/capacity/definitions/import",
+            CapacityDefinitionsImportRequest(
+                yaml_text=yaml_text, validate_only=validate_only
+            ),
+            request_id=request_id,
+        )
+        return CapacityDefinitionsImportResponse.model_validate(result)
+
 
 class SiteCapacityClient(_AuthenticatedSiteClient):
     """Authenticated seller client for buyer-facing site capacity operations."""
@@ -473,11 +580,12 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
         self,
         base_url: str,
         signer: Signer,
-        expected_authorities: TrustedIdentitySet,
+        expected_authorities: AuthorityTrust,
         *,
         timeout: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
         max_timestamp_skew: int = 300,
+        caller_role: str = "seller",
     ) -> None:
         super().__init__(
             base_url,
@@ -486,6 +594,7 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
             timeout=timeout,
             transport=transport,
             max_timestamp_skew=max_timestamp_skew,
+            caller_role=caller_role,
         )
 
     async def snapshot(
@@ -583,8 +692,16 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
+        deal_ref: Mapping[str, Any] | None = None,
         request_id: str | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
+        """Commit a reservation; the reservation as the site recorded it.
+
+        The site may record a window other than the one named: a repeat commit
+        leaves the window the first one recorded. ``deal_ref`` correlates the
+        reservation with its deal; an escrow it names is recorded where the
+        reservation has none.
+        """
         if not capacity_reservation_id:
             raise ValueError(
                 "remote capacity commit requires the capacity_reservation_id the "
@@ -601,16 +718,18 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
                     str(lease_end_utc) if lease_end_utc is not None else None
                 ),
                 "idempotency_ref": idempotency_ref,
+                "deal_ref": dict(deal_ref) if deal_ref else None,
             }.items()
             if value is not None
         }
-        await self._request(
+        result = await self._request(
             "POST",
             "/api/v1/capacity/reservations/"
             f"{capacity_reservation_id}/commit",
             body,
             request_id=request_id,
         )
+        return result.get("reservation")
 
     async def release(
         self,
@@ -645,6 +764,27 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
             "/api/v1/capacity/reservations/"
             f"{capacity_reservation_id}/truncate-lease",
             {"lease_end_utc": str(lease_end_utc)},
+            request_id=request_id,
+        )
+        return result.get("reservation")
+
+    async def activate_lease(
+        self,
+        *,
+        capacity_reservation_id: str,
+        request_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Activate a lease; the reservation as the site recorded it.
+
+        The request names the reservation and carries no body: the instant is
+        the site's. A retry answers the instant the first activation recorded.
+        An unknown reservation (404) and a refused one (409) raise
+        :class:`SiteCapacityClientError` carrying the status.
+        """
+        result = await self._request(
+            "POST",
+            "/api/v1/capacity/reservations/"
+            f"{capacity_reservation_id}/activate-lease",
             request_id=request_id,
         )
         return result.get("reservation")

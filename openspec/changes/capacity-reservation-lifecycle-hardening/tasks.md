@@ -36,8 +36,14 @@
 - [ ] 3.3 Assert the near-miss explicitly: keying on listing identity alone must not be
       possible, since two counterparties on one listing would collapse into one
       reservation.
-- [ ] 3.4 Focused tests: retried placement returns the same reservation; two
-      counterparties on one listing get two; placement after expiry admits fresh.
+- [ ] 3.4 Normalize dimensions/attributes, selected pool/site, offering mode and lease
+      window for same-key comparison; reject changed reuse. Recover the recorded
+      reservation identity/state across held, committed and released states, including
+      acknowledgement loss. Unresolved expired/released replay is repair-required or
+      classified end, never a replacement hold. Known expired-hold replacement is a
+      distinct explicit placement with a fresh logical identity. Verify exact replay,
+      conflicts, cross-state recovery and two counterparties receiving distinct holds.
+      This slice gates unify/renewable acknowledgement-gap work, not all hardening.
 
 ## 4. Terminal reservation retention
 
@@ -53,25 +59,61 @@
       migration validation. Disclose any suite not run.
 - [ ] 5.2 Run `openspec validate --all --strict` against the baseline current at
       implementation time.
+- [ ] 5.3 **Comment hygiene and import placement, before the pre-closeout review.** Run
+      `make check-comment-hygiene` and read the comments this change added for any that
+      narrate the review or migration that introduced them; move each import the change
+      added to module level unless a verified circular import or a recorded lazy-load
+      reason keeps it local. Closeout only confirms both.
 
 ## 6. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 6.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read `reserve()`'s
-      idempotency docstring and `_expire_stale_holds`' directly; both describe the
-      behavior this change alters.
-- [ ] 6.2 **Import placement.** Review imports this change adds or touches.
-- [ ] 6.3 **Documentation compliance.** Confirm the three rules landed in
-      `openspec/specs/site-capacity/spec.md` and the rejected alternatives (replacing
-      rather than generalizing the key; count-based retention; removing lazy expiry
-      wholesale) stayed in `design.md`.
+- [ ] 6.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added for any that narrate the review or migration that
+      introduced them, reading `reserve()`'s idempotency docstring and
+      `_expire_stale_holds`' directly, since both describe the behavior this change
+      alters. Do not edit code here: anything to rewrite returns the change to
+      implementation.
+- [ ] 6.2 **Import placement — confirm.** Check the imports this change added for any
+      still local without a recorded reason. One that should move returns the change to
+      implementation.
+- [ ] 6.3 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe: the three rules belong in the `site-capacity`
+      delta, and the rejected alternatives (replacing rather than generalizing the key;
+      count-based retention; removing lazy expiry wholesale) stay in `design.md`.
 - [ ] 6.4 **Narrative compression.** Compress completed-task notes to final behavior,
-      validation evidence, and promotion destinations.
-- [ ] 6.5 **Roadmap currency.** Record the disposition. This change closes no roadmap
-      goal's gap on its own; if the capacity-economics work has by then been recorded as
-      a goal, update its current state instead of skipping the step.
-- [ ] 6.6 **Promotion.** Complete the design-promotion record below.
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
+- [ ] 6.5 **Roadmap currency.** Update the affected goal's current state and gap
+      mapping in `docs/development/ROADMAP.md`, or record that no goal is affected. This
+      change closes no roadmap goal's gap on its own; if the capacity-economics work has
+      by then been recorded as a goal, update its current state instead.
+- [ ] 6.6 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 6.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 6.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun.
+- [ ] 6.9 **Promotion.** Write the permanent documents this change owes — none beyond
+      the `site-capacity` specification — and complete the design-promotion record
+      below. A `spec.md` the deltas cover (`openspec/specs/site-capacity/spec.md`) is
+      written by the archive in 6.11, not by hand; the record names it all the same.
+- [ ] 6.10 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=capacity-reservation-lifecycle-hardening` and
+      resolve every match, then
+      `openspec validate capacity-reservation-lifecycle-hardening --strict`.
+- [ ] 6.11 **Archival.** Last, once every other part is checked: `openspec archive
+      capacity-reservation-lifecycle-hardening -y` merges the deltas into
+      `openspec/specs/` and moves the change under `openspec/changes/archive/`; point the
+      index row at the archived directory, and run `openspec validate --specs --strict`.
 
 ## Design promotion record
 

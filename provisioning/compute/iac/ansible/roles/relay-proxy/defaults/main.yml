@@ -1,0 +1,4 @@
+---
+relay_client_config: /etc/frp/frpc-buyers.toml
+relay_proxy_local_port: 22
+relay_proxy_library_path: /usr/local/lib/arkhai-relay/remove_proxy.sh

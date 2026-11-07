@@ -1,0 +1,7 @@
+#!/bin/sh
+# The repository's pre-push checks are one make target, which the workflow's guarded
+# push runs too; Git's ref updates reach it on standard input, and the remote as
+# REMOTE.
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 1
+exec make --no-print-directory -s pre-push REMOTE="$1"

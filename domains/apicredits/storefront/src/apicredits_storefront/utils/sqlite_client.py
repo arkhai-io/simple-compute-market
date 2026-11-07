@@ -2,9 +2,9 @@
 
 The domain-neutral market-state persistence lives in
 ``core_storefront.sqlite_client``. This subclass adds
-``credit_deal_terms`` and the immutable public-row link to the shared
-settlement obligation. Quantity and key disposition are fixed at round
-zero and read back when settlement submits issuance.
+accepted credit terms, negotiation-bound settlement evidence and issuance
+progress. Source evidence, shared Alkahest servicing and private delivery
+results have separate repositories.
 """
 
 from __future__ import annotations
@@ -18,6 +18,9 @@ from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
 from core_storefront.sqlite_migrations import MigrationLike
 from market_identity import Identity
 from market_settlement_runtime import settlement_migrations
+
+from apicredits_storefront.settlement_repository import SettlementRepository
+from market_core import SettlementEvidence
 
 from .config import settings
 from .migrations import APICREDITS_MIGRATIONS
@@ -46,6 +49,67 @@ class SQLiteClient(CoreSQLiteClient):
               created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
             )
             """
+        )
+
+    def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
+        for table, columns in {
+            "api_credit_settlement_evidence": {"negotiation_id", "mechanism", "agreement_digest", "settlement_ref", "status", "evidence"},
+            "api_credit_issuance_progress": {"negotiation_id", "public_ref", "status", "fulfillment_uid", "public_result", "credentials_ref", "delivery_started_at"},
+        }.items():
+            actual = {str(row[1]) for row in cur.execute(f"PRAGMA table_info({table})")}
+            if not columns <= actual:
+                raise RuntimeError("incompatible API-credit settlement schema; explicitly reset the database")
+        # Every capacity effect, reconciliation, and recheck reads a listing's
+        # durable binding, and a listing created before bindings were recorded
+        # has none to read. There is no record to derive one from, so such a
+        # database is refused rather than adopted.
+        unbound = cur.execute(
+            """
+            SELECT l.listing_id FROM listings l
+            LEFT JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
+            WHERE b.listing_id IS NULL
+            ORDER BY l.listing_id LIMIT 1
+            """
+        ).fetchone()
+        if unbound is not None:
+            raise RuntimeError(
+                f"API-credit listing {unbound[0]!r} has no durable listing binding; "
+                "this storefront requires a fresh database"
+            )
+
+    async def save_settlement_evidence(self, evidence: SettlementEvidence) -> SettlementEvidence:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).store, evidence)
+
+    async def load_settlement_evidence(self, *, negotiation_id: str) -> SettlementEvidence | None:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).get, negotiation_id)
+
+    async def load_settlement_evidence_by_ref(self, *, settlement_ref: str) -> SettlementEvidence | None:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).get_by_reference, settlement_ref)
+
+    async def load_issuance_progress(self, *, reference: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).progress, reference)
+
+    async def save_issuance_progress(self, *, negotiation_id: str, **fields: Any) -> dict[str, Any]:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).checkpoint, negotiation_id, **fields)
+
+    async def claim_credit_delivery_start(self, *, negotiation_id: str) -> bool:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).claim_delivery_start, negotiation_id)
+
+    async def record_credit_refund_intent(self, *, negotiation_id: str) -> dict[str, Any]:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).record_refund_intent, negotiation_id)
+
+    async def abandon_credit_refund_intent(self, *, negotiation_id: str, prior_status: str) -> None:
+        await asyncio.to_thread(
+            SettlementRepository(self.db_path).abandon_refund_intent, negotiation_id, prior_status=prior_status,
+        )
+
+    async def complete_credit_refund(self, *, negotiation_id: str) -> None:
+        await asyncio.to_thread(SettlementRepository(self.db_path).complete_refund, negotiation_id)
+
+    async def list_unsettled_payment_negotiations(self, *, mechanism: str, limit: int) -> list[str]:
+        """Accepted deals of ``mechanism`` with no verified receipt, open credit issuance, or a refund left `refunding`."""
+        return await asyncio.to_thread(
+            SettlementRepository(self.db_path).unsettled_negotiations, mechanism=mechanism, limit=limit,
         )
 
     async def save_credit_terms(

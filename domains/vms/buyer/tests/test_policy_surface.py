@@ -12,13 +12,13 @@ from market_policy.buyer_policy import (
     get_buyer_policy,
 )
 
-from domains.vms.buyer.policy_surface import (
+from arkhai_vms_buyer.policy_surface import (
     BISECTION_POLICY,
     LISTED_PRICE_POLICY,
     configured_buyer_policy,
     entry_uses_scalar_amount,
 )
-from domains.vms.buyer.escrow_selection import select_escrow_entry
+from arkhai_vms_buyer.escrow_selection import select_escrow_entry
 
 
 _TOKEN = "0x" + "22" * 20
@@ -107,8 +107,8 @@ def test_selection_refuses_incompatible_only_listings():
 
 
 def test_chain_terminal_follows_the_configured_policy():
-    from domains.vms.buyer.buyer_client import load_buyer_chain
-    from domains.vms.negotiation.policies import (
+    from arkhai_vms_buyer.buyer_client import load_buyer_chain
+    from arkhai_vms_negotiation.policies import (
         bisection_middleware,
         listed_price_middleware,
     )
@@ -122,12 +122,12 @@ def test_chain_terminal_follows_the_configured_policy():
 
 
 def test_policy_without_derivation_passes_explicit_values_through():
-    from domains.vms.buyer.cli_helpers import resolve_prices_from_matches
+    from arkhai_vms_buyer.cli_helpers import resolve_prices_from_matches
     from rich.console import Console
 
     opaque = BuyerPolicy(name="opaque-test", middlewares=("listed_price",))
     with patch(
-        "domains.vms.buyer.policy_surface.configured_buyer_policy",
+        "arkhai_vms_buyer.policy_surface.configured_buyer_policy",
         return_value=opaque,
     ):
         assert resolve_prices_from_matches(
@@ -139,7 +139,7 @@ def test_policy_without_derivation_passes_explicit_values_through():
 def test_interactive_derivation_confirms_and_honors_decline():
     from rich.console import Console
 
-    from domains.vms.buyer.policy_surface import derive_scalar_prices
+    from arkhai_vms_buyer.policy_surface import derive_scalar_prices
 
     listing = {"listing_id": "lst-1", "seller": "http://s:8001",
                "accepted_escrows": [_scalar_entry()]}

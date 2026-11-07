@@ -1,0 +1,208 @@
+"""VM buyer composition for installed settlement registrations."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping
+from dataclasses import replace
+from typing import Any
+
+import typer
+from core_buyer.buyer_config import ResolvedBuyerIdentity
+from core_buyer.registry_config import registry_descriptors, resolve_indexer_urls
+from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
+from market_deal_lifecycle.selection import AuthoritySelection
+from market_deal_lifecycle.terms import TermContext
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
+from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
+from market_alkahest import create_alkahest_registration
+from market_arkhai_payments import create_arkhai_payments_registration
+from market_contact_exchange import (
+    create_contact_command_group,
+    create_contact_exchange_registration,
+)
+from market_config.config_loader import load_user_config
+from market_core import SettlementStageTable
+from market_settlement_runtime import (
+    MechanismReadiness,
+    SettlementConfig,
+    SettlementConfigurationRegistry,
+)
+
+from .chain_cli import chain_app
+from .common import refuse_retired_address_book_keys
+from .escrow_cli import escrow_app
+from .settlement_stages import AlkahestBuyerStage, PaymentsBuyerStage
+
+
+_BUYER_STAGES = SettlementStageTable({
+    "alkahest.v1": AlkahestBuyerStage(),
+    "arkhai.payments.v1": PaymentsBuyerStage(),
+})
+
+
+def buyer_settlement_stages() -> SettlementStageTable:
+    """Support for fresh admission and accepted recovery, independent of priority."""
+    return _BUYER_STAGES
+
+
+def buyer_stage(mechanism: str):
+    try:
+        return _BUYER_STAGES[mechanism]
+    except KeyError as exc:
+        raise ValueError(
+            f"accepted settlement mechanism {mechanism!r} is not installed; "
+            "recovery will not fall back to another mechanism"
+        ) from exc
+
+
+def advertised_plan_validator(match: Mapping[str, Any]):
+    """The selected entry's check of a plan it materializes, for one match."""
+    selected = match.get("_selected_settlement")
+    if not isinstance(selected, SelectedSettlementOption):
+        return None
+    return buyer_stage(selected.selection.settlement_schema).plan_validator(
+        match, selected
+    )
+
+
+def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[str, Any]:
+    """What the selected entry records about a match's listing at acceptance.
+
+    The entry is the match's selected settlement option, from which the
+    buyer's proposal was built.
+    """
+    selected = match.get("_selected_settlement")
+    if not isinstance(selected, SelectedSettlementOption):
+        return {}
+    return buyer_stage(selected.selection.settlement_schema).listing_record(match)
+
+
+def validate_buyer_acceptance(outcome) -> None:
+    if outcome.agreement is None or outcome.agreement.settlement is None:
+        raise RuntimeError("accepted work has no Agreement settlement option")
+    buyer_stage(outcome.agreement.settlement.settlement_schema).validate_acceptance(outcome)
+
+
+def _alkahest_command_group():
+
+    group = typer.Typer(
+        no_args_is_help=True,
+        help="Raw Alkahest setup, inspection, and mutation utilities.",
+    )
+    group.add_typer(
+        escrow_app,
+        name="escrow",
+        help="Inspect, create, or reclaim Alkahest escrows.",
+    )
+    group.add_typer(
+        chain_app,
+        name="chain",
+        help="Check the configured EVM contracts used by Alkahest.",
+    )
+    return group
+
+
+async def buyer_settlement_readiness() -> tuple[
+    SettlementConfig, tuple[MechanismReadiness, ...]
+]:
+    """Observe installed buyer mechanism prerequisites without mutation."""
+
+    policy = resolve_buyer_settlement_policy()
+    config = policy.config
+    resources: dict[str, Any] = {}
+
+    for registration in policy.ordered_registrations():
+        resources.update(buyer_stage(registration.mechanism_id).readiness_resources())
+
+    statuses = await policy.registry.ordered_readiness(
+        config,
+        role="buyer",
+        resources=resources,
+    )
+    return config, statuses
+
+
+def _introduction_context() -> Any:
+    # The introduction commands negotiate and recover through the buyer
+    # client, which imports this composition for acceptance validation.
+    from .introduction_cli import IntroductionContext
+
+    return IntroductionContext()
+
+
+def buyer_settlement_registry() -> SettlementConfigurationRegistry:
+    """Return the explicitly installed VM buyer mechanisms."""
+
+    return SettlementConfigurationRegistry(
+        (
+            replace(
+                create_alkahest_registration(),
+                command_group=_alkahest_command_group(),
+            ),
+            create_arkhai_payments_registration(),
+            create_contact_exchange_registration(
+                command_group=create_contact_command_group(_introduction_context)
+            ),
+        )
+    )
+
+
+def resolve_buyer_settlement_policy(
+    config: Mapping[str, Any] | None = None,
+    *,
+    identity: ResolvedBuyerIdentity | None = None,
+    action_capable: bool = True,
+    registry_urls: str | None = None,
+) -> BuyerSettlementPolicy:
+    """Strictly resolve the common buyer ``[Settlement]`` hierarchy."""
+
+    document = dict(load_user_config() if config is None else config)
+    if "settlement" in document:
+        raise ValueError(
+            "legacy [settlement] configuration is not supported; run "
+            "`market config migrate --scope settlement --write --backup`"
+        )
+    refuse_retired_address_book_keys(document)
+    raw = document.get("Settlement", {})
+    if not isinstance(raw, Mapping):
+        raise ValueError("[Settlement] must be a table")
+    registry = buyer_settlement_registry()
+    settlement = registry.resolve(raw, role="buyer")
+    disputes = dispute_config(document, role="buyer")
+    descriptors = (
+        registry_descriptors(
+            signer=identity.signer, urls=resolve_indexer_urls(override=registry_urls)
+        )
+        if identity is not None and action_capable and disputes.use_registry_dispute_authorities
+        else {}
+    )
+    authorities = authorities_by_registry(
+        disputes,
+        {url: descriptor.recommended_dispute_authorities or [] if descriptor else []
+         for url, descriptor in descriptors.items()},
+        role="buyer",
+        report=logging.getLogger(__name__).warning if identity is not None else lambda _: None,
+    )
+    return BuyerSettlementPolicy(
+        config=settlement,
+        registry=registry,
+        stages=buyer_settlement_stages(),
+        option_preference=AuthoritySelection(authorities, contexts={
+            "arkhai.payments.v1": TermContext(
+                mechanism="arkhai.payments.v1", has_adapter=True, compute=True,
+                dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+            ),
+        }, report=logging.getLogger(__name__).info),
+        public_context={
+            "dispute_authorities_by_registry": authorities,
+        },
+    )
+
+
+def alkahest_entry_from_selection(
+    selected: SelectedSettlementOption,
+) -> dict[str, Any] | None:
+    """Decode the mechanism-owned accepted escrow only after selection."""
+
+    return buyer_stage(selected.selection.settlement_schema).accepted_entry(selected)

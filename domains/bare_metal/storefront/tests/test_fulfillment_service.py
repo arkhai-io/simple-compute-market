@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -10,15 +11,23 @@ from core_storefront import (
     StorefrontThreadBinding,
     fulfill_domain,
 )
+from core_storefront.domain_registry import StorefrontDomainBindingError
 from arkhai_bare_metal import BareMetalListing, BareMetalTerms
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
+from market_site.ledger import dict_resource_satisfies_claim
+from market_core import SettlementEvidence
+from arkhai_bare_metal_storefront.settlement_evidence import (
+    EvidencePayload,
+    DeliveryInput,
+)
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.fulfillment_service import (
     BareMetalFulfillmentError,
     BareMetalFulfillmentService,
 )
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 
 
 BUYER = Ed25519Signer(bytes.fromhex("11" * 32)).identity
@@ -31,25 +40,31 @@ class FakeDb:
         self.materialization = None
         self.receipt = None
         self.result = None
+        self.result_refusal: Exception | None = None
+        self.capacity_backing = "backed"
         self.context = {
             "buyer_scheme": BUYER.scheme.value,
             "buyer_identifier": BUYER.identifier,
             "terminal_state": "success",
+            "listing_id": "listing-a",
             "site_id": "site-a",
             "physical_resource_id": "resource-a",
-            "machine_id": "machine-a",
+            "host_id": "machine-a",
             "physical_host_id": "host-a",
+            "claimed_attributes": {"gpu_model": LISTING_HARDWARE["gpu_model"]},
         }
         self.terms = BareMetalTerms(
-            machine_id="machine-a",
+            host_id="machine-a",
             physical_host_id="host-a",
             duration_seconds=3600,
             ssh_public_key="ssh-ed25519 buyer",
         )
         self.listing = BareMetalListing(
-            machine_id="machine-a",
+            capacity_backing="backed",
+            **LISTING_HARDWARE,
+            host_id="machine-a",
             physical_host_id="host-a",
-            capabilities={"gpu_model": "H200"},
+            access_methods=["ssh"],
         )
 
     async def load_thread_binding(self, *, negotiation_id):
@@ -65,16 +80,40 @@ class FakeDb:
             ),
         )
 
+    async def load_listing_binding(self, *, listing_id):
+        # The durable record the listing's capacity binding is built from.
+        assert listing_id == "listing-a"
+        return SimpleNamespace(
+            site_id="site-a",
+            physical_resource_id="resource-a",
+            binding=SimpleNamespace(offering_mode="bare_metal"),
+            capacity_backing=self.capacity_backing,
+        )
+
     async def load_bare_metal_fulfillment_context(self, *, negotiation_id):
         assert negotiation_id == "neg-a"
         return dict(self.context)
 
-    async def load_escrow(self, *, escrow_uid):
-        return {
-            "escrow_uid": escrow_uid,
-            "negotiation_id": "neg-a",
-            "status": "settlement_verified",
-        }
+    async def verified_evidence(
+        self, *, negotiation_id, buyer_principal, include_refunds=False,
+        delivery_started=False,
+    ):
+        assert negotiation_id == "neg-a" and buyer_principal == BUYER
+        return SettlementEvidence(
+            negotiation_id="neg-a",
+            mechanism="alkahest.v1",
+            settlement_ref="escrow-a",
+            status="settlement_verified",
+            evidence=EvidencePayload(
+                agreement_sha256="a" * 64,
+                source={"obligation_ref": "test-obligation"},
+                delivery=DeliveryInput(
+                    site_id="site-a",
+                    physical_resource_id="resource-a",
+                    terms=self.terms,
+                ),
+            ).model_dump(mode="json"),
+        )
 
     async def load_bare_metal_terms(self, *, negotiation_id):
         return self.terms
@@ -123,7 +162,16 @@ class FakeDb:
         self.receipt = receipt
 
     async def save_bare_metal_result(self, *, negotiation_id, result):
+        """Write-once, as the store's: another result is refused, and so is
+        any write while ``result_refusal`` stands for another mismatch."""
+        if self.result_refusal is not None:
+            raise self.result_refusal
+        if self.result is not None and self.result != result:
+            raise StorefrontDomainBindingError("result conflicts with durable state")
         self.result = result
+
+    async def load_bare_metal_result(self, *, negotiation_id):
+        return self.result
 
 
 class FakeSite:
@@ -142,8 +190,11 @@ class FakeCapacity:
     def __init__(self, *, returned_site: str = "site-a") -> None:
         self.returned_site = returned_site
         self.site_client = FakeSite()
+        self.site_names = ["site-a"]
         self.reservation_sites = {}
         self.reserves = []
+        self.commits = []
+        self.committed_window: tuple[str, str] | None = None
 
     def site(self, site_id):
         assert site_id == "site-a"
@@ -157,29 +208,50 @@ class FakeCapacity:
             "site": self.returned_site,
         }
 
+    async def commit(self, **request):
+        """Write-once, as the site's: the first commit's window is kept."""
+        self.commits.append(request)
+        if self.committed_window is None:
+            self.committed_window = (request["lease_start_utc"], request["lease_end_utc"])
+        start, end = self.committed_window
+        return {
+            "capacity_reservation_id": request["capacity_reservation_id"],
+            "state": "leased",
+            "lease_start_utc": start,
+            "lease_end_utc": end,
+            "site": request["site_id"],
+        }
+
 
 class FakeFulfillment:
-    def __init__(self, *, begin_failures: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        begin_failures: int = 0,
+        scheduled_host_id: str | None = "machine-a",
+        scheduled_physical_host_id: str = "host-a",
+    ) -> None:
         self.phase = "create"
         self.schedules = []
         self.begins = []
         self.teardowns = []
+        self.terminations = []
         self.begin_failures = begin_failures
+        self.scheduled_host_id = scheduled_host_id
+        self.scheduled_physical_host_id = scheduled_physical_host_id
+        self.delivered_user = "tenant-a"
 
     async def schedule_resource(self, request):
+        """The scheduled resource as a major-3 schedule response names it: its
+        declaration's host, and its machine among its top-level attributes."""
         self.schedules.append(request)
         return SimpleNamespace(
             settlement_resource_id="settlement-resource-a",
             pool_id="pool-a",
             resource_kind="compute.bare-metal",
             provider="bare_metal.ansible",
-            attributes={
-                "bare_metal_publication": {
-                    "enabled": True,
-                    "machine_id": "machine-a",
-                    "physical_host_id": "host-a",
-                }
-            },
+            host_id=self.scheduled_host_id,
+            attributes={"physical_host_id": self.scheduled_physical_host_id},
         )
 
     async def begin_fulfillment(self, body):
@@ -211,20 +283,29 @@ class FakeFulfillment:
                 "state": "active",
                 "provisioned_resources": [],
                 "domain_result": {
-                    "kind": "bare_metal.fulfillment.result.v1",
+                    "kind": "compute.access-delivery",
                     "schema_version": 1,
                     "payload": {
-                        "kind": "bare_metal.v1",
-                        "action": "node_grant_access",
-                        "machine_id": "machine-a",
-                        "physical_host_id": "host-a",
-                        "ssh_user": "tenant-a",
-                        "status": "success",
-                        "details": {"private_key": "must-not-cross-storefront"},
+                        "endpoints": [
+                            {
+                                "protocol": "ssh",
+                                "host": "203.0.113.10",
+                                "port": 22,
+                                "user": self.delivered_user,
+                            }
+                        ],
+                        "credentials": [],
+                        "ready_at": "2030-01-01T00:00:01+00:00",
                     },
                 },
             },
         )
+
+    async def terminate_lease(self, capacity_reservation_id, *, reason=None):
+        """The site ends the lease and converges teardown through its fulfillment."""
+        self.phase = "teardown"
+        self.terminations.append((capacity_reservation_id, reason))
+        return SimpleNamespace(capacity_reservation_id=capacity_reservation_id, status="releasing")
 
     async def begin_fulfillment_teardown(self, fulfillment_id, **request):
         self.phase = "teardown"
@@ -237,7 +318,7 @@ class FakeFulfillment:
 
 
 @pytest.mark.asyncio
-async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> None:
+async def test_selected_site_lifecycle_is_idempotent_and_ends_its_lease() -> None:
     db = FakeDb()
     capacity = FakeCapacity()
     fulfillment = FakeFulfillment()
@@ -245,6 +326,7 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
         db=db,
         capacity_client=capacity,
         fulfillment_client=fulfillment,
+        read_verified_evidence=db.verified_evidence,
     )
     begun_projection = await fulfill_domain(
         get_market_domain_contract(),
@@ -260,7 +342,10 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
                     contract_minor=0,
                 ),
             ),
-            escrow_uid="escrow-a",
+            settlement_evidence=await db.verified_evidence(
+                negotiation_id="neg-a", buyer_principal=BUYER
+            ),
+            domain_input={"read_verified_evidence": db.verified_evidence},
             buyer_principal=BUYER,
             ports=StorefrontFulfillmentPorts(
                 repository=db,
@@ -272,7 +357,7 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
     begun = dict(db.lifecycle)
     repeated = await service.begin(
         negotiation_id="neg-a",
-        escrow_uid="escrow-a",
+        settlement_ref="escrow-a",
         buyer_principal=BUYER,
     )
 
@@ -282,9 +367,10 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
     assert len(capacity.reserves) == 1
     assert capacity.reserves[0]["site"] == "site-a"
     assert capacity.reserves[0]["claim"] == {
+        "gpu_model": "H200",
         "resource_id": "resource-a",
         "dimensions": {"units": 1},
-        "executor_kind": "bare_metal",
+        "offering_mode": "bare_metal",
     }
     assert len(fulfillment.schedules) == 1
     assert fulfillment.schedules[0].resource_id == "resource-a"
@@ -292,7 +378,7 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
         "resource_kind": "compute.bare-metal"
     }
     assert len(fulfillment.begins) == 1
-    assert fulfillment.begins[0].fulfillment_request.payload["machine_id"] == "machine-a"
+    assert fulfillment.begins[0].fulfillment_request.payload["host_id"] == "machine-a"
 
     ready = await service.status(
         negotiation_id="neg-a",
@@ -301,29 +387,90 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
     assert ready["state"] == "active"
     assert db.receipt.status == "ready"
     assert db.result.ssh_user == "tenant-a"
-    assert db.result.details is None
+    assert "host" not in db.result.model_dump()
 
-    tearing_down = await service.teardown(
+    tearing_down = await service.apply_end(
+        "neg-a", terminate=True, at=0, operation_key="end", reason="buyer_teardown",
+    )
+    assert tearing_down.progress == "tearing_down"
+    repeated_teardown = await service.apply_end(
+        "neg-a", terminate=True, at=0, operation_key="end", reason="buyer_teardown",
+    )
+    torn_down = await service.status(
         negotiation_id="neg-a",
         buyer_principal=BUYER,
     )
-    assert tearing_down["state"] == "teardown_dispatch_pending"
-    released = await service.status(
-        negotiation_id="neg-a",
-        buyer_principal=BUYER,
+    # Teardown ends the lease once; a repeat retains teardown progress until
+    # the separate capacity-released callback proves capacity return.
+    assert repeated_teardown.progress == "tearing_down"
+    assert fulfillment.terminations == [("reservation-a", "buyer_teardown")]
+    assert fulfillment.teardowns == []
+    assert torn_down["state"] == "torn_down"
+    assert capacity.site_client.releases == []
+
+
+@pytest.mark.parametrize(
+    ("host_id", "physical_host_id"),
+    [(None, "host-a"), ("machine-b", "host-a"), ("machine-a", "host-b")],
+    ids=["no-host", "another-host", "another-machine"],
+)
+@pytest.mark.asyncio
+async def test_begin_refuses_a_scheduled_resource_the_terms_did_not_sell(
+    host_id, physical_host_id
+) -> None:
+    """Begin compares the schedule response's own host and machine with the
+    accepted terms, and refuses a resource naming no host or another one,
+    before beginning anything."""
+    db = FakeDb()
+    fulfillment = FakeFulfillment(
+        scheduled_host_id=host_id, scheduled_physical_host_id=physical_host_id
     )
-    assert released["state"] == "released"
-    assert capacity.site_client.releases == [
-        {
-            "capacity_reservation_id": "reservation-a",
-            "deal_ref": {
-                "negotiation_id": "neg-a",
-                "escrow_uid": "escrow-a",
-            },
-        }
-    ]
-    assert "reservation-a" not in capacity.reservation_sites
-    assert len(fulfillment.teardowns) == 1
+    service = BareMetalFulfillmentService(
+        db=db,
+        capacity_client=FakeCapacity(),
+        fulfillment_client=fulfillment,
+        read_verified_evidence=db.verified_evidence,
+    )
+
+    with pytest.raises(BareMetalFulfillmentError, match="scheduled resource conflicts"):
+        await service.begin(
+            negotiation_id="neg-a", settlement_ref="escrow-a", buyer_principal=BUYER
+        )
+
+    assert len(fulfillment.schedules) == 1
+    assert fulfillment.begins == []
+
+
+@pytest.mark.asyncio
+async def test_a_delivery_conflict_is_named_only_when_the_recorded_result_differs() -> None:
+    """A reported delivery other than the recorded result is a delivery
+    conflict, and the recorded result stands; the store's refusal of the same
+    result for another reason is not."""
+    db = FakeDb()
+    fulfillment = FakeFulfillment()
+    service = BareMetalFulfillmentService(
+        db=db,
+        capacity_client=FakeCapacity(),
+        fulfillment_client=fulfillment,
+        read_verified_evidence=db.verified_evidence,
+    )
+    await service.begin(
+        negotiation_id="neg-a", settlement_ref="escrow-a", buyer_principal=BUYER
+    )
+    await service.status(negotiation_id="neg-a", buyer_principal=BUYER)
+    recorded = db.result
+
+    fulfillment.delivered_user = "tenant-b"
+    with pytest.raises(BareMetalFulfillmentError) as conflict:
+        await service.status(negotiation_id="neg-a", buyer_principal=BUYER)
+    assert conflict.value.error == "delivery_conflict"
+    assert db.result is recorded
+
+    fulfillment.delivered_user = "tenant-a"
+    db.result_refusal = StorefrontDomainBindingError("unbound domain")
+    with pytest.raises(StorefrontDomainBindingError, match="unbound domain"):
+        await service.status(negotiation_id="neg-a", buyer_principal=BUYER)
+    assert db.result is recorded
 
 
 @pytest.mark.asyncio
@@ -335,19 +482,20 @@ async def test_begin_retry_reuses_immutable_materialization() -> None:
         db=db,
         capacity_client=capacity,
         fulfillment_client=fulfillment,
+        read_verified_evidence=db.verified_evidence,
     )
 
     with pytest.raises(RuntimeError, match="controlled failure"):
         await service.begin(
             negotiation_id="neg-a",
-            escrow_uid="escrow-a",
+            settlement_ref="escrow-a",
             buyer_principal=BUYER,
         )
     recorded = db.materialization
 
     retried = await service.begin(
         negotiation_id="neg-a",
-        escrow_uid="escrow-a",
+        settlement_ref="escrow-a",
         buyer_principal=BUYER,
     )
 
@@ -356,6 +504,18 @@ async def test_begin_retry_reuses_immutable_materialization() -> None:
     assert len(capacity.reserves) == 1
     assert len(fulfillment.schedules) == 1
     assert len(fulfillment.begins) == 2
+    # The lease begins at commit: each attempt commits with the deal's escrow
+    # before beginning, and the materialization states the window the first
+    # commit recorded, not a clock of the storefront's own.
+    assert [commit["deal_ref"] for commit in capacity.commits] == [
+        {"escrow_uid": "escrow-a"},
+        {"escrow_uid": "escrow-a"},
+    ]
+    start, end = capacity.committed_window
+    assert (recorded.lease_start_utc, recorded.lease_end_utc) == (
+        datetime.fromisoformat(start),
+        datetime.fromisoformat(end),
+    )
 
 
 @pytest.mark.asyncio
@@ -367,14 +527,104 @@ async def test_reservation_conflicting_site_fails_before_scheduling() -> None:
         db=db,
         capacity_client=capacity,
         fulfillment_client=fulfillment,
+        read_verified_evidence=db.verified_evidence,
     )
 
-    with pytest.raises(BareMetalFulfillmentError, match="conflicting site"):
+    with pytest.raises(BareMetalFulfillmentError, match="mismatched site"):
         await service.begin(
             negotiation_id="neg-a",
-            escrow_uid="escrow-a",
+            settlement_ref="escrow-a",
             buyer_principal=BUYER,
         )
 
     assert fulfillment.schedules == []
     assert fulfillment.begins == []
+
+
+async def test_a_listing_no_authority_stands_behind_reserves_nothing() -> None:
+    db = FakeDb()
+    db.capacity_backing = "unbacked"
+    capacity = FakeCapacity()
+    fulfillment = FakeFulfillment()
+    service = BareMetalFulfillmentService(
+        db=db,
+        capacity_client=capacity,
+        fulfillment_client=fulfillment,
+        read_verified_evidence=db.verified_evidence,
+    )
+
+    with pytest.raises(BareMetalFulfillmentError, match="capacity-backed"):
+        await service.begin(
+            negotiation_id="neg-a",
+            settlement_ref="escrow-a",
+            buyer_principal=BUYER,
+        )
+
+    assert capacity.reserves == []
+    assert fulfillment.schedules == []
+
+
+async def test_a_machine_without_gpus_reserves_one_unit_with_no_attribute() -> None:
+    """A trusted record carrying an empty set of claimed attributes, as a
+    listing whose shape states no attribute has, reserves its Physical Resource
+    by units alone, which the site's own admission matcher admits for the
+    machine it declares."""
+    db = FakeDb()
+    db.listing = BareMetalListing(
+        capacity_backing="backed",
+        region="us-west",
+        vcpu_count=64,
+        ram_gb=512,
+        host_id="machine-a",
+        physical_host_id="host-a",
+        access_methods=["ssh"],
+    )
+    db.context["claimed_attributes"] = db.listing.claimed_attributes
+    capacity = FakeCapacity()
+    service = BareMetalFulfillmentService(
+        db=db,
+        capacity_client=capacity,
+        fulfillment_client=FakeFulfillment(),
+        read_verified_evidence=db.verified_evidence,
+    )
+
+    await service.begin(negotiation_id="neg-a", settlement_ref="escrow-a", buyer_principal=BUYER)
+
+    (reserve,) = capacity.reserves
+    assert reserve["claim"] == {
+        "resource_id": "resource-a",
+        "dimensions": {"units": 1},
+        "offering_mode": "bare_metal",
+    }
+    declaration = {
+        "resource_id": "resource-a",
+        "pool_id": "pool-a",
+        "resource_type": "compute.bare-metal",
+        "available": {"units": 1, "vcpu_count": 64, "ram_gb": 512},
+        "attributes": {"physical_host_id": "host-a"},
+    }
+    assert dict_resource_satisfies_claim(declaration, reserve["claim"]) is True
+
+
+async def test_a_record_carrying_no_claimed_attributes_reserves_nothing() -> None:
+    """The claim's attributes come only from the trusted listing record; a
+    record carrying none at all, rather than an empty set, is broken, and the
+    reservation is refused rather than made from it."""
+    db = FakeDb()
+    db.context.pop("claimed_attributes")
+    capacity = FakeCapacity()
+    service = BareMetalFulfillmentService(
+        db=db,
+        capacity_client=capacity,
+        fulfillment_client=FakeFulfillment(),
+        read_verified_evidence=db.verified_evidence,
+    )
+
+    with pytest.raises(BareMetalFulfillmentError, match="carries no claimed attributes"):
+        await service.begin(
+            negotiation_id="neg-a",
+            settlement_ref="escrow-a",
+            buyer_principal=BUYER,
+        )
+
+    assert capacity.reserves == []

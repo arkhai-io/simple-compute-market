@@ -20,7 +20,7 @@ kind: Pod
 metadata:
   name: {{ include "e2e-tests.fullname" . }}-e2e-deal-test
   labels:
-    {{- include "e2e-tests.labels" . | nindent 4 }}
+    {{- include "e2e-tests.testLabels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation

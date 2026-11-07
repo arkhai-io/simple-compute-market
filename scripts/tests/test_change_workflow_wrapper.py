@@ -1,0 +1,1032 @@
+"""A step runs unattended on its models, and a waiting run resumes with the owner's
+answer: the wrapper's command and the outcome it logs."""
+
+from __future__ import annotations
+
+import json
+import os
+import signal
+import subprocess
+import sys
+import uuid
+from dataclasses import replace
+from datetime import datetime
+from pathlib import Path
+
+import pytest
+
+from change_workflow.common import StepError
+from change_workflow.harness import anchored
+from change_workflow.log import log_path, note_orchestrator, read_log, record_outcome
+from change_workflow.outcome import harness_schema, load_schema, outcome_problems
+from change_workflow.running import Run, Terminated, live_runs, recorded_run, runs_directory
+from change_workflow.steps import Model, load_steps
+from change_workflow.wrapper import Wrapper
+from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LIMIT, MODELS, NETWORK, OPUS,
+                                      SESSION, VALID, FakeClaude, clock, configured,
+                                      event_lines, failed_run, make_wrapper, not_installed,
+                                      option, option_rules, without_session_id)
+
+
+def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+
+    make_wrapper(tmp_path, claude).run("design", CHANGE)
+
+    command = claude.commands[0]
+    rules = load_steps()["design"]
+    assert command[:3] == ["claude", "-p", f"/change-design {CHANGE}"]
+    assert option(command, "--permission-mode") == "dontAsk"
+    assert (option(command, "--model"), option(command, "--effort")) == (
+        "claude-opus-5-5", "high")
+    assert option(command, "--setting-sources") == "project"
+    assert option(command, "--output-format") == "stream-json"
+    assert "--verbose" in command
+    assert json.loads(option(command, "--json-schema")) == harness_schema(load_schema())
+    assert option_rules(command, "--allowedTools") == [anchored(r, tmp_path) for r in rules.allow]
+    assert option_rules(command, "--disallowedTools") == [anchored(r, tmp_path)
+                                                          for r in rules.deny]
+    assert "--resume" not in command
+    # Its own session, never one inherited from the environment it was started in.
+    assert uuid.UUID(option(command, "--session-id")).version == 4
+
+
+@pytest.mark.parametrize("kind", sorted(VALID))
+def test_each_outcome_is_logged_with_its_session_and_commit(tmp_path: Path, kind: str) -> None:
+    claude = FakeClaude((event_lines(VALID[kind]), 0))
+
+    line = make_wrapper(tmp_path, claude).run("implement", CHANGE)
+
+    # Every line carries the run's own record of denials, the step's replaced.
+    expected = {**VALID[kind], "denials": []}
+    assert {key: line[key] for key in expected} == expected
+    assert (line["step"], line["session"], line["commit"], line["exit_status"]) == (
+        "implement", SESSION, COMMIT, 0)
+    assert (line["harness"], line["model"], line["effort"]) == ("claude", "claude-opus-5-5",
+                                                               "high")
+    assert "unavailable" not in line
+    assert read_log(log_path(tmp_path, CHANGE)) == [line]
+
+
+def test_a_crash_is_logged_stopped_with_its_exit_status(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(result=False), 137))
+
+    line = make_wrapper(tmp_path, claude).run("validate", CHANGE)
+
+    assert (line["outcome"], line["reason"], line["exit_status"]) == ("stopped", "exit 137", 137)
+    assert line["message"] == line["reason"]
+    assert line["session"] == SESSION
+    assert outcome_problems({k: line[k] for k in ("outcome", "message", "reason",
+                                                  "denials")}) == []
+
+
+def test_a_run_without_an_outcome_is_logged_stopped(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(None), 0))
+
+    line = make_wrapper(tmp_path, claude).run("closeout", CHANGE)
+
+    assert (line["outcome"], line["reason"]) == ("stopped", "the run ended without an outcome")
+
+
+def test_a_run_that_ends_in_error_is_logged_stopped(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"], is_error=True), 0))
+
+    line = make_wrapper(tmp_path, claude).run("closeout", CHANGE)
+
+    assert line["reason"] == "the run ended in error: error_during_execution"
+
+
+def test_a_malformed_outcome_is_logged_stopped(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines({"outcome": "finished", "message": "Done."}), 0))
+
+    line = make_wrapper(tmp_path, claude).run("implement", CHANGE)
+
+    assert line["outcome"] == "stopped"
+    assert line["reason"] == ("the run's outcome does not conform to the schema: "
+                              "outcome has no next")
+    assert line["message"] == "Done.\n\n" + line["reason"]
+
+
+def test_a_turn_after_the_report_keeps_the_report_as_earlier(tmp_path: Path) -> None:
+    # A wake-up the step scheduled fires after it reported, and its turn ends the run.
+    report = {"outcome": "finished", "message": "The section is committed; make test passed.",
+              "next": {"step": "triage", "kind": "implementation"}}
+    woke = {"outcome": "finished", "message": "Nothing left to wait for.",
+            "next": {"step": "triage", "kind": "implementation"}}
+    claude = FakeClaude((event_lines(report) + event_lines(woke), 0))
+
+    line = make_wrapper(tmp_path, claude).run("implement", CHANGE)
+
+    assert (line["outcome"], line["message"]) == ("finished", "Nothing left to wait for.")
+    assert line["earlier"] == [report]
+    assert read_log(log_path(tmp_path, CHANGE)) == [line]
+
+
+def test_a_run_of_one_turn_has_no_earlier(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+
+    assert "earlier" not in make_wrapper(tmp_path, claude).run("implement", CHANGE)
+
+
+def test_a_run_that_crashes_after_reporting_keeps_the_report(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"]) + event_lines(result=False), 137))
+
+    line = make_wrapper(tmp_path, claude).run("implement", CHANGE)
+
+    assert line["outcome"] == "stopped"
+    assert line["earlier"] == [{key: VALID["finished"][key] for key in ("outcome", "message",
+                                                                         "next")}]
+
+
+def test_a_stop_without_denials_is_logged_as_the_step_gave_it(tmp_path: Path) -> None:
+    # The wrapper sets the denials on every outcome, so a step need not give them.
+    recorded = [{"tool_name": "Bash", "tool_use_id": "t1", "tool_input": {"command": "make lock"}}]
+    stop = {"outcome": "stopped", "message": "Needs make lock.", "reason": "make lock denied"}
+    claude = FakeClaude((event_lines(stop, denials=recorded), 0))
+
+    line = make_wrapper(tmp_path, claude).run("validate", CHANGE)
+
+    assert {key: line[key] for key in (*stop, "denials")} == {**stop, "denials": recorded}
+
+
+def test_a_malformed_stop_keeps_the_steps_message(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines({"outcome": "stopped", "message": "Which option?"}), 0))
+
+    line = make_wrapper(tmp_path, claude).run("triage", CHANGE)
+
+    assert (line["outcome"], line["reason"]) == (
+        "stopped", "the run's outcome does not conform to the schema: outcome has no reason")
+    assert line["message"] == "Which option?\n\n" + line["reason"]
+
+
+def test_denials_are_taken_from_the_stream_not_the_step(tmp_path: Path) -> None:
+    recorded = [{"tool_name": "Bash", "tool_use_id": "t1", "tool_input": {"command": "make lock"}}]
+    claimed = {**VALID["stopped"], "denials": [{"tool_name": "Edit"}]}
+    claude = FakeClaude((event_lines(claimed, denials=recorded), 0),
+                        (event_lines(result=False, denials=recorded), 1))
+    wrapper = make_wrapper(tmp_path, claude)
+
+    stopped = wrapper.run("validate", CHANGE)
+    crashed = wrapper.run("validate", CHANGE)
+
+    assert stopped["denials"] == recorded
+    assert crashed["denials"] == []
+
+
+def test_denials_of_a_crashed_run_with_a_result_are_kept(tmp_path: Path) -> None:
+    recorded = [{"tool_name": "Bash", "tool_input": {"command": "make lock"}}]
+    claude = FakeClaude((event_lines(None, denials=recorded), 1))
+
+    line = make_wrapper(tmp_path, claude).run("validate", CHANGE)
+
+    assert (line["reason"], line["denials"]) == ("exit 1: done", recorded)
+
+
+def test_planning_resumes_the_design_session(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["question"], session="design-1"), 0),
+                        (event_lines(VALID["finished"], session="design-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+
+    wrapper.run("design", CHANGE)
+    line = wrapper.run("plan", CHANGE)
+
+    assert option(claude.commands[1], "--resume") == "design-1"
+    assert claude.commands[1][2] == f"/change-plan {CHANGE}"
+    assert option_rules(claude.commands[1], "--allowedTools") == [
+        anchored(r, tmp_path) for r in load_steps()["plan"].allow]
+    assert (line["step"], line["session"]) == ("plan", "design-1")
+
+
+def test_planning_without_a_design_session_starts_fresh(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+
+    make_wrapper(tmp_path, claude).run("plan", CHANGE)
+
+    assert "--resume" not in claude.commands[0]
+
+
+def test_review_is_not_a_claude_step(tmp_path: Path) -> None:
+    with pytest.raises(StepError, match="no unattended Claude Code run"):
+        make_wrapper(tmp_path, FakeClaude()).run("review", CHANGE)
+
+
+def test_a_question_is_answered_by_resuming_its_session_with_a_granted_rule(
+        tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["question"], session="v-1"), 0),
+                        (event_lines(VALID["finished"], session="v-1"), 0),
+                        (event_lines(VALID["finished"], session="v-2"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    asked = wrapper.run("validate", CHANGE)
+    note_orchestrator(log_path(tmp_path, CHANGE), "asked the owner", "question")
+
+    resumed = wrapper.resume(CHANGE, asked["seq"], "Delete the volume.",
+                             ["Bash(kubectl delete pvc *)"])
+    rerun = wrapper.run("validate", CHANGE)
+
+    command = claude.commands[1]
+    assert command[2] == "The owner's answer: Delete the volume."
+    assert option(command, "--resume") == "v-1"
+    assert option_rules(command, "--allowedTools")[-1] == "Bash(kubectl delete pvc *)"
+    assert (resumed["step"], resumed["session"], resumed["granted"]) == (
+        "validate", "v-1", ["Bash(kubectl delete pvc *)"])
+    assert "Bash(kubectl delete pvc *)" not in claude.commands[2]
+    assert "--resume" not in claude.commands[2]
+    assert "granted" not in rerun
+
+
+def test_a_fresh_run_granted_rules_holds_them_for_that_run_alone(tmp_path: Path) -> None:
+    # The owner grants two rules before the step's next run has started.
+    granted = ["Bash(gh run download *)", "Bash(make check-packaging)"]
+    claude = FakeClaude((event_lines(VALID["finished"], session="v-1"), 0),
+                        (event_lines(VALID["finished"], session="v-2"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+
+    line = wrapper.run("validate", CHANGE, granted=granted)
+    rerun = wrapper.run("validate", CHANGE)
+
+    table = [anchored(r, tmp_path) for r in load_steps()["validate"].allow]
+    assert option_rules(claude.commands[0], "--allowedTools") == [*table, *granted]
+    assert line["granted"] == granted
+    assert option_rules(claude.commands[1], "--allowedTools") == table
+    assert "granted" not in rerun
+
+
+def test_a_resumed_implementation_keeps_its_sections(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["question"]), 0), (event_lines(VALID["finished"]), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    asked = wrapper.run("implement", CHANGE, arguments="section 2", sections=[2])
+
+    line = wrapper.resume(CHANGE, asked["seq"], "Yes.")
+
+    assert line["sections"] == [2]
+    assert "granted" not in line
+
+
+def test_implementation_continues_a_finished_session_it_names(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"], session="i-1"), 0),
+                        (event_lines(VALID["finished"], session="i-2"), 0),
+                        (event_lines(VALID["finished"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    first = wrapper.run("implement", CHANGE, arguments="section 8A", sections=["8A"])
+    wrapper.run("implement", CHANGE, arguments="section 8B", sections=["8B"])
+
+    # The later session is not the one continued: the session is named, not inferred.
+    line = wrapper.run("implement", CHANGE, arguments="section 8C", sections=["8C"],
+                       continuing="i-1")
+
+    command = claude.commands[2]
+    assert command[2] == f"/change-implement {CHANGE} section 8C"
+    assert option(command, "--resume") == "i-1"
+    assert (option(command, "--model"), option(command, "--effort")) == (
+        first["model"], first["effort"])
+    assert (line["session"], line["continues"], line["sections"]) == ("i-1", first["seq"],
+                                                                      ["8C"])
+
+
+@pytest.mark.parametrize("continuing", ["i-1", "i-2"])
+def test_no_session_is_continued_while_an_implementation_run_waits(
+        tmp_path: Path, continuing: str) -> None:
+    # Continuing another session would leave the question unresumable, since a
+    # resume reaches only implementation's latest run.
+    claude = FakeClaude((event_lines(VALID["finished"], session="i-2"), 0),
+                        (event_lines(VALID["question"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    wrapper.run("implement", CHANGE)
+    asked = wrapper.run("implement", CHANGE)
+
+    with pytest.raises(StepError, match=f"seq {asked['seq']}.*resume it with the answer"):
+        wrapper.run("implement", CHANGE, continuing=continuing)
+    assert len(claude.commands) == 2
+
+
+def test_a_stop_a_decision_resolved_does_not_hold_a_session_back(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["stopped"], session="i-1"), 0),
+                        (event_lines(VALID["finished"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    stopped = wrapper.run("implement", CHANGE)
+    note_orchestrator(log_path(tmp_path, CHANGE), "left for a fix later", "owner's word",
+                      resolves=stopped["seq"])
+
+    line = wrapper.run("implement", CHANGE, arguments="fix the parser", continuing="i-1")
+
+    assert (line["session"], line["continues"]) == ("i-1", stopped["seq"])
+
+
+@pytest.mark.parametrize("step,session,fresh,match", [
+    ("implement", "nobody", False, "no implementation run of session nobody"),
+    ("validate", "i-1", False, "only implementation continues"),
+    ("implement", "i-1", True, "cannot also start fresh"),
+])
+def test_continuing_is_refused_for_a_session_it_cannot_continue(
+        tmp_path: Path, step: str, session: str, fresh: bool, match: str) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    wrapper.run("implement", CHANGE)
+
+    with pytest.raises(StepError, match=match):
+        wrapper.run(step, CHANGE, continuing=session, fresh=fresh)
+    assert len(claude.commands) == 1
+
+
+def test_a_resume_names_the_waiting_run_not_the_last(tmp_path: Path) -> None:
+    # Validation and triage run side by side: the triage asks, then the
+    # validation finishes above it, and the answer is the triage's.
+    claude = FakeClaude((event_lines(VALID["question"], session="t-1"), 0),
+                        (event_lines(VALID["finished"], session="v-1"), 0),
+                        (event_lines(VALID["finished"], session="t-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    asked = wrapper.run("triage", CHANGE)
+    finished = wrapper.run("validate", CHANGE)
+
+    line = wrapper.resume(CHANGE, asked["seq"], "Agreed.")
+
+    assert option(claude.commands[2], "--resume") == "t-1"
+    assert (line["step"], line["session"]) == ("triage", "t-1")
+    with pytest.raises(StepError, match="ended finished"):
+        wrapper.resume(CHANGE, finished["seq"], "Agreed.")
+
+
+def test_a_stopped_run_is_read_then_resumed_with_a_grant_and_not_again(
+        tmp_path: Path) -> None:
+    # The orchestrating session's order: the stop's denial is read first, by a
+    # line that resolves nothing, and the grant resumes the read run; a line
+    # that resolved it would have made the resume refuse it.
+    denied = [{"tool_name": "Bash", "tool_input": {"command": "make lock"}}]
+    claude = FakeClaude((event_lines(VALID["stopped"], denials=denied, session="v-1"), 0),
+                        (event_lines(VALID["finished"], session="v-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    stopped = wrapper.run("validate", CHANGE)
+    note_orchestrator(log_path(tmp_path, CHANGE),
+                      "gap: proposed Bash(make lock) as a one-run grant", "r",
+                      reads=stopped["seq"])
+
+    line = wrapper.resume(CHANGE, stopped["seq"], "Go on.", ["Bash(make lock)"])
+
+    assert option(claude.commands[1], "--resume") == "v-1"
+    assert (line["step"], line["granted"]) == ("validate", ["Bash(make lock)"])
+    assert line["seq"] != stopped["seq"]
+    with pytest.raises(StepError, match="latest run"):
+        wrapper.resume(CHANGE, stopped["seq"], "Go on.")
+
+
+def test_a_run_that_is_not_waiting_is_refused(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["stopped"], session="d-1"), 0),
+                        (event_lines(VALID["question"], session="v-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    log = log_path(tmp_path, CHANGE)
+    stopped = wrapper.run("design", CHANGE)
+    resolved = note_orchestrator(log, "rerun it", "r", resolves=stopped["seq"])
+    asked = wrapper.run("validate", CHANGE)
+    note_orchestrator(log, "abandoned", "r", resolves=asked["seq"])
+    review = record_outcome(log, "review", VALID["finished"], session="codex:x",
+                            commit=COMMIT, extra={"kind": "design"})
+
+    with pytest.raises(StepError, match="ended stopped and a decision line resolves it"):
+        wrapper.resume(CHANGE, stopped["seq"], "Go on.")
+    with pytest.raises(StepError, match="ended question and a decision line resolves"):
+        wrapper.resume(CHANGE, asked["seq"], "Go on.")
+    with pytest.raises(StepError, match="orchestrator line, not the run of a step"):
+        wrapper.resume(CHANGE, resolved["seq"], "Go on.")
+    with pytest.raises(StepError, match="review line, not the run of a step"):
+        wrapper.resume(CHANGE, review["seq"], "Go on.")
+    with pytest.raises(StepError, match="no seq 9"):
+        wrapper.resume(CHANGE, 9, "Go on.")
+
+
+def test_nothing_to_resume_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(StepError, match="no seq 1"):
+        make_wrapper(tmp_path, FakeClaude()).resume(CHANGE, 1, "Yes.")
+
+
+def test_a_resume_needs_an_answer(tmp_path: Path) -> None:
+    with pytest.raises(StepError, match="answer"):
+        make_wrapper(tmp_path, FakeClaude()).resume(CHANGE, 1, "")
+
+
+def test_a_run_that_cannot_start_is_logged_stopped(tmp_path: Path) -> None:
+    def missing(command, cwd, feed, step) -> int:
+        raise not_installed("claude")
+
+    line = Wrapper(root=make_wrapper(tmp_path, FakeClaude()).root, runner=missing,
+                   head=lambda _: COMMIT, clock=clock, echo=None).run("design", CHANGE)
+
+    assert (line["outcome"], line["exit_status"]) == ("stopped", None)
+    assert line["reason"] == ("no model of the step is available: claude-opus-5-5: claude is "
+                              "not installed")
+    assert line["unavailable"] == [{**OPUS.entry(), "reason": "claude is not installed"}]
+
+
+def test_a_run_whose_wrapper_is_terminated_is_logged_stopped_naming_the_signal(
+    tmp_path: Path,
+) -> None:
+    """A wrapper killed by SIGTERM's default action would write nothing, and the
+    log would read the run as still waiting on its previous outcome."""
+    def terminated(command, cwd, feed, step) -> int:
+        for line in event_lines(VALID["finished"], result=False):
+            feed(line)
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise AssertionError("SIGTERM did not end the run")
+
+    previous = signal.getsignal(signal.SIGTERM)
+    wrapper = Wrapper(root=make_wrapper(tmp_path, FakeClaude()).root, runner=terminated,
+                      head=lambda _: COMMIT, clock=clock, echo=None)
+    with pytest.raises(Terminated):
+        wrapper.run("implement", CHANGE)
+
+    (line,) = read_log(log_path(tmp_path, CHANGE))
+    assert line["outcome"] == "stopped"
+    assert line["reason"] == "the run did not finish: Terminated: received SIGTERM"
+    assert line["session"] == SESSION
+    # The handler is the wrapper's only while a run goes on.
+    assert signal.getsignal(signal.SIGTERM) is previous
+
+
+def test_a_stop_after_the_agent_has_exited_ends_nothing_and_the_outcome_is_logged(
+    tmp_path: Path,
+) -> None:
+    """The record is held until the line is written, so a stop can reach a run
+    as it ends; killed there, it would leave no line for work already done."""
+    def signalling_head(_root: Path) -> str:
+        # Read as the line is written, after the agent's process has ended.
+        os.kill(os.getpid(), signal.SIGTERM)
+        return COMMIT
+
+    previous = signal.getsignal(signal.SIGTERM)
+    runs = tmp_path / "git" / "change-runs"
+    wrapper = replace(make_wrapper(tmp_path, FakeClaude((event_lines(VALID["finished"]), 0))),
+                      head=signalling_head, runs=lambda _: runs)
+    line = wrapper.run("implement", CHANGE)
+
+    assert (line["outcome"], line["commit"]) == ("finished", COMMIT)
+    assert read_log(log_path(tmp_path, CHANGE)) == [line]
+    assert list(runs.iterdir()) == []
+    assert signal.getsignal(signal.SIGTERM) is previous
+
+
+def test_a_stop_before_the_agent_starts_ends_the_run_as_it_would_start(
+    tmp_path: Path,
+) -> None:
+    signalled: list[bool] = []
+
+    def signalling_clock() -> datetime:
+        # First read as the run's record is written, before the agent starts.
+        if not signalled:
+            signalled.append(True)
+            os.kill(os.getpid(), signal.SIGTERM)
+        return clock()
+
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    runs = tmp_path / "git" / "change-runs"
+    wrapper = replace(make_wrapper(tmp_path, claude), clock=signalling_clock,
+                      runs=lambda _: runs)
+    with pytest.raises(Terminated):
+        wrapper.run("implement", CHANGE)
+
+    assert claude.commands == []
+    (line,) = read_log(log_path(tmp_path, CHANGE))
+    assert (line["outcome"], line["reason"]) == (
+        "stopped", "the run did not finish: Terminated: received SIGTERM")
+
+
+def test_a_file_the_run_cannot_find_is_no_unavailability(tmp_path: Path) -> None:
+    # Only the program failing to launch says the harness cannot serve its model.
+    def lost(command, cwd, feed, step) -> int:
+        raise not_installed(str(tmp_path / "gone" / "01-closeout.jsonl"))
+
+    line = Wrapper(root=make_wrapper(tmp_path, FakeClaude()).root, runner=lost,
+                   head=lambda _: COMMIT, clock=clock, echo=None).run("closeout", CHANGE)
+
+    assert line["outcome"] == "stopped"
+    assert line["reason"].startswith("the run did not finish: FileNotFoundError")
+    assert "unavailable" not in line
+
+
+def test_a_run_that_archives_its_change_is_logged_in_the_archive(tmp_path: Path) -> None:
+    # Closeout's last act renames the change's directory into the archive while
+    # the run is still writing its transcript.
+    archived = tmp_path / "openspec/changes/archive" / f"2026-10-21-{CHANGE}"
+    lines = event_lines(VALID["finished"], tools=(("Bash", {"command": "openspec archive"}),))
+
+    def archiving(command, cwd, feed, step) -> int:
+        for line in lines[:2]:
+            feed(line)
+        archived.parent.mkdir(parents=True)
+        (tmp_path / "openspec/changes" / CHANGE).rename(archived)
+        for line in lines[2:]:
+            feed(line)
+        return 0
+
+    line = Wrapper(root=make_wrapper(tmp_path, FakeClaude()).root, runner=archiving,
+                   head=lambda _: COMMIT, clock=clock, echo=None).run("closeout", CHANGE)
+
+    assert (line["outcome"], line["exit_status"]) == ("finished", 0)
+    assert "unavailable" not in line
+    assert not (tmp_path / "openspec/changes" / CHANGE).exists()
+    assert read_log(archived / "reviews/workflow.jsonl") == [line]
+    transcript = archived / "reviews" / line["transcript"]
+    assert transcript.read_text("utf-8") == "".join(lines)
+    assert "openspec archive" in transcript.with_suffix(".progress").read_text("utf-8")
+
+
+@pytest.mark.parametrize("lines", [
+    failed_run(LIMIT), failed_run("Not logged in · Please run /login"), ["Invalid API key\n"],
+])
+def test_a_steps_only_model_unavailable_stops_it_saying_why(tmp_path: Path, lines) -> None:
+    claude = FakeClaude((lines, 1))
+
+    line = make_wrapper(tmp_path, claude).run("triage", CHANGE)
+
+    assert len(claude.commands) == 1
+    assert line["outcome"] == "stopped"
+    assert line["reason"].startswith("no model of the step is available: claude-opus-5-5: ")
+    assert line["unavailable"][0]["model"] == "claude-opus-5-5"
+
+
+def test_a_usage_limit_names_when_it_resets(tmp_path: Path) -> None:
+    line = make_wrapper(tmp_path, FakeClaude((failed_run(LIMIT), 1))).run("validate", CHANGE)
+
+    assert line["reason"] == f"no model of the step is available: claude-sonnet-5-5: {LIMIT}"
+    assert (line["model"], line["effort"]) == ("claude-sonnet-5-5", "medium")
+
+
+def test_a_network_error_is_retried_twice_on_the_same_model_then_stops(tmp_path: Path) -> None:
+    claude = FakeClaude(*[(failed_run(NETWORK), 1)] * 3)
+
+    line = make_wrapper(tmp_path, claude).run("design", CHANGE)
+
+    assert len(claude.commands) == 3
+    assert all(option(command, "--model") == "claude-opus-5-5" for command in claude.commands)
+    assert line["outcome"] == "stopped"
+    assert line["reason"] == f"claude-opus-5-5 could not be reached after 3 attempts: {NETWORK}"
+    assert "unavailable" not in line
+
+
+def test_a_network_error_then_a_run_logs_the_run(tmp_path: Path) -> None:
+    claude = FakeClaude((failed_run(NETWORK), 1), (event_lines(VALID["finished"]), 0))
+
+    line = make_wrapper(tmp_path, claude).run("design", CHANGE)
+
+    # The retry is the same command on the same model, under a session id of its
+    # own: the failed attempt may already have claimed the first.
+    first, second = (without_session_id(command) for command in claude.commands)
+    assert first == second
+    assert option(claude.commands[0], "--session-id") != option(claude.commands[1],
+                                                                 "--session-id")
+    assert (line["outcome"], line["exit_status"]) == ("finished", 0)
+    transcript = log_path(tmp_path, CHANGE).parent / line["transcript"]
+    assert "EAI_AGAIN" in transcript.read_text("utf-8")
+
+
+def test_an_ordinary_failure_is_not_read_as_an_unavailable_model(tmp_path: Path) -> None:
+    claude = FakeClaude((failed_run("the hook refused the edit"), 1))
+
+    line = make_wrapper(tmp_path, claude).run("implement", CHANGE)
+
+    assert len(claude.commands) == 1
+    assert line["reason"] == "exit 1: the hook refused the edit"
+    assert "unavailable" not in line
+
+
+def test_a_resume_runs_on_the_model_the_waiting_run_used(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"], session="t-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    log = log_path(tmp_path, CHANGE)
+    asked = record_outcome(log, "triage", VALID["question"], session="t-1", commit=COMMIT,
+                           extra={"harness": "claude", "model": "claude-sonnet-5-5",
+                                  "effort": "low"})
+
+    line = wrapper.resume(CHANGE, asked["seq"], "accept")
+
+    assert (option(claude.commands[0], "--model"), option(claude.commands[0], "--effort")) == (
+        "claude-sonnet-5-5", "low")
+    assert (line["model"], line["effort"]) == ("claude-sonnet-5-5", "low")
+
+
+def test_a_resume_whose_model_is_unavailable_stops_and_tries_no_other(tmp_path: Path) -> None:
+    claude = FakeClaude((failed_run(LIMIT), 1))
+    wrapper = make_wrapper(tmp_path, claude)
+    asked = record_outcome(log_path(tmp_path, CHANGE), "triage", VALID["question"],
+                           session="t-1", commit=COMMIT,
+                           extra={"harness": "claude", "model": "claude-sonnet-5-5"})
+
+    line = wrapper.resume(CHANGE, asked["seq"], "accept")
+
+    # Neither the row's first model nor any other is tried in its place.
+    assert [option(command, "--model") for command in claude.commands] == ["claude-sonnet-5-5"]
+    assert (line["outcome"], line["model"]) == ("stopped", "claude-sonnet-5-5")
+    assert LIMIT in line["reason"]
+
+
+def test_a_steps_first_model_is_available(tmp_path: Path) -> None:
+    """CW-ebmo: the step's models are the configuration's, in order; the first
+    available runs, and the line names it and its effort."""
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    configured(tmp_path, CONFIGURED.replace(
+        'validate = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]',
+        'validate = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]'))
+
+    line = make_wrapper(tmp_path, claude).run("validate", CHANGE)
+
+    assert [option(command, "--model") for command in claude.commands] == ["claude-opus-5-5"]
+    assert (line["harness"], line["model"], line["effort"]) == ("claude", "claude-opus-5-5",
+                                                               "high")
+
+
+def test_a_step_with_no_models_configured_is_refused_naming_the_field(tmp_path: Path) -> None:
+    claude = FakeClaude()
+    configured(tmp_path, CONFIGURED.replace(MODELS, ""))
+
+    with pytest.raises(StepError, match="models.design"):
+        make_wrapper(tmp_path, claude).run("design", CHANGE)
+    assert claude.commands == []
+
+
+def test_an_unavailable_model_falls_to_the_next_in_order(tmp_path: Path) -> None:
+    """The models' policy allows one Claude model per step, so the fallback between
+    Claude entries is proven on the wrapper's turn with the models given directly."""
+    claude = FakeClaude((failed_run(LIMIT), 1), (event_lines(VALID["finished"]), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    rules = load_steps()["validate"]
+    second = Model("claude", "second-model", "low")
+
+    line = wrapper._turn("validate", rules, CHANGE, log_path(tmp_path, CHANGE),
+                         "/change-validate x", (OPUS, second), session=None)
+
+    assert [option(command, "--model") for command in claude.commands] == [
+        "claude-opus-5-5", "second-model"]
+    assert (line["outcome"], line["model"], line["effort"]) == ("finished", "second-model", "low")
+    assert line["unavailable"] == [{**OPUS.entry(), "reason": LIMIT}]
+
+
+def test_planning_resumes_design_on_the_model_design_ran_on(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"], session="d-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    record_outcome(log_path(tmp_path, CHANGE), "design", VALID["finished"],
+                   session="d-1", commit=COMMIT,
+                   extra={"harness": "claude", "model": "claude-opus-5-0", "effort": "max"})
+
+    wrapper.run("plan", CHANGE)
+
+    assert option(claude.commands[0], "--resume") == "d-1"
+    assert option(claude.commands[0], "--model") == "claude-opus-5-0"
+
+
+def test_a_session_from_before_models_were_recorded_resumes_on_the_steps_first(
+        tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"], session="d-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    record_outcome(log_path(tmp_path, CHANGE), "design", VALID["question"],
+                   session="d-1", commit=COMMIT)
+
+    wrapper.run("plan", CHANGE)
+
+    assert option(claude.commands[0], "--model") == "claude-opus-5-5"
+
+
+def test_an_interrupted_run_is_logged_stopped_and_the_interrupt_kept(tmp_path: Path) -> None:
+    def interrupted(command, cwd, feed, step) -> int:
+        for line in event_lines(result=False):
+            feed(line)
+        raise KeyboardInterrupt
+
+    wrapper = Wrapper(root=make_wrapper(tmp_path, FakeClaude()).root, runner=interrupted,
+                      head=lambda _: COMMIT, clock=clock, echo=None)
+    with pytest.raises(KeyboardInterrupt):
+        wrapper.run("validate", CHANGE)
+
+    line = read_log(log_path(tmp_path, CHANGE))[-1]
+    assert (line["outcome"], line["session"]) == ("stopped", SESSION)
+    assert line["reason"] == "the run did not finish: KeyboardInterrupt"
+
+
+def test_a_last_run_without_a_session_is_not_resumed_past(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["question"], session="v-1"), 0),
+                        (["Error: refused\n"], 1))
+    wrapper = make_wrapper(tmp_path, claude)
+    asked = wrapper.run("validate", CHANGE)
+    crashed = wrapper.run("validate", CHANGE)
+
+    with pytest.raises(StepError, match="recorded no session"):
+        wrapper.resume(CHANGE, crashed["seq"], "Yes.")
+    with pytest.raises(StepError, match="not validate's latest run"):
+        wrapper.resume(CHANGE, asked["seq"], "Yes.")
+
+
+def test_planning_resumes_its_own_latest_session_and_may_start_fresh(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["question"], session="design-1"), 0),
+                        (event_lines(VALID["question"], session="plan-2"), 0),
+                        (event_lines(VALID["finished"], session="plan-2"), 0),
+                        (event_lines(VALID["finished"], session="plan-3"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    wrapper.run("design", CHANGE)
+    wrapper.run("plan", CHANGE)
+
+    wrapper.run("plan", CHANGE)
+    wrapper.run("plan", CHANGE, fresh=True)
+
+    assert option(claude.commands[2], "--resume") == "plan-2"
+    assert "--resume" not in claude.commands[3]
+
+
+def test_only_implementation_takes_sections(tmp_path: Path) -> None:
+    with pytest.raises(StepError, match="only implementation"):
+        make_wrapper(tmp_path, FakeClaude()).run("validate", CHANGE, sections=[1])
+
+
+def test_planning_after_a_design_run_without_a_session_is_refused(tmp_path: Path) -> None:
+    claude = FakeClaude((["Error: refused\n"], 1), (event_lines(VALID["finished"]), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    wrapper.run("design", CHANGE)
+
+    with pytest.raises(StepError, match="--fresh"):
+        wrapper.run("plan", CHANGE)
+    wrapper.run("plan", CHANGE, fresh=True)
+
+    assert "--resume" not in claude.commands[1]
+
+
+@pytest.mark.parametrize("kind", ["finished", "question"])
+def test_a_run_that_went_on_past_a_denial_is_logged_as_it_ended_with_the_denial(
+        tmp_path: Path, kind: str) -> None:
+    recorded = [{"tool_name": "Bash", "tool_input": {"command": "cat x"}}]
+    claude = FakeClaude((event_lines(VALID[kind], denials=recorded), 0))
+
+    line = make_wrapper(tmp_path, claude).run("design", CHANGE)
+
+    assert (line["outcome"], line["message"], line["denials"]) == (
+        kind, VALID[kind]["message"], recorded)
+
+
+# A run in progress is recorded in its checkout, so a round view never moves it.
+
+def test_a_run_is_recorded_while_it_runs_and_forgotten_once_its_line_is_written(
+        tmp_path: Path) -> None:
+    runs = tmp_path / "git" / "change-runs"
+    seen: list[list[Run]] = []
+
+    class Watching(FakeClaude):
+        def __call__(self, command, cwd, feed, step) -> int:
+            seen.append(live_runs(runs))
+            return super().__call__(command, cwd, feed, step)
+
+    wrapper = make_wrapper(tmp_path, Watching((event_lines(VALID["finished"]), 0)))
+    wrapper.runs = lambda _: runs
+    # The log reads the clock last, for the time on the line it then writes.
+    at_clock: list[list[Run]] = []
+    wrapper.clock = lambda: (at_clock.append(live_runs(runs)), clock())[1]
+
+    wrapper.run("implement", CHANGE)
+
+    (recorded,) = seen[0]
+    assert (recorded.pid, recorded.step, recorded.change, recorded.started) == (
+        os.getpid(), "implement", CHANGE, "2026-10-21T09:15:40Z")
+    assert at_clock[-1] == seen[0]
+    assert len(read_log(log_path(tmp_path, CHANGE))) == 1
+    assert list(runs.iterdir()) == []
+
+
+def test_an_interrupted_run_forgets_its_record_after_its_line(tmp_path: Path) -> None:
+    runs = tmp_path / "git" / "change-runs"
+
+    def interrupted(command, cwd, feed, step) -> int:
+        assert live_runs(runs)
+        raise KeyboardInterrupt
+
+    wrapper = make_wrapper(tmp_path, FakeClaude())
+    wrapper.runner = interrupted
+    wrapper.runs = lambda _: runs
+    at_clock: list[list[Run]] = []
+    wrapper.clock = lambda: (at_clock.append(live_runs(runs)), clock())[1]
+
+    with pytest.raises(KeyboardInterrupt):
+        wrapper.run("validate", CHANGE)
+
+    assert read_log(log_path(tmp_path, CHANGE))[-1]["outcome"] == "stopped"
+    assert len(at_clock[-1]) == 1
+    assert list(runs.iterdir()) == []
+
+
+def _stale_record(runs: Path, pid: int, step: str = "triage") -> Path:
+    """A record as a run killed before it could remove it leaves it: written, and
+    its lock released as the run's descriptor closed."""
+    runs.mkdir(parents=True, exist_ok=True)
+    record = runs / f"{pid}-{uuid.uuid4().hex}.json"
+    record.write_text(json.dumps({"pid": pid, "step": step, "change": CHANGE,
+                                  "started": "2026-10-21T09:15:40Z"}), "utf-8")
+    return record
+
+
+def test_a_record_is_a_run_only_while_its_lock_is_held(tmp_path: Path) -> None:
+    runs = tmp_path / "change-runs"
+    with recorded_run(runs, "triage", CHANGE, clock=clock):
+        (live,) = live_runs(runs)
+        assert live.describe() == (
+            f"triage of {CHANGE} (process {os.getpid()}, started 2026-10-21T09:15:40Z)")
+    # A record whose lock is free reads as no run, though its process (this one)
+    # is alive: neither a reused process id nor a survivor passes for the run.
+    stale = _stale_record(runs, os.getpid())
+    assert stale.is_file() and live_runs(runs) == []
+
+
+_HOLDER = """
+import subprocess, sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from change_workflow.running import recorded_run
+with recorded_run(Path(sys.argv[2]), "validate", "shape-bounds"):
+    # close_fds=False: the record's descriptor is still not passed on.
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
+                             close_fds=False)
+    print(child.pid, flush=True)
+    time.sleep(60)
+"""
+
+
+def test_a_killed_runs_record_is_stale_though_its_child_survives(tmp_path: Path) -> None:
+    """Library integration: real processes and the kernel's own lock release."""
+    runs = tmp_path / "change-runs"
+    scripts = Path(__file__).resolve().parents[1]
+    holder = subprocess.Popen([sys.executable, "-c", _HOLDER, str(scripts), str(runs)],
+                              stdout=subprocess.PIPE, text=True)
+    assert holder.stdout is not None
+    child = int(holder.stdout.readline())
+    try:
+        (live,) = live_runs(runs)
+        assert (live.pid, live.step) == (holder.pid, "validate")
+
+        holder.kill()
+        holder.wait()
+
+        os.kill(child, 0)  # The run's child is still alive,
+        assert len(list(runs.glob("*.json"))) == 1  # its record is left behind,
+        assert live_runs(runs) == []  # and nothing holds it.
+    finally:
+        holder.kill()
+        try:
+            os.kill(child, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+# A finished triage is resumed only on the owner's direction to revisit it.
+
+def _finished_triage(tmp_path: Path) -> tuple[Wrapper, FakeClaude, dict]:
+    _triaged_records(tmp_path, "04-implementation")
+    outcome = {"outcome": "finished", "message": "Advance.", "triaged": ["04-implementation"],
+               "next": {"step": "round"}}
+    claude = FakeClaude((event_lines(outcome, session="t-1"), 0),
+                        (event_lines(outcome, session="t-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    triage = record_outcome(log_path(tmp_path, CHANGE), "triage", outcome, session="t-1",
+                            commit=COMMIT)
+    return wrapper, claude, triage
+
+
+def test_a_finished_triage_is_resumed_under_the_owners_revisit(tmp_path: Path) -> None:
+    wrapper, claude, triage = _finished_triage(tmp_path)
+    # A step started after the triage, stopped and resolved before the revisit.
+    stopped = record_outcome(log_path(tmp_path, CHANGE), "validate", VALID["stopped"],
+                             session="v-1", commit=COMMIT)
+    note_orchestrator(log_path(tmp_path, CHANGE), "revisits 04 F5", "the owner's words",
+                      by="owner", resumes=triage["seq"])
+    note_orchestrator(log_path(tmp_path, CHANGE), "the revisit supersedes it", "r",
+                      by="owner", resolves=stopped["seq"])
+
+    line = wrapper.resume(CHANGE, triage["seq"], "Cite the stable row.")
+
+    assert option(claude.commands[0], "--resume") == "t-1"
+    assert (line["step"], line["outcome"], line["resumes"]) == ("triage", "finished",
+                                                                triage["seq"])
+
+
+def test_a_finished_triage_resumed_without_a_direction_is_refused(tmp_path: Path) -> None:
+    """A finished run is resumed without a direction."""
+    wrapper, claude, triage = _finished_triage(tmp_path)
+
+    with pytest.raises(StepError, match="ended finished, not with a question or a stop, so "
+                                        "it is not waiting"):
+        wrapper.resume(CHANGE, triage["seq"], "Cite the stable row.")
+    assert claude.commands == []
+
+
+def test_a_revisit_direction_resumes_the_triage_once(tmp_path: Path) -> None:
+    wrapper, claude, triage = _finished_triage(tmp_path)
+    note_orchestrator(log_path(tmp_path, CHANGE), "revisits 04 F5", "r", by="owner",
+                      resumes=triage["seq"])
+    resumed = wrapper.resume(CHANGE, triage["seq"], "Cite the stable row.")
+
+    # The direction is spent, and the resumed run is now the triage's latest.
+    assert resumed["resumes"] == triage["seq"]
+    with pytest.raises(StepError, match=f"seq {triage['seq']} is not triage's latest run, so "
+                                        "it no longer waits"):
+        wrapper.resume(CHANGE, triage["seq"], "Again.")
+    assert len(claude.commands) == 1
+
+
+def test_a_revisit_a_later_triage_superseded_is_refused_at_the_resume(tmp_path: Path) -> None:
+    """The direction was given while the triage was the latest of its review; a
+    triage of that review since supersedes it."""
+    wrapper, claude, triage = _finished_triage(tmp_path)
+    note_orchestrator(log_path(tmp_path, CHANGE), "revisits", "r", by="owner",
+                      resumes=triage["seq"])
+    later = record_outcome(log_path(tmp_path, CHANGE), "triage",
+                           {"outcome": "finished", "message": "x",
+                            "triaged": ["04-implementation"], "next": {"step": "round"}},
+                           session="t-2", commit=COMMIT)
+
+    with pytest.raises(StepError, match=f"the revisit is refused: the triage at seq "
+                                        f"{later['seq']} came after"):
+        wrapper.resume(CHANGE, triage["seq"], "Words.")
+    assert claude.commands == []
+
+
+def test_a_direction_naming_another_triage_resumes_nothing(tmp_path: Path) -> None:
+    wrapper, claude, triage = _finished_triage(tmp_path)
+    other = record_outcome(log_path(tmp_path, CHANGE), "triage",
+                           {"outcome": "finished", "message": "x", "triaged": ["04-implementation"],
+                            "next": {"step": "round"}}, session="t-2", commit=COMMIT)
+    note_orchestrator(log_path(tmp_path, CHANGE), "revisits", "r", by="owner",
+                      resumes=other["seq"])
+
+    with pytest.raises(StepError, match=f"seq {triage['seq']} is not triage's latest run"):
+        wrapper.resume(CHANGE, triage["seq"], "Words.")
+    assert claude.commands == []
+
+
+# A triage names the records it triaged, which the computation routes on.
+
+def _reviews(tmp_path: Path) -> Path:
+    return log_path(tmp_path, CHANGE).parent
+
+
+def _triaged_records(tmp_path: Path, *names: str) -> None:
+    (tmp_path / "openspec/changes" / CHANGE).mkdir(parents=True, exist_ok=True)
+    reviews = _reviews(tmp_path)
+    reviews.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (reviews / f"{name}.md").write_text("A record.\n", "utf-8")
+        (reviews / f"{name}.triage.md").write_text("Its triage.\n", "utf-8")
+
+
+def _triage(tmp_path: Path, outcome: dict) -> dict:
+    return make_wrapper(tmp_path, FakeClaude((event_lines(outcome), 0))).run("triage", CHANGE)
+
+
+def test_a_triage_names_its_exit(tmp_path: Path) -> None:
+    _triaged_records(tmp_path, "157-closeout")
+    outcome = {"outcome": "finished", "message": "Another closeout review.",
+               "triaged": ["157-closeout"], "next": {"step": "review", "kind": "closeout"}}
+
+    line = _triage(tmp_path, outcome)
+
+    assert {key: line[key] for key in outcome} == outcome
+    assert read_log(log_path(tmp_path, CHANGE)) == [line]
+
+
+def test_a_triage_may_name_the_records_triaged_beside_its_review(tmp_path: Path) -> None:
+    _triaged_records(tmp_path, "52-implementation", "53-validation",
+                     "54-implementation-owner", "55-design-external")
+    outcome = {"outcome": "returned", "message": "Back to planning.", "evidence": "F1",
+               "triaged": ["52-implementation", "53-validation", "54-implementation-owner"],
+               "next": {"step": "plan"}}
+
+    assert _triage(tmp_path, outcome)["outcome"] == "returned"
+    # An external review is a review of its kind.
+    assert _triage(tmp_path, {**outcome, "triaged": ["55-design-external"]})[
+        "outcome"] == "returned"
+
+
+@pytest.mark.parametrize("triaged,named", [
+    (None, "names no records in triaged"),
+    ([], "not a non-empty list"),
+    (["31-design"], "31-design is no record in reviews/"),
+    (["12-validation"], "12-validation names no review"),
+    (["13-design", "13-design"], "13-design is named twice"),
+    (["14-design"], "14-design has no triage file beside it"),
+    (["design"], "'design' is not a record's name"),
+])
+def test_a_triage_that_does_not_name_what_it_triaged_is_logged_stopped(
+        tmp_path: Path, triaged, named: str) -> None:
+    _triaged_records(tmp_path, "12-validation", "13-design")
+    # A review whose triage has not been written.
+    (_reviews(tmp_path) / "14-design").with_suffix(".md").write_text("x", "utf-8")
+    outcome = {"outcome": "finished", "message": "Advance.", "next": {"step": "plan"},
+               **({"triaged": triaged} if triaged is not None else {})}
+
+    line = _triage(tmp_path, outcome)
+
+    assert line["outcome"] == "stopped"
+    assert named in line["reason"]
+    assert line["message"] == f"Advance.\n\n{line['reason']}"
+
+
+def test_a_triage_that_asks_names_nothing_it_triaged(tmp_path: Path) -> None:
+    assert _triage(tmp_path, VALID["question"])["outcome"] == "question"
+
+
+def test_a_checkout_without_git_has_no_runs_directory(tmp_path: Path) -> None:
+    # The pytest temporary directory is not inside a Git checkout.
+    assert runs_directory(tmp_path) is None
+    with recorded_run(None, "design", CHANGE):
+        assert live_runs(None) == []
+    assert list(tmp_path.iterdir()) == []

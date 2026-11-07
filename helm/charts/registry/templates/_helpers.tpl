@@ -34,6 +34,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Labels for this chart's Helm test pod. Every workload selector in the release
+requires app.kubernetes.io/name, so a test pod carries the release's other
+labels but never that one: selecting a workload's pods by its selector, as
+`kubectl logs -l` or `kubectl logs deploy/...` does, never returns a test pod.
+*/}}
+{{- define "registry.testLabels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: test
+{{- end }}
+
+{{/*
 Resolve the full image reference for the registry container.
 Supports an optional global.imageRepository passed down from the parent.
 */}}
@@ -67,6 +83,70 @@ releases so reinstalls rebind existing indexed state.
 */}}
 {{- define "registry.pvcName" -}}
 {{- printf "%s-data" (include "registry.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+
+{{/*
+The ConfigMap holding the registry's rendered profile, config-production.env.
+*/}}
+{{- define "registry.configMapName" -}}
+{{- printf "%s-config" (include "registry.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+
+{{/*
+Where the signer credential Secret's key is mounted. The rendered profile names
+it as REGISTRY_AUTHORITY_CREDENTIAL_FILE, so the two cannot disagree.
+*/}}
+{{- define "registry.credentialFile" -}}
+/var/run/secrets/arkhai/registry-identity/credential
+{{- end }}
+
+{{/*
+One line of a dotenv profile, `NAME='value'`, from (list NAME value); nothing
+for an unset value. The registry's dotenv reader decodes only `\\` and `\'` in a
+single-quoted value, so backslashes are doubled before quotes are escaped, and
+the value it reads is the one given, newlines included. Two values it cannot
+read back are refused: one ending in a backslash, whose escaped form ends `\'`
+and so reads as a quote rather than the line's end, and one holding `${`, which
+the reader expands as a variable reference in every value, quoted or not.
+*/}}
+{{- define "registry.envLine" -}}
+{{- $name := index . 0 -}}
+{{- $value := index . 1 -}}
+{{- if not (kindIs "invalid" $value) -}}
+{{- $string := toString $value -}}
+{{- if hasSuffix "\\" $string -}}
+{{- fail (printf "registry setting %s must not end in a backslash, which its profile env file cannot carry" $name) -}}
+{{- end -}}
+{{- if contains "${" $string -}}
+{{- fail (printf "registry setting %s must not contain ${, which the registry's profile reader expands as a variable" $name) -}}
+{{- end -}}
+{{- printf "%s='%s'" $name ($string | replace "\\" "\\\\" | replace "'" "\\'") -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The registry's ACTIVE_PROFILES: its rendered profile, then the secretProfile's
+when one is named, which therefore overrides a setting both state.
+*/}}
+{{- define "registry.activeProfiles" -}}
+{{- $profiles := list "production" -}}
+{{- $secretProfile := .Values.secretProfile | default dict -}}
+{{- if $secretProfile.secretName -}}
+{{- $profiles = append $profiles (include "registry.secretProfileName" .) -}}
+{{- end -}}
+{{- join "," $profiles -}}
+{{- end }}
+
+{{/*
+The secretProfile's profile name, required with its secretName. `production`
+is the rendered profile's, which a Secret's file would replace at the same path.
+*/}}
+{{- define "registry.secretProfileName" -}}
+{{- $profile := required "registry secretProfile.profile is required with its secretName" .Values.secretProfile.profile -}}
+{{- if eq $profile "production" -}}
+{{- fail "registry secretProfile.profile must not be production, the profile the chart renders from its values" -}}
+{{- end -}}
+{{- $profile -}}
 {{- end }}
 
 

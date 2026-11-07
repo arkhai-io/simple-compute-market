@@ -1,0 +1,3450 @@
+{
+  "keys": {
+    "payee": "0303030303030303030303030303030303030303030303030303030303030303",
+    "service": "0505050505050505050505050505050505050505050505050505050505050505"
+  },
+  "mandates": [
+    {
+      "id": "732b7dbef46677cbaa9ad0504c5cfe39e3d6f02bc91f23375c68015ebb70866e",
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "fee": {
+          "bps": 250
+        },
+        "nonce": "vector-1",
+        "expires": 1900000000,
+        "parts": [
+          {
+            "kind": "once",
+            "asset": "USD/6",
+            "amount": "1000",
+            "hold": {
+              "for": "P0D"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                },
+                {
+                  "account": "22222222-2222-4222-8222-222222222222",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                },
+                {
+                  "account": "33333333-3333-4333-8333-333333333333",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [
+                "22222222-2222-4222-8222-222222222222",
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": []
+            }
+          },
+          {
+            "kind": "once",
+            "asset": "USD/6",
+            "amount": "9007199254740993",
+            "hold": {
+              "afterStop": "P0D"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                },
+                {
+                  "account": "22222222-2222-4222-8222-222222222222",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                },
+                {
+                  "account": "33333333-3333-4333-8333-333333333333",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [
+                "22222222-2222-4222-8222-222222222222",
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": []
+            }
+          },
+          {
+            "kind": "once",
+            "asset": "EUR/2",
+            "amount": "333",
+            "hold": {
+              "for": "P1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                },
+                {
+                  "account": "22222222-2222-4222-8222-222222222222",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                },
+                {
+                  "account": "33333333-3333-4333-8333-333333333333",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [
+                "22222222-2222-4222-8222-222222222222",
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "194a7a89cc31f1035253a146529aa007321be78a7fc385be6a45a7ee52b93cf8",
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "fee": {
+          "bps": 250
+        },
+        "nonce": "rate-vector-1",
+        "expires": 1900000000,
+        "parts": [
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "2",
+            "period": "PT1H",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "P0D"
+            },
+            "maxHoldExtension": null,
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "22222222-2222-4222-8222-222222222222",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": [
+                "33333333-3333-4333-8333-333333333333"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "snapshots": [
+    {
+      "name": "before-start",
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "fee": {
+          "bps": 250
+        },
+        "nonce": "partial-period-vector-1",
+        "expires": 1900000000,
+        "parts": [
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "returned"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "prorated"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            },
+            "end": {
+              "at": 1800000120,
+              "partialPeriod": "charged"
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "returned"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            },
+            "end": {
+              "at": 1800000120,
+              "partialPeriod": "returned"
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "prorated"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            },
+            "end": {
+              "at": 1800000120,
+              "partialPeriod": "prorated"
+            }
+          }
+        ]
+      },
+      "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004062363664376137666432346165626634373432313335653232323534653362343764376330643035336334343633386161333662353635643562366432633132",
+      "signed": {
+        "snapshot": {
+          "livemode": false,
+          "transaction": "78a6b0d457baf6f76ea367fe38cb04b8d9d91f1f6770b3d81c73ea4e21335cde",
+          "receipt": {
+            "receipt": {
+              "livemode": false,
+              "transaction": "78a6b0d457baf6f76ea367fe38cb04b8d9d91f1f6770b3d81c73ea4e21335cde",
+              "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "from": "11111111-1111-4111-8111-111111111111",
+              "to": "22222222-2222-4222-8222-222222222222",
+              "ledger": "approval-1",
+              "parts": [
+                {
+                  "asset": "USD/6",
+                  "gross": "505",
+                  "fee": "12",
+                  "net": "493",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "5"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "505",
+                  "fee": "12",
+                  "net": "493",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "5"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "505",
+                  "fee": "12",
+                  "net": "493",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "5"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "202",
+                  "fee": "5",
+                  "net": "197",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "2"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "202",
+                  "fee": "5",
+                  "net": "197",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "2"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "202",
+                  "fee": "5",
+                  "net": "197",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "2"
+                  }
+                }
+              ],
+              "approvedAt": 1800000000,
+              "issuer": {
+                "scheme": "ed25519",
+                "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+              }
+            },
+            "proof": {
+              "scheme": "ed25519",
+              "value": "vAE3gY9XZkJDopQPzTmID-5rLLEnqLYmHkWzUWJ9uYDNrGpgO8fURLlV3QUD4HsVXE2ldoh6UiOs_Kg4zlTiCw"
+            }
+          },
+          "observedAt": 1800000000,
+          "parts": [
+            {
+              "part": 0,
+              "asset": "USD/6",
+              "gross": "505",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "505",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0"
+              },
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "status": "held"
+            },
+            {
+              "part": 1,
+              "asset": "USD/6",
+              "gross": "505",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "505",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0"
+              },
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "status": "held"
+            },
+            {
+              "part": 2,
+              "asset": "USD/6",
+              "gross": "505",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "505",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0"
+              },
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "status": "held"
+            },
+            {
+              "part": 3,
+              "asset": "USD/6",
+              "gross": "202",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "202",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0"
+              },
+              "end": {
+                "at": 1800000120,
+                "partialPeriod": "charged"
+              },
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "status": "held"
+            },
+            {
+              "part": 4,
+              "asset": "USD/6",
+              "gross": "202",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "202",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0"
+              },
+              "end": {
+                "at": 1800000120,
+                "partialPeriod": "returned"
+              },
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "status": "held"
+            },
+            {
+              "part": 5,
+              "asset": "USD/6",
+              "gross": "202",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "202",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0"
+              },
+              "end": {
+                "at": 1800000120,
+                "partialPeriod": "prorated"
+              },
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "status": "held"
+            }
+          ],
+          "events": [],
+          "latestEventSequence": 0,
+          "attachments": [],
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+          }
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "sFoEiq8rSb0EOvwnJtffElt2Kd1-9pgEyoT0FrYP9Dld8fptK-UC_rjFmE-GD5qNsXrw5HBJi135zBeLW0XLCQ"
+        }
+      }
+    },
+    {
+      "name": "after-start",
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "fee": {
+          "bps": 250
+        },
+        "nonce": "partial-period-vector-1",
+        "expires": 1900000000,
+        "parts": [
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "returned"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "prorated"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            },
+            "end": {
+              "at": 1800000120,
+              "partialPeriod": "charged"
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "returned"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            },
+            "end": {
+              "at": 1800000120,
+              "partialPeriod": "returned"
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "prorated"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            },
+            "end": {
+              "at": 1800000120,
+              "partialPeriod": "prorated"
+            }
+          }
+        ]
+      },
+      "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004032306534623665303461323363666139396239303538363735323465633665306532623631343731386438343736613030336230336239353965656336396436",
+      "signed": {
+        "snapshot": {
+          "livemode": false,
+          "transaction": "78a6b0d457baf6f76ea367fe38cb04b8d9d91f1f6770b3d81c73ea4e21335cde",
+          "receipt": {
+            "receipt": {
+              "livemode": false,
+              "transaction": "78a6b0d457baf6f76ea367fe38cb04b8d9d91f1f6770b3d81c73ea4e21335cde",
+              "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "from": "11111111-1111-4111-8111-111111111111",
+              "to": "22222222-2222-4222-8222-222222222222",
+              "ledger": "approval-1",
+              "parts": [
+                {
+                  "asset": "USD/6",
+                  "gross": "505",
+                  "fee": "12",
+                  "net": "493",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "5"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "505",
+                  "fee": "12",
+                  "net": "493",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "5"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "505",
+                  "fee": "12",
+                  "net": "493",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "5"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "202",
+                  "fee": "5",
+                  "net": "197",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "2"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "202",
+                  "fee": "5",
+                  "net": "197",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "2"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "202",
+                  "fee": "5",
+                  "net": "197",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "2"
+                  }
+                }
+              ],
+              "approvedAt": 1800000000,
+              "issuer": {
+                "scheme": "ed25519",
+                "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+              }
+            },
+            "proof": {
+              "scheme": "ed25519",
+              "value": "vAE3gY9XZkJDopQPzTmID-5rLLEnqLYmHkWzUWJ9uYDNrGpgO8fURLlV3QUD4HsVXE2ldoh6UiOs_Kg4zlTiCw"
+            }
+          },
+          "observedAt": 1800000010,
+          "parts": [
+            {
+              "part": 0,
+              "asset": "USD/6",
+              "gross": "505",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "505",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0",
+                "reservedThrough": 1800000310
+              },
+              "started": 1800000010,
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "status": "held"
+            },
+            {
+              "part": 1,
+              "asset": "USD/6",
+              "gross": "505",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "505",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0",
+                "reservedThrough": 1800000310
+              },
+              "started": 1800000010,
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "status": "held"
+            },
+            {
+              "part": 2,
+              "asset": "USD/6",
+              "gross": "505",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "505",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0",
+                "reservedThrough": 1800000310
+              },
+              "started": 1800000010,
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "status": "held"
+            },
+            {
+              "part": 3,
+              "asset": "USD/6",
+              "gross": "202",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "202",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0",
+                "reservedThrough": 1800000120
+              },
+              "started": 1800000010,
+              "end": {
+                "at": 1800000120,
+                "partialPeriod": "charged"
+              },
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "status": "held"
+            },
+            {
+              "part": 4,
+              "asset": "USD/6",
+              "gross": "202",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "202",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0",
+                "reservedThrough": 1800000120
+              },
+              "started": 1800000010,
+              "end": {
+                "at": 1800000120,
+                "partialPeriod": "returned"
+              },
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "status": "held"
+            },
+            {
+              "part": 5,
+              "asset": "USD/6",
+              "gross": "202",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "202",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0",
+                "reservedThrough": 1800000120
+              },
+              "started": 1800000010,
+              "end": {
+                "at": 1800000120,
+                "partialPeriod": "prorated"
+              },
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "status": "held"
+            }
+          ],
+          "events": [
+            {
+              "account": "11111111-1111-4111-8111-111111111111",
+              "requestId": "vector-start",
+              "event": {
+                "kind": "start"
+              },
+              "receivedAt": 1800000010,
+              "sequence": 1
+            }
+          ],
+          "latestEventSequence": 1,
+          "fundedThrough": 1800000120,
+          "attachments": [],
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+          }
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "YQA7N7IYpvfGwtlRWPO5Fk-VEIc2VjwjIXb7OwB8mo6-FqeXlDM1qeaP9Z6LUXP9Q6LKAtL6mJkGtLx2gMMcDg"
+        }
+      }
+    },
+    {
+      "name": "after-stops-and-ends",
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "fee": {
+          "bps": 250
+        },
+        "nonce": "partial-period-vector-1",
+        "expires": 1900000000,
+        "parts": [
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "returned"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "prorated"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            },
+            "end": {
+              "at": 1800000120,
+              "partialPeriod": "charged"
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "returned"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            },
+            "end": {
+              "at": 1800000120,
+              "partialPeriod": "returned"
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "prorated"
+                }
+              ],
+              "reverse": [],
+              "extend": []
+            },
+            "end": {
+              "at": 1800000120,
+              "partialPeriod": "prorated"
+            }
+          }
+        ]
+      },
+      "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004031333839336636373638303337396664333133333931383131613366353839336235323466313535386434383735353230633131653563663637623464353730",
+      "signed": {
+        "snapshot": {
+          "livemode": false,
+          "transaction": "78a6b0d457baf6f76ea367fe38cb04b8d9d91f1f6770b3d81c73ea4e21335cde",
+          "receipt": {
+            "receipt": {
+              "livemode": false,
+              "transaction": "78a6b0d457baf6f76ea367fe38cb04b8d9d91f1f6770b3d81c73ea4e21335cde",
+              "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "from": "11111111-1111-4111-8111-111111111111",
+              "to": "22222222-2222-4222-8222-222222222222",
+              "ledger": "approval-1",
+              "parts": [
+                {
+                  "asset": "USD/6",
+                  "gross": "505",
+                  "fee": "12",
+                  "net": "493",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "5"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "505",
+                  "fee": "12",
+                  "net": "493",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "5"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "505",
+                  "fee": "12",
+                  "net": "493",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "5"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "202",
+                  "fee": "5",
+                  "net": "197",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "2"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "202",
+                  "fee": "5",
+                  "net": "197",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "2"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "202",
+                  "fee": "5",
+                  "net": "197",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  },
+                  "rate": {
+                    "period": "PT1M",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "2"
+                  }
+                }
+              ],
+              "approvedAt": 1800000000,
+              "issuer": {
+                "scheme": "ed25519",
+                "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+              }
+            },
+            "proof": {
+              "scheme": "ed25519",
+              "value": "vAE3gY9XZkJDopQPzTmID-5rLLEnqLYmHkWzUWJ9uYDNrGpgO8fURLlV3QUD4HsVXE2ldoh6UiOs_Kg4zlTiCw"
+            }
+          },
+          "observedAt": 1800000120,
+          "parts": [
+            {
+              "part": 0,
+              "asset": "USD/6",
+              "gross": "505",
+              "held": "202",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "0",
+              "refunded": "303",
+              "rate": {
+                "periodsEarned": "2",
+                "grossEarned": "202",
+                "reservedThrough": 1800000120
+              },
+              "started": 1800000010,
+              "stop": {
+                "effectiveAt": 1800000120,
+                "cause": "payer",
+                "partialPeriod": "charged",
+                "sequence": 5,
+                "settled": {
+                  "part": 0,
+                  "asset": "USD/6",
+                  "gross": "202",
+                  "fee": "5",
+                  "net": "197"
+                }
+              },
+              "feePaid": "5",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "releaseAt": "2027-01-15T08:03:00Z",
+              "status": "held"
+            },
+            {
+              "part": 1,
+              "asset": "USD/6",
+              "gross": "505",
+              "held": "101",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "0",
+              "refunded": "404",
+              "rate": {
+                "periodsEarned": "1",
+                "grossEarned": "101",
+                "reservedThrough": 1800000120
+              },
+              "started": 1800000010,
+              "stop": {
+                "effectiveAt": 1800000120,
+                "cause": "payer",
+                "partialPeriod": "returned",
+                "sequence": 6,
+                "settled": {
+                  "part": 1,
+                  "asset": "USD/6",
+                  "gross": "101",
+                  "fee": "2",
+                  "net": "99"
+                }
+              },
+              "feePaid": "2",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "releaseAt": "2027-01-15T08:03:00Z",
+              "status": "held"
+            },
+            {
+              "part": 2,
+              "asset": "USD/6",
+              "gross": "505",
+              "held": "185",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "0",
+              "refunded": "320",
+              "rate": {
+                "periodsEarned": "2",
+                "grossEarned": "185",
+                "reservedThrough": 1800000120
+              },
+              "started": 1800000010,
+              "stop": {
+                "effectiveAt": 1800000120,
+                "cause": "payer",
+                "partialPeriod": "prorated",
+                "sequence": 7,
+                "settled": {
+                  "part": 2,
+                  "asset": "USD/6",
+                  "gross": "185",
+                  "fee": "4",
+                  "net": "181"
+                }
+              },
+              "feePaid": "4",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "releaseAt": "2027-01-15T08:03:00Z",
+              "status": "held"
+            },
+            {
+              "part": 3,
+              "asset": "USD/6",
+              "gross": "202",
+              "held": "202",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "0",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "2",
+                "grossEarned": "202",
+                "reservedThrough": 1800000120
+              },
+              "started": 1800000010,
+              "end": {
+                "at": 1800000120,
+                "partialPeriod": "charged"
+              },
+              "stop": {
+                "effectiveAt": 1800000120,
+                "cause": "terms",
+                "partialPeriod": "charged",
+                "sequence": 2,
+                "settled": {
+                  "part": 3,
+                  "asset": "USD/6",
+                  "gross": "202",
+                  "fee": "5",
+                  "net": "197"
+                }
+              },
+              "feePaid": "5",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "releaseAt": "2027-01-15T08:03:00Z",
+              "status": "held"
+            },
+            {
+              "part": 4,
+              "asset": "USD/6",
+              "gross": "202",
+              "held": "101",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "0",
+              "refunded": "101",
+              "rate": {
+                "periodsEarned": "1",
+                "grossEarned": "101",
+                "reservedThrough": 1800000120
+              },
+              "started": 1800000010,
+              "end": {
+                "at": 1800000120,
+                "partialPeriod": "returned"
+              },
+              "stop": {
+                "effectiveAt": 1800000120,
+                "cause": "terms",
+                "partialPeriod": "returned",
+                "sequence": 3,
+                "settled": {
+                  "part": 4,
+                  "asset": "USD/6",
+                  "gross": "101",
+                  "fee": "2",
+                  "net": "99"
+                }
+              },
+              "feePaid": "2",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "releaseAt": "2027-01-15T08:03:00Z",
+              "status": "held"
+            },
+            {
+              "part": 5,
+              "asset": "USD/6",
+              "gross": "202",
+              "held": "185",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "0",
+              "refunded": "17",
+              "rate": {
+                "periodsEarned": "2",
+                "grossEarned": "185",
+                "reservedThrough": 1800000120
+              },
+              "started": 1800000010,
+              "end": {
+                "at": 1800000120,
+                "partialPeriod": "prorated"
+              },
+              "stop": {
+                "effectiveAt": 1800000120,
+                "cause": "terms",
+                "partialPeriod": "prorated",
+                "sequence": 4,
+                "settled": {
+                  "part": 5,
+                  "asset": "USD/6",
+                  "gross": "185",
+                  "fee": "4",
+                  "net": "181"
+                }
+              },
+              "feePaid": "4",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "releaseAt": "2027-01-15T08:03:00Z",
+              "status": "held"
+            }
+          ],
+          "events": [
+            {
+              "account": "11111111-1111-4111-8111-111111111111",
+              "requestId": "vector-start",
+              "event": {
+                "kind": "start"
+              },
+              "receivedAt": 1800000010,
+              "sequence": 1
+            },
+            {
+              "issuer": "terms",
+              "requestId": "terms:78a6b0d457baf6f76ea367fe38cb04b8d9d91f1f6770b3d81c73ea4e21335cde:3:1800000120",
+              "event": {
+                "kind": "stop",
+                "part": 3
+              },
+              "receivedAt": 1800000120,
+              "sequence": 2
+            },
+            {
+              "issuer": "terms",
+              "requestId": "terms:78a6b0d457baf6f76ea367fe38cb04b8d9d91f1f6770b3d81c73ea4e21335cde:4:1800000120",
+              "event": {
+                "kind": "stop",
+                "part": 4
+              },
+              "receivedAt": 1800000120,
+              "sequence": 3
+            },
+            {
+              "issuer": "terms",
+              "requestId": "terms:78a6b0d457baf6f76ea367fe38cb04b8d9d91f1f6770b3d81c73ea4e21335cde:5:1800000120",
+              "event": {
+                "kind": "stop",
+                "part": 5
+              },
+              "receivedAt": 1800000120,
+              "sequence": 4
+            },
+            {
+              "account": "11111111-1111-4111-8111-111111111111",
+              "requestId": "vector-stop-0",
+              "event": {
+                "kind": "stop",
+                "part": 0
+              },
+              "receivedAt": 1800000120,
+              "sequence": 5
+            },
+            {
+              "account": "11111111-1111-4111-8111-111111111111",
+              "requestId": "vector-stop-1",
+              "event": {
+                "kind": "stop",
+                "part": 1
+              },
+              "receivedAt": 1800000120,
+              "sequence": 6
+            },
+            {
+              "account": "11111111-1111-4111-8111-111111111111",
+              "requestId": "vector-stop-2",
+              "event": {
+                "kind": "stop",
+                "part": 2
+              },
+              "receivedAt": 1800000120,
+              "sequence": 7
+            }
+          ],
+          "latestEventSequence": 7,
+          "attachments": [],
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+          }
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "qDDK7Zcw-MoT021p2mnmG1U_EQNiE6drk-jVNkOVlhvegztfqAQl-ldko-1MWJSzl31YAkNUE7KSdhc3GBsXBQ"
+        }
+      }
+    },
+    {
+      "name": "clamped-setup-and-rate-at-approval",
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "fee": {
+          "bps": 250
+        },
+        "nonce": "clamped-setup-vector-1",
+        "expires": 1900000000,
+        "parts": [
+          {
+            "kind": "once",
+            "asset": "USD/6",
+            "amount": "1000",
+            "hold": {
+              "afterStop": "PT1M"
+            },
+            "maxHoldExtension": "P0D",
+            "end": {
+              "at": 1799999990,
+              "partialPeriod": "charged"
+            },
+            "authorities": {
+              "stop": [],
+              "reverse": [],
+              "extend": []
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "2",
+            "period": "PT1H",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "P0D"
+            },
+            "maxHoldExtension": null,
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "22222222-2222-4222-8222-222222222222",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": [
+                "33333333-3333-4333-8333-333333333333"
+              ]
+            },
+            "end": {
+              "at": 1799999995,
+              "partialPeriod": "charged"
+            }
+          }
+        ]
+      },
+      "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004037663538323532333965613766383732646266303966326564353730633864316132343735663061356237633538356633663731373237393732333666366237",
+      "signed": {
+        "snapshot": {
+          "livemode": false,
+          "transaction": "0a64c20e700a8a27969040ae71794e09ac0718e2447dc905351bd1dd40bff725",
+          "receipt": {
+            "receipt": {
+              "livemode": false,
+              "transaction": "0a64c20e700a8a27969040ae71794e09ac0718e2447dc905351bd1dd40bff725",
+              "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "from": "11111111-1111-4111-8111-111111111111",
+              "to": "22222222-2222-4222-8222-222222222222",
+              "ledger": "approval-1",
+              "parts": [
+                {
+                  "asset": "USD/6",
+                  "gross": "1000",
+                  "fee": "25",
+                  "net": "975",
+                  "hold": {
+                    "afterStop": "PT1M"
+                  }
+                },
+                {
+                  "asset": "USD/6",
+                  "gross": "0",
+                  "fee": "0",
+                  "net": "0",
+                  "hold": {
+                    "afterStop": "P0D"
+                  },
+                  "rate": {
+                    "period": "PT1H",
+                    "reserveAhead": "PT5M",
+                    "periodsReserved": "0"
+                  }
+                }
+              ],
+              "approvedAt": 1800000000,
+              "issuer": {
+                "scheme": "ed25519",
+                "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+              }
+            },
+            "proof": {
+              "scheme": "ed25519",
+              "value": "ZWS2nJq573qli2REqcs_gXODBqH_sZoSQR20Wlbh_zhcFPlOrsp5RMAb5gNQMb6r1N02vn4VyTQnmChUEf7HCQ"
+            }
+          },
+          "observedAt": 1800000000,
+          "parts": [
+            {
+              "part": 0,
+              "asset": "USD/6",
+              "gross": "1000",
+              "held": "1000",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "0",
+              "refunded": "0",
+              "end": {
+                "at": 1800000000,
+                "partialPeriod": "charged"
+              },
+              "stop": {
+                "effectiveAt": 1800000000,
+                "cause": "terms",
+                "partialPeriod": "charged",
+                "sequence": 1,
+                "settled": {
+                  "part": 0,
+                  "asset": "USD/6",
+                  "gross": "1000",
+                  "fee": "25",
+                  "net": "975"
+                }
+              },
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "PT1M"
+              },
+              "extensions": [],
+              "releaseAt": "2027-01-15T08:01:00Z",
+              "status": "held"
+            },
+            {
+              "part": 1,
+              "asset": "USD/6",
+              "gross": "0",
+              "held": "0",
+              "released": "0",
+              "reversed": "0",
+              "reserved": "0",
+              "refunded": "0",
+              "rate": {
+                "periodsEarned": "0",
+                "grossEarned": "0"
+              },
+              "end": {
+                "at": 1800000000,
+                "partialPeriod": "charged"
+              },
+              "stop": {
+                "effectiveAt": 1800000000,
+                "cause": "terms",
+                "partialPeriod": "charged",
+                "sequence": 2,
+                "settled": {
+                  "part": 1,
+                  "asset": "USD/6",
+                  "gross": "0",
+                  "fee": "0",
+                  "net": "0"
+                }
+              },
+              "feePaid": "0",
+              "hold": {
+                "afterStop": "P0D"
+              },
+              "extensions": [],
+              "status": "settled"
+            }
+          ],
+          "events": [
+            {
+              "issuer": "terms",
+              "requestId": "terms:0a64c20e700a8a27969040ae71794e09ac0718e2447dc905351bd1dd40bff725:0:1800000000",
+              "event": {
+                "kind": "stop",
+                "part": 0
+              },
+              "receivedAt": 1800000000,
+              "sequence": 1
+            },
+            {
+              "issuer": "terms",
+              "requestId": "terms:0a64c20e700a8a27969040ae71794e09ac0718e2447dc905351bd1dd40bff725:1:1800000000",
+              "event": {
+                "kind": "stop",
+                "part": 1
+              },
+              "receivedAt": 1800000000,
+              "sequence": 2
+            }
+          ],
+          "latestEventSequence": 2,
+          "attachments": [],
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+          }
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "yvH-wyXw7KLf0leEaQtayyCN1xz-M2a8_udaqOe87pKBlEc_N4eR8vbWQZn_O5cgcEcPxCWp_IPaTzTJ39sOBw"
+        }
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "rate-partial-reversals",
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "fee": {
+          "bps": 250
+        },
+        "nonce": "rate-partial-reversals",
+        "expires": 1900000000,
+        "parts": [
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT5M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "P0D",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": []
+            }
+          }
+        ]
+      },
+      "approvedAt": 1800000000,
+      "receipt": {
+        "receipt": {
+          "livemode": false,
+          "transaction": "84f031497e00ca181c6d1e1ce6ae64e69c2146c9f931d06e2237a6c0fa73e5a6",
+          "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "from": "11111111-1111-4111-8111-111111111111",
+          "to": "22222222-2222-4222-8222-222222222222",
+          "ledger": "approval-1",
+          "parts": [
+            {
+              "asset": "USD/6",
+              "gross": "505",
+              "fee": "12",
+              "net": "493",
+              "hold": {
+                "afterStop": "PT5M"
+              },
+              "rate": {
+                "period": "PT1M",
+                "reserveAhead": "PT5M",
+                "periodsReserved": "5"
+              }
+            }
+          ],
+          "approvedAt": 1800000000,
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+          }
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "Nrg1xc7IC0dlkyiIZpMZfcJRRTBfb-qRsXSVbmfsHsTorVKVvuOcclrOhN5nnv_6-j5n_pWdkbgSXpOCEaSgAg"
+        }
+      },
+      "steps": [
+        {
+          "name": "start",
+          "at": 1800000000,
+          "request": {
+            "account": "11111111-1111-4111-8111-111111111111",
+            "requestId": "reversal-start",
+            "event": {
+              "kind": "start",
+              "part": 0
+            }
+          },
+          "expectedEvent": {
+            "account": "11111111-1111-4111-8111-111111111111",
+            "requestId": "reversal-start",
+            "event": {
+              "kind": "start",
+              "part": 0
+            },
+            "receivedAt": 1800000000,
+            "sequence": 1
+          },
+          "snapshot": {
+            "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004035653463653439303664326333353162353861333437323939636365366564616132393138653931643836306363633462383633373864363237323730636665",
+            "signed": {
+              "snapshot": {
+                "livemode": false,
+                "transaction": "84f031497e00ca181c6d1e1ce6ae64e69c2146c9f931d06e2237a6c0fa73e5a6",
+                "receipt": {
+                  "receipt": {
+                    "livemode": false,
+                    "transaction": "84f031497e00ca181c6d1e1ce6ae64e69c2146c9f931d06e2237a6c0fa73e5a6",
+                    "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "from": "11111111-1111-4111-8111-111111111111",
+                    "to": "22222222-2222-4222-8222-222222222222",
+                    "ledger": "approval-1",
+                    "parts": [
+                      {
+                        "asset": "USD/6",
+                        "gross": "505",
+                        "fee": "12",
+                        "net": "493",
+                        "hold": {
+                          "afterStop": "PT5M"
+                        },
+                        "rate": {
+                          "period": "PT1M",
+                          "reserveAhead": "PT5M",
+                          "periodsReserved": "5"
+                        }
+                      }
+                    ],
+                    "approvedAt": 1800000000,
+                    "issuer": {
+                      "scheme": "ed25519",
+                      "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                    }
+                  },
+                  "proof": {
+                    "scheme": "ed25519",
+                    "value": "Nrg1xc7IC0dlkyiIZpMZfcJRRTBfb-qRsXSVbmfsHsTorVKVvuOcclrOhN5nnv_6-j5n_pWdkbgSXpOCEaSgAg"
+                  }
+                },
+                "observedAt": 1800000000,
+                "parts": [
+                  {
+                    "part": 0,
+                    "asset": "USD/6",
+                    "gross": "505",
+                    "held": "0",
+                    "released": "0",
+                    "reversed": "0",
+                    "reserved": "505",
+                    "refunded": "0",
+                    "rate": {
+                      "periodsEarned": "0",
+                      "grossEarned": "0",
+                      "reservedThrough": 1800000300
+                    },
+                    "started": 1800000000,
+                    "feePaid": "0",
+                    "hold": {
+                      "afterStop": "PT5M"
+                    },
+                    "extensions": [],
+                    "status": "held"
+                  }
+                ],
+                "events": [
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "reversal-start",
+                    "event": {
+                      "kind": "start",
+                      "part": 0
+                    },
+                    "receivedAt": 1800000000,
+                    "sequence": 1
+                  }
+                ],
+                "latestEventSequence": 1,
+                "fundedThrough": 1800000300,
+                "attachments": [],
+                "issuer": {
+                  "scheme": "ed25519",
+                  "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                }
+              },
+              "proof": {
+                "scheme": "ed25519",
+                "value": "oWhIIqIMLvcG4DeMsJOQqjMfbRj3ZZ0uGgVQPc7r0G6cNT-9TbEp7YQQ_0fzSXxICXkVFEAdlpvP_hFAJDOrDA"
+              }
+            }
+          }
+        },
+        {
+          "name": "partial-reverse-running",
+          "at": 1800000070,
+          "request": {
+            "account": "33333333-3333-4333-8333-333333333333",
+            "requestId": "reverse-running",
+            "event": {
+              "kind": "reverse",
+              "part": 0,
+              "amount": "41"
+            }
+          },
+          "expectedEvent": {
+            "account": "33333333-3333-4333-8333-333333333333",
+            "requestId": "reverse-running",
+            "event": {
+              "kind": "reverse",
+              "part": 0,
+              "amount": "41"
+            },
+            "receivedAt": 1800000070,
+            "sequence": 2
+          },
+          "snapshot": {
+            "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004033646432656539636161313038383031653738353261393235363238663535373130306365386566363661323633396534333532346135306239303337323965",
+            "signed": {
+              "snapshot": {
+                "livemode": false,
+                "transaction": "84f031497e00ca181c6d1e1ce6ae64e69c2146c9f931d06e2237a6c0fa73e5a6",
+                "receipt": {
+                  "receipt": {
+                    "livemode": false,
+                    "transaction": "84f031497e00ca181c6d1e1ce6ae64e69c2146c9f931d06e2237a6c0fa73e5a6",
+                    "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "from": "11111111-1111-4111-8111-111111111111",
+                    "to": "22222222-2222-4222-8222-222222222222",
+                    "ledger": "approval-1",
+                    "parts": [
+                      {
+                        "asset": "USD/6",
+                        "gross": "505",
+                        "fee": "12",
+                        "net": "493",
+                        "hold": {
+                          "afterStop": "PT5M"
+                        },
+                        "rate": {
+                          "period": "PT1M",
+                          "reserveAhead": "PT5M",
+                          "periodsReserved": "5"
+                        }
+                      }
+                    ],
+                    "approvedAt": 1800000000,
+                    "issuer": {
+                      "scheme": "ed25519",
+                      "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                    }
+                  },
+                  "proof": {
+                    "scheme": "ed25519",
+                    "value": "Nrg1xc7IC0dlkyiIZpMZfcJRRTBfb-qRsXSVbmfsHsTorVKVvuOcclrOhN5nnv_6-j5n_pWdkbgSXpOCEaSgAg"
+                  }
+                },
+                "observedAt": 1800000070,
+                "parts": [
+                  {
+                    "part": 0,
+                    "asset": "USD/6",
+                    "gross": "505",
+                    "held": "60",
+                    "released": "0",
+                    "reversed": "41",
+                    "reserved": "404",
+                    "refunded": "0",
+                    "rate": {
+                      "periodsEarned": "1",
+                      "grossEarned": "101",
+                      "reservedThrough": 1800000300
+                    },
+                    "started": 1800000000,
+                    "feePaid": "1",
+                    "hold": {
+                      "afterStop": "PT5M"
+                    },
+                    "extensions": [],
+                    "status": "held"
+                  }
+                ],
+                "events": [
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "reversal-start",
+                    "event": {
+                      "kind": "start",
+                      "part": 0
+                    },
+                    "receivedAt": 1800000000,
+                    "sequence": 1
+                  },
+                  {
+                    "account": "33333333-3333-4333-8333-333333333333",
+                    "requestId": "reverse-running",
+                    "event": {
+                      "kind": "reverse",
+                      "part": 0,
+                      "amount": "41"
+                    },
+                    "receivedAt": 1800000070,
+                    "sequence": 2
+                  }
+                ],
+                "latestEventSequence": 2,
+                "fundedThrough": 1800000300,
+                "attachments": [],
+                "issuer": {
+                  "scheme": "ed25519",
+                  "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                }
+              },
+              "proof": {
+                "scheme": "ed25519",
+                "value": "R0-l5hW0heykEkzJnQDBRdKS7fRTr_OQhDdltHDVvUV8peM7A-0Xtem6tnGeYsYxwr14vuWQf7-jVS-9zuQ0AA"
+              }
+            }
+          }
+        },
+        {
+          "name": "stop",
+          "at": 1800000130,
+          "request": {
+            "account": "11111111-1111-4111-8111-111111111111",
+            "requestId": "reversal-stop",
+            "event": {
+              "kind": "stop",
+              "part": 0
+            }
+          },
+          "expectedEvent": {
+            "account": "11111111-1111-4111-8111-111111111111",
+            "requestId": "reversal-stop",
+            "event": {
+              "kind": "stop",
+              "part": 0
+            },
+            "receivedAt": 1800000130,
+            "sequence": 3
+          },
+          "snapshot": {
+            "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004066323832393835313830656630633039636430363737313638353938316562623265386364333931306637343963613634333765636237313135363131346634",
+            "signed": {
+              "snapshot": {
+                "livemode": false,
+                "transaction": "84f031497e00ca181c6d1e1ce6ae64e69c2146c9f931d06e2237a6c0fa73e5a6",
+                "receipt": {
+                  "receipt": {
+                    "livemode": false,
+                    "transaction": "84f031497e00ca181c6d1e1ce6ae64e69c2146c9f931d06e2237a6c0fa73e5a6",
+                    "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "from": "11111111-1111-4111-8111-111111111111",
+                    "to": "22222222-2222-4222-8222-222222222222",
+                    "ledger": "approval-1",
+                    "parts": [
+                      {
+                        "asset": "USD/6",
+                        "gross": "505",
+                        "fee": "12",
+                        "net": "493",
+                        "hold": {
+                          "afterStop": "PT5M"
+                        },
+                        "rate": {
+                          "period": "PT1M",
+                          "reserveAhead": "PT5M",
+                          "periodsReserved": "5"
+                        }
+                      }
+                    ],
+                    "approvedAt": 1800000000,
+                    "issuer": {
+                      "scheme": "ed25519",
+                      "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                    }
+                  },
+                  "proof": {
+                    "scheme": "ed25519",
+                    "value": "Nrg1xc7IC0dlkyiIZpMZfcJRRTBfb-qRsXSVbmfsHsTorVKVvuOcclrOhN5nnv_6-j5n_pWdkbgSXpOCEaSgAg"
+                  }
+                },
+                "observedAt": 1800000130,
+                "parts": [
+                  {
+                    "part": 0,
+                    "asset": "USD/6",
+                    "gross": "505",
+                    "held": "262",
+                    "released": "0",
+                    "reversed": "41",
+                    "reserved": "0",
+                    "refunded": "202",
+                    "rate": {
+                      "periodsEarned": "3",
+                      "grossEarned": "303",
+                      "reservedThrough": 1800000130
+                    },
+                    "started": 1800000000,
+                    "stop": {
+                      "effectiveAt": 1800000130,
+                      "cause": "payer",
+                      "partialPeriod": "charged",
+                      "sequence": 3,
+                      "settled": {
+                        "part": 0,
+                        "asset": "USD/6",
+                        "gross": "262",
+                        "fee": "6",
+                        "net": "256"
+                      }
+                    },
+                    "feePaid": "6",
+                    "hold": {
+                      "afterStop": "PT5M"
+                    },
+                    "extensions": [],
+                    "releaseAt": "2027-01-15T08:07:10Z",
+                    "status": "held"
+                  }
+                ],
+                "events": [
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "reversal-start",
+                    "event": {
+                      "kind": "start",
+                      "part": 0
+                    },
+                    "receivedAt": 1800000000,
+                    "sequence": 1
+                  },
+                  {
+                    "account": "33333333-3333-4333-8333-333333333333",
+                    "requestId": "reverse-running",
+                    "event": {
+                      "kind": "reverse",
+                      "part": 0,
+                      "amount": "41"
+                    },
+                    "receivedAt": 1800000070,
+                    "sequence": 2
+                  },
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "reversal-stop",
+                    "event": {
+                      "kind": "stop",
+                      "part": 0
+                    },
+                    "receivedAt": 1800000130,
+                    "sequence": 3
+                  }
+                ],
+                "latestEventSequence": 3,
+                "attachments": [],
+                "issuer": {
+                  "scheme": "ed25519",
+                  "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                }
+              },
+              "proof": {
+                "scheme": "ed25519",
+                "value": "usF6J-M63aImeZX7B0sxol3rxyGuva8nzZ8f3oXJLJJRRkD3-7bd-6dAr1BOGgWMi3iywjSVNQSQBpbwtc_jBQ"
+              }
+            }
+          }
+        },
+        {
+          "name": "partial-reverse-stopped-within-hold",
+          "at": 1800000140,
+          "request": {
+            "account": "33333333-3333-4333-8333-333333333333",
+            "requestId": "reverse-stopped",
+            "event": {
+              "kind": "reverse",
+              "part": 0,
+              "amount": "81"
+            }
+          },
+          "expectedEvent": {
+            "account": "33333333-3333-4333-8333-333333333333",
+            "requestId": "reverse-stopped",
+            "event": {
+              "kind": "reverse",
+              "part": 0,
+              "amount": "81"
+            },
+            "receivedAt": 1800000140,
+            "sequence": 4
+          },
+          "snapshot": {
+            "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004031396537393836333565666231633466666635333833323439326537316630376234383662653961666639353331383632336664613365313937323537396365",
+            "signed": {
+              "snapshot": {
+                "livemode": false,
+                "transaction": "84f031497e00ca181c6d1e1ce6ae64e69c2146c9f931d06e2237a6c0fa73e5a6",
+                "receipt": {
+                  "receipt": {
+                    "livemode": false,
+                    "transaction": "84f031497e00ca181c6d1e1ce6ae64e69c2146c9f931d06e2237a6c0fa73e5a6",
+                    "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "from": "11111111-1111-4111-8111-111111111111",
+                    "to": "22222222-2222-4222-8222-222222222222",
+                    "ledger": "approval-1",
+                    "parts": [
+                      {
+                        "asset": "USD/6",
+                        "gross": "505",
+                        "fee": "12",
+                        "net": "493",
+                        "hold": {
+                          "afterStop": "PT5M"
+                        },
+                        "rate": {
+                          "period": "PT1M",
+                          "reserveAhead": "PT5M",
+                          "periodsReserved": "5"
+                        }
+                      }
+                    ],
+                    "approvedAt": 1800000000,
+                    "issuer": {
+                      "scheme": "ed25519",
+                      "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                    }
+                  },
+                  "proof": {
+                    "scheme": "ed25519",
+                    "value": "Nrg1xc7IC0dlkyiIZpMZfcJRRTBfb-qRsXSVbmfsHsTorVKVvuOcclrOhN5nnv_6-j5n_pWdkbgSXpOCEaSgAg"
+                  }
+                },
+                "observedAt": 1800000140,
+                "parts": [
+                  {
+                    "part": 0,
+                    "asset": "USD/6",
+                    "gross": "505",
+                    "held": "181",
+                    "released": "0",
+                    "reversed": "122",
+                    "reserved": "0",
+                    "refunded": "202",
+                    "rate": {
+                      "periodsEarned": "3",
+                      "grossEarned": "303",
+                      "reservedThrough": 1800000130
+                    },
+                    "started": 1800000000,
+                    "stop": {
+                      "effectiveAt": 1800000130,
+                      "cause": "payer",
+                      "partialPeriod": "charged",
+                      "sequence": 3,
+                      "settled": {
+                        "part": 0,
+                        "asset": "USD/6",
+                        "gross": "262",
+                        "fee": "6",
+                        "net": "256"
+                      }
+                    },
+                    "feePaid": "4",
+                    "hold": {
+                      "afterStop": "PT5M"
+                    },
+                    "extensions": [],
+                    "releaseAt": "2027-01-15T08:07:10Z",
+                    "status": "held"
+                  }
+                ],
+                "events": [
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "reversal-start",
+                    "event": {
+                      "kind": "start",
+                      "part": 0
+                    },
+                    "receivedAt": 1800000000,
+                    "sequence": 1
+                  },
+                  {
+                    "account": "33333333-3333-4333-8333-333333333333",
+                    "requestId": "reverse-running",
+                    "event": {
+                      "kind": "reverse",
+                      "part": 0,
+                      "amount": "41"
+                    },
+                    "receivedAt": 1800000070,
+                    "sequence": 2
+                  },
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "reversal-stop",
+                    "event": {
+                      "kind": "stop",
+                      "part": 0
+                    },
+                    "receivedAt": 1800000130,
+                    "sequence": 3
+                  },
+                  {
+                    "account": "33333333-3333-4333-8333-333333333333",
+                    "requestId": "reverse-stopped",
+                    "event": {
+                      "kind": "reverse",
+                      "part": 0,
+                      "amount": "81"
+                    },
+                    "receivedAt": 1800000140,
+                    "sequence": 4
+                  }
+                ],
+                "latestEventSequence": 4,
+                "attachments": [],
+                "issuer": {
+                  "scheme": "ed25519",
+                  "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                }
+              },
+              "proof": {
+                "scheme": "ed25519",
+                "value": "QNHxkdqK0tkm34rmsgBCh5y6GQRoz1rjhNmDk0geCIlc5wtuYjHaioRW8XbOtNtcLM5hyz0cU6O02q7crFYfAA"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "payer-stop-lost-response-retry",
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "fee": {
+          "bps": 250
+        },
+        "nonce": "payer-stop-lost-response-retry",
+        "expires": 1900000000,
+        "parts": [
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "101",
+            "period": "PT1M",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "afterStop": "PT5M"
+            },
+            "maxHoldExtension": "P0D",
+            "authorities": {
+              "start": [
+                "11111111-1111-4111-8111-111111111111"
+              ],
+              "stop": [
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "PT30S",
+                  "partialPeriod": "chosen"
+                }
+              ],
+              "reverse": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": []
+            }
+          }
+        ]
+      },
+      "approvedAt": 1800000000,
+      "receipt": {
+        "receipt": {
+          "livemode": false,
+          "transaction": "f0966e582063972d2a4b45ee647ac09137ee1c5889cf0152f8dcac0f72e3dd44",
+          "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "from": "11111111-1111-4111-8111-111111111111",
+          "to": "22222222-2222-4222-8222-222222222222",
+          "ledger": "approval-1",
+          "parts": [
+            {
+              "asset": "USD/6",
+              "gross": "505",
+              "fee": "12",
+              "net": "493",
+              "hold": {
+                "afterStop": "PT5M"
+              },
+              "rate": {
+                "period": "PT1M",
+                "reserveAhead": "PT5M",
+                "periodsReserved": "5"
+              }
+            }
+          ],
+          "approvedAt": 1800000000,
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+          }
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "iJXY5soPiT8tVcl3PltJnnkMsyoo__QEMrr6AxnJbDhUtjrC_sL_2dBITbXNdel2z4LqlcQsLt4a_3vJ1e7UDg"
+        }
+      },
+      "steps": [
+        {
+          "name": "start",
+          "at": 1800000000,
+          "request": {
+            "account": "11111111-1111-4111-8111-111111111111",
+            "requestId": "retry-start",
+            "event": {
+              "kind": "start",
+              "part": 0
+            }
+          },
+          "expectedEvent": {
+            "account": "11111111-1111-4111-8111-111111111111",
+            "requestId": "retry-start",
+            "event": {
+              "kind": "start",
+              "part": 0
+            },
+            "receivedAt": 1800000000,
+            "sequence": 1
+          },
+          "snapshot": {
+            "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004037616130393332393865626563636138663634666239353061373735323164633831393033313731633263656132343964383964313230363538376630393933",
+            "signed": {
+              "snapshot": {
+                "livemode": false,
+                "transaction": "f0966e582063972d2a4b45ee647ac09137ee1c5889cf0152f8dcac0f72e3dd44",
+                "receipt": {
+                  "receipt": {
+                    "livemode": false,
+                    "transaction": "f0966e582063972d2a4b45ee647ac09137ee1c5889cf0152f8dcac0f72e3dd44",
+                    "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "from": "11111111-1111-4111-8111-111111111111",
+                    "to": "22222222-2222-4222-8222-222222222222",
+                    "ledger": "approval-1",
+                    "parts": [
+                      {
+                        "asset": "USD/6",
+                        "gross": "505",
+                        "fee": "12",
+                        "net": "493",
+                        "hold": {
+                          "afterStop": "PT5M"
+                        },
+                        "rate": {
+                          "period": "PT1M",
+                          "reserveAhead": "PT5M",
+                          "periodsReserved": "5"
+                        }
+                      }
+                    ],
+                    "approvedAt": 1800000000,
+                    "issuer": {
+                      "scheme": "ed25519",
+                      "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                    }
+                  },
+                  "proof": {
+                    "scheme": "ed25519",
+                    "value": "iJXY5soPiT8tVcl3PltJnnkMsyoo__QEMrr6AxnJbDhUtjrC_sL_2dBITbXNdel2z4LqlcQsLt4a_3vJ1e7UDg"
+                  }
+                },
+                "observedAt": 1800000000,
+                "parts": [
+                  {
+                    "part": 0,
+                    "asset": "USD/6",
+                    "gross": "505",
+                    "held": "0",
+                    "released": "0",
+                    "reversed": "0",
+                    "reserved": "505",
+                    "refunded": "0",
+                    "rate": {
+                      "periodsEarned": "0",
+                      "grossEarned": "0",
+                      "reservedThrough": 1800000300
+                    },
+                    "started": 1800000000,
+                    "feePaid": "0",
+                    "hold": {
+                      "afterStop": "PT5M"
+                    },
+                    "extensions": [],
+                    "status": "held"
+                  }
+                ],
+                "events": [
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "retry-start",
+                    "event": {
+                      "kind": "start",
+                      "part": 0
+                    },
+                    "receivedAt": 1800000000,
+                    "sequence": 1
+                  }
+                ],
+                "latestEventSequence": 1,
+                "fundedThrough": 1800000300,
+                "attachments": [],
+                "issuer": {
+                  "scheme": "ed25519",
+                  "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                }
+              },
+              "proof": {
+                "scheme": "ed25519",
+                "value": "2PRv6fgpAB3dGAXOfXnTuT-TsWvqShoNC-Zb50LOv6ThloctAuV3gQmqpLwNEdKOJPAQU9ZCVwPK1ep6ikgwBg"
+              }
+            }
+          }
+        },
+        {
+          "name": "stop-response-lost",
+          "at": 1800000070,
+          "request": {
+            "account": "11111111-1111-4111-8111-111111111111",
+            "requestId": "retry-stop",
+            "event": {
+              "kind": "stop",
+              "part": 0,
+              "partialPeriod": "prorated"
+            }
+          },
+          "expectedEvent": {
+            "account": "11111111-1111-4111-8111-111111111111",
+            "requestId": "retry-stop",
+            "event": {
+              "kind": "stop",
+              "part": 0,
+              "partialPeriod": "prorated"
+            },
+            "receivedAt": 1800000070,
+            "sequence": 2
+          },
+          "snapshot": {
+            "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004032616532343230613866633063333939373939626534363730653233303166313637316463633336323134363338643238386636336630353433613733303362",
+            "signed": {
+              "snapshot": {
+                "livemode": false,
+                "transaction": "f0966e582063972d2a4b45ee647ac09137ee1c5889cf0152f8dcac0f72e3dd44",
+                "receipt": {
+                  "receipt": {
+                    "livemode": false,
+                    "transaction": "f0966e582063972d2a4b45ee647ac09137ee1c5889cf0152f8dcac0f72e3dd44",
+                    "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "from": "11111111-1111-4111-8111-111111111111",
+                    "to": "22222222-2222-4222-8222-222222222222",
+                    "ledger": "approval-1",
+                    "parts": [
+                      {
+                        "asset": "USD/6",
+                        "gross": "505",
+                        "fee": "12",
+                        "net": "493",
+                        "hold": {
+                          "afterStop": "PT5M"
+                        },
+                        "rate": {
+                          "period": "PT1M",
+                          "reserveAhead": "PT5M",
+                          "periodsReserved": "5"
+                        }
+                      }
+                    ],
+                    "approvedAt": 1800000000,
+                    "issuer": {
+                      "scheme": "ed25519",
+                      "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                    }
+                  },
+                  "proof": {
+                    "scheme": "ed25519",
+                    "value": "iJXY5soPiT8tVcl3PltJnnkMsyoo__QEMrr6AxnJbDhUtjrC_sL_2dBITbXNdel2z4LqlcQsLt4a_3vJ1e7UDg"
+                  }
+                },
+                "observedAt": 1800000070,
+                "parts": [
+                  {
+                    "part": 0,
+                    "asset": "USD/6",
+                    "gross": "505",
+                    "held": "101",
+                    "released": "0",
+                    "reversed": "0",
+                    "reserved": "101",
+                    "refunded": "303",
+                    "rate": {
+                      "periodsEarned": "1",
+                      "grossEarned": "101",
+                      "reservedThrough": 1800000100
+                    },
+                    "started": 1800000000,
+                    "pendingStop": {
+                      "at": 1800000100,
+                      "cause": "payer",
+                      "partialPeriod": "prorated",
+                      "sequence": 2
+                    },
+                    "feePaid": "2",
+                    "hold": {
+                      "afterStop": "PT5M"
+                    },
+                    "extensions": [],
+                    "status": "held"
+                  }
+                ],
+                "events": [
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "retry-start",
+                    "event": {
+                      "kind": "start",
+                      "part": 0
+                    },
+                    "receivedAt": 1800000000,
+                    "sequence": 1
+                  },
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "retry-stop",
+                    "event": {
+                      "kind": "stop",
+                      "part": 0,
+                      "partialPeriod": "prorated"
+                    },
+                    "receivedAt": 1800000070,
+                    "sequence": 2
+                  }
+                ],
+                "latestEventSequence": 2,
+                "fundedThrough": 1800000100,
+                "attachments": [],
+                "issuer": {
+                  "scheme": "ed25519",
+                  "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                }
+              },
+              "proof": {
+                "scheme": "ed25519",
+                "value": "MJagMrSZjkB8ejvTWufYs6OLoDGmkkPd_bqm-LdzSBsNAoFfx4S_F-oGRqsTY3ybZI8GxNTe32vzk6nE1qWFDg"
+              }
+            }
+          }
+        },
+        {
+          "name": "retry-before-deadline",
+          "at": 1800000080,
+          "request": {
+            "account": "11111111-1111-4111-8111-111111111111",
+            "requestId": "retry-stop",
+            "event": {
+              "kind": "stop",
+              "part": 0,
+              "partialPeriod": "prorated"
+            }
+          },
+          "expectedEvent": {
+            "account": "11111111-1111-4111-8111-111111111111",
+            "requestId": "retry-stop",
+            "event": {
+              "kind": "stop",
+              "part": 0,
+              "partialPeriod": "prorated"
+            },
+            "receivedAt": 1800000070,
+            "sequence": 2
+          },
+          "snapshot": {
+            "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004039653436396134653866333163626132656435366234646465656438326237303336313930626666666666666565336531366263613865373861623236386338",
+            "signed": {
+              "snapshot": {
+                "livemode": false,
+                "transaction": "f0966e582063972d2a4b45ee647ac09137ee1c5889cf0152f8dcac0f72e3dd44",
+                "receipt": {
+                  "receipt": {
+                    "livemode": false,
+                    "transaction": "f0966e582063972d2a4b45ee647ac09137ee1c5889cf0152f8dcac0f72e3dd44",
+                    "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "from": "11111111-1111-4111-8111-111111111111",
+                    "to": "22222222-2222-4222-8222-222222222222",
+                    "ledger": "approval-1",
+                    "parts": [
+                      {
+                        "asset": "USD/6",
+                        "gross": "505",
+                        "fee": "12",
+                        "net": "493",
+                        "hold": {
+                          "afterStop": "PT5M"
+                        },
+                        "rate": {
+                          "period": "PT1M",
+                          "reserveAhead": "PT5M",
+                          "periodsReserved": "5"
+                        }
+                      }
+                    ],
+                    "approvedAt": 1800000000,
+                    "issuer": {
+                      "scheme": "ed25519",
+                      "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                    }
+                  },
+                  "proof": {
+                    "scheme": "ed25519",
+                    "value": "iJXY5soPiT8tVcl3PltJnnkMsyoo__QEMrr6AxnJbDhUtjrC_sL_2dBITbXNdel2z4LqlcQsLt4a_3vJ1e7UDg"
+                  }
+                },
+                "observedAt": 1800000080,
+                "parts": [
+                  {
+                    "part": 0,
+                    "asset": "USD/6",
+                    "gross": "505",
+                    "held": "101",
+                    "released": "0",
+                    "reversed": "0",
+                    "reserved": "101",
+                    "refunded": "303",
+                    "rate": {
+                      "periodsEarned": "1",
+                      "grossEarned": "101",
+                      "reservedThrough": 1800000100
+                    },
+                    "started": 1800000000,
+                    "pendingStop": {
+                      "at": 1800000100,
+                      "cause": "payer",
+                      "partialPeriod": "prorated",
+                      "sequence": 2
+                    },
+                    "feePaid": "2",
+                    "hold": {
+                      "afterStop": "PT5M"
+                    },
+                    "extensions": [],
+                    "status": "held"
+                  }
+                ],
+                "events": [
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "retry-start",
+                    "event": {
+                      "kind": "start",
+                      "part": 0
+                    },
+                    "receivedAt": 1800000000,
+                    "sequence": 1
+                  },
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "retry-stop",
+                    "event": {
+                      "kind": "stop",
+                      "part": 0,
+                      "partialPeriod": "prorated"
+                    },
+                    "receivedAt": 1800000070,
+                    "sequence": 2
+                  }
+                ],
+                "latestEventSequence": 2,
+                "fundedThrough": 1800000100,
+                "attachments": [],
+                "issuer": {
+                  "scheme": "ed25519",
+                  "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                }
+              },
+              "proof": {
+                "scheme": "ed25519",
+                "value": "R2BHCU4dIGlg-xRvSLkGWOpAw0-A0zTcUCfOiiyXHvqPpAkRFMlZJSB_Da5XktBiu4Umy7ieYwdsYi6SNjuyDQ"
+              }
+            }
+          }
+        },
+        {
+          "name": "notice-deadline",
+          "at": 1800000100,
+          "snapshot": {
+            "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004034653534313364646163613764316133663332303238633732383163343038326635333462613938316432373439653439643962663136656433633361333832",
+            "signed": {
+              "snapshot": {
+                "livemode": false,
+                "transaction": "f0966e582063972d2a4b45ee647ac09137ee1c5889cf0152f8dcac0f72e3dd44",
+                "receipt": {
+                  "receipt": {
+                    "livemode": false,
+                    "transaction": "f0966e582063972d2a4b45ee647ac09137ee1c5889cf0152f8dcac0f72e3dd44",
+                    "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "from": "11111111-1111-4111-8111-111111111111",
+                    "to": "22222222-2222-4222-8222-222222222222",
+                    "ledger": "approval-1",
+                    "parts": [
+                      {
+                        "asset": "USD/6",
+                        "gross": "505",
+                        "fee": "12",
+                        "net": "493",
+                        "hold": {
+                          "afterStop": "PT5M"
+                        },
+                        "rate": {
+                          "period": "PT1M",
+                          "reserveAhead": "PT5M",
+                          "periodsReserved": "5"
+                        }
+                      }
+                    ],
+                    "approvedAt": 1800000000,
+                    "issuer": {
+                      "scheme": "ed25519",
+                      "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                    }
+                  },
+                  "proof": {
+                    "scheme": "ed25519",
+                    "value": "iJXY5soPiT8tVcl3PltJnnkMsyoo__QEMrr6AxnJbDhUtjrC_sL_2dBITbXNdel2z4LqlcQsLt4a_3vJ1e7UDg"
+                  }
+                },
+                "observedAt": 1800000100,
+                "parts": [
+                  {
+                    "part": 0,
+                    "asset": "USD/6",
+                    "gross": "505",
+                    "held": "168",
+                    "released": "0",
+                    "reversed": "0",
+                    "reserved": "0",
+                    "refunded": "337",
+                    "rate": {
+                      "periodsEarned": "2",
+                      "grossEarned": "168",
+                      "reservedThrough": 1800000100
+                    },
+                    "started": 1800000000,
+                    "stop": {
+                      "effectiveAt": 1800000100,
+                      "cause": "payer",
+                      "partialPeriod": "prorated",
+                      "sequence": 2,
+                      "settled": {
+                        "part": 0,
+                        "asset": "USD/6",
+                        "gross": "168",
+                        "fee": "4",
+                        "net": "164"
+                      }
+                    },
+                    "feePaid": "4",
+                    "hold": {
+                      "afterStop": "PT5M"
+                    },
+                    "extensions": [],
+                    "releaseAt": "2027-01-15T08:06:40Z",
+                    "status": "held"
+                  }
+                ],
+                "events": [
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "retry-start",
+                    "event": {
+                      "kind": "start",
+                      "part": 0
+                    },
+                    "receivedAt": 1800000000,
+                    "sequence": 1
+                  },
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "retry-stop",
+                    "event": {
+                      "kind": "stop",
+                      "part": 0,
+                      "partialPeriod": "prorated"
+                    },
+                    "receivedAt": 1800000070,
+                    "sequence": 2
+                  }
+                ],
+                "latestEventSequence": 2,
+                "attachments": [],
+                "issuer": {
+                  "scheme": "ed25519",
+                  "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                }
+              },
+              "proof": {
+                "scheme": "ed25519",
+                "value": "e-P8uwWny7s5Z9PUmwTt8lYKHQP6kyz8t03jqwpOBiqffFounxWDDdN1PIi1IK8onqSAwfZ4Pzi8gAjwLirkAw"
+              }
+            }
+          }
+        },
+        {
+          "name": "retry-after-deadline",
+          "at": 1800000110,
+          "request": {
+            "account": "11111111-1111-4111-8111-111111111111",
+            "requestId": "retry-stop",
+            "event": {
+              "kind": "stop",
+              "part": 0,
+              "partialPeriod": "prorated"
+            }
+          },
+          "expectedEvent": {
+            "account": "11111111-1111-4111-8111-111111111111",
+            "requestId": "retry-stop",
+            "event": {
+              "kind": "stop",
+              "part": 0,
+              "partialPeriod": "prorated"
+            },
+            "receivedAt": 1800000070,
+            "sequence": 2
+          },
+          "snapshot": {
+            "message": "0000001b61726b6861692e7061796d656e74732e736e617073686f742e76310000004031356135323237323339633165616237613861633432663530386532366561643239353063326261643539373230623033383636643761396339316162633163",
+            "signed": {
+              "snapshot": {
+                "livemode": false,
+                "transaction": "f0966e582063972d2a4b45ee647ac09137ee1c5889cf0152f8dcac0f72e3dd44",
+                "receipt": {
+                  "receipt": {
+                    "livemode": false,
+                    "transaction": "f0966e582063972d2a4b45ee647ac09137ee1c5889cf0152f8dcac0f72e3dd44",
+                    "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "from": "11111111-1111-4111-8111-111111111111",
+                    "to": "22222222-2222-4222-8222-222222222222",
+                    "ledger": "approval-1",
+                    "parts": [
+                      {
+                        "asset": "USD/6",
+                        "gross": "505",
+                        "fee": "12",
+                        "net": "493",
+                        "hold": {
+                          "afterStop": "PT5M"
+                        },
+                        "rate": {
+                          "period": "PT1M",
+                          "reserveAhead": "PT5M",
+                          "periodsReserved": "5"
+                        }
+                      }
+                    ],
+                    "approvedAt": 1800000000,
+                    "issuer": {
+                      "scheme": "ed25519",
+                      "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                    }
+                  },
+                  "proof": {
+                    "scheme": "ed25519",
+                    "value": "iJXY5soPiT8tVcl3PltJnnkMsyoo__QEMrr6AxnJbDhUtjrC_sL_2dBITbXNdel2z4LqlcQsLt4a_3vJ1e7UDg"
+                  }
+                },
+                "observedAt": 1800000110,
+                "parts": [
+                  {
+                    "part": 0,
+                    "asset": "USD/6",
+                    "gross": "505",
+                    "held": "168",
+                    "released": "0",
+                    "reversed": "0",
+                    "reserved": "0",
+                    "refunded": "337",
+                    "rate": {
+                      "periodsEarned": "2",
+                      "grossEarned": "168",
+                      "reservedThrough": 1800000100
+                    },
+                    "started": 1800000000,
+                    "stop": {
+                      "effectiveAt": 1800000100,
+                      "cause": "payer",
+                      "partialPeriod": "prorated",
+                      "sequence": 2,
+                      "settled": {
+                        "part": 0,
+                        "asset": "USD/6",
+                        "gross": "168",
+                        "fee": "4",
+                        "net": "164"
+                      }
+                    },
+                    "feePaid": "4",
+                    "hold": {
+                      "afterStop": "PT5M"
+                    },
+                    "extensions": [],
+                    "releaseAt": "2027-01-15T08:06:40Z",
+                    "status": "held"
+                  }
+                ],
+                "events": [
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "retry-start",
+                    "event": {
+                      "kind": "start",
+                      "part": 0
+                    },
+                    "receivedAt": 1800000000,
+                    "sequence": 1
+                  },
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "requestId": "retry-stop",
+                    "event": {
+                      "kind": "stop",
+                      "part": 0,
+                      "partialPeriod": "prorated"
+                    },
+                    "receivedAt": 1800000070,
+                    "sequence": 2
+                  }
+                ],
+                "latestEventSequence": 2,
+                "attachments": [],
+                "issuer": {
+                  "scheme": "ed25519",
+                  "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+                }
+              },
+              "proof": {
+                "scheme": "ed25519",
+                "value": "eAZ2DEBZhkzN070kUp2cW3l_dhFPO7SKuiB7DSRO8Qt1XOsv1vpL6pRtAVcRL6YPKbzGcVLRnWQj5wfx3WrvAQ"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "receipt": {
+    "message": "0000001a61726b6861692e7061796d656e74732e726563656970742e76310000004062383663323535303662613337643262666363313836343263613963613639626139663061303632616335333437653962323437386165653862323633343939",
+    "signed": {
+      "receipt": {
+        "livemode": false,
+        "transaction": "732b7dbef46677cbaa9ad0504c5cfe39e3d6f02bc91f23375c68015ebb70866e",
+        "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "ledger": "approval-1",
+        "parts": [
+          {
+            "asset": "USD/6",
+            "gross": "1000",
+            "fee": "25",
+            "net": "975",
+            "hold": {
+              "for": "P0D"
+            }
+          },
+          {
+            "asset": "USD/6",
+            "gross": "9007199254740993",
+            "fee": "225179981368524",
+            "net": "8782019273372469",
+            "hold": {
+              "afterStop": "P0D"
+            }
+          },
+          {
+            "asset": "EUR/2",
+            "gross": "333",
+            "fee": "8",
+            "net": "325",
+            "hold": {
+              "for": "P1M"
+            }
+          }
+        ],
+        "approvedAt": 1800000000,
+        "issuer": {
+          "scheme": "ed25519",
+          "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+        }
+      },
+      "proof": {
+        "scheme": "ed25519",
+        "value": "iyQNW3CjfHhuz_s-tAXIwq-l0NLq86a0QgavEVnMy2D4Ok0bap_9yVapRz4mi0u5kb8X61OYOBpusjohWC3rCQ"
+      }
+    }
+  },
+  "attachments": [
+    {
+      "request": {
+        "kind": "deal",
+        "content": {
+          "terms": "Fixture agreement — opaque to the service",
+          "price": {
+            "amount": "1000",
+            "asset": "USD/6"
+          }
+        },
+        "label": "Agreement"
+      },
+      "stored": {
+        "kind": "deal",
+        "content": {
+          "terms": "Fixture agreement — opaque to the service",
+          "price": {
+            "amount": "1000",
+            "asset": "USD/6"
+          }
+        },
+        "label": "Agreement",
+        "sha256": "3aa80cbf7d90505b1ab0b48b35d0c90f9f1bc35baa59999b69a2a7c8e6f57227",
+        "name": "deal.json",
+        "mediaType": "application/json",
+        "size": 97,
+        "uploader": "11111111-1111-4111-8111-111111111111"
+      }
+    }
+  ],
+  "approvals": [
+    {
+      "id": "dacdb4fc69c180a29ca7304c7324a62e2627908b9f3269c5506c3d4c23c30081",
+      "request": {
+        "mandate": {
+          "from": "11111111-1111-4111-8111-111111111111",
+          "to": "22222222-2222-4222-8222-222222222222",
+          "deal": "3aa80cbf7d90505b1ab0b48b35d0c90f9f1bc35baa59999b69a2a7c8e6f57227",
+          "fee": {
+            "bps": 250
+          },
+          "nonce": "vector-1",
+          "expires": 1900000000,
+          "parts": [
+            {
+              "kind": "once",
+              "asset": "USD/6",
+              "amount": "1000",
+              "hold": {
+                "for": "P0D"
+              },
+              "maxHoldExtension": "P0D",
+              "authorities": {
+                "stop": [
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "notice": "P0D",
+                    "partialPeriod": "charged"
+                  },
+                  {
+                    "account": "22222222-2222-4222-8222-222222222222",
+                    "notice": "P0D",
+                    "partialPeriod": "charged"
+                  },
+                  {
+                    "account": "33333333-3333-4333-8333-333333333333",
+                    "notice": "P0D",
+                    "partialPeriod": "charged"
+                  }
+                ],
+                "reverse": [
+                  "22222222-2222-4222-8222-222222222222",
+                  "33333333-3333-4333-8333-333333333333"
+                ],
+                "extend": []
+              }
+            },
+            {
+              "kind": "once",
+              "asset": "USD/6",
+              "amount": "9007199254740993",
+              "hold": {
+                "afterStop": "P0D"
+              },
+              "maxHoldExtension": "P0D",
+              "authorities": {
+                "stop": [
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "notice": "P0D",
+                    "partialPeriod": "charged"
+                  },
+                  {
+                    "account": "22222222-2222-4222-8222-222222222222",
+                    "notice": "P0D",
+                    "partialPeriod": "charged"
+                  },
+                  {
+                    "account": "33333333-3333-4333-8333-333333333333",
+                    "notice": "P0D",
+                    "partialPeriod": "charged"
+                  }
+                ],
+                "reverse": [
+                  "22222222-2222-4222-8222-222222222222",
+                  "33333333-3333-4333-8333-333333333333"
+                ],
+                "extend": []
+              }
+            },
+            {
+              "kind": "once",
+              "asset": "EUR/2",
+              "amount": "333",
+              "hold": {
+                "for": "P1M"
+              },
+              "maxHoldExtension": "P0D",
+              "authorities": {
+                "stop": [
+                  {
+                    "account": "11111111-1111-4111-8111-111111111111",
+                    "notice": "P0D",
+                    "partialPeriod": "charged"
+                  },
+                  {
+                    "account": "22222222-2222-4222-8222-222222222222",
+                    "notice": "P0D",
+                    "partialPeriod": "charged"
+                  },
+                  {
+                    "account": "33333333-3333-4333-8333-333333333333",
+                    "notice": "P0D",
+                    "partialPeriod": "charged"
+                  }
+                ],
+                "reverse": [
+                  "22222222-2222-4222-8222-222222222222",
+                  "33333333-3333-4333-8333-333333333333"
+                ],
+                "extend": []
+              }
+            }
+          ]
+        },
+        "attachments": [
+          {
+            "kind": "deal",
+            "content": {
+              "terms": "Fixture agreement — opaque to the service",
+              "price": {
+                "amount": "1000",
+                "asset": "USD/6"
+              }
+            },
+            "label": "Agreement"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,9 +1,13 @@
 {{/*
-One Deployment per agent in .Values.agents. Each pod mounts two TOML
-files at /etc/arkhai/ — storefront.toml (ConfigMap, non-sensitive) and
-storefront.secrets.toml (Secret, sensitive) — and points XDG_CONFIG_HOME
-at /etc so dynaconf picks them up via its layered discovery and merge.
-No env-var-based config.
+One Deployment per agent in .Values.agents, named for its key. Each pod mounts
+two files at /etc/arkhai/ — storefront.json (ConfigMap, non-sensitive) and
+storefront.secrets.toml (Secret, sensitive) — and points XDG_CONFIG_HOME at /etc
+so dynaconf picks them up via its layered discovery and merge. An agent naming
+an Alkahest address-book ConfigMap mounts it read-only too, and one naming a CA
+bundle mounts it read-only, its rendered configuration's
+[Settlement.arkhai_payments].ca_bundle_path naming the file. No env-var-based
+config: the environment carries only the configuration directory and the signing
+credential; the payments key is a setting in the Secret overlay.
 
 checksum/config + checksum/secrets annotations force a rollout when
 either source object changes, independently — flipping a log level
@@ -15,11 +19,15 @@ infrastructure is included in the pod spec. Set to false for environments
 where ZeroTier is unnecessary (e.g. GKE Autopilot, API-gateway-fronted
 deployments) or where the required Linux capabilities (NET_ADMIN, SYS_MODULE)
 and hostPath volumes are not permitted. The application runtime is unaffected
-when zerotier_network is unset in storefront.toml — entrypoint.sh is already
+when zerotier_network is unset in the storefront config — entrypoint.sh is already
 fail-soft on daemon startup and the Python runtime skips all ZeroTier paths
 when zerotier_network is absent.
 */}}
-{{- range $agent := .Values.agents }}
+{{- $agents := dict }}
+{{- include "storefront.agents" (dict "root" . "into" $agents) }}
+{{- range $name, $entry := $agents }}
+{{- /* An agent states no runtime overlay by omitting `secret`. */}}
+{{- $agent := mergeOverwrite (dict "secret" (dict)) $entry (dict "name" $name) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -52,47 +60,20 @@ spec:
         checksum/config:  {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
         checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") $ | sha256sum }}
     spec:
+      # Kubernetes would otherwise inject variables for every Service in the
+      # namespace, and those for a Service named storefront-... would land in
+      # the storefront's STOREFRONT_ override layer as settings.
+      enableServiceLinks: false
       # fsGroup matches the container's appuser group so the volume's
       # mount root is owned by gid 1000 — without it, SQLite's first
       # write to /var/lib/arkhai fails with permission denied. Applies
       # whether the volume is a PVC or emptyDir.
       securityContext:
         fsGroup: 1000
-      initContainers:
-        {{- $config := $agent.config | default dict }}
-        {{- $settlement := $config.settlement | default dict }}
-        {{- $alkahest := $settlement.alkahest | default dict }}
-        {{- $chains := $config.chains | default dict }}
-        {{- if and ($alkahest.enabled | default false) (gt (len $chains) 0) }}
-        {{- $chainName := first (keys $chains | sortAlpha) }}
-        {{- $chain := index $chains $chainName }}
-        - name: wait-for-rpc
-          image: busybox:1.36
-          {{- /* Probe an injected chain only when Alkahest is enabled. */}}
-          {{- $rpcProbeUrl := default (include "rpc.url" $) $chain.rpc_url }}
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for RPC..."
-              until wget -qO- --post-data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-                --header 'Content-Type: application/json' \
-                {{ $rpcProbeUrl | quote }} > /dev/null 2>&1; do
-                echo "RPC not ready, retrying in 5s..."; sleep 5
-              done
-              echo "RPC ready."
-        {{- end }}
-        - name: wait-for-registry
-          image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for registry at {{ include "storefront.registryUrl" $ }}/health..."
-              until wget -qO- {{ include "storefront.registryUrl" $ }}/health > /dev/null 2>&1; do
-                echo "Registry not ready, retrying in 5s..."; sleep 5
-              done
-              echo "Registry ready."
+      # No init container waits on the registry, a chain, or a site: the
+      # storefront starts while they are unreachable, reports them degraded in
+      # its system status, and its loops retry until they answer. A wait here
+      # would hold the pod back on a dependency the process already tolerates.
       containers:
         - name: market-storefront-{{ $agent.name }}
           image: {{ include "storefront.image" $ }}
@@ -115,48 +96,42 @@ spec:
                 - NET_ADMIN
                 - SYS_MODULE
           {{- end }}
+          # Public identity stays in storefront.json. The credential and the
+          # payments key are injected from Secrets and never rendered into a
+          # ConfigMap, command argument, or chart-generated Secret. The
+          # environment and the configuration mounts are the payments check test
+          # pod's too (templates/tests/payments-check-test.yaml).
           env:
-            # Public identity stays in storefront.toml. The credential is
-            # injected from a dedicated Secret and is never rendered into a
-            # ConfigMap, command argument, or chart-generated Secret.
-            - name: XDG_CONFIG_HOME
-              value: /etc
-            - name: ARKHAI_IDENTITY_CREDENTIAL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "storefront agent identity.credentialSecret.name is required" $agent.identity.credentialSecret.name | quote }}
-                  key: {{ required "storefront agent identity.credentialSecret.key is required" $agent.identity.credentialSecret.key | quote }}
+            {{- include "storefront.agentEnv" (dict "root" $ "agent" $agent) | nindent 12 }}
           volumeMounts:
             {{- if $.Values.zerotierEnabled }}
             - name: tun-device
               mountPath: /dev/net/tun
             {{- end }}
-            - name: arkhai-config
-              mountPath: /etc/arkhai/storefront.toml
-              subPath: storefront.toml
-              readOnly: true
-            {{- if $agent.secret.secretName }}
-            - name: arkhai-secrets
-              mountPath: /etc/arkhai/storefront.secrets.toml
-              subPath: {{ $agent.secret.configKey | default "storefront.secrets.toml" }}
-              readOnly: true
-            {{- end }}
+            {{- include "storefront.agentConfigMounts" (dict "root" $ "agent" $agent) | nindent 12 }}
             - name: arkhai-data
               mountPath: {{ $.Values.persistence.mountPath | quote }}
           # /health performs only a fast SQLite ping — safe as a Kubernetes
-          # liveness/readiness probe with no outbound calls or blocking I/O.
+          # probe with no outbound calls or blocking I/O. The startup probe
+          # holds the liveness and readiness probes off until the process
+          # first answers, so a slow start is not judged by them and they need
+          # no initial delay.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
           livenessProbe:
             httpGet:
               path: /health
-              port: {{ $agent.port }}
-            initialDelaySeconds: 15
+              port: http
             periodSeconds: 15
             timeoutSeconds: 3
           readinessProbe:
             httpGet:
               path: /health
-              port: {{ $agent.port }}
-            initialDelaySeconds: 5
+              port: http
             periodSeconds: 10
             timeoutSeconds: 3
           resources:
@@ -167,20 +142,7 @@ spec:
           hostPath:
             path: /dev/net/tun
         {{- end }}
-        - name: arkhai-config
-          configMap:
-            name: {{ include "storefront.agentConfigMapName" (dict "root" $ "agent" $agent) }}
-            items:
-              - key: storefront.toml
-                path: storefront.toml
-        {{- if $agent.secret.secretName }}
-        - name: arkhai-secrets
-          secret:
-            secretName: {{ $agent.secret.secretName | quote }}
-            items:
-              - key: {{ $agent.secret.configKey | default "storefront.secrets.toml" }}
-                path: storefront.secrets.toml
-        {{- end }}
+        {{- include "storefront.agentConfigVolumes" (dict "root" $ "agent" $agent) | nindent 8 }}
         # SQLite agent.db storage. Three modes:
         #   existingClaim set → mount a Terraform-managed PVC by name
         #   persistence.enabled → chart creates and owns the PVC

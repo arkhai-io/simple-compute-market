@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from market_resource_pools_contracts.backing import BACKED
 from market_settlement_runtime import SettlementPublicationClause
 from pydantic import ValidationError
 
@@ -26,9 +27,8 @@ _COLLABORATORS = vm_listing_collaborators(
 _CAPACITY_SOURCE = {
     "site_id": "site-test",
     "resource_id": "resource-1",
-    "gpu_count": 1,
+    "listing_shape": {"gpu": {"count": 1, "model": "H200"}},
 }
-
 
 
 def _repository(**values):
@@ -42,7 +42,7 @@ def _repository(**values):
 def test_vm_listing_request_rejects_removed_scalar_hosted_config() -> None:
     with pytest.raises(ValidationError, match="settlement_config"):
         VmCreateListingRequest(
-            offer={"virtualization_type": "vm"},
+            listing_resource={"offering_mode": "vm"},
             settlement_config={
                 "account_ref": "acct-seller",
                 "currency": "usd",
@@ -54,19 +54,19 @@ def test_vm_listing_request_rejects_removed_scalar_hosted_config() -> None:
 
 def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
     request = VmCreateListingRequest(
-        offer={
+        listing_resource={
             "resource_type": "compute",
             "resource_id": "resource-1",
             "gpu_model": "H200",
             "gpu_count": 1,
             "region": "California, US",
             "sla": 99.0,
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         capacity_source=_CAPACITY_SOURCE,
         settlements=[
             SettlementPublicationClause(
-                mechanism="fiat.stripe.v1",
+                mechanism="example.payment.v1",
                 asset="usd",
                 rate="2",
                 per="hour",
@@ -83,13 +83,14 @@ def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
         binding=_COLLABORATORS.binding,
         domain=_COLLABORATORS.domain,
         capacity_runtime=_COLLABORATORS.capacity_runtime,
+        site_projections=_COLLABORATORS.site_projections,
         sqlite_client=_repository(),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
         settlement_composition_provider=lambda: object(),
     )
 
-    _offer, accepted, options, _demands = service._parse_offer_and_escrows(request)
+    _offer, accepted, options = service._parse_listing_resource_and_escrows(request)
 
     assert accepted == []
     assert options == []
@@ -100,7 +101,7 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
     monkeypatch,
 ) -> None:
     clause = SettlementPublicationClause(
-        mechanism="fiat.stripe.v1",
+        mechanism="example.payment.v1",
         asset="usd",
         rate="2",
         per="hour",
@@ -111,11 +112,12 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         },
     )
     option = {
-        "option_id": "stripe-option",
-        "mechanism": "fiat.stripe.v1",
-        "asset": "usd",
-        "rates": [{"field": "amount", "per": "hour", "value": "200"}],
-        "params": {},
+        "option_id": "example-option",
+        "price": {
+            "asset": "usd",
+            "rates": [{"field": "amount", "per": "hour", "value": "200"}],
+        },
+        "settlement": {"schema": "example.payment.v1", **({} or {})},
     }
     db = _repository(
         upsert_listing_with_binding=AsyncMock(),
@@ -128,29 +130,28 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         binding=_COLLABORATORS.binding,
         domain=_COLLABORATORS.domain,
         capacity_runtime=_COLLABORATORS.capacity_runtime,
+        site_projections=_COLLABORATORS.site_projections,
         sqlite_client=db,
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
         settlement_composition_provider=lambda: composition,
+        source_backing_resolver=lambda **_source: BACKED,
+        registry_publisher=AsyncMock(return_value={"status": "published"}),
     )
     monkeypatch.setattr(
         service,
         "_compile_publication_clauses",
         lambda _request, *, composition: (clause,),
     )
-    monkeypatch.setattr(
-        "market_storefront.services.publication_service.publish_order_to_registry",
-        AsyncMock(return_value={"status": "published"}),
-    )
     request = VmCreateListingRequest(
-        offer={
+        listing_resource={
             "resource_type": "compute",
             "resource_id": "resource-1",
             "gpu_model": "H200",
             "gpu_count": 1,
             "region": "California, US",
             "sla": 99.0,
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         capacity_source=_CAPACITY_SOURCE,
         settlements=[clause],
@@ -163,12 +164,13 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         {
             "accepted_escrows": [],
             "claimant_principal": TEST_MARKETPLACE_SIGNER.identity,
+            "origin": _CAPACITY_SOURCE["site_id"],
         },
         clauses=[clause],
     )
-    assert db.upsert_listing_with_binding.await_args.kwargs[
-        "publication_clauses"
-    ] == [clause.model_dump(mode="json", exclude_defaults=True)]
+    assert db.upsert_listing_with_binding.await_args.kwargs["publication_clauses"] == [
+        clause.model_dump(mode="json", exclude_defaults=True)
+    ]
 
 
 @pytest.mark.asyncio
@@ -178,39 +180,45 @@ async def test_direct_settlement_options_are_rejected() -> None:
         binding=_COLLABORATORS.binding,
         domain=_COLLABORATORS.domain,
         capacity_runtime=_COLLABORATORS.capacity_runtime,
+        site_projections=_COLLABORATORS.site_projections,
         sqlite_client=_repository(),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
         settlement_composition_provider=lambda: object(),
     )
     request = VmCreateListingRequest(
-        offer={"virtualization_type": "vm"},
+        listing_resource={"offering_mode": "vm"},
         capacity_source=_CAPACITY_SOURCE,
         settlement_options=[
             {
                 "option_id": "direct",
-                "mechanism": "fiat.stripe.v1",
-                "asset": "usd",
-                "rates": [],
-                "params": {},
+                "price": {"asset": "usd", "rates": []},
+                "settlement": {"schema": "example.payment.v1", **({} or {})},
             }
         ],
     )
 
     with pytest.raises(ValueError, match="derived from installed"):
-        await service._derive_settlement_artifacts(request)
+        await service._derive_settlement_artifacts(request, origin="default")
 
 
 @pytest.mark.asyncio
-async def test_registration_composition_receives_ordered_hosted_clauses() -> None:
+async def test_registration_composition_receives_ordered_example_clauses() -> None:
     option = {
         "option_id": "hosted",
-        "mechanism": "fiat.stripe.v1",
-        "asset": "usd",
-        "rates": [{"field": "amount", "per": "hour", "value": "125"}],
-        "params": {
-            "account_ref": "acct-seller",
-            "funding_profile": "us_ach_debit.v1",
+        "price": {
+            "asset": "usd",
+            "rates": [{"field": "amount", "per": "hour", "value": "125"}],
+        },
+        "settlement": {
+            "schema": "example.payment.v1",
+            **(
+                {
+                    "account_ref": "acct-seller",
+                    "funding_profile": "us_ach_debit.v1",
+                }
+                or {}
+            ),
         },
     }
     composition = SimpleNamespace(
@@ -221,6 +229,7 @@ async def test_registration_composition_receives_ordered_hosted_clauses() -> Non
         binding=_COLLABORATORS.binding,
         domain=_COLLABORATORS.domain,
         capacity_runtime=_COLLABORATORS.capacity_runtime,
+        site_projections=_COLLABORATORS.site_projections,
         sqlite_client=_repository(),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
@@ -228,7 +237,7 @@ async def test_registration_composition_receives_ordered_hosted_clauses() -> Non
     )
     clauses = [
         SettlementPublicationClause(
-            mechanism="fiat.stripe.v1",
+            mechanism="example.payment.v1",
             asset="usd",
             rate="125",
             per="hour",
@@ -240,22 +249,25 @@ async def test_registration_composition_receives_ordered_hosted_clauses() -> Non
         )
     ]
     request = VmCreateListingRequest(
-        offer={"virtualization_type": "vm"},
+        listing_resource={"offering_mode": "vm"},
         capacity_source=_CAPACITY_SOURCE,
         settlements=clauses,
     )
 
-    accepted, options = await service._derive_settlement_artifacts(
+    accepted, options, readiness = await service._derive_settlement_artifacts(
         request,
         clauses=tuple(clauses),
+        origin="default",
     )
 
     assert accepted == []
     assert options == [option]
+    assert readiness == ()
     composition.publication_artifacts.assert_awaited_once_with(
         {
             "accepted_escrows": [],
             "claimant_principal": TEST_MARKETPLACE_SIGNER.identity,
+            "origin": "default",
         },
         clauses=clauses,
     )

@@ -11,7 +11,7 @@ behavior, rather than only indirectly through either caller.
 
 from decimal import Decimal
 
-from market_site import resource_satisfies_requirement
+from market_site import resource_feasibility_view, resource_satisfies_requirement
 
 
 def test_matching_kind_and_sufficient_dimensions_is_satisfied():
@@ -109,8 +109,6 @@ def test_no_required_attributes_means_any_attributes_pass():
 
 
 def test_canonical_view_exposes_authoritative_top_level_facts():
-    from market_site import resource_feasibility_view
-
     view = resource_feasibility_view(
         resource_id="resource-1",
         pool_id="pool-authoritative",
@@ -132,3 +130,33 @@ def test_canonical_view_exposes_authoritative_top_level_facts():
             "resource_subtype": "h200",
         },
     )
+
+
+def test_declaration_fields_win_over_attributes_of_the_same_name():
+    """A row stored before registration refused such attributes must not
+    restate its own identity for matching."""
+    view = resource_feasibility_view(
+        resource_id="resource-1",
+        pool_id="default",
+        resource_kind="compute.gpu",
+        host_id="kvm1",
+        available={"gpu_count": Decimal(1)},
+        attributes={
+            "host_id": "kvm9",
+            "resource_id": "resource-9",
+            "resource_type": "other.kind",
+        },
+    )
+
+    def matches(**required: str) -> bool:
+        return resource_satisfies_requirement(
+            resource=view,
+            required_resource_kind=None,
+            required_dimensions={},
+            required_attributes=required,
+        )
+
+    assert matches(host_id="kvm1", resource_id="resource-1", resource_type="compute.gpu")
+    assert not matches(host_id="kvm9")
+    assert not matches(resource_id="resource-9")
+    assert not matches(resource_type="other.kind")

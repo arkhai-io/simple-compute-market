@@ -6,20 +6,40 @@ from typing import Any, Mapping
 
 from sqlalchemy.orm import Session
 
-from compute_provisioning import PoolConfigValidationProblem
-from compute_provisioning_service.db.models import AnsiblePoolConfig
+from compute_provisioning.hosts import ConnectionCodecs
+from compute_provisioning.relays import (
+    RELAY_ID_FIELD,
+    pool_relay_id,
+    relay_execution_fields,
+    set_pool_relay,
+    validate_relay_reference,
+)
+from market_resource_pools import PoolConfigValidationProblem
+from vm_provisioning_adapter.db import AnsiblePoolConfig
 from vm_provisioning_adapter.requirement_delegates import (
     DEFAULT_REQUIREMENT_DELEGATE,
     registered_requirement_delegate_names,
 )
 
-# The DB # column is still NOT NULL with no migration this round.
-# This is a compatibility placeholder only — nothing reads it.
-_UNUSED_INVENTORY_GROUP_COMPAT_VALUE = "__unused__"
-
 
 class AnsiblePoolConfigHandler:
-    provider = "ansible"
+    provider = "vm.ansible"
+
+    def __init__(
+        self,
+        settings: Any | None = None,
+        connection_codecs: ConnectionCodecs | None = None,
+    ) -> None:
+        # Settings carry the key that decrypts a relay's admission token. The
+        # handler is constructed without them in contexts that only read or
+        # write non-secret configuration; an execution read then finds no key
+        # and fails loudly rather than returning a config that silently omits
+        # the token.
+        self._settings = settings
+        # The host authority's codecs, through which pointing the pool at a
+        # relay checks its hosts' management routes against that relay.
+        self._connection_codecs = connection_codecs
+
     _FIELDS = frozenset(
         {
             "playbook_path",
@@ -28,6 +48,12 @@ class AnsiblePoolConfigHandler:
             "default_vm_ram",
             "default_vm_vcpus",
             "default_vm_disk_size",
+            # A reference to a relay, never the rendezvous itself, stored as
+            # the family's pool relay reference. The address, window, and token
+            # belong to the relay row because every pool pointing at one relay
+            # shares them; holding a window here would let two pools allocate
+            # from one listening namespace under disagreeing bounds.
+            RELAY_ID_FIELD,
         }
     )
 
@@ -55,12 +81,16 @@ class AnsiblePoolConfigHandler:
             "requirement_delegate", DEFAULT_REQUIREMENT_DELEGATE
         )
         extra_vars = config.get("extra_vars", {})
-        if not isinstance(playbook_path, str) or not playbook_path.strip():
+        # Optional: a pool that states none runs the service's configured VM
+        # playbook. One that is stated must name something.
+        if playbook_path is not None and (
+            not isinstance(playbook_path, str) or not playbook_path.strip()
+        ):
             problems.append(
                 PoolConfigValidationProblem(
                     path="playbook_path",
-                    code="required_field",
-                    message="provider_config.playbook_path is required for provider='ansible'",
+                    code="invalid_type",
+                    message="provider_config.playbook_path must be a non-empty string",
                 )
             )
         if not isinstance(requirement_delegate, str) or not requirement_delegate.strip():
@@ -68,7 +98,7 @@ class AnsiblePoolConfigHandler:
                 PoolConfigValidationProblem(
                     path="requirement_delegate",
                     code="required_field",
-                    message="provider_config.requirement_delegate is required for provider='ansible'",
+                    message="provider_config.requirement_delegate is required for provider='vm.ansible'",
                 )
             )
         elif requirement_delegate not in registered_requirement_delegate_names():
@@ -116,21 +146,28 @@ class AnsiblePoolConfigHandler:
             )
         else:
             normalized_defaults["default_vm_disk_size"] = disk_size
+        relay_id, relay_problems = validate_relay_reference(config)
+        problems.extend(relay_problems)
         if problems:
             return None, tuple(problems)
         return {
             "playbook_path": playbook_path,
             "requirement_delegate": requirement_delegate,
             "extra_vars": dict(extra_vars),
+            "relay_id": relay_id,
             **normalized_defaults,
         }, ()
 
     def read_config(self, db: Session, pool_id: str) -> dict[str, Any]:
-        row = (
-            db.query(AnsiblePoolConfig)
-            .filter(AnsiblePoolConfig.pool_id == pool_id)
-            .one_or_none()
-        )
+        """Configuration with no secret in it, and the relay unresolved.
+
+        Serves the pool endpoints, the export document, the administrative
+        read-modify-write, and reconciliation comparison. It returns the relay
+        *reference* and never the rendezvous behind it, so no admission token
+        can reach a serialized response and reconciliation cannot diverge on a
+        field one side is unable to see.
+        """
+        row = self._row(db, pool_id)
         if row is None:
             return {}
         return {
@@ -140,7 +177,34 @@ class AnsiblePoolConfigHandler:
             "default_vm_ram": row.default_vm_ram,
             "default_vm_vcpus": row.default_vm_vcpus,
             "default_vm_disk_size": row.default_vm_disk_size,
+            RELAY_ID_FIELD: pool_relay_id(db, pool_id),
         }
+
+    def read_config_for_execution(self, db: Session, pool_id: str) -> dict[str, Any]:
+        """Configuration with the relay resolved and its token decrypted.
+
+        Reserved for preparing provider input at dispatch; the family resolves
+        the relay, and a missing or disabled one adds no fields.
+        """
+        config = self.read_config(db, pool_id)
+        config.update(
+            relay_execution_fields(db, config.get(RELAY_ID_FIELD), self._encryption_key())
+        )
+        return config
+
+    def _encryption_key(self) -> str:
+        settings = self._settings
+        if settings is None:
+            return ""
+        return str(getattr(settings, "ssh_decryption_key", "") or "")
+
+    @staticmethod
+    def _row(db: Session, pool_id: str) -> AnsiblePoolConfig | None:
+        return (
+            db.query(AnsiblePoolConfig)
+            .filter(AnsiblePoolConfig.pool_id == pool_id)
+            .one_or_none()
+        )
 
     def replace_config(
         self, db: Session, pool_id: str, config: Mapping[str, Any]
@@ -156,17 +220,16 @@ class AnsiblePoolConfigHandler:
             db.add(row)
         row.playbook_path = normalized["playbook_path"]
         row.requirement_delegate = normalized["requirement_delegate"]
-        row.inventory_group = _UNUSED_INVENTORY_GROUP_COMPAT_VALUE
         row.extra_vars = normalized["extra_vars"]
         row.default_vm_ram = normalized["default_vm_ram"]
         row.default_vm_vcpus = normalized["default_vm_vcpus"]
         row.default_vm_disk_size = normalized["default_vm_disk_size"]
-
-    def delete_config(self, db: Session, pool_id: str) -> None:
-        row = (
-            db.query(AnsiblePoolConfig)
-            .filter(AnsiblePoolConfig.pool_id == pool_id)
-            .one_or_none()
+        # A pool repoint changes which rendezvous its future VMs reach. Existing
+        # VMs keep the relay recorded on their leases, so the family refuses
+        # the repoint while any of them are still bound. It also refuses one
+        # onto a relay a host the pool holds is managed through, whose relay
+        # would refuse that host's ungranted management proxy. Either refusal
+        # rolls the whole write back.
+        set_pool_relay(
+            db, pool_id, normalized[RELAY_ID_FIELD], codecs=self._connection_codecs
         )
-        if row is not None:
-            db.delete(row)

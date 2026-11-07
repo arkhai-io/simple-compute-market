@@ -15,7 +15,11 @@ the chart pins replicaCount + strategy: Recreate to enforce a single
 writer.
 */}}
 {{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
-{{- range $agent := .Values.agents }}
+{{- $agents := dict }}
+{{- include "storefront.agents" (dict "root" . "into" $agents) }}
+{{- range $name, $entry := $agents }}
+{{- /* An agent states no runtime overlay by omitting `secret`. */}}
+{{- $agent := mergeOverwrite (dict "secret" (dict)) $entry (dict "name" $name) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -23,8 +27,10 @@ metadata:
   labels:
     {{- include "storefront.labels" $ | nindent 4 }}
     app.kubernetes.io/component: {{ $agent.component | default $agent.name | quote }}
+  {{- if ne (toString $.Values.persistence.retainOnUninstall) "false" }}
   annotations:
     helm.sh/resource-policy: keep
+  {{- end }}
 spec:
   accessModes:
     - {{ $.Values.persistence.accessMode | quote }}

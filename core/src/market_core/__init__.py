@@ -1,5 +1,6 @@
 """Core market models shared by buyers, storefronts, and settlement kits."""
 
+from .settlement import SettlementEvidence, SettlementStageTable
 from .domain_contract import (
     MARKET_DOMAIN_CONTRACT_VERSION,
     SUPPORTED_MARKET_DOMAIN_CONTRACT_VERSIONS,
@@ -31,6 +32,7 @@ from .domain_conformance import (
     DomainConformanceCase,
     assert_domain_conformance,
 )
+from .envelopes import VersionedEnvelope, envelope
 from .query_dsl import (
     ComparisonOperator,
     FieldDescriptor,
@@ -55,8 +57,19 @@ from .query_dsl import (
     render_field_reference,
     validate_query,
 )
+from .registry_descriptor import (
+    KeyGatedRegistryAccess,
+    PublicRegistryAccess,
+    RegistryAccess,
+    RegistryAuthorityDescriptor,
+    RegistryDescriptor,
+    RegistryPrincipal,
+    RegistrySchemaDescriptor,
+)
 
 __all__ = [
+    "SettlementEvidence",
+    "SettlementStageTable",
     "MARKET_DOMAIN_CONTRACT_VERSION",
     "SUPPORTED_MARKET_DOMAIN_CONTRACT_VERSIONS",
     "BUYER_IDENTITY_INJECTION_CONTRACT",
@@ -84,6 +97,8 @@ __all__ = [
     "DomainCodecExample",
     "DomainConformanceCase",
     "assert_domain_conformance",
+    "VersionedEnvelope",
+    "envelope",
     "ComparisonOperator",
     "FieldDescriptor",
     "MissingValueRule",
@@ -106,5 +121,11 @@ __all__ = [
     "render_canonical_query",
     "render_field_reference",
     "validate_query",
+    "KeyGatedRegistryAccess",
+    "PublicRegistryAccess",
+    "RegistryAccess",
+    "RegistryAuthorityDescriptor",
+    "RegistryDescriptor",
+    "RegistryPrincipal",
+    "RegistrySchemaDescriptor",
 ]
-

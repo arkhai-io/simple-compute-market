@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime
-import json
 from unittest.mock import AsyncMock, Mock
-from typing import Any
 
 import pytest
 from core_storefront.aggregation import fill_first
@@ -12,11 +11,23 @@ from core_storefront.domain_registry import (
     StorefrontListingBinding,
     build_storefront_derivation_key,
 )
-from market_capacity_publication import CapacityBinding, CapacityRuntime, CapacitySite
-from market_core.schemas import EscrowProposal, ProvisionTerms
-from market_negotiation_runtime import OfferUnfulfillableError
+from market_capacity_publication import (
+    PublicationBinding,
+    CapacityRuntime,
+    CapacitySite,
+)
+from market_resource_pools_contracts.backing import BACKED
+from market_core.schemas import (
+    EscrowProposal,
+    ProvisionTerms,
+    RateValue,
+    SettlementOption,
+    derive_settlement_option_id,
+)
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_negotiation_runtime import OfferUnfulfillableError
 from market_policy.identity import Identity
+from market_policy.listing_source import ListingSourceVerdict
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.negotiation_thread import get_thread_store
 
@@ -24,14 +35,13 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
-from domains.vms.negotiation.storefront_round import SellerRoundResult
-from market_hosted_settlement import default_hosted_selection_dispatch
+from arkhai_vms_negotiation.storefront_round import SellerRoundResult
 from market_storefront.negotiation_runtime import (
-    _accepted_selection_artifacts,
     _decode_vm_terms,
     _default_seller_round_hook,
     build_vm_negotiation_runtime,
 )
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 _BUYER_SIGNER = Ed25519Signer(b"\x41" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x42" * 32)
@@ -45,8 +55,14 @@ _RECIPIENT = "0x" + "44" * 20
 _ESCROW = "0x" + "11" * 20
 _DOMAIN = build_vm_storefront_domain()
 
+
 async def _noop_reconcile(_context) -> None:
     return None
+
+
+def _no_projections():
+    """A projection state over the runtime's site that has served nothing yet."""
+    return site_projection_state({"site-test": FakeProjectionSite(resource_pools=[])})
 
 
 def _capacity_runtime() -> CapacityRuntime:
@@ -85,23 +101,18 @@ def _listing_binding(db, listing_id: str) -> StorefrontListingBinding:
             "payload": {"pool_id": pool_id},
         },
         last_reconciled_at=datetime.now().isoformat(),
+        capacity_backing="backed",
     )
 
 
 @pytest.fixture
 def marketplace_dependencies(monkeypatch):
     from market_storefront import container
-    from market_storefront.services import capacity_client
 
     monkeypatch.setattr(
         container,
         "resolved_marketplace_signer",
         _SELLER_SIGNER,
-    )
-    monkeypatch.setattr(
-        capacity_client,
-        "get_provisioning_authorities",
-        lambda: _PROVISIONING_AUTHORITIES,
     )
     return _SELLER_SIGNER
 
@@ -145,14 +156,15 @@ async def db(tmp_path, monkeypatch):
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={
+        listing_resource={
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
             "resource_id": "resource-hook",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
+        settlement_options=[_option().model_dump(mode="json")],
         accepted_escrows=[
             {
                 "chain_name": "anvil",
@@ -165,15 +177,25 @@ async def db(tmp_path, monkeypatch):
         max_duration_seconds=7200,
         storefront_url="http://seller:8001",
         seller_principal=_SELLER,
+        # The release condition the accepted plan settles under: the address
+        # book's recipient arbiter, paying the seller.
+        demands=[
+            {
+                "chain_name": "anvil",
+                "arbiter": "0x" + "33" * 20,
+                "demand_data": {"recipient": "0x" + "44" * 20},
+            }
+        ],
     )
 
     async def resolve_capacity_binding(repository, listing_id):
         binding = await repository.load_listing_binding(listing_id=listing_id)
         assert binding is not None
-        return CapacityBinding(
+        return PublicationBinding(
             binding.site_id,
             binding.binding.offering_mode,
             str(binding.pool_id),
+            BACKED,
         )
 
     monkeypatch.setattr(
@@ -182,6 +204,33 @@ async def db(tmp_path, monkeypatch):
     )
     assert await client.load_listing_binding(listing_id="L-hook") == listing_binding
     return client
+
+
+def _option() -> SettlementOption:
+    entry = {
+        "chain_name": "anvil", "escrow_address": _ESCROW,
+        "literal_fields": {"token": _TOKEN, "recipient": _RECIPIENT},
+        "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+    }
+    body = {
+        "price": {
+            "asset": _TOKEN,
+            "rates": [RateValue(field="amount", per="hour", value=100)],
+        },
+        "settlement": {"schema": "alkahest.v1", **({"accepted_escrow": entry} or {})},
+    }
+    return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
+
+
+def _selected_proposal(amount: int) -> dict:
+    return {
+        "fields": {"amount": amount},
+        "settlement_selection": {
+            "option_id": _option().option_id,
+            "settlement": {"schema": "alkahest.v1"},
+            "expiration_unix": 1_800_000_000,
+        },
+    }
 
 
 def _proposal(amount: int) -> EscrowProposal:
@@ -193,6 +242,11 @@ def _proposal(amount: int) -> EscrowProposal:
         rates=[{"field": "amount", "per": "hour", "value": "100"}],
         expiration_unix=1_800_000_000,
     )
+
+
+async def _source_matches(_repository, _resolved) -> ListingSourceVerdict:
+    """These tests exercise the policy hook; the source check has its own."""
+    return ListingSourceVerdict("matches")
 
 
 async def _start(
@@ -207,6 +261,7 @@ async def _start(
     their_agent_url,
     seller_round_hook=None,
     capacity_runtime=None,
+    listing_source_check=None,
 ):
     registration = sqlite_client.domain_registry.resolve_mode("vm")
     runtime = build_vm_negotiation_runtime(
@@ -214,7 +269,9 @@ async def _start(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
+        site_projections=_no_projections(),
         seller_round_hook=seller_round_hook,
+        listing_source_check=listing_source_check or _source_matches,
     )
     proposal_wire = (
         proposal.model_dump(mode="json")
@@ -246,6 +303,7 @@ async def _continue(
     seller_principal=None,
     seller_round_hook=None,
     capacity_runtime=None,
+    listing_source_check=None,
 ):
     registration = sqlite_client.domain_registry.resolve_mode("vm")
     runtime = build_vm_negotiation_runtime(
@@ -253,7 +311,9 @@ async def _continue(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
+        site_projections=_no_projections(),
         seller_round_hook=seller_round_hook,
+        listing_source_check=listing_source_check or _source_matches,
     )
     return await runtime.continue_negotiation(
         repository=sqlite_client,
@@ -263,9 +323,7 @@ async def _continue(
         buyer_reason=buyer_reason,
         buyer_principal=buyer_principal,
         actor_principal=actor_principal,
-        actor_role=(
-            "buyer" if actor_principal == buyer_principal else "admin"
-        ),
+        actor_role=("buyer" if actor_principal == buyer_principal else "admin"),
         seller_principal=seller_principal,
     )
 
@@ -314,7 +372,6 @@ def test_normalize_vm_message_terms_rejects_unsupported_version() -> None:
         _decode_vm_terms(_DOMAIN, terms)
 
 
-
 def test_default_policy_is_resolved_from_the_injected_contract(
     marketplace_dependencies,
 ) -> None:
@@ -328,10 +385,12 @@ def test_default_policy_is_resolved_from_the_injected_contract(
             run_negotiation_policy=policy,
         ),
     )
-    capacity_runtime = _capacity_runtime()
-
-    assert _default_seller_round_hook(domain, capacity_runtime) is seller_hook
-    assert policy.call_args.args == (capacity_runtime.client(),)
+    assert _default_seller_round_hook(domain) is seller_hook
+    # The policy is given no source check and no capacity client: the
+    # runtime checks the listing against its source and hands each round
+    # the verdict.
+    assert policy.call_args.args == ()
+    assert "source_check" not in policy.call_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -348,17 +407,19 @@ async def test_foreign_envelope_rejects_before_policy_or_repository_state(db) ->
 
     with pytest.raises(ValueError, match=r"compute\.v1"):
         await _start(
-        sqlite_client=db,
-        our_listing_id="L-hook",
-        buyer_principal=_BUYER,
-        seller_principal=_SELLER,
-        provision_terms=terms,
-        our_base_url="http://seller",
-        their_agent_url="http://buyer",
-        seller_round_hook=seller_hook,)
+            sqlite_client=db,
+            our_listing_id="L-hook",
+            buyer_principal=_BUYER,
+            seller_principal=_SELLER,
+            provision_terms=terms,
+            our_base_url="http://seller",
+            their_agent_url="http://buyer",
+            seller_round_hook=seller_hook,
+        )
 
     repository_probe.assert_not_awaited()
     seller_hook.assert_not_awaited()
+
 
 @pytest.mark.asyncio
 async def test_negotiation_runtime_uses_injected_seller_round_hook(db):
@@ -368,6 +429,7 @@ async def test_negotiation_runtime_uses_injected_seller_round_hook(db):
         seen["history"] = kwargs["history"]
         seen["has_policy_inputs"] = "policy_inputs" in kwargs
         seen["has_sqlite_client"] = "sqlite_client" in kwargs
+        seen["listing_source"] = kwargs.get("listing_source")
         return SellerRoundResult(
             our_amount=123,
             strategy_label="maximize",
@@ -380,157 +442,11 @@ async def test_negotiation_runtime_uses_injected_seller_round_hook(db):
         )
 
     response = await _start(
-    sqlite_client=db,
-    our_listing_id="L-hook",
-    buyer_principal=_BUYER,
-    seller_principal=_SELLER,
-    proposal=_proposal(50),
-    provision_terms=ProvisionTerms(
-        kind="compute.v1",
-        version=1,
-        payload={
-            "duration_seconds": 3600,
-            "ssh_public_key": "ssh-rsa AAAA",
-        },
-    ),
-    our_base_url="http://test-seller:8001",
-    their_agent_url="http://buyer:9000",
-    seller_round_hook=hook,)
-
-    assert response["action"] == "counter"
-    assert response["proposal"]["fields"]["amount"] == "123"
-    assert seen["history"][0].proposal["fields"]["amount"] == 50
-    assert seen["has_policy_inputs"] is False
-    assert seen["has_sqlite_client"] is False
-    listing_binding = await db.load_listing_binding(listing_id="L-hook")
-    thread_binding = await db.load_thread_binding(
-        negotiation_id=response["negotiation_id"]
-    )
-    assert listing_binding is not None
-    assert thread_binding.listing_id == listing_binding.listing_id
-    assert thread_binding.site_id == listing_binding.site_id
-    assert thread_binding.binding == listing_binding.binding
-
-
-@pytest.mark.asyncio
-async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
-    from market_core.schemas import (
-        RateValue,
-        SettlementOption,
-        SettlementSelection,
-        derive_settlement_option_id,
-    )
-
-    rates = [RateValue(field="amount", value=42)]
-    params = {
-        "account_ref": "acct-seller",
-        "authority_id": "hosted-authority-1",
-        "environment": "test",
-        "country": "US",
-        "claimant_principal": _SELLER.model_dump(mode="json"),
-        "funds_flow": "separate_charges_transfers",
-        "funding_profile": "card.v1",
-        "interaction": "interactive",
-        "contract_fingerprint": "sha256:" + "11" * 32,
-        "condition": {
-            "protocol": "arkhai.condition.v1",
-            "condition_id": "condition-1",
-            "evaluator": {
-                "kind": "builtin.v1",
-                "version": "trivial.v1",
-                "params": {"kind": "trivial"},
-            },
-            "demand": {"encoding": "application/jcs+json", "value": True},
-        },
-    }
-    option = SettlementOption(
-        option_id=derive_settlement_option_id(
-            mechanism="fiat.stripe.v1",
-            asset="usd",
-            rates=rates,
-            params=params,
-        ),
-        mechanism="fiat.stripe.v1",
-        asset="usd",
-        rates=rates,
-        params=params,
-    )
-    selection = SettlementSelection(
-        mechanism=option.mechanism,
-        option_id=option.option_id,
-        expiration_unix=1_900_000_000,
-    )
-    hosted_binding = _listing_binding(db, "L-hosted")
-    await db.upsert_listing_with_binding(
-        binding=hosted_binding,
-        status="open",
-        created_at=datetime.now().isoformat(),
-        updated_at=datetime.now().isoformat(),
-        offer_resource={
-            "gpu_model": "H200",
-            "gpu_count": 1,
-            "sla": 99.9,
-            "region": "California, US",
-            "resource_id": "resource-hosted",
-            "virtualization_type": "vm",
-        },
-        accepted_escrows=[],
-        settlement_options=[option.model_dump(mode="json")],
-        fulfillment_resource=None,
-        max_duration_seconds=7200,
-        storefront_url="http://seller:8001",
-        seller_principal=_SELLER,
-    )
-    await db.upsert_resource(
-        resource_id="resource-hosted",
-        resource_type="compute.gpu",
-        resource_subtype=None,
-        unit="vm",
-        value=1,
-        state="available",
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "kvm1",
-        },
-    )
-
-    from tests.fake_site import FakeSite, capacity_runtime_over
-
-    site = FakeSite(deliverable_modes={"vm"})
-    site.add_resource(
-        "resource-hosted",
-        1,
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "kvm1",
-        },
-    )
-
-    async def hook(**_kwargs):
-        return SellerRoundResult(
-            our_amount=42,
-            strategy_label="listed_price",
-            direction="minimize",
-            chain_label="hosted",
-            decision=NegotiationDecision(
-                action="accept",
-                proposal={"settlement_selection": selection.model_dump()},
-            ),
-            intermediate={
-                "accepted_settlement_selection": selection.model_dump(),
-                "accepted_settlement_option": option.model_dump(mode="json"),
-            },
-        )
-
-    capacity_runtime = capacity_runtime_over(site, site_name="site-test")
-    response = await _start(
         sqlite_client=db,
-        our_listing_id="L-hosted",
+        our_listing_id="L-hook",
         buyer_principal=_BUYER,
         seller_principal=_SELLER,
-        proposal={"settlement_selection": selection.model_dump()},
+        proposal=_proposal(50),
         provision_terms=ProvisionTerms(
             kind="compute.v1",
             version=1,
@@ -542,57 +458,22 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
         our_base_url="http://test-seller:8001",
         their_agent_url="http://buyer:9000",
         seller_round_hook=hook,
-        capacity_runtime=capacity_runtime,
     )
 
-    assert response["action"] == "accept"
-    assert response["settlement_selection"] == selection.model_dump()
-    assert response["settlement_plan"]["obligations"][0]["mechanism"] == (
-        "fiat.stripe.v1"
-    )
-    obligation = response["settlement_plan"]["obligations"][0]
-    assert obligation["payer_principal"] == _BUYER.model_dump(mode="json")
-    assert obligation["claimant_principal"] == _SELLER.model_dump(mode="json")
-    vm_state = response["settlement_plan"]["service_terms"]["vm.v1"]
-    assert vm_state["listing_id"] == "L-hosted"
-    assert vm_state["order"]["offer_resource"]["resource_id"] == "resource-hosted"
-    assert vm_state["provision"]["ssh_public_key"] == "ssh-rsa AAAA"
-    thread = await db.load_negotiation_thread_row(
-        negotiation_id=response["negotiation_id"]
-    )
+    assert response["action"] == "counter"
+    assert response["proposal"]["fields"]["amount"] == "123"
+    assert seen["history"][0].proposal["fields"]["amount"] == 50
+    assert seen["has_policy_inputs"] is False
+    assert seen["has_sqlite_client"] is False
+    assert seen["listing_source"] == ListingSourceVerdict("matches")
+    listing_binding = await db.load_listing_binding(listing_id="L-hook")
     thread_binding = await db.load_thread_binding(
         negotiation_id=response["negotiation_id"]
     )
-    assert thread_binding.listing_id == hosted_binding.listing_id
-    assert thread_binding.site_id == hosted_binding.site_id
-    assert thread_binding.binding == hosted_binding.binding
-    assert thread["provision_terms"] == {
-        "kind": "compute.v1",
-        "version": 1,
-        "payload": {
-            "duration_seconds": 3600,
-            "ssh_public_key": "ssh-rsa AAAA",
-        },
-    }
-    legacy_params = dict(params)
-    legacy_params.pop("funding_profile")
-    legacy_params["payment_method_types"] = ["card"]
-    legacy_option = option.model_copy(update={"params": legacy_params})
-    with pytest.raises(
-        OfferUnfulfillableError,
-        match="hosted_settlement_option_not_exact",
-    ):
-        _accepted_selection_artifacts(
-            default_hosted_selection_dispatch(),
-            selection=selection.model_dump(mode="json"),
-            option=legacy_option.model_dump(mode="json"),
-            agreed_amount=42,
-            duration_seconds=3600,
-            buyer_principal=_BUYER,
-            seller_principal=_SELLER,
-            listing=vm_state["order"],
-            provision_terms=vm_state["provision"],
-        )
+    assert listing_binding is not None
+    assert thread_binding.listing_id == listing_binding.listing_id
+    assert thread_binding.site_id == listing_binding.site_id
+    assert thread_binding.binding == listing_binding.binding
 
 
 @pytest.mark.asyncio
@@ -609,25 +490,77 @@ async def test_negotiation_runtime_rejects_mismatched_resource_shape(db):
 
     with pytest.raises(OfferUnfulfillableError) as exc_info:
         await _start(
-        sqlite_client=db,
-        our_listing_id="L-hook",
-        buyer_principal=_BUYER,
-        seller_principal=_SELLER,
-        proposal=_proposal(50),
-        provision_terms=ProvisionTerms(
-            kind="compute.v1",
-            version=1,
-            payload={
-                "duration_seconds": 3600,
-                "ssh_public_key": "ssh-rsa AAAA",
-                # Listing offers gpu_count=1; this asks for 2.
-                "compute_resource": {"gpu_count": 2},
-            },
-        ),
-        our_base_url="http://test-seller:8001",
-        their_agent_url="http://buyer:9000",
-        seller_round_hook=hook,)
+            sqlite_client=db,
+            our_listing_id="L-hook",
+            buyer_principal=_BUYER,
+            seller_principal=_SELLER,
+            proposal=_proposal(50),
+            provision_terms=ProvisionTerms(
+                kind="compute.v1",
+                version=1,
+                payload={
+                    "duration_seconds": 3600,
+                    "ssh_public_key": "ssh-rsa AAAA",
+                    # Listing offers gpu_count=1; this asks for 2.
+                    "compute_resource": {"gpu_count": 2},
+                },
+            ),
+            our_base_url="http://test-seller:8001",
+            their_agent_url="http://buyer:9000",
+            seller_round_hook=hook,
+        )
     assert "resource_shape_not_negotiable" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_an_opening_on_a_listing_without_gpus_compares_its_own_dimensions(db):
+    """The opening reads a listing stating no GPUs as compute, and compares the
+    dimensions the buyer names against the ones it states."""
+    await db.upsert_listing_with_binding(
+        binding=_listing_binding(db, "L-cpu"),
+        status="open",
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat(),
+        listing_resource={
+            "vcpu_count": 8,
+            "ram_gb": 32,
+            "sla": 99.9,
+            "region": "California, US",
+            "resource_id": "resource-cpu",
+            "offering_mode": "vm",
+        },
+        settlement_options=[_option().model_dump(mode="json")],
+        fulfillment_resource=None,
+        max_duration_seconds=7200,
+        storefront_url="http://seller:8001",
+        seller_principal=_SELLER,
+    )
+
+    async def hook(**_kwargs):
+        raise AssertionError("seller policy must not run for a rejected request")
+
+    with pytest.raises(OfferUnfulfillableError) as exc_info:
+        await _start(
+            sqlite_client=db,
+            our_listing_id="L-cpu",
+            buyer_principal=_BUYER,
+            seller_principal=_SELLER,
+            proposal=_proposal(50),
+            provision_terms=ProvisionTerms(
+                kind="compute.v1",
+                version=1,
+                payload={
+                    "duration_seconds": 3600,
+                    "ssh_public_key": "ssh-rsa AAAA",
+                    "compute_resource": {"vcpu_count": 16},
+                },
+            ),
+            our_base_url="http://test-seller:8001",
+            their_agent_url="http://buyer:9000",
+            seller_round_hook=hook,
+        )
+    assert "resource_shape_not_negotiable" in str(exc_info.value)
+    assert "'listing': 8" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -649,23 +582,24 @@ async def test_negotiation_runtime_permits_matching_resource_shape(db):
         )
 
     response = await _start(
-    sqlite_client=db,
-    our_listing_id="L-hook",
-    buyer_principal=_BUYER,
-    seller_principal=_SELLER,
-    proposal=_proposal(50),
-    provision_terms=ProvisionTerms(
-        kind="compute.v1",
-        version=1,
-        payload={
-            "duration_seconds": 3600,
-            "ssh_public_key": "ssh-rsa AAAA",
-            "compute_resource": {"gpu_count": 1},
-        },
-    ),
-    our_base_url="http://test-seller:8001",
-    their_agent_url="http://buyer:9000",
-    seller_round_hook=hook,)
+        sqlite_client=db,
+        our_listing_id="L-hook",
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
+        proposal=_proposal(50),
+        provision_terms=ProvisionTerms(
+            kind="compute.v1",
+            version=1,
+            payload={
+                "duration_seconds": 3600,
+                "ssh_public_key": "ssh-rsa AAAA",
+                "compute_resource": {"gpu_count": 1},
+            },
+        ),
+        our_base_url="http://test-seller:8001",
+        their_agent_url="http://buyer:9000",
+        seller_round_hook=hook,
+    )
     assert seen["ran"] is True
     assert response["action"] == "counter"
 
@@ -685,22 +619,23 @@ async def test_negotiation_runtime_continuation_uses_injected_seller_round_hook(
         )
 
     opened = await _start(
-    sqlite_client=db,
-    our_listing_id="L-hook",
-    buyer_principal=_BUYER,
-    seller_principal=_SELLER,
-    proposal=_proposal(50),
-    provision_terms=ProvisionTerms(
-        kind="compute.v1",
-        version=1,
-        payload={
-            "duration_seconds": 3600,
-            "ssh_public_key": "ssh-rsa AAAA",
-        },
-    ),
-    our_base_url="http://test-seller:8001",
-    their_agent_url="http://buyer:9000",
-    seller_round_hook=opening_hook,)
+        sqlite_client=db,
+        our_listing_id="L-hook",
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
+        proposal=_selected_proposal(50),
+        provision_terms=ProvisionTerms(
+            kind="compute.v1",
+            version=1,
+            payload={
+                "duration_seconds": 3600,
+                "ssh_public_key": "ssh-rsa AAAA",
+            },
+        ),
+        our_base_url="http://test-seller:8001",
+        their_agent_url="http://buyer:9000",
+        seller_round_hook=opening_hook,
+    )
 
     seen = {}
 
@@ -721,17 +656,21 @@ async def test_negotiation_runtime_continuation_uses_injected_seller_round_hook(
         )
 
     response = await _continue(
-    sqlite_client=db,
-    neg_id=opened["negotiation_id"],
-    buyer_action="counter",
-    buyer_proposal=_proposal(100).model_dump(),
-    buyer_reason=None,
-    buyer_principal=_BUYER,
-    actor_principal=_BUYER,
-    seller_round_hook=continue_hook,)
+        sqlite_client=db,
+        neg_id=opened["negotiation_id"],
+        buyer_action="counter",
+        buyer_proposal=_selected_proposal(100),
+        buyer_reason=None,
+        buyer_principal=_BUYER,
+        actor_principal=_BUYER,
+        seller_round_hook=continue_hook,
+    )
 
     assert response["action"] == "accept"
     assert response["accepted_escrow_proposal"]["fields"]["amount"] == "100"
+    thread = await db.load_negotiation_thread_row(negotiation_id=opened["negotiation_id"])
+    assert thread["settlement_data"]["accepted_escrow_proposal"] == response["accepted_escrow_proposal"]
+    assert _DOMAIN.settlement.seller_stages["alkahest.v1"].accepted_proposal(thread) == response["accepted_escrow_proposal"]
     assert seen["history"][-1].sender == "them"
     assert seen["history"][-1].proposal["fields"]["amount"] == 100
     assert seen["has_policy_inputs"] is False

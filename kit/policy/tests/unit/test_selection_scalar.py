@@ -14,7 +14,10 @@ from market_policy.negotiation_middleware import (
     NegotiationRound,
 )
 from market_policy.scalar_policies import (
+    selected_settlement_artifact,
     accept_exact_listing_middleware,
+    accept_unpriced_selection_middleware,
+    bisection_middleware,
     buyer_counter_guard,
     option_uses_scalar_amount,
     proposal_uses_scalar_amount,
@@ -22,17 +25,18 @@ from market_policy.scalar_policies import (
 
 _SCALAR_OPTION = {
     "option_id": "aa" * 32,
-    "mechanism": "fiat.stripe.v1",
-    "asset": "usd",
-    "rates": [{"field": "amount", "per": "hour", "value": "100"}],
-    "params": {},
+    "price": {
+        "asset": "usd",
+        "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+    },
+    "settlement": {"schema": "example.payment.v1", **({} or {})},
 }
 _NON_SCALAR_OPTION = {
     "option_id": "bb" * 32,
-    "mechanism": "contact-exchange.v1",
-    "asset": "introduction",
-    "rates": [],
-    "params": {"terms": "weekly rate negotiable on call"},
+    "settlement": {
+        "schema": "contact-exchange.v1",
+        **({"terms": "weekly rate negotiable on call"} or {}),
+    },
 }
 _LISTING = {"settlement_options": [_SCALAR_OPTION, _NON_SCALAR_OPTION]}
 
@@ -43,8 +47,8 @@ def _selection_proposal(
 ) -> dict[str, Any]:
     return {
         "settlement_selection": {
-            "mechanism": option["mechanism"],
             "option_id": option["option_id"],
+            "settlement": {"schema": option["settlement"]["schema"]},
             "expiration_unix": 1_900_000_000,
         },
         "fields": dict(fields or {}),
@@ -78,7 +82,7 @@ def test_selection_proposal_scalarness_follows_matched_option() -> None:
 
 def test_unmatched_selection_stays_scalar() -> None:
     unmatched = _selection_proposal(
-        {"option_id": "cc" * 32, "mechanism": "contact-exchange.v1"}
+        {"option_id": "cc" * 32, "settlement": {"schema": "contact-exchange.v1"}}
     )
     assert proposal_uses_scalar_amount(_LISTING, unmatched) is True
 
@@ -103,7 +107,7 @@ def test_exact_accept_takes_non_scalar_selection_as_proposed() -> None:
 
 def test_exact_accept_rejects_unlisted_selection() -> None:
     proposal = _selection_proposal(
-        {"option_id": "cc" * 32, "mechanism": "contact-exchange.v1"}
+        {"option_id": "cc" * 32, "settlement": {"schema": "contact-exchange.v1"}}
     )
     history = [
         NegotiationRound(
@@ -141,7 +145,9 @@ def test_exact_accept_holds_scalar_selection_to_reference_amount() -> None:
     decision, _ = accept_exact_listing_middleware(history, _context(100.0))
     assert decision is not None
     assert decision.action == "accept"
-    assert decision.proposal["fields"]["amount"] == 100
+    # Decimal-digit string: the amount rides the wire in its uint256 form,
+    # which is what canonical JSON can carry at 18-decimal magnitudes.
+    assert decision.proposal["fields"]["amount"] == "100"
 
 
 def test_buyer_counter_guard_tolerates_non_scalar_counter_without_amount() -> None:
@@ -178,3 +184,221 @@ def test_buyer_counter_guard_still_rejects_scalar_counter_without_amount() -> No
     assert decision is not None
     assert decision.action == "reject"
     assert decision.reason == "counter_missing_amount"
+
+
+def test_buyer_counter_guard_reads_scalar_bargaining_from_the_opening() -> None:
+    """A counter selecting an unpriced option cannot make a bargained opening
+    take-it-or-leave-it: an acceptance settles the opening."""
+    opening = _selection_proposal(_SCALAR_OPTION, fields={"amount": 100})
+    context = _context()
+    context.our_escrow_proposal = dict(opening)
+    history = [
+        NegotiationRound(round_number=0, sender="them", action="initial", proposal=opening),
+        NegotiationRound(
+            round_number=1, sender="us", action="counter", proposal={"fields": {"amount": "120"}}
+        ),
+        NegotiationRound(
+            round_number=2,
+            sender="them",
+            action="counter",
+            proposal=_selection_proposal(_NON_SCALAR_OPTION),
+        ),
+    ]
+    decision, out = buyer_counter_guard(history, context)
+    assert out.intermediate["uses_scalar_amount"] is True
+    assert decision is not None
+    assert decision.reason == "counter_missing_amount"
+
+
+# -- selected_settlement_artifact ---------------------------------------------
+
+_ESCROW_A = {"chain_name": "anvil", "escrow_address": "0x" + "aa" * 20, "rates": []}
+_ESCROW_B = {"chain_name": "anvil", "escrow_address": "0x" + "bb" * 20, "rates": []}
+_OPTION = {"option_id": "o" * 64, "settlement": {"schema": "example.rated.v1"}}
+_TWO_ESCROWS = {"accepted_escrows": [_ESCROW_A, _ESCROW_B], "settlement_options": [_OPTION]}
+
+
+def test_a_settlement_selection_selects_its_option():
+    proposal = {
+        "settlement_selection": {
+            "option_id": "o" * 64,
+            "settlement": {"schema": "example.rated.v1"},
+        }
+    }
+    assert selected_settlement_artifact(_TWO_ESCROWS, proposal) == _OPTION
+
+
+def test_an_escrow_proposal_selects_its_escrow_not_the_first():
+    proposal = {"chain_name": "anvil", "escrow_address": ("0x" + "bb" * 20).upper()}
+    assert selected_settlement_artifact(_TWO_ESCROWS, proposal) == _ESCROW_B
+
+
+def test_nothing_selected_is_none():
+    assert selected_settlement_artifact(_TWO_ESCROWS, None) is None
+    assert selected_settlement_artifact(
+        _TWO_ESCROWS, {"chain_name": "anvil", "escrow_address": "0x" + "cc" * 20}
+    ) is None
+    assert (
+        selected_settlement_artifact(
+            _TWO_ESCROWS,
+            {
+                "settlement_selection": {
+                    "option_id": "x" * 64,
+                    "settlement": {"schema": "example.rated.v1"},
+                }
+            },
+        )
+        is None
+    )
+
+
+def _opening(proposal: dict[str, Any] | None) -> list[NegotiationRound]:
+    return [NegotiationRound(round_number=0, sender="them", action="initial", proposal=proposal)]
+
+
+def test_an_unpriced_selection_is_accepted_as_published() -> None:
+    proposal = _selection_proposal(_NON_SCALAR_OPTION)
+    decision, _ = accept_unpriced_selection_middleware(_opening(proposal), _context())
+    assert decision is not None
+    assert decision.action == "accept"
+    assert decision.proposal == proposal
+    assert decision.reason == "unpriced_selection"
+
+
+def test_a_priced_selection_passes_to_the_bargaining_policy() -> None:
+    proposal = _selection_proposal(_SCALAR_OPTION, {"amount": 100})
+    decision, _ = accept_unpriced_selection_middleware(_opening(proposal), _context(100))
+    assert decision is None
+
+
+def test_a_proposal_without_a_selection_passes_through() -> None:
+    decision, _ = accept_unpriced_selection_middleware(
+        _opening({"fields": {"amount": 100}}), _context(100)
+    )
+    assert decision is None
+    decision, _ = accept_unpriced_selection_middleware(_opening(None), _context())
+    assert decision is None
+
+
+def test_a_selection_of_no_advertised_option_passes_through() -> None:
+    unknown = {**_NON_SCALAR_OPTION, "option_id": "cc" * 32}
+    decision, _ = accept_unpriced_selection_middleware(
+        _opening(_selection_proposal(unknown)), _context()
+    )
+    assert decision is None
+
+
+def _priced_opening_then(counter: dict[str, Any]) -> list[NegotiationRound]:
+    return [
+        NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="initial",
+            proposal=_selection_proposal(_SCALAR_OPTION, {"amount": 50}),
+        ),
+        NegotiationRound(
+            round_number=1, sender="us", action="counter", proposal={"fields": {"amount": "100"}}
+        ),
+        NegotiationRound(round_number=2, sender="them", action="counter", proposal=counter),
+    ]
+
+
+def test_a_counter_selecting_an_unpriced_option_is_not_accepted_after_a_priced_opening() -> None:
+    """An acceptance settles the opening, so a counter naming an unpriced option
+    with an amount of its own must not be accepted at that amount."""
+    history = _priced_opening_then(_selection_proposal(_NON_SCALAR_OPTION, {"amount": 1}))
+
+    decision, _ = accept_unpriced_selection_middleware(history, _context(100))
+
+    assert decision is None
+
+
+def test_an_unpriced_opening_is_accepted_as_opened_whatever_a_counter_carries() -> None:
+    opening = _selection_proposal(_NON_SCALAR_OPTION)
+    history = [
+        NegotiationRound(round_number=0, sender="them", action="initial", proposal=opening),
+        NegotiationRound(round_number=1, sender="us", action="counter", proposal=dict(opening)),
+        NegotiationRound(
+            round_number=2,
+            sender="them",
+            action="counter",
+            proposal=_selection_proposal(_NON_SCALAR_OPTION, {"amount": 1}),
+        ),
+    ]
+
+    decision, _ = accept_unpriced_selection_middleware(history, _context())
+
+    assert decision is not None
+    assert decision.action == "accept"
+    assert decision.proposal == opening
+
+
+def test_exact_accept_prices_a_counter_against_the_opening_selection() -> None:
+    """A counter selecting an unpriced option after a priced opening is held to
+    the opening's reference amount, and the opening is what is accepted."""
+    unpriced_counter = _priced_opening_then(
+        _selection_proposal(_NON_SCALAR_OPTION, {"amount": 1})
+    )
+    decision, _ = accept_exact_listing_middleware(unpriced_counter, _context(100.0))
+    assert decision is not None
+    assert decision.action == "reject"
+    assert decision.reason.startswith("exact_listing:amount_mismatch")
+
+    at_reference = _priced_opening_then(
+        _selection_proposal(_NON_SCALAR_OPTION, {"amount": 100})
+    )
+    decision, _ = accept_exact_listing_middleware(at_reference, _context(100.0))
+    assert decision is not None
+    assert decision.action == "accept"
+    assert decision.proposal["settlement_selection"]["option_id"] == _SCALAR_OPTION[
+        "option_id"
+    ]
+    assert decision.proposal["fields"]["amount"] == "100"
+
+
+def test_bisection_alone_never_accepts_an_unpriced_selection() -> None:
+    """Why the guard exists: a scalar terminal waits for an amount that an
+    unpriced option never carries, and counters instead."""
+    decision, _ = bisection_middleware(
+        _opening(_selection_proposal(_NON_SCALAR_OPTION)), _context()
+    )
+    assert decision.action == "counter"
+
+
+
+def _buyer_opening_context(selected: dict[str, Any]) -> NegotiationContext:
+    """A buyer's round-0 context: the selection and the option it selected."""
+    return NegotiationContext(
+        direction="minimize",
+        our_reference_amount=500,
+        our_opening_amount=200,
+        listing={"settlement_options": [selected]},
+        our_escrow_proposal=_selection_proposal(selected),
+    )
+
+
+def test_a_buyer_opening_selecting_a_scalar_option_carries_the_amount() -> None:
+    decision, _ = bisection_middleware([], _buyer_opening_context(_SCALAR_OPTION))
+
+    assert decision.action == "counter"
+    assert decision.proposal["fields"] == {"amount": "200"}
+    assert decision.proposal["settlement_selection"]["option_id"] == _SCALAR_OPTION[
+        "option_id"
+    ]
+    # The seller reads the same proposal as bargaining through the amount.
+    assert proposal_uses_scalar_amount(_LISTING, decision.proposal) is True
+
+
+def test_a_buyer_opening_selecting_an_unpriced_option_carries_no_amount() -> None:
+    decision, _ = bisection_middleware([], _buyer_opening_context(_NON_SCALAR_OPTION))
+
+    assert decision.proposal["fields"] == {}
+
+
+def test_a_buyer_opening_whose_option_is_unknown_carries_no_amount() -> None:
+    context = _buyer_opening_context(_SCALAR_OPTION)
+    context.listing = {}
+
+    decision, _ = bisection_middleware([], context)
+
+    assert decision.proposal["fields"] == {}

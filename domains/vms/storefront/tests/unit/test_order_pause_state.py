@@ -17,7 +17,8 @@ from core_storefront.domain_registry import (
     StorefrontListingBinding,
     build_storefront_derivation_key,
 )
-from market_capacity_publication import CapacityBinding, CapacityRuntime, CapacitySite
+from market_capacity_publication import PublicationBinding, CapacityRuntime, CapacitySite
+from market_resource_pools_contracts.backing import BACKED
 from market_core.schemas import EscrowProposal
 from market_identity import TrustedIdentitySet, create_signer
 
@@ -25,12 +26,14 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
+from market_storefront.lifecycle import trading_pause
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_negotiation_runtime import (
-    OfferUnfulfillableError,
+    NegotiationUnavailableError,
     StorefrontPausedError,
 )
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 
 _BUYER_SIGNER = create_signer("ed25519", b"\x41" * 32)
@@ -43,6 +46,17 @@ _PROVISIONING_AUTHORITIES = TrustedIdentitySet(
         create_signer("ed25519", b"\x44" * 32).identity,
     )
 )
+
+
+#: The fixture listing's escrow, token, and release condition: development
+#: values naming no deployed contract, never for a public network.
+_LISTED_ESCROW = "0x000000000000000000000000000000000000abcd"
+_LISTED_TOKEN = "0x0000000000000000000000000000000000000001"
+_CONDITION = {
+    "chain_name": "test",
+    "arbiter": "0x" + "22" * 20,
+    "demand_data": {"recipient": "0x" + "33" * 20},
+}
 
 
 async def _noop_reconcile(_context) -> None:
@@ -82,6 +96,10 @@ async def _start(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=_capacity_runtime(),
+        # The site has served nothing, so no listing's source is confirmed.
+        site_projections=site_projection_state(
+            {"site-test": FakeProjectionSite(resource_pools=[])}
+        ),
     )
     return await runtime.start(
         repository=sqlite_client,
@@ -127,28 +145,28 @@ async def db(tmp_path) -> SQLiteClient:
             "payload": {"pool_id": "pool-order-001"},
         },
         last_reconciled_at=datetime.now().isoformat(),
+        capacity_backing="backed",
     )
     await client.upsert_listing_with_binding(
         binding=listing_binding,
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={
+        listing_resource={
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
             "resource_id": "resource-order-001",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         accepted_escrows=[{
             "chain_name": "test",
-            "escrow_address": "0x000000000000000000000000000000000000abcd",
-            "literal_fields": {
-                "token": "0x0000000000000000000000000000000000000001",
-            },
+            "escrow_address": _LISTED_ESCROW,
+            "literal_fields": {"token": _LISTED_TOKEN},
             "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
         }],
+        demands=[_CONDITION],
         fulfillment_resource=None,
         max_duration_seconds=3600,
         storefront_url="http://seller:8001",
@@ -161,17 +179,11 @@ async def db(tmp_path) -> SQLiteClient:
 @pytest.fixture
 def marketplace_signer(monkeypatch):
     from market_storefront import container
-    from market_storefront.services import capacity_client
 
     monkeypatch.setattr(
         container,
         "resolved_marketplace_signer",
         _SELLER_SIGNER,
-    )
-    monkeypatch.setattr(
-        capacity_client,
-        "get_provisioning_authorities",
-        lambda: _PROVISIONING_AUTHORITIES,
     )
     return _SELLER_SIGNER
 
@@ -180,10 +192,11 @@ def exact_capacity_binding(monkeypatch):
     async def resolve(repository, listing_id):
         binding = await repository.load_listing_binding(listing_id=listing_id)
         assert binding is not None
-        return CapacityBinding(
+        return PublicationBinding(
             binding.site_id,
             binding.binding.offering_mode,
             str(binding.pool_id),
+            BACKED,
         )
 
     monkeypatch.setattr(
@@ -249,7 +262,7 @@ class TestOrderPauseHelpers:
             status="open",
             created_at=now,
             updated_at=now,
-            offer_resource={},
+            listing_resource={},
             
             fulfillment_resource=None,
             max_duration_seconds=3600,
@@ -275,7 +288,7 @@ class TestOrderPauseHelpers:
             status="open",
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
-            offer_resource={},
+            listing_resource={},
             
             fulfillment_resource=None,
             max_duration_seconds=3600,
@@ -326,9 +339,7 @@ class TestNegotiationRuntimePauseGuard:
     """Pause checks fire before negotiation policy or persistence."""
 
     async def test_global_pause_raises(self, db, monkeypatch):
-        # Patch is_globally_paused to return True
-        import market_storefront.server as server_mod
-        monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", True)
+        monkeypatch.setattr(trading_pause(), "_paused", True)
 
         with pytest.raises(StorefrontPausedError) as exc_info:
             await _start(sqlite_client=db,
@@ -338,8 +349,7 @@ class TestNegotiationRuntimePauseGuard:
         assert exc_info.value.reason == "global"
 
     async def test_order_pause_raises(self, db, monkeypatch):
-        import market_storefront.server as server_mod
-        monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
+        monkeypatch.setattr(trading_pause(), "_paused", False)
 
         await db.set_listing_paused(listing_id="order-001", paused=True)
 
@@ -353,8 +363,7 @@ class TestNegotiationRuntimePauseGuard:
     async def test_no_pause_proceeds_normally(self, db, monkeypatch):
         """When not paused, the function proceeds to normal validation
         (raises ValueError for missing strategy, not StorefrontPausedError)."""
-        import market_storefront.server as server_mod
-        monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
+        monkeypatch.setattr(trading_pause(), "_paused", False)
 
         # order-001 has no strategy set, so we expect ValueError not paused
         with pytest.raises((ValueError, Exception)) as exc_info:
@@ -364,23 +373,32 @@ class TestNegotiationRuntimePauseGuard:
             their_agent_url="0xBuyer",)
         assert not isinstance(exc_info.value, StorefrontPausedError)
 
-    async def test_pre_negotiation_guard_rejection_raises_offer_unfulfillable(
+    async def test_an_unconfirmable_source_refuses_the_opening_as_retryable(
         self, db, monkeypatch, marketplace_signer
     ):
-        """Round-0 guard veto (no matching inventory) raises OfferUnfulfillableError.
+        """An opening whose listing's source cannot be confirmed is retryable.
 
-        The fixture's listing offers ``gpu_model=H200, region=California, US``;
-        the test DB has no portfolio resources at all, so the
-        ``has_matching_inventory_guard`` middleware vetoes with
-        ``no_matching_inventory``, which maps to 409.
+        The fixture's listing offers ``gpu_model=H200, region=California, US``,
+        and its site's projection has not loaded, so nothing confirms or denies
+        its source: the runtime refuses before any write with a retryable
+        refusal (503), not a declared mismatch (409).
         """
-        import market_storefront.server as server_mod
-        monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
+        monkeypatch.setattr(trading_pause(), "_paused", False)
 
         from market_core.schemas import EscrowProposal, ProvisionTerms
-        with pytest.raises(OfferUnfulfillableError) as exc_info:
+        # The listed escrow under the listing's condition, so the round's
+        # guards pass and only the source verdict decides.
+        proposal = EscrowProposal(
+            chain_name="test",
+            escrow_address=_LISTED_ESCROW,
+            fields={"amount": 5000},
+            literal_fields={"token": _LISTED_TOKEN},
+            demand=_CONDITION,
+            expiration_unix=2000000000,
+        )
+        with pytest.raises(NegotiationUnavailableError) as exc_info:
             await _start(sqlite_client=db,
-            our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
+            our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=proposal,
             provision_terms=ProvisionTerms(
                 kind="compute.v1",
                 version=1,
@@ -392,5 +410,5 @@ class TestNegotiationRuntimePauseGuard:
             our_base_url="http://seller:8001",
             their_agent_url="0xBuyer",)
 
-        assert exc_info.value.reason == "no_matching_inventory"
+        assert exc_info.value.reason == "listing_source_unverifiable"
         assert exc_info.value.listing_id == "order-001"

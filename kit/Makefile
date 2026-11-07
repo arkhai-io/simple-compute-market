@@ -1,8 +1,56 @@
-.PHONY: test test-alkahest test-capacity-publication test-config test-contact-exchange test-delivery test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront dist dist-capacity-publication dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
+.PHONY: test test-alkahest test-capability-shape test-capability-pricing test-capability-admissibility test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront dist dist-ci dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront test-arkhai-payments
 
 DIST_DIR ?= ../.dist
 
-test: dist test-alkahest test-capacity-publication test-config test-contact-exchange test-delivery test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront
+test: dist test-deal-servicing test-deal-lifecycle-client test-deal-lifecycle-buyer test-arkhai-mediation test-deal-lifecycle test-deal-lifecycle-contracts test-alkahest test-capability-shape test-capability-pricing test-capability-admissibility test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront test-arkhai-payments
+
+.PHONY: test-deal-servicing test-deal-lifecycle-client test-deal-lifecycle-buyer dist-deal-lifecycle-buyer
+
+test-deal-servicing:
+	cd deal-servicing && $(MAKE) test
+
+test-deal-lifecycle-client:
+	cd deal-lifecycle-client && $(MAKE) test
+
+dist-deal-lifecycle-client: dist-deal-lifecycle-contracts
+	cd deal-lifecycle-client && $(MAKE) build DIST_DIR=$(abspath $(DIST_DIR))
+
+test-deal-lifecycle-buyer:
+	cd deal-lifecycle-buyer && $(MAKE) test
+
+dist-deal-lifecycle-buyer: dist-deal-lifecycle
+	cd deal-lifecycle-buyer && $(MAKE) build
+
+.PHONY: test-deal-lifecycle test-deal-lifecycle-contracts dist-deal-lifecycle dist-deal-lifecycle-contracts test-arkhai-mediation dist-arkhai-mediation
+
+dist-deal-servicing: dist-deal-lifecycle
+	cd deal-servicing && $(MAKE) build
+
+.PHONY: dist-deal-servicing
+
+test-arkhai-mediation:
+	cd arkhai-mediation && $(MAKE) test
+
+dist-arkhai-mediation: dist-deal-lifecycle
+	cd arkhai-mediation && $(MAKE) build
+
+test-deal-lifecycle:
+	cd deal-lifecycle && $(MAKE) test
+
+dist-deal-lifecycle: dist-deal-lifecycle-contracts
+	-mkdir -p $(DIST_DIR)
+	cd deal-lifecycle && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_deal_lifecycle-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: lifecycle produced a platform-specific wheel" && exit 1)
+
+test-deal-lifecycle-contracts:
+	cd deal-lifecycle-contracts && $(MAKE) test
+
+dist-deal-lifecycle-contracts:
+	-mkdir -p $(DIST_DIR)
+	cd deal-lifecycle-contracts && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_deal_lifecycle_contracts-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: lifecycle contracts produced a platform-specific wheel" && exit 1)
 
 test-alkahest:
 	cd alkahest && $(MAKE) test
@@ -16,8 +64,23 @@ test-config:
 test-contact-exchange:
 	cd contact-exchange && $(MAKE) test
 
+test-capability-shape:
+	cd capability-shape && $(MAKE) test
+
+test-capability-pricing:
+	cd capability-pricing && $(MAKE) test
+
+test-capability-admissibility:
+	cd capability-admissibility && $(MAKE) test
+
+test-pool-overrides:
+	cd pool-overrides && $(MAKE) test
+
 test-delivery:
 	cd delivery && $(MAKE) test
+
+test-delivery-apprise:
+	cd delivery-apprise && $(MAKE) test
 
 test-identity:
 	cd identity && $(MAKE) test
@@ -31,8 +94,14 @@ test-site:
 test-site-client:
 	cd site-client && $(MAKE) test
 
+test-resource-pools-contracts:
+	cd resource-pools-contracts && $(MAKE) test
+
 test-resource-pools:
 	cd resource-pools && $(MAKE) test
+
+test-resource-pools-client:
+	cd resource-pools-client && $(MAKE) test
 
 test-fulfillment:
 	cd fulfillment && $(MAKE) test
@@ -43,13 +112,12 @@ test-settlement-runtime:
 test-negotiation-runtime:
 	cd negotiation-runtime && $(MAKE) test
 
-test-hosted-settlement:
-	cd hosted-settlement && $(MAKE) test
-
 test-storefront:
 	cd storefront && $(MAKE) test
 
-dist: dist-capacity-publication dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
+dist: dist-ci
+
+dist-ci: dist-deal-lifecycle-client dist-deal-lifecycle-buyer dist-deal-servicing dist-arkhai-mediation dist-deal-lifecycle dist-deal-lifecycle-contracts dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments
 
 dist-contact-exchange: dist-settlement-runtime
 	-mkdir -p $(DIST_DIR)
@@ -57,11 +125,41 @@ dist-contact-exchange: dist-settlement-runtime
 	@ls $(DIST_DIR)/arkhai_kit_contact_exchange-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-contact-exchange produced a platform-specific wheel" && exit 1)
 
+dist-capability-shape:
+	-mkdir -p $(DIST_DIR)
+	cd capability-shape && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_capability_shape-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-capability-shape produced a platform-specific wheel" && exit 1)
+
+dist-capability-pricing: dist-capability-shape
+	-mkdir -p $(DIST_DIR)
+	cd capability-pricing && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_capability_pricing-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-capability-pricing produced a platform-specific wheel" && exit 1)
+
+dist-capability-admissibility: dist-capability-shape
+	-mkdir -p $(DIST_DIR)
+	cd capability-admissibility && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_capability_admissibility-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-capability-admissibility produced a platform-specific wheel" && exit 1)
+
+dist-pool-overrides:
+	-mkdir -p $(DIST_DIR)
+	cd pool-overrides && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_pool_overrides-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-pool-overrides produced a platform-specific wheel" && exit 1)
+
 dist-delivery:
 	-mkdir -p $(DIST_DIR)
 	cd delivery && $(MAKE) build
 	@ls $(DIST_DIR)/arkhai_kit_delivery-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-delivery produced a platform-specific wheel" && exit 1)
+
+dist-delivery-apprise: dist-delivery
+	-mkdir -p $(DIST_DIR)
+	cd delivery-apprise && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_delivery_apprise-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-delivery-apprise produced a platform-specific wheel" && exit 1)
 
 dist-capacity-publication: dist-site-client
 	-mkdir -p $(DIST_DIR)
@@ -81,11 +179,23 @@ dist-site-client:
 	@ls $(DIST_DIR)/arkhai_kit_site_client-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-site-client produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-resource-pools:
+dist-resource-pools-contracts: dist-capability-admissibility
+	-mkdir -p $(DIST_DIR)
+	cd resource-pools-contracts && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_resource_pools_contracts-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-resource-pools-contracts produced a platform-specific wheel" && exit 1)
+
+dist-resource-pools: dist-resource-pools-contracts
 	-mkdir -p $(DIST_DIR)
 	cd resource-pools && $(MAKE) build
 	@ls $(DIST_DIR)/arkhai_kit_resource_pools-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-resource-pools produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-resource-pools-client: dist-resource-pools-contracts
+	-mkdir -p $(DIST_DIR)
+	cd resource-pools-client && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_resource_pools_client-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-resource-pools-client produced a platform-specific wheel" && exit 1)
 
 dist-fulfillment: dist-site dist-resource-pools
 	-mkdir -p $(DIST_DIR)
@@ -105,14 +215,18 @@ dist-negotiation-runtime:
 	@ls $(DIST_DIR)/arkhai_kit_negotiation_runtime-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-negotiation-runtime produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-hosted-settlement:
-	-mkdir -p $(DIST_DIR)
-	cd hosted-settlement && $(MAKE) build
-	@ls $(DIST_DIR)/arkhai_kit_hosted_settlement-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-kit-hosted-settlement produced a platform-specific wheel" && exit 1)
-
 dist-storefront:
 	-mkdir -p $(DIST_DIR)
 	cd storefront && $(MAKE) build
 	@ls $(DIST_DIR)/arkhai_kit_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+
+test-arkhai-payments:
+	cd arkhai-payments && $(MAKE) test
+
+dist-arkhai-payments:
+	-mkdir -p $(DIST_DIR)
+	cd arkhai-payments && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_arkhai_payments-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-arkhai-payments produced a platform-specific wheel" && exit 1)

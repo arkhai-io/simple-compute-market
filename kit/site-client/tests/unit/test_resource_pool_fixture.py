@@ -1,0 +1,89 @@
+"""The resource-pool projection contract fixture accepts what it builds and
+refuses what a consumer could not derive from."""
+
+from __future__ import annotations
+
+import pytest
+
+from market_site_client.fixtures.resource_pools import (
+    build_projected_resource,
+    build_resource_pool_projection,
+    build_resource_pool_row,
+    validate_resource_pool_projection,
+)
+
+
+def _projection():
+    return build_resource_pool_projection(
+        [
+            build_resource_pool_row("backed"),
+            build_resource_pool_row(
+                "broker",
+                capacity_backing="unbacked",
+                resources=[build_projected_resource("broker-1", capacity={"gpu_count": 8})],
+            ),
+        ]
+    )
+
+
+def test_what_the_builders_produce_validates():
+    projection = _projection()
+
+    validate_resource_pool_projection(projection)
+    backed = projection["resource_pools"][0]["pool_metadata"]["policy_tags"]
+    broker = projection["resource_pools"][1]["pool_metadata"]["policy_tags"]
+    # Each pool's default delivery is the one its backing permits.
+    assert backed["deliverable_modes"] == backed["advertisable_modes"]
+    assert broker["deliverable_modes"] == []
+
+
+@pytest.mark.parametrize(
+    ("damage", "message"),
+    [
+        (lambda row: row["pool_metadata"]["policy_tags"].pop("capacity_backing"), "backing"),
+        (lambda row: row["pool_metadata"]["policy_tags"].pop("advertisable_modes"), "advertisable"),
+        (lambda row: row["pool_metadata"].pop("enabled"), "enablement"),
+        (lambda row: row.pop("pool_metadata"), "metadata"),
+        (lambda row: row["resources"][0].pop("capacity"), "capacity"),
+        (lambda row: row["resources"][0]["capacity"].update(gpu_count="8"), "capacity"),
+        (lambda row: row["resources"][0].pop("resource_type"), "resource_type"),
+        (lambda row: row["resources"][0].update(resource_type=None), "resource_type"),
+        (lambda row: row["resources"][0].update(resource_type=" "), "resource_type"),
+        (lambda row: row["resources"][0].update(publication_view_problems={}), "problems"),
+        (
+            lambda row: row["resources"][0].update(publication_view_problems={"v.1": []}),
+            "problems",
+        ),
+        (
+            lambda row: row["resources"][0].update(publication_view_problems={"v.1": "no"}),
+            "problems",
+        ),
+    ],
+)
+def test_a_response_a_consumer_could_not_derive_from_is_refused(damage, message):
+    projection = _projection()
+    damage(projection["resource_pools"][1])
+
+    with pytest.raises(AssertionError, match=message):
+        validate_resource_pool_projection(projection)
+
+
+def test_a_member_carries_the_view_problems_it_is_built_with():
+    member = build_projected_resource(
+        "m1", publication_view_problems={"bare_metal.v2": ("names no host",)}
+    )
+    projection = build_resource_pool_projection(
+        [build_resource_pool_row("p", resources=[member])]
+    )
+
+    validate_resource_pool_projection(projection)
+    assert member["publication_view_problems"] == {"bare_metal.v2": ["names no host"]}
+    assert "publication_view_problems" not in build_projected_resource("m2")
+
+
+def test_a_pool_with_an_unregistered_label_is_built_for_consumer_tests():
+    row = build_resource_pool_row("odd", capacity_backing="Unbacked")
+
+    tags = row["pool_metadata"]["policy_tags"]
+    assert tags["capacity_backing"] == "Unbacked"
+    assert tags["deliverable_modes"] == []

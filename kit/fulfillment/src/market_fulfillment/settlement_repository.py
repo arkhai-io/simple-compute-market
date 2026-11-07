@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db import ProvisionedResource, SchedulingCursor, SettlementRecord, SettlementRecordState
-from .envelopes import VersionedEnvelope
+from market_core import VersionedEnvelope
 from .ids import new_fulfillment_id
 from .provider import FulfillmentConflictError
 from .recovery_diagnostics import RecoveryDiagnostics, RecoveryStateDiagnostics
@@ -169,6 +169,7 @@ class SettlementRepository:
             pool_id=resource.pool_id,
             provider=resource.provider,
             resource_attributes=dict(resource.attributes),
+            resource_host_id=resource.host_id,
             state=SettlementRecordState.assigned.value,
         )
         try:
@@ -376,25 +377,33 @@ class SettlementRepository:
     # Abandonment hook
     # ------------------------------------------------------------------
 
-    def abandon_if_assigned(self, db: Session, capacity_reservation_id: str) -> None:
-        """Transition an ``assigned`` aggregate to ``abandoned``, or no-op.
+    def abandon_if_assigned(self, db: Session, capacity_reservation_id: str) -> bool:
+        """Transition an ``assigned`` aggregate to ``abandoned``; report whether it did.
 
-        This is the concrete implementation ``market_site.CapacityLedgerService``
-        invokes (through a ``Protocol`` it defines, referencing no
-        fulfillment types) whenever it reclaims capacity that might belong
-        to a reservation with a not-yet-dispatched settlement assignment --
-        a lapsed TTL hold, a terminal release, or a negotiation-driven
-        resize's supersede step. It is called unconditionally by those
-        callers; whether there is anything to abandon is entirely this
-        method's decision, not theirs.
+        A conditional update on the current state, so it holds across
+        sessions and processes: an aggregate that a concurrent ``begin``
+        moved past ``assigned`` is left as it is, and ``False`` says so. Once
+        abandoned, nothing can dispatch the aggregate. The caller owns the
+        transaction; capacity reclaim calls this through the site's release
+        guard, inside the transaction that frees the capacity.
         """
 
-        record = self.get(db, capacity_reservation_id)
-        if record is None or record.state != SettlementRecordState.assigned.value:
-            return
-        validate_transition(record.state, SettlementRecordState.abandoned.value)
-        record.state = SettlementRecordState.abandoned.value
+        validate_transition(
+            SettlementRecordState.assigned.value, SettlementRecordState.abandoned.value
+        )
+        changed = (
+            db.query(SettlementRecord)
+            .filter(
+                SettlementRecord.capacity_reservation_id == capacity_reservation_id,
+                SettlementRecord.state == SettlementRecordState.assigned.value,
+            )
+            .update(
+                {SettlementRecord.state: SettlementRecordState.abandoned.value},
+                synchronize_session="fetch",
+            )
+        )
         db.flush()
+        return bool(changed)
 
     # ------------------------------------------------------------------
     # Recovery claims
@@ -466,6 +475,31 @@ class SettlementRepository:
             db.expunge(record)
         return candidates
 
+    def release_worker_claims(self, db: Session, *, worker_id: str) -> int:
+        """Release every claim currently held by ``worker_id``.
+
+        The bulk form of ``clear_claim``, for a worker that wants its next
+        cycle to see rows it is itself holding under an unexpired lease.
+        Scoped to one worker on purpose: another worker's lease may be
+        covering a provider call still in flight, and clearing that would
+        let two cycles act on one operation.
+
+        Returns the number of claims released, so a caller can log whether
+        an explicit advance actually needed to reclaim anything.
+        """
+
+        begin_sqlite_write_transaction(db)
+        held = (
+            db.query(SettlementRecord)
+            .filter(SettlementRecord.claimed_by == worker_id)
+            .all()
+        )
+        for record in held:
+            record.claimed_by = None
+            record.claim_expires_at = None
+        db.flush()
+        return len(held)
+
     def clear_claim(
         self,
         db: Session,
@@ -486,6 +520,43 @@ class SettlementRepository:
         record.claimed_by = None
         record.claim_expires_at = None
         db.flush()
+
+    def record_progress(
+        self,
+        db: Session,
+        capacity_reservation_id: str,
+        *,
+        worker_id: str,
+        lease_seconds: float | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        """Record that ``worker_id``'s claim made healthy progress on the row.
+
+        ``attempt_count`` counts consecutive claims that produced nothing but a
+        failure, so the backoff it sets grows only while the row keeps failing.
+        A healthy observation, whether an applied outcome or a provider that
+        answered "still pending", starts that count again. With no
+        ``lease_seconds`` the claim is released; with one, the claim is kept
+        for that long, so the row is polled again after that interval rather
+        than after a backoff it never earned.
+
+        A no-op returning ``False`` if the row is no longer claimed by
+        ``worker_id``: a worker whose lease lapsed and was reclaimed must not
+        touch the new owner's claim, expiry, or count.
+        """
+
+        record = self.get(db, capacity_reservation_id)
+        if record is None or record.claimed_by != worker_id:
+            return False
+        record.attempt_count = 0
+        if lease_seconds is None:
+            record.claimed_by = None
+            record.claim_expires_at = None
+        else:
+            now = now or datetime.now(timezone.utc)
+            record.claim_expires_at = now + timedelta(seconds=lease_seconds)
+        db.flush()
+        return True
 
     def mark_provisioned_resources_torn_down(
         self,

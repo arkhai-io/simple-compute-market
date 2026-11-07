@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 import pytest
+from core_storefront.auth import AuthError, ReplayClaim
 from fastapi import Request
 from market_identity import (
     EMPTY_BODY,
@@ -18,7 +19,6 @@ from market_identity import (
 
 import market_storefront.container as container
 from market_storefront.middleware.admin_identity import _contract as _admin_contract
-from core_storefront.auth import AuthError, ReplayClaim
 from market_storefront.middleware.seller_auth import (
     _buyer_response_contract,
     authenticate_listing_mutation,
@@ -58,9 +58,7 @@ class ReplayStore:
             attempt_token="attempt-1",
         )
 
-    async def record_replay_outcome(
-        self, reservation, *, attempt_token, status, body
-    ):
+    async def record_replay_outcome(self, reservation, *, attempt_token, status, body):
         key = (reservation.identity.principal, reservation.identity.request_id)
         self.outcomes[key] = (status, body)
 
@@ -97,7 +95,8 @@ def _request(
             "raw_path": path.encode(),
             "query_string": query_string,
             "headers": [
-                (name.lower().encode(), value.encode()) for name, value in headers.items()
+                (name.lower().encode(), value.encode())
+                for name, value in headers.items()
             ],
             "client": ("test", 1),
             "server": ("test", 80),
@@ -321,24 +320,6 @@ async def test_public_listing_get_is_not_authenticated(monkeypatch):
             {},
             ("deal_heartbeat", "deal-1"),
         ),
-        (
-            "POST",
-            "/api/v1/settlements",
-            {"obligation_ref": "obligation-1"},
-            ("settlement_start", "obligation-1"),
-        ),
-        (
-            "GET",
-            "/api/v1/settlements/settlement-1",
-            EMPTY_BODY,
-            ("settlement_status", "settlement-1"),
-        ),
-        (
-            "POST",
-            "/api/v1/settlements/settlement-1/reclaim",
-            EMPTY_BODY,
-            ("settlement_reclaim", "settlement-1"),
-        ),
     ],
 )
 async def test_buyer_route_response_contracts_are_scheme_neutral(
@@ -352,13 +333,6 @@ async def test_buyer_route_response_contracts_are_scheme_neutral(
     ("method", "path", "body", "operation", "resource"),
     [
         ("POST", "/api/v1/admin/pause", {}, "admin_pause", ""),
-        (
-            "PATCH",
-            "/api/v1/admin/portfolio/resources/vm-1",
-            {"state": "available"},
-            "admin_patch_resource",
-            "vm-1",
-        ),
         (
             "POST",
             "/api/v1/listings/listing-1/negotiations/neg-1/advance",
@@ -417,16 +391,80 @@ async def test_identity_status_route_binds_sorted_exact_query() -> None:
         "/api/v1/admin/identity/status",
         {},
         method="GET",
-        query_string=(
-            b"subject=operator%2Fa&authority=storefront.administrator"
-        ),
+        query_string=(b"subject=operator%2Fa&authority=storefront.administrator"),
     )
     contract = _admin_contract(request, EMPTY_BODY)
 
     assert contract is not None
     assert contract.operation == "admin_identity_status"
     assert contract.resource == (
-        "identity-status?authority=storefront.administrator"
-        "&subject=operator%2Fa"
+        "identity-status?authority=storefront.administrator&subject=operator%2Fa"
     )
     assert contract.body is EMPTY_BODY
+
+
+# -- storefront pool overrides -------------------------------------------------
+# The encoding itself is the pool-override kit's and is tested there; these prove
+# the administrator middleware binds the override routes through it.
+
+_OVERRIDES = "/api/v1/admin/pool-overrides"
+
+
+def _query(**values: str) -> bytes:
+    from urllib.parse import urlencode
+
+    return urlencode(values).encode()
+
+
+async def test_a_pool_override_write_binds_the_kits_contract() -> None:
+    from market_pool_overrides import pool_override_contract
+
+    body = {"site_id": "site/a", "pool_id": "gpu", "offering_mode": "vm", "terms": {}}
+
+    contract = _admin_contract(_request(_OVERRIDES, {}, method="PUT"), body)
+
+    expected = pool_override_contract("PUT", [], body)
+    assert (contract.operation, contract.resource, contract.body) == (
+        expected.operation, expected.resource, expected.body,
+    )
+
+
+@pytest.mark.parametrize(
+    ("method", "query", "operation", "resource"),
+    [
+        ("GET", {"site_id": "a", "pool_id": "gpu", "offering_mode": "vm"},
+         "admin_get_pool_override", "pool-overrides?offering_mode=vm&pool_id=gpu&site_id=a"),
+        ("GET", {}, "admin_list_pool_overrides", "pool-overrides"),
+        ("DELETE", {"site_id": "a", "pool_id": "gpu", "offering_mode": "vm"},
+         "admin_delete_pool_override", "a/gpu/vm"),
+    ],
+)
+async def test_pool_override_reads_and_deletes_bind_their_query(
+    method, query, operation, resource
+) -> None:
+    request = _request(_OVERRIDES, {}, method=method, query_string=_query(**query))
+
+    contract = _admin_contract(request, EMPTY_BODY)
+
+    assert (contract.operation, contract.resource) == (operation, resource)
+    assert contract.body is EMPTY_BODY
+
+
+@pytest.mark.parametrize(
+    ("method", "query_string", "body"),
+    [
+        ("GET", b"pool_id=gpu", EMPTY_BODY),
+        ("GET", b"site_id=a&limit=5", EMPTY_BODY),
+        ("DELETE", b"site_id=a&pool_id=gpu", EMPTY_BODY),
+        ("PUT", b"", {"site_id": "a", "pool_id": "gpu"}),
+    ],
+)
+async def test_an_unbindable_pool_override_request_is_refused_as_bad(
+    method, query_string, body
+) -> None:
+    request = _request(_OVERRIDES, {}, method=method, query_string=query_string)
+
+    with pytest.raises(AuthError) as caught:
+        _admin_contract(request, body)
+
+    assert caught.value.status_code == 400

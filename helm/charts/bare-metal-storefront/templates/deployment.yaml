@@ -1,3 +1,18 @@
+{{/*
+One storefront process. The pod mounts storefront.json (the ConfigMap) and, when
+`secret` names one, storefront.secrets.toml (an existing Secret) at
+/etc/arkhai/, and points XDG_CONFIG_HOME at /etc so the storefront's loader
+finds them. Its environment carries XDG_CONFIG_HOME and the signing credential
+only: every setting, the payments key and the CA bundle's path among them,
+reaches the storefront through those files. The environment and the configuration
+mounts are the payments check test pod's too
+(templates/tests/payments-check-test.yaml). Service
+links are off because Kubernetes would otherwise inject variables for every
+Service in the namespace, and those named for a Service beginning `storefront`
+would land in the loader's STOREFRONT_ override layer.
+
+checksum/config rolls the pod when the rendered configuration changes.
+*/}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,7 +30,10 @@ spec:
     metadata:
       labels:
         {{- include "bare-metal-storefront.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
+      enableServiceLinks: false
       securityContext:
         fsGroup: 1001
       containers:
@@ -25,47 +43,14 @@ spec:
           command:
             - bare-metal-storefront
             - serve
-            - --host
-            - 0.0.0.0
-            - --port
-            - {{ .Values.service.port | quote }}
           env:
-            - name: BARE_METAL_STOREFRONT_IDENTITY_SCHEME
-              value: {{ .Values.identity.principal.scheme | quote }}
-            - name: BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER
-              value: {{ .Values.identity.principal.identifier | quote }}
-            - name: BARE_METAL_STOREFRONT_ADMIN_IDENTITIES
-              value: {{ .Values.adminPrincipals | toJson | quote }}
-            - name: BARE_METAL_STOREFRONT_PUBLIC_URL
-              value: {{ required "bare-metal storefront publicUrl is required" .Values.publicUrl | quote }}
-            {{- if .Values.alkahestEnabled }}
-            - name: BARE_METAL_STOREFRONT_EVM_ADDRESS
-              value: {{ required "sellerEvmAddress is required when Alkahest is enabled" .Values.sellerEvmAddress | quote }}
-            {{- end }}
-            - name: BARE_METAL_STOREFRONT_SETTLEMENT
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "bare-metal settlement config Secret name is required" .Values.settlementConfigSecret.name | quote }}
-                  key: {{ required "bare-metal settlement config Secret key is required" .Values.settlementConfigSecret.key | quote }}
-            - name: BARE_METAL_STOREFRONT_SITE_PLACEMENT
-              value: {{ .Values.sitePlacement | quote }}
-            - name: BARE_METAL_STOREFRONT_DB_PATH
-              value: {{ .Values.databasePath | quote }}
-            - name: ARKHAI_IDENTITY_CREDENTIAL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "bare-metal storefront identity credential Secret name is required" .Values.identity.credentialSecret.name | quote }}
-                  key: {{ required "bare-metal storefront identity credential Secret key is required" .Values.identity.credentialSecret.key | quote }}
-            - name: BARE_METAL_STOREFRONT_SITES
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "bare-metal storefront site bindings Secret name is required" .Values.siteBindingsSecret.name | quote }}
-                  key: {{ required "bare-metal storefront site bindings Secret key is required" .Values.siteBindingsSecret.key | quote }}
+            {{- include "bare-metal-storefront.env" . | nindent 12 }}
           ports:
             - name: http
-              containerPort: {{ .Values.service.port }}
+              containerPort: {{ .Values.port }}
               protocol: TCP
           volumeMounts:
+            {{- include "bare-metal-storefront.configMounts" . | nindent 12 }}
             - name: data
               mountPath: {{ .Values.persistence.mountPath | quote }}
           startupProbe:
@@ -89,6 +74,7 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
+        {{- include "bare-metal-storefront.configVolumes" . | nindent 8 }}
         - name: data
           {{- if or .Values.persistence.enabled .Values.persistence.existingClaim }}
           persistentVolumeClaim:

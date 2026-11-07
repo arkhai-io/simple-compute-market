@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from market_policy.listing_source import ListingSourceVerdict
 from market_policy.negotiation_middleware import (
     NegotiationDecision,
     NegotiationRound,
@@ -42,5 +43,6 @@ class SellerRoundHook(Protocol):
         history: list[NegotiationRound],
         requested_duration_seconds: int | None = None,
         strategy_label: str | None = None,
+        listing_source: ListingSourceVerdict | None = None,
     ) -> SellerRoundResult:
         ...

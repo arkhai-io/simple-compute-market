@@ -13,7 +13,7 @@ from apicredits_storefront.services.issuance_evidence import (
     PrivateResultAccessError,
 )
 from apicredits_storefront.utils.migrations import _migrate_issuance_evidence
-from domains.apicredits.settlement.issuance_evidence import (
+from arkhai_apicredits.settlement.issuance_evidence import (
     ApiCreditsIssuanceEvidenceBodyV1,
 )
 

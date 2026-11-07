@@ -9,16 +9,22 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from market_fulfillment import (
+    CREATE_COMPENSATION,
     FULFILLMENT_RESULT_KIND,
+    CompensationCandidate,
+    CompensationRefusedError,
+    CredentialFetchFailedError,
     FulfillmentConflictError,
     FulfillmentCreateFailedError,
     FulfillmentOrchestrator,
     FulfillmentResult,
+    ProviderConfigInvalidError,
     ProviderRegistry,
+    ProviderUnavailableError,
     SettlementEntityNotFoundError,
     SettlementRecordState,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 from market_fulfillment.fulfillment_persistence import FulfillmentAcceptanceDecision
 
 
@@ -39,8 +45,9 @@ def _record(**overrides):
         "pool_id": "pool-1",
         "provider": "ansible",
         "settlement_resource_id": "resource-1",
-        "resource_attributes": {"vm_host": "host-1"},
-        "scheduling_requirements": {"executor_kind": "vm", "resource_kind": "vm"},
+        "resource_attributes": {},
+        "resource_host_id": "host-1",
+        "scheduling_requirements": {"offering_mode": "vm", "resource_kind": "vm"},
         "prepared_create_operation": None,
         "prepared_teardown_operation": None,
         "provider_metadata": {},
@@ -58,11 +65,13 @@ class FakeTransaction:
         self.db.get.return_value = record
         self.pool = SimpleNamespace(
             provider_config={"playbook_path": "playbook.yml"},
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
         )
         self.dispatch_required = dispatch_required
         self.persisted = []
         self.acknowledged = []
+        self.attached_jobs = []
+        self.write_reads = []
         self.provisioned_resources = provisioned_resources or []
 
     def accept(self, **kwargs):
@@ -86,16 +95,30 @@ class FakeTransaction:
         self.record.state = SettlementRecordState.dispatching.value
         return self.record
 
+    def attach_executor_job(self, capacity_reservation_id, job_id):
+        self.attached_jobs.append((capacity_reservation_id, job_id))
+
     def begin_teardown(self, fulfillment_id, prepared):
         self.teardown_prepared = prepared
         self.record.prepared_teardown_operation = prepared.model_dump(mode="json")
         self.record.state = SettlementRecordState.teardown_dispatch_pending.value
         return self.record
 
+    def begin_compensating_teardown(self, fulfillment_id, prepared):
+        self.compensation_prepared = prepared
+        self.record.prepared_teardown_operation = prepared.model_dump(mode="json")
+        self.record.state = SettlementRecordState.teardown_dispatch_pending.value
+        self.record.failure_reason = CREATE_COMPENSATION
+        return self.record
+
     def get_by_fulfillment_id(self, fulfillment_id):
         if self.record.fulfillment_id == fulfillment_id:
             return self.record
         return None
+
+    def get_by_fulfillment_id_for_write(self, fulfillment_id):
+        self.write_reads.append(fulfillment_id)
+        return self.get_by_fulfillment_id(fulfillment_id)
 
     def list_provisioned_resources(self, capacity_reservation_id):
         if capacity_reservation_id == self.record.capacity_reservation_id:
@@ -125,8 +148,19 @@ class FakeUnitOfWork:
             self.read_transaction_open = False
 
 
+class _ProviderMock(MagicMock):
+    """A mock provider that, like every real one, declares its host need."""
+
+    needs_host = True
+
+
 def _provider():
-    provider = MagicMock()
+    provider = _ProviderMock()
+    # Explicit, because a bare MagicMock returns a truthy Mock for any
+    # attribute: the orchestrator would then try to attach that object as a
+    # job id. Providers without an addressable job handle return None, and
+    # that is the default this fake should represent.
+    provider.resolve_executor_job_id.return_value = None
     provider.prepare_create.return_value = VersionedEnvelope(
         kind="vm.ansible.create.v1",
         schema_version=1,
@@ -387,6 +421,249 @@ async def test_begin_fulfillment_teardown_unknown_id_raises_not_found():
         )
 
 
+def _failed_record(**overrides):
+    values = {
+        "state": SettlementRecordState.failed.value,
+        "failure_reason": "provider_reported_failure",
+        "failure_message": "create reported no delivery evidence",
+        "provider_metadata": {"operation": "create", "job_id": "job-1"},
+    }
+    values.update(overrides)
+    return _record(**values)
+
+
+def _authorize_all(candidate):
+    return True
+
+
+def _assert_nothing_written(tx, record, before):
+    assert not hasattr(tx, "compensation_prepared")
+    assert not hasattr(tx, "teardown_prepared")
+    assert vars(record) == before
+
+
+@pytest.mark.asyncio
+async def test_compensating_teardown_queues_an_authorized_failed_create():
+    record = _failed_record()
+    tx = FakeTransaction(record)
+    provider = _provider()
+
+    acceptance = await _orchestrator(
+        FakeUnitOfWork(tx), provider
+    ).begin_compensating_teardown("fulfillment-1", authorize=_authorize_all)
+
+    assert tx.write_reads == ["fulfillment-1"]
+    provider.prepare_teardown.assert_called_once()
+    settlement_result, pool_config = provider.prepare_teardown.call_args.args
+    assert settlement_result.fulfillment_id == "fulfillment-1"
+    assert settlement_result.provider_metadata == {
+        "operation": "create",
+        "job_id": "job-1",
+    }
+    assert pool_config == {"playbook_path": "playbook.yml"}
+    assert tx.compensation_prepared.payload == {"prepared": "teardown"}
+    assert acceptance.state == SettlementRecordState.teardown_dispatch_pending.value
+    assert record.failure_reason == CREATE_COMPENSATION
+    assert record.failure_message == "create reported no delivery evidence"
+
+
+@pytest.mark.asyncio
+async def test_compensating_teardown_gives_authorize_the_records_fields():
+    record = _failed_record()
+    seen = []
+
+    def authorize(candidate):
+        seen.append(candidate)
+        return True
+
+    await _orchestrator(
+        FakeUnitOfWork(FakeTransaction(record)), _provider()
+    ).begin_compensating_teardown("fulfillment-1", authorize=authorize)
+
+    assert len(seen) == 1
+    candidate = seen[0]
+    assert isinstance(candidate, CompensationCandidate)
+    assert candidate.state == SettlementRecordState.failed.value
+    assert candidate.failure_reason == "provider_reported_failure"
+    assert dict(candidate.provider_metadata) == {
+        "operation": "create",
+        "job_id": "job-1",
+    }
+    with pytest.raises(TypeError):
+        candidate.provider_metadata["operation"] = "teardown"
+
+
+@pytest.mark.asyncio
+async def test_compensating_teardown_refused_by_authorize_writes_nothing():
+    record = _failed_record()
+    before = dict(vars(record))
+    tx = FakeTransaction(record)
+    provider = _provider()
+
+    with pytest.raises(CompensationRefusedError) as raised:
+        await _orchestrator(
+            FakeUnitOfWork(tx), provider
+        ).begin_compensating_teardown("fulfillment-1", authorize=lambda _: False)
+
+    assert isinstance(raised.value, FulfillmentConflictError)
+    provider.prepare_teardown.assert_not_called()
+    _assert_nothing_written(tx, record, before)
+
+
+def _nested_metadata():
+    return {
+        "operation": "create",
+        "job_id": "job-1",
+        "target": {"host_id": "host-1", "labels": ["a"]},
+    }
+
+
+def _mutate_nested(candidate):
+    candidate.provider_metadata["target"]["host_id"] = "host-2"
+    candidate.provider_metadata["target"]["labels"].append("b")
+
+
+@pytest.mark.asyncio
+async def test_a_refusing_authorize_cannot_change_the_records_nested_metadata():
+    record = _failed_record(provider_metadata=_nested_metadata())
+    tx = FakeTransaction(record)
+    provider = _provider()
+
+    def authorize(candidate):
+        _mutate_nested(candidate)
+        return False
+
+    with pytest.raises(CompensationRefusedError):
+        await _orchestrator(
+            FakeUnitOfWork(tx), provider
+        ).begin_compensating_teardown("fulfillment-1", authorize=authorize)
+
+    assert record.provider_metadata == _nested_metadata()
+    assert record.state == SettlementRecordState.failed.value
+    assert record.failure_reason == "provider_reported_failure"
+    assert record.prepared_teardown_operation is None
+    assert not hasattr(tx, "compensation_prepared")
+    provider.prepare_teardown.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_an_authorizing_callbacks_nested_mutation_never_reaches_preparation():
+    record = _failed_record(provider_metadata=_nested_metadata())
+    provider = _provider()
+
+    def authorize(candidate):
+        _mutate_nested(candidate)
+        return True
+
+    await _orchestrator(
+        FakeUnitOfWork(FakeTransaction(record)), provider
+    ).begin_compensating_teardown("fulfillment-1", authorize=authorize)
+
+    assert record.provider_metadata == _nested_metadata()
+    settlement_result = provider.prepare_teardown.call_args.args[0]
+    assert settlement_result.provider_metadata == _nested_metadata()
+
+
+@pytest.mark.asyncio
+async def test_compensating_teardown_the_provider_cannot_prepare_is_refused():
+    record = _failed_record()
+    before = dict(vars(record))
+    tx = FakeTransaction(record)
+    provider = _provider()
+    provider.prepare_teardown.side_effect = ProviderConfigInvalidError(
+        "create job job-1 not found"
+    )
+
+    with pytest.raises(CompensationRefusedError, match="create job job-1 not found"):
+        await _orchestrator(
+            FakeUnitOfWork(tx), provider
+        ).begin_compensating_teardown("fulfillment-1", authorize=_authorize_all)
+
+    _assert_nothing_written(tx, record, before)
+
+
+@pytest.mark.asyncio
+async def test_compensating_teardown_propagates_any_other_preparation_error():
+    record = _failed_record()
+    before = dict(vars(record))
+    tx = FakeTransaction(record)
+    provider = _provider()
+    provider.prepare_teardown.side_effect = ProviderUnavailableError("job store down")
+
+    with pytest.raises(ProviderUnavailableError):
+        await _orchestrator(
+            FakeUnitOfWork(tx), provider
+        ).begin_compensating_teardown("fulfillment-1", authorize=_authorize_all)
+
+    _assert_nothing_written(tx, record, before)
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        SettlementRecordState.teardown_dispatch_pending.value,
+        SettlementRecordState.tearing_down.value,
+        SettlementRecordState.torn_down.value,
+        SettlementRecordState.teardown_failed.value,
+    ],
+)
+@pytest.mark.asyncio
+async def test_compensating_teardown_adopts_a_begun_teardown(state):
+    record = _failed_record(state=state, failure_reason=CREATE_COMPENSATION)
+    before = dict(vars(record))
+    tx = FakeTransaction(record)
+    provider = _provider()
+    authorize = MagicMock(return_value=True)
+
+    acceptance = await _orchestrator(
+        FakeUnitOfWork(tx), provider
+    ).begin_compensating_teardown("fulfillment-1", authorize=authorize)
+
+    assert acceptance.state == state
+    authorize.assert_not_called()
+    provider.prepare_teardown.assert_not_called()
+    _assert_nothing_written(tx, record, before)
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        SettlementRecordState.assigned.value,
+        SettlementRecordState.dispatch_pending.value,
+        SettlementRecordState.dispatching.value,
+        SettlementRecordState.active.value,
+        SettlementRecordState.abandoned.value,
+    ],
+)
+@pytest.mark.asyncio
+async def test_compensating_teardown_refuses_any_other_state(state):
+    record = _failed_record(state=state)
+    before = dict(vars(record))
+    tx = FakeTransaction(record)
+    provider = _provider()
+    authorize = MagicMock(return_value=True)
+
+    with pytest.raises(FulfillmentConflictError) as raised:
+        await _orchestrator(
+            FakeUnitOfWork(tx), provider
+        ).begin_compensating_teardown("fulfillment-1", authorize=authorize)
+
+    assert not isinstance(raised.value, CompensationRefusedError)
+    authorize.assert_not_called()
+    provider.prepare_teardown.assert_not_called()
+    _assert_nothing_written(tx, record, before)
+
+
+@pytest.mark.asyncio
+async def test_compensating_teardown_unknown_id_raises_not_found():
+    uow = FakeUnitOfWork(FakeTransaction(_failed_record()))
+
+    with pytest.raises(SettlementEntityNotFoundError):
+        await _orchestrator(uow, _provider()).begin_compensating_teardown(
+            "no-such-fulfillment", authorize=_authorize_all
+        )
+
+
 @pytest.mark.asyncio
 async def test_get_fulfillment_result_active_state_includes_provisioned_resources_and_credentials():
     record = _record(
@@ -541,8 +818,6 @@ async def test_get_fulfillment_result_unknown_id_raises_not_found():
 
 @pytest.mark.asyncio
 async def test_get_fulfillment_result_credential_fetch_failure_is_distinct_from_workload_failure():
-    from market_fulfillment import CredentialFetchFailedError
-
     record = _record(state=SettlementRecordState.active.value)
     tx = FakeTransaction(record, provisioned_resources=[_provisioned_resource()])
     provider = _provider()
@@ -564,8 +839,6 @@ async def test_get_fulfillment_result_unexpected_provider_exception_is_wrapped_n
     CredentialFetchFailedError) still rejects the whole result as
     credential_fetch_failed, rather than leaking a raw provider-internal
     exception type to the caller."""
-    from market_fulfillment import CredentialFetchFailedError
-
     record = _record(state=SettlementRecordState.active.value)
     tx = FakeTransaction(record, provisioned_resources=[_provisioned_resource()])
     provider = _provider()
@@ -743,233 +1016,55 @@ async def test_recoverable_dispatch_failure_remains_pending(caplog):
     assert "dispatch failed after durable acceptance" in caplog.text.lower()
 
 
-def test_independent_sessions_serialize_fulfillment_acceptance_deterministically(tmp_path):
-    """A controlled transaction barrier proves SQLite writer serialization
-    for fulfillment acceptance without relying on an uncontrolled race or
-    elapsed-time ordering -- mirrors test_scheduler.py's
-    ``test_independent_sessions_serialize_cursor_updates_deterministically``
-    for ``SchedulingUnitOfWork``.
-    """
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Event, Lock
+# ---------------------------------------------------------------------------
+# The provider's create-job handle reaches the reservation
+#
+# The field was plumbed end to end with a `None` default at every hop and no
+# VM supplier, so the VM path left it null while bare metal filled it -- a
+# parameter with a default and no caller is invisible to tests of either side.
+# ---------------------------------------------------------------------------
 
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from market_fulfillment.db import Base as FulfillmentBase
-    from market_fulfillment.fulfillment_persistence import (
-        SqlAlchemyFulfillmentTransaction,
-        SqlAlchemyFulfillmentUnitOfWork,
-    )
-    from market_fulfillment.settlement_repository import SettlementRepository
-    from market_fulfillment.settlement_types import (
-        SettlementRequirement,
-        SettlementResource,
-    )
-    from market_resource_pools import PoolCreate, ResourcePoolService
-    from market_resource_pools.db import Base as PoolsBase
-
-    class _Handler:
-        provider = "ansible"
-
-        def validate_config(self, config):
-            return dict(config)
-
-        def validate_config_problems(self, config):
-            return dict(config), ()
-
-        def read_config(self, db, pool_id):
-            return {}
-
-        def replace_config(self, db, pool_id, config):
-            pass
-
-        def delete_config(self, db, pool_id):
-            pass
-
-    database = tmp_path / "fulfillment.db"
-    engine = create_engine(
-        f"sqlite:///{database}",
-        connect_args={"check_same_thread": False, "timeout": 5},
-    )
-    PoolsBase.metadata.create_all(bind=engine)
-    FulfillmentBase.metadata.create_all(bind=engine)
-    factory = sessionmaker(bind=engine)
-    pools = ResourcePoolService(factory, {"ansible": _Handler()})
-    pools.create_pool(
-        PoolCreate(
-            id="pool-a",
-            label="pool-a",
-            provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
-            provider_config={},
-        )
-    )
-
-    repo = SettlementRepository()
-    with factory() as db:
-        for capacity_reservation_id, resource_id in (("cr-1", "r1"), ("cr-2", "r2")):
-            repo.schedule(
-                db,
-                capacity_reservation_id=capacity_reservation_id,
-                market="vms",
-                scheduling_requirements=SettlementRequirement(
-                    executor_kind="vm",
-                    resource_kind="vm", dimensions={"gpu_count": 1}
-                ),
-                resource=SettlementResource(
-                    settlement_resource_id=resource_id,
-                    executor_kind="vm",
-                    pool_id="pool-a",
-                    resource_kind="vm",
-                    provider="ansible",
-                ),
-            )
-        db.commit()
-
-    accept_persisted = Event()
-    allow_first_commit = Event()
-    second_transaction_attempted = Event()
-    second_transaction_opened = Event()
-    ordinal_lock = Lock()
-    next_ordinal = 0
-
-    class PausingTransaction(SqlAlchemyFulfillmentTransaction):
-        def __init__(self, *args, **kwargs):
-            nonlocal next_ordinal
-            super().__init__(*args, **kwargs)
-            with ordinal_lock:
-                next_ordinal += 1
-                self.ordinal = next_ordinal
-
-        def accept(self, *args, **kwargs):
-            result = super().accept(*args, **kwargs)
-            if self.ordinal == 2:
-                # Reaching here means this session's BEGIN IMMEDIATE (issued
-                # inside accept_fulfillment) actually completed -- only
-                # possible once the first session released the writer slot.
-                second_transaction_opened.set()
-            return result
-
-        def persist_prepared_create(self, *args, **kwargs):
-            result = super().persist_prepared_create(*args, **kwargs)
-            if self.ordinal == 1:
-                # Force the write to SQL before exposing the barrier, so the
-                # held SQLite writer slot is observable rather than relying
-                # on SQLAlchemy's deferred flush behavior.
-                self.db.flush()
-                accept_persisted.set()
-                assert allow_first_commit.wait(timeout=5)
-            return result
-
-    class ObservedUnitOfWork(SqlAlchemyFulfillmentUnitOfWork):
-        def transaction(self):
-            # The first call is already paused when the second begin_fulfillment
-            # call starts, so this event identifies the second attempt.
-            if accept_persisted.is_set():
-                second_transaction_attempted.set()
-            return super().transaction()
-
-    uow = ObservedUnitOfWork(
-        factory, pools, repository=repo, transaction_type=PausingTransaction
-    )
-    provider = _provider()
-    orchestrator = _orchestrator(uow, provider)
-
-    def _begin(capacity_reservation_id: str):
-        return asyncio.run(
-            orchestrator.begin_fulfillment(capacity_reservation_id, "vms", _request())
-        )
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        first_future = executor.submit(_begin, "cr-1")
-        assert accept_persisted.wait(timeout=5)
-        second_future = executor.submit(_begin, "cr-2")
-        assert second_transaction_attempted.wait(timeout=5)
-        assert not second_transaction_opened.is_set()
-        allow_first_commit.set()
-        first = first_future.result(timeout=5)
-        second = second_future.result(timeout=5)
-
-    assert second_transaction_opened.is_set()
-    assert {first.capacity_reservation_id, second.capacity_reservation_id} == {
-        "cr-1",
-        "cr-2",
-    }
-    assert first.state == second.state == SettlementRecordState.dispatching.value
 
 @pytest.mark.asyncio
-async def test_fresh_service_composition_reads_status_and_result_from_same_file_database(tmp_path):
-    """A new composition reconstructs status/result reads from durable state only."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from market_fulfillment.db import (
-        Base as FulfillmentBase,
-        ProvisionedResource,
-        SettlementRecord,
-    )
-    from market_fulfillment.fulfillment_persistence import (
-        SqlAlchemyFulfillmentUnitOfWork,
-    )
-
-    database = tmp_path / "fulfillment-result-restart.db"
-    database_url = f"sqlite:///{database}"
-
-    first_engine = create_engine(database_url)
-    FulfillmentBase.metadata.create_all(bind=first_engine)
-    first_factory = sessionmaker(bind=first_engine)
-    with first_factory() as db:
-        db.add(
-            SettlementRecord(
-                capacity_reservation_id="reservation-restart-1",
-                fulfillment_id="fulfillment-restart-1",
-                market="vms",
-                scheduling_requirements={"resource_kind": "vm"},
-                settlement_resource_id="host-1",
-                pool_id="pool-1",
-                provider="ansible",
-                resource_attributes={"vm_host": "host-1"},
-                fulfillment_request=_request().model_dump(mode="json"),
-                provider_metadata={"current_job_id": "job-restart-1"},
-                state=SettlementRecordState.active.value,
-            )
-        )
-        db.add(
-            ProvisionedResource(
-                provisioned_resource_id="provisioned-restart-1",
-                capacity_reservation_id="reservation-restart-1",
-                fulfillment_id="fulfillment-restart-1",
-                status="active",
-            )
-        )
-        db.commit()
-    first_engine.dispose()
-
-    second_engine = create_engine(database_url)
-    second_factory = sessionmaker(bind=second_engine)
+async def test_dispatch_attaches_the_providers_create_job_handle():
+    acceptance_tx = FakeTransaction(_record())
+    acknowledgement_tx = FakeTransaction(acceptance_tx.record)
     provider = _provider()
-    restarted = FulfillmentOrchestrator(
-        provider_registry=ProviderRegistry({"ansible": provider}),
-        unit_of_work=SqlAlchemyFulfillmentUnitOfWork(
-            session_factory=second_factory,
-            pool_service=MagicMock(),
-        ),
+    provider.resolve_executor_job_id.return_value = "ansible-job-7"
+
+    await _orchestrator(
+        FakeUnitOfWork(acceptance_tx, acknowledgement_tx), provider
+    ).begin_fulfillment("reservation-1", "compute", _request())
+
+    # Same transaction as the acknowledgement: a reservation must not
+    # reference a create the settlement row does not also record.
+    assert acknowledgement_tx.attached_jobs == [
+        ("reservation-1", "ansible-job-7")
+    ]
+    # Resolved from the metadata the provider returned at dispatch.
+    provider.resolve_executor_job_id.assert_called_once_with(
+        acknowledgement_tx.acknowledged[0]
     )
 
-    status = restarted.get_fulfillment_status("fulfillment-restart-1")
-    result = await restarted.get_fulfillment_result("fulfillment-restart-1")
 
-    assert status.fulfillment_id == "fulfillment-restart-1"
-    assert status.capacity_reservation_id == "reservation-restart-1"
-    assert status.state == SettlementRecordState.active.value
-    assert result.payload["fulfillment_id"] == "fulfillment-restart-1"
-    assert result.payload["provisioned_resources"] == [
-        {
-            "provisioned_resource_id": "provisioned-restart-1",
-            "status": "active",
-        }
-    ]
-    provider.fetch_credentials.assert_awaited_once()
-    second_engine.dispose()
+@pytest.mark.asyncio
+async def test_a_provider_without_a_job_handle_attaches_nothing():
+    """`None` is a legitimate answer, not a missing implementation.
+
+    Asserted so the orchestrator never attaches a falsy placeholder: a
+    reservation carrying an empty job reference is worse than one carrying
+    none, because it reads as a handle an operator can look up.
+    """
+    acceptance_tx = FakeTransaction(_record())
+    acknowledgement_tx = FakeTransaction(acceptance_tx.record)
+    provider = _provider()
+    provider.resolve_executor_job_id.return_value = None
+
+    await _orchestrator(
+        FakeUnitOfWork(acceptance_tx, acknowledgement_tx), provider
+    ).begin_fulfillment("reservation-1", "compute", _request())
+
+    assert acknowledgement_tx.acknowledged, (
+        "dispatch did not complete, so this proves nothing"
+    )
+    assert acknowledgement_tx.attached_jobs == []

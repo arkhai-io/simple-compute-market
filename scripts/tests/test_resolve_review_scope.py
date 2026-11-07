@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from pathlib import Path
 import subprocess
 import sys
-
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESOLVER = REPO_ROOT / "scripts" / "resolve-review-scope.py"
@@ -75,7 +74,6 @@ def test_identity_change_expands_to_every_runtime_and_deployment_consumer() -> N
 
     assert set(payload["validation_projects"]) >= {
         "kit/identity",
-        "kit/hosted-settlement",
         "kit/settlement-runtime",
         "kit/config",
         "kit/policy",
@@ -100,7 +98,7 @@ def test_identity_change_expands_to_every_runtime_and_deployment_consumer() -> N
         "e2e-tests",
     }
     assert "dist-identity" in payload["dist_targets"]
-    assert "dist-hosted-client" in payload["dist_targets"]
+    assert "dist-kits" in payload["dist_targets"]
     assert "dist-storefront-client" in payload["dist_targets"]
     assert "dist-arkhai-core-registry" in payload["dist_targets"]
 
@@ -111,9 +109,30 @@ def test_settlement_deployment_change_selects_full_wheelhouse_scope() -> None:
     assert selected >= {
         "kit/config",
         "kit/settlement-runtime",
-        "kit/hosted-settlement",
         "kit/alkahest",
         "core/buyer",
         "domains/vms/buyer",
         "domains/vms/storefront",
     }
+
+
+def test_every_project_and_test_root_the_resolver_names_exists() -> None:
+    """A moved project or test directory must move in the manifest too.
+
+    The resolver reports these paths to the review environment, which runs
+    each test root; a stale one silently skips that project's tests.
+    """
+    missing = [
+        path
+        for project in resolver.PROJECTS.values()
+        for path in (project.path, *project.tests)
+        if not (REPO_ROOT / path).is_dir()
+    ]
+
+    assert missing == []
+
+
+def test_the_api_credits_service_is_reviewed_across_both_test_tiers() -> None:
+    project = resolver.PROJECTS["domains/apicredits/service"]
+
+    assert project.tests == ("domains/apicredits/service/tests",)

@@ -1,4 +1,4 @@
-"""Secret-free bare-metal buyer configuration and trusted client composition."""
+"""Secret-free bare-metal buyer configuration."""
 
 from __future__ import annotations
 
@@ -7,14 +7,11 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from core_buyer import (
-    ResolvedBuyerIdentity,
-    resolve_fresh_buyer_identity,
-    resolve_recovery_buyer_identity,
-)
+from market_arkhai_payments import ArkhaiPaymentsConfig
+from market_arkhai_payments.models import AccountId
 from market_identity import Identity, TrustedIdentitySet
+from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry, dispute_config
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from registry_client import SyncRegistryClient
 
 _CONFIG_ENV = "BARE_METAL_BUYER_CONFIG"
 
@@ -30,6 +27,17 @@ class BareMetalBuyerConfig(BaseModel):
     default_duration_seconds: int = Field(default=3600, gt=0)
     default_max_rounds: int = Field(default=10, ge=1, le=100)
     timeout_seconds: float = Field(default=30.0, gt=0.0, le=600.0)
+    payer_account: str | None = None
+    arkhai_payments: ArkhaiPaymentsConfig | None = None
+    disputes: DisputeConfig = Field(default_factory=DisputeConfig)
+    dispute_authorities_by_registry: dict[str, tuple[DisputeEntry, ...]] = Field(default_factory=dict)
+
+    @field_validator("payer_account")
+    @classmethod
+    def validate_payer_account(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return AccountId.model_validate(value).root
 
     @field_validator("registry_url")
     @classmethod
@@ -69,35 +77,8 @@ def load_bare_metal_buyer_config(
     if not isinstance(section, dict):
         raise ValueError("bare-metal buyer config requires [bare_metal]")
     section = dict(section)
+    section["disputes"] = dispute_config(payload, role="buyer")
     principals = section.get("registry_principals")
     if isinstance(principals, list):
         section["registry_principals"] = tuple(principals)
     return BareMetalBuyerConfig.model_validate(section)
-
-
-def fresh_identity() -> ResolvedBuyerIdentity:
-    """Resolve the active profile signer for new buyer work."""
-
-    return resolve_fresh_buyer_identity()
-
-
-def recovery_identity(run_id: str) -> ResolvedBuyerIdentity:
-    """Resolve the exact retained signer recorded for one run."""
-
-    return resolve_recovery_buyer_identity(run_id)
-
-
-def registry_client(
-    config: BareMetalBuyerConfig,
-    identity: ResolvedBuyerIdentity,
-) -> SyncRegistryClient:
-    """Create a signed registry client without accepting secrets in domain config."""
-
-    return SyncRegistryClient(
-        config.registry_url,
-        timeout=config.timeout_seconds,
-        signer=identity.signer,
-        caller_role="buyer",
-        expected_registries=config.registry_trust,
-        registry_authority=config.registry_authority,
-    )

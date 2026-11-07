@@ -1,0 +1,181 @@
+"""Ansible INI inventories as an input format for the host registry.
+
+Every host entry in an inventory given to the provisioning service is a host
+to register, under whatever section it is listed: the section names are the
+file's Ansible syntax and mean nothing to the host registry, and a host's pool
+is the one its entry states, never its section. Parsing turns
+each entry into an ``InventoryHost`` with an ``ssh`` connection the host
+authority applies; the authority, not this module, decides what applying means.
+
+The file given to the service lists only the execution hosts to register;
+registering a host declares none of its capacity. Infrastructure an operator
+manages with Ansible (relay proxies, the provisioning servers themselves)
+belongs in a separate file of the same inventory directory, which the service
+is not given.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from pathlib import Path
+from typing import Literal
+
+from compute_provisioning.hosts.service import POOL_UNSTATED, InventoryHost
+
+from .connection import ssh_connection
+
+logger = logging.getLogger(__name__)
+
+# The key an entry uses when it names no ansible_ssh_private_key_file.
+DEFAULT_KEY_PATH = "/home/appuser/.ssh/id_ed25519"
+
+
+def parse_inventory_ini(
+    ini_text: str,
+    *,
+    key_material: Literal["path", "embedded"] = "path",
+    read_key: Callable[[str], str] = lambda path: Path(path).read_text(encoding="utf-8"),
+) -> list[InventoryHost]:
+    """The hosts an INI inventory declares, each with an ``ssh`` connection.
+
+    With ``key_material="path"`` an entry's key file is referenced by path; with
+    ``"embedded"`` it is read and submitted as the connection's private key,
+    which the ``ssh`` codec protects before anything is stored.
+    """
+
+    hosts: list[InventoryHost] = []
+    for entry in _parse_entries(ini_text):
+        key_file = entry["ansible_ssh_private_key_file"]
+        connection = ssh_connection(
+            ssh_host=entry["ssh_host"],
+            ssh_user=entry["ssh_user"],
+            ssh_port=entry["ssh_port"],
+            public_host=entry["public_host"],
+            public_port=entry["public_port"],
+            key_path=key_file if key_material == "path" else None,
+            private_key=read_key(key_file) if key_material == "embedded" else None,
+        )
+        hosts.append(
+            InventoryHost(
+                host_id=entry["host_id"],
+                connection=connection,
+                pool_id=entry["pool_id"],
+            )
+        )
+    return hosts
+
+
+def _parse_entries(ini_text: str) -> list[dict]:
+    """Parse an Ansible INI inventory block into a list of host dicts.
+
+    Every host entry is imported, under any section or none. A
+    ``[group:vars]`` section holds variables and a ``[group:children]``
+    section names groups; neither lists hosts, and both are skipped.
+
+    Returns a list of ``{"host_id", "ssh_host", "public_host", "ssh_user",
+    "ssh_port", "public_port", "pool_id", "ansible_ssh_private_key_file"}``
+    dicts. Entries missing ``ansible_host`` or ``ansible_user`` are skipped
+    with a warning.
+
+    Variable mapping:
+        ``ansible_port=``                 → ``ssh_port`` (int, default 22)
+        ``public_host=``                  → ``public_host`` (tenant-facing addr)
+        ``public_port=``                  → ``public_port`` (tenant-facing port, int)
+        ``ansible_ssh_private_key_file=`` → preserved verbatim
+        ``pool_id=<id>``                  → the Resource Pool to place the host in
+        ``pool_id=`` (empty)              → ``None``: unplace the host
+        no ``pool_id``                    → ``POOL_UNSTATED``: the pool is left as it is
+        All other variables              → ignored
+    """
+    results = []
+    in_host_section = True
+
+    for line in ini_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if stripped.startswith("["):
+            in_host_section = ":" not in stripped
+            continue
+
+        if not in_host_section:
+            continue
+
+        parts = stripped.split()
+        name = parts[0]
+
+        host_vars: dict[str, str] = {}
+        for part in parts[1:]:
+            if "=" in part:
+                k, _, v = part.partition("=")
+                host_vars[k] = v
+
+        ssh_host = host_vars.get("ansible_host")
+        ssh_user = host_vars.get("ansible_user")
+
+        if not ssh_host or not ssh_user:
+            logger.warning(
+                "parse_inventory_ini: skipping '%s' — missing ansible_host or ansible_user",
+                name,
+            )
+            continue
+
+        # A malformed ansible_port= or public_port= skips the entry, because
+        # substituting a fallback would turn an operator's typo into a host
+        # that cannot be reached at all — a failure that looks like a network
+        # problem rather than a bad inventory line.
+        malformed = next(
+            (
+                key
+                for key in ("ansible_port", "public_port")
+                if key in host_vars and _port(host_vars[key]) is None
+            ),
+            None,
+        )
+        if malformed is not None:
+            logger.warning(
+                "parse_inventory_ini: skipping '%s' — %s '%s' is not a port number "
+                "between 1 and 65535",
+                name,
+                malformed,
+                host_vars[malformed],
+            )
+            continue
+        ssh_port = _port(host_vars["ansible_port"]) if "ansible_port" in host_vars else 22
+        public_port = _port(host_vars["public_port"]) if "public_port" in host_vars else None
+
+        results.append({
+            "host_id": name,
+            "ssh_host": ssh_host,
+            "public_host": host_vars.get("public_host"),
+            "ssh_user": ssh_user,
+            "ssh_port": ssh_port,
+            "public_port": public_port,
+            # A non-empty pool_id= names a pool, an empty one unplaces the
+            # host, and no pool_id says nothing: an existing host stays where
+            # it is, so an older inventory never unplaces it.
+            "pool_id": (
+                POOL_UNSTATED
+                if "pool_id" not in host_vars
+                else host_vars["pool_id"] or None
+            ),
+            "ansible_ssh_private_key_file": host_vars.get(
+                "ansible_ssh_private_key_file", DEFAULT_KEY_PATH
+            ),
+        })
+
+    return results
+
+
+def _port(value: str) -> int | None:
+    """``value`` as a port number, or ``None`` when it is not one."""
+    try:
+        port = int(value)
+    except ValueError:
+        return None
+    return port if 1 <= port <= 65535 else None
+
+
+__all__ = ["DEFAULT_KEY_PATH", "parse_inventory_ini"]

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import tomllib
+
+import pytest
 
 
 def test_config_path_file_exists(monkeypatch, tmp_path, runner, app):
@@ -30,11 +33,23 @@ def test_config_path_file_missing(monkeypatch, tmp_path, runner, app):
     assert "not present" in result.output or "init-user" in result.output
 
 
-def test_config_show_file_missing(monkeypatch, tmp_path, runner, app):
-    import market_storefront.groups.config as config_group
+_LAYER_NAMES = {
+    "storefront_toml": "storefront.toml",
+    "storefront_json": "storefront.json",
+    "storefront_secrets_toml": "storefront.secrets.toml",
+}
 
-    cfg = tmp_path / "storefront.toml"
-    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
+
+def _layers(tmp_path, **files: str):
+    directory = tmp_path / "arkhai"
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, text in files.items():
+        (directory / _LAYER_NAMES[name]).write_text(text)
+    return directory
+
+
+def test_config_show_reports_no_layer(monkeypatch, tmp_path, runner, app):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
 
     result = runner.invoke(app, ["config", "show"])
 
@@ -42,31 +57,56 @@ def test_config_show_file_missing(monkeypatch, tmp_path, runner, app):
     assert "No storefront config" in result.output
 
 
-def test_config_show_raw(monkeypatch, tmp_path, runner, app):
-    import market_storefront.groups.config as config_group
-
-    cfg = tmp_path / "storefront.toml"
-    cfg.write_text("port = 8001\n")
-    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
-
-    result = runner.invoke(app, ["config", "show", "--raw"])
-
-    assert result.exit_code == 0
-    assert "port = 8001" in result.output
-
-
-def test_config_show_json(monkeypatch, tmp_path, runner, app):
-    import market_storefront.groups.config as config_group
-
-    cfg = tmp_path / "storefront.toml"
-    cfg.write_text("port = 8001\n")
-    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
-    monkeypatch.setattr(config_group, "load_storefront_config", lambda: {"port": 8001})
+def test_config_show_merges_rendered_layers_without_a_toml(
+    monkeypatch, tmp_path, runner, app
+):
+    """A chart-deployed pod has the rendered JSON and the overlay, and no TOML."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _layers(
+        tmp_path,
+        storefront_json='{"port": 8001, "Chains": {"anvil": {"chain_id": 31337}}}',
+        storefront_secrets_toml='[chains.anvil]\nrpc_url = "http://anvil:8545"\n',
+    )
 
     result = runner.invoke(app, ["config", "show"])
 
     assert result.exit_code == 0
-    assert json.loads(result.output)["port"] == 8001
+    assert json.loads(result.output) == {
+        "chains": {"anvil": {"chain_id": 31337, "rpc_url": "http://anvil:8545"}},
+        "port": 8001,
+    }
+
+
+def test_config_show_raw_prints_public_layers_and_never_the_overlay(
+    monkeypatch, tmp_path, runner, app
+):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    directory = _layers(
+        tmp_path,
+        storefront_toml="port = 8000\n",
+        storefront_json='{"port": 8001}',
+        storefront_secrets_toml='[wallet]\nprivate_key = "0xsecret"\n',
+    )
+
+    result = runner.invoke(app, ["config", "show", "--raw"])
+
+    assert result.exit_code == 0
+    toml_at = result.output.index(f"# {directory / 'storefront.toml'}")
+    json_at = result.output.index(f"# {directory / 'storefront.json'}")
+    assert toml_at < json_at
+    assert "port = 8000" in result.output and '{"port": 8001}' in result.output
+    assert "storefront.secrets.toml" not in result.output
+    assert "0xsecret" not in result.output
+
+
+def test_config_show_raw_without_public_layer(monkeypatch, tmp_path, runner, app):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _layers(tmp_path, storefront_secrets_toml='[wallet]\nprivate_key = "0xsecret"\n')
+
+    result = runner.invoke(app, ["config", "show", "--raw"])
+
+    assert result.exit_code == 1
+    assert "0xsecret" not in result.output
 
 
 def test_config_get_key_found_scalar(monkeypatch, runner, app):
@@ -195,49 +235,20 @@ def test_config_init_user_new_file(monkeypatch, tmp_path, runner, app):
     assert "# settlements = [" in cfg.read_text()
 
 
-def test_config_migrate_registers_settlement_check(monkeypatch, tmp_path, runner, app):
-    from market_config.settlement_migration import (
-        MigrationAction,
-        SettlementMigrationResult,
-    )
+def test_config_init_user_states_no_provisioning_mode(monkeypatch, tmp_path, runner, app):
+    """Nothing reads a provisioning mode: whether delivery is mocked is the
+    provisioning service's to decide, so the template offers none."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
 
-    import market_storefront.groups.config as config_group
-
-    cfg = tmp_path / "storefront.toml"
-    cfg.write_text("[hosted_settlement]\nenabled = true\n")
-    captured = {}
-
-    def migrate(path, **kwargs):
-        captured.update(kwargs)
-        return SettlementMigrationResult(
-            path=path,
-            changed=True,
-            written=False,
-            actions=(
-                MigrationAction(
-                    "move",
-                    "hosted_settlement.enabled",
-                    "Settlement.stripe.enabled",
-                ),
-            ),
-        )
-
-    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
-    monkeypatch.setattr(config_group, "migrate_settlement_config", migrate)
-
-    result = runner.invoke(
-        app,
-        ["config", "migrate", "--scope", "settlement", "--check"],
-    )
+    result = runner.invoke(app, ["config", "init-user"])
 
     assert result.exit_code == 0
-    assert captured["role"] == "seller"
-    assert captured["check"] is True
-    assert captured["write"] is False
-    assert captured["backup"] is False
-    assert callable(captured["validator"])
-    assert "value redacted" in result.output
-    assert "Settlement.stripe.enabled" in result.output
+    written = (tmp_path / "arkhai" / "storefront.toml").read_text()
+    section = written.split("\n[provisioning]\n", 1)[1].split("\n[", 1)[0]
+    assert "service_url" in section
+    assert not [
+        line for line in section.splitlines() if line.lstrip("# ").startswith("mode")
+    ]
 
 
 def test_config_set_rejects_legacy_path_with_exact_migration_command(
@@ -262,3 +273,173 @@ def test_config_set_rejects_legacy_path_with_exact_migration_command(
 
     assert result.exit_code == 2
     assert STOREFRONT_MIGRATION_COMMAND in result.output
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "resources_csv_path",
+        "RESOURCES_CSV_INLINE",
+        "Escrow_Templates.usdc.chain_name",
+        "capacity.Use_Site_Projection_For_Listings",
+    ],
+)
+def test_config_set_refuses_a_retired_inventory_key_naming_the_upgrade_guide(
+    monkeypatch, runner, app, key
+):
+    import market_storefront.groups.config as config_group
+
+    monkeypatch.setattr(
+        config_group,
+        "write_user_config",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("retired edit reached writer")
+        ),
+    )
+
+    result = runner.invoke(app, ["config", "set", key, "x"])
+
+    assert result.exit_code == 2
+    assert "was removed" in result.output
+    assert "Upgrading from CSV inventory" in result.output
+
+
+@pytest.mark.parametrize(
+    ("key", "named"),
+    [
+        (
+            "claims_sweep_interval",
+            "claims_sweep_interval was renamed settlement_servicing_interval_seconds",
+        ),
+        ("CLAIMS_SWEEP_INTERVAL", "settlement_servicing_interval_seconds"),
+        ("enable_registry_discovery", "enable_registry_discovery was removed"),
+        ("provisioning.identity.principals", "provisioning.identity was removed"),
+        (
+            "provisioning.fail_on_unreachable",
+            "provisioning.fail_on_unreachable was removed",
+        ),
+        (
+            "PROVISIONING.FAIL_ON_UNREACHABLE",
+            "provisioning.fail_on_unreachable was removed",
+        ),
+        ("provisioning.preflight_timeout", "provisioning.preflight_timeout was removed"),
+        ("Provisioning.Preflight_Timeout", "provisioning.preflight_timeout was removed"),
+    ],
+)
+def test_config_set_refuses_a_renamed_or_removed_key_naming_what_replaces_it(
+    monkeypatch, runner, app, key, named
+):
+    import market_storefront.groups.config as config_group
+
+    monkeypatch.setattr(
+        config_group,
+        "write_user_config",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("retired edit reached writer")
+        ),
+    )
+
+    result = runner.invoke(app, ["config", "set", key, "30"])
+
+    assert result.exit_code == 2
+    assert named in result.output
+
+
+def test_config_set_accepts_other_capacity_keys(monkeypatch, tmp_path, runner, app):
+    import market_storefront.groups.config as config_group
+
+    cfg = tmp_path / "storefront.toml"
+    doc: dict = {}
+    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
+    monkeypatch.setattr(config_group, "load_user_config", lambda path: doc)
+    monkeypatch.setattr(config_group, "write_user_config", lambda written, path: path)
+
+    result = runner.invoke(app, ["config", "set", "capacity.poll_interval_seconds", "5"])
+
+    assert result.exit_code == 0, result.output
+    assert doc == {"capacity": {"poll_interval_seconds": 5}}
+
+
+_PAYMENTS_SETTLEMENT = """[Settlement]
+schema_version = 1
+priority = ["arkhai.payments.v1"]
+
+[Settlement.arkhai_payments]
+enabled = true
+service_url = "https://payments.example.test"
+service_identity = { scheme = "ed25519", identifier = "6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM" }
+fee_bps = 250
+api_key_env = "ARKHAI_PAYMENTS_API_KEY"
+"""
+
+
+def test_settlement_migration_accepts_the_installed_payments_mechanism(
+    monkeypatch, tmp_path, runner, app
+):
+    import market_storefront.groups.config as config_group
+
+    cfg = tmp_path / "storefront.toml"
+    cfg.write_text(_PAYMENTS_SETTLEMENT)
+    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
+
+    result = runner.invoke(app, ["config", "migrate", "--scope", "settlement", "--check"])
+
+    assert result.exit_code == 0, result.output
+    assert cfg.read_text() == _PAYMENTS_SETTLEMENT
+
+
+_RETIRED_BOOKS = """[Settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[Settlement.alkahest]
+enabled = true
+address_config_path = "/etc/arkhai/alkahest/anvil.json"
+
+[Chains.anvil]
+rpc_url = "ws://anvil:8545"
+alkahest_address_config_path = "/etc/arkhai/alkahest/anvil.json"
+"""
+
+
+def test_settlement_migration_moves_the_retired_address_book_keys(
+    monkeypatch, tmp_path, runner, app
+):
+    """Spec scenario "A configuration is migrated", through the storefront's
+    `config migrate`: the check reports the moves and writes nothing, and the
+    write moves both keys into the table, keeping a backup."""
+    import market_storefront.groups.config as config_group
+
+    cfg = tmp_path / "storefront.toml"
+    cfg.write_text(_RETIRED_BOOKS)
+    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
+
+    checked = runner.invoke(app, ["config", "migrate", "--scope", "settlement", "--check"])
+    assert checked.exit_code == 0, checked.output
+    assert "Settlement.alkahest.address_books.anvil" in checked.output
+    assert cfg.read_text() == _RETIRED_BOOKS
+
+    written = runner.invoke(
+        app, ["config", "migrate", "--scope", "settlement", "--write", "--backup"]
+    )
+    assert written.exit_code == 0, written.output
+    document = tomllib.loads(cfg.read_text())
+    assert document["Settlement"]["alkahest"]["address_books"] == {
+        "anvil": "/etc/arkhai/alkahest/anvil.json"
+    }
+    assert "address_config_path" not in document["Settlement"]["alkahest"]
+    assert document["Chains"]["anvil"] == {"rpc_url": "ws://anvil:8545"}
+    assert cfg.with_name("storefront.toml.bak").read_text() == _RETIRED_BOOKS
+
+
+def test_settlement_migration_refuses_stripe_with_its_removal(monkeypatch, tmp_path, runner, app):
+    import market_storefront.groups.config as config_group
+
+    cfg = tmp_path / "storefront.toml"
+    cfg.write_text('[Settlement]\nschema_version = 1\npriority = ["fiat.stripe.v1"]\n')
+    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
+
+    result = runner.invoke(app, ["config", "migrate", "--scope", "settlement", "--check"])
+
+    assert result.exit_code != 0
+    assert "was removed" in result.output

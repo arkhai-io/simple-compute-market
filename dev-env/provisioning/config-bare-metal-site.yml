@@ -1,0 +1,29 @@
+# Site profile for the bare-metal lane's selected site, `bare-metal-provisioning`:
+# compose.bare-metal-local.yml binds it into CONFIG_DIRECTORY=/app/config beside
+# the packaged config.yml and config-docker.yml, and loads
+# ACTIVE_PROFILES=docker,bare-metal-site,<mode>.
+#
+# Public development identities (standard Anvil accounts), never for a public
+# network; see dev-env/identities/README.md, "The bare-metal lane". Quoted, so
+# each hex identifier stays a string. A repository test holds them to the signer
+# credential the service mounts (dev-env/identities/provisioning.identity.env)
+# and the runner's `bare_metal_lane` pins in e2e-tests/config/config-docker.yml.
+
+# The site authority's own signer: Anvil 0.
+identity:
+  scheme: "eip191"
+  identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+
+# The storefront the site binds its seller role to: the bare-metal storefront's
+# principal, Anvil 2, as its development storefront.toml states.
+storefront_identity:
+  scheme: "eip191"
+  identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+
+# The exact selected site the storefront's configuration names.
+storefront_site_id: "bare-metal-e2e"
+
+# The site administrator: Anvil 5.
+admin_identity:
+  scheme: "eip191"
+  identifier: "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc"

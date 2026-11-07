@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from market_deal_lifecycle.projections import LIFECYCLE_QUERY_FIELDS
+
 import pytest
 
-from src.api.filter_eval import build_criteria, evaluate_all
-from src.api.filter_spec import load_filter_spec
+from core_registry.api.filter_eval import build_criteria, evaluate_all
+from core_registry.api.filter_spec import load_filter_spec
 
 _PROFILE = Path(__file__).resolve().parents[2] / "filter-spec.introductions.yaml"
 
@@ -21,14 +23,14 @@ def _listing(**overrides) -> dict:
     listing = {
         "listing_id": "intro-1",
         "storefront_url": "https://broker.example",
-        "offer_resource": {"description": "8x H100 blocks, private broker"},
+        "listing_resource": {"description": "8x H100 blocks, private broker"},
         "settlement_options": [
             {
                 "option_id": "aa" * 32,
-                "mechanism": "contact-exchange.v1",
-                "asset": "introduction",
-                "rates": [],
-                "params": {"channel": "telegram", "terms": "prose"},
+                "settlement": {
+                    "schema": "contact-exchange.v1",
+                    **({"channel": "telegram", "terms": "prose"} or {}),
+                },
             }
         ],
     }
@@ -44,19 +46,21 @@ def _match(spec, listing, **params) -> bool:
 def test_profile_loads_with_schema_identity(spec) -> None:
     assert spec.schema_identity is not None
     assert spec.schema_identity.id == "introductions.market"
-    assert {item.name for item in spec.filters} == {"region", "mechanism", "channel"}
+    assert {item.name for item in spec.filters} == {
+        "region", "mechanism", "channel", "option_asset", *LIFECYCLE_QUERY_FIELDS,
+    }
 
 
 def test_sparse_listings_stay_discoverable(spec) -> None:
     sparse = _listing(
-        offer_resource={},
+        listing_resource={},
         settlement_options=[
             {
                 "option_id": "bb" * 32,
-                "mechanism": "contact-exchange.v1",
-                "asset": "introduction",
-                "rates": [],
-                "params": {"terms": "prose only, no stated channel"},
+                "settlement": {
+                    "schema": "contact-exchange.v1",
+                    **({"terms": "prose only, no stated channel"} or {}),
+                },
             }
         ],
     )
@@ -73,4 +77,4 @@ def test_stated_fields_still_filter_exactly(spec) -> None:
 def test_option_projections_reject_stated_mismatches(spec) -> None:
     listing = _listing()
     assert not _match(spec, listing, channel="carrier-pigeon")
-    assert not _match(spec, listing, mechanism="fiat.stripe.v1")
+    assert not _match(spec, listing, mechanism="example.payment.v1")

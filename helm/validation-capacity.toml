@@ -1,0 +1,10 @@
+# The memory one release of the umbrella chart needs, as a change's Helm
+# validation last measured it: the largest of its namespace's sampled usage,
+# recorded from that validation's summary.json. Validation's capacity preflight
+# (scripts/validate_slice.py) compares the namespaces that would then be running,
+# times this figure, with the node's allocatable memory; it is an estimate and
+# reserves nothing. Where two branches' figures conflict at a merge, keep the one
+# whose measured_at is later.
+
+[release]
+# No figure is recorded yet, so the preflight warns that its check was skipped.

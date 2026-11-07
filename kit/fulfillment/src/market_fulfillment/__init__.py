@@ -19,7 +19,6 @@ from .db import (
     SettlementRecord,
     SettlementRecordState,
 )
-from .envelopes import VersionedEnvelope, envelope
 from .ids import (
     derive_provisioned_resource_id,
     new_capacity_reservation_id,
@@ -37,6 +36,7 @@ from .results import (
     build_fulfillment_result_envelope,
 )
 from .provider import (
+    CompensationRefusedError,
     CredentialFetchFailedError,
     FulfillmentConflictError,
     FulfillmentCreateFailedError,
@@ -53,12 +53,18 @@ from .provider import (
     ProviderNotFoundError,
     ProviderOperationState,
     ProviderRegistry,
+    provider_needs_host,
     ProviderStatus,
     ProvisionedResourceDescriptor,
     ProviderUnavailableError,
 )
 from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
-from .fulfillment import FulfillmentAcceptance, FulfillmentOrchestrator, FulfillmentStatus
+from .fulfillment import (
+    CompensationCandidate,
+    FulfillmentAcceptance,
+    FulfillmentOrchestrator,
+    FulfillmentStatus,
+)
 from .fulfillment_persistence import (
     FulfillmentAcceptanceDecision, FulfillmentTransaction, FulfillmentUnitOfWork,
     SqlAlchemyFulfillmentTransaction, SqlAlchemyFulfillmentUnitOfWork,
@@ -83,11 +89,18 @@ from .settlement_types import (
     SettlementRequirement,
     SettlementResource,
 )
-from .transitions import InvalidSettlementTransitionError, validate_transition
+from .transitions import (
+    CREATE_COMPENSATION,
+    InvalidSettlementTransitionError,
+    validate_transition,
+)
 
 __all__ = [
     "Backoff",
     "CapacityReservationExpiredError",
+    "CompensationCandidate",
+    "CompensationRefusedError",
+    "CREATE_COMPENSATION",
     "begin_sqlite_write_transaction",
     "FulfillmentBase",
     "SqlAlchemyFulfillmentUnitOfWork",
@@ -119,6 +132,7 @@ __all__ = [
     "ProviderNotFoundError",
     "ProviderOperationState",
     "ProviderRegistry",
+    "provider_needs_host",
     "ProviderStatus",
     "ProviderUnavailableError",
     "ProvisionedResourceDescriptor",
@@ -148,9 +162,7 @@ __all__ = [
     "SettlementRequirement",
     "SettlementResource",
     "SettlementSchedulingPolicy",
-    "VersionedEnvelope",
     "build_fulfillment_result_envelope",
-    "envelope",
     "derive_provisioned_resource_id",
     "new_capacity_reservation_id",
     "new_fulfillment_id",

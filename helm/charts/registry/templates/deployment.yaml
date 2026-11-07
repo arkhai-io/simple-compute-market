@@ -1,9 +1,20 @@
-{{- $activeIdentity := .Values.global.registryIdentity -}}
-{{- if ne .Values.identity.authority $activeIdentity.authority -}}
-{{- fail "registry identity authority must match global.registryIdentity.authority" -}}
+{{- /*
+  The bootstrap and administrator keys are secret settings, which reach the
+  registry in the profile file of a Secret the deployment supplies, never as a
+  pod variable from a chart-named Secret key.
+*/}}
+{{- $auth := .Values.auth | default dict -}}
+{{- range $key := list "bootstrapKeySecret" "adminKeySecret" -}}
+{{- if (get $auth $key | default dict).name -}}
+{{- fail (printf "registry auth.%s is retired: state the key in a Secret's config-<profile>.env and name it with secretProfile" $key) -}}
 {{- end -}}
-{{- if or (ne .Values.identity.principal.scheme $activeIdentity.principal.scheme) (ne .Values.identity.principal.identifier $activeIdentity.principal.identifier) -}}
-{{- fail "registry identity principal must match global.registryIdentity.principal" -}}
+{{- end -}}
+{{- $secretProfile := .Values.secretProfile | default dict -}}
+{{- if and .Values.config.requireReadApiKey (not .Values.descriptor.accessAcquisitionPointer) -}}
+{{- fail "key-gated registry descriptor requires an access acquisition pointer" -}}
+{{- end -}}
+{{- if and (not .Values.config.requireReadApiKey) .Values.descriptor.accessAcquisitionPointer -}}
+{{- fail "public registry descriptor must not configure an access acquisition pointer" -}}
 {{- end -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -24,6 +35,10 @@ spec:
     metadata:
       labels:
         {{- include "registry.selectorLabels" . | nindent 8 }}
+      annotations:
+        # The settings are in a ConfigMap, which a pod does not reread, so a
+        # release that changes one rolls the pod.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       # fsGroup matches the container's appuser (UID 1000); without it
       # the PVC's mount root is root-owned and SQLite can't write.
@@ -37,68 +52,30 @@ spec:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
+          # Only the resolver variables: every setting is in a profile file under
+          # the configuration directory, and a pod variable would override it.
           env:
-            - name: REGISTRY_AUTHORITY_ID
-              value: {{ required "registry identity authority is required" $activeIdentity.authority | quote }}
-            - name: REGISTRY_AUTHORITY_SCHEME
-              value: {{ required "registry identity principal scheme is required" $activeIdentity.principal.scheme | quote }}
-            - name: REGISTRY_AUTHORITY_IDENTIFIER
-              value: {{ required "registry identity principal identifier is required" $activeIdentity.principal.identifier | quote }}
-            - name: REGISTRY_AUTHORITY_CREDENTIAL_FILE
-              value: /var/run/secrets/arkhai/registry-identity/credential
-            # --- sourced from subchart values ---
-            - name: DATABASE_URL
-              value: {{ .Values.config.databaseUrl | quote }}
-            - name: PORT
-              value: {{ .Values.service.port | quote }}
-            - name: HOST
-              value: {{ .Values.config.host | quote }}
-            - name: ENABLE_HEALTH_CHECKS
-              value: {{ .Values.config.enableHealthChecks | quote }}
-            - name: HEALTH_CHECK_INTERVAL
-              value: {{ .Values.config.healthCheckInterval | quote }}
-            - name: ENDPOINT_CHECK_TIMEOUT
-              value: {{ .Values.config.endpointCheckTimeout | quote }}
-            - name: HEARTBEAT_TTL_SECS
-              value: {{ .Values.config.heartbeatTtlSecs | quote }}
-            - name: LOG_LEVEL
-              value: {{ .Values.config.logLevel | quote }}
-            # ROOT_PATH: gateway path prefix for this service. Used by the
-            # custom OpenAPI function to inject a servers block so Swagger UI
-            # generates correct curl examples behind the API gateway.
-            # Set via ops repo values overlay; empty for local dev.
-            - name: ROOT_PATH
-              value: {{ .Values.config.rootPath | default "" | quote }}
-            - name: REGISTRY_REQUIRE_READ_API_KEY
-              value: {{ .Values.config.requireReadApiKey | default false | quote }}
-            - name: REGISTRY_REQUIRE_WRITE_API_KEY
-              value: {{ .Values.config.requireWriteApiKey | default false | quote }}
-            {{- if ((.Values.auth).bootstrapKeySecret).name }}
-            - name: REGISTRY_BOOTSTRAP_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.auth.bootstrapKeySecret.name | quote }}
-                  key: {{ .Values.auth.bootstrapKeySecret.key | quote }}
-            {{- end }}
-            {{- if ((.Values.auth).adminKeySecret).name }}
-            - name: REGISTRY_ADMIN_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.auth.adminKeySecret.name | quote }}
-                  key: {{ .Values.auth.adminKeySecret.key | quote }}
-            {{- end }}
-            {{- if and ((.Values.global).rpc) ((.Values.global).rpc.enabled) }}
-            # Chain settings are mechanism/indexer inputs, not marketplace
-            # identity. Hosted-only registry profiles omit them completely.
-            - name: CHAIN_ID
-              value: {{ .Values.global.rpc.chainId | quote }}
-            {{- end }}
+            - name: CONFIG_DIRECTORY
+              value: "/app/config"
+            - name: ACTIVE_PROFILES
+              value: {{ include "registry.activeProfiles" . | quote }}
           volumeMounts:
             - name: arkhai-data
               mountPath: {{ .Values.persistence.mountPath | quote }}
             - name: registry-identity
-              mountPath: /var/run/secrets/arkhai/registry-identity
+              mountPath: {{ include "registry.credentialFile" . | dir }}
               readOnly: true
+            - name: config
+              mountPath: /app/config/config-production.env
+              subPath: config-production.env
+              readOnly: true
+            {{- if $secretProfile.secretName }}
+            {{- $profile := include "registry.secretProfileName" . }}
+            - name: secret-profile
+              mountPath: {{ printf "/app/config/config-%s.env" $profile | quote }}
+              subPath: {{ printf "config-%s.env" $profile | quote }}
+              readOnly: true
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /health
@@ -135,7 +112,19 @@ spec:
             secretName: {{ required "registry identity credential Secret name is required" .Values.identity.credentialSecret.name | quote }}
             items:
               - key: {{ required "registry identity credential Secret key is required" .Values.identity.credentialSecret.key | quote }}
-                path: credential
+                path: {{ include "registry.credentialFile" . | base }}
+        - name: config
+          configMap:
+            name: {{ include "registry.configMapName" . | quote }}
+        {{- if $secretProfile.secretName }}
+        {{- $profile := include "registry.secretProfileName" . }}
+        - name: secret-profile
+          secret:
+            secretName: {{ $secretProfile.secretName | quote }}
+            items:
+              - key: {{ printf "config-%s.env" $profile | quote }}
+                path: {{ printf "config-%s.env" $profile | quote }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

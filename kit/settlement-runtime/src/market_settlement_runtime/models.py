@@ -86,6 +86,10 @@ class SettlementOperationRecord(BaseModel):
     lease_owner: str | None = None
     lease_until_unix: float | None = None
     next_attempt_unix: float | None = None
+    #: A pending ``fulfill`` operation released because its delivery is not
+    #: yet ready: due at once, its attempt not counted. Cleared by the next
+    #: reservation.
+    awaiting_delivery: bool = False
 
 
 class SettlementObligationRecord(BaseModel):
@@ -205,6 +209,9 @@ class SettlementOperationOutcome(BaseModel):
     status: Literal["succeeded", "pending", "manual_required", "busy", "terminal"]
     action: dict[str, Any] | None = None
     receipt: dict[str, Any] | None = None
+    # How many times the operation has been reserved, this reservation
+    # included; reported on a pending fulfillment so a step can bound retries.
+    attempts: int | None = None
 
 
 class SettlementPlanStatus(BaseModel):

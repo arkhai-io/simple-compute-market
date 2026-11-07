@@ -1,0 +1,644 @@
+"""The storefront's publication loop: one cycle derives, publishes, and reconciles.
+
+A cycle derives candidates from every configured site's projection, publishes new
+ones, refreshes the terms of open ones, closes those whose source no longer
+supports them, holds those whose source cannot be read, and reopens those
+reconciliation closed when their source supports them again. It never touches a
+listing its seller closed. See openspec/specs/storefront-publication/spec.md,
+"Publication runs as a controllable storefront lifecycle loop".
+
+The capacity-publication kit's cycle driver runs the synchronous core
+publication runner in a worker thread and returns each callback to the event
+loop for the storefront's own async services. A dry run drives exactly the same
+callbacks, which record what they would do instead of doing it, so a preview
+and a run cannot disagree about what a cycle means.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import replace
+from typing import Any, TypeVar
+
+from core_storefront.publication_runner import (
+    REOPEN_UNCHANGED,
+    NoSettlementOption,
+    PublicationPayload,
+)
+from arkhai_vms_listings.listing_comparison import (
+    REFRESH_IN_PLACE,
+    REFUSE,
+    TERM_LISTING_FIELDS,
+    UNCHANGED,
+    compare_listing,
+    refreshed_listing_resource,
+)
+from arkhai_vms_listings.reconciler import (
+    ShapeFeasibility,
+    available_compute_slices,
+    open_listing_resource_keys,
+    ReconciliationScope,
+    site_derivation_entries,
+    stale_open_listing_ids,
+)
+from market_capability_admissibility import Declaration
+from market_capacity_publication import (
+    BoundListing,
+    PublicationCycleDriver,
+    PublicationCycleReport,
+    ReconciliationPlan,
+    RefusedCandidates,
+    SiteDerivationLog,
+    SiteProjectionState,
+    converge_registries,
+)
+from market_resource_pools_contracts.backing import capacity_backing
+
+import market_storefront.container as container
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
+from market_storefront.lifecycle import enter_stage
+from market_storefront.models.listing_models import VmCreateListingRequest
+from market_storefront.publication_binding import vm_candidate_derivation_key
+from market_storefront.publication_wiring import (
+    VmPublicationSourceCallbacks,
+    build_vm_storefront_publication_selection,
+)
+from market_storefront.services.capacity_client import (
+    capacity_binding_for_listing,
+    site_capacity_buckets,
+    site_pool_projection,
+)
+from market_storefront.services.publication_service import (
+    _candidate,
+    _make_registry_client,
+    build_publication_runtime,
+)
+from market_storefront.services.listing_source_check import (
+    stored_listing_resource,
+)
+from market_storefront.services.publication_terms import (
+    compile_publication_clauses,
+    compose_clause_rates,
+    enabled_publication_clauses,
+    listing_resource_for_candidate,
+    normalize_max_duration_seconds,
+    pool_hint_resolution_settings,
+)
+from market_storefront.utils.config import (
+    BASE_URL_OVERRIDE,
+    settings,
+    settlement_publication_defaults,
+    storefront_domain_registry,
+)
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+_DEFAULT_INTERVAL_SECONDS = 30.0
+
+# Set when a site's resource-pool projection generation changes, so a change a
+# site declares reaches the loop without waiting out its interval. A held loop
+# stays held: the controller's timer reads its gate before any work either way.
+_WAKE = asyncio.Event()
+
+
+def wake_publication_loop() -> None:
+    _WAKE.set()
+
+
+def new_publication_wake() -> asyncio.Event:
+    """A fresh wake for a publication timer about to be registered.
+
+    An event is bound to the event loop that first waits on it, so each start
+    of the loops registers its own; `wake_publication_loop` sets whichever is
+    current. A wake raised before the timer starts is not carried over, which
+    loses nothing: the timer's first cycle runs as soon as it starts.
+    """
+    global _WAKE
+    _WAKE = asyncio.Event()
+    return _WAKE
+
+
+def _source_of(candidate: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "site_id": candidate.get("site_id"),
+        "pool_id": candidate.get("pool_id"),
+        "resource_id": candidate.get("resource_id"),
+        "gpu_count": candidate.get("gpu_count"),
+        "capacity_backing": candidate.get("capacity_backing"),
+    }
+
+
+def _derivation_source(candidate: Mapping[str, Any]) -> dict[str, Any]:
+    """Where a candidate's site derivation entry is recorded: its site, pool,
+    Physical Resource where it has one, and shape, at the entry's top level."""
+    return {
+        "site_id": candidate.get("site_id"),
+        "pool_id": candidate.get("pool_id"),
+        "physical_resource_id": candidate.get("resource_id"),
+        "shape_digest": candidate.get("shape_digest"),
+    }
+
+
+def _terms_of(record: Mapping[str, Any]) -> dict[str, Any]:
+    return {name: record.get(name) for name in TERM_LISTING_FIELDS}
+
+
+class VmPublicationCycle:
+    """One publication cycle over the VM source."""
+
+    def __init__(
+        self,
+        *,
+        sqlite_client: Any,
+        listing_service: Any,
+        capacity_runtime: Any,
+        site_projections: SiteProjectionState,
+        registry: Any,
+        storefront_url: str,
+        dry_run: bool,
+        admissibility_default: Declaration | None,
+        shape_feasible: ShapeFeasibility | None = None,
+        enter_stage: Callable[[str], None] | None = None,
+        derivation: SiteDerivationLog | None = None,
+    ) -> None:
+        """``enter_stage`` names each stage the cycle reaches -- ``compose``,
+        ``run``, ``converge`` -- so a failure is recorded in the stage it
+        happened in; the loop controller's, when a cycle runs under it.
+        ``derivation`` receives each configured site's holds and reports once
+        the cycle has derived them."""
+        self._db = sqlite_client
+        self._derivation = derivation
+        self._enter_stage = enter_stage or (lambda _stage: None)
+        self._admissibility_default = admissibility_default
+        self._shape_feasible = shape_feasible or vm_shape_feasibility()
+        self._listings = listing_service
+        self._capacity = capacity_runtime
+        self._site_projections = site_projections
+        self._registry = registry
+        self._storefront_url = storefront_url
+        self.report = PublicationCycleReport(dry_run=dry_run)
+        self._driver = PublicationCycleDriver()
+        self._refusals = RefusedCandidates(
+            self.report,
+            call=self._await,
+            listings=sqlite_client,
+            derivation_key=vm_candidate_derivation_key,
+            derivation_source=_derivation_source,
+            reconciliation_close=self._reconciliation_close,
+        )
+        self._projection: Mapping[str, list[dict[str, Any]]] = {}
+        self._buckets: Mapping[str, list[dict[str, Any]]] | None = None
+        self._availability: Mapping[tuple[str, str], int] | None = None
+        self._sites: tuple[str, ...] = ()
+        self._derived: dict[int, Any] = {}
+
+    @property
+    def dry_run(self) -> bool:
+        return self.report.dry_run
+
+    def _await(self, awaitable: Awaitable[T]) -> T:
+        return self._driver.call(awaitable)
+
+    # -- cycle -----------------------------------------------------------
+
+    async def run(self) -> dict[str, Any]:
+        self._enter_stage("compose")
+        self._sites = tuple(self._capacity.site_ids)
+        if not self._sites:
+            self._enter_stage("converge")
+            await self._converge_registries()
+            return self._report()
+        self._projection = site_pool_projection(self._site_projections)
+        self._buckets = site_capacity_buckets(self._site_projections)
+        try:
+            self._availability = dict(await self._capacity.availability())
+        except Exception as exc:
+            # Unknown availability is not zero: nothing is closed or reopened
+            # on it. New unbacked supply, which no availability bounds, still
+            # publishes, and backed candidates are ranged as fully available
+            # with the reservation boundary deciding authoritatively.
+            logger.warning("[PUBLICATION] capacity availability unavailable: %s", exc)
+            self._availability = None
+        selection = build_vm_storefront_publication_selection(
+            self._registry,
+            VmPublicationSourceCallbacks(
+                open_keys=self._open_keys,
+                close_stale=self._close_stale,
+                available_candidates=self._available_candidates,
+                listing_resource=listing_resource_for_candidate,
+                record_published=self._record_published,
+                reopen_existing=self._reopen_existing,
+                close_candidate_listing=self._refusals.close_candidate_listing,
+            ),
+        )
+        sources = selection.build_sources()
+        self._enter_stage("run")
+        await self._driver.run(
+            sources,
+            db_path=self._db.db_path,
+            base_url=self._storefront_url,
+            build_payload=self._build_payload,
+            publish_listing=self._publish_listing,
+            close_stale=self._availability is not None,
+            skip_open=False,
+        )
+        if self._derivation is not None:
+            self._derivation.record(
+                self._registry.resolve_mode("vm").contribution_id,
+                self.report,
+                self._sites,
+            )
+        self._enter_stage("converge")
+        await self._converge_registries()
+        return self._report()
+
+    async def _converge_registries(self) -> None:
+        """Repair every registry that missed a publish, close, or reopen.
+
+        Runs after derivation so it sees this cycle's own outcomes; a dry run
+        reports what it would resend without sending it.
+        """
+        await converge_registries(self._runtime(), self.report)
+
+    def _report(self) -> dict[str, Any]:
+        return {"loop": "publication", **self.report.as_dict()}
+
+    # -- source callbacks (worker thread) --------------------------------
+
+    def _open_keys(self, db_path: str) -> set[str]:
+        return open_listing_resource_keys(db_path)
+
+    def _available_candidates(self, db_path: str) -> list[dict[str, Any]]:
+        holds: set[tuple[str, str, str]] = set()
+        reports: dict[str, dict[str, Any]] = {}
+        candidates = available_compute_slices(
+            db_path,
+            member_availability=self._availability,
+            site_pool_projection=self._projection,
+            site_capacity_buckets=self._buckets,
+            hint_resolution=pool_hint_resolution_settings(
+                admissibility_default=self._admissibility_default
+            ),
+            holds=holds,
+            shape_feasible=self._shape_feasible,
+            configured_sites=self._sites,
+            reports=reports,
+        )
+        for kind, site_id, _source_id in sorted(holds):
+            if kind == "site":
+                # Unknown, not empty: nothing of this site's is closed or refreshed.
+                self.report.record("hold", site_id=site_id, reason="site_projection_unknown")
+        # Every pool or member hold has its reason in the site's report, which
+        # is recorded whole: what a cycle holds, and what it reports holding
+        # nothing. Every VM listing publishes a region, which only its pool
+        # states. A pool stating none publishes and refreshes nothing; its
+        # candidates still count as present, so source reconciliation does not
+        # close the listings it already published. Its hold comes from the
+        # report rather than from the candidates, because a pool with no
+        # available slice yields no candidate and is held all the same.
+        for site_id in sorted(reports):
+            for action, entry in site_derivation_entries(reports[site_id]):
+                self.report.record(action, site_id=site_id, **entry)
+        return [candidate for candidate in candidates if candidate.get("region") is not None]
+
+    def _close_stale(self, db_path: str, _base_url: str) -> list[str]:
+        stale = stale_open_listing_ids(
+            db_path,
+            configured_sites=self._sites,
+            member_availability=self._availability,
+            site_pool_projection=self._projection,
+            site_capacity_buckets=self._buckets,
+            scope=ReconciliationScope.SOURCE,
+            shape_feasible=self._shape_feasible,
+            admissibility_default=self._admissibility_default,
+        )
+        for listing_id in stale:
+            self.report.record("close", listing_id=listing_id, reason="source_gone")
+        if self.dry_run or not stale:
+            return stale
+        result = self._await(self._reconciliation_close(stale))
+        for listing_id in result["failed_closes"]:
+            self.report.record(
+                "fail", listing_id=listing_id, reason="local_close_failed"
+            )
+        return list(result["closed"])
+
+    async def _reconciliation_close(
+        self, listing_ids: list[str]
+    ) -> dict[str, tuple[str, ...]]:
+        bound = tuple(
+            [
+                BoundListing(
+                    listing_id,
+                    await capacity_binding_for_listing(self._db, listing_id),
+                )
+                for listing_id in listing_ids
+            ]
+        )
+        return await self._runtime().reconcile(ReconciliationPlan(close=bound))
+
+    def _build_payload(
+        self,
+        source: Any,
+        candidate: dict[str, Any],
+        listing_resource: dict[str, Any],
+    ) -> PublicationPayload | NoSettlementOption | str:
+        """The candidate's payload, or its refusal recorded under its site.
+
+        A candidate with no settlement option is refused where configuration
+        rules out every mechanism it could publish, and held while any of them
+        is unknown; the runner then closes or keeps its open listing. A
+        mechanism whose clauses were dropped because the storefront does not
+        enable it counts among those ruled out only where the candidate's
+        backing would let it publish them.
+        """
+        try:
+            request, rate_structure, ruled_out = self._create_request(
+                source, candidate, listing_resource
+            )
+            try:
+                derived = replace(
+                    self._await(self._listings.derive_listing(request)),
+                    rate_structure=rate_structure,
+                )
+            except NoSettlementOption as exc:
+                if not ruled_out:
+                    raise
+                raise NoSettlementOption(
+                    str(exc), mechanisms=(*exc.mechanisms, *ruled_out), unknown=exc.unknown
+                ) from exc
+        except Exception as exc:
+            return self._refusals.refuse(candidate, exc)
+        self._derived[id(listing_resource)] = derived
+        listing = derived.listing.model_dump(mode="json")
+        return PublicationPayload(
+            accepted_escrows=tuple(listing.get("accepted_escrows") or ()),
+            settlement_options=tuple(listing.get("settlement_options") or ()),
+            publication_clauses=tuple(derived.publication_clauses()),
+            demands=tuple(listing.get("demands") or ()),
+            max_duration_seconds=listing.get("max_duration_seconds"),
+        )
+
+    def _create_request(
+        self,
+        source: Any,
+        candidate: dict[str, Any],
+        listing_resource: dict[str, Any],
+    ) -> tuple[VmCreateListingRequest, dict[str, Any] | None, tuple[str, ...]]:
+        """The create request a candidate derives, its rate structure, and the
+        mechanisms its configuration rules out.
+
+        Clause rates are composed before compilation completes the request, so a
+        shape-priced listing whose rates cannot price its shape is refused here,
+        through the same path as any other underivable candidate. A clause
+        naming a mechanism the storefront does not enable is dropped, and its
+        mechanism is ruled out only if the candidate's backing admits it: one
+        the candidate could never publish is not classified at all.
+        """
+        pricing = source.pricing_resource(candidate, listing_resource)
+        raw_clauses = pricing.get("settlements")
+        if raw_clauses is None:
+            raw_clauses = [
+                clause.model_dump(mode="json", exclude_defaults=True)
+                for clause in settlement_publication_defaults()
+            ]
+        if not isinstance(raw_clauses, list) or not raw_clauses:
+            # Nothing in configuration names a mechanism for this listing.
+            raise NoSettlementOption(
+                "no settlement clauses: set the pool's `settlements` pricing hint "
+                "or configure [pricing].settlements"
+            )
+        raw_clauses, disabled = enabled_publication_clauses(raw_clauses)
+        ruled_out = (
+            self._listings.admissible_mechanisms(
+                disabled, backing=capacity_backing(candidate.get("capacity_backing"))
+            )
+            if disabled
+            else ()
+        )
+        if not raw_clauses:
+            # Each disabled mechanism the candidate could publish is ruled out
+            # by configuration, so none is unknown and its open listing closes.
+            raise NoSettlementOption(
+                "every settlement clause names a mechanism the storefront does not "
+                f"enable: {', '.join(disabled)}",
+                mechanisms=ruled_out,
+            )
+        composed = compose_clause_rates(
+            compile_publication_clauses(raw_clauses),
+            listing_shape=candidate["listing_shape"],
+            family_rates=candidate.get("family_rates"),
+        )
+        clauses = composed.clauses
+        request = VmCreateListingRequest(
+            listing_resource=listing_resource,
+            capacity_source={
+                "site_id": candidate["site_id"],
+                "pool_id": candidate.get("pool_id"),
+                "resource_id": candidate.get("resource_id"),
+                "listing_shape": candidate["listing_shape"],
+            },
+            settlements=list(clauses),
+            max_duration_seconds=normalize_max_duration_seconds(
+                pricing.get("max_duration_seconds")
+            ),
+        )
+        return request, composed.rate_structure, ruled_out
+
+    def _publish_listing(
+        self,
+        listing_resource: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        derived = self._derived[id(listing_resource)]
+        source = {
+            "derivation_key": derived.binding.derivation_key,
+            "capacity_backing": derived.binding.capacity_backing,
+        }
+        self.report.record("publish", source=source)
+        if self.dry_run:
+            return {"status": "planned"}
+        try:
+            return self._await(self._persist_new(derived))
+        except Exception as exc:
+            self.report.record("fail", source=source, reason=str(exc))
+            raise
+
+    async def _persist_new(self, derived: Any) -> dict[str, Any]:
+        response = await self._listings.persist_derived_listing(derived)
+        return {"status": response.status, "listing_id": response.listing_id}
+
+    def _record_published(
+        self, _db_path: str, _candidate: dict[str, Any], _listing_id: str
+    ) -> None:
+        # Creating the listing already wrote its durable binding.
+        return None
+
+    def _reopen_existing(
+        self,
+        _db_path: str,
+        _base_url: str,
+        candidate: dict[str, Any],
+        listing_resource: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any] | None:
+        derived = self._derived[id(listing_resource)]
+        try:
+            return self._await(self._reconcile_existing(candidate, derived))
+        except Exception as exc:
+            # The runner records this as a failed candidate; the report says
+            # which source failed and why, so an operator does not have to
+            # find it in a log.
+            self.report.record("fail", source=_source_of(candidate), reason=str(exc))
+            raise
+
+    async def _reconcile_existing(
+        self, candidate: dict[str, Any], derived: Any
+    ) -> dict[str, Any] | None:
+        existing = await self._db.load_listing_binding_by_derivation(
+            derivation_key=derived.binding.derivation_key
+        )
+        if existing is None:
+            return None
+        listing_id = existing.listing_id
+        stored = await self._db.load_listing(listing_id=listing_id)
+        if stored is None:
+            return None
+        if stored.get("closed_by") == "seller":
+            self.report.record(
+                "skip", listing_id=listing_id, reason="closed_by_seller"
+            )
+            return {"status": REOPEN_UNCHANGED}
+
+        fresh = {
+            **derived.listing.model_dump(mode="json"),
+            "rate_structure": derived.rate_structure,
+        }
+        stored_resource = stored_listing_resource(stored)
+        comparison = compare_listing(
+            stored_resource=stored_resource,
+            stored_terms=_terms_of(stored),
+            fresh_resource=fresh["listing_resource"],
+            fresh_terms=_terms_of(fresh),
+            binding_backing=capacity_backing(existing.capacity_backing),
+            source_backing=capacity_backing(candidate.get("capacity_backing")),
+        )
+        is_open = stored.get("status") == "open"
+        if comparison.outcome in REFUSE:
+            logger.warning(
+                "[PUBLICATION] listing %s from %s no longer matches its source in "
+                "%s; %s",
+                listing_id,
+                _source_of(candidate),
+                list(comparison.differing_fields),
+                "closing it" if is_open else "not reopening it",
+            )
+            if is_open:
+                self.report.record(
+                    "close",
+                    listing_id=listing_id,
+                    reason=comparison.outcome,
+                    fields=list(comparison.differing_fields),
+                )
+            else:
+                # A refusal, like every one a cycle makes, names its site and
+                # pool, so it reaches the site's derivation.
+                self.report.record(
+                    "refuse",
+                    **_derivation_source(candidate),
+                    listing_id=listing_id,
+                    reason=comparison.outcome,
+                    fields=list(comparison.differing_fields),
+                )
+            if is_open and not self.dry_run:
+                await self._reconciliation_close([listing_id])
+            return {"status": REOPEN_UNCHANGED}
+        if is_open and comparison.outcome == UNCHANGED:
+            return {"status": REOPEN_UNCHANGED}
+
+        action = "refresh" if is_open else "reopen"
+        self.report.record(
+            action,
+            listing_id=listing_id,
+            reason=comparison.outcome,
+            fields=list(comparison.differing_fields),
+        )
+        if self.dry_run:
+            return {"status": REOPEN_UNCHANGED}
+        assert comparison.outcome in REFRESH_IN_PLACE or not is_open
+        await self._db.update_listing(
+            listing_id=listing_id,
+            listing_resource=refreshed_listing_resource(
+                stored_resource=stored_resource,
+                fresh_resource=fresh["listing_resource"],
+                binding_backing=capacity_backing(existing.capacity_backing),
+            ),
+            accepted_escrows=fresh.get("accepted_escrows"),
+            settlement_options=fresh.get("settlement_options"),
+            publication_clauses=derived.publication_clauses(),
+            demands=fresh.get("demands"),
+            max_duration_seconds=fresh.get("max_duration_seconds"),
+            rate_structure=derived.rate_structure,
+        )
+        refreshed = await self._db.load_listing(listing_id=listing_id)
+        publication = await _candidate(self._db, refreshed)
+        runtime = self._runtime()
+        if is_open:
+            return await runtime.publish(publication)
+        return await runtime.reopen(publication, reopened_by="reconciliation")
+
+    def _runtime(self) -> Any:
+        return build_publication_runtime(
+            self._db, registry_client_factory=_make_registry_client
+        )
+
+
+async def run_publication_cycle_once(
+    *, dry_run: bool, site_projections: SiteProjectionState | None = None
+) -> dict[str, Any]:
+    """Run, or preview, exactly one publication cycle — the timer's cycle.
+
+    ``site_projections`` is the storefront's state; without one, the cycle reads
+    the state the composition root put in the container. Resolving the
+    cycle's collaborators, the domain registry among them, is its ``compose``
+    stage.
+    """
+
+    enter_stage("compose")
+    cycle = VmPublicationCycle(
+        sqlite_client=container.resolved_sqlite_client,
+        listing_service=container.resolved_listing_service,
+        capacity_runtime=container.resolved_capacity_runtime,
+        site_projections=site_projections or container.site_projections(),
+        registry=storefront_domain_registry(),
+        storefront_url=BASE_URL_OVERRIDE,
+        dry_run=dry_run,
+        admissibility_default=container.resolved_admissibility_default,
+        enter_stage=enter_stage,
+        derivation=container.resolved_site_derivation_log,
+    )
+    return await cycle.run()
+
+
+def publication_interval_seconds() -> float:
+    """``[capacity].publication_interval_seconds``, the timer's wait between cycles."""
+    capacity = getattr(settings, "capacity", None)
+    return float(
+        getattr(capacity, "publication_interval_seconds", 0)
+        or _DEFAULT_INTERVAL_SECONDS
+    )
+
+
+__all__ = [
+    "VmPublicationCycle",
+    "new_publication_wake",
+    "publication_interval_seconds",
+    "run_publication_cycle_once",
+    "wake_publication_loop",
+]

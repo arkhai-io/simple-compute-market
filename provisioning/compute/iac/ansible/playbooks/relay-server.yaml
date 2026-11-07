@@ -1,0 +1,6 @@
+---
+- name: Prepare a buyer relay
+  hosts: relay_servers
+  become: true
+  roles:
+    - relay-server

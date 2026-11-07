@@ -1,5 +1,8 @@
 from pathlib import Path
+import re
 import unittest
+
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,6 +13,18 @@ VM_CREATE = TASKS / "vm-create.yml"
 VM_DESTROY = TASKS / "vm-destroy.yml"
 VM_UNDEFINE = TASKS / "vm-undefine.yml"
 JSON_OUTPUT = TASKS / "json-output.yml"
+
+
+def _directives(text: str) -> str:
+    """Non-comment lines only.
+
+    An assertion that scans a whole file can be satisfied by its own comments:
+    these tasks explain at length which mechanism they deliberately avoid, so a
+    check for the absence of that mechanism must not read the explanation.
+    """
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
 
 
 def _read(path: Path) -> str:
@@ -48,21 +63,36 @@ class VmManagementContractTests(unittest.TestCase):
             text,
         )
 
-    def test_vm_create_reads_frp_dashboard_from_compressed_response_env(self) -> None:
-        text = _read(VM_CREATE)
-        wait_idx = text.index("Wait for FRP proxy to appear online in dashboard")
-        display_idx = text.index("Display FRP proxy information")
-        wait_block = text[wait_idx:display_idx]
+    def test_vm_create_delegates_the_allocated_guest_proxy_to_the_family(self) -> None:
+        tasks = yaml.safe_load(_read(VM_CREATE))
+        (proxy,) = [task for task in tasks if task.get("vars", {}).get("relay_proxy_action") == "add"]
+        self.assertEqual(proxy["include_role"]["name"], "relay-proxy")
+        self.assertEqual(proxy["include_role"]["apply"]["delegate_to"], "{{ target_host }}")
+        self.assertIs(proxy["no_log"], True)
+        self.assertEqual(proxy["vars"], {
+            "relay_proxy_action": "add", "relay_proxy_name": "vm-{{ vm_name }}",
+            "relay_proxy_local_ip": "{{ vm_ip }}", "relay_proxy_remote_port": "{{ vm_remote_port }}",
+        })
+        self.assertIn("frp_server_addr is defined", proxy["when"])
+        self.assertNotIn("uri", {key for task in tasks for key in task})
 
-        self.assertIn(
-            'curl --compressed -fsS -u "admin:{{ frp_dashboard_password }}"',
-            wait_block,
-        )
-        self.assertIn('export FRP_DASHBOARD_RESPONSE="$RESPONSE"', wait_block)
-        self.assertIn('json.loads(os.environ["FRP_DASHBOARD_RESPONSE"])', wait_block)
-        self.assertIn('proxy.get("status") == "online"', wait_block)
-        self.assertNotIn("json.load(sys.stdin)", wait_block)
-        self.assertNotIn("| python3 - <<'PY'", wait_block)
+    def test_every_cleanup_script_uses_the_installed_family_library(self) -> None:
+        tasks = yaml.safe_load(_read(VM_CREATE))
+        installer = next(i for i, task in enumerate(tasks) if task.get("include_role", {}).get("tasks_from") == "helper")
+        writer = next(i for i, task in enumerate(tasks) if task["name"] == "Create VM cleanup script on target host")
+        self.assertLess(installer, writer)
+        content = tasks[writer]["copy"]["content"]
+        self.assertIn("source {{ relay_proxy_teardown_library | quote }}", content)
+        self.assertIn('"vm-$VM_NAME"', content)
+        self.assertNotIn("remove_guest_proxy()", content)
+
+    def test_both_create_fact_variants_report_relay(self) -> None:
+        tasks = yaml.safe_load(_read(VM_CREATE))
+        facts = [task["set_fact"]["vm_creation_data"] for task in tasks if "vm_creation_data" in task.get("set_fact", {})]
+        self.assertEqual(len(facts), 2)
+        for fact in facts:
+            self.assertIn("relay", fact)
+            self.assertNotIn("frp", fact)
 
     def test_vm_destroy_emits_force_destroy_json_contract(self) -> None:
         text = _read(VM_DESTROY)
@@ -85,12 +115,14 @@ class VmManagementContractTests(unittest.TestCase):
 
         for token in (
             "virsh domifaddr {{ vm_name }}",
-            "path: /etc/frp/frpc.toml",
-            "notify: restart frpc",
+            "name: relay-proxy",
+            "relay_proxy_action: remove",
+            'relay_proxy_name: "vm-{{ vm_name }}"',
             "Fail if VM is running",
             "Cannot undefine VM '{{ vm_name }}' - VM is currently running",
-            "iptables -t nat -L PREROUTING -n --line-numbers",
-            "iptables -D FORWARD $line",
+            "{{ lookup('file', 'guest_teardown.sh') }}",
+            'remove_guest_rules "{{ vm_guest_rule_marker }}"',
+            'remove_guest_ufw_rules "{{ vm_guest_rule_marker }}"',
             "iptables-save > /etc/iptables/rules.v4",
             "iptables-save > /etc/sysconfig/iptables",
             "iptables-save > /etc/iptables.rules",
@@ -121,9 +153,9 @@ class VmManagementContractTests(unittest.TestCase):
         tasks here are protected, but json-output.yml's own `debug:
         var:`/`debug: msg:` tasks (which also render the credential-bearing
         vm_creation_data/vm_creation_json) MUST NOT gain no_log, since they
-        are the literal transport AnsibleService._extract_ansible_json
-        parses out of raw stdout -- see ansible_service.py's
-        redact_ansible_output docstring.
+        are the literal transport the VM codec's fact extraction parses
+        out of raw stdout -- see the Ansible runner's redact_ansible_output
+        docstring.
         """
         text = _read(VM_CREATE)
 
@@ -160,13 +192,52 @@ class VmManagementContractTests(unittest.TestCase):
 
     def test_json_output_transport_tasks_are_not_no_log_protected(self) -> None:
         """The inverse of the previous test: json-output.yml's tasks are a
-        deliberate exception and must stay readable by
-        AnsibleService._extract_ansible_json's marker search."""
+        deliberate exception and must stay readable by the VM codec's
+        fact extraction."""
         text = _read(JSON_OUTPUT)
         idx = text.index("- name: Output VM creation data as parsable JSON")
         next_idx = text.find("\n- name:", idx + 1)
         block = text[idx:next_idx] if next_idx != -1 else text[idx:]
         self.assertNotIn("no_log", block)
+
+
+#: `virt-install` as a command word: not part of a file name such as
+#: `gpu-virt-install-retry.yml` or of a variable such as `virt_install_success`.
+_VIRT_INSTALL = re.compile(r"(?<![\w-])virt-install(?![\w.-])")
+
+
+class VmCreationRequestsKvmTests(unittest.TestCase):
+    """A VM is never created under software emulation."""
+
+    def test_every_virt_install_names_kvm(self) -> None:
+        commands = 0
+        findings = []
+        for path in sorted(TASKS.glob("*.yml")):
+            lines = _read(path).splitlines()
+            for number, line in enumerate(lines):
+                text = line.strip()
+                if text.startswith("#") or text.startswith("- name:"):
+                    continue
+                if not _VIRT_INSTALL.search(text):
+                    continue
+                commands += 1
+                following = lines[number + 1].strip() if number + 1 < len(lines) else ""
+                if text != "virt-install \\" or following != "--virt-type kvm \\":
+                    findings.append(f"{path.name}:{number + 1}: {text!r}")
+        self.assertGreater(commands, 0, "no virt-install command found")
+        self.assertEqual(findings, [])
+
+    def test_a_create_refuses_a_host_without_kvm_before_anything_else(self) -> None:
+        """Before anything is created for the guest: its first two tasks."""
+        tasks = yaml.safe_load(_read(VM_CREATE))
+        stat, refusal = tasks[0], tasks[1]
+        self.assertEqual(stat["stat"], {"path": "/dev/kvm"})
+        self.assertEqual(stat["register"], "kvm_device")
+        self.assertEqual(stat["delegate_to"], "{{ target_host }}")
+        self.assertIn("KVM is unavailable", refusal["fail"]["msg"])
+        self.assertEqual(
+            refusal["when"], ['vm_action == "create"', "not kvm_device.stat.exists"]
+        )
 
 
 if __name__ == "__main__":

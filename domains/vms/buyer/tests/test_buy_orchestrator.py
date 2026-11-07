@@ -16,33 +16,33 @@ What the tests verify:
 
 from __future__ import annotations
 
-import uuid
+import base64
 import json
 import time
+import uuid
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.request import Request
 
 import pytest
-
-from market_core.schemas import (
-    EscrowProposal,
-    EscrowTerms,
-    SettlementOption,
-    SettlementSelection,
-    derive_settlement_option_id,
-)
+import httpx
+from market_deal_lifecycle_client import LifecycleClient
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 from core_buyer.registry_config import RegistryAuthority
+from core_buyer.buyer_config import ResolvedBuyerIdentity
+from typer.testing import CliRunner
 from identity_helpers import (
     BUYER_SIGNER,
     seller_principals,
     signed_response_headers,
+    with_accepted_agreement,
 )
+from market_alkahest.plans import escrow_terms_to_settlement_obligation
+from market_alkahest.schemas import EscrowTerms
+from market_core.schemas import EscrowProposal
 
-from domains.vms.buyer.buy_orchestrator import (
+from arkhai_vms_buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
     BuyResult,
@@ -52,9 +52,20 @@ from domains.vms.buyer.buy_orchestrator import (
     run_buy,
     submit_settlement_request,
 )
-from domains.vms.buyer.escrow_client import looks_like_propagation_lag
-from domains.vms.buyer.buyer_client import NegotiationOutcome
-
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome
+from arkhai_vms_buyer.escrow_client import looks_like_propagation_lag
+from arkhai_vms_buyer import arkhai_payments, common, deal_helpers, settlement_composition
+from arkhai_vms_buyer.run_log import RunLog
+from arkhai_vms_buyer.cli import app
+from market_arkhai_payments import (
+    MandatePolicy,
+    PaymentApproval,
+    PaymentsOptionParams,
+    derive_mandate,
+    transaction_id,
+)
+from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+from market_arkhai_payments.fixtures import dispute_lifecycle
 
 _ESCROW_ADDR = "0x" + "cd" * 20
 _BUYER_ADDR = "0x" + "cc" * 20
@@ -153,8 +164,20 @@ def _stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds):
     )
 
 
-def _build_escrow_terms_ok(proposal, seller_wallet, agreed_amount, duration_seconds):
-    return [_stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds)]
+def _build_escrow_terms_ok(proposal, listing, agreed_amount, duration_seconds):
+    return [_stub_escrow_terms(_SELLER_WALLET, agreed_amount, duration_seconds)]
+
+
+def _accepted_echo(agreed_amount, duration_seconds=7200):
+    """The seller's accept-time echo, its plan committing to the escrow the
+    stubbed derivation builds for ``agreed_amount`` over ``duration_seconds``,
+    so the buyer's plan check passes."""
+    terms = _stub_escrow_terms(_SELLER_WALLET, agreed_amount, duration_seconds)
+    obligation = escrow_terms_to_settlement_obligation(terms.model_dump(mode="json"))
+    return {
+        **_ACCEPTED_ECHO,
+        "settlement_plan": {"obligations": [obligation.model_dump(mode="json")]},
+    }
 
 
 def _run_buy_with_legacy_hooks(
@@ -291,6 +314,8 @@ def _urlopen_sequence(responses):
         if not queue:
             raise AssertionError(f"Unexpected urlopen call: {req.full_url}")
         nxt = queue.pop(0)
+        if isinstance(nxt, dict):
+            nxt = with_accepted_agreement(req, nxt)
         body = nxt if isinstance(nxt, str) else json.dumps(nxt)
         headers = (
             signed_response_headers(req, nxt)
@@ -350,72 +375,6 @@ def test_matches_can_be_preseeded_skipping_registry_query():
         )
     assert result.status == "exited"
     assert result.attempts and result.attempts[0]["outcome"]["status"] == "exited"
-
-
-def test_exact_settlement_revalidation_runs_before_seller_network() -> None:
-    params = {
-        "account_ref": "seller-main",
-        "authority_id": "authority-main",
-        "country": "US",
-        "environment": "production",
-        "claimant_principal": seller_principals().identities[0].model_dump(
-            mode="json"
-        ),
-        "condition": {
-            "condition_id": "vm-fulfillment",
-            "evaluator": {
-                "kind": "builtin.v1",
-                "version": "trivial.v1",
-                "params": {"kind": "trivial"},
-            },
-            "demand": {"encoding": "application/jcs+json", "value": {}},
-        },
-        "funding_profile": "card.v1",
-        "interaction": "interactive",
-        "funds_flow": "separate_charges_transfers",
-        "contract_fingerprint": "sha256:" + "ab" * 32,
-    }
-    option = SettlementOption(
-        option_id=derive_settlement_option_id(
-            mechanism="fiat.stripe.v1",
-            asset="usd",
-            rates=[],
-            params=params,
-        ),
-        mechanism="fiat.stripe.v1",
-        asset="usd",
-        params=params,
-    )
-    selection = SettlementSelection(
-        mechanism=option.mechanism,
-        option_id=option.option_id,
-        expiration_unix=2_000_000_000,
-    )
-    observed = []
-
-    async def reject(match, advertised_option):
-        observed.append((match["listing_id"], advertised_option.option_id))
-        raise RuntimeError("remote readiness unavailable")
-
-    result = _run_buy_with_legacy_hooks(
-        config=_config(),
-        constraints=_constraints(),
-        provision=_provision(),
-        build_escrow_proposal=lambda _match: selection,
-        build_escrow_terms=_build_escrow_terms_ok,
-        create_escrow=lambda escrows: ["0xnever"],
-        matches=[
-            {
-                "listing_id": "seller-1",
-                "seller": _SELLER_URL,
-                "_selected_settlement": SimpleNamespace(option=option),
-            }
-        ],
-        revalidate_settlement=reject,
-    )
-    assert result.status == "exited"
-    assert observed == [("seller-1", option.option_id)]
-    assert result.attempts[0]["error"] == "settlement_revalidation_failed"
 
 
 def test_run_buy_composes_high_level_negotiate_and_settle_hooks():
@@ -500,7 +459,7 @@ def test_happy_path_drives_to_ready():
             "negotiation_id": "neg-1",
             "action": "accept",
             "proposal": {"fields": {"amount": 50}},
-            **_ACCEPTED_ECHO,
+            **_accepted_echo(50),
         },
         # 3. POST /settle/{uid}
         {"escrow_uid": "0xescrow", "status": "provisioning"},
@@ -513,12 +472,12 @@ def test_happy_path_drives_to_ready():
         },
     ]
 
-    build_calls: list[tuple[EscrowProposal, str, int, int]] = []
+    build_calls: list[tuple[EscrowProposal, dict, int, int]] = []
     create_calls: list[list[EscrowTerms]] = []
 
-    def _build_escrow_terms(proposal, seller_wallet, agreed_amount, duration_seconds):
-        build_calls.append((proposal, seller_wallet, agreed_amount, duration_seconds))
-        return [_stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds)]
+    def _build_escrow_terms(proposal, listing, agreed_amount, duration_seconds):
+        build_calls.append((proposal, listing, agreed_amount, duration_seconds))
+        return [_stub_escrow_terms(_SELLER_WALLET, agreed_amount, duration_seconds)]
 
     def _create_escrow(escrows):
         create_calls.append(escrows)
@@ -546,20 +505,17 @@ def test_happy_path_drives_to_ready():
     assert result.agreed_amount == 50
     assert result.negotiation_id == "neg-1"
 
-    # build_escrow_terms received the proposal echoed by the seller +
-    # the negotiated agreement.
+    # build_escrow_terms received the proposal echoed by the seller, the
+    # listing it was negotiated against, and the negotiated agreement.
     assert len(build_calls) == 1
-    captured_proposal, captured_seller, captured_price, captured_duration = build_calls[
+    captured_proposal, captured_listing, captured_price, captured_duration = build_calls[
         0
     ]
     assert captured_proposal.chain_name == "anvil"
     assert captured_proposal.escrow_address == _ESCROW_ADDR
     assert captured_proposal.fields["token"] == _TOKEN
-    assert (captured_seller, captured_price, captured_duration) == (
-        _SELLER_WALLET,
-        50,
-        7200,
-    )
+    assert captured_listing["listing_id"] == "seller-1"
+    assert (captured_price, captured_duration) == (50, 7200)
     # create_escrow received the canonical EscrowTerms list.
     assert len(create_calls) == 1
     assert len(create_calls[0]) == 1
@@ -608,7 +564,7 @@ def test_first_match_exits_second_agrees():
             "negotiation_id": "neg-2",
             "action": "accept",
             "proposal": {"fields": {"amount": 50}},
-            **_ACCEPTED_ECHO,
+            **_accepted_echo(50),
         },
         # POST /settle/{uid}
         {"escrow_uid": "0xescrow", "status": "provisioning"},
@@ -644,7 +600,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
             "negotiation_id": "neg-1",
             "action": "accept",
             "proposal": {"fields": {"amount": 50}},
-            **_ACCEPTED_ECHO,
+            **_accepted_echo(50),
         },
     ]
 
@@ -677,7 +633,7 @@ def test_provisioning_failed_returns_failed_status():
             "negotiation_id": "neg-1",
             "action": "accept",
             "proposal": {"fields": {"amount": 50}},
-            **_ACCEPTED_ECHO,
+            **_accepted_echo(50),
         },
         {"escrow_uid": "0xescrow", "status": "provisioning"},
         {"status": "failed", "reason": "no available VM"},
@@ -715,7 +671,7 @@ def test_settlement_timeout_returns_timeout_status():
             "negotiation_id": "neg-1",
             "action": "accept",
             "proposal": {"fields": {"amount": 50}},
-            **_ACCEPTED_ECHO,
+            **_accepted_echo(50),
         },
         {"escrow_uid": "0xescrow", "status": "provisioning"},
     ] + [{"status": "provisioning"}] * 50  # never terminal
@@ -764,6 +720,124 @@ def test_to_dict_skips_empty_attempts_list():
     assert r.to_dict() == {"status": "no_matches", "rounds": 0}
 
 
+@pytest.mark.parametrize("stray_escrow", [False, True])
+def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeypatch, stray_escrow):
+    """Exercise role dispatch and persisted recovery; payment approval is the external seam."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    payer = "11111111-1111-4111-8111-111111111111"
+    payee = "22222222-2222-4222-8222-222222222222"
+    config = _config()
+    provision = _provision()
+    params = {"payee_account": payee, "window": "P7D", "deposit_agreement": False}
+    option_body = {
+        "price": {"asset": "USD/2", "rates": []},
+        "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
+        "lifecycle": dispute_lifecycle(payer),
+    }
+    option = SettlementOption(option_id=derive_settlement_option_id(**option_body), **option_body)
+    agreement = Agreement(
+        negotiation_id="neg-payment", listing_id="seller-1", listing_hash="0" * 64,
+        buyer=BUYER_SIGNER.identity.model_dump(mode="json"),
+        seller=seller_principals().identities[0].model_dump(mode="json"),
+        settlement=option, settlement_params={"payer_account": payer}, amount=50, asset="USD/2",
+        duration_seconds=provision.duration_seconds, provision_terms=provision.model_dump(mode="json"),
+        start_utc="2025-01-01T00:00:00Z", accepted_at="2025-01-01T00:00:00Z",
+    )
+    raw = agreement.model_dump_json(exclude_none=True).encode()
+    mandate = derive_mandate(json.loads(raw), MandatePolicy(
+        buyer_account=payer, option=PaymentsOptionParams.model_validate(params),
+        accepted_at=agreement.accepted_at, start_utc=agreement.start_utc,
+        duration_seconds=agreement.duration_seconds, amount=agreement.amount, asset=agreement.asset,
+        fee_bps=250, lifecycle=option.lifecycle,
+    ))
+    data = {
+        "mandate": mandate.model_dump(mode="json", by_alias=True, exclude_none=True),
+        "transaction_id": transaction_id(mandate),
+    }
+    document = {
+        "Settlement": {"schema_version": 1, "priority": ["arkhai.payments.v1"], "arkhai_payments": {
+            "enabled": True, "service_url": "http://127.0.0.1",
+            "service_identity": BUYER_SIGNER.identity.model_dump(mode="json"),
+            "fee_bps": 250, "development_auth": True,
+        }},
+        "vms": {"payer_account": payer},
+    }
+    monkeypatch.setattr(settlement_composition, "load_user_config", lambda: document)
+    monkeypatch.setattr(arkhai_payments, "load_user_config", lambda: document)
+    approvals = []
+
+    def approve(_self, agreement_bytes, settlement_data, **_kwargs):
+        approvals.append((agreement_bytes, settlement_data))
+        return transaction_id(mandate)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("payment dispatch touched an Alkahest resource")
+
+    monkeypatch.setattr(PaymentApproval, "approve", approve)
+    monkeypatch.setattr(arkhai_payments, "make_publisher_trust_resolver", lambda **_kw: seller_principals)
+    monkeypatch.setattr(deal_helpers, "_publisher_trust_refresh", lambda _signer: lambda *_args: seller_principals())
+    monkeypatch.setattr(common, "resolve_buyer_wallet", forbidden)
+    monkeypatch.setattr(common, "chain_by_name", forbidden)
+    match = _listing_with_identity({"listing_id": "seller-1", "seller": _SELLER_URL})
+    match.update(source_registry_url=_REGISTRY, source_registry_authority="registry")
+    log = RunLog.start(
+        profile_id=config.buyer_profile_id, principal=config.principal,
+        seller_url=_SELLER_URL, listing_id=match["listing_id"],
+        publisher_id=match["publisher_id"], publisher_principals=match["publisher_principals"],
+        source_registry_url=_REGISTRY, source_registry_authority="registry",
+    )
+    proposal = _escrow_proposal() if stray_escrow else None
+    encoded = base64.b64encode(raw).decode()
+    log.event(
+        "negotiation_completed", status="agreed", negotiation_id=agreement.negotiation_id,
+        agreed_amount=50, agreement_bytes=encoded, settlement_data=data,
+        accepted_provision_terms=provision.model_dump(mode="json"),
+        accepted_escrow_proposal=proposal.model_dump(mode="json") if proposal else None,
+    )
+    outcome = NegotiationOutcome(
+        status="agreed", negotiation_id=agreement.negotiation_id, agreed_amount=50,
+        agreement=agreement, agreement_bytes=encoded, settlement_data=data,
+        accepted_provision_terms=provision, accepted_escrow_proposal=proposal,
+    )
+    hook = make_legacy_settle_hook(
+        config=config, provision=provision, confirm_settlement=None,
+        settlement_poll_interval=0, settlement_total_timeout=1, sleep=lambda _s: None,
+        settlement_policy=settlement_composition.resolve_buyer_settlement_policy(),
+    )
+    def peer(request):
+        submitted = json.loads(request.content)
+        assert submitted["kind"] == "commit"
+        assert submitted["commitment_ref"] == transaction_id(mandate)
+        body = {"outcome": {"status": "accepted"}}
+        legacy_request = Request(str(request.url), data=request.content, headers=dict(request.headers), method="POST")
+        return httpx.Response(200, json=body, headers=signed_response_headers(legacy_request, body))
+
+    original_client = LifecycleClient.__init__
+
+    def peer_transport(self, *args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(peer)
+        return original_client(self, *args, **kwargs)
+
+    monkeypatch.setattr(LifecycleClient, "__init__", peer_transport)
+    responses = [{"status": "ready"}] * 2
+    with _patched_transport(_urlopen_sequence(responses)):
+        result = hook(NegotiationResult(match=match, outcome=outcome, attempts=[]), lambda stage, body: log.event(stage, **body))
+        # New admission changes cannot redirect this accepted operation.
+        document["Settlement"] = {"schema_version": 1, "priority": ["alkahest.v1"], "alkahest": {"enabled": True}, "arkhai_payments": {**document["Settlement"]["arkhai_payments"], "enabled": False}}
+        identity = ResolvedBuyerIdentity(
+            profile_id=config.buyer_profile_id, principal=config.principal,
+            signer=config.signer, source="recovery",
+        )
+        monkeypatch.setattr(common, "resolve_recovery_buyer_identity", lambda _run: identity)
+        resumed = CliRunner().invoke(app, [
+            "settle", "--from", log.run_id, "--poll-interval", "0", "--settlement-timeout", "1",
+        ])
+    assert result.status == "ready"
+    assert resumed.exit_code == 0, resumed.output
+    assert "ready" in resumed.output
+    assert approvals == [(raw, data)] * 2
+
+
 def _settle_kwargs():
     return dict(
         seller_url=_SELLER_URL,
@@ -771,8 +845,6 @@ def _settle_kwargs():
         payload={
             "negotiation_id": "neg-1",
             "buyer_evm_address": _BUYER_ADDR,
-            "chain_name": "anvil",
-            "ssh_public_key": "ssh-rsa AAAA...",
         },
         principal=BUYER_SIGNER.identity,
         signer=BUYER_SIGNER,

@@ -1,14 +1,15 @@
 [project]
 name = "arkhai-kit-contact-exchange"
-version = "0.1.2"
+version = "0.4.1"
 description = "Introduction-only settlement: contact exchange with no payment and no provisioning"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
 dependencies = [
-  "arkhai-core==0.2.0",
-  "arkhai-kit-identity==0.3.0",
-  "arkhai-kit-settlement-runtime==0.1.2",
+  "arkhai-core==0.5.0",
+  "arkhai-kit-identity==0.4.0",
+  "arkhai-kit-settlement-runtime==0.7.0",
   "pydantic>=2.7",
+  "typer>=0.12.0",
 ]
 
 [build-system]
@@ -20,8 +21,14 @@ packages = ["src/market_contact_exchange"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
 asyncio_mode = "auto"
 
 [dependency-groups]
 dev = ["pytest>=8.3.4,<9.0.0", "pytest-asyncio>=0.23"]
+
+# The package allowlist: every distribution this package may declare or import
+# beyond the standard library, because its lightness is part of its contract.
+# make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
+[tool.arkhai.architecture]
+allowed-dependencies = ["arkhai-core", "arkhai-kit-identity", "arkhai-kit-settlement-runtime", "pydantic", "typer"]

@@ -1,0 +1,324 @@
+"""Reconciling mounted definition documents, gated on the document changing.
+
+Import treats its document as authoritative: it overwrites entries that differ
+from it and, for pools, disables entries it does not name. Host and capacity
+documents retain the entries they do not name; a contributed document's own
+apply step decides what it does with them. That authority
+belongs to the act of an operator submitting a document. A process start is not
+a submission.
+
+The distinction is easy to lose because import is idempotent — but idempotent
+with respect to the *document*, not the *database*. Re-running it against state
+something else changed reverts that change, because a diff against the document
+is exactly what detects it. Applied on every startup, it would undo
+administration on eviction, drain, and crash recovery: silently, with no
+failure and no log line an operator would think to check.
+
+So the digest of the last reconciled document is recorded, and a startup
+reconciles only when the mounted document differs from it. The digest is written
+in the same transaction as the apply, because a digest committed after an
+already-committed apply is indistinguishable at the next startup from one
+recorded before a crash.
+
+The fresh-site pool seed is the one import here that is not gated by a digest:
+it applies only to a site with no pool document and no stored pool, so once it
+has created pools it never applies again.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Sequence
+from contextlib import nullcontext
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from market_site import (
+    CapacityDefinitionProblem,
+    CapacityDefinitionsOutcome,
+    CapacityLedgerService,
+    reconcile_capacity_definitions_in_session,
+)
+
+from compute_provisioning import DefinitionDocumentContribution
+from compute_provisioning.hosts.definitions import reconcile_host_definitions_in_session
+from compute_provisioning.hosts.service import HostAuthority
+from compute_provisioning_contracts import HostDefinitionProblem
+
+from compute_provisioning_service.db.models import DefinitionDocumentImport, ResourcePool
+
+logger = logging.getLogger(__name__)
+
+_CAPACITY = "capacity"
+_HOSTS = "hosts"
+_POOLS = "pools"
+_POOL_SEED = "pool-seed"
+
+
+class HostDefinitionsRejected(ValueError):
+    """A host definitions document with problems; nothing was applied.
+
+    Each problem carries its location in the document and its code; one that
+    stored state decides, such as a refused pool move, also names the host its
+    entry declares, so a refused start says which host to correct.
+    """
+
+    def __init__(self, problems: tuple[HostDefinitionProblem, ...]) -> None:
+        self.problems = problems
+        super().__init__(
+            "host definitions refused: "
+            + "; ".join(f"{p.path} ({p.code}): {p.message}" for p in problems)
+        )
+
+
+class CapacityDefinitionsRejected(ValueError):
+    """A capacity-definitions document with problems; nothing was applied."""
+
+    def __init__(self, problems: tuple[CapacityDefinitionProblem, ...]) -> None:
+        self.problems = problems
+        super().__init__(
+            "capacity definitions refused: "
+            + "; ".join(f"{p.path}: {p.message}" for p in problems)
+        )
+
+
+def reconcile_capacity_document(
+    db: Any, ledger: CapacityLedgerService, yaml_text: str
+) -> CapacityDefinitionsOutcome:
+    """Reconcile a capacity-definitions document into ``db``'s transaction.
+
+    The caller holds ``ledger.serialized()`` around its transaction and
+    commits only a valid outcome it means to apply.
+    """
+    return reconcile_capacity_definitions_in_session(db, ledger, yaml_text)
+
+
+@dataclass(frozen=True)
+class ImportOutcome:
+    kind: str
+    reconciled: bool
+    detail: str
+
+
+class DefinitionDocumentImporter:
+    """Owns reading, gating, applying, and recording — in that order, once —
+    and the fresh-site pool seed, which records nothing."""
+
+    def __init__(
+        self,
+        *,
+        session_factory: Any,
+        settings: Any,
+        pool_service: Any,
+        contributed: Sequence[DefinitionDocumentContribution] = (),
+        capacity_ledger: CapacityLedgerService | None = None,
+        host_authority: HostAuthority | None = None,
+    ) -> None:
+        self._session_factory = session_factory
+        self._settings = settings
+        self._pool_service = pool_service
+        self._contributed = tuple(contributed)
+        self._capacity_ledger = capacity_ledger
+        self._host_authority = host_authority
+
+    # ------------------------------------------------------------------
+    # Entry points
+    # ------------------------------------------------------------------
+
+    def import_contributed_definitions(self) -> tuple[ImportOutcome, ...]:
+        """Reconcile every contributed document kind, in contribution order.
+
+        They run before pools, because pool configuration may reference what
+        they declare: a first boot from documents then resolves it.
+        """
+        return tuple(
+            self._import(
+                kind=document.kind,
+                path=document.path,
+                label=document.label,
+                apply=document.apply,
+            )
+            for document in self._contributed
+        )
+
+    def import_pool_definitions(self) -> ImportOutcome:
+        return self._import(
+            kind=_POOLS,
+            path=getattr(self._settings, "resolved_pool_definitions_path", None),
+            label="Pool-definitions",
+            apply=self._apply_pools,
+        )
+
+    def seed_initial_pools(self) -> ImportOutcome:
+        """Create a fresh site's pools from its seed document.
+
+        Applies only when no pool document is configured and no pool is
+        stored: a configured document is the site's authority over its pools,
+        and a site holding any pool is not fresh, so its pools are never
+        touched. The seed goes through the pool document's validation and
+        import in one transaction, so it lands whole or not at all; on an empty
+        pool table that import only creates. No digest is recorded: the seed is
+        not a submitted document, and a later change to it reaches no site that
+        already holds pools.
+        """
+        if getattr(self._settings, "resolved_pool_definitions_path", None) is not None:
+            logger.info("Pool seed: skipped — a pool document is configured")
+            return ImportOutcome(_POOL_SEED, False, "pool document configured")
+        path = getattr(self._settings, "resolved_pool_seed_path", None)
+        if path is None:
+            logger.info("Pool seed: disabled — pool_seed_path is empty")
+            return ImportOutcome(_POOL_SEED, False, "disabled")
+
+        with self._session_factory() as db, db.begin():
+            if db.query(ResourcePool.id).first() is not None:
+                logger.info("Pool seed: skipped — pools are already stored")
+                return ImportOutcome(_POOL_SEED, False, "pools stored")
+            if not path.exists():
+                raise FileNotFoundError(f"Configured pool seed file does not exist: {path}")
+            diff = self._pool_service.import_pools_in_session(
+                db, path.read_text(encoding="utf-8")
+            )
+        for pool_id in diff.created:
+            logger.info("Pool seed: created pool %s from %s", pool_id, path)
+        return ImportOutcome(_POOL_SEED, True, f"created={len(diff.created)}")
+
+    def import_host_definitions(self) -> ImportOutcome:
+        """Reconcile host definitions.
+
+        They run after pools, which an entry names, whether from the pool
+        document or the fresh-site seed, and after the stored-pool check; and
+        before capacity, whose declarations may name a host. A first document on
+        a site that already registers hosts applies like any changed one: no
+        digest is recorded for it yet.
+        """
+        return self._import(
+            kind=_HOSTS,
+            path=getattr(self._settings, "resolved_host_definitions_path", None),
+            label="Host-definitions",
+            apply=self._apply_hosts,
+        )
+
+    def import_capacity_definitions(self) -> ImportOutcome:
+        """Reconcile capacity declarations. They run after pools, which a
+        declaration names, and after host definitions, since a declaration may
+        name a host."""
+        # The ledger's serialization lock spans the whole import, through the
+        # commit that records the digest, so no reservation is admitted
+        # between a declaration's checks and its commit.
+        guard = (
+            self._capacity_ledger.serialized()
+            if self._capacity_ledger is not None
+            else nullcontext()
+        )
+        with guard:
+            return self._import(
+                kind=_CAPACITY,
+                path=getattr(self._settings, "resolved_capacity_definitions_path", None),
+                label="Capacity-definitions",
+                apply=self._apply_capacity,
+            )
+
+    # ------------------------------------------------------------------
+    # The gate
+    # ------------------------------------------------------------------
+
+    def _import(self, *, kind: str, path: Path | None, label: str, apply: Any) -> ImportOutcome:
+        if path is None:
+            logger.info("%s import: no path configured — skipped", label)
+            return ImportOutcome(kind, False, "not configured")
+
+        if not path.exists():
+            # A configured path that is not there is a deployment error, not an
+            # absence: something intended a document to be mounted here.
+            raise FileNotFoundError(f"Configured {label.lower()} file does not exist: {path}")
+
+        yaml_text = path.read_text(encoding="utf-8")
+        digest = self.digest_of(yaml_text)
+
+        with self._session_factory() as db, db.begin():
+            if self._recorded_digest(db, kind) == digest:
+                logger.info(
+                    "%s import from %s: unchanged since the last reconciliation — "
+                    "not reapplied, so administrative changes are preserved",
+                    label,
+                    path,
+                )
+                return ImportOutcome(kind, False, "unchanged")
+
+            detail = apply(db, yaml_text)
+            # Same transaction as the apply. A failure above leaves no digest,
+            # so the next startup retries rather than treating a half-applied
+            # document as done.
+            self._record_digest(db, kind, digest)
+
+        logger.info("%s import from %s: %s", label, path, detail)
+        return ImportOutcome(kind, True, detail)
+
+    # ------------------------------------------------------------------
+    # Appliers
+    # ------------------------------------------------------------------
+
+    def _apply_pools(self, db: Any, yaml_text: str) -> str:
+        diff = self._pool_service.import_pools_in_session(db, yaml_text)
+        return (
+            f"created={len(diff.created)} updated={len(diff.updated)} "
+            f"disabled={len(diff.disabled)} unchanged={len(diff.unchanged)}"
+        )
+
+    def _apply_hosts(self, db: Any, yaml_text: str) -> str:
+        if self._host_authority is None:
+            raise RuntimeError("host definitions need the host authority")
+        outcome = reconcile_host_definitions_in_session(db, self._host_authority, yaml_text)
+        if not outcome.valid:
+            # Raising rolls back the apply's transaction, so whatever an entry
+            # or a pool-change hook wrote is discarded, no entry lands, and no
+            # digest is recorded: the next startup retries.
+            raise HostDefinitionsRejected(outcome.problems)
+        diff = outcome.diff
+        # A host the document stops naming is retained, never disabled, so the
+        # operator is told which registered hosts it leaves as they are.
+        not_named = ", ".join(outcome.not_named) if outcome.not_named else "none"
+        return (
+            f"created={len(diff.created)} updated={len(diff.updated)} "
+            f"unchanged={len(diff.unchanged)}; registered and not named, "
+            f"left as they are: {not_named}"
+        )
+
+    def _apply_capacity(self, db: Any, yaml_text: str) -> str:
+        if self._capacity_ledger is None:
+            raise RuntimeError("capacity definitions need the capacity ledger")
+        outcome = reconcile_capacity_document(db, self._capacity_ledger, yaml_text)
+        if not outcome.valid:
+            # Raising rolls back the apply's transaction, so no entry lands
+            # and no digest is recorded: the next startup retries.
+            raise CapacityDefinitionsRejected(outcome.problems)
+        # No "disabled" count: a declaration the document stops naming is
+        # retained.
+        diff = outcome.diff
+        return (
+            f"created={len(diff.created)} updated={len(diff.updated)} "
+            f"unchanged={len(diff.unchanged)}"
+        )
+
+    # ------------------------------------------------------------------
+    # Digest bookkeeping
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def digest_of(text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _recorded_digest(db: Any, kind: str) -> str | None:
+        row = db.get(DefinitionDocumentImport, kind)
+        return None if row is None else row.digest
+
+    @staticmethod
+    def _record_digest(db: Any, kind: str, digest: str) -> None:
+        row = db.get(DefinitionDocumentImport, kind)
+        if row is None:
+            db.add(DefinitionDocumentImport(document_kind=kind, digest=digest))
+        else:
+            row.digest = digest

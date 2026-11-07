@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from pydantic import ValidationError
 from arkhai_vms import make_vm_provision_terms
 from fastapi import HTTPException
 from market_identity import Ed25519Signer
@@ -11,8 +13,10 @@ from starlette.requests import Request
 
 import market_storefront.container as _container
 from market_storefront.controllers.settle_controller import SettleController
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.middleware import buyer_auth
 from market_storefront.models.settle_models import VmSettleRequest
+from market_storefront.utils import config as storefront_config
 
 _BUYER = Ed25519Signer(b"\x71" * 32).identity
 _OTHER_BUYER = Ed25519Signer(b"\x72" * 32).identity
@@ -35,12 +39,17 @@ def _thread() -> dict:
     return {
         "negotiation_id": "neg-1",
         "terminal_state": "success",
+        "agreement_bytes": json.dumps(
+            {"settlement": {"settlement": {"schema": "alkahest.v1"}}}
+        ).encode(),
         "buyer_principal": _BUYER.model_dump(mode="json"),
-        "buyer_escrow_proposal": {
-            "chain_name": "anvil",
-            "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": "0x" + "22" * 20},
-            "expiration_unix": 1_900_000_000,
+        "settlement_data": {
+            "accepted_escrow_proposal": {
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "fields": {"token": "0x" + "22" * 20},
+                "expiration_unix": 1_900_000_000,
+            },
         },
         "provision_terms": make_vm_provision_terms(
             duration_seconds=3600,
@@ -49,13 +58,11 @@ def _thread() -> dict:
     }
 
 
-def _body(*, buyer=_BUYER, ssh_public_key: str = _ACCEPTED_SSH) -> VmSettleRequest:
+def _body(*, buyer=_BUYER) -> VmSettleRequest:
     return VmSettleRequest(
         negotiation_id="neg-1",
         buyer_principal=buyer,
         buyer_evm_address="0x" + "33" * 20,
-        ssh_public_key=ssh_public_key,
-        chain_name="anvil",
     )
 
 
@@ -82,27 +89,25 @@ async def test_settlement_start_rejects_cross_buyer_substitution() -> None:
     db.load_escrow.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_settlement_start_rejects_ssh_key_substitution(monkeypatch) -> None:
-    db = SimpleNamespace(
-        load_negotiation_thread_row=AsyncMock(return_value=_thread()),
-        load_escrow=AsyncMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        buyer_auth,
-        "_verify",
-        AsyncMock(return_value=SimpleNamespace(exact_retry=False)),
-    )
+@pytest.mark.parametrize(
+    "restated",
+    [
+        pytest.param({"ssh_public_key": "ssh-ed25519 AAAAsubstituted attacker@test"}, id="key"),
+        pytest.param({"chain_name": "mainnet"}, id="chain"),
+    ],
+)
+def test_settlement_cannot_restate_negotiated_terms(restated) -> None:
+    """The SSH key and chain are read from the accepted negotiation. A request
+    carrying either is refused before any lookup, whatever its value."""
+    body = {
+        "negotiation_id": "neg-1",
+        "buyer_principal": _BUYER.model_dump(mode="json"),
+        "buyer_evm_address": "0x" + "33" * 20,
+        **restated,
+    }
 
-    with pytest.raises(HTTPException) as exc_info:
-        await _controller(db).settle_escrow(
-            "escrow-1",
-            _body(ssh_public_key="ssh-ed25519 AAAAsubstituted attacker@test"),
-            _request(),
-        )
-
-    assert exc_info.value.status_code == 403
-    assert "accepted provision terms" in str(exc_info.value.detail)
+    with pytest.raises(ValidationError):
+        VmSettleRequest.model_validate(body)
 
 
 @pytest.mark.asyncio
@@ -130,6 +135,7 @@ async def test_settlement_start_passes_only_persisted_inputs_to_coordinator(
     )
     composition = SimpleNamespace(
         coordinator=coordinator,
+        seller_stages=build_vm_storefront_domain().settlement.seller_stages,
         mechanism_clients={"alkahest.v1": object()},
         local_principal=_SELLER,
     )
@@ -145,3 +151,101 @@ async def test_settlement_start_passes_only_persisted_inputs_to_coordinator(
         chain_name="anvil",
         request=None,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("configured", "status_code"),
+    [
+        pytest.param({"anvil": object()}, 503, id="configured-chain-without-a-client-yet"),
+        pytest.param({}, 400, id="unconfigured-chain"),
+    ],
+)
+async def test_a_chain_with_no_client_is_retryable_only_when_configured(
+    monkeypatch, configured, status_code
+) -> None:
+    """The chain probe builds each client after startup, so a settle request
+    for a configured chain it has not built yet is answered 503 for a retry; a
+    chain the storefront does not configure at all is refused."""
+    db = SimpleNamespace(
+        load_negotiation_thread_row=AsyncMock(return_value=_thread()),
+        load_escrow=AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        buyer_auth,
+        "_verify",
+        AsyncMock(return_value=SimpleNamespace(exact_retry=False)),
+    )
+    monkeypatch.setattr(_container, "configured_chain_names", lambda: ())
+    coordinator = SimpleNamespace(start=AsyncMock())
+    composition = SimpleNamespace(
+        coordinator=coordinator,
+        seller_stages=build_vm_storefront_domain().settlement.seller_stages,
+        mechanism_clients={"alkahest.v1": object()},
+        local_principal=_SELLER,
+    )
+    monkeypatch.setattr(_container, "resolved_settlement_composition", composition)
+
+    with patch.dict(storefront_config.CHAINS, configured, clear=True):
+        with pytest.raises(HTTPException) as exc_info:
+            await _controller(db).settle_escrow("escrow-1", _body(), _request())
+
+    assert exc_info.value.status_code == status_code
+    coordinator.start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_deal_settled_by_introduction_is_refused_before_its_stage_starts(
+    monkeypatch,
+) -> None:
+    """The settle route answers from the accepted stage's declaration that it
+    completes outside settlement, after the buyer's ownership is checked and
+    before anything starts."""
+    thread = {
+        **_thread(),
+        "agreement_bytes": json.dumps(
+            {"settlement": {"settlement": {"schema": "contact-exchange.v1"}}}
+        ).encode(),
+    }
+    db = SimpleNamespace(
+        load_negotiation_thread_row=AsyncMock(return_value=thread),
+        load_escrow=AsyncMock(return_value=None),
+    )
+    verify = AsyncMock(return_value=SimpleNamespace(exact_retry=False))
+    monkeypatch.setattr(buyer_auth, "_verify", verify)
+    coordinator = SimpleNamespace(start=AsyncMock())
+    composition = SimpleNamespace(
+        coordinator=coordinator,
+        seller_stages=build_vm_storefront_domain().settlement.seller_stages,
+        mechanism_clients={},
+        local_principal=_SELLER,
+    )
+    monkeypatch.setattr(_container, "resolved_settlement_composition", composition)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _controller(db).settle_escrow("neg-1", _body(), _request())
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == (
+        "a contact exchange completes by introduction, not settlement"
+    )
+    verify.assert_awaited_once()
+    coordinator.start.assert_not_awaited()
+    db.load_escrow.assert_not_awaited()
+
+
+def test_the_accepted_escrow_proposal_is_never_the_buyers_opening() -> None:
+    """Settlement reads the proposal the seller accepted under the listing's
+    release condition; a thread recording only the buyer's opening is refused."""
+    stage = build_vm_storefront_domain().settlement.seller_stages["alkahest.v1"]
+    accepted = _thread()
+    opening_only = {
+        **{key: value for key, value in accepted.items() if key != "settlement_data"},
+        "buyer_escrow_proposal": accepted["settlement_data"]["accepted_escrow_proposal"],
+    }
+
+    assert stage.accepted_proposal(accepted) == (
+        accepted["settlement_data"]["accepted_escrow_proposal"]
+    )
+    with pytest.raises(ValueError, match="no persisted accepted escrow proposal"):
+        stage.accepted_proposal(opening_only)

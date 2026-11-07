@@ -1,7 +1,15 @@
-from sqlalchemy import create_engine, Engine
+from sqlalchemy import create_engine, Engine, inspect
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
+from market_fulfillment.db import Base as FulfillmentBase
+from market_resource_pools.db import Base as PoolsBase
+from market_site.db import Base as SiteBase
+from vm_provisioning_adapter.db import Base as VmBase
+
+from compute_provisioning.hosts.db import Base as HostsBase
+from compute_provisioning.jobs.db import Base as JobsBase
+from compute_provisioning.relays.db import Base as RelaysBase
 from compute_provisioning_service.db.migrations import apply_schema_migrations
 from compute_provisioning_service.db.models import Base
 
@@ -34,33 +42,31 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def run_migrations(
-    engine: Engine,
-    *,
-    default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
-    default_inventory_group: str = "kvm_hosts",
-) -> None:
+def run_migrations(engine: Engine) -> None:
     """Create all tables and apply versioned migrations.
 
     This is the full migration entrypoint: ``compute-provisioning-migrate`` (CLI,
     for local dev and the Helm init container) and ``make migrate`` both
     call this. It is idempotent — safe to run on every deploy/restart.
 
+    It takes only the database: its result depends on the code and the data
+    already stored, never on the service's configuration, which startup applies
+    instead (seeding pools, importing documents and inventory). See
+    openspec/specs/deployment-state/spec.md#requirement-service-owned-migration-history.
+
     The main service container does **not** call this at startup; it calls
     :func:`compute_provisioning_service.db.migrations.check_schema_version` instead and fails fast if
-    migrations haven't been applied. See ARCHITECTURE.md § Schema Migration
-    Execution.
+    migrations haven't been applied.
     """
-    # Resource-pool tables must be created before this service's own Base:
-    # ansible_pool_configs (on Base) has a ForeignKey("resource_pools.id"),
-    # and SQLAlchemy's cross-metadata FK resolution during create_all needs
-    # the referenced table to already exist.
-    from sqlalchemy import inspect
-    from market_fulfillment.db import Base as FulfillmentBase
-    from market_resource_pools.db import Base as PoolsBase
-    from market_site.db import Base as SiteBase
-
+    # Resource-pool tables must be created before the relays' and VM's:
+    # pool_relays and ansible_pool_configs have foreign keys to resource_pools,
+    # and SQLAlchemy's cross-metadata FK resolution during create_all needs the
+    # referenced table to exist.
     PoolsBase.metadata.create_all(bind=engine)
+    RelaysBase.metadata.create_all(bind=engine)
+    VmBase.metadata.create_all(bind=engine)
+    HostsBase.metadata.create_all(bind=engine)
+    JobsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     FulfillmentBase.metadata.create_all(bind=engine)
 
@@ -73,9 +79,5 @@ def run_migrations(
         site_tables = [table for table in site_tables if table.name != "capacity_reservations"]
     SiteBase.metadata.create_all(bind=engine, tables=site_tables)
 
-    apply_schema_migrations(
-        engine,
-        default_playbook_path=default_playbook_path,
-        default_inventory_group=default_inventory_group,
-    )
+    apply_schema_migrations(engine)
     SiteBase.metadata.create_all(bind=engine)

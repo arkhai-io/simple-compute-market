@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
 from market_core.query_dsl import QuerySyntaxError, QueryValidationError
@@ -80,7 +81,7 @@ def _registration(
         client_factory=lambda section, resources, role: object(),
         option_builder=lambda section, readiness, resources, role: (),
         buyer_compatibility=lambda section, option, context: (
-            compatible and option.mechanism == mechanism
+            compatible and option.settlement_schema == mechanism
         ),
         clause_fields=fields,
         publication_input_model=_PublicationInput,
@@ -88,24 +89,24 @@ def _registration(
     )
 
 
-def _registry(*, stripe_compatible: bool = True) -> SettlementConfigurationRegistry:
+def _registry(*, example_compatible: bool = True) -> SettlementConfigurationRegistry:
     return SettlementConfigurationRegistry(
         (
             _registration(
-                "fiat.stripe.v1",
-                "stripe",
+                "example.payment.v1",
+                "example",
                 (
                     _field(
-                        "stripe.method",
-                        lambda option: option.params.get("methods"),
+                        "example.method",
+                        lambda option: option.settlement_params.get("methods"),
                     ),
                     _field(
-                        "stripe.optional",
-                        lambda option: option.params.get("optional"),
+                        "example.optional",
+                        lambda option: option.settlement_params.get("optional"),
                         on_missing=MissingValueRule.PASS,
                     ),
                 ),
-                compatible=stripe_compatible,
+                compatible=example_compatible,
             ),
             _registration(
                 "alkahest.v1",
@@ -113,7 +114,7 @@ def _registry(*, stripe_compatible: bool = True) -> SettlementConfigurationRegis
                 (
                     _field(
                         "alkahest.chain",
-                        lambda option: option.params.get("chain"),
+                        lambda option: option.settlement_params.get("chain"),
                     ),
                 ),
             ),
@@ -123,12 +124,12 @@ def _registry(*, stripe_compatible: bool = True) -> SettlementConfigurationRegis
 
 def _config(
     *,
-    priority: tuple[str, ...] = ("fiat.stripe.v1", "alkahest.v1"),
+    priority: tuple[str, ...] = ("example.payment.v1", "alkahest.v1"),
 ) -> SettlementConfig:
     return SettlementConfig(
         priority=priority,
         mechanisms={
-            "stripe": _Section(enabled="fiat.stripe.v1" in priority),
+            "example": _Section(enabled="example.payment.v1" in priority),
             "alkahest": _Section(enabled="alkahest.v1" in priority),
         },
     )
@@ -140,16 +141,13 @@ def _option(
     **params: Any,
 ) -> SettlementOption:
     option_id = derive_settlement_option_id(
-        mechanism=mechanism,
-        asset=asset,
-        rates=[],
-        params=params,
+        price={"asset": asset, "rates": []},
+        settlement={"schema": mechanism, **(params or {})},
     )
     return SettlementOption(
         option_id=option_id,
-        mechanism=mechanism,
-        asset=asset,
-        params=params,
+        price={"asset": asset, "rates": []},
+        settlement={"schema": mechanism, **(params or {})},
     )
 
 
@@ -157,11 +155,11 @@ def test_compilation_normalizes_config_key_and_rejects_unknown_mechanism() -> No
     registry = _registry()
 
     compiled = compile_settlement_clause(
-        "mechanism=stripe stripe.method=card",
+        "mechanism=example example.method=card",
         registry,
     )
 
-    assert compiled.render() == "mechanism=fiat.stripe.v1 stripe.method=card"
+    assert compiled.render() == "mechanism=example.payment.v1 example.method=card"
     with pytest.raises(QueryValidationError) as caught:
         compile_settlement_clause("mechanism=ghost", registry)
     assert caught.value.code == "unknown_mechanism"
@@ -169,17 +167,17 @@ def test_compilation_normalizes_config_key_and_rejects_unknown_mechanism() -> No
 
 def test_one_clause_never_combines_values_from_different_options() -> None:
     registry = _registry()
-    usd_bank = _option("fiat.stripe.v1", "usd", methods=["bank"])
-    eur_card = _option("fiat.stripe.v1", "eur", methods=["card"])
+    usd_bank = _option("example.payment.v1", "usd", methods=["bank"])
+    eur_card = _option("example.payment.v1", "eur", methods=["card"])
     clause = compile_settlement_clause(
-        "asset=usd stripe.method=card",
+        "asset=usd example.method=card",
         registry,
     )
 
     result = select_settlement_candidates(
         (usd_bank, eur_card),
         registry=registry,
-        config=_config(priority=("fiat.stripe.v1",)),
+        config=_config(priority=("example.payment.v1",)),
         clauses=(clause,),
     )
 
@@ -187,19 +185,49 @@ def test_one_clause_never_combines_values_from_different_options() -> None:
     assert settlement_clause_matches(clause, usd_bank, registry) is False
     assert settlement_clause_matches(clause, eur_card, registry) is False
 
+    lifecycle = {
+        "adjudication": {
+            "version": 1,
+            "dispute": {
+                "interface": "example.dispute.v1", "origin": "https://dispute.example",
+                "account": "acct_example", "record_key": "example-public-key", "params": {},
+            },
+            "dispute_window_seconds": 60, "case_hold_max_seconds": None,
+        },
+        "early_termination": {
+            "version": 1,
+            "entitlements": {"payer": {"notice_seconds": 0, "settles_through": "started_period"}},
+            "settles_through": "last_boundary",
+        },
+    }
+    # Exercise the codec at its accessor seam, independently of wire admission.
+    stoppable = SimpleNamespace(
+        settlement_schema="example.payment.v1", price_asset="usd", lifecycle=lifecycle
+    )
+    query = compile_settlement_clause(
+        "asset=usd early_termination.payer=true early_termination.premature_stop_penalty<=0",
+        registry,
+    )
+    assert settlement_clause_matches(query, stoppable, registry)
+    assert not settlement_clause_matches(query, usd_bank, registry)
+    stoppable.price_asset = "eur"
+    assert not settlement_clause_matches(query, stoppable, registry)
+    with pytest.raises(QueryValidationError, match="asset"):
+        compile_settlement_clause("early_termination.premature_stop_penalty>0", registry)
+
 
 def test_first_surviving_clause_precedes_mechanism_priority() -> None:
     registry = _registry()
-    stripe = _option("fiat.stripe.v1", "usd", methods=["card"])
+    example = _option("example.payment.v1", "usd", methods=["card"])
     alkahest = _option("alkahest.v1", "usdc", chain="base_sepolia")
 
     result = select_settlement_candidates(
-        (stripe, alkahest),
+        (example, alkahest),
         registry=registry,
         config=_config(),
         clauses=(
             "mechanism=alkahest alkahest.chain=base_sepolia",
-            "mechanism=stripe stripe.method=card",
+            "mechanism=example example.method=card",
         ),
     )
 
@@ -209,48 +237,48 @@ def test_first_surviving_clause_precedes_mechanism_priority() -> None:
 
 def test_no_clause_preserves_priority_and_option_id_order() -> None:
     registry = _registry()
-    stripe_b = _option("fiat.stripe.v1", "usd", methods=["card"], profile="b")
-    stripe_a = _option("fiat.stripe.v1", "usd", methods=["card"], profile="a")
+    example_b = _option("example.payment.v1", "usd", methods=["card"], profile="b")
+    example_a = _option("example.payment.v1", "usd", methods=["card"], profile="a")
     alkahest = _option("alkahest.v1", "usdc", chain="base_sepolia")
 
     result = select_settlement_candidates(
-        (alkahest, stripe_b, stripe_a),
+        (alkahest, example_b, example_a),
         registry=registry,
         config=_config(),
     )
 
     assert result.matched_clause_index is None
     assert [candidate.option.option_id for candidate in result.candidates] == [
-        *sorted((stripe_a.option_id, stripe_b.option_id)),
+        *sorted((example_a.option_id, example_b.option_id)),
         alkahest.option_id,
     ]
 
 
 def test_missing_projection_rule_and_mechanism_qualification_are_enforced() -> None:
     registry = _registry()
-    stripe = _option("fiat.stripe.v1", "usd", methods=["card"])
+    example = _option("example.payment.v1", "usd", methods=["card"])
     alkahest = _option("alkahest.v1", "usdc", chain="base_sepolia")
 
-    optional = compile_settlement_clause("stripe.optional=anything", registry)
-    required = compile_settlement_clause("stripe.method=card", registry)
+    optional = compile_settlement_clause("example.optional=anything", registry)
+    required = compile_settlement_clause("example.method=card", registry)
 
-    assert settlement_clause_matches(optional, stripe, registry) is True
+    assert settlement_clause_matches(optional, example, registry) is True
     assert settlement_clause_matches(optional, alkahest, registry) is False
     assert settlement_clause_matches(required, alkahest, registry) is False
 
 
 def test_incompatible_and_disabled_options_are_removed_before_clauses() -> None:
-    stripe = _option("fiat.stripe.v1", "usd", methods=["card"])
+    example = _option("example.payment.v1", "usd", methods=["card"])
     alkahest = _option("alkahest.v1", "usdc", chain="base_sepolia")
 
     incompatible = select_settlement_candidates(
-        (stripe, alkahest),
-        registry=_registry(stripe_compatible=False),
+        (example, alkahest),
+        registry=_registry(example_compatible=False),
         config=_config(),
         clauses=("asset in [usd,usdc]",),
     )
     disabled = select_settlement_candidates(
-        (stripe, alkahest),
+        (example, alkahest),
         registry=_registry(),
         config=_config(priority=("alkahest.v1",)),
         clauses=("asset in [usd,usdc]",),

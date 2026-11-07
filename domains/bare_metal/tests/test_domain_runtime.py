@@ -8,9 +8,10 @@ from pydantic import ValidationError
 pytest.importorskip("market_core")
 
 from arkhai_bare_metal import (
+    BARE_METAL_DOMAIN_IDENTITY,
     BARE_METAL_SCHEMA_KIND,
     NODE_GRANT_ACCESS_ACTION,
-    BareMetalAccessResult,
+    BareMetalResult,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
@@ -18,6 +19,7 @@ from arkhai_bare_metal import (
     BareMetalTerms,
 )
 from arkhai_bare_metal.domain_runtime import market_domain
+from arkhai_bare_metal.fixtures.listing import build_bare_metal_listing_resource
 from market_core import (
     DomainCapability,
     DomainCodecExample,
@@ -30,44 +32,44 @@ def test_storefront_runtime_normalizes_bare_metal_schema_slots() -> None:
     runtime = market_domain()
     lease_end = datetime.now(UTC) + timedelta(hours=1)
 
-    listing = runtime.codecs.listing({
-        "machine_id": "node-1",
-        "physical_host_id": "host-1",
-    })
+    listing = runtime.codecs.listing(
+        build_bare_metal_listing_resource(host_id="node-1", physical_host_id="host-1")
+    )
     message = runtime.codecs.message({
         "duration_seconds": 3600,
         "ssh_public_key": "ssh-ed25519 AAAA test",
     })
     terms = runtime.codecs.terms({
-        "machine_id": "node-1",
+        "host_id": "node-1",
         "physical_host_id": "host-1",
         "duration_seconds": 3600,
         "ssh_public_key": "ssh-ed25519 AAAA test",
     })
     materialization = runtime.codecs.materialization({
         "escrow_uid": "escrow-1",
-        "machine_id": "node-1",
+        "host_id": "node-1",
         "physical_host_id": "host-1",
         "lease_end_utc": lease_end,
         "ssh_public_key": "ssh-ed25519 AAAA test",
     })
     receipt = runtime.codecs.receipt({
-        "machine_id": "node-1",
+        "host_id": "node-1",
         "physical_host_id": "host-1",
         "status": "active",
     })
     result = runtime.codecs.result({
-        "action": NODE_GRANT_ACCESS_ACTION,
-        "machine_id": "node-1",
+        "ssh_user": "tenant-a",
+        "ready_at": "2026-10-06T12:00:00+00:00",
+        "lease_end_utc": "2026-10-06T13:00:00+00:00",
     })
 
-    assert runtime.identity == BARE_METAL_SCHEMA_KIND
+    assert runtime.identity == BARE_METAL_DOMAIN_IDENTITY
     assert isinstance(listing, BareMetalListing)
     assert isinstance(message, BareMetalMessage)
     assert isinstance(terms, BareMetalTerms)
     assert isinstance(materialization, BareMetalMaterialization)
     assert isinstance(receipt, BareMetalReceipt)
-    assert isinstance(result, BareMetalAccessResult)
+    assert isinstance(result, BareMetalResult)
 
     assert_domain_conformance(
         DomainConformanceCase(
@@ -89,8 +91,13 @@ def test_storefront_runtime_normalizes_bare_metal_schema_slots() -> None:
 def test_storefront_runtime_surfaces_bare_metal_validation_errors() -> None:
     runtime = market_domain()
 
-    with pytest.raises(ValidationError, match="machine_id must be non-empty"):
-        runtime.codecs.listing({
-            "machine_id": "",
-            "physical_host_id": "host-1",
-        })
+    with pytest.raises(ValidationError, match="host_id must be non-empty"):
+        runtime.codecs.listing(build_bare_metal_listing_resource(host_id=""))
+
+
+def test_bare_metal_listing_without_backing_is_refused() -> None:
+    """A listing that does not say whether it is backed is not classified."""
+    runtime = market_domain()
+
+    with pytest.raises(ValidationError, match="capacity_backing"):
+        runtime.codecs.listing({"host_id": "node-1", "physical_host_id": "host-1"})

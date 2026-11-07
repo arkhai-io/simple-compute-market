@@ -75,8 +75,9 @@
       every earlier run answered `401`. It did not, on its own, clear this
       refusal.
 - [ ] 3.2 Correct it here if it is a marketplace defect or another harness
-      omission; record it for `add-bare-metal-hosted-settlement` if it belongs to
-      the hosted matrix. A development run qualifies no lane either way.
+      omission. (`settle-through-arkhai-payments` removed hosted settlement on 2026-10-08, and
+      `add-bare-metal-hosted-settlement` was archived as superseded, so there is no
+      hosted matrix to record it for.) A development run qualifies no lane either way.
 
       The refusal is `buyer_auth._verify`: the request's already-authenticated
       principal is not the buyer the agreement records, or is not carrying the
@@ -91,6 +92,10 @@
 
 ## 4. Closeout
 
+Per `openspec/README.md#plan-closeout-requirements`.
+
+Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+
 - [x] 4.1 Hygiene clean, strict validation, lint clean on every touched file
       (five pre-existing errors remain in files this change does not touch).
       The provider's throughput constraint is recorded in
@@ -100,10 +105,43 @@
       currently reach it. Suites: core buyer 115, storefront client 30, core
       storefront 148, e2e unit 97, VM buyer 196, VM storefront 941, bare-metal
       buyer 11, bare-metal storefront 122.
-
+- [ ] 4.2 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 4.3 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=name-unverifiable-responses` and resolve every match, then
+      `openspec validate name-unverifiable-responses --strict`.
+- [ ] 4.4 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun.
+- [ ] 4.5 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 4.6 **Import placement — confirm.** Check the imports this change added for any
+      still local without a recorded reason. One that should move returns the change to
+      implementation.
+- [ ] 4.7 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe.
+- [ ] 4.8 **Narrative compression.** Compress completed-task notes to final behavior,
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
+- [ ] 4.9 **Promotion.** Write the permanent documents this change owes — none beyond
+      the `storefront-publication` specification, since the hosted credential payload
+      guide the record names was removed with hosted settlement — and complete the
+      design-promotion record. A `spec.md` the deltas cover
+      (`openspec/specs/storefront-publication/spec.md`) is written by the archive in
+      4.10, not by hand; the record names it all the same.
+- [ ] 4.10 **Archival.** Last, once every other part is checked: `openspec archive
+      name-unverifiable-responses -y` merges the deltas into `openspec/specs/` and moves the
+      change under `openspec/changes/archive/`; point the index row at the archived
+      directory, and run `openspec validate --specs --strict`.
 ## Design promotion record
 
 | Accepted decision | Permanent location |
 |---|---|
 | A fail-closed refusal names the status and whether the response was authenticated, and never the body | `openspec/specs/storefront-publication/spec.md` (promote at synchronization) |
-| A development run authenticates to the private registry it configures | `docs/development/HOSTED_CREDENTIAL_PAYLOAD.md` |
+| A development run authenticates to the private registry it configures | hosted credential payload guide (removed with hosted settlement by `settle-through-arkhai-payments`) |

@@ -16,6 +16,8 @@ from __future__ import annotations
 import pytest
 
 from market_site.ledger import (
+    _requested_dimensions,
+    _split_claim_requirement,
     dict_resource_satisfies_claim,
     resource_feasibility_view,
     resource_satisfies_requirement,
@@ -30,7 +32,9 @@ def _row(**overrides):
         "resource_subtype": None,
         "available_units": 4,
         "value": 4,
-        "available": {"gpu_count": 4, "ram_gb": 128},
+        # "units" is the ledger's default mirror dimension, which an empty
+        # claim requests one of on the admission path.
+        "available": {"gpu_count": 4, "ram_gb": 128, "units": 4},
         "attributes": {"region": "eu-west", "gpu_model": "A100"},
     }
     row.update(overrides)
@@ -40,8 +44,6 @@ def _row(**overrides):
 def _authoritative_result(row, claim):
     """The admission-path result for the same data, built the same way
     ledger.py's own call sites build a ResourceFeasibilityView."""
-    from market_site.ledger import _requested_dimensions, _split_claim_requirement
-
     resource_kind, required_attributes = _split_claim_requirement(claim)
     required_dimensions = _requested_dimensions(claim)
     resource = resource_feasibility_view(
@@ -117,6 +119,15 @@ def test_no_claim_matches_everything():
     assert dict_resource_satisfies_claim(_row(), {}) is True
 
 
+@pytest.mark.parametrize(
+    "claim", [None, {}, {"pool_id": "default"}, {"pool_id": "r1"}, {"units": 1}]
+)
+def test_a_row_recording_no_pool_matches_no_claim(claim):
+    """Admission admits nothing against such a row, so ranking must not
+    read it as `default`, or as a pool named for the resource."""
+    assert dict_resource_satisfies_claim(_row(pool_id=None), claim) is False
+
+
 def test_unit_claim_keys_must_match_the_backing_ledger_service_configuration():
     """VM's CapacityLedgerService is composed with
     unit_claim_keys=("units", "gpu_count") in container.py -- the
@@ -130,8 +141,29 @@ def test_unit_claim_keys_must_match_the_backing_ledger_service_configuration():
     assert dict_resource_satisfies_claim(row, {"gpu_count": 2}) is False
     # With VM's actual configured unit_claim_keys, it's a quantity check.
     assert dict_resource_satisfies_claim(
-        row, {"gpu_count": 2}, unit_claim_keys=("units", "gpu_count"),
+        row, {"gpu_count": 2}, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
     ) is True
     assert dict_resource_satisfies_claim(
-        row, {"gpu_count": 5}, unit_claim_keys=("units", "gpu_count"),
+        row, {"gpu_count": 5}, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
     ) is False
+
+
+def test_the_unit_total_is_a_fact_only_under_the_composition_mirror_name():
+    """The scalar unit total is matchable under the mirror dimension the
+    composition names, and under no other domain's name. Under the module
+    default, whose mirror is ``units``, a claim naming ``gpu_count`` is an
+    attribute requirement no resource declares, so an equal number must not
+    make it match."""
+    assert dict_resource_satisfies_claim(_row(available_units=3), {"gpu_count": 3}) is False
+
+    view = resource_feasibility_view(
+        resource_id="r1",
+        pool_id="pool",
+        resource_kind="compute.gpu",
+        available={},
+        units=3,
+        mirror_dimension="accelerators",
+    )
+    assert view.attributes["accelerators"] == 3
+    assert view.attributes["units"] == 3
+    assert "gpu_count" not in view.attributes

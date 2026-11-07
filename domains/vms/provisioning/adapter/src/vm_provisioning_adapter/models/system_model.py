@@ -1,4 +1,7 @@
-"""Server-only models for the system diagnostics and test controllers.
+"""Server-only model of the VM job the evaluate-job dry run describes.
+
+A job's parameters are VM's, so the request is VM's own; the dry run's report
+is the compute family's ``MockJobEvaluation``.
 
 File naming: ``_model`` suffix marks this as a model definition file.
 """
@@ -16,12 +19,3 @@ class EvaluateJobRequest(BaseModel):
     vm_target: str = "eval-target"
     ssh_pubkey: Optional[str] = None
     vm_action: str = "create"
-
-
-class EvaluateJobResponse(BaseModel):
-    """Response from POST /test/evaluate-job."""
-    params_valid: bool
-    host_exists: bool
-    rule_matched: Optional[str] = None
-    would_pause: bool = False
-    errors: list[str] = []

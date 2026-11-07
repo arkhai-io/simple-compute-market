@@ -34,7 +34,7 @@ class StorefrontPublicationCommandCallbacks:
     """Infrastructure callbacks supplied by a concrete storefront executable."""
 
     build_payload: PayloadBuilder
-    publish_offer: PublishOffer
+    publish_listing: PublishOffer
 
 
 def build_storefront_publication_command(
@@ -48,7 +48,7 @@ def build_storefront_publication_command(
         db_path=config.db_path,
         base_url=config.base_url,
         build_payload=callbacks.build_payload,
-        publish_offer=callbacks.publish_offer,
+        publish_listing=callbacks.publish_listing,
     )
 
 

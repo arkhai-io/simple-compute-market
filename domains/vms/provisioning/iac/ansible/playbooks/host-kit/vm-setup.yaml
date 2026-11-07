@@ -5,4 +5,7 @@
   roles:
     - ../../roles/vm-setup
   vars:
-    vm_image_type: "{{ image_setup_type | default('golden') }}" # options: golden, scratch
+    # Scratch by default: it is the image market fulfillment creates VMs from,
+    # and needs only the host's outbound network. The golden image (object
+    # storage, a service-account key, Packer) is prepared only when named.
+    vm_image_type: "{{ image_setup_type | default('scratch') }}" # options: scratch, golden

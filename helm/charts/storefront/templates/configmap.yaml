@@ -1,14 +1,16 @@
 {{/*
-Per-agent ConfigMap. Holds the non-sensitive rendered storefront.toml
-(top-level scalars, chain, registry, gateway, provisioning, negotiation
-sub-tables). Mounted alongside the Secret-rendered storefront.secrets.toml
-at /etc/arkhai/; dynaconf merges the two files at startup.
+Per-agent ConfigMap holding the public storefront document, storefront.json.
+Mounted alongside the Secret overlay, storefront.secrets.toml, at /etc/arkhai/;
+the storefront merges the two at startup, the overlay winning.
 
-Split from a single-Secret blob so non-sensitive toggles (log levels,
-provisioning mode, RPC URLs, etc.) can be edited as a ConfigMap —
-kubectl-friendly diffs, no secret-rotation audit noise.
+Kept apart from the Secret so non-sensitive edits (log levels, poll
+intervals, RPC URLs) diff as a ConfigMap, with no secret-rotation noise.
 */}}
-{{- range $agent := .Values.agents }}
+{{- $agents := dict }}
+{{- include "storefront.agents" (dict "root" . "into" $agents) }}
+{{- range $name, $entry := $agents }}
+{{- /* An agent states no runtime overlay by omitting `secret`. */}}
+{{- $agent := mergeOverwrite (dict "secret" (dict)) $entry (dict "name" $name) }}
 {{- $component := $agent.component | default $agent.name }}
 apiVersion: v1
 kind: ConfigMap
@@ -18,7 +20,7 @@ metadata:
     {{- include "storefront.labels" $ | nindent 4 }}
     app.kubernetes.io/component: {{ $component | quote }}
 data:
-  storefront.toml: |
-    {{- include "storefront.agentConfigToml" (dict "root" $ "agent" $agent) | nindent 4 }}
+  storefront.json: |
+    {{- include "storefront.agentConfigDocument" (dict "root" $ "agent" $agent) | nindent 4 }}
 ---
 {{- end }}

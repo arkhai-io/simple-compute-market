@@ -1,0 +1,106 @@
+---
+- name: Require the supplied relay admission token
+  ansible.builtin.assert:
+    that:
+      - frp_auth_token is defined and frp_auth_token | length > 0
+  no_log: true
+
+- name: Require an explicit nonempty proxy window
+  ansible.builtin.assert:
+    that:
+      - frp_proxy_ports | length > 0
+
+- name: Validate each allowed proxy range
+  ansible.builtin.assert:
+    that:
+      - item.start | int > 0
+      - item.end | int >= item.start | int
+      - item.end | int <= 65535
+  loop: "{{ frp_proxy_ports }}"
+
+- name: Install and start checked relay admission
+  ansible.builtin.import_tasks: plugin.yml
+
+- name: Install the pinned relay server binary
+  ansible.builtin.include_role:
+    name: frp-binary
+  vars:
+    frp_binary_name: frps
+
+- name: Create the relay configuration and log directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /etc/frp
+      mode: '0700'
+    - path: /var/log/frp
+      mode: '0755'
+
+- name: Deploy the relay server configuration
+  ansible.builtin.template:
+    src: frps.toml.j2
+    dest: /etc/frp/frps.toml
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  notify: restart frps
+
+- name: Deploy the versioned relay server unit
+  ansible.builtin.template:
+    src: frps.service.j2
+    dest: /etc/systemd/system/frps.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart frps
+
+- name: Install the relay firewall and fail2ban
+  ansible.builtin.package:
+    name: [ufw, fail2ban]
+    state: present
+
+- name: Deploy fail2ban ports from the allowed proxy ranges
+  ansible.builtin.template:
+    src: fail2ban.conf.j2
+    dest: /etc/fail2ban/jail.d/sshd-frp.conf
+    mode: '0644'
+  notify: restart relay fail2ban
+
+- name: Allow SSH and the relay control port
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: ["22", "{{ frp_server_port }}"]
+
+- name: Allow every configured proxy range
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.start }}:{{ item.end }}"
+    proto: tcp
+  loop: "{{ frp_proxy_ports }}"
+
+- name: Enable the relay firewall
+  community.general.ufw:
+    state: enabled
+
+- name: Enable fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: started
+    enabled: true
+
+- name: Apply changed relay configuration and version
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the relay server
+  ansible.builtin.systemd:
+    name: frps
+    state: started
+    enabled: true
+    daemon_reload: true

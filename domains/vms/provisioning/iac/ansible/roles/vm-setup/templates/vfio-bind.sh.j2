@@ -1,0 +1,99 @@
+#!/bin/bash
+# Bind the audited passthrough devices to vfio-pci, by PCI address.
+#
+# Two properties matter here and both are deliberate.
+#
+# Binding is scoped to an address, never to a vendor:device ID. The kernel's
+# `vfio-pci.ids=` parameter matches by ID, so naming one device's ID claims
+# every device presenting that ID anywhere in the machine — including devices
+# in IOMMU groups nothing ever inspected. An address names one slot.
+#
+# Binding happens after boot rather than during it. A wrong binding decision
+# applied from the kernel command line produces a machine with no network and
+# no way to observe or correct it. The same decision applied here fails a
+# systemd unit on a machine that is up and reachable.
+
+set -uo pipefail
+
+STATE_FILE="{{ vfio_bind_state_path }}"
+RESCUE_TOKEN="{{ rescue_cmdline_token }}"
+
+# The rescue boot entry adds this token. It is the whole mechanism by which
+# that entry is inert: same kernel, same initramfs, no device bound.
+if grep -qw "${RESCUE_TOKEN}" /proc/cmdline; then
+    echo "Rescue token ${RESCUE_TOKEN} present on the kernel command line; binding nothing."
+    exit 0
+fi
+
+if [ ! -s "${STATE_FILE}" ]; then
+    echo "No bind list at ${STATE_FILE}; nothing to do."
+    exit 0
+fi
+
+modprobe vfio-pci || {
+    echo "ERROR: vfio-pci module unavailable." >&2
+    exit 1
+}
+
+rc=0
+
+while read -r addr; do
+    case "${addr}" in
+        ''|\#*) continue ;;
+    esac
+
+    dev="/sys/bus/pci/devices/${addr}"
+    if [ ! -d "${dev}" ]; then
+        echo "ERROR: ${addr} is not present on this machine." >&2
+        rc=1
+        continue
+    fi
+
+    current=""
+    if [ -L "${dev}/driver" ]; then
+        current="$(basename "$(readlink -f "${dev}/driver")")"
+    fi
+
+    if [ "${current}" = "vfio-pci" ]; then
+        echo "${addr} already bound to vfio-pci."
+        continue
+    fi
+
+    if ! echo "vfio-pci" > "${dev}/driver_override"; then
+        echo "ERROR: could not set driver_override for ${addr}." >&2
+        rc=1
+        continue
+    fi
+
+    if [ -n "${current}" ]; then
+        # Unbinding is uncontested because the host GPU drivers are
+        # blacklisted; a driver still holding the device here means the
+        # blacklist did not take effect and the failure should be visible.
+        if ! echo "${addr}" > "${dev}/driver/unbind"; then
+            echo "ERROR: could not unbind ${current} from ${addr}." >&2
+            rc=1
+            continue
+        fi
+    fi
+
+    if ! echo "${addr}" > /sys/bus/pci/drivers_probe; then
+        echo "ERROR: could not probe a driver for ${addr}." >&2
+        rc=1
+        continue
+    fi
+
+    bound=""
+    if [ -L "${dev}/driver" ]; then
+        bound="$(basename "$(readlink -f "${dev}/driver")")"
+    fi
+
+    if [ "${bound}" != "vfio-pci" ]; then
+        echo "ERROR: ${addr} bound to '${bound:-nothing}' rather than vfio-pci." >&2
+        rc=1
+        continue
+    fi
+
+    echo "${addr} bound to vfio-pci."
+done < "${STATE_FILE}"
+
+exit "${rc}"

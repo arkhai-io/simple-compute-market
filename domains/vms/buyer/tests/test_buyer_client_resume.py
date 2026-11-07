@@ -21,12 +21,15 @@ deterministic fake strategy.
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from unittest.mock import patch
 
 import pytest
 
+from market_core.schemas import Agreement
+from identity_helpers import alkahest_option
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
@@ -34,7 +37,7 @@ from market_policy.negotiation_middleware import (
     NegotiationStep,
 )
 
-from domains.vms.buyer.buyer_client import (
+from arkhai_vms_buyer.buyer_client import (
     NegotiationOutcome,
     ResumeState,
     negotiate_with_seller,
@@ -71,6 +74,44 @@ class _MockResponse:
         pass
 
 
+def _with_accepted_agreement(req, body):
+    if body.get("action") != "accept":
+        return body
+    request_body = json.loads(req.data.decode("utf-8")) if req.data else {}
+    negotiation_id = body.get("negotiation_id") or req.full_url.rstrip("/").rsplit("/", 1)[-1]
+    buyer = BUYER_SIGNER.identity
+    seller = seller_principals().identities[0]
+    body.setdefault("buyer_principal", buyer.model_dump(mode="json"))
+    body.setdefault("seller_principal", seller.model_dump(mode="json"))
+    proposal = body.get("proposal")
+    fields = proposal.get("fields") if isinstance(proposal, dict) else None
+    amount = int(fields.get("amount", 0)) if isinstance(fields, dict) else 0
+    body.setdefault("accepted_escrow_proposal", {
+        "chain_name": "anvil", "escrow_address": "0x" + "cd" * 20,
+        "fields": {}, "expiration_unix": 1_800_000_000,
+    })
+    agreement = Agreement(
+        negotiation_id=negotiation_id,
+        listing_id=request_body.get("listing_id") or "L-1",
+        listing_hash="0" * 64,
+        buyer=buyer.model_dump(mode="json"),
+        seller=seller.model_dump(mode="json"),
+        settlement=alkahest_option(),
+        amount=amount,
+        asset="usd",
+        duration_seconds=0,
+        start_utc="2025-01-01T00:00:00Z",
+        accepted_at="2025-01-01T00:00:00Z",
+    )
+    return {
+        **body,
+        "agreement": agreement.model_dump(mode="json", exclude_none=True),
+        "agreement_bytes": base64.b64encode(
+            agreement.model_dump_json(exclude_none=True).encode("utf-8")
+        ).decode("ascii"),
+    }
+
+
 def _urlopen_capture(responses):
     """Return a urlopen replacement that yields the given responses in
     order and records every Request seen.
@@ -88,7 +129,7 @@ def _urlopen_capture(responses):
             "headers": dict(req.header_items()),
             "body": json.loads(req.data.decode("utf-8")) if req.data else None,
         })
-        body = next(it)
+        body = _with_accepted_agreement(req, next(it))
         return _MockResponse(
             status=200,
             text=json.dumps(body),
@@ -216,7 +257,9 @@ def test_resume_buyer_counters_then_seller_accepts(mock_urlopen):
     assert outcome.agreed_amount == 70
     assert outcome.negotiation_id == "neg-2"
     assert seen[0]["body"]["action"] == "counter"
-    assert seen[0]["body"]["proposal"]["fields"]["amount"] == 70
+    # The body the buyer signed: amounts are decimal-digit strings, so a
+    # uint256 counter can be canonicalized at all.
+    assert seen[0]["body"]["proposal"]["fields"]["amount"] == "70"
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")

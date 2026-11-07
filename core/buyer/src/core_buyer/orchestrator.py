@@ -108,6 +108,7 @@ class BuyResult:
     seller_url: Optional[str] = None
     agreed_amount: Optional[int] = None
     escrow_uid: Optional[str] = None
+    settlement_ref: Optional[str] = None
     fulfillment_uid: Optional[str] = None
     connection_details: Optional[str] = None
     tenant_credentials: Optional[dict[str, Any]] = None
@@ -122,6 +123,7 @@ class BuyResult:
             "seller_url",
             "agreed_amount",
             "escrow_uid",
+            "settlement_ref",
             "fulfillment_uid",
             "connection_details",
             "tenant_credentials",

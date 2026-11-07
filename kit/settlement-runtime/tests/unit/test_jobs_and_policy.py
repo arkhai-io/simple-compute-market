@@ -145,6 +145,62 @@ async def test_new_job_binds_then_persists_and_wakes(tmp_path) -> None:
     assert stored["fulfillment_ref"] == "fulfillment"
 
 
+async def test_a_deferred_job_is_persisted_without_binding_or_waking(tmp_path) -> None:
+    """Work remains that the domain's own convergence finishes: the outcome is
+    persisted so the domain can leave the deal open, no fulfillment is bound,
+    and servicing is not woken."""
+    repository = SettlementSQLiteRepository(str(tmp_path / "deferred-job.db"))
+    runtime = SettlementRuntime(repository, {})
+    prepared = PreparedSettlement(
+        agreement_ref="agreement",
+        obligations=(obligation(),),
+        selected_obligation_index=0,
+        local_principal=SELLER,
+        mechanism_ref="escrow",
+        mechanism_receipt=None,
+        fulfillment_input={"private": "input"},
+    )
+    persisted: list[FulfillmentOutcome] = []
+    woken: list[str] = []
+
+    async def prepare(**kwargs):
+        return prepared
+
+    async def reserve(value, escrow_uid, negotiation_id):
+        return None
+
+    async def fulfill(value, *, mechanism_client):
+        return FulfillmentOutcome(status="deferred", reason="lease registration pending")
+
+    async def persist(value, outcome):
+        persisted.append(outcome)
+
+    async def wake(obligation_ref):
+        woken.append(obligation_ref)
+
+    coordinator = SettlementJobCoordinator(
+        runtime,
+        prepare=prepare,
+        reserve_start=reserve,
+        fulfill=fulfill,
+        persist_outcome=persist,
+        wake_servicing=wake,
+    )
+    records = await runtime.register_plan(
+        agreement_ref=prepared.agreement_ref, obligations=prepared.obligations
+    )
+
+    outcome = await coordinator.run_once(
+        prepared, obligation_ref=records[0].obligation_ref, mechanism_client=object()
+    )
+
+    assert outcome.status == "deferred"
+    assert [p.status for p in persisted] == ["deferred"]
+    assert woken == []
+    stored = await repository.load_settlement_obligation(records[0].obligation_ref)
+    assert stored["fulfillment_ref"] is None
+
+
 async def test_failure_policy_preserves_order_duplicates_and_isolation() -> None:
     original = {"deal": "one"}
     seen: list[str] = []

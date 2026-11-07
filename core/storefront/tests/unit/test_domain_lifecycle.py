@@ -10,6 +10,8 @@ from market_core import (
     ImmutableFulfillmentCapability,
     ImmutableSettlementCapability,
     MarketDomainContract,
+    SettlementEvidence,
+    SettlementStageTable,
 )
 from market_identity import Identity, IdentityScheme
 
@@ -45,8 +47,7 @@ def _contract(*, identity: str, build_plan, fulfill) -> MarketDomainContract:
             normalize_result=_identity,
         ),
         settlement=ImmutableSettlementCapability(
-            verify=_identity,
-            build_plan=build_plan,
+            seller_stages=SettlementStageTable({"example.settlement.v1": build_plan}),
         ),
         fulfillment=ImmutableFulfillmentCapability(fulfill=fulfill),
     )
@@ -88,7 +89,13 @@ def _fulfillment_context(identity: str = "bare_metal.v1") -> StorefrontFulfillme
             site_id="site-a",
             binding=_binding(identity),
         ),
-        escrow_uid="escrow-1",
+        settlement_evidence=SettlementEvidence(
+            negotiation_id="neg-1",
+            mechanism="example.settlement.v1",
+            settlement_ref="settlement-1",
+            status="verified",
+            evidence={"domain": identity},
+        ),
         buyer_principal=_principal(1),
         ports=StorefrontFulfillmentPorts(
             repository=object(),
@@ -134,7 +141,7 @@ def test_settlement_builder_receives_one_exact_immutable_context():
     domain = _contract(identity="compute.v1", build_plan=build_plan, fulfill=fulfill)
     context = _settlement_context()
 
-    artifacts = build_domain_settlement_artifacts(domain, context)
+    artifacts = build_domain_settlement_artifacts(domain, context, build_plan=build_plan)
 
     assert received == [context]
     assert artifacts.settlement_plan["obligations"][0]["payer"] == "buyer"
@@ -155,7 +162,9 @@ def test_cross_domain_settlement_swap_fails_before_hook():
     domain = _contract(identity="bare_metal.v1", build_plan=build_plan, fulfill=fulfill)
 
     with pytest.raises(StorefrontDomainLifecycleError, match="disagrees"):
-        build_domain_settlement_artifacts(domain, _settlement_context())
+        build_domain_settlement_artifacts(
+            domain, _settlement_context(), build_plan=build_plan
+        )
     assert called is False
 
 
@@ -164,7 +173,7 @@ async def test_fulfillment_result_must_retain_operation_and_site_binding():
     async def fulfill(*, context):
         return {
             "negotiation_id": context.negotiation_id,
-            "escrow_uid": context.escrow_uid,
+            "settlement_ref": context.settlement_ref,
             "site_id": context.site_id,
             "physical_resource_id": "host-7",
             "state": "active",
@@ -187,14 +196,16 @@ async def test_fulfillment_result_must_retain_operation_and_site_binding():
 
 
 @pytest.mark.asyncio
-async def test_fulfillment_result_cannot_retarget_another_site():
+@pytest.mark.parametrize("coordinate", ("site_id", "negotiation_id", "settlement_ref"))
+async def test_fulfillment_result_cannot_retarget_accepted_evidence(coordinate):
     async def fulfill(*, context):
         return {
             "negotiation_id": context.negotiation_id,
-            "escrow_uid": context.escrow_uid,
-            "site_id": "site-b",
+            "settlement_ref": context.settlement_ref,
+            "site_id": context.site_id,
             "physical_resource_id": "host-7",
             "state": "active",
+            coordinate: "changed-binding",
         }
 
     domain = _contract(

@@ -6,7 +6,7 @@ composes three closed-function stages in order:
 
     1. discover         — registry query for matching seller orders
     2. negotiate        — aggregation + per-match negotiation hook
-    3. settle           — create escrow, submit settlement, poll terminal state
+    3. settle           — invoke the declared Agreement mechanism stage
 
 Nothing here runs a server or handles inbound HTTP. The buyer is a
 client that drives the deal end to end. Seller HTTP calls use the buyer's
@@ -18,15 +18,20 @@ count, the provisioning payload) into the top-level `negotiate` /
 
 from __future__ import annotations
 
+from market_identity import EnvelopeCapture
+
 import asyncio
 import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
-from market_core.schemas import SettlementOption, SettlementSelection
+from market_core import SettlementStageTable
+
+from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
 from market_identity import Identity, Signer, TrustedIdentitySet
+from market_policy.scalar_policies import selected_settlement_artifact
 
 from core_buyer.orchestrator import (
     DEFAULT_HTTP_TIMEOUT,
@@ -39,6 +44,8 @@ from core_buyer.orchestrator import (
     fetch_listing_dict,
 )
 
+from .aggregation import AggregationPolicy, load_aggregation_policy
+from .deal_helpers import settlement_acceptance_fields
 from .negotiation_client import (
     NegotiationOutcome,
     _authenticated_json,
@@ -55,13 +62,31 @@ DEFAULT_SETTLEMENT_TIMEOUT = 600.0  # 10 minutes
 BuildEscrowProposalFn = Callable[[dict[str, Any]], Any | None]
 EncodeEscrowProposalFn = Callable[[Any], dict[str, Any]]
 DecodeOpaquePayloadFn = Callable[[dict[str, Any]], Any]
-BuildEscrowTermsFn = Callable[[Any, str | None, int, int], list[Any]]
+# Materialize the seller-accepted escrow proposal into opaque term payloads:
+# (accepted proposal, the selected listing, agreed amount, duration seconds).
+# The listing is passed so the mechanism holds the terms it builds to what the
+# listing advertises, rather than to whatever the proposal names.
+BuildEscrowTermsFn = Callable[[Any, dict[str, Any], int, int], list[Any]]
+# Refuse the buyer's derived term payloads unless they are exactly what the
+# seller's committed plan obligates; raises with the reason.
+CheckEscrowsFundPlanFn = Callable[[list[Any], SettlementPlan], None]
+# What the selected entry records about the listing, given (the listing, the
+# buyer's settlement proposal), when negotiation starts and at acceptance, so a
+# resumed run derives its settlement from it rather than from the seller.
+AcceptedListingRecordFn = Callable[[dict[str, Any], Any], dict[str, Any]]
 CreateEscrowFn = Callable[[list[Any]], list[str]]
 SettlementRecipientFn = Callable[[Any], str | None]
 BuildSettlementPayloadFn = Callable[[str, Any], dict[str, Any]]
 RevalidateSettlementFn = Callable[
     [dict[str, Any], SettlementOption],
     Awaitable[None],
+]
+# Per candidate listing: the selected mechanism's check of a seller plan that
+# it materializes from the selection rather than mirroring the option, or None
+# when the option's own parameters are the plan's.
+AdvertisedPlanValidatorFn = Callable[
+    [dict[str, Any]],
+    Callable[[SettlementPlan], None] | None,
 ]
 
 
@@ -138,7 +163,8 @@ def make_publisher_trust_resolver(
             )
         if (
             str(refreshed.get("listing_id")) != listing_id
-            or refreshed.get("publisher_id") != publisher_id
+            # Recovery retains registry subject IDs as text in the run context.
+            or str(refreshed.get("publisher_id")) != str(publisher_id)
             or refreshed.get("storefront_url") != storefront_url
         ):
             raise RuntimeError(
@@ -258,6 +284,7 @@ def _signed_json(
     request_id: str | None = None,
     timestamp: int | None = None,
     resolve_response_principals: Callable[[], TrustedIdentitySet],
+    capture: EnvelopeCapture | None = None,
 ) -> dict[str, Any]:
     return _authenticated_json(
         url,
@@ -271,6 +298,7 @@ def _signed_json(
         request_id=request_id,
         timestamp=timestamp,
         expected_response_principals=resolve_response_principals(),
+        capture=capture,
     )
 
 
@@ -285,6 +313,7 @@ def signed_storefront_json(
     resource: str,
     timeout: float,
     resolve_response_principals: Callable[[], TrustedIdentitySet],
+    capture: EnvelopeCapture | None = None,
 ) -> dict[str, Any]:
     """Call one signed storefront route and verify its signed JSON response."""
 
@@ -298,6 +327,7 @@ def signed_storefront_json(
         resource=resource,
         timeout=timeout,
         resolve_response_principals=resolve_response_principals,
+        capture=capture,
     )
 
 
@@ -313,7 +343,7 @@ def wait_for_settlement(
     sleep: Callable[[float], None] = time.sleep,
     resolve_seller_principals: Callable[[], TrustedIdentitySet],
 ) -> dict[str, Any]:
-    """Poll an EVM settlement until it reaches a terminal public status."""
+    """Poll settlement, observing public status and returning private delivery."""
 
     deadline = time.monotonic() + total_timeout
     attempts = 0
@@ -327,7 +357,9 @@ def wait_for_settlement(
             resolve_seller_principals=resolve_seller_principals,
         )
         if on_poll:
-            on_poll(attempts, status_body)
+            # Authenticated delivery may contain credentials or future private
+            # fields; progress observers persist public status only.
+            on_poll(attempts, {"status": status_body.get("status")})
         if status_body.get("status") in ("ready", "failed"):
             return status_body
         if time.monotonic() >= deadline:
@@ -374,11 +406,14 @@ def make_negotiate_hook(
     encode_escrow_proposal: EncodeEscrowProposalFn,
     decode_provision_terms: DecodeOpaquePayloadFn,
     decode_escrow_proposal: DecodeOpaquePayloadFn,
-    decode_escrow_terms: DecodeOpaquePayloadFn,
     max_negotiation_rounds: int,
     derive_prices: Callable[[dict[str, Any]], tuple[int, int]] | None,
     chain: list[Any] | None,
     revalidate_settlement: RevalidateSettlementFn | None = None,
+    validate_acceptance: Callable[[NegotiationOutcome], None] | None = None,
+    advertised_plan_validator: AdvertisedPlanValidatorFn | None = None,
+    accepted_listing_record: AcceptedListingRecordFn | None = None,
+    capture: EnvelopeCapture | None = None,
 ) -> NegotiateFn:
     """Build the schema-instantiated negotiate hook.
 
@@ -386,7 +421,10 @@ def make_negotiate_hook(
     accepted-escrow proposal construction, per-listing price derivation,
     buyer policy chain, and aggregation policy execution. ``provision``
     is the domain's provisioning payload, passed through opaquely;
-    ``unit_count`` is the per-unit→absolute scale.
+    ``unit_count`` is the per-unit→absolute scale. ``accepted_listing_record``
+    returns what a negotiation records about its listing, as ``listing_record``,
+    when it starts and when it is agreed: whatever the selected entry needs to
+    derive its settlement again on resume. Core passes it through opaquely.
     """
 
     def _hook(
@@ -403,11 +441,14 @@ def make_negotiate_hook(
             encode_escrow_proposal=encode_escrow_proposal,
             decode_provision_terms=decode_provision_terms,
             decode_escrow_proposal=decode_escrow_proposal,
-            decode_escrow_terms=decode_escrow_terms,
             max_negotiation_rounds=max_negotiation_rounds,
             derive_prices=derive_prices,
             chain=chain,
             revalidate_settlement=revalidate_settlement,
+            validate_acceptance=validate_acceptance,
+            advertised_plan_validator=advertised_plan_validator,
+            accepted_listing_record=accepted_listing_record,
+            capture=capture,
             on_event=on_event,
         )
 
@@ -425,12 +466,15 @@ def _negotiate_matches(
     encode_escrow_proposal: EncodeEscrowProposalFn,
     decode_provision_terms: DecodeOpaquePayloadFn,
     decode_escrow_proposal: DecodeOpaquePayloadFn,
-    decode_escrow_terms: DecodeOpaquePayloadFn,
     max_negotiation_rounds: int,
     derive_prices: Callable[[dict[str, Any]], tuple[int, int]] | None,
     chain: list[Any] | None,
     revalidate_settlement: RevalidateSettlementFn | None,
+    validate_acceptance: Callable[[NegotiationOutcome], None] | None,
     on_event: Callable[[str, dict], None],
+    advertised_plan_validator: AdvertisedPlanValidatorFn | None = None,
+    accepted_listing_record: AcceptedListingRecordFn | None = None,
+    capture: EnvelopeCapture | None = None,
 ) -> NegotiationResult:
     attempts: list[dict[str, Any]] = []
 
@@ -476,10 +520,29 @@ def _negotiate_matches(
             settlement_selection = None
         advertised_option: SettlementOption | None = None
         if settlement_selection is not None:
-            selected = match.get("_selected_settlement")
-            selected_option = getattr(selected, "option", None)
-            if selected_option is not None:
-                advertised_option = SettlementOption.model_validate(selected_option)
+            # The domain hook returns a selection, not necessarily a cached
+            # SelectedSettlementOption. Resolve its rate and acceptance contract
+            # from the advertised listing for every buyer entry point.
+            selected_option = selected_settlement_artifact(
+                match,
+                {"settlement_selection": settlement_selection.model_dump(mode="json")},
+            )
+            if selected_option is None:
+                # A selection naming nothing the listing advertises has no rate
+                # or acceptance contract to negotiate or revalidate against.
+                attempts.append(
+                    {
+                        "seller_url": seller_url,
+                        "listing_id": listing_id,
+                        "error": "unadvertised_settlement_selection",
+                    }
+                )
+                return NegotiationOutcome(
+                    status="exited",
+                    negotiation_id=None,
+                    reason="unadvertised_settlement_selection",
+                )
+            advertised_option = SettlementOption.model_validate(selected_option)
         if advertised_option is not None and revalidate_settlement is not None:
             try:
                 await revalidate_settlement(match, advertised_option)
@@ -575,11 +638,19 @@ def _negotiate_matches(
                 )
             initial_price = constraints.initial_price
             max_price = constraints.max_price
+        # Recorded when the negotiation starts and again at acceptance, so a
+        # run resumed mid-negotiation still holds what its listing advertised.
+        listing_record = (
+            accepted_listing_record(match, settlement_proposal)
+            if accepted_listing_record is not None
+            else None
+        )
         _emit_neg(
             "negotiation_started",
             seller_url=seller_url,
             initial_price=initial_price,
             max_price=max_price,
+            listing_record=listing_record,
         )
 
         # negotiate_with_seller is sync (blocking urllib); to_thread lets
@@ -599,13 +670,19 @@ def _negotiate_matches(
                 encode_escrow_proposal=encode_escrow_proposal,
                 decode_provision_terms=decode_provision_terms,
                 decode_escrow_proposal=decode_escrow_proposal,
-                decode_escrow_terms=decode_escrow_terms,
                 settlement_selection=settlement_selection,
                 max_rounds=max_negotiation_rounds,
                 on_round=_on_round,
                 chain=chain,
                 policy_params=negotiation_policy_params,
+                validate_acceptance=validate_acceptance,
+                validate_advertised_plan=(
+                    advertised_plan_validator(match)
+                    if advertised_plan_validator is not None
+                    else None
+                ),
                 resolve_seller_principals=resolve_seller_principals,
+                capture=capture,
             )
         except RuntimeError as exc:
             _emit_neg("negotiation_failed", error=f"http_error: {exc}")
@@ -619,15 +696,44 @@ def _negotiate_matches(
             # Reraise so policies that don't catch see the actual error —
             # surface state, don't paper over network failures.
             raise
+        except Exception as exc:
+            # The handler above narrows to RuntimeError, which is what the
+            # transport raises. Anything else left no record of how this
+            # negotiation ended: the run-log held an opening and nothing
+            # after it, so the reason had to be reconstructed from an
+            # absence. Named here, then reraised unchanged.
+            _emit_neg(
+                "negotiation_failed",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            attempts.append(
+                {
+                    "seller_url": seller_url,
+                    "listing_id": listing_id,
+                    "error": f"negotiation_raised: {type(exc).__name__}: {exc}",
+                }
+            )
+            raise
 
         if outcome.negotiation_id and "negotiation_id" not in neg_ctx:
             neg_ctx["negotiation_id"] = outcome.negotiation_id
 
+        # Scalars only, emitted before the outcome is serialized below. That
+        # serialization can refuse a payload of its own accord, and when it
+        # does the run shows an opening, no completion and no error — one
+        # silence covering several explanations. This event separates what
+        # the seller answered from whether it could be written down.
+        _emit_neg(
+            "negotiation_returned",
+            status=outcome.status,
+            reason=outcome.reason,
+            rounds=outcome.rounds,
+            agreed_amount=outcome.agreed_amount,
+        )
+
         # Note: the buyer-side ``buyer_escrow_shape_guard`` middleware
         # (default in the buyer's chain) handles seller-pin-mutation
         # vetoes per round — no separate post-agreement audit is needed.
-
-        from .deal_helpers import settlement_acceptance_fields
 
         accepted_settlement = settlement_acceptance_fields(
             negotiation_id=outcome.negotiation_id or "",
@@ -647,16 +753,19 @@ def _negotiate_matches(
                 else None
             ),
             **accepted_settlement,
-            accepted_escrow_terms=(
-                [_opaque_payload_dict(term) for term in outcome.accepted_escrow_terms]
-                if outcome.accepted_escrow_terms is not None
-                else None
-            ),
+            listing_record=listing_record if outcome.status == "agreed" else None,
             accepted_provision_terms=(
                 _opaque_payload_dict(outcome.accepted_provision_terms)
                 if outcome.accepted_provision_terms is not None
                 else None
             ),
+            agreement=(
+                outcome.agreement.model_dump(mode="json", exclude_none=True)
+                if outcome.agreement is not None
+                else None
+            ),
+            agreement_bytes=outcome.agreement_bytes,
+            settlement_data=outcome.settlement_data,
         )
         attempts.append(
             {
@@ -666,8 +775,6 @@ def _negotiate_matches(
             }
         )
         return outcome
-
-    from .aggregation import AggregationPolicy, load_aggregation_policy
 
     policy: AggregationPolicy = load_aggregation_policy(config.aggregation_policy)
 
@@ -689,11 +796,50 @@ def _negotiate_matches(
     return NegotiationResult(match=match, outcome=outcome, attempts=attempts)
 
 
+StageT = TypeVar("StageT")
+
+
 def make_settle_hook(
+    *,
+    stages: SettlementStageTable[StageT],
+    invoke: Callable[[StageT, NegotiationResult, Callable[[str, dict], None]], BuyResult],
+) -> SettleFn:
+    """Resolve accepted work before effects, then invoke its domain-owned stage.
+
+    ``invoke`` adapts the composing domain's stage shape to the buyer role hook;
+    core does not require methods or a callable stage from a mechanism kit.
+    """
+    def _hook(
+        negotiation: NegotiationResult,
+        on_event: Callable[[str, dict], None],
+    ) -> BuyResult:
+        if negotiation.match is None or negotiation.outcome is None:
+            raise ValueError("settle hook received no selected negotiation")
+        outcome = negotiation.outcome
+        agreement = outcome.agreement
+        if agreement is None or agreement.settlement is None:
+            raise ValueError("accepted work has no Agreement settlement option")
+        if agreement.negotiation_id != outcome.negotiation_id:
+            raise ValueError("accepted Agreement changed negotiation identity")
+        mechanism = agreement.settlement.settlement_schema
+        try:
+            stage = stages[mechanism]
+        except KeyError as exc:
+            raise ValueError(
+                f"unsupported accepted settlement mechanism: {mechanism}; "
+                "restore its buyer stage to resume this Agreement"
+            ) from exc
+        return invoke(stage, negotiation, on_event)
+
+    return _hook
+
+
+def make_escrow_settle_hook(
     *,
     config: BuyConfig,
     unit_count: float,
     build_escrow_terms: BuildEscrowTermsFn,
+    check_escrows_fund_plan: CheckEscrowsFundPlanFn,
     create_escrow: CreateEscrowFn,
     settlement_recipient: SettlementRecipientFn,
     build_settlement_payload: BuildSettlementPayloadFn,
@@ -705,10 +851,12 @@ def make_settle_hook(
     sleep: Callable[[float], None],
     duration_seconds: int = 0,
 ) -> SettleFn:
-    """Build the schema-instantiated settlement hook.
+    """Bind the escrow helper explicitly into an applicable domain table entry.
 
-    Domain ports materialize escrow terms, recipient identity, and the
-    mechanism-specific settlement request payload.
+    This helper is never a dispatch default. The selected entry owns acceptance
+    guards and resolves its escrow prerequisites before invoking it. The buyer
+    funds only the escrow ``build_escrow_terms`` derives, and where the seller
+    sent a plan, only once ``check_escrows_fund_plan`` finds them equal.
     """
 
     def _hook(
@@ -724,6 +872,7 @@ def make_settle_hook(
             unit_count=unit_count,
             duration_seconds=duration_seconds,
             build_escrow_terms=build_escrow_terms,
+            check_escrows_fund_plan=check_escrows_fund_plan,
             create_escrow=create_escrow,
             settlement_recipient=settlement_recipient,
             build_settlement_payload=build_settlement_payload,
@@ -751,6 +900,7 @@ def _settle_one(
     settlement_submit_max_attempts: int,
     settlement_submit_retryable: Callable[[RuntimeError], bool],
     build_escrow_terms: BuildEscrowTermsFn,
+    check_escrows_fund_plan: CheckEscrowsFundPlanFn,
     create_escrow: CreateEscrowFn,
     settlement_recipient: SettlementRecipientFn,
     confirm_settlement: Callable[[AgreedTerms, dict[str, Any]], bool] | None,
@@ -762,9 +912,8 @@ def _settle_one(
 ) -> BuyResult:
     """Drive escrow → submit → poll for the policy's chosen winner.
 
-    Lifted out of the run_buy loop so the negotiate-vs-settle split is
-    structural, not just visual. Inputs are the policy's
-    ``(match, outcome)`` plus the orchestrator's settlement deps.
+    Only an explicitly composed escrow entry calls this helper. Inputs are
+    the policy's exact ``(match, outcome)`` and that entry's escrow ports.
     """
     seller_url = (
         match.get("storefront_url")
@@ -788,6 +937,21 @@ def _settle_one(
             seller_url=seller_url,
             agreed_amount=outcome.agreed_amount,
             reason="missing_accepted_escrow_proposal",
+            rounds=outcome.rounds,
+            attempts=attempts,
+        )
+    # A seller accepts an escrow only with the plan it committed to, so a reply
+    # without one breaks the protocol, and funding then would skip the one
+    # check that catches buyer and seller deriving different escrows.
+    if outcome.settlement_plan is None:
+        message = "seller_plan_missing: the seller accepted an escrow without its settlement plan"
+        on_event("escrow_create_failed", {"error": message})
+        return BuyResult(
+            status="exited",
+            negotiation_id=outcome.negotiation_id,
+            seller_url=seller_url,
+            agreed_amount=outcome.agreed_amount,
+            reason=message,
             rounds=outcome.rounds,
             attempts=attempts,
         )
@@ -829,27 +993,42 @@ def _settle_one(
                 attempts=attempts,
             )
 
-    if outcome.accepted_escrow_terms is not None:
-        escrows = outcome.accepted_escrow_terms
-    else:
-        try:
-            escrows = build_escrow_terms(
-                accepted_proposal,
-                terms.seller_wallet_address,
-                terms.agreed_amount,
-                duration_seconds,
-            )
-        except Exception as exc:
-            on_event("escrow_create_failed", {"error": f"build_escrow_terms: {exc}"})
-            return BuyResult(
-                status="exited",
-                negotiation_id=outcome.negotiation_id,
-                seller_url=seller_url,
-                agreed_amount=outcome.agreed_amount,
-                reason=f"build_escrow_terms_failed: {exc}",
-                rounds=outcome.rounds,
-                attempts=attempts,
-            )
+    # The buyer funds only what it derives itself; the seller's plan is its
+    # committed copy, compared with the derivation and never funded instead.
+    try:
+        escrows = build_escrow_terms(
+            accepted_proposal,
+            match,
+            terms.agreed_amount,
+            duration_seconds,
+        )
+    except Exception as exc:
+        on_event("escrow_create_failed", {"error": f"build_escrow_terms: {exc}"})
+        return BuyResult(
+            status="exited",
+            negotiation_id=outcome.negotiation_id,
+            seller_url=seller_url,
+            agreed_amount=outcome.agreed_amount,
+            reason=f"build_escrow_terms_failed: {exc}",
+            rounds=outcome.rounds,
+            attempts=attempts,
+        )
+    try:
+        check_escrows_fund_plan(escrows, outcome.settlement_plan)
+    except Exception as exc:
+        message = str(exc)
+        if not message.startswith("seller_plan_mismatch"):
+            message = f"seller_plan_mismatch: {message}"
+        on_event("escrow_create_failed", {"error": message})
+        return BuyResult(
+            status="exited",
+            negotiation_id=outcome.negotiation_id,
+            seller_url=seller_url,
+            agreed_amount=outcome.agreed_amount,
+            reason=message,
+            rounds=outcome.rounds,
+            attempts=attempts,
+        )
 
     on_event(
         "escrow_create_start",

@@ -1,29 +1,28 @@
 # Full multi-domain local stack (the default `docker compose` target).
 #
-# Assembles every market domain on one shared dev chain, reproducing the
-# previous monolithic topology. `docker compose up` here brings up Anvil, the
-# VM compute market, and the API-credits market together — what the e2e suite
-# expects.
+# Assembles every market domain on one shared dev chain: Anvil, the VM compute
+# market, and the API-credits market together.
 #
-# Domains are independent: bring just one up with its wrapper instead —
-#   docker compose -f compose.vms.yml up
-#   docker compose -f compose.apicredits.yml up
-# Domain wrappers own explicit signer/wallet secret references. The full stack
-# repeats the API-credits override because that domain compose stays reusable.
+# Domains are independent: each end-to-end lane brings up one domain's stack
+# instead (`make -C e2e-tests test-e2e-vm`, `test-e2e-bare-metal`,
+# `test-e2e-apicredits`).
+#
+# Both domain wrappers include compose.dev.yml, so this file includes the VM
+# wrapper and the API-credits domain file, never compose.apicredits.yml: the
+# chain enters once.
 include:
   - compose.vms.yml
   - domains/apicredits/compose.yml
 
-services:
-  api-credits-registry:
-    environment:
-      - REGISTRY_AUTHORITY_ID=api-credits-registry
-      - REGISTRY_AUTHORITY_SCHEME=ed25519
-      - REGISTRY_AUTHORITY_IDENTIFIER=skkdlQKuKGMKK6yy4MdFEP_N0yjDNP8-E5PnWy0x59w
-      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
-    volumes:
-      - ${APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set API-credits registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
-  credits-storefront:
-    env_file:
-      - ${APICREDITS_IDENTITY_ENV_FILE:?set API-credits signer credential environment file}
-      - ${APICREDITS_EVM_WALLET_ENV_FILE:?set API-credits EVM wallet environment file}
+# This file composes base topologies only. The development identities,
+# configuration files, secret overlays, registry and site profiles and buyer
+# services live in compose.vms-local.yml and compose.apicredits-local.yml,
+# layered with `-f` because an including file cannot redefine a service it
+# imported. A bare `docker compose up` here therefore brings up services that
+# refuse to start for want of their identities. The full local stack is:
+#
+#     docker compose -f docker-compose.yml -f compose.vms-local.yml \
+#       -f compose.apicredits-local.yml up -d
+#
+# Its provisioning services run the mock profile unless PROVISIONING_MODE=real
+# is in the environment.

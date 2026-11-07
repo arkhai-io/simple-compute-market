@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import Field
 
 from ..events import DeliveryEvent
-from ..sinks import DeliveryError, DeliverySink, SinkSettings
+from ..sinks import DeclaredSink, DeliveryError, DeliverySink, SinkSettings
 
 
 class SmtpSinkSettings(SinkSettings):
@@ -63,4 +63,12 @@ def build_smtp_sink(settings: Mapping[str, Any]) -> DeliverySink:
     return deliver_by_mail
 
 
-__all__ = ["SmtpSinkSettings", "build_smtp_sink"]
+#: The installed sink: its factory with the settings model it declares.
+SMTP_SINK = DeclaredSink(build_smtp_sink, SmtpSinkSettings)
+
+
+__all__ = [
+    "SMTP_SINK",
+    "SmtpSinkSettings",
+    "build_smtp_sink",
+]

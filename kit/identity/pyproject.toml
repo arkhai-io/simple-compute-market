@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-identity"
-version = "0.3.0"
+version = "0.4.0"
 license = "MIT"
 description = "Canonical marketplace identities and authenticated envelopes"
 requires-python = ">=3.10,<3.14"
@@ -28,3 +28,9 @@ testpaths = ["tests/unit"]
 dev = [
     "pytest>=8.3.4,<9.0.0",
 ]
+
+# The package allowlist: every distribution this package may declare or import
+# beyond the standard library, because its lightness is part of its contract.
+# make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
+[tool.arkhai.architecture]
+allowed-dependencies = ["cryptography", "eth-account", "keyring", "pydantic", "rfc8785"]

@@ -33,23 +33,54 @@
 
 ## 5. Validation
 
-- [ ] 5.1 Parent integration owns the kit, VM, API-credit, bare-metal, and conformance suites.
+- [ ] 5.1 Run the kit, VM, API-credit, bare-metal, and conformance suites. Disclose
+      any suite not run.
 - [x] 5.2 Removed every VM/API-credit/core lifecycle implementation and legacy import.
-- [ ] 5.3 Parent integration owns behavioral validation against the recorded drift matrix.
-- [ ] 5.4 Parent integration owns repository-wide strict OpenSpec validation.
+- [ ] 5.3 Validate behavior against the recorded drift matrix, per concern, not against
+      a general impression that the suites pass.
+- [ ] 5.4 Run `openspec validate --all --strict`.
 
 ## 6. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 6.1 Parent integration owns `make check-comment-hygiene`.
+Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+
+- [ ] 6.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added for any that narrate the review or migration that
+      introduced them, including the kit modules' docstrings for references to the
+      domain they were moved from. Do not edit code here: anything to rewrite returns
+      the change to implementation.
 - [x] 6.2 Kit imports are foundation-only; domain imports remain in composition adapters.
 - [x] 6.3 Promoted the ownership and recovery requirements to
       `openspec/specs/market-composition/spec.md`.
+      Archival uses `--skip-specs`: this task synchronized the specification by hand.
 - [x] 6.4 Compressed closeout notes to the final mechanism/hook split, drift
-      disposition, package surfaces, and parent-owned validation.
+      disposition, and package surfaces.
 - [x] 6.5 Updated Goal 4's current state and removed the completed negotiation-copy gap.
 - [x] 6.6 Completed the design-promotion record and permanent architecture/testing docs.
+- [ ] 6.7 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 6.8 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=kit-owned-negotiation-runtime` and resolve every
+      match, then `openspec validate kit-owned-negotiation-runtime --strict`.
+- [ ] 6.9 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun.
+- [ ] 6.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 6.11 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe.
+- [ ] 6.12 **Archival.** Last, once every other part is checked: `openspec archive
+      kit-owned-negotiation-runtime -y --skip-specs` moves the change under
+      `openspec/changes/archive/` without re-applying the deltas 6.3 synchronized by
+      hand; point the index row at the archived directory, and run
+      `openspec validate --specs --strict`.
 
 ## Design promotion record
 

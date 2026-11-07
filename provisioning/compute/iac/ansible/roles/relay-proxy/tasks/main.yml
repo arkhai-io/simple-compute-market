@@ -1,0 +1,17 @@
+---
+- name: Require a proxy operation and exact name
+  ansible.builtin.assert:
+    that:
+      - relay_proxy_action in ['add', 'remove']
+      - relay_proxy_name is match('^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$')
+
+- name: Ensure the shared teardown helper is available on every attempt
+  ansible.builtin.include_tasks: helper.yml
+
+- name: Add the buyer proxy
+  ansible.builtin.include_tasks: add.yml
+  when: relay_proxy_action == 'add'
+
+- name: Remove the buyer proxy
+  ansible.builtin.include_tasks: remove.yml
+  when: relay_proxy_action == 'remove'

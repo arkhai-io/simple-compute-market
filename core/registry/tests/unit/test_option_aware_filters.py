@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from src.api.filter_eval import build_criteria, evaluate_all
-from src.api.filter_spec import load_filter_spec
+from core_registry.api.filter_eval import build_criteria, evaluate_all
+from core_registry.api.filter_spec import load_filter_spec
 
 _SPEC = Path(__file__).resolve().parents[2] / "filter-spec.yaml"
 _TOKEN = "0x" + "ab" * 20
@@ -34,10 +34,11 @@ def _option_listing(**params_overrides) -> dict:
         "settlement_options": [
             {
                 "option_id": "aa" * 32,
-                "mechanism": "alkahest.v1",
-                "asset": _TOKEN,
-                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
-                "params": params,
+                "price": {
+                    "asset": _TOKEN,
+                    "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+                },
+                "settlement": {"schema": "alkahest.v1", **(params or {})},
             }
         ],
     }
@@ -56,7 +57,7 @@ def test_compute_spec_declares_the_option_aware_filters(spec) -> None:
 def test_mechanism_filter_is_option_aware_and_missing_tolerant(spec) -> None:
     listing = _option_listing()
     assert _match(spec, listing, mechanism="in:[alkahest.v1]")
-    assert not _match(spec, listing, mechanism="in:[fiat.stripe.v1]")
+    assert not _match(spec, listing, mechanism="in:[example.payment.v1]")
     escrow_only = {"listing_id": "legacy-1", "accepted_escrows": [{}]}
     assert _match(spec, escrow_only, mechanism="in:[alkahest.v1]")
 
@@ -71,6 +72,9 @@ def test_option_token_filters_read_the_embedded_escrow_template(spec) -> None:
 
 def test_option_token_missing_is_underreport_friendly(spec) -> None:
     rateless = _option_listing(accepted_escrow=None)
-    rateless["settlement_options"][0]["params"] = {"channel": "telegram"}
+    rateless["settlement_options"][0]["settlement"] = {
+        "schema": "contact-exchange.v1",
+        "channel": "telegram",
+    }
     assert _match(spec, rateless, option_token=f"in:[{_TOKEN}]")
     assert _match(spec, rateless, option_token_exclude=f"not_in:[{_TOKEN}]")

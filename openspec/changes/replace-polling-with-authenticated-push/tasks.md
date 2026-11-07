@@ -80,24 +80,65 @@
       run.
 - [ ] 7.5 Run `openspec validate --all --strict` against the baseline current at
       implementation time.
+- [ ] 7.6 **Comment hygiene and import placement, before the pre-closeout review.** Run
+      `make check-comment-hygiene` and read the comments this change added for any that
+      narrate the review or migration that introduced them; move each import the change
+      added to module level unless a verified circular import or a recorded lazy-load
+      reason keeps it local. Closeout only confirms both.
 
 ## 8. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 8.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read the three pollers'
-      docstrings directly; each describes polling as the delivery mechanism.
-- [ ] 8.2 **Import placement.** Review imports this change adds or touches.
-- [ ] 8.3 **Documentation compliance.** Confirm the delivery rules landed in
-      `physical-provisioning`, the receiver rules in `storefront-publication`, the
-      scenario rule in `test-compatibility`, that `ARCHITECTURE.md`'s event model no
-      longer describes polling as the delivery mechanism, and that `TESTING.md` states
-      scenarios await events.
+- [ ] 8.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added for any that narrate the review or migration that
+      introduced them. Do not edit code here: anything to rewrite returns the change to
+      implementation. Read the three pollers' docstrings directly as well; each
+      described polling as the delivery mechanism.
+- [ ] 8.2 **Import placement — confirm.** Check the imports this change added for any
+      still local without a recorded reason. One that should move returns the change to
+      implementation.
+- [ ] 8.3 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe: the delivery rules belong to
+      `physical-provisioning`, the receiver rules to `storefront-publication`, the
+      scenario rule to `test-compatibility`; `ARCHITECTURE.md`'s event model no longer
+      describes polling as the delivery mechanism, and `TESTING.md` states scenarios
+      await events.
 - [ ] 8.4 **Narrative compression.** Compress completed-task notes to final behavior,
-      validation evidence, and promotion destinations.
-- [ ] 8.5 **Roadmap currency.** Record the disposition; this change closes no roadmap
-      goal's gap on its own.
-- [ ] 8.6 **Promotion.** Complete the design-promotion record below.
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
+- [ ] 8.5 **Roadmap currency.** Update the affected goal's current state and gap
+      mapping in `docs/development/ROADMAP.md`, or record that no goal is affected.
+      Expected: this change closes no roadmap goal's gap on its own; record the
+      disposition.
+- [ ] 8.6 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 8.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 8.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change (those Section 6
+      refactored to await delivered events), or an explicit blocker naming its cause
+      and the change that owns it, with the validations it gates treated as unrun.
+- [ ] 8.9 **Promotion.** Write the permanent documents this change owes —
+      `docs/development/ARCHITECTURE.md` (the capacity and deal event delivery model)
+      and `docs/development/TESTING.md` (scenarios await events rather than poll) —
+      and complete the design-promotion record below. A `spec.md` the deltas cover
+      (`physical-provisioning`, `storefront-publication`, `test-compatibility`) is
+      written by the archive in 8.11, not by hand; the record names it all the same.
+- [ ] 8.10 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=replace-polling-with-authenticated-push` and
+      resolve every match, then
+      `openspec validate replace-polling-with-authenticated-push --strict`.
+- [ ] 8.11 **Archival.** Last, once every other part is checked: `openspec archive
+      replace-polling-with-authenticated-push -y` merges the deltas into
+      `openspec/specs/` and moves the change under `openspec/changes/archive/`; point
+      the index row at the archived directory, and run
+      `openspec validate --specs --strict`.
 
 ## Design promotion record
 

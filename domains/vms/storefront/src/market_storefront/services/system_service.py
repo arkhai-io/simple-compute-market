@@ -8,54 +8,87 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Any
 
 import httpx
+from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
+from market_capacity_publication import SiteProjectionState
 from market_identity import Signer
+from market_policy.listing_source import ListingSourceVerdict
 
 import market_storefront.container as _container
-from market_storefront.settlement_composition import (
-    build_storefront_publication_clause_compiler,
+from market_storefront import lifecycle
+from market_storefront.services.capacity_client import site_projection_status
+from market_storefront.services.listing_cardinality_explanations import (
+    listing_cardinality_mode_explanations,
 )
+from market_storefront.services.listing_identity_carryover import carryover_report
 from market_storefront.negotiation_runtime import load_storefront_chain
 from market_storefront.utils.config import (
     AGENT_ID,
     CHAINS,
-    ESCROW_TEMPLATES,
     get_evm_wallet_address,
     settings,
 )
 
 logger = logging.getLogger(__name__)
 
+# The negotiation-strategy probe's synthetic listing: placeholder values that
+# name no real contract or party. The shape guard refuses an escrow naming no
+# contract, one its listing does not accept, and a condition its listing does
+# not advertise, so the probe's opening names this listing's escrow and
+# condition.
+_PROBE_ESCROW = {"chain_name": "probe", "escrow_address": "0x" + "11" * 20}
+_PROBE_CONDITION = {
+    "chain_name": "probe",
+    "arbiter": "0x" + "22" * 20,
+    "demand_data": {"recipient": "0x" + "33" * 20},
+}
+_PROBE_LISTING = {"accepted_escrows": [_PROBE_ESCROW], "demands": [_PROBE_CONDITION]}
 
-def _default_projection_status_provider() -> dict[str, Any]:
-    """Real production source for per-site projection load state.
 
-    A plain module-level function, not a bound import at class-body scope,
-    so it is only ever resolved when actually called — a caller that never
-    exercises `include_registry=True` pays no import cost, and a test can
-    substitute a fake via the constructor without patching this module.
+def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
+    """Each site's holds, refusals, and reports from the latest publication
+    cycle that derived it, from the process's site-derivation log; empty
+    before any cycle has run."""
+    log = _container.resolved_site_derivation_log
+    return log.latest() if log is not None else {}
+
+
+async def _default_pool_override_status_provider() -> list[dict[str, Any]] | None:
+    """Every stored storefront pool override and the one state it is in, or
+    ``None`` when no override service is composed."""
+    service = _container.resolved_pool_override_service
+    if service is None:
+        return None
+    return await service.statuses()
+
+
+def _default_lifecycle_provider() -> dict[str, dict[str, Any]]:
+    """Every lifecycle loop's controller state and the outcome of its last
+    cycle, by loop name, from the process's one loop controller."""
+    return {name: loop.to_dict() for name, loop in lifecycle.snapshot().items()}
+
+
+async def _default_settlement_provider() -> list[dict[str, Any]] | None:
+    """Each composed mechanism's readiness, as its registration projects it.
+
+    Readiness reads the Alkahest chain probe's last results and calls no chain,
+    so a status read never waits on one. Status names nothing being published,
+    so Alkahest's readiness answers for every configured chain.
     """
-    from market_storefront.services.site_projection_cache import (
-        projection_status_summary,
-    )
+    composition = _container.resolved_settlement_composition
+    if composition is None:
+        return None
+    return [status.safe_projection() for status in await composition.readiness()]
 
-    return projection_status_summary()
 
-
-def _default_listing_mode_explanation_provider() -> dict[str, dict[str, str]]:
-    """Real production source for per-site, per-pool listing_mode fallback
-    explanations. Same lazy-resolution and constructor-injection rationale
-    as `_default_projection_status_provider`, immediately above.
-    """
-    from market_storefront.services.site_projection_cache import (
-        listing_mode_explanations,
-    )
-
-    return listing_mode_explanations()
+def _default_listing_identity_carryover_provider() -> dict[str, Any]:
+    """Which pre-shape listings carried a seller's close or pause, and to which
+    shape-bearing successor: the listing a seller should reopen or resume."""
+    return carryover_report()
 
 
 # ---------------------------------------------------------------------------
@@ -71,21 +104,52 @@ class SystemService:
         *,
         sqlite_client,
         marketplace_signer: Signer,
+        site_projections: SiteProjectionState,
         agent_id: str | None = None,
         projection_status_provider: Callable[[], dict[str, Any]] | None = None,
-        listing_mode_explanation_provider: Callable[[], dict[str, dict[str, str]]]
-        | None = None,
+        listing_cardinality_mode_explanation_provider: (
+            Callable[[], dict[str, dict[str, str]]] | None
+        ) = None,
+        publication_derivation_provider: (
+            Callable[[], dict[str, dict[str, Any]]] | None
+        ) = None,
+        listing_identity_carryover_provider: Callable[[], dict[str, Any]] | None = None,
+        pool_override_status_provider: (
+            Callable[[], Awaitable[list[dict[str, Any]] | None]] | None
+        ) = None,
+        lifecycle_provider: Callable[[], dict[str, dict[str, Any]]] | None = None,
+        settlement_provider: (
+            Callable[[], Awaitable[list[dict[str, Any]] | None]] | None
+        ) = None,
+        registry_probe_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._db = sqlite_client
+        # The transport the registry health probes are sent over; the network's
+        # unless a caller answers them itself.
+        self._registry_probe_transport = registry_probe_transport
         self._marketplace_signer = marketplace_signer
         self._agent_id = agent_id or AGENT_ID or "agent"
-        self._projection_status_provider = (
-            projection_status_provider or _default_projection_status_provider
+        # Both read the storefront's one projection state unless a caller
+        # supplies its own report.
+        self._projection_status_provider = projection_status_provider or partial(
+            site_projection_status, site_projections
         )
-        self._listing_mode_explanation_provider = (
-            listing_mode_explanation_provider
-            or _default_listing_mode_explanation_provider
+        self._listing_cardinality_mode_explanation_provider = (
+            listing_cardinality_mode_explanation_provider
+            or partial(listing_cardinality_mode_explanations, site_projections)
         )
+        self._publication_derivation_provider = (
+            publication_derivation_provider or _default_publication_derivation_provider
+        )
+        self._listing_identity_carryover_provider = (
+            listing_identity_carryover_provider
+            or _default_listing_identity_carryover_provider
+        )
+        self._pool_override_status_provider = (
+            pool_override_status_provider or _default_pool_override_status_provider
+        )
+        self._lifecycle_provider = lifecycle_provider or _default_lifecycle_provider
+        self._settlement_provider = settlement_provider or _default_settlement_provider
 
     # ------------------------------------------------------------------
     # Health / connectivity checks
@@ -148,6 +212,14 @@ class SystemService:
         all_ok = all(_check_is_healthy(k, v) for k, v in checks.items())
 
         result: dict = {"status": "ok" if all_ok else "degraded", "checks": checks}
+        # Public on both routes: a buyer reads these before handing over any
+        # data, so they cannot wait for an authenticated status call.
+        contact_exchange = _container.resolved_contact_exchange
+        disclosures = (
+            contact_exchange.disclosures() if contact_exchange is not None else {}
+        )
+        if disclosures:
+            result["disclosures"] = disclosures
 
         if include_registry:
             principal = self._marketplace_signer.identity
@@ -162,6 +234,20 @@ class SystemService:
                 }
                 for item in self._db.domain_registry.projection()
             )
+            # The provisioning contract major this storefront *speaks*, taken
+            # from its own installed `compute_provisioning` wheel rather than
+            # from anything the peer reports. Two deployments can disagree
+            # only if their wheels differ, which is exactly the skew a
+            # cutover has to rule out before mutations resume -- and until
+            # both sides reported this there was no way to check it against a
+            # live fleet.
+            #
+            # Distinct from `storefront_domains[].contract_version` above,
+            # which is a domain contribution's own version and a different
+            # axis entirely.
+            result["provisioning_contract_version"] = (
+                COMPUTE_PROVISIONING_CONTRACT_VERSION
+            )
             wallet = get_evm_wallet_address().lower() if CHAINS else ""
             result["evm_mechanisms"] = {
                 name: {
@@ -171,20 +257,39 @@ class SystemService:
                 for name, chain in CHAINS.items()
             }
             try:
-                resources = await self._db.list_resources()
-                result["resource_count"] = len(resources)
-            except Exception:
-                result["resource_count"] = None
-            try:
                 result["site_projections"] = self._projection_status_provider()
             except Exception:
                 result["site_projections"] = None
             try:
-                result["listing_mode_explanations"] = (
-                    self._listing_mode_explanation_provider()
+                result["listing_cardinality_mode_explanations"] = (
+                    self._listing_cardinality_mode_explanation_provider()
                 )
             except Exception:
-                result["listing_mode_explanations"] = None
+                result["listing_cardinality_mode_explanations"] = None
+            try:
+                result["publication_derivation"] = (
+                    self._publication_derivation_provider()
+                )
+            except Exception:
+                result["publication_derivation"] = None
+            try:
+                result["listing_identity_carryover"] = (
+                    self._listing_identity_carryover_provider()
+                )
+            except Exception:
+                result["listing_identity_carryover"] = None
+            try:
+                result["pool_overrides"] = await self._pool_override_status_provider()
+            except Exception:
+                result["pool_overrides"] = None
+            try:
+                result["lifecycle"] = self._lifecycle_provider()
+            except Exception:
+                result["lifecycle"] = None
+            try:
+                result["settlement"] = await self._settlement_provider()
+            except Exception:
+                result["settlement"] = None
 
         return result
 
@@ -213,7 +318,9 @@ class SystemService:
             if token:
                 headers["Authorization"] = f"Bearer {token}"
             try:
-                async with httpx.AsyncClient(timeout=2.0) as client:
+                async with httpx.AsyncClient(
+                    timeout=2.0, transport=self._registry_probe_transport
+                ) as client:
                     resp = await client.get(f"{url}/health", headers=headers)
                 return "ok" if resp.status_code < 500 else f"http_{resp.status_code}"
             except httpx.ConnectError:
@@ -229,96 +336,12 @@ class SystemService:
         # Surface the most recent non-ok result (all are non-ok here).
         return results[-1]
 
-    # Canonical bind-mount target for the inventory CSV inside a container.
-    # When neither csv_inline nor csv_path is set explicitly,
-    # ``seed_resources_if_empty`` auto-discovers a file at this path. Lets
-    # the canonical compose deploy work with no resources_csv_path setting
-    # in the TOML.
-    _DEFAULT_CSV_PATH = "/app/resources.csv"
-
-    async def seed_resources_if_empty(
-        self,
-        *,
-        csv_inline: str | None = None,
-        csv_path: str | None = None,
-    ) -> dict:
-        """Seed the resources table on startup if it is empty.
-
-        Source priority (matches provisioning service pattern):
-          1. ``csv_inline`` — raw CSV content delivered via config injection
-             (Helm Secret ``resources_csv_inline``). Used when the CSV must not
-             be baked into the container image.
-          2. ``csv_path`` — path to a CSV file on disk (compose / local dev).
-          3. Auto-discovery of ``/app/resources.csv`` — the canonical
-             container bind-mount target. Skipped silently when the file
-             doesn't exist, so local-dev outside a container is unaffected.
-
-        Seeding is skipped when the resources table already has rows, so that
-        operator changes made via the import API are not overwritten on pod
-        restart. To force a clobber regardless of table state, use
-        ``POST /api/v1/admin/portfolio/resources/import``.
-
-        Returns a dict with keys:
-          seeded         — True if the CSV was imported, False if skipped.
-          imported_count — number of rows written (0 when seeded=False).
-          source         — human-readable description of the data source used.
-        """
-        existing = await self._db.list_resources()
-        if existing:
-            logger.info(
-                "[RESOURCE SEED] Skipping — %d resource(s) already in DB",
-                len(existing),
-            )
-            return {
-                "seeded": False,
-                "imported_count": len(existing),
-                "source": "already_populated",
-            }
-
-        if csv_inline:
-            report = await self._db.upsert_resources_from_csv_content(
-                csv_content=csv_inline,
-                source_label="resources_csv_inline (config)",
-                templates=ESCROW_TEMPLATES,
-                settlement_compiler=build_storefront_publication_clause_compiler(),
-            )
-            source = "resources_csv_inline (config)"
-        elif csv_path:
-            report = await self._db.upsert_resources_from_csv(
-                csv_path=csv_path,
-                templates=ESCROW_TEMPLATES,
-                settlement_compiler=build_storefront_publication_clause_compiler(),
-            )
-            source = csv_path
-        elif os.path.exists(self._DEFAULT_CSV_PATH):
-            report = await self._db.upsert_resources_from_csv(
-                csv_path=self._DEFAULT_CSV_PATH,
-                templates=ESCROW_TEMPLATES,
-                settlement_compiler=build_storefront_publication_clause_compiler(),
-            )
-            source = f"{self._DEFAULT_CSV_PATH} (auto-discovered)"
-        else:
-            logger.info(
-                "[RESOURCE SEED] No resource source configured — starting with empty inventory"
-            )
-            return {"seeded": False, "imported_count": 0, "source": None}
-
-        imported = report.get("imported_count", 0)
-        failed = report.get("failed_count", 0)
-        if failed:
-            logger.warning(
-                "[RESOURCE SEED] %d row(s) failed to import from %s",
-                failed,
-                source,
-            )
-        logger.info("[RESOURCE SEED] Imported %d resource(s) from %s", imported, source)
-        return {"seeded": True, "imported_count": imported, "source": source}
-
     def negotiation_strategy_check(self) -> str:
         """Probe the configured negotiation chain. Returns a viability string.
 
         Runs the chain against a synthetic round-0 input (buyer matching
-        seller price exactly, no listing context) and reports whether the
+        seller price exactly, on a synthetic listing accepting the probe's
+        escrow and condition) and reports whether the
         terminal middleware would accept/counter (viable) or exit (broken
         config). Guard middlewares fire first; their veto produces
         ``exit_on_probe`` with the guard's reason — operator can read the
@@ -346,20 +369,21 @@ class SystemService:
                     # Minimal structurally-valid opening proposal: the VM
                     # opening guard validates the full EscrowProposal shape
                     # (chain_name/escrow_address/expiration_unix required).
-                    # The zero escrow address keeps the shape guard's legacy
-                    # carve-out applicable, so the probe needs no
-                    # accepted-escrows context on a listing.
                     proposal={
-                        "chain_name": "probe",
-                        "escrow_address": "0x" + "00" * 20,
+                        **_PROBE_ESCROW,
                         "fields": {"amount": 10_000},
+                        "demand": _PROBE_CONDITION,
                         "expiration_unix": 4_102_444_800,  # 2100-01-01
                     },
                 )
             ]
             context = NegotiationContext(
                 direction="maximize",
-                our_reference_amount=10_000.0,
+                our_reference_amount=10_000,
+                listing=_PROBE_LISTING,
+                # The probe exercises the strategy, not a listing: no source is
+                # checked, so the inventory guard is given a matching verdict.
+                listing_source=ListingSourceVerdict("matches"),
             )
             probe = run_negotiation_chain(chain, history, context)
             if probe.action in ("exit", "reject"):

@@ -6,6 +6,7 @@ import itertools
 import json
 import time
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -70,7 +71,6 @@ class FakeSite:
         self.response_operation: str | None = None
         self.response_resource: str | None = None
         self.response_protocol: str | None = None
-        self.omit_response_authentication = False
 
     def add_resource(
         self,
@@ -105,7 +105,7 @@ class FakeSite:
             for reservation in self.reservations.values()
             if reservation["resource_id"] == resource_id
             and reservation["state"]
-            in ("reserved", "provisioning", "leased", "releasing")
+            in ("reserved", "leased", "releasing")
         )
         return self.resources[resource_id]["total_units"] - held
 
@@ -250,9 +250,6 @@ class FakeSite:
         resource: str,
         request_id: str,
     ) -> httpx.Response:
-        if self.omit_response_authentication:
-            return httpx.Response(status_code, json=body)
-
         response_signer = self.response_signer or self.authority
         signed = sign_response(
             signer=response_signer,
@@ -371,12 +368,13 @@ class FakeSite:
                 "units": match["allocated_gpu_count"],
                 "state": "reserved",
                 "deal_ref": body.get("deal_ref") or {},
+                "activated_at_utc": None,
             }
             self._emit("reserved", match["resource_id"])
             public_match = {
                 key: value
                 for key, value in match.items()
-                if key not in {"resource_id", "vm_host"}
+                if key not in {"resource_id", "host_id"}
             }
             return 200, {
                 "reservation": {
@@ -436,6 +434,19 @@ class FakeSite:
             self._emit("lease_truncated", reservation["resource_id"])
             return 200, {"reservation": reservation}
 
+        if path.endswith("/activate-lease"):
+            capacity_reservation_id = path.split("/")[-2]
+            reservation = self.reservations.get(capacity_reservation_id)
+            if reservation is None:
+                return 404, {"detail": "not found"}
+            if reservation["state"] != "leased":
+                return 409, {"detail": f"is {reservation['state']}; cannot activate"}
+            if reservation.get("lease_end_utc") is None:
+                return 409, {"detail": "has no lease tail; cannot activate"}
+            if reservation["activated_at_utc"] is None:
+                reservation["activated_at_utc"] = datetime.now(timezone.utc).isoformat()
+            return 200, {"reservation": reservation}
+
         if request.method == "GET" and path == "/api/v1/capacity/reservations":
             escrow = request.url.params.get("escrow_uid")
             state = request.url.params.get("state")
@@ -472,10 +483,10 @@ class FakeSite:
 
     def _match(self, claim: dict[str, Any]) -> dict[str, Any] | None:
         claim = claim or {}
-        executor_kind = claim.get("executor_kind")
+        offering_mode = claim.get("offering_mode")
         if (
-            not isinstance(executor_kind, str)
-            or executor_kind not in self.deliverable_modes
+            not isinstance(offering_mode, str)
+            or offering_mode not in self.deliverable_modes
         ):
             return None
         dimensions = claim.get("dimensions") or {}
@@ -498,7 +509,7 @@ class FakeSite:
                     "gpu_count",
                     "dimensions",
                     "resource_type",
-                    "executor_kind",
+                    "offering_mode",
                 )
             )
             if mismatched or self._available(resource_id) < requested:
@@ -507,7 +518,7 @@ class FakeSite:
                 "resource_id": resource_id,
                 "pool_id": None,
                 "member_id": None,
-                "vm_host": attributes.get("vm_host"),
+                "host_id": attributes.get("host_id"),
                 "allocated_gpu_count": requested,
                 "available_gpu_count": self._available(resource_id),
                 "attributes": attributes,

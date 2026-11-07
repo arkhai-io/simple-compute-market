@@ -23,7 +23,19 @@ class PoolConfigValidationProblem:
 
 
 class PoolConfigHandler(Protocol[UnitOfWorkT]):
-    """Validate and persist one provider's pool configuration."""
+    """Validate and persist one provider's pool configuration.
+
+    Reads come at two levels of disclosure. ``read_config`` omits every secret
+    a provider holds and is what serves API responses, the export document,
+    administrative round-trips, and reconciliation comparison.
+    ``read_config_for_execution`` may decrypt secrets and resolve references,
+    and is reserved for preparing provider input at dispatch.
+
+    The unqualified name belongs to the read that omits secrets deliberately.
+    A caller that forgets to ask for them loses a value it needed and fails on
+    the execution path, which is loud; the reverse mistake would place a
+    credential in a serialized response, which is silent.
+    """
 
     provider: str
 
@@ -37,11 +49,13 @@ class PoolConfigHandler(Protocol[UnitOfWorkT]):
         self, unit_of_work: UnitOfWorkT, pool_id: str
     ) -> dict[str, Any]: ...
 
+    def read_config_for_execution(
+        self, unit_of_work: UnitOfWorkT, pool_id: str
+    ) -> dict[str, Any]: ...
+
     def replace_config(
         self,
         unit_of_work: UnitOfWorkT,
         pool_id: str,
         config: Mapping[str, Any],
     ) -> None: ...
-
-    def delete_config(self, unit_of_work: UnitOfWorkT, pool_id: str) -> None: ...

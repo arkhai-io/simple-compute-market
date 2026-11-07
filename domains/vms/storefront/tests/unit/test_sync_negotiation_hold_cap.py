@@ -1,11 +1,8 @@
 """Unit tests for VM pool-policy resolution used by the shared runtime hook.
 
-External boundary: a real SQLite storefront binding, plus a fake in-memory
-projection cache satisfying the same duck-typed shape
-``site_projection_cache.projection_caches()`` produces -- patched at its
-source module (this function imports it locally, at call time, so
-patching the source is the correct seam here, not a module-level-import
-anti-pattern; see docs/development/TESTING.md).
+External boundary: a real SQLite storefront binding, plus a projection state
+the test builds over fake sites and passes in, as composition passes the
+storefront's one state.
 """
 
 from __future__ import annotations
@@ -21,7 +18,11 @@ from market_storefront.domain_runtime import (
 from market_storefront.negotiation_runtime import lookup_pool_policy_tags
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.utils.sqlite_client import SQLiteClient
-from tests.fake_site import TEST_MARKETPLACE_SIGNER
+from tests.fake_site import (
+    TEST_MARKETPLACE_SIGNER,
+    FakeProjectionSite,
+    loaded_site_projection_state,
+)
 
 _VM_REGISTRY = build_vm_storefront_registry(build_vm_storefront_domain())
 
@@ -42,22 +43,23 @@ def _record_bound_listing(
     resource_id: str | None,
     gpu_count: int,
 ) -> None:
-    offer = {
+    listing_resource = {
         "gpu_model": "H200",
         "gpu_count": gpu_count,
-        "virtualization_type": "vm",
+        "offering_mode": "vm",
     }
     if pool_id is not None:
-        offer["pool_id"] = pool_id
+        listing_resource["pool_id"] = pool_id
     if resource_id is not None:
-        offer["resource_id"] = resource_id
+        listing_resource["resource_id"] = resource_id
     binding = prepare_vm_listing_binding(
         listing_id=listing_id,
         candidate={
+            "capacity_backing": "backed",
             "site_id": site_id,
             "pool_id": pool_id,
             "resource_id": resource_id,
-            "gpu_count": gpu_count,
+            "listing_shape": {"gpu": {"count": gpu_count, "model": "H200"}},
         },
     )
     repository = SQLiteClient(db_path=db_path, registry=_VM_REGISTRY)
@@ -67,7 +69,7 @@ def _record_bound_listing(
             status="open",
             created_at="2026-08-15T00:00:00Z",
             updated_at="2026-08-15T00:00:00Z",
-            offer_resource=offer,
+            listing_resource=listing_resource,
             fulfillment_resource=None,
             max_duration_seconds=3600,
             storefront_url="http://storefront.test",
@@ -77,40 +79,29 @@ def _record_bound_listing(
     )
 
 
-class _FakeView:
-    def __init__(self, value):
-        self.value = value
-
-
-class _FakeProjectionCache:
-    def __init__(self, value):
-        self._value = value
-
-    def view(self):
-        return _FakeView(self._value)
-
-
-class _FakeSiteCaches:
-    def __init__(self, resource_pools_value):
-        self.resource_pools = _FakeProjectionCache(resource_pools_value)
-
-
-def _patch_caches(monkeypatch, caches: dict):
-    import market_storefront.services.site_projection_cache as cache_module
-
-    monkeypatch.setattr(cache_module, "projection_caches", lambda: caches)
+def _held(pools_by_site: dict):
+    """A state holding what each site serves; a site serving ``None`` has never
+    answered, so the state holds nothing for it."""
+    return asyncio.run(
+        loaded_site_projection_state(
+            {
+                site: FakeProjectionSite(resource_pools=pools)
+                for site, pools in (pools_by_site or {"site-z": []}).items()
+            }
+        )
+    )
 
 
 class TestLookupPoolPolicyTags:
-    def test_none_listing_id_returns_empty(self, db_path, monkeypatch):
-        _patch_caches(monkeypatch, {})
-        assert lookup_pool_policy_tags(_Client(db_path), None) == {}
+    def test_none_listing_id_returns_empty(self, db_path):
+        state = _held({})
+        assert lookup_pool_policy_tags(_Client(db_path), None, state) == {}
 
-    def test_unmapped_listing_returns_empty(self, db_path, monkeypatch):
-        _patch_caches(monkeypatch, {})
-        assert lookup_pool_policy_tags(_Client(db_path), "listing-none") == {}
+    def test_unmapped_listing_returns_empty(self, db_path):
+        state = _held({})
+        assert lookup_pool_policy_tags(_Client(db_path), "listing-none", state) == {}
 
-    def test_resolves_policy_tags_for_mapped_pool(self, db_path, monkeypatch):
+    def test_resolves_policy_tags_for_mapped_pool(self, db_path):
         _record_bound_listing(
             db_path,
             listing_id="listing-1",
@@ -119,10 +110,10 @@ class TestLookupPoolPolicyTags:
             resource_id=None,
             gpu_count=4,
         )
-        _patch_caches(monkeypatch, {
-            "site-a": _FakeSiteCaches([
+        state = _held({
+            "site-a": [
                 {
-                    "resource_pool_id": "gpu-pool",
+                    "pool_id": "gpu-pool",
                     "resources": [],
                     "pool_metadata": {
                         "policy_tags": {
@@ -131,15 +122,15 @@ class TestLookupPoolPolicyTags:
                         },
                     },
                 },
-            ]),
+            ],
         })
-        tags = lookup_pool_policy_tags(_Client(db_path), "listing-1")
+        tags = lookup_pool_policy_tags(_Client(db_path), "listing-1", state)
         assert tags == {
             "deliverable_modes": ["vm"],
             "max_reservation_hold_seconds": 30,
         }
 
-    def test_empty_when_site_not_in_cache(self, db_path, monkeypatch):
+    def test_empty_when_site_not_in_cache(self, db_path):
         _record_bound_listing(
             db_path,
             listing_id="listing-1",
@@ -148,10 +139,10 @@ class TestLookupPoolPolicyTags:
             resource_id=None,
             gpu_count=4,
         )
-        _patch_caches(monkeypatch, {})  # site-a never loaded
-        assert lookup_pool_policy_tags(_Client(db_path), "listing-1") == {}
+        state = _held({})  # site-a never loaded
+        assert lookup_pool_policy_tags(_Client(db_path), "listing-1", state) == {}
 
-    def test_empty_when_cached_value_has_not_loaded_yet(self, db_path, monkeypatch):
+    def test_empty_when_cached_value_has_not_loaded_yet(self, db_path):
         _record_bound_listing(
             db_path,
             listing_id="listing-1",
@@ -160,10 +151,10 @@ class TestLookupPoolPolicyTags:
             resource_id=None,
             gpu_count=4,
         )
-        _patch_caches(monkeypatch, {"site-a": _FakeSiteCaches(None)})
-        assert lookup_pool_policy_tags(_Client(db_path), "listing-1") == {}
+        state = _held({"site-a": None})
+        assert lookup_pool_policy_tags(_Client(db_path), "listing-1", state) == {}
 
-    def test_empty_when_pool_absent_from_cached_projection(self, db_path, monkeypatch):
+    def test_empty_when_pool_absent_from_cached_projection(self, db_path):
         _record_bound_listing(
             db_path,
             listing_id="listing-1",
@@ -172,20 +163,20 @@ class TestLookupPoolPolicyTags:
             resource_id=None,
             gpu_count=4,
         )
-        _patch_caches(monkeypatch, {
-            "site-a": _FakeSiteCaches([
+        state = _held({
+            "site-a": [
                 {
-                    "resource_pool_id": "a-different-pool",
+                    "pool_id": "a-different-pool",
                     "resources": [],
                     "pool_metadata": {
                         "policy_tags": {"deliverable_modes": ["vm"]},
                     },
                 },
-            ]),
+            ],
         })
-        assert lookup_pool_policy_tags(_Client(db_path), "listing-1") == {}
+        assert lookup_pool_policy_tags(_Client(db_path), "listing-1", state) == {}
 
-    def test_empty_when_pool_has_no_metadata(self, db_path, monkeypatch):
+    def test_empty_when_pool_has_no_metadata(self, db_path):
         _record_bound_listing(
             db_path,
             listing_id="listing-1",
@@ -194,15 +185,15 @@ class TestLookupPoolPolicyTags:
             resource_id=None,
             gpu_count=4,
         )
-        _patch_caches(monkeypatch, {
-            "site-a": _FakeSiteCaches([
-                {"resource_pool_id": "gpu-pool", "resources": []},
-            ]),
+        state = _held({
+            "site-a": [
+                {"pool_id": "gpu-pool", "resources": []},
+            ],
         })
-        assert lookup_pool_policy_tags(_Client(db_path), "listing-1") == {}
+        assert lookup_pool_policy_tags(_Client(db_path), "listing-1", state) == {}
 
     def test_specific_resource_only_mapping_does_not_falsely_match_a_pool(
-        self, db_path, monkeypatch,
+        self, db_path,
     ):
         """A resource-only durable binding has no pool_id, so a policy lookup
         must not accidentally treat the physical resource ID as a pool ID."""
@@ -214,10 +205,10 @@ class TestLookupPoolPolicyTags:
             resource_id="res-1",
             gpu_count=4,
         )
-        _patch_caches(monkeypatch, {
-            "site-a": _FakeSiteCaches([
+        state = _held({
+            "site-a": [
                 {
-                    "resource_pool_id": "gpu-pool",
+                    "pool_id": "gpu-pool",
                     "resources": [],
                     "pool_metadata": {
                         "policy_tags": {
@@ -226,9 +217,9 @@ class TestLookupPoolPolicyTags:
                         },
                     },
                 },
-            ]),
+            ],
         })
-        assert lookup_pool_policy_tags(_Client(db_path), "listing-1") == {}
+        assert lookup_pool_policy_tags(_Client(db_path), "listing-1", state) == {}
 
 
 class _Client:

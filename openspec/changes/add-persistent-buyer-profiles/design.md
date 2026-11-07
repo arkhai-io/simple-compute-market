@@ -210,4 +210,4 @@ The cutover generator removes direct buyer `[Identity]` from role templates. Ser
 | Deterministic store/provider/migration matrix, conformance, canaries | `test-compatibility/spec.md`: “Buyer profile compatibility is deterministic across domains”; `TESTING.md`: “Marketplace Identity Verification” |
 | Foundation layering and resolved identity flow | `ARCHITECTURE.md`: “Marketplace identity” |
 | User lifecycle, import, selection, rotation, and recovery | `buyer-quickstart.md`: “Configure”, “Resume an interrupted buy” |
-| Goal state and change mapping | `ROADMAP.md`: “Buyer identity lifecycle status” |
+| Goal state and change mapping | No roadmap goal: `ROADMAP.md` carries only goals, and this change serves none. The profile's current state is in `ARCHITECTURE.md`: “Marketplace identity” and `marketplace-identity/spec.md`; the change's remaining work is its row in `openspec/changes/README.md` |

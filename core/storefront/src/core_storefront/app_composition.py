@@ -72,13 +72,7 @@ def build_storefront_app(
     lifespan: Any | None = None,
     routers: Iterable[Any] = (),
 ) -> Any:
-    """Build a FastAPI storefront app and register routers.
-
-    ``FastAPI`` remains an optional/lazy import for the core package: concrete
-    storefront executables already depend on FastAPI, while lower-level core
-    tests can import this module without importing FastAPI until they call the
-    builder.
-    """
+    """Build a FastAPI storefront app and register routers."""
 
     from fastapi import FastAPI
 

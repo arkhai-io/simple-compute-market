@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from domains.vms.buyer.aggregation import (
+from arkhai_vms_buyer.aggregation import (
     DEFAULT_POLICY_NAME,
     NegotiateFn,
     gather_outcomes,
@@ -22,7 +22,7 @@ from domains.vms.buyer.aggregation import (
     load_aggregation_policy,
     register_aggregation_policy,
 )
-from domains.vms.buyer.buyer_client import NegotiationOutcome
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome
 
 
 def _match(listing_id: str, *, price: int | None = None, seller: str = "http://s") -> dict[str, Any]:

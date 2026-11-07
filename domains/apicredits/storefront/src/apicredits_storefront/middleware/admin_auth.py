@@ -19,14 +19,29 @@ from apicredits_storefront.middleware.response_auth import (
 
 async def require_admin_principal(request: Request) -> Identity:
     """Authenticate one of the configured admin principals."""
-    if container.resolved_sqlite_client is None:
-        raise HTTPException(status_code=503, detail="storefront is not initialized")
     route = request.scope.get("route")
     operation = getattr(route, "name", None)
     if not isinstance(operation, str) or not operation:
         raise HTTPException(status_code=500, detail="admin route has no operation name")
     query = urlencode(sorted(request.query_params.multi_items()))
     resource = request.url.path + (f"?{query}" if query else "")
+    return await authenticate_admin(request, operation=operation, resource=resource)
+
+
+async def authenticate_admin(
+    request: Request,
+    *,
+    operation: str,
+    resource: str,
+) -> Identity:
+    """Authenticate an administrator under an explicit signed operation and resource.
+
+    Routes whose contract a shared typed client defines -- the lifecycle
+    controls every storefront serves -- verify the operation and resource that
+    client signs, rather than this storefront's route name and path.
+    """
+    if container.resolved_sqlite_client is None:
+        raise HTTPException(status_code=503, detail="storefront is not initialized")
     raw_body = await request.body()
     try:
         body = json.loads(raw_body) if raw_body else EMPTY_BODY

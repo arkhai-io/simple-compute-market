@@ -18,13 +18,16 @@ is superseded. The original task list is in Git history.
 
 - [ ] 2.1 Confirm `multi-domain-storefront-composition` has landed; the storefront under
       test is one process hosting both compute contracts.
-- [ ] 2.2 Confirm the bare-metal deal path exists end to end —
-      `market-platform-bare-metal-10-storefront-composition` for the seller side and
-      `bare-metal-buyer-domain` for the buyer side.
+- [ ] 2.2 Confirm the bare-metal deal path exists end to end: bare metal negotiating
+      through the kit runtime inside the shared shell
+      (`bare-metal-and-credits-domain-stacks` 4a) and the pipeline deal
+      (`bare-metal-mock-provisioned-deal`).
 - [ ] 2.3 Confirm `pools-7-storefront-fulfillment-cutover`'s selected-site scheduling,
       durable fulfillment, pull result, restart recovery, and teardown are accepted.
-- [ ] 2.4 Confirm `pool-declared-offering-modes` has removed both implicit executor
+- [x] 2.4 Confirm `pool-declared-offering-modes` has removed both implicit executor
       fallbacks and landed the legacy-row policy this change no longer owns.
+      Confirmed: `deal_event_sink` raises `capacity release cannot be published
+      without offering_mode`, and the ledger infers no executor from `vm_host`.
 - [ ] 2.5 Record exact wheel and image versions and the deterministic backend controls
       the topology uses.
 
@@ -94,7 +97,7 @@ is superseded. The original task list is in Git history.
 - [ ] 7.3 Run deployment-render and configuration tests for the multi-authority bindings.
 - [ ] 7.4 Treat any defect the proof exposes as a defect in the owning capability. Fix it
       there and reference it here; do not patch the harness and do not absorb the fix.
-- [ ] 7.5 Promote the deterministic topology evidence to
+- [x] 7.5 **Withdrawn** 2026-10-14: closeout does this — 8.9 writes the architecture companions and `ARCHITECTURE.md` by hand, and the archive in 8.11 writes the `test-compatibility` spec its delta covers. As first planned: Promote the deterministic topology evidence to
       `openspec/specs/test-compatibility/spec.md` and `architecture.md`, and the accepted
       topology map to `docs/development/ARCHITECTURE.md`.
 - [ ] 7.6 **Amended 2026-08-06.** The original promoted "the one-domain storefront
@@ -102,25 +105,59 @@ is superseded. The original task list is in Git history.
       promote instead that one storefront hosting a family's contracts shares authorities
       without sharing market semantics. Verify nothing in this change's promotion
       reintroduces the superseded boundary.
-- [ ] 7.7 Run strict OpenSpec validation and archive only after the proven behavior is
+- [x] 7.7 **Withdrawn** 2026-10-14: closeout does this — 8.10 validates and 8.11 archives, as the last closeout part. As first planned: Run strict OpenSpec validation and archive only after the proven behavior is
       represented as current permanent architecture.
 
 ## 8. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 8.1 **Comment hygiene.** Run `make check-comment-hygiene`.
-- [ ] 8.2 **Import placement.** Review imports this change adds or touches; a proof
-      harness must not acquire production dependencies to reach internals.
-- [ ] 8.3 **Documentation compliance.** Confirm the topology requirement landed in
-      `test-compatibility` and the topology map in `ARCHITECTURE.md`, and that no
+- [ ] 8.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added for any that narrate the review or migration that
+      introduced them. Do not edit code here: anything to rewrite returns the change to
+      implementation.
+- [ ] 8.2 **Import placement — confirm.** Check the imports this change added for any
+      still local without a recorded reason, and that the proof harness acquired no
+      production dependency to reach internals. One that should move returns the
+      change to implementation.
+- [ ] 8.3 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe: the topology requirement sits in the
+      `test-compatibility` delta and the topology map in `ARCHITECTURE.md`, and no
       requirement promoted here asserts one market domain per storefront process.
-- [ ] 8.4 **Narrative compression.** Compress completed-task notes to final behavior and
-      validation evidence, including whether the topology ran live.
-- [ ] 8.5 **Roadmap currency.** Update Goal 3's current-state description and gap mapping
-      in `docs/development/ROADMAP.md`, including removing the unreconciled-contradiction
+- [ ] 8.4 **Narrative compression.** Compress completed-task notes to final behavior,
+      material validation evidence (including whether the topology ran live),
+      unresolved or deferred work, and permanent-documentation destinations, moving
+      durable rationale into `design.md` first.
+- [ ] 8.5 **Roadmap currency.** Update Goal 3's current state and gap mapping in
+      `docs/development/ROADMAP.md`, including removing the unreconciled-contradiction
       note this rewrite resolves.
-- [ ] 8.6 **Promotion.** Complete the design-promotion record below.
+- [ ] 8.6 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 8.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 8.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun.
+- [ ] 8.9 **Promotion.** Write the permanent documents this change owes —
+      `openspec/specs/test-compatibility/architecture.md` (the deterministic topology
+      evidence), `docs/development/ARCHITECTURE.md` (the accepted topology map), and
+      `openspec/specs/market-composition/architecture.md` (one storefront hosting a
+      family's contracts shares authorities without sharing market semantics) — and
+      complete the design-promotion record below. The `spec.md` files the deltas cover
+      (`physical-provisioning`, `site-capacity`, `test-compatibility`) are written by
+      the archive in 8.11, not by hand; the record names them all the same.
+- [ ] 8.10 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=market-platform-compute-40-multi-domain-proof` and resolve every match, then
+      `openspec validate market-platform-compute-40-multi-domain-proof --strict`.
+- [ ] 8.11 **Archival.** Last, once every other part is checked: `openspec archive
+      market-platform-compute-40-multi-domain-proof -y` merges the deltas into `openspec/specs/`
+      and moves the change under `openspec/changes/archive/`; point the index row at the
+      archived directory, and run `openspec validate --specs --strict`.
 
 ## Design promotion record
 

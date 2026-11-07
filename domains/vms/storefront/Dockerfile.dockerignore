@@ -6,6 +6,11 @@
 # ── Internal package wheels (built by make dist before docker build) ─
 !.dist/
 
+# ── Shared uv entry point ────────────────────────────────────────────
+!scripts/
+scripts/*
+!scripts/uv_project.py
+
 # ── VM storefront ────────────────────────────────────────────────────
 !domains/
 !domains/vms/

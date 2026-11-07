@@ -1,12 +1,12 @@
 # storefront-client
 
 Async and synchronous HTTP clients for the Arkhai storefront REST API.
-The immutable public package is `arkhai-core-storefront-client==0.17.0`.
+The immutable public package is `arkhai-core-storefront-client==0.25.0`.
 
 ## Identity configuration
 
 Authenticated calls use the marketplace identity v2 contract from
-`arkhai-kit-identity==0.3.0`. Inject a scheme-neutral `market_identity.Signer`,
+`arkhai-kit-identity==0.4.0`. Inject a scheme-neutral `market_identity.Signer`,
 the one caller role used by that client, and the exact storefront publisher
 principal trusted to sign responses.
 
@@ -41,7 +41,7 @@ client whose configured role does not match the route contract:
 - `buyer`: negotiation and settlement calls.
 - `admin`: operator writes and reads, including events, negotiation inspection,
   inventory, and settlement evaluation.
-- `service`: system status and fulfillment lifecycle callbacks.
+- `service`: system status and the capacity-released callback.
 
 `get_health`, `list_listings`, and `get_listing` remain public reads and can be
 called by a client without identity configuration.

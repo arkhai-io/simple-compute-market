@@ -22,8 +22,19 @@ from tomlkit.items import Table
 ConfigValidator = Callable[[Mapping[str, Any], SettlementRole], None]
 
 ALKAHEST_MECHANISM = "alkahest.v1"
-STRIPE_MECHANISM = "fiat.stripe.v1"
-KNOWN_MECHANISMS = frozenset({ALKAHEST_MECHANISM, STRIPE_MECHANISM})
+
+#: A role's installed mechanisms, mechanism identifier to `[Settlement]` key,
+#: taken from the registrations its runtime composes. The migration has no
+#: mechanism list of its own, so it cannot drift from what a role installs.
+InstalledMechanisms = Mapping[str, str]
+
+#: Removed mechanisms, refused with a removal diagnostic rather than as unknown.
+RETIRED_MECHANISMS: Mapping[str, str] = {"fiat.stripe.v1": "stripe"}
+_RETIRED_ALIASES = {"stripe": "fiat.stripe.v1", "fiat": "fiat.stripe.v1"}
+STRIPE_REMOVAL_MESSAGE = (
+    "Stripe settlement (`fiat.stripe.v1`, `[Settlement.stripe]`) was removed; "
+    "remove these settings. They are not mapped to Arkhai payments."
+)
 
 BUYER_MIGRATION_COMMAND = "market config migrate --scope settlement --write --backup"
 STOREFRONT_MIGRATION_COMMAND = (
@@ -47,68 +58,25 @@ _LEGACY_ALKAHEST_FIELDS: dict[str, tuple[str, Callable[[Any], Any] | None]] = {
         lambda value: _address_list(value),
     ),
 }
-_HOSTED_FIELD_RENAMES = {
-    "contract_version": "expected_api_version",
-    "timeout_seconds": "request_timeout_seconds",
-}
-_REMOVED_EMPTY_HOSTED_PATHS = frozenset(
-    {
-        ("account_ref",),
-        ("authority_id",),
-        ("authority", "principals"),
-        ("base_url",),
-        ("condition_profile",),
-        ("environment",),
-        ("expected_manifest_digest",),
-    }
-)
+#: The retired address-book keys, and the table that replaced both.
+_CHAIN_BOOK_KEY = "alkahest_address_config_path"
+_SECTION_BOOK_KEY = "address_config_path"
+_ADDRESS_BOOKS = ("Settlement", "alkahest", "address_books")
+
+
+def _book_text(item: Any) -> str:
+    return str(_plain(item) or "").strip()
+
+
 _ALKAHEST_FIELDS = frozenset(
     {
-        "address_config_path",
+        "address_books",
+        "probe_interval_seconds",
+        "rpc_timeout_seconds",
         "enabled",
-        "interruptible",
+        "release_models",
         "interruptible_oracle_addresses",
-        "oracle_gated",
         "trusted_oracle_addresses",
-    }
-)
-_STRIPE_FIELDS = frozenset(
-    {
-        "account_ref",
-        "allow_insecure_loopback",
-        "authority",
-        "authority_id",
-        "base_url",
-        "condition_profile",
-        "condition_profiles",
-        "currency",
-        "enabled",
-        "environment",
-        "expected_api_version",
-        "expected_manifest_digest",
-        "expected_schema_version",
-        "preflight_timeout_seconds",
-        "request_timeout_seconds",
-        "required_capabilities",
-        "resolvers",
-    }
-)
-_FORBIDDEN_STRIPE_KEY_PARTS = frozenset(
-    {
-        "access_token",
-        "admin",
-        "administrator",
-        "api_key",
-        "credential",
-        "database",
-        "db_url",
-        "dsn",
-        "migration",
-        "private_key",
-        "provider",
-        "secret",
-        "stripe_key",
-        "webhook",
     }
 )
 
@@ -134,7 +102,7 @@ class SettlementMigrationValidationError(SettlementMigrationError):
 class MigrationAction:
     """One redacted migration operation; values are deliberately not represented."""
 
-    kind: Literal["move", "remove"]
+    kind: Literal["move", "remove", "set"]
     source: str
     destination: str | None = None
 
@@ -157,6 +125,8 @@ class SettlementMigrationResult:
     actions: tuple[MigrationAction, ...]
     backup_path: Path | None = None
     environment_renames: tuple[EnvironmentRename, ...] = ()
+    #: What the migrated file changes beyond its moves, naming paths only.
+    notices: tuple[str, ...] = ()
 
 
 def _address_list(value: Any) -> list[str]:
@@ -255,14 +225,11 @@ def _normalized_mechanism(value: Any) -> str:
         )
     aliases = {
         "alkahest": ALKAHEST_MECHANISM,
-        "stripe": STRIPE_MECHANISM,
-        "hosted": STRIPE_MECHANISM,
-        "hosted.stripe": STRIPE_MECHANISM,
     }
     return aliases.get(value, value)
 
 
-def _normalized_priority(value: Any) -> list[str]:
+def _normalized_priority(value: Any, installed: InstalledMechanisms) -> list[str]:
     raw = _plain(value)
     entries = raw.split(",") if isinstance(raw, str) else raw
     if not isinstance(entries, (list, tuple)):
@@ -273,7 +240,12 @@ def _normalized_priority(value: Any) -> list[str]:
         _normalized_mechanism(entry.strip() if isinstance(entry, str) else entry)
         for entry in entries
     ]
-    if any(mechanism not in KNOWN_MECHANISMS for mechanism in priority):
+    if any(
+        mechanism in RETIRED_MECHANISMS or mechanism in _RETIRED_ALIASES
+        for mechanism in priority
+    ):
+        raise SettlementMigrationValidationError(STRIPE_REMOVAL_MESSAGE)
+    if any(mechanism not in installed for mechanism in priority):
         raise SettlementMigrationValidationError(
             "legacy settlement priority contains an unknown mechanism (value redacted)"
         )
@@ -290,13 +262,17 @@ def _same_value(left: Any, right: Any) -> bool:
 
 class _Planner:
     def __init__(
-        self, document: MutableMapping[str, Any], role: SettlementRole
+        self,
+        document: MutableMapping[str, Any],
+        role: SettlementRole,
+        installed: InstalledMechanisms,
     ) -> None:
         self.document = document
         self.role = role
+        self.installed = installed
         self.actions: list[MigrationAction] = []
+        self.notices: list[str] = []
         self.alkahest_seen = False
-        self.stripe_enabled = False
         self.legacy_priority: list[str] | None = None
         self.legacy_priority_item: Any | None = None
         self.enablement_sources: dict[str, str] = {}
@@ -337,58 +313,6 @@ class _Planner:
         _delete_path(self.document, source)
         self.actions.append(MigrationAction("remove", _path_text(source)))
 
-    def migrate_hosted(self) -> None:
-        present = [
-            path
-            for path in _LEGACY_HOSTED_TABLES
-            if _lookup(self.document, path) is not None
-        ]
-        if len(present) > 1:
-            raise SettlementMigrationConflict(
-                _path_text(present[0]), _path_text(present[1])
-            )
-        if not present:
-            return
-        source_table_path = present[0]
-        source_table = _lookup(self.document, source_table_path)
-        if not isinstance(source_table, Mapping):
-            raise SettlementMigrationValidationError(
-                f"legacy settlement path {_path_text(source_table_path)} must be a table"
-            )
-        self._reject_forbidden_stripe_keys(source_table, source_table_path)
-        enabled = source_table.get("enabled")
-        self.stripe_enabled = _plain(enabled) is True
-        if self.stripe_enabled:
-            self.enablement_sources["stripe"] = (
-                f"{_path_text(source_table_path)}.enabled"
-            )
-        leaves = _iter_table_leaves(source_table)
-        for relative, _item in leaves:
-            source = (*source_table_path, *relative)
-            if relative in _REMOVED_EMPTY_HOSTED_PATHS and _plain(_item) in (
-                "",
-                [],
-            ):
-                self.remove(source)
-                continue
-            renamed = (
-                _HOSTED_FIELD_RENAMES.get(relative[0], relative[0]),
-                *relative[1:],
-            )
-            self.move(source, ("Settlement", "stripe", *renamed))
-        self.remove(source_table_path)
-
-    def _reject_forbidden_stripe_keys(
-        self, table: Mapping[str, Any], prefix: tuple[str, ...]
-    ) -> None:
-        for relative, _value in _iter_table_leaves(table):
-            for part in relative:
-                lowered = part.lower()
-                if any(token in lowered for token in _FORBIDDEN_STRIPE_KEY_PARTS):
-                    raise SettlementMigrationValidationError(
-                        f"forbidden hosted settlement path {_path_text((*prefix, *relative))} (value redacted)"
-                    )
-
     def migrate_alkahest_policy(self) -> None:
         for source_name, (
             destination_name,
@@ -407,8 +331,55 @@ class _Planner:
                 value=moved_value,
             )
 
+    def migrate_release_models(self) -> None:
+        section_path = ("Settlement", "alkahest")
+        section = _lookup(self.document, section_path)
+        if not isinstance(section, Mapping):
+            return
+        flags = ("oracle_gated", "interruptible")
+        present = [name for name in flags if name in section]
+        for name in present:
+            if type(_plain(section[name])) is not bool:
+                raise SettlementMigrationValidationError(
+                    f"Settlement.alkahest.{name} must be a boolean (value redacted)"
+                )
+        enabled = [name for name in present if _plain(section[name]) is True]
+        if len(enabled) > 1:
+            raise SettlementMigrationConflict(
+                "Settlement.alkahest.oracle_gated", "Settlement.alkahest.interruptible"
+            )
+        destination = (*section_path, "release_models")
+        models = enabled or ["recipient"]
+        if present:
+            source = enabled[0] if enabled else present[0]
+            self.move((*section_path, source), destination, value=models)
+            for name in present:
+                self.remove((*section_path, name))
+        elif "release_models" not in section:
+            _ensure_table(self.document, section_path)["release_models"] = models
+            self.actions.append(MigrationAction("set", _path_text(destination)))
+
     def migrate_address_books(self) -> None:
-        occurrences: list[tuple[tuple[str, ...], Any]] = []
+        """Move each retired address-book key into ``Settlement.alkahest.address_books``.
+
+        A chain's own key names that chain's book. The section key named one
+        book for every chain, so it moves to the one configured chain, or to
+        the chains whose own keys name that same book; where neither says which
+        chains it served, the operator must, and migration refuses. A chain
+        named two different books is refused too. An empty key names nothing
+        and is removed.
+
+        A seller serviced every chain's claims against the section key's book,
+        and read the chain's own key for publication, verification, and
+        refunds. On a configured chain the section key does not move to, its
+        claims change to that chain's book in the table, or to the SDK's
+        built-in addresses where it has none; migration names each such chain,
+        so the change is seen before it is written. No buyer read the section
+        key, so a buyer's migration names none.
+        """
+        configured: list[str] = []
+        chain_books: dict[str, tuple[tuple[str, ...], Any]] = {}
+        empty: list[tuple[str, ...]] = []
         for chains_name in ("Chains", "chains"):
             chains = self.document.get(chains_name)
             if not isinstance(chains, Mapping):
@@ -416,62 +387,106 @@ class _Planner:
             for chain_name, chain in chains.items():
                 if not isinstance(chain, Mapping):
                     continue
-                field = "alkahest_address_config_path"
-                if field in chain:
-                    occurrences.append(
-                        ((chains_name, str(chain_name), field), chain[field])
+                name = str(chain_name)
+                if name not in configured:
+                    configured.append(name)
+                if _CHAIN_BOOK_KEY not in chain:
+                    continue
+                source = (chains_name, name, _CHAIN_BOOK_KEY)
+                item = chain[_CHAIN_BOOK_KEY]
+                if not _book_text(item):
+                    empty.append(source)
+                    continue
+                if name in chain_books and _book_text(chain_books[name][1]) != _book_text(item):
+                    raise SettlementMigrationConflict(
+                        _path_text(chain_books[name][0]), _path_text(source)
                     )
-        if not occurrences:
-            return
-        self.alkahest_seen = True
-        self.enablement_sources.setdefault("alkahest", _path_text(occurrences[0][0]))
-        nonempty = [
-            entry for entry in occurrences if str(_plain(entry[1]) or "").strip()
+                chain_books.setdefault(name, (source, item))
+
+        moves: list[tuple[tuple[str, ...], str, Any]] = [
+            (source, name, item) for name, (source, item) in chain_books.items()
         ]
-        if nonempty:
-            first_path, first_item = nonempty[0]
-            conflicting = next(
-                (
-                    entry
-                    for entry in nonempty[1:]
-                    if str(_plain(entry[1])).strip() != str(_plain(first_item)).strip()
-                ),
-                None,
-            )
-            if conflicting is not None:
-                raise SettlementMigrationConflict(
-                    _path_text(first_path), _path_text(conflicting[0])
+        section_source = ("Settlement", "alkahest", _SECTION_BOOK_KEY)
+        section_item = _lookup(self.document, section_source)
+        if section_item is not None and not _book_text(section_item):
+            empty.append(section_source)
+        elif section_item is not None:
+            book = _book_text(section_item)
+            if len(configured) == 1:
+                served = configured
+            else:
+                served = [
+                    name
+                    for name, (_source, item) in chain_books.items()
+                    if _book_text(item) == book
+                ]
+            if not served:
+                raise SettlementMigrationError(
+                    f"cannot tell which chains {_path_text(section_source)} served; "
+                    f"name each chain's book under {_path_text(_ADDRESS_BOOKS)}"
                 )
-        destination = ("Settlement", "alkahest", "address_config_path")
-        if nonempty:
-            first_path, first_item = nonempty[0]
-            destination_item = _lookup(self.document, destination)
-            if destination_item is not None and not _same_value(
-                destination_item, first_item
-            ):
-                raise SettlementMigrationConflict(
-                    _path_text(first_path), _path_text(destination)
-                )
-            if destination_item is None:
-                parent = _ensure_table(self.document, destination[:-1])
-                parent[destination[-1]] = copy.deepcopy(first_item)
-            for source, _item in occurrences:
-                _delete_path(self.document, source)
-                self.actions.append(
-                    MigrationAction("move", _path_text(source), _path_text(destination))
-                )
+            moves.extend((section_source, name, section_item) for name in served)
+            unreached = [name for name in configured if name not in served]
         else:
-            for source, _item in occurrences:
-                self.remove(source)
+            unreached = []
+
+        books = _lookup(self.document, _ADDRESS_BOOKS)
+        planned: dict[str, tuple[tuple[str, ...], Any]] = {}
+        for source, name, item in moves:
+            current = books.get(name) if isinstance(books, Mapping) else None
+            if current is not None and _book_text(current) != _book_text(item):
+                raise SettlementMigrationConflict(
+                    _path_text(source), _path_text((*_ADDRESS_BOOKS, name))
+                )
+            if name in planned and _book_text(planned[name][1]) != _book_text(item):
+                raise SettlementMigrationConflict(
+                    _path_text(planned[name][0]), _path_text(source)
+                )
+            planned.setdefault(name, (source, item))
+
+        if self.role == "seller":
+            for name in unreached:
+                has_book = name in planned or (
+                    isinstance(books, Mapping) and books.get(name) is not None
+                )
+                now = (
+                    _path_text((*_ADDRESS_BOOKS, name))
+                    if has_book
+                    else "the SDK's built-in addresses"
+                )
+                self.notices.append(
+                    f"{_path_text(section_source)} no longer applies to chain "
+                    f"{name}: its claims are serviced against {now}"
+                )
+
+        if planned:
+            table = _ensure_table(self.document, _ADDRESS_BOOKS)
+            for name, (_source, item) in planned.items():
+                if name not in table:
+                    # Trimmed, as the table requires, keeping a comment the
+                    # retired key carried.
+                    moved = tomlkit.item(_book_text(item))
+                    _copy_trivia(item, moved)
+                    table[name] = moved
+        for source, name, _item in moves:
+            if _lookup(self.document, source) is not None:
+                _delete_path(self.document, source)
+            self.actions.append(
+                MigrationAction(
+                    "move", _path_text(source), _path_text((*_ADDRESS_BOOKS, name))
+                )
+            )
+        for source in empty:
+            self.remove(source)
 
     def migrate_priority(self) -> None:
         source = ("settlement", "mechanism_priority")
         legacy_item = _lookup(self.document, source)
         if legacy_item is not None:
-            self.legacy_priority = _normalized_priority(legacy_item)
+            self.legacy_priority = _normalized_priority(legacy_item, self.installed)
             self.legacy_priority_item = copy.deepcopy(legacy_item)
             for mechanism in self.legacy_priority:
-                key = "alkahest" if mechanism == ALKAHEST_MECHANISM else "stripe"
+                key = "alkahest"
                 self.enablement_sources[key] = _path_text(source)
             _delete_path(self.document, source)
             self.actions.append(
@@ -481,13 +496,13 @@ class _Planner:
         destination = ("Settlement", "priority")
         current_item = _lookup(self.document, destination)
         current = (
-            _normalized_priority(current_item) if current_item is not None else None
+            _normalized_priority(current_item, self.installed)
+            if current_item is not None
+            else None
         )
         derived = list(self.legacy_priority or current or [])
         if self.alkahest_seen and ALKAHEST_MECHANISM not in derived:
             derived.append(ALKAHEST_MECHANISM)
-        if self.stripe_enabled and STRIPE_MECHANISM not in derived:
-            derived.append(STRIPE_MECHANISM)
 
         if (
             self.legacy_priority is not None
@@ -517,7 +532,6 @@ class _Planner:
 
         if self.actions and derived:
             self._set_enabled("alkahest", ALKAHEST_MECHANISM in derived)
-            self._set_enabled("stripe", STRIPE_MECHANISM in derived)
 
     def _set_enabled(self, key: str, enabled: bool) -> None:
         section = _lookup(self.document, ("Settlement", key))
@@ -534,10 +548,16 @@ class _Planner:
             parent["enabled"] = enabled
 
     def run(self) -> tuple[MigrationAction, ...]:
-        self.migrate_hosted()
+        if any(
+            _lookup(self.document, path) is not None for path in _LEGACY_HOSTED_TABLES
+        ):
+            raise SettlementMigrationError(
+                "hosted settlement configuration is not supported"
+            )
         self.migrate_alkahest_policy()
         self.migrate_address_books()
         self.migrate_priority()
+        self.migrate_release_models()
         return tuple(self.actions)
 
 
@@ -554,6 +574,9 @@ def is_legacy_settlement_path(path: str) -> bool:
         "interruptible_oracle_address",
         "settlement.hosted",
         "settlement.mechanism_priority",
+        f"settlement.alkahest.{_SECTION_BOOK_KEY}",
+        "settlement.alkahest.oracle_gated",
+        "settlement.alkahest.interruptible",
     }:
         return True
     if normalized.startswith(
@@ -564,7 +587,7 @@ def is_legacy_settlement_path(path: str) -> bool:
     return (
         len(parts) >= 3
         and parts[0] == "chains"
-        and parts[-1] == "alkahest_address_config_path"
+        and parts[-1] == _CHAIN_BOOK_KEY
     )
 
 
@@ -580,39 +603,26 @@ def reject_legacy_settlement_path(path: str, *, command: str) -> None:
 def environment_renames(
     environ: Mapping[str, str], *, role: SettlementRole
 ) -> tuple[EnvironmentRename, ...]:
-    """Project legacy marketplace environment names without reading their values.
-
-    Hosted-service-owned ``HOSTED_SETTLEMENT_*`` variables are intentionally not
-    marketplace aliases and are therefore never returned.
-    """
+    """Project supported marketplace environment aliases without reading values."""
 
     renames: list[EnvironmentRename] = []
     if role == "seller":
         exact = {
             "STOREFRONT_ORACLE_GATED_LISTINGS": (
-                "STOREFRONT_SETTLEMENT__ALKAHEST__ORACLE_GATED"
+                "STOREFRONT_SETTLEMENT__ALKAHEST__RELEASE_MODELS"
             ),
             "STOREFRONT_TRUSTED_ORACLE_ADDRESS": (
                 "STOREFRONT_SETTLEMENT__ALKAHEST__TRUSTED_ORACLE_ADDRESSES"
             ),
             "STOREFRONT_INTERRUPTIBLE_LISTINGS": (
-                "STOREFRONT_SETTLEMENT__ALKAHEST__INTERRUPTIBLE"
+                "STOREFRONT_SETTLEMENT__ALKAHEST__RELEASE_MODELS"
             ),
             "STOREFRONT_INTERRUPTIBLE_ORACLE_ADDRESS": (
                 "STOREFRONT_SETTLEMENT__ALKAHEST__INTERRUPTIBLE_ORACLE_ADDRESSES"
             ),
         }
-        hosted_suffixes = {
-            "CONTRACT_VERSION": "EXPECTED_API_VERSION",
-            "TIMEOUT_SECONDS": "REQUEST_TIMEOUT_SECONDS",
-        }
         for name in environ:
             destination = exact.get(name)
-            hosted_prefix = "STOREFRONT_SETTLEMENT__HOSTED__"
-            if name.startswith(hosted_prefix):
-                suffix = name[len(hosted_prefix) :]
-                suffix = hosted_suffixes.get(suffix, suffix)
-                destination = f"STOREFRONT_SETTLEMENT__STRIPE__{suffix}"
             if destination is not None:
                 renames.append(EnvironmentRename(name, destination))
     else:
@@ -627,6 +637,7 @@ def _validate_candidate(
     *,
     role: SettlementRole,
     validator: ConfigValidator | None,
+    installed: InstalledMechanisms,
 ) -> Mapping[str, Any]:
     try:
         parsed = tomllib.loads(text)
@@ -639,11 +650,12 @@ def _validate_candidate(
     if settlement is not None:
         if not isinstance(settlement, dict):
             raise SettlementMigrationValidationError("Settlement must be a table")
+        if any(key in settlement for key in RETIRED_MECHANISMS.values()):
+            raise SettlementMigrationValidationError(STRIPE_REMOVAL_MESSAGE)
         unknown_sections = set(settlement) - {
             "schema_version",
             "priority",
-            "alkahest",
-            "stripe",
+            *installed.values(),
         }
         if unknown_sections:
             raise SettlementMigrationValidationError(
@@ -660,19 +672,21 @@ def _validate_candidate(
                 "Settlement.schema_version must match the installed schema"
             )
         priority = settlement.get("priority", [])
-        normalized = _normalized_priority(priority)
+        normalized = _normalized_priority(priority, installed)
         if normalized != priority:
             raise SettlementMigrationValidationError(
                 "Settlement.priority must use canonical mechanism identifiers"
             )
-        for key in ("alkahest", "stripe"):
+        # The migration maps legacy Alkahest keys, so it owns their field set;
+        # every other installed section is left to the caller's typed validator.
+        for key in ("alkahest",):
             section = settlement.get(key)
             if section is not None and not isinstance(section, dict):
                 raise SettlementMigrationValidationError(
                     f"Settlement.{key} must be a table"
                 )
             if isinstance(section, dict):
-                allowed = _ALKAHEST_FIELDS if key == "alkahest" else _STRIPE_FIELDS
+                allowed = _ALKAHEST_FIELDS
                 if set(section) - allowed:
                     raise SettlementMigrationValidationError(
                         f"Settlement.{key} contains an unknown key (value redacted)"
@@ -685,24 +699,6 @@ def _validate_candidate(
                 raise SettlementMigrationValidationError(
                     f"Settlement.{key}.enabled must be a boolean"
                 )
-        stripe = settlement.get("stripe")
-        if isinstance(stripe, dict) and "authority" in stripe:
-            authority = stripe["authority"]
-            if not isinstance(authority, dict) or set(authority) - {"principals"}:
-                raise SettlementMigrationValidationError(
-                    "Settlement.stripe.authority contains an unknown key "
-                    "(value redacted)"
-                )
-        if isinstance(stripe, dict):
-            for relative, _value in _plain_leaves(stripe):
-                if any(
-                    token in part.lower()
-                    for part in relative
-                    for token in _FORBIDDEN_STRIPE_KEY_PARTS
-                ):
-                    raise SettlementMigrationValidationError(
-                        "Settlement.stripe contains a forbidden provider or secret key (value redacted)"
-                    )
 
     _reject_remaining_legacy(parsed)
     if validator is not None:
@@ -750,11 +746,16 @@ def _reject_remaining_legacy(parsed: Mapping[str, Any]) -> None:
         if not isinstance(chains, Mapping):
             continue
         for chain_name, chain in chains.items():
-            if isinstance(chain, Mapping) and "alkahest_address_config_path" in chain:
+            if isinstance(chain, Mapping) and _CHAIN_BOOK_KEY in chain:
                 raise SettlementMigrationValidationError(
                     "legacy settlement path "
-                    f"{chains_name}.{chain_name}.alkahest_address_config_path remains"
+                    f"{chains_name}.{chain_name}.{_CHAIN_BOOK_KEY} remains"
                 )
+    section_key = ("Settlement", "alkahest", _SECTION_BOOK_KEY)
+    if _lookup(parsed, section_key) is not None:
+        raise SettlementMigrationValidationError(
+            f"legacy settlement path {_path_text(section_key)} remains"
+        )
 
 
 def _write_all(fd: int, content: bytes) -> None:
@@ -886,12 +887,14 @@ def migrate_settlement_config(
     check: bool = False,
     write: bool = False,
     backup: bool = False,
+    installed: InstalledMechanisms,
     validator: ConfigValidator | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> SettlementMigrationResult:
     """Check or atomically migrate one role TOML document.
 
-    Exactly one of ``check`` and ``write`` is required. Write mode requires an
+    ``installed`` names the role's installed mechanisms, from the same
+    registrations its runtime composes. Exactly one of ``check`` and ``write`` is required. Write mode requires an
     explicit backup opt-in. Candidate validation and all conflict checks happen
     before the first filesystem mutation.
     """
@@ -926,9 +929,13 @@ def migrate_settlement_config(
         ) from exc
 
     planned = copy.deepcopy(document)
-    actions = _Planner(planned, role).run()
+    planner = _Planner(planned, role, installed)
+    actions = planner.run()
+    notices = tuple(planner.notices)
     candidate_text = tomlkit.dumps(planned)
-    _validate_candidate(candidate_text, role=role, validator=validator)
+    _validate_candidate(
+        candidate_text, role=role, validator=validator, installed=installed
+    )
     candidate = candidate_text.encode("utf-8")
     changed = bool(actions)
     renames = environment_renames(environ or {}, role=role)
@@ -940,6 +947,7 @@ def migrate_settlement_config(
             written=False,
             actions=actions,
             environment_renames=renames,
+            notices=notices,
         )
     if validator is None:
         raise SettlementMigrationValidationError(
@@ -959,6 +967,7 @@ def migrate_settlement_config(
         actions=actions,
         backup_path=backup_path,
         environment_renames=renames,
+        notices=notices,
     )
 
 
@@ -967,7 +976,9 @@ def format_migration_result(result: SettlementMigrationResult) -> tuple[str, ...
 
     lines: list[str] = []
     for action in result.actions:
-        if action.destination is None:
+        if action.kind == "set":
+            lines.append(f"set {action.source} (value redacted)")
+        elif action.destination is None:
             lines.append(f"remove {action.source} (value redacted)")
         else:
             lines.append(
@@ -977,6 +988,7 @@ def format_migration_result(result: SettlementMigrationResult) -> tuple[str, ...
         lines.append(
             f"rename environment {rename.source} -> {rename.destination} (value redacted)"
         )
+    lines.extend(f"note: {notice}" for notice in result.notices)
     if not result.changed:
         lines.append("No settlement configuration migration changes.")
     elif result.written:

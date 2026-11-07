@@ -1,68 +1,27 @@
 # PyPI intermittently serves 5xx where internal package names should
 # 404 (they resolve from .dist); back off through the flap instead of
 # failing after uv's default 3 tries.
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat .python-version 2>/dev/null),$(error .python-version not found))
+
 export UV_HTTP_RETRIES ?= 10
 
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
-IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.3.0-py3-none-any.whl
-HOSTED_REPO_ROOT := .
-HOSTED_RELEASE_DIR ?= $(DIST_DIR)
-include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
-HOSTED_COMPOSE_ENV ?= $(DIST_DIR)/hosted-settlement-compose.env
-# The locally built consumer a development stack runs in place of an
-# attested release image.
-HOSTED_LOCAL_MARKETPLACE_IMAGE ?= arkhai:storefront
-# Written by the local credential assembly, whose generated keys they pin.
-HOSTED_STRIPE_TEST_STOREFRONT_CONFIG ?= e2e-tests/config/hosted-storefront.toml
-HOSTED_STRIPE_TEST_BUYER_CONFIG ?= e2e-tests/config/hosted-buyer.toml
-HOSTED_MARKETPLACE_RELEASE_DIR ?= $(DIST_DIR)/marketplace-release
-HOSTED_MARKETPLACE_RELEASE_MANIFEST ?= $(HOSTED_MARKETPLACE_RELEASE_DIR)/marketplace-release-manifest.json
-# A settlement authority built from a sibling checkout, for a development run
-# of a version that has no published release. Empty selects the released
-# producer, which is what every existing invocation gets.
-HOSTED_SETTLEMENT_SOURCE ?= ../hosted-settlement-service
-HOSTED_LOCAL_HOSTED_VERSION ?= $(shell sed -n 's/^RELEASE_VERSION ?= //p' $(HOSTED_SETTLEMENT_SOURCE)/Makefile 2>/dev/null)
-HOSTED_LOCAL_HOSTED_IMAGE ?=
-HOSTED_LOCAL_HOSTED_ARTIFACTS ?= $(HOSTED_SETTLEMENT_SOURCE)/.dist
-# Five of the released producer's six identities are in the trust config that
-# pins it, so a development run reads them from there instead of having six
-# digests copied in by hand. The workflow run id is not among them and stays an
-# input. A protected run passes all six on the command line, which wins over
-# these and is still checked for emptiness before the run starts.
-HOSTED_TRUSTED_IDENTITIES := $(shell uv run --no-project python -c "import json;d=json.load(open('$(HOSTED_RELEASE_TRUST)'));print('sha256:'+d['manifest_sha256'],'sha256:'+d['client_wheel']['sha256'],d['service_image']['digest'],d['source_commit'],d['workflow_ref'])" 2>/dev/null)
-HOSTED_PRODUCTION_MANIFEST_SHA256 ?= $(word 1,$(HOSTED_TRUSTED_IDENTITIES))
-HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256 ?= $(word 2,$(HOSTED_TRUSTED_IDENTITIES))
-HOSTED_PRODUCTION_IMAGE_DIGEST ?= $(word 3,$(HOSTED_TRUSTED_IDENTITIES))
-HOSTED_PRODUCTION_SOURCE_COMMIT ?= $(word 4,$(HOSTED_TRUSTED_IDENTITIES))
-HOSTED_PRODUCTION_WORKFLOW_REF ?= $(word 5,$(HOSTED_TRUSTED_IDENTITIES))
-HOSTED_PRODUCTION_WORKFLOW_RUN_ID ?=
-# Which producer a development run binds, in the two places it has to be said.
-HOSTED_PRODUCER_INPUTS = $(if $(HOSTED_LOCAL_HOSTED_IMAGE),--local-hosted-image "$(HOSTED_LOCAL_HOSTED_IMAGE)" --hosted-artifacts "$(HOSTED_LOCAL_HOSTED_ARTIFACTS)" --hosted-release-version "$(HOSTED_LOCAL_HOSTED_VERSION)",--trust "$(HOSTED_RELEASE_TRUST)" --manifest "$(HOSTED_RELEASE_MANIFEST)" --wheel "$(HOSTED_CLIENT_WHEEL)")
-# A build made here has no released coordinates, and supplying any is refused.
-HOSTED_PRODUCER_PINS = $(if $(HOSTED_LOCAL_HOSTED_IMAGE),,--hosted-manifest-sha256 "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" --hosted-client-wheel-sha256 "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" --hosted-image-digest "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" --hosted-source-commit "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" --hosted-workflow-ref "$(HOSTED_PRODUCTION_WORKFLOW_REF)" --hosted-workflow-run-id "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)")
-HOSTED_MARKETPLACE_COMMIT ?=
-HOSTED_MARKETPLACE_WORKFLOW_RUN_ID ?=
-HOSTED_MARKETPLACE_WORKFLOW_REF ?=
-HOSTED_MARKETPLACE_MANIFEST_SHA256 ?=
-HOSTED_MARKETPLACE_IMAGE_DIGEST ?=
-HOSTED_STRIPE_TEST_RUN_REF ?=
-HOSTED_STRIPE_TEST_SCENARIO ?=
-HOSTED_STRIPE_TEST_FUNDING_PROFILE ?=
-HOSTED_STRIPE_TEST_INTERACTION ?=
-HOSTED_STRIPE_TEST_ACCOUNT_REF ?=
-HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
-HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
-HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
+IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
-.PHONY: build-hosted-producer
-.PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
+.PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
+.PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
+.PHONY: test-release-tooling test-deployment-packaging test-registry-client test-e2e-unit
+.PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
+.PHONY: test-payments-lane-double build-payments-lane-double
 .PHONY: dist-arkhai-core-registry
-.PHONY: build-bare-metal-storefront
-.PHONY: dist-bare-metal-buyer
+.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
+.PHONY: run-e2e run-ci fetch-e2e-logs
+.PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
+.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -77,9 +36,15 @@ HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-hosted-client dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client
+# The wheel set a publishing path builds; publishing workflows call this name.
+dist-release: ## Build the wheel set for a publishing path.
+	$(MAKE) dist
 
-dist-domains: dist-kits dist-compute-provisioning ## Build every domains-scoped wheel through the domain aggregate
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client
+
+dist-ci: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client ## Build repository-owned Python wheels without fetching separately released artifacts.
+
+dist-domains: dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-storefront-client dist-registry-client dist-ci-kits dist-compute-provisioning dist-compute-provisioning-ansible ## Build every domains-scoped wheel through the domain aggregate
 	cd domains && $(MAKE) dist DIST_DIR=$(DIST_DIR)
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
@@ -94,13 +59,31 @@ dist-policy: ## Build arkhai-kit-policy wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_kit_policy-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-policy produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-compute-provisioning: dist-kits ## Build arkhai-compute-provisioning wheel into .dist/
+dist-compute-provisioning-contracts: ## Build the compute provisioning family's wire-contract wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd provisioning/compute/contracts && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute_provisioning_contracts-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-compute-provisioning-contracts produced a platform-specific wheel" && exit 1)
+
+dist-compute-provisioning-client: dist-compute-provisioning-contracts ## Build the compute provisioning family's client wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd provisioning/compute/client && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute_provisioning_client-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-compute-provisioning-client produced a platform-specific wheel" && exit 1)
+
+dist-compute-provisioning: dist-ci-kits dist-compute-provisioning-contracts ## Build arkhai-compute-provisioning wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd provisioning/compute && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_compute_provisioning-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-compute-provisioning produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-compute-provisioning-service: dist-kits dist-compute-provisioning dist-domains ## Build the extracted compute service wheel.
+dist-compute-provisioning-ansible: dist-compute-provisioning ## Build the compute family kit's Ansible implementation wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd provisioning/compute/ansible && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute_provisioning_ansible-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-compute-provisioning-ansible produced a platform-specific wheel" && exit 1)
+
+dist-compute-provisioning-service: dist-ci-kits dist-compute-provisioning dist-domains ## Build the extracted compute service wheel.
 	-mkdir -p $(DIST_DIR)
 	cd provisioning/compute/service && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_compute_provisioning_service-*-none-any.whl > /dev/null 2>&1 || \
@@ -144,209 +127,11 @@ dist-arkhai-core-storefront: ## Build arkhai-core-storefront wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_core_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-bare-metal-buyer: dist-core dist-arkhai-core-buyer dist-registry-client dist-kits dist-hosted-client ## Build the bare-metal buyer contribution wheel.
-	cd domains && $(MAKE) dist-bare-metal-buyer DIST_DIR=$(DIST_DIR)
-
-dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## Build the bare-metal storefront contribution wheel.
-	cd domains && $(MAKE) dist-bare-metal-storefront DIST_DIR=$(DIST_DIR)
-
-verify-hosted-release: ## Verify the staged signed production release and exact client wheel.
-	$(VERIFY_HOSTED_RELEASE)
-
-hosted-preflight: prepare-hosted-compose
-
-prepare-hosted-compose: ## Verify production inputs and render a non-secret Compose env.
-	@test -n "$(HOSTED_MARKETPLACE_MANIFEST_SHA256)" || { echo "ERROR: missing HOSTED_MARKETPLACE_MANIFEST_SHA256"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_COMMIT)" || { echo "ERROR: missing HOSTED_MARKETPLACE_COMMIT"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_MARKETPLACE_WORKFLOW_REF"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_MARKETPLACE_WORKFLOW_RUN_ID"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_MARKETPLACE_IMAGE_DIGEST"; exit 1; }
-	@test -f "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)" || { echo "ERROR: missing attested HOSTED_MARKETPLACE_RELEASE_MANIFEST"; exit 1; }
-	gh attestation verify "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)" \
-		--repo arkhai-io/simple-compute-market
-	uv run --no-project --with 'eth-account>=0.13,<0.14' \
-		python scripts/prepare-hosted-compose.py \
-		--trust "$(HOSTED_RELEASE_TRUST)" \
-		--manifest "$(HOSTED_RELEASE_MANIFEST)" \
-		--wheel "$(HOSTED_CLIENT_WHEEL)" \
-		--marketplace-manifest "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)" \
-		--marketplace-manifest-sha256 "$(HOSTED_MARKETPLACE_MANIFEST_SHA256)" \
-		--marketplace-source-commit "$(HOSTED_MARKETPLACE_COMMIT)" \
-		--marketplace-workflow-ref "$(HOSTED_MARKETPLACE_WORKFLOW_REF)" \
-		--marketplace-workflow-run-id "$(HOSTED_MARKETPLACE_WORKFLOW_RUN_ID)" \
-		--marketplace-image-digest "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" \
-		--output "$(HOSTED_COMPOSE_ENV)"
-
-
-build-hosted-producer: ## Build the settlement authority image and artifacts from a sibling checkout.
-	@test -d "$(HOSTED_SETTLEMENT_SOURCE)" || { echo "ERROR: no hosted-settlement-service checkout at $(HOSTED_SETTLEMENT_SOURCE)"; exit 1; }
-	@test -n "$(HOSTED_LOCAL_HOSTED_VERSION)" || { echo "ERROR: cannot read RELEASE_VERSION from $(HOSTED_SETTLEMENT_SOURCE)/Makefile"; exit 1; }
-	$(MAKE) -C "$(HOSTED_SETTLEMENT_SOURCE)" image artifacts
-	@echo "built localhost/arkhai-hosted-settlement-service:$(HOSTED_LOCAL_HOSTED_VERSION); bind it with"
-	@echo "  make hosted-stripe-test-local HOSTED_LOCAL_HOSTED_IMAGE=localhost/arkhai-hosted-settlement-service:$(HOSTED_LOCAL_HOSTED_VERSION) ..."
-
-prepare-hosted-compose-local: ## Render a Compose env for a development stack.
-	uv run --no-project --with 'eth-account>=0.13,<0.14' \
-		python scripts/prepare-hosted-compose.py \
-		$(HOSTED_PRODUCER_INPUTS) \
-		--release-mode local \
-		--local-marketplace-image "$(HOSTED_LOCAL_MARKETPLACE_IMAGE)" \
-		--output "$(HOSTED_COMPOSE_ENV)"
-
-hosted-preflight-local: prepare-hosted-compose-local
-
-hosted-stripe-test-local: hosted-preflight-local ## Run one development scenario; its evidence never qualifies.
-	@test -n "$(STRIPE_SECRET_KEY)" || { echo "ERROR: missing STRIPE_SECRET_KEY"; exit 1; }
-	@test -n "$(STRIPE_CONNECTED_ACCOUNT_ID)" || { echo "ERROR: missing STRIPE_CONNECTED_ACCOUNT_ID"; exit 1; }
-	@if [ -n "$(HOSTED_LOCAL_HOSTED_IMAGE)" ]; then \
-		test -d "$(HOSTED_LOCAL_HOSTED_ARTIFACTS)" || { echo "ERROR: no producer artifacts at $(HOSTED_LOCAL_HOSTED_ARTIFACTS); run make build-hosted-producer"; exit 1; }; \
-	else \
-		test -n "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" || { echo "ERROR: missing HOSTED_PRODUCTION_MANIFEST_SHA256"; exit 1; }; \
-		test -n "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" || { echo "ERROR: missing HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256"; exit 1; }; \
-		test -n "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_PRODUCTION_IMAGE_DIGEST"; exit 1; }; \
-		test -n "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" || { echo "ERROR: missing HOSTED_PRODUCTION_SOURCE_COMMIT"; exit 1; }; \
-		test -n "$(HOSTED_PRODUCTION_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_REF"; exit 1; }; \
-		test -n "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_RUN_ID"; exit 1; }; \
-	fi
-	@test -n "$(HOSTED_STRIPE_TEST_RUN_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_RUN_REF"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_SCENARIO)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_SCENARIO"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_FUNDING_PROFILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_FUNDING_PROFILE"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_INTERACTION)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_INTERACTION"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_ACCOUNT_REF"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT"; exit 1; }
-	@test -f "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE"; exit 1; }
-	@echo "NOTE: a development run; its evidence never qualifies as protected evidence."
-	# --frozen: a run must not re-resolve dependencies, and an absolute
-	# --find-links would otherwise rewrite the project lock on every run.
-	uv run --frozen --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
-		python -m src.hosted_real_stripe.driver \
-		--compose-env "$(HOSTED_COMPOSE_ENV)" \
-		--release-mode local \
-		$(HOSTED_PRODUCER_PINS) \
-		--observed-marketplace-commit "$$(git rev-parse HEAD)" \
-		--run-identity "$(HOSTED_STRIPE_TEST_RUN_REF)" \
-		--scenario "$(HOSTED_STRIPE_TEST_SCENARIO)" \
-		--funding-profile "$(HOSTED_STRIPE_TEST_FUNDING_PROFILE)" \
-		--interaction "$(HOSTED_STRIPE_TEST_INTERACTION)" \
-		--account-ref "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" \
-		--authority-environment "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" \
-		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
-		--storefront-config "$(HOSTED_STRIPE_TEST_STOREFRONT_CONFIG)" \
-		--buyer-config "$(HOSTED_STRIPE_TEST_BUYER_CONFIG)" \
-		$(if $(HOSTED_STRIPE_TEST_RETAIN_AUTHORITY_STATE),--retain-authority-state,) \
-		$(if $(HOSTED_STRIPE_TEST_VISIBLE_BROWSER),--visible-browser,) \
-		$(if $(HOSTED_STRIPE_TEST_ATTENDED),--attended,) \
-		$(if $(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT),--lifecycle-timeout "$(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT)",) \
-		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
-
-hosted-compose-up: hosted-preflight ## Start or converge the production stack without deleting authority state.
-	docker compose --profile hosted-production --env-file "$(HOSTED_COMPOSE_ENV)" \
-			-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml up -d --wait
-
-hosted-compose-restart: hosted-preflight ## Recreate from newly verified inputs while preserving named volumes.
-	docker compose --profile hosted-production --env-file "$(HOSTED_COMPOSE_ENV)" \
-			-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml \
-			up -d --wait --force-recreate
-
-hosted-compose-clean: ## Tear down partial or complete hosted stacks and delete volumes.
-	@env_file="$(HOSTED_COMPOSE_ENV)"; temporary=; \
-	if [ ! -f "$$env_file" ]; then \
-		temporary=$$(mktemp); env_file="$$temporary"; \
-		printf '%s\n' \
-			'HOSTED_SETTLEMENT_VERIFIED_IMAGE=invalid/cleanup@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
-			'HOSTED_MARKETPLACE_VERIFIED_IMAGE=invalid/cleanup@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
-			'HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000' \
-			'HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR=$(CURDIR)' > "$$env_file"; \
-	fi; \
-	VMS_REGISTRY_ADMIN_API_KEY=cleanup VMS_REGISTRY_BOOTSTRAP_API_KEY=cleanup \
-	HOSTED_SETTLEMENT_ENV_FILE=/dev/null \
-	VMS_BOB_STRIPE_STOREFRONT_CONFIG=/dev/null \
-	VMS_BOB_STOREFRONT_SECRETS_FILE=/dev/null \
-	VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE=/dev/null \
-	VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE=/dev/null \
-	VMS_PROVISIONING_IDENTITY_ENV_FILE=/dev/null \
-	VMS_BOB_IDENTITY_ENV_FILE=/dev/null \
-	docker compose --profile hosted-production --profile hosted-stripe-test \
-		--env-file "$$env_file" -f domains/vms/compose.yml -f compose.hosted-settlement.yml \
-			-f compose.vms-fiat.yml down -v --remove-orphans; \
-	status=$$?; test -z "$$temporary" || rm -f "$$temporary"; exit $$status
-
-hosted-stripe-test-stop: ## Stop protected roles while preserving authority state.
-	@test -f "$(HOSTED_COMPOSE_ENV)" || { echo "ERROR: missing HOSTED_COMPOSE_ENV"; exit 1; }
-	VMS_REGISTRY_ADMIN_API_KEY=cleanup VMS_REGISTRY_BOOTSTRAP_API_KEY=cleanup \
-	HOSTED_SETTLEMENT_ENV_FILE=/dev/null \
-	VMS_BOB_STRIPE_STOREFRONT_CONFIG=/dev/null \
-	VMS_BOB_STOREFRONT_SECRETS_FILE=/dev/null \
-	VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE=/dev/null \
-	VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE=/dev/null \
-	VMS_PROVISIONING_IDENTITY_ENV_FILE=/dev/null \
-	VMS_BOB_IDENTITY_ENV_FILE=/dev/null \
-	docker compose --profile hosted-stripe-test --env-file "$(HOSTED_COMPOSE_ENV)" \
-		-f domains/vms/compose.yml -f compose.hosted-settlement.yml \
-		-f compose.vms-fiat.yml down --remove-orphans
-
-
-hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode system scenario.
-	@test -n "$(STRIPE_SECRET_KEY)" || { echo "ERROR: missing STRIPE_SECRET_KEY"; exit 1; }
-	@test -n "$(STRIPE_CONNECTED_ACCOUNT_ID)" || { echo "ERROR: missing STRIPE_CONNECTED_ACCOUNT_ID"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" || { echo "ERROR: missing HOSTED_PRODUCTION_MANIFEST_SHA256"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" || { echo "ERROR: missing HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_PRODUCTION_IMAGE_DIGEST"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" || { echo "ERROR: missing HOSTED_PRODUCTION_SOURCE_COMMIT"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_REF"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_RUN_ID"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_COMMIT)" || { echo "ERROR: missing HOSTED_MARKETPLACE_COMMIT"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_MARKETPLACE_WORKFLOW_RUN_ID"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_MARKETPLACE_WORKFLOW_REF"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_MANIFEST_SHA256)" || { echo "ERROR: missing HOSTED_MARKETPLACE_MANIFEST_SHA256"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_MARKETPLACE_IMAGE_DIGEST"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_RUN_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_RUN_REF"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_SCENARIO)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_SCENARIO"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_FUNDING_PROFILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_FUNDING_PROFILE"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_INTERACTION)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_INTERACTION"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_ACCOUNT_REF"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT"; exit 1; }
-	@test -f "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE"; exit 1; }
-	# --frozen: a run must not re-resolve dependencies, and an absolute
-	# --find-links would otherwise rewrite the project lock on every run.
-	uv run --frozen --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
-		python -m src.hosted_real_stripe.driver \
-		--compose-env "$(HOSTED_COMPOSE_ENV)" \
-		--hosted-manifest-sha256 "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" \
-		--hosted-client-wheel-sha256 "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" \
-		--hosted-image-digest "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" \
-		--hosted-source-commit "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" \
-		--hosted-workflow-ref "$(HOSTED_PRODUCTION_WORKFLOW_REF)" \
-		--hosted-workflow-run-id "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)" \
-		--marketplace-commit "$(HOSTED_MARKETPLACE_COMMIT)" \
-		--observed-marketplace-commit "$$(git rev-parse HEAD)" \
-		--marketplace-workflow-run-id "$(HOSTED_MARKETPLACE_WORKFLOW_RUN_ID)" \
-		--marketplace-workflow-ref "$(HOSTED_MARKETPLACE_WORKFLOW_REF)" \
-		--marketplace-manifest-sha256 "$(HOSTED_MARKETPLACE_MANIFEST_SHA256)" \
-		--marketplace-image-digest "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" \
-		--run-identity "$(HOSTED_STRIPE_TEST_RUN_REF)" \
-		--scenario "$(HOSTED_STRIPE_TEST_SCENARIO)" \
-		--funding-profile "$(HOSTED_STRIPE_TEST_FUNDING_PROFILE)" \
-		--interaction "$(HOSTED_STRIPE_TEST_INTERACTION)" \
-		--account-ref "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" \
-		--authority-environment "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" \
-		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
-		--storefront-config "$(HOSTED_STRIPE_TEST_STOREFRONT_CONFIG)" \
-		--buyer-config "$(HOSTED_STRIPE_TEST_BUYER_CONFIG)" \
-		$(if $(HOSTED_STRIPE_TEST_VISIBLE_BROWSER),--visible-browser,) \
-		$(if $(HOSTED_STRIPE_TEST_ATTENDED),--attended,) \
-		$(if $(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT),--lifecycle-timeout "$(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT)",) \
-		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
-
-dist-hosted-client: verify-hosted-release ## Copy only verified immutable release inputs into .dist.
-	@if [ "$(abspath $(HOSTED_RELEASE_DIR))" != "$(abspath $(DIST_DIR))" ]; then \
-		mkdir -p "$(DIST_DIR)"; \
-		for file in $(HOSTED_RELEASE_FILES); do \
-			cp "$(HOSTED_RELEASE_DIR)/$$file" "$(DIST_DIR)/$$file"; \
-		done; \
-	fi
-dist-kits: dist-hosted-client ## Build kit-owned wheels into .dist/
+dist-kits: ## Build kit-owned wheels into .dist/
 	$(MAKE) -C kit dist DIST_DIR=$(DIST_DIR)
+
+dist-ci-kits: ## Build kit-owned wheels that do not require separately released artifacts.
+	$(MAKE) -C kit dist-ci DIST_DIR=$(DIST_DIR)
 
 dist-alkahest: ## Build arkhai-kit-alkahest wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -363,15 +148,9 @@ dist-config: ## Build arkhai-kit-config wheel into .dist/
 dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 	helm package helm/ --destination $(DIST_DIR)
 
-check-hosted-client-pin: ## Report any consumer pinning a different hosted client
-	uv run --no-project python scripts/check-hosted-client-pin.py
-
-fix-hosted-client-pin: ## Move every consumer to the version kit/hosted-settlement names
-	uv run --no-project python scripts/check-hosted-client-pin.py --fix
-
 test-release-tooling: dist-identity ## Run release verifier and portable wheelhouse contract tests.
 	uv run --no-project --with pytest --with 'eth-account>=0.13,<0.14' \
-		--with 'arkhai-kit-identity' --find-links "$(DIST_DIR)" \
+		--with 'arkhai-kit-identity' --with pyyaml --find-links "$(DIST_DIR)" \
 		pytest -q scripts/tests
 
 test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm schema/render contracts.
@@ -380,45 +159,123 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-core test-kits test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits
+test: test-domains test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-e2e-unit test-deployment-packaging test-frp-grant-admission test-payments-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
+
+test-domains:
+	$(MAKE) -C domains test
 
 test-core:
 	cd core && make test
+
+test-compute-provisioning-contracts:
+	cd provisioning/compute/contracts && $(MAKE) test
+
+test-compute-provisioning-client:
+	cd provisioning/compute/client && $(MAKE) test
+
+test-compute-provisioning:
+	cd provisioning/compute && make test
+
+test-compute-provisioning-ansible:
+	cd provisioning/compute/ansible && make test
 
 test-provisioning:
 	cd provisioning/compute/service && make test
 
 test-provisioning-iac:
-	$(MAKE) -C domains test-provisioning-iac
+	$(MAKE) -C provisioning/compute/iac test
 
 test-registry:
 	cd core/registry && make reinit && make test
 
-test-storefront:
-	$(MAKE) -C domains test-storefront
+test-registry-client:
+	cd core/registry-client && $(MAKE) test
 
-test-vms-buyer:
-	$(MAKE) -C domains test-vms-buyer
+# The standalone frps admission plugin under tools/: its default suite needs no
+# network and skips the real-frp tests, which its gate runs with the floor run.
+test-frp-grant-admission:
+	$(MAKE) -C tools/frp-grant-admission test
 
-test-apicredits:
-	$(MAKE) -C domains test-apicredits
+test-frp-grant-admission-frp: ## Run the frps admission plugin against the real frp its pins file names; fetches frp
+	$(MAKE) -C tools/frp-grant-admission test-frp
 
-# Compatibility alias for the cross-language middleware parity suite.
-test-apicredits-middleware:
-	$(MAKE) -C domains test-apicredits-middleware
+test-frp-grant-admission-floor: ## Run the frps admission plugin's unit tests with its runtime dependencies at their declared floors
+	$(MAKE) -C tools/frp-grant-admission test-floor
+
+# The lanes' payments double under tools/: its committed TLS files, then its unit
+# and in-process library integration suite.
+test-payments-lane-double:
+	$(MAKE) -C tools/payments-lane-double test
+
+# The e2e project's unit tests; its scenarios need the docker-compose stack.
+test-e2e-unit:
+	cd e2e-tests && $(MAKE) test-unit
 
 test-kits:
 	cd kit && make test
 
 #Basic flow: build (optional), init (downloads if not built), run
-# `build` produces the production artifacts: the three runtime images
-# (registry, storefront, provisioning) and the buyer CLI binary. `build-dev`
-# adds the test chain + integration-test image needed for the local e2e stack.
-build: init-prerequisites dist build-buyer
-	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
-	$(MAKE) -j3 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
+# `build` produces the production artifacts: the runtime images and the buyer
+# CLI binary. `build-dev` adds the test chain + integration-test image needed
+# for the local e2e stack.
+#
+# Every image copies `.dist/` and the dev chain's state is generated from it,
+# so the wheels must be complete before any of them starts. Under `make -j` a
+# target's prerequisites run concurrently, and the GNU Make the pipeline's
+# runners carry (4.3) has no `.WAIT` to order them, so these targets order
+# their steps as recipe lines of recursive calls instead. Only the images,
+# which share nothing but `.dist/`, are built in parallel.
+#
+# IMAGE_SUFFIX, empty by default, is appended to every image tag a build target
+# writes, here and in each subproject the image targets delegate to, which is
+# passed it explicitly. A change's Helm validation builds with
+# `IMAGE_SUFFIX=-<change>` and deploys those tags, so two changes' builds never
+# write one tag (scripts/change_namespace.py). Compose, the pipeline lanes, and
+# an owner's own deployments use the bare tags.
+IMAGE_SUFFIX ?=
 
-build-dev: build build-dev-env build-test-image
+build: ## Build the wheels, the buyer CLI binary, and every runtime image
+	$(MAKE) init-prerequisites
+	$(MAKE) dist
+	$(MAKE) build-buyer
+	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
+	$(MAKE) -j4 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-frp-grant-admission
+
+build-dev: ## Build everything `build` does, the dev chain image, the test image, and the payments double
+	$(MAKE) build
+	$(MAKE) build-dev-env
+	$(MAKE) build-test-image
+	$(MAKE) build-payments-lane-double
+
+# One end-to-end lane's images: the wheels, the dev chain with its baked state,
+# the test image (which installs `market` from the wheels, so no lane needs
+# build-buyer), and the runtime images that lane's stack runs. Each lane job
+# builds only its own; build-dev keeps building everything for local use. The
+# pipeline runs a lane target on a fresh checkout, so this target, not its
+# caller, makes the wheels first, ordered as `build` orders its steps.
+build-e2e-base:
+	$(MAKE) init-prerequisites
+	$(MAKE) dist
+	$(MAKE) build-dev-env
+	$(MAKE) build-test-image
+
+build-e2e-vm: build-e2e-base ## Build the VM end-to-end lane's images
+	$(MAKE) -j4 build-registry build-storefront build-provisioning build-payments-lane-double
+
+build-e2e-bare-metal: build-e2e-base ## Build the bare-metal end-to-end lane's images
+	$(MAKE) -j4 build-registry build-provisioning build-bare-metal-storefront build-payments-lane-double
+
+build-e2e-apicredits: build-e2e-base ## Build the API-credit end-to-end lane's images
+	$(MAKE) -j5 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-payments-lane-double
+
+# The native Ansible gate's image: only the provisioning image and the wheels it
+# installs, since the gate composes no stack, so no dev chain and no test image.
+# The pipeline runs it on a fresh checkout, so the wheels come first, as the lane
+# targets make them.
+build-e2e-native-gate: ## Build the provisioning image the native Ansible gate runs in
+	$(MAKE) init-prerequisites
+	$(MAKE) dist
+	$(MAKE) build-provisioning
 
 # Seller-only build: the two runtime images a seller actually needs
 # (`arkhai:storefront`, `arkhai:compute-provisioning`) and just the wheels they
@@ -443,50 +300,103 @@ build-buyer: init-prerequisites init-buyer
 # Runs through the storefront venv, which pins alkahest_py; the relative
 # --find-links keeps domains/vms/storefront/uv.lock paths portable.
 build-anvil-state:
-	cd domains/vms/storefront && uv run --find-links ../../../.dist python ../../../dev-env/generate_state.py
+	cd kit/alkahest && uv run --find-links ../../.dist python ../../dev-env/generate_state.py
 
 build-dev-env: build-anvil-state
-	cd dev-env && make build
+	cd dev-env && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 build-registry:
-	cd core/registry && make build
+	cd core/registry && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 build-storefront:
-	cd domains/vms/storefront && make build
+	cd domains/vms/storefront && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 build-bare-metal-storefront:
 	docker build --ulimit nofile=65536:65536 \
 		-f domains/bare_metal/storefront/Dockerfile \
-		-t arkhai:bare-metal-storefront .
+		-t arkhai:bare-metal-storefront$(IMAGE_SUFFIX) .
 
 build-provisioning:
-	cd provisioning/compute/service && make build
+	cd provisioning/compute/service && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
+
+# Native gates run the Ansible, collections, playbooks and tests packaged in the
+# candidate image, with loopback networking only. A separate parse pass uses the
+# shared service configuration and image role path, as service jobs do.
+PROVISIONING_IMAGE ?= arkhai:compute-provisioning$(IMAGE_SUFFIX)
+test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a disposable private container
+	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
+		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
+	docker run --rm --user 0 --network none --pid="" --ipc private \
+		--cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+		--tmpfs /work:rw,nosuid,nodev,mode=0755 \
+		-v "$(CURDIR)/domains/bare_metal/provisioning/iac:/iac:ro" -w /iac \
+		-e BARE_METAL_DISPOSABLE_NATIVE=private-container-v1 \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_cleanup_gate.sh
+
+test-provisioning-iac-native: ## Run family and VM IaC native Ansible tests in the built provisioning image
+	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
+		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
+	docker run --rm --network none \
+		-w /opt/domains/vms/provisioning/iac \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_ansible_gate.sh
+	docker run --rm --network none \
+		-w /opt/provisioning/compute/iac \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_ansible_gate.sh
+	docker run --rm --network none -e ANSIBLE_LOG_PATH=/dev/null \
+		$(PROVISIONING_IMAGE) bash /opt/provisioning/compute/iac/scripts/image_syntax_gate.sh
 
 # API-credits domain images (item 6). Built from the repo root so each
 # Dockerfile's `COPY .dist/` + `COPY domains/` resolve. The api-credits
 # registry reuses arkhai:registry (built by build-registry) with a
 # different filter-spec mounted at runtime.
 build-apicredits-service:
-	docker build --ulimit nofile=65536:65536 -f domains/apicredits/service/Dockerfile -t arkhai:apicredits-service .
+	docker build --ulimit nofile=65536:65536 -f domains/apicredits/service/Dockerfile -t arkhai:apicredits-service$(IMAGE_SUFFIX) .
 
 build-apicredits-storefront:
-	docker build --ulimit nofile=65536 -f domains/apicredits/storefront/Dockerfile -t arkhai:apicredits-storefront .
+	docker build --ulimit nofile=65536 -f domains/apicredits/storefront/Dockerfile -t arkhai:apicredits-storefront$(IMAGE_SUFFIX) .
 
 build-apicredits-sample-app:
-	docker build --ulimit nofile=65536:65536 -f domains/apicredits/sample-app/Dockerfile -t arkhai:apicredits-sample-app .
+	docker build --ulimit nofile=65536:65536 -f domains/apicredits/sample-app/Dockerfile -t arkhai:apicredits-sample-app$(IMAGE_SUFFIX) .
+
+# The frps admission plugin builds from its own directory, which is the whole of its
+# build context; the image carries the plugin's own version, read from its project.
+FRP_GRANT_ADMISSION_DIR := tools/frp-grant-admission
+# Hoisted into a variable: macOS-shipped GNU Make 3.81 refuses `$$` inside single
+# quotes inside `$(shell ...)`.
+FRP_GRANT_ADMISSION_VERSION_SED := s/^version = "\(.*\)"$$/\1/p
+build-frp-grant-admission: ## Build the frps admission plugin's image
+	docker build --ulimit nofile=65536:65536 \
+		--build-arg VERSION=$(shell sed -n '$(FRP_GRANT_ADMISSION_VERSION_SED)' $(FRP_GRANT_ADMISSION_DIR)/pyproject.toml) \
+		-f $(FRP_GRANT_ADMISSION_DIR)/Dockerfile \
+		-t arkhai:frp-grant-admission$(IMAGE_SUFFIX) $(FRP_GRANT_ADMISSION_DIR)
+	$(if $(IMAGE_SUFFIX),,docker tag arkhai:frp-grant-admission arkhai:frp-grant-admission-$(GIT_SUFFIX))
 
 build-test-image:
-	cd e2e-tests && make build
+	cd e2e-tests && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
+
+# The lanes' payments double, built from the repository root so its Dockerfile can
+# copy the wheelhouse its lock resolves from. Lanes and the local release run it;
+# it is never pushed.
+build-payments-lane-double: ## Build the payments double's image
+	docker build --ulimit nofile=65536:65536 \
+		-f tools/payments-lane-double/Dockerfile \
+		-t arkhai:payments-lane-double$(IMAGE_SUFFIX) .
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
-# `make init` resolves dependencies for all three roles. Each role's
-# Makefile owns its own venv; we just delegate so a fresh clone has one
-# entry point. Run `make build` separately to produce wheel/Docker artifacts.
-init: init-prerequisites init-submodules init-buyer init-storefront init-arkhai-core-registry
+# `make init` builds the internal wheels and resolves dependencies for the buyer,
+# both storefronts, and the registry. Each project's Makefile owns its own venv;
+# we just delegate so a fresh clone has one entry point. Run `make build`
+# separately for Docker images.
+init: init-prerequisites init-submodules init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry
 
+# The uv installed here is the repository's minimum (scripts/check_uv_version.py):
+# init's reinit refuses an older one.
 init-prerequisites:
-	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
+	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.12.22/install.sh | sh; source $HOME/.local/bin/env; }
 
 init-submodules:
 	GIT_TRACE=1 GIT_CURL_TRACE=1 git submodule update --init
@@ -496,13 +406,23 @@ init-submodules:
 init-zero-tier:
 	cd scripts/zerotier && make install
 
-init-buyer: dist-domains
+# Each role's environment installs every internal package its lock names from
+# .dist, so each builds the whole repository wheelhouse first. A hand-kept subset
+# drifts from the locks, and the gap shows only in a checkout whose .dist no
+# earlier build has filled, such as a fresh clone.
+init-buyer: dist-ci
 	cd domains/vms/buyer && make init
 
-init-storefront: dist-domains dist-policy dist-compute-provisioning dist-storefront-client dist-registry-client
+init-storefront: dist-ci
 	cd domains/vms/storefront && make init
 
-init-arkhai-core-registry: dist-registry-client
+# The bare-metal chart's and the release topology's render checks load their
+# rendered configuration with this environment's storefront; without it they
+# skip, which validation fails.
+init-bare-metal-storefront: dist-ci
+	cd domains/bare_metal/storefront && make init
+
+init-arkhai-core-registry: dist-ci
 	cd core/registry && make init
 
 deploy-compose:
@@ -510,11 +430,34 @@ deploy-compose:
 	docker compose ps
 
 # Top-level Helm deploy consumes pre-existing Secret names from helm/values.yaml;
-# credential files and inventory content never pass through Helm values.
+# credential files never pass through Helm values, while a host definitions
+# document, which names keys by path and carries none, is the provisioning
+# chart's `definitions.hosts` value. It keeps the release's volumes on
+# uninstall; a local development cluster is deployed with
+# `make -C helm deploy-local` instead (docs/development/DEPLOYMENT_AND_CONFIG.md).
 deploy: deploy-helm
 
 deploy-helm:
 	$(MAKE) -C helm deploy
+
+# The local two-release topology on a development cluster: several storefronts
+# per registry. Release 1 is `make -C helm deploy-local`'s release; release 2 is
+# the bare-metal storefront and its own provisioning service, publishing to
+# release 1's registry (helm/bare-metal-release-values.yaml). helm/Makefile's
+# topology targets say what each installs, needs, and checks; helm-topology-secrets
+# creates the Secrets both releases read and the deal test's buyer-profile volume,
+# from development values only.
+helm-topology-secrets: ## Create the local two-release Helm topology's Secrets and the buyer-profile volume, from development values (cast and kubectl)
+	$(MAKE) -C helm topology-secrets
+
+helm-topology-up: ## Install the local two-release Helm topology (the umbrella, then the bare-metal seller release on its registry) and restart its Deployments, all but dev-env's, onto rebuilt images
+	$(MAKE) -C helm topology-up
+
+helm-topology-down: ## Uninstall the local two-release Helm topology, the bare-metal seller release first
+	$(MAKE) -C helm topology-down
+
+helm-topology-check: ## Run both releases' helm tests against the installed two-release topology
+	$(MAKE) -C helm topology-check
 
 ## Docker-run based local deploy (legacy, still useful for local dev without k8s).
 deploy-docker: deploy-dev-env deploy-registry deploy-storefront deploy-provisioning
@@ -546,20 +489,12 @@ stop-compose:
 # ---------------------------------------------------------------------------
 # Artifact Registry push configuration.
 #
-# AR_PROJECT is the only variable operators need to override when targeting
-# a different environment. All four registry URLs are derived from it.
-#
-# Usage:
-#   make push-runtime-artifacts                          # push to dev (default)
-#   make push-runtime-artifacts AR_PROJECT=compute-market-1-preprod
-#   make push-runtime-artifacts AR_PROJECT=compute-market-1-prod
-#
-# One-time machine setup before first push (covers Docker and Helm OCI):
-#   gcloud auth configure-docker us-central1-docker.pkg.dev
+# Supply AR_PROJECT and AR_LOCATION explicitly for the destination deployment.
+# Registry URLs are derived from these values and AR_PREFIX.
 # ---------------------------------------------------------------------------
 
-AR_PROJECT  ?= compute-market-1-dev
-AR_LOCATION ?= us-central1
+AR_PROJECT ?=
+AR_LOCATION ?=
 AR_PREFIX   ?= $(AR_PROJECT)
 
 DOCKER_REGISTRY := $(AR_LOCATION)-docker.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-docker
@@ -581,76 +516,31 @@ PROVISIONING_OPERATOR_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1
 # Targets can be run individually or all at once via push-runtime-artifacts.
 # ---------------------------------------------------------------------------
 
+ARTIFACT_COMMAND = python3 scripts/publish_artifacts.py --project "$(AR_PROJECT)" --location "$(AR_LOCATION)" --prefix "$(AR_PREFIX)"
+
+.PHONY: _require-ar-project test-domains dist-domains push-dev-images push-charts push-wheels push-cli clobber-wheels
 _require-ar-project:
-ifndef AR_PROJECT
-	$(error AR_PROJECT is required. Usage: make <target> AR_PROJECT=<name>)
-endif
-
-define publish_python_wheel
-	@if gcloud artifacts versions describe "$(2)" \
-	  --project="$(AR_PROJECT)" \
-	  --location="$(AR_LOCATION)" \
-	  --repository="$(AR_PREFIX)-python" \
-	  --package="$(1)" >/dev/null 2>&1; then \
-		echo "Skipping $(1)==$(2): already exists in $(AR_PREFIX)-python"; \
-	else \
-		uv publish \
-		  --publish-url "$(PYTHON_REGISTRY)" \
-		  --username oauth2accesstoken \
-		  --password "$$(gcloud auth print-access-token)" \
-		  "$(3)"; \
-	fi
-endef
-
-define clobber_python_wheel
-	@if gcloud artifacts versions describe "$(2)" \
-	  --project="$(AR_PROJECT)" \
-	  --location="$(AR_LOCATION)" \
-	  --repository="$(AR_PREFIX)-python" \
-	  --package="$(1)" >/dev/null 2>&1; then \
-		echo "Deleting $(1)==$(2) from $(AR_PREFIX)-python"; \
-		gcloud artifacts versions delete "$(2)" \
-		  --project="$(AR_PROJECT)" \
-		  --location="$(AR_LOCATION)" \
-		  --repository="$(AR_PREFIX)-python" \
-		  --package="$(1)" \
-		  --quiet; \
-	else \
-		echo "No existing $(1)==$(2) in $(AR_PREFIX)-python"; \
-	fi; \
-	uv publish \
-	  --publish-url "$(PYTHON_REGISTRY)" \
-	  --username oauth2accesstoken \
-	  --password "$$(gcloud auth print-access-token)" \
-	  "$(3)"
-endef
-
-define push_image
-	docker tag arkhai:$(2)-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/arkhai:$(1)-$(GIT_SUFFIX)
-	docker tag arkhai:$(2)-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/arkhai:$(1)
-	docker push $(DOCKER_REGISTRY)/arkhai:$(1)-$(GIT_SUFFIX)
-	docker push $(DOCKER_REGISTRY)/arkhai:$(1)
-endef
+	@$(ARTIFACT_COMMAND) check
 
 push-runtime-artifacts: push-images push-charts push-wheels push-cli
 
 push-images: _require-ar-project
-	$(call push_image,registry,registry)
-	$(call push_image,storefront,storefront)
-	$(call push_image,provisioning,provisioning)
+	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target registry --source registry
+	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target storefront --source storefront
+	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target provisioning --source compute-provisioning
+	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target frp-grant-admission --source frp-grant-admission
 
 push-dev-images: _require-ar-project
-	$(call push_image,dev-env,dev-env)
-	$(call push_image,e2e-tests,e2e-tests)
+	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target dev-env --source dev-env
+	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target e2e-tests --source e2e-tests
 
 push-charts: _require-ar-project dist-helm
 	helm push $(DIST_DIR)/arkhai-node-operator-*.tgz $(HELM_REGISTRY)
 	rm $(DIST_DIR)/arkhai-node-operator-*.tgz
 
-push-wheels: _require-ar-project
-	$(call publish_python_wheel,arkhai-core-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
-	$(call publish_python_wheel,arkhai-core-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
-	$(call publish_python_wheel,arkhai-vms-provisioning-operator-client,$(PROVISIONING_OPERATOR_CLIENT_VERSION),$(DIST_DIR)/arkhai_vms_provisioning_operator_client-$(PROVISIONING_OPERATOR_CLIENT_VERSION)-py3-none-any.whl)
+push-wheels: _require-ar-project ## Publish every manifest distribution to the registry.
+	uv run --no-project python scripts/push-distributions.py \
+	  --dist-dir $(DIST_DIR) --registry $(PYTHON_REGISTRY)
 
 push-cli: _require-ar-project
 	gcloud artifacts generic upload \
@@ -662,48 +552,134 @@ push-cli: _require-ar-project
 	  --source=domains/vms/buyer/dist/market
 
 clobber-wheels: _require-ar-project
-	$(call clobber_python_wheel,arkhai-core-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
-	$(call clobber_python_wheel,arkhai-core-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
-	$(call clobber_python_wheel,arkhai-vms-provisioning-operator-client,$(PROVISIONING_OPERATOR_CLIENT_VERSION),$(DIST_DIR)/arkhai_vms_provisioning_operator_client-$(PROVISIONING_OPERATOR_CLIENT_VERSION)-py3-none-any.whl)
+	$(ARTIFACT_COMMAND) wheel --registry "$(PYTHON_REGISTRY)" --package arkhai-core-storefront-client --version "$(STOREFRONT_CLIENT_VERSION)" --wheel "$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl" --clobber
+	$(ARTIFACT_COMMAND) wheel --registry "$(PYTHON_REGISTRY)" --package arkhai-core-registry-client --version "$(REGISTRY_CLIENT_VERSION)" --wheel "$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl" --clobber
+	$(ARTIFACT_COMMAND) wheel --registry "$(PYTHON_REGISTRY)" --package arkhai-vms-provisioning-operator-client --version "$(PROVISIONING_OPERATOR_CLIENT_VERSION)" --wheel "$(DIST_DIR)/arkhai_vms_provisioning_operator_client-$(PROVISIONING_OPERATOR_CLIENT_VERSION)-py3-none-any.whl" --clobber
 
 # Reviw and agent targets
 
 # ---------------------------------------------------------------------------
-# check-comment-hygiene — mechanical sweep for AGENTS.md's "Python comments
-# and docstrings" rule: change IDs, section/task numbers, and change-document
-# filenames must never appear in comments or docstrings outside openspec/.
-# This catches the reliably-mechanical subset of that rule (not the fuzzier
-# "references the review that introduced the code" cases, which still need
-# a human/LLM read) and is meant to run as part of every plan's closeout
-# task, not only when someone remembers to ask. Deliberately does not match
-# a bare "tombstone" -- that word has a legitimate, unrelated meaning
-# (a soft-delete marker row) already in use in this codebase, and a regex
-# can't safely tell the two usages apart; the tombstone convention itself
-# stays a judgment-call check, not a mechanical one.
+# check-comment-hygiene — mechanical sweep for AGENTS.md's "Python comments and
+# docstrings" rule: change IDs, section/task numbers, change-document filenames,
+# and OpenSpec change names must never appear in code outside openspec/. The
+# scans, their file types, exclusions, and the one exemption are
+# scripts/check_comment_hygiene.py's, with their reasons.
 # ---------------------------------------------------------------------------
 check-comment-hygiene: ## Fail if change-ID/task-number references leak outside openspec/
-	@echo "Scanning for change-ID and task-number references outside openspec/..."
-	@matches=$$(grep -rnE \
-		'POOLS-[0-9]+|[Ss]ection [0-9]+\.[0-9]+|[Ss]ection [0-9]+(\s|:|$$)|[Tt]ask [0-9]+\.[0-9]+|\btasks\.md\b|\bdesign\.md\b|\bproposal\.md\b' \
-		--include="*.py" --include="*.yml" --include="*.yaml" \
-		--exclude-dir="openspec" --exclude-dir=".git" --exclude-dir="__pycache__" \
-		--exclude-dir=".venv" --exclude-dir=".dist" --exclude-dir="node_modules" --exclude-dir="build" \
-		. 2>/dev/null || true); \
-	if [ -n "$$matches" ]; then \
-		echo "$$matches"; \
-		echo ""; \
-		echo "FAIL: found change-history references outside openspec/. See AGENTS.md's"; \
-		echo "'Python comments and docstrings' section -- comments must describe the"; \
-		echo "current system, not the history of the change that produced it."; \
-		exit 1; \
-	fi
-	@echo "OK: no change-ID/task-number references found outside openspec/."
+	@python3 scripts/check_comment_hygiene.py
 
-code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
+# ---------------------------------------------------------------------------
+# check-doc-citations — AGENTS.md's cross-reference rule: every openspec/,
+# docs/, tools/, scripts/, e2e-tests/, and .agents/ path cited by a document
+# must resolve on this branch, and an unresolvable one is a blocking defect
+# rather than a stale link.
+#
+# Rejects a tombstoned target as well as an absent one. The existence test
+# this replaces could not fail on a rename-to-tombstone -- the likeliest
+# broken citation in a renaming change -- because a tombstoned file still
+# exists on disk while its content is gone. The predicate is imported from
+# scripts/tombstones.py rather than reimplemented, so this check and the
+# prune utility cannot disagree about what a tombstone is.
+#
+# Archived changes are excluded: they record what was true when archived. A
+# change runs this during its own closeout, while its citations are still
+# expected to hold.
+# ---------------------------------------------------------------------------
+# Pass CHANGE=<name> to scope to one change's own documents, active or archived,
+# which is what a closeout gates on: a change owes the citations it wrote, and
+# gating it on the whole repository's documentation debt would let one stale
+# runbook block everyone else's archival.
+check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
+	@python3 scripts/check_doc_citations.py "$(CHANGE)"
+
+# An indexed capability's spec.md held to its index.md
+# (openspec/README.md#capability-documentation-pattern). With CHANGE=<name> that
+# change's deltas count as its archive will leave them, since closeout writes the
+# index before the archive merges them.
+check-spec-index: ## Fail if an indexed capability's spec.md and index.md disagree on its requirement ids (CHANGE=<name> counts its deltas)
+	@python3 scripts/check_spec_index.py "$(CHANGE)"
+
+# Each storefront chart's values schema carries one definition generated from
+# that storefront's typed configuration models; it keeps secret-marked fields
+# out of the chart's pass-through config. Each storefront names the schema files
+# it writes -- VM's storefront chart and the umbrella's storefront definition, and
+# the bare-metal chart's -- and its generator runs in that storefront's own
+# environment (make init-storefront; make -C domains/bare_metal/storefront init),
+# whose test suite fails when a committed definition is stale.
+helm-values-schema: ## Regenerate each storefront's config definition in its Helm values schemas
+	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write --root ../../..
+	cd domains/bare_metal/storefront && uv run --frozen --no-sync python -m arkhai_bare_metal_storefront.values_schema write --root ../../..
+
+# An older uv writes locks at an older revision; uv_project.py refuses it too, but
+# this prerequisite refuses before the wheelhouse is built, even under -j.
+lock: check-uv-version ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
+	@$(MAKE) --no-print-directory dist
+	python3 scripts/uv_project.py lock $(PROJECTS)
+
+check-uv-version: ## Fail if the installed uv is older than the minimum that writes this repository's locks
+	@python3 scripts/check_uv_version.py
+
+check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture
+
+check-uv-setup: ## Fail if a reinit target or image install names internal packages instead of deriving them
+	@python3 scripts/check_uv_setup.py
+
+check-locks: ## Fail if a lock is not current with its project, the wheels in .dist, or the repository (run make dist first)
+	@python3 scripts/check_locks.py
+
+check-python-version: ## Fail if anything selects a Python version other than .python-version
+	@python3 scripts/check_python_version.py
+
+check-project-layout: ## Fail if a distribution is not one package under src/ or cannot install editable
+	@python3 scripts/check_project_layout.py
+
+# check-architecture -- the package layer, scope, and kind rules of
+# docs/development/ARCHITECTURE.md, over every import and every declared
+# internal dependency, against docs/development/ARCHITECTURE.toml. Each part
+# runs alone; any part failing fails the whole. It reads only the tree, so it
+# needs no wheelhouse and no project environment.
+check-architecture: ## Fail if a package breaks a layer, scope, dependency, or kind rule no exception row excuses
+	@status=0; \
+	for part in layers scope dependencies kinds; do \
+		python3 scripts/check_architecture_$$part.py || status=1; \
+	done; \
+	exit $$status
+
+check-architecture-layers: ## Fail on an upward dependency, a same-layer cycle, a scope outside its layer's bounds, an unclassified project, a stale override, or an invalid rules file
+	@python3 scripts/check_architecture_layers.py
+
+check-architecture-scope: ## Fail on a dependency or identity literal outside a package's scope
+	@python3 scripts/check_architecture_scope.py
+
+check-architecture-dependencies: ## Fail on an undeclared internal import; warn on an unexplained declaration
+	@python3 scripts/check_architecture_dependencies.py
+
+check-architecture-kinds: ## Fail on a dependency outside a kind or package allowlist, an undeclared third-party import in an allowlisted package, or an imported plugin
+	@python3 scripts/check_architecture_kinds.py
+
+# A change owes the rows it owns, as it owes the citations it wrote: it may not
+# be archived while it owns an exception or override row.
+check-architecture-change: ## Fail while CHANGE=<name> owns an architecture exception or override row
+	@if [ -z "$(CHANGE)" ]; then echo "CHANGE=<name> is required" >&2; exit 2; fi
+	@status=0; \
+	for part in layers scope dependencies kinds; do \
+		python3 scripts/check_architecture_$$part.py --change "$(CHANGE)" || status=1; \
+	done; \
+	if [ $$status -eq 0 ]; then echo "OK: $(CHANGE) owns no architecture row."; fi; \
+	exit $$status
+
+architecture-report: ## Write the full architecture report, no exception applied (OUT=<path>, else stdout)
+	@python3 scripts/architecture_report.py $(if $(OUT),--out "$(OUT)")
+
+# `zip -y` stores a symlink as a link. Without it the agent-skill links under
+# .claude/skills and .codex/skills unzip as empty directories, and the snapshot no
+# longer shows which skills each harness loads.
+code-snapshot: round-view-closed ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
 	@OUTFILE="$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX).zip"; \
 	echo "Creating $$OUTFILE ..."; \
-	git ls-files --recurse-submodules | zip -@ "$$OUTFILE"; \
+	git ls-files --recurse-submodules | zip -y -@ "$$OUTFILE"; \
 	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
 	echo "Done: $$OUTFILE ($$SIZE)"
 
@@ -714,7 +690,7 @@ code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored art
 # staging their content; the trailing `git reset` unwinds the index back
 # to exactly its pre-run state, so the target's own "without changing git
 # state" guarantee still holds once it completes.
-review-diff: ## Write a binary-safe HEAD-relative diff for review without changing git state.
+review-diff: round-view-closed ## Write a binary-safe HEAD-relative diff for review without changing git state.
 	@mkdir -p .snapshot
 	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}.diff"; \
 	echo "Creating $$OUTFILE ..."; \
@@ -723,43 +699,123 @@ review-diff: ## Write a binary-safe HEAD-relative diff for review without changi
 	git reset -q; \
 	echo "Done: $$OUTFILE"
 
-last-diff: ## Write a binary-safe diff for the most recent commit.
+last-diff: round-view-closed ## Write a binary-safe diff for the most recent commit.
 	@mkdir -p .snapshot
 	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}-last.diff"; \
 	echo "Creating $$OUTFILE ..."; \
 	git diff --binary HEAD^ HEAD > "$$OUTFILE"; \
 	echo "Done: $$OUTFILE"
 
-review-wheelhouse-prepare: ## Preserve verified release inputs across the disposable wheel rebuild.
-	@release_dir="$$(mktemp -d)"; \
-	trap 'rm -rf "$$release_dir"' EXIT; \
-	for file in $(HOSTED_RELEASE_FILES); do \
-		cp "$(HOSTED_RELEASE_DIR)/$$file" "$$release_dir/$$file"; \
-	done; \
-	$(MAKE) dist-clean; \
-	$(MAKE) dist HOSTED_RELEASE_DIR="$$release_dir"
-	@$(MAKE) review-locks
-
 review-locks: ## Refresh selected project lockfiles against current repository wheels.
-	@uv run python $(CURDIR)/scripts/refresh-review-locks.py \
-		--root "$(CURDIR)" \
-		--dist-dir "$(DIST_DIR)" \
-		--python "$${REVIEW_PYTHON:-3.13}" \
-		--projects $${REVIEW_PROJECTS}
+	@if [ -z "$${REVIEW_PROJECTS}" ]; then echo "REVIEW_PROJECTS names no projects" >&2; exit 1; fi
+	python3 scripts/uv_project.py lock $${REVIEW_PROJECTS}
 
-review-wheelhouse: ## Resolve scope, rebuild wheels, refresh locks, and bundle dependencies.
-	@projects="$${REVIEW_PROJECTS:-}"; \
-	if [ -z "$${projects// }" ]; then \
-		args="--root $(CURDIR) --base-ref $${BASE_REF:-HEAD^} --format lines"; \
-		if [ -n "$${REVIEW_SCOPE_FILE:-}" ]; then args="$$args --scope-file $$REVIEW_SCOPE_FILE"; fi; \
-		projects="$$($(CURDIR)/scripts/resolve-review-scope.py $$args | tr '\n' ' ')"; \
-	fi; \
-	$(MAKE) review-wheelhouse-prepare REVIEW_PROJECTS="$$projects"; \
-	REVIEW_PROJECTS="$$projects" bash ./scripts/package-review-wheelhouse.sh \
-		"$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX)-wheelhouse.tar.gz"
+# The change workflow's targets — each step, the review, the round view, the
+# workflow's checks, and the guarded push — are the engine's make fragment, which
+# reads the branch a change lands on from the change's clone. A value of the
+# owner's machine, such as HELM_ALL_SCENARIOS or HELM_CONTEXT given to `make
+# validate`, reaches the Helm part's command through the environment: make exports
+# a variable set on its command line to every command it runs, the validation
+# session included, and the part's own make reads it there.
+include scripts/change_workflow/workflow.mk
 
-review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJECTS, REVIEW_SCOPE_FILE, or BASE_REF.
-	@args="--root $(CURDIR) --base-ref $${BASE_REF:-HEAD^}"; \
-	if [ -n "$${REVIEW_PROJECTS:-}" ]; then args="$$args --projects $$REVIEW_PROJECTS"; \
-	elif [ -n "$${REVIEW_SCOPE_FILE:-}" ]; then args="$$args --scope-file $$REVIEW_SCOPE_FILE"; fi; \
-	$(CURDIR)/scripts/resolve-review-scope.py $$args
+# The owner's complete closing check is the workflow's whole `pre-commit`: its
+# default checks, then this repository's `check-repository`, each once. Run as the
+# engine runs it before a commit, a worktree changing a path outside the inert
+# paths runs the functional hooks first.
+check-change: ## Run the change workflow's pre-commit for a change: its default checks — the change index, the task list, the agent skills, the strict OpenSpec validation — then check-repository; when the worktree changes a path outside the inert paths, relocking, the packaging check, and every suite first (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
+	@scripts/change-workflow run pre-commit "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-repository: ## Run this repository's own closing checks of a change — comment hygiene, its citations, the indexed capabilities' specifications, decision destinations, history wording, version bumps, local imports, and the capability index — printing only failures and one pass line; the workflow's pre-commit hook (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
+	@python3 scripts/check_change.py "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-decision-destinations: ## Fail if a `### D<n>` decision of a change's design has no bullet starting `D<n>` in its proposal's "Knowledge to promote" (CHANGE=<change>)
+	@python3 scripts/check_decision_destinations.py "$(CHANGE)"
+
+check-history-wording: ## Fail if a comment or docstring line added since the merge-base with the branch the change lands on describes history ([CHANGE_BASE=dev])
+	@python3 scripts/check_history_wording.py$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-version-bumps: ## Fail if a package version differs from its version at the merge-base with the branch the change lands on by more than one SemVer step ([CHANGE_BASE=dev])
+	@python3 scripts/check_version_bumps.py$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-local-imports: ## Fail if an import added inside a function since the merge-base with the branch the change lands on has no comment giving its reason ([CHANGE_BASE=dev])
+	@python3 scripts/check_local_imports.py$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-capability-index: ## Fail if a capability with a spec.md has no row in openspec/specs/README.md, or a row links nothing
+	@python3 scripts/check_capability_index.py
+
+record-capacity: ## Record in helm/validation-capacity.toml the memory a change's latest validation measured, with when and from which change; when it measured none, leave the file as it is and say so; run by archive cleanup (CHANGE=<change>)
+	@python3 scripts/validate_slice.py capacity --change "$(CHANGE)"
+
+design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
+	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design
+
+HELM_CONTEXT ?= docker-desktop
+
+validate-local: round-view-closed ## Validate HEAD without changing the checkout: check-packaging, then make test
+	@python3 scripts/validate_slice.py local
+
+WORKFLOW ?=
+CI_AFTER_RUN ?=
+
+validate-ci: round-view-closed ## Validate HEAD on a CI run dispatched by run-ci: wait for the run newer than CI_AFTER_RUN, keep its job logs, and class each failure against the same job in the latest completed dev run of code the branch contains (WORKFLOW=<file> CI_AFTER_RUN=<id>)
+	@python3 scripts/validate_slice.py ci --workflow "$(WORKFLOW)" $(if $(strip $(CI_AFTER_RUN)),--after-run "$(CI_AFTER_RUN)")
+
+validate-helm: round-view-closed ## Validate HEAD on the Helm charts in the change's namespace: preflights, the change's images, render checks, the release upgraded from zero over deleted volumes, the pipeline's scenarios as a pod there (CHANGE=<change> HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
+	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(CHANGE),--change "$(CHANGE)") $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios)
+
+# It deploys, so it is named as a validation and its script outside `check_*`:
+# six steps' rules allow any `make check-*`, and closeout's `python3 scripts/check_*`.
+validate-parallel: ## Run two changes' clones' Helm parts at the same moment and report whether each kept to its own namespace, tags, and scenario pod, and what it left in its namespace (CLONES="<clone> <clone>" HELM_CONTEXT=docker-desktop)
+	@python3 scripts/validate_parallel.py --context "$(HELM_CONTEXT)" $(CLONES)
+
+# Each dispatch ends its output with the newest run of its workflow on the branch
+# before the dispatch, alone on the last line: the marker validation's collect
+# waits past (fetch-e2e-logs' E2E_AFTER_RUN, validate-ci's CI_AFTER_RUN).
+run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch, ending with the newest run of it there before the dispatch
+	@python3 scripts/ci_evidence.py pipeline
+
+run-ci: round-view-closed ## Dispatch a CI workflow validation may dispatch on the current branch, refusing any other, ending with the newest run of it there before the dispatch (WORKFLOW=<file>)
+	@python3 scripts/ci_evidence.py dispatch "$(WORKFLOW)"
+
+E2E_LOG_DIR ?= $(CURDIR)/.snapshot/e2e-logs
+E2E_RUN_ID ?=
+E2E_COMMIT ?=
+E2E_AFTER_RUN ?=
+
+fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting directory.
+	@$(CURDIR)/scripts/fetch-e2e-logs.py \
+		--output-dir "$(E2E_LOG_DIR)" \
+		$(if $(strip $(E2E_RUN_ID)),--run-id "$(E2E_RUN_ID)") \
+		$(if $(strip $(E2E_COMMIT)),--commit "$(E2E_COMMIT)") \
+		$(if $(strip $(E2E_AFTER_RUN)),--after-run "$(E2E_AFTER_RUN)")
+
+
+install-gitleaks: ## Install the gitleaks release scripts/gitleaks-pins.toml pins, verified against its sha256; needs no root and does nothing when it is already on PATH ([GITLEAKS_INSTALL_DIR=~/.local/bin])
+	@python3 scripts/install_gitleaks.py$(if $(strip $(GITLEAKS_INSTALL_DIR)), --dir "$(GITLEAKS_INSTALL_DIR)")
+
+check-public-content: ## Scan staged changes for recognizable private content, and for private keys and provider credentials through the pinned gitleaks
+	@status=0; \
+	python3 scripts/check_public_content.py --staged || status=1; \
+	python3 scripts/check_secrets.py --staged || status=1; \
+	exit $$status
+
+REMOTE ?=
+
+# Git gives a pre-push hook its ref updates on standard input, which both checks
+# read, so they are read once and given to each; either refuses the push. The
+# updates go on with no newline added: Git runs the hook with no input when every
+# ref is up to date, and a blank line would be read as a malformed update. The
+# repository's Git hook and the workflow's guarded push both run this.
+pre-push: ## Run both public-content checks on what a push would send, as Git runs a pre-push hook: the ref updates on standard input (REMOTE=<remote>)
+	@if [ -z "$(REMOTE)" ]; then echo "ERROR: pre-push needs REMOTE=<remote>" >&2; exit 2; fi; \
+	updates=$$(cat); status=0; \
+	printf '%s' "$$updates" | python3 scripts/check_public_content.py --pre-push "$(REMOTE)" || status=1; \
+	printf '%s' "$$updates" | python3 scripts/check_secrets.py --pre-push "$(REMOTE)" || status=1; \
+	exit $$status
+
+check-secrets: ## Scan staged changes for private keys and provider credentials through the pinned gitleaks (.gitleaks.toml)
+	@python3 scripts/check_secrets.py --staged
+
+audit-secrets: ## Report what every gitleaks rule finds in HEAD's tracked tree, refusing nothing; read it before an official build ships (scripts/gitleaks-audit.toml)
+	@python3 scripts/check_secrets.py --audit

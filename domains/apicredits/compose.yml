@@ -2,8 +2,9 @@
 #
 # The seller side of the token-gated-API market: a registry/indexer instance
 # speaking the api_credits schema, the credits service (keys / prepaid credits /
-# quota ledger), the credits storefront (self-seeds one quota-backed listing on
-# startup), and a sample gated app behind the Python token-gating middleware.
+# quota ledger), the credits storefront (self-seeds one quota-backed listing
+# once its dependencies answer), and a sample gated app behind the Python
+# token-gating middleware.
 # The buyer drives it with `market credits buy` through the root overlay's
 # one-shot buyer service. Mutable XDG profile/run state and the strict
 # provider-secret mount are separate from this seller-only domain stack.
@@ -18,10 +19,17 @@
 # Paths below are relative to THIS file's directory (domains/apicredits/) —
 # Compose `include:` resolves an included file's relative paths against its
 # own location.
+#
+# This file holds topology only. A deployment's identities, admin credential,
+# configuration files, secret overlay and registry profile are bound by its
+# overlay (compose.apicredits-local.yml for development), and nothing here gives
+# one a fallback, so without an overlay the registry, credits service, sample
+# app and storefront refuse to start for want of them.
 
 services:
   # 1. Registry for the api_credits schema — same image as the vms.compute
-  # registry, different filter-spec (selected via REGISTRY_FILTER_SPEC_PATH).
+  # registry, different filter-spec, mounted below and selected by the
+  # deployment's registry profile through REGISTRY_FILTER_SPEC_PATH.
   api-credits-registry:
     image: arkhai:registry
     depends_on:
@@ -31,8 +39,6 @@ services:
       - "8090:8080"
     env_file:
       - ../../core/registry/.env.docker-compose
-    environment:
-      - REGISTRY_FILTER_SPEC_PATH=/app/filter-spec-apicredits.yaml
     volumes:
       - ../../shared-env:/app/shared-env
       - ./registry/filter-spec.yaml:/app/filter-spec-apicredits.yaml:ro
@@ -56,8 +62,26 @@ services:
       - "8092:8082"
     environment:
       - APICREDITS_STOREFRONT_ADMIN_KEY_FILE=/run/secrets/arkhai/api-credits-admin-key
+      # Who may call, by role. Supplied here rather than in settings.toml
+      # because dynaconf merges committed lists into overrides instead of
+      # replacing them, so a committed principal could never be narrowed
+      # away by a deployment.
+      #
+      # `seller` is the credits storefront, which signs eip191; `service`
+      # is the gated application, which signs ed25519 and may spend
+      # credits but not mint or revoke them. `admin` is left unset: an
+      # admin-role request is then refused naming the gap, which is the
+      # right answer while no human holds a credential for this service.
+      # The flip. Selecting the mounted credential turns on signed
+      # authentication for every non-health route at once -- there is no
+      # per-role or per-route coexistence with the shared-secret gate
+      # (main.py chooses one middleware or the other), which is why this
+      # lands in the same change as both clients' signing.
+      - APICREDITS_SITE_SIGNING_KEY_FILE=/run/secrets/arkhai/api-credits-service/credential
+      - APICREDITS_TRUSTED_PRINCIPALS=@json {"seller":[{"scheme":"eip191","identifier":"0x90f79bf6eb2c4f870365e785982e1f101e93b906"}],"service":[{"scheme":"ed25519","identifier":"w75DsOFODAFDR0gVcITNTSeEvG_SRQU9GyTulF2w7IM"}]}
+    # The admin credential and the authority's own signing credential, at the
+    # paths the two variables above name, are bound by the deployment's overlay.
     volumes:
-      - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
       - api-credits-service-data:/app/data
     restart: unless-stopped
     deploy:
@@ -83,15 +107,26 @@ services:
     environment:
       - APICREDITS_MIDDLEWARE_SERVICE_URL=http://credits-service:8082
       - APICREDITS_MIDDLEWARE_ADMIN_KEY_FILE=/run/secrets/arkhai/api-credits-admin-key
+      # The gated application's `service`-role credential, mounted for the
+      # same reason and on the same terms as the authority's above.
+      - APICREDITS_MIDDLEWARE_IDENTITY_CREDENTIAL_FILE=/run/secrets/arkhai/api-credits-gated-app/credential
+      # Whose signed responses the gate accepts: the authority's own
+      # principal, the public half of
+      # dev-env/identities/api-credits-service.ed25519. Required once the
+      # credential above is set -- signing requests without verifying
+      # responses would let anything on the path answer for the service,
+      # including denying or granting access.
+      - APICREDITS_MIDDLEWARE_AUTHORITY_PRINCIPALS=[{"scheme":"ed25519","identifier":"MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c"}]
       - APICREDITS_MIDDLEWARE_AMOUNT_PER_REQUEST=1
       # Short verify cache so a re-purchase (top-up) becomes visible to
-      # the gate quickly — the e2e polls through this window.
+      # the gate within seconds. The end-to-end lane's overlay
+      # (compose.apicredits-lane.yml) runs it with no cache at all.
       - APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS=3
       - APICREDITS_MIDDLEWARE_PURCHASE_SERVICE_NAME=weather-api
       - APICREDITS_MIDDLEWARE_PURCHASE_STOREFRONT_URL=http://credits-storefront:8000
       - APICREDITS_MIDDLEWARE_PURCHASE_REGISTRY_URL=http://api-credits-registry:8080
-    volumes:
-      - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
+    # The admin credential and the gated application's credential, at the
+    # paths named above, are bound by the deployment's overlay.
     restart: unless-stopped
     deploy:
       resources:
@@ -105,8 +140,9 @@ services:
       start_period: 10s
 
   # 4. Credits storefront — quota-backed listings + issuance-backed
-  # settlement. Self-seeds one listing on startup (storefront.credits.toml
-  # [seed] block) pointing at the sample app.
+  # settlement. Self-seeds one listing (storefront.credits.toml [seed] block)
+  # pointing at the sample app, from its listing-seed loop once the credits
+  # service and the chain answer.
   credits-storefront:
     image: arkhai:apicredits-storefront
     platform: linux/amd64
@@ -122,17 +158,11 @@ services:
     ports:
       - "8093:8000"
     environment:
+      # Where the loader finds the files the deployment's overlay binds:
+      # /etc/arkhai/storefront.toml and its secret overlay
+      # /etc/arkhai/storefront.secrets.toml.
       - XDG_CONFIG_HOME=/etc
     volumes:
-      # Chain-/seller-specific config is the one environment-supplied mount;
-      # override $APICREDITS_STOREFRONT_CONFIG to point at a different chain's
-      # TOML (the default is the dev/anvil seller config).
-      - ${APICREDITS_STOREFRONT_CONFIG:-./storefront/storefront.credits.toml}:/etc/arkhai/storefront.toml:ro
-      # The dev chain's deployed Alkahest contract addresses, borrowed from
-      # the VM storefront's data tree (the canonical anvil address book). A
-      # non-Anvil deployment supplies its own address book here.
-      - ../vms/storefront/src/market_storefront/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
-      - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
       - api-credits-storefront-data:/app/data
     restart: unless-stopped
     deploy:

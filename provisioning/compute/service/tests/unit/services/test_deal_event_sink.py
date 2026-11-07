@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from compute_provisioning_contracts import LifecycleEvent
 from market_identity import Ed25519Signer, Eip191Signer, TrustedIdentitySet
 
 from compute_provisioning_service.identity import ProvisioningIdentityContext
@@ -50,14 +52,14 @@ async def test_release_event_uses_service_signer_site_and_storefront_pin(
     )
     reservation = {
         "capacity_reservation_id": "alloc-7",
-        "executor_kind": "vm",
+        "offering_mode": "vm",
         "released_at": "2026-07-13T12:00:00+00:00",
         "deal_ref": {"storefront_url": "https://untrusted.example/"},
     }
     event_id = "capacity_released:alloc-7:2026-07-13T12:00:00+00:00"
     request_id = "capacity-release-" + hashlib.sha256(event_id.encode()).hexdigest()
 
-    with patch("storefront_client.StorefrontClient", return_value=storefront) as client:
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=storefront) as client:
         delivered = await notify_storefront_capacity_released(
             SimpleNamespace(storefront_url="https://configured.example/"),
             reservation,
@@ -83,6 +85,41 @@ async def test_release_event_uses_service_signer_site_and_storefront_pin(
     storefront.close.assert_awaited_once_with()
 
 
+@pytest.mark.parametrize("event_kind", ["usage_ready", "provisioning_started"])
+@pytest.mark.asyncio
+async def test_the_sink_sends_nothing_for_an_event_other_than_capacity_release(event_kind):
+    """A storefront learns every other fulfillment transition by reading the
+    fulfillment, so the sink refuses such an event: it builds no client and
+    reports the event undelivered."""
+    service = Ed25519Signer(b"\x11" * 32)
+    storefront_signer = Ed25519Signer(b"\x12" * 32)
+    identity = ProvisioningIdentityContext(
+        signer=service,
+        storefront_principal=storefront_signer.identity,
+        admin_principal=Ed25519Signer(b"\x13" * 32).identity,
+        storefront_site_id="default",
+    )
+    sink = StorefrontLifecycleEventSink(
+        SimpleNamespace(storefront_url="https://configured.example"),
+        identity,
+        _authority(storefront_signer.identity),
+    )
+    event = LifecycleEvent(
+        event_id=f"{event_kind}:alloc-7",
+        capacity_reservation_id="alloc-7",
+        deal_ref={},
+        offering_mode="vm",
+        event_kind=event_kind,
+        payload={},
+        occurred_at=datetime.now(timezone.utc),
+    )
+
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient") as client:
+        assert await sink.deliver(event) is False
+
+    client.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_uncertain_ack_retry_reuses_the_same_client_and_request_identity():
     service = Ed25519Signer(b"\x11" * 32)
@@ -104,11 +141,11 @@ async def test_uncertain_ack_retry_reuses_the_same_client_and_request_identity()
     )
     reservation = {
         "capacity_reservation_id": "alloc-7",
-        "executor_kind": "vm",
+        "offering_mode": "vm",
         "released_at": "2026-07-13T12:00:00+00:00",
     }
 
-    with patch("storefront_client.StorefrontClient", return_value=storefront) as client:
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=storefront) as client:
         assert await notify_storefront_capacity_released(
             SimpleNamespace(storefront_url="ignored"), reservation, sink=sink
         ) is False

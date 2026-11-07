@@ -98,7 +98,5 @@ Rollback is a code revert; no persisted state or wire surface changes.
 
 ## Open Questions
 
-- **Should this extraction wait for the in-flight changes that modify the same code?**
-  Extracting during active modification means repeated rebasing; extracting after means
-  those changes land in one domain and need porting. Deferrable to sequencing, and the
-  answer may differ per concern.
+None. The extraction landed ahead of the negotiation and capacity changes that modify
+the same code, which are written against the kit hooks rather than a domain copy.

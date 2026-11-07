@@ -10,6 +10,12 @@ port          = 8000
 base_url      = "http://credits-storefront:8000/"
 db_path       = "/app/data/storefront.db"
 
+# Registry discovery (seller-side). Matches the shipped default in
+# apicredits_storefront/settings.toml, stated explicitly because this
+# deployment profile replaces those defaults rather than layering over
+# them, and `server.py` reads the key unconditionally.
+enable_registry_discovery = true
+
 [identity]
 scheme     = "eip191"
 identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
@@ -21,14 +27,44 @@ identities = [
 
 [wallet]
 address     = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
-private_key = "" # APICREDITS_STOREFRONT_WALLET__PRIVATE_KEY secret environment input
+private_key = "" # stated in the secret overlay, storefront.secrets.toml
+
+# Which settlement mechanisms this seller will actually service. Without
+# this section `mechanism_config("alkahest")` is None, `alkahest_enabled`
+# is false, and no chain probe is composed, so no chain client is ever
+# built -- the storefront starts cleanly, publishes, negotiates and accepts,
+# and then refuses `POST /api/v1/settle/...` with
+# `chain 'anvil' not configured on this storefront — available chains: []`.
+# Only that probe builds chain clients, so without this section the chain
+# table below yields none: configuring one without the other leaves it
+# inert, and the absence produces no startup warning.
+[settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[settlement.alkahest]
+enabled = true
+# Each chain's Alkahest address book: the same anvil book the VM storefront
+# uses (one anvil deployment), bind-mounted into this container.
+address_books = { anvil = "/app/alkahest_anvil_addresses.json" }
+release_models = ["recipient"]
+trusted_oracle_addresses = []
+# `interruptible`/`interruptible_oracle_addresses` are deliberately absent.
+# They configure VM spot interruption, which this domain does not sell, and
+# `AlkahestSettlementConfig` defaults both to off.
+
+[settlement.arkhai_payments]
+enabled = false
+# Enabling payments also requires service_url, Ed25519 service_identity,
+# fee_bps, root [[Dispute]] preferences (or registry recommendations), the
+# mechanism in `priority`, and an explicit
+# payment publication clause containing payee_account and asset. The key is
+# `api_key` in the secret overlay, which already states the payments double's
+# development token; with payments off it is unused. Never store a key here.
 
 [chains.anvil]
 rpc_url  = "ws://anvil:8545"
 chain_id = 31337
-# The same Alkahest address book the VM storefront uses (one anvil
-# deployment), bind-mounted into this container.
-alkahest_address_config_path = "/app/alkahest_anvil_addresses.json"
 
 [registry]
 # Only the api-credits registry: this seller's listings speak the
@@ -42,7 +78,7 @@ discovery_timeout = 5.0
 [registry.authorities."http://api-credits-registry:8080"]
 authority = "api-credits-registry"
 identities = [
-  { scheme = "ed25519", identifier = "skkdlQKuKGMKK6yy4MdFEP_N0yjDNP8-E5PnWy0x59w" },
+  { scheme = "ed25519", identifier = "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho" },
 ]
 
 [credits]
@@ -50,8 +86,6 @@ identities = [
 # selected explicitly below and the separate issuance/keys mechanism API.
 service_url         = "http://credits-service:8082"
 admin_key_file      = "/run/secrets/arkhai/api-credits-admin-key"
-preflight_timeout   = 60
-fail_on_unreachable = true
 
 [capacity]
 # Poll fast — the suite waits on delta-driven listing reconciliation.
@@ -66,8 +100,34 @@ hold_ttl_seconds = 900
 url = "http://credits-service:8082"
 
 [capacity.sites.default.expected_authorities]
+# The credits service, which is this storefront's `default` capacity site --
+# `[capacity.sites.default].url` above points at it. The previous value here
+# had no committed private half and could not be recovered; it was recorded as
+# undecidable on the premise that this site was the provisioning service, which
+# signs eip191. That premise was checkable and wrong.
+#
+# Public half of dev-env/identities/api-credits-service.ed25519. It must match
+# what that service resolves as its own principal, or this storefront rejects
+# every response it gets from its own site.
 identities = [
-  { scheme = "ed25519", identifier = "My6-jSfLcyOzpAHBwTtd1kvMwOEOzaHCtdEaA3eaheU" },
+  { scheme = "ed25519", identifier = "MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c" },
+]
+
+[credits.expected_authorities]
+# The credits service's own principal, for verifying the signed responses
+# to this storefront's issuance and key-administration calls. Same service
+# and same value as [capacity.sites.default.expected_authorities] above,
+# deliberately pinned separately: that key belongs to the
+# capacity-publication subsystem and is a merged list, so appending a
+# capacity authority there must not widen what the credits boundary
+# accepts. A unit test asserts the two agree while both exist.
+#
+# Public half of dev-env/identities/api-credits-service.ed25519. Setting
+# this is half of the signed-authentication flip; the other half is
+# APICREDITS_SITE_SIGNING_KEY_FILE on the service in
+# domains/apicredits/compose.yml.
+identities = [
+  { scheme = "ed25519", identifier = "MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c" },
 ]
 
 [negotiation]
@@ -82,10 +142,11 @@ policies = []
 default_min_price = "1"
 
 [seed]
-# Demo self-seed (e2e): on startup, register this quota resource in the
-# credits-service ledger and publish a listing from it, so a fresh
-# `compose up` has something to discover. The listing's base_url points
-# at the gated sample app the buyer will consume.
+# Demo self-seed (e2e): the storefront's listing-seed loop registers this
+# quota resource in the credits-service ledger and publishes a listing from
+# it once the credits service and the chain answer, so a fresh `compose up`
+# has something to discover. The listing's base_url points at the gated
+# sample app the buyer will consume.
 resource_id     = "weather-quota"
 total_units     = 100
 service_name    = "weather-api"

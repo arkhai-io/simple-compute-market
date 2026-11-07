@@ -5,8 +5,8 @@ via pufferlib 3.0's pufferl API.
 
 Checkpoints land in experiments/ by default. After training, the script
 copies the final checkpoint to:
-  negotiation/rl/models/arkhai_negotiator_seller.pt
-  negotiation/rl/models/arkhai_negotiator_buyer.pt
+  negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_seller.pt
+  negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_buyer.pt
 
 Usage (from domains/vms/):
     # Short smoke-test (CPU / MPS):
@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint-dir",
         type=str,
-        default="negotiation/rl/models/",
+        default="negotiation/src/arkhai_vms_negotiation/rl/models/",
         help="Where to copy final checkpoints",
     )
     parser.add_argument(

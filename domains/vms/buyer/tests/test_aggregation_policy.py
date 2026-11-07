@@ -22,23 +22,27 @@ from unittest.mock import patch
 from urllib.request import Request
 from urllib.parse import urlparse
 
-from market_core.schemas import EscrowProposal, EscrowTerms
+from market_alkahest.plans import escrow_terms_to_settlement_obligation
+from market_alkahest.schemas import EscrowTerms
+from market_core.schemas import EscrowProposal, SettlementPlan
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 from core_buyer.registry_config import RegistryAuthority
 from identity_helpers import (
     BUYER_SIGNER,
     seller_principals,
     signed_response_headers,
+    with_accepted_agreement,
+    accepted_alkahest_agreement,
 )
 
 _ESCROW_ADDR_AGG = "0x" + "cd" * 20
 
-from domains.vms.buyer.aggregation import (
+from arkhai_vms_buyer.aggregation import (
     NegotiateFn,
     gather_outcomes,
     register_aggregation_policy,
 )
-from domains.vms.buyer.buy_orchestrator import (
+from arkhai_vms_buyer.buy_orchestrator import (
     AgreedTerms,
     BuyConfig,
     BuyConstraints,
@@ -46,7 +50,7 @@ from domains.vms.buyer.buy_orchestrator import (
     make_legacy_settle_hook,
     run_buy,
 )
-from domains.vms.buyer.buyer_client import NegotiationOutcome
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome
 
 
 _BUYER_ADDR = "0x" + "cc" * 20
@@ -92,7 +96,7 @@ def _build_escrow_proposal():
     return lambda _match: _escrow_proposal()
 
 
-def _build_escrow_terms_stub(proposal, seller_wallet, agreed_amount, duration_seconds):
+def _build_escrow_terms_stub(proposal, listing, agreed_amount, duration_seconds):
     """Stub builder for aggregation tests — escrow terms aren't the point here."""
     return [EscrowTerms(
         maker="buyer",
@@ -105,6 +109,21 @@ def _build_escrow_terms_stub(proposal, seller_wallet, agreed_amount, duration_se
         },
         expiration_unix=proposal.expiration_unix,
     )]
+
+
+def _plan_for(agreed_amount) -> dict:
+    """The seller's plan committing to the escrow ``_build_escrow_terms_stub``
+    derives for ``agreed_amount`` over the provision's hour, so the buyer's
+    plan check passes."""
+    (terms,) = _build_escrow_terms_stub(
+        _escrow_proposal(), {}, agreed_amount, _provision().duration_seconds
+    )
+    obligation = escrow_terms_to_settlement_obligation(terms.model_dump(mode="json"))
+    return {"obligations": [obligation.model_dump(mode="json")]}
+
+
+def _accepted_echo(agreed_amount) -> dict:
+    return {**_ACCEPTED_ECHO_AGG, "settlement_plan": _plan_for(agreed_amount)}
 
 
 def _run_buy_with_legacy_hooks(
@@ -243,6 +262,8 @@ def _route_by_url(routes: dict[str, list]):
                 if not queue:
                     raise AssertionError(f"No more responses for {key!r} ({url})")
                 nxt = queue.pop(0)
+                if isinstance(nxt, dict):
+                    nxt = with_accepted_agreement(req, nxt)
                 body = nxt if isinstance(nxt, str) else json.dumps(nxt)
                 headers = (
                     signed_response_headers(req, nxt)
@@ -277,12 +298,12 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
         ],
         "seller-a": [
             # /negotiate/new — seller-a accepts at 80 (worse for buyer)
-            {"negotiation_id": "neg-a", "action": "accept", "proposal": {"fields": {"amount": 80}}, **_ACCEPTED_ECHO_AGG},
+            {"negotiation_id": "neg-a", "action": "accept", "proposal": {"fields": {"amount": 80}}, **_accepted_echo(80)},
             # Settlement flow only runs for the *winner*; seller-a never gets here
         ],
         "seller-b": [
             # /negotiate/new — seller-b accepts at 60 (better for buyer)
-            {"negotiation_id": "neg-b", "action": "accept", "proposal": {"fields": {"amount": 60}}, **_ACCEPTED_ECHO_AGG},
+            {"negotiation_id": "neg-b", "action": "accept", "proposal": {"fields": {"amount": 60}}, **_accepted_echo(60)},
             # Wallet + settle for the winner
             {"agent_wallet_address": _SELLER_WALLET_B},
             {"escrow_uid": "0xescrow", "status": "provisioning"},
@@ -333,7 +354,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
             ]},
         ],
         "seller-a": [
-            {"negotiation_id": "neg-a", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO_AGG},
+            {"negotiation_id": "neg-a", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_accepted_echo(50)},
             {"agent_wallet_address": _SELLER_WALLET_A},
             {"escrow_uid": "0xescrow", "status": "provisioning"},
             {"status": "ready", "fulfillment_uid": "0xattest"},
@@ -377,10 +398,14 @@ def test_custom_policy_can_short_circuit():
         return (matches[1], NegotiationOutcome(
             status="agreed",
             negotiation_id="synthetic-1",
+            agreement=accepted_alkahest_agreement(
+                "synthetic-1", matches[1]["listing_id"], 42, _provision(), _escrow_proposal(),
+            ),
             agreed_amount=42,
             duration_seconds=3600,
             accepted_provision_terms=_provision(),
             accepted_escrow_proposal=_escrow_proposal(),
+            settlement_plan=SettlementPlan.model_validate(_plan_for(42)),
         ))
 
     routes = {

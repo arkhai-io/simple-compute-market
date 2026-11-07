@@ -12,7 +12,8 @@ both parties have committed, which is the worst point to discover it.
 `kit/site` already has the primitive: `probe()` runs the same matching logic as
 `reserve()` and consumes nothing. `SiteCapacityClient.probe` and the aggregate client
 expose it, and `vm_job_spec_service` already calls it in the fulfillment path. Nothing
-calls it during negotiation.
+calls it during negotiation, which runs as `kit/negotiation-runtime`'s lifecycle
+with the VM domain's hooks injected.
 
 This change is a shared prerequisite. Multidimensional shape negotiation needs it to
 distinguish a shape the seller will not sell from one the site cannot currently serve,
@@ -63,9 +64,12 @@ None.
 
 ## Impact
 
-- Affected code: `domains/vms/storefront/src/market_storefront/utils/sync_negotiation.py`
-  (the negotiation path), `domains/vms/negotiation/policies.py` (outcome vocabulary
-  alongside the existing guard), and the storefront's capacity client usage.
+- Affected code: `kit/negotiation-runtime`'s
+  `NegotiationDomainHooks` if the probe is a distinct hook,
+  `domains/vms/storefront/src/market_storefront/negotiation_runtime.py` (the VM
+  `evaluate_round` composition), `domains/vms/negotiation/policies.py` (outcome
+  vocabulary alongside the existing guard), and the storefront's capacity client
+  usage.
 - Affected tests: negotiation unit suites, and an e2e path proving an unservable shape
   fails during negotiation rather than at settlement.
 - Performance: adds one site round trip per checked round. `kit/site`'s ledger
@@ -90,8 +94,8 @@ None.
 
 ## Dependencies and Related Changes
 
-- Shared prerequisite for `capacity-shape-pricing` and
-  `negotiation-driven-capacity-resize`, and for the parked capacity-economics thread.
+- Shared prerequisite for `negotiation-driven-capacity-resize` and for the parked
+  capacity-economics thread.
   It does not belong exclusively to any roadmap goal.
 - Complements `capacity-shape-envelope`: admissibility first, from declared policy and
   without a round trip; then this check, authoritative and remote.

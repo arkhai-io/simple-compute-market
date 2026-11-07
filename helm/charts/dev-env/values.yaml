@@ -30,3 +30,11 @@ resources: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+# Mailpit: an SMTP server with a query API, for test releases that verify
+# seller-side introduction delivery by reading back what was sent. Off by
+# default; never part of a production release.
+mailpit:
+  enabled: false
+  image: docker.io/axllent/mailpit:v1.27
+  smtpPort: 1025
+  apiPort: 8025

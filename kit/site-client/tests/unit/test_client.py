@@ -1,4 +1,8 @@
-"""Authenticated v2 contracts for both site-capacity clients."""
+"""Authenticated v2 contracts for both site-capacity clients.
+
+Every signer seed here (a repeated byte) is a deterministic development key that
+must never be used on a public network.
+"""
 
 from __future__ import annotations
 import time
@@ -6,6 +10,7 @@ import time
 import httpx
 import pytest
 from market_identity import (
+    EMPTY_BODY,
     Ed25519Signer,
     Eip191Signer,
     Signer,
@@ -20,6 +25,7 @@ from market_site_client import (
     SiteCapacityAuthenticationError,
     SiteCapacityClient,
     SiteCapacityClientError,
+    SiteCapacityUnauthenticatedResponseError,
 )
 
 
@@ -41,7 +47,7 @@ def site(signer_pair: tuple[Signer, Signer]) -> FakeSite:
     fake.add_resource(
         "compute-kvm1-001",
         8,
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        attributes={"host_id": "kvm1", "gpu_model": "H200"},
     )
     return fake
 
@@ -96,27 +102,31 @@ async def test_every_public_async_method_uses_the_exact_route_contract(
     assert (await capacity_client.capacity_bucket_projection_version())["revision"] == 1
     assert (await capacity_client.capacity_bucket_projection())["capacity_buckets"] == []
     assert await capacity_client.probe(
-        claim={"executor_kind": "vm", "gpu_model": "A100"}
+        claim={"offering_mode": "vm", "gpu_model": "A100"}
     ) is None
     assert (
         await capacity_client.probe(
-            claim={"executor_kind": "vm", "gpu_model": "H200"}
+            claim={"offering_mode": "vm", "gpu_model": "H200"}
         )
-    )["vm_host"] == "kvm1"
+    )["host_id"] == "kvm1"
 
     reserved = await capacity_client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 3},
+        claim={"offering_mode": "vm", "gpu_count": 3},
         deal_ref={"escrow_uid": "0xesc"},
         request_id="reserve",
     )
     assert reserved is not None
     reservation_id = reserved["capacity_reservation_id"]
     assert "resource_id" not in reserved
-    await capacity_client.commit(
+    committed = await capacity_client.commit(
         capacity_reservation_id=reservation_id,
+        lease_end_utc="2026-07-01 00:00",
         idempotency_ref="0xesc",
         request_id="commit",
     )
+    # The commit answers with the reservation as the site recorded it.
+    assert committed["capacity_reservation_id"] == reservation_id
+    assert committed["state"] == "leased"
     assert (await capacity_client.get_reservation(reservation_id))["state"] == "leased"
     assert [
         row["capacity_reservation_id"]
@@ -129,6 +139,11 @@ async def test_every_public_async_method_uses_the_exact_route_contract(
     )
     assert truncated is not None
     assert truncated["lease_end_utc"] == "2026-06-01 00:00"
+    activated = await capacity_client.activate_lease(
+        capacity_reservation_id=reservation_id, request_id="activate"
+    )
+    assert activated["capacity_reservation_id"] == reservation_id
+    assert activated["activated_at_utc"] is not None
     released = await capacity_client.release(
         deal_ref={"escrow_uid": "0xesc"},
         failure_reason="provisioning_failed",
@@ -154,6 +169,7 @@ async def test_every_public_async_method_uses_the_exact_route_contract(
         "capacity_reservation_get",
         "capacity_reservations_list",
         "capacity_truncate_lease",
+        "capacity_activate_lease",
         "capacity_release",
         "capacity_events",
     ]
@@ -163,7 +179,18 @@ async def test_every_public_async_method_uses_the_exact_route_contract(
     )
     assert next(
         seen for seen in site.seen_requests if seen["operation"] == "capacity_commit"
-    )["body"] == {"idempotency_ref": "0xesc"}
+    )["body"] == {"lease_end_utc": "2026-07-01 00:00", "idempotency_ref": "0xesc"}
+    activation = next(
+        seen
+        for seen in site.seen_requests
+        if seen["operation"] == "capacity_activate_lease"
+    )
+    assert activation["path"] == (
+        f"/api/v1/capacity/reservations/{reservation_id}/activate-lease"
+    )
+    assert activation["resource"] == reservation_id
+    # The fake records a deep copy, so the empty-body sentinel is compared by type.
+    assert type(activation["body"]) is type(EMPTY_BODY)
     assert next(
         seen
         for seen in site.seen_requests
@@ -177,11 +204,13 @@ async def test_resource_registration_body_uses_json_defaults_and_omits_none(
     admin_client: SiteCapacityAdminClient, site: FakeSite
 ) -> None:
     await admin_client.register_resource(
-        "r1", total_units=1, request_id="registration-defaults"
+        "r1", total_units=1, request_id="registration-defaults",
+        pool_id="default",
     )
     assert site.seen_requests[-1]["resource"] == "r1"
     assert site.seen_requests[-1]["body"] == {
         "total_units": 1,
+        "pool_id": "default",
         "resource_type": "compute.gpu",
         "attributes": {},
         "enabled": True,
@@ -197,14 +226,14 @@ async def test_later_exact_retry_refreshes_signature_without_redispatch(
     clock = [int(time.time())]
     monkeypatch.setattr("market_site_client.client.time.time", lambda: clock[0])
     first = await capacity_client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"escrow_uid": "exact"},
         request_id="stable-request",
     )
     dispatches = site.dispatch_count
     clock[0] += 1
     second = await capacity_client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"escrow_uid": "exact"},
         request_id="stable-request",
     )
@@ -221,14 +250,14 @@ async def test_changed_local_request_id_reuse_fails_before_transport(
     capacity_client: SiteCapacityClient, site: FakeSite
 ) -> None:
     await capacity_client.probe(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         request_id="fixed",
     )
     sent = len(site.seen_requests)
 
     with pytest.raises(ValueError, match="changed request content"):
         await capacity_client.probe(
-            claim={"executor_kind": "vm", "gpu_count": 2},
+            claim={"offering_mode": "vm", "gpu_count": 2},
             request_id="fixed",
         )
 
@@ -253,13 +282,13 @@ async def test_changed_reuse_from_an_independent_client_gets_verified_conflict(
         transport=site.transport(),
     )
     await first.probe(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         request_id="shared",
     )
 
     with pytest.raises(SiteCapacityClientError) as excinfo:
         await second.probe(
-            claim={"executor_kind": "vm", "gpu_count": 2},
+            claim={"offering_mode": "vm", "gpu_count": 2},
             request_id="shared",
         )
 
@@ -274,7 +303,7 @@ async def test_request_body_mutation_is_rejected_but_signed_error_is_accepted(
     site.mutate_next_request_body = True
     with pytest.raises(SiteCapacityClientError) as excinfo:
         await capacity_client.reserve(
-            claim={"executor_kind": "vm", "gpu_count": 1},
+            claim={"offering_mode": "vm", "gpu_count": 1},
             request_id="mutated-request",
         )
 
@@ -372,18 +401,140 @@ async def test_authority_rotation_overlap_then_retired_identity_removal(
     await retired.snapshot(request_id="retired-new")
 
 
+@pytest.mark.parametrize("client_type", (SiteCapacityClient, SiteCapacityAdminClient))
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ("missing", "unknown"))
-async def test_missing_or_unknown_response_protocol_is_rejected(
-    capacity_client: SiteCapacityClient, site: FakeSite, failure: str
+async def test_a_trust_provider_is_read_per_response_so_a_rotation_reaches_a_live_client(
+    site: FakeSite,
+    signer_pair: tuple[Signer, Signer],
+    client_type: type[SiteCapacityClient] | type[SiteCapacityAdminClient],
 ) -> None:
-    if failure == "missing":
-        site.omit_response_authentication = True
-    else:
-        site.response_protocol = "arkhai.market-response.v1"
+    """One client follows a rotation from overlap to retirement, never rebuilt."""
+    caller, old_authority = signer_pair
+    new_authority = Ed25519Signer(b"\x33" * 32)
+    trusted = [TrustedIdentitySet(identities=(old_authority.identity,))]
+    reads: list[TrustedIdentitySet] = []
 
-    with pytest.raises(SiteCapacityAuthenticationError, match="missing or malformed"):
-        await capacity_client.snapshot(request_id=f"protocol-{failure}")
+    def provider() -> TrustedIdentitySet:
+        reads.append(trusted[0])
+        return trusted[0]
+
+    client = client_type(
+        "http://site-authority:8081",
+        caller,
+        provider,
+        transport=site.transport(),
+    )
+
+    async def read(request_id: str) -> None:
+        if isinstance(client, SiteCapacityAdminClient):
+            await client.list_resources(request_id=request_id)
+        else:
+            await client.snapshot(request_id=request_id)
+
+    await read("before-rotation")
+    trusted[0] = TrustedIdentitySet(
+        identities=(new_authority.identity, old_authority.identity)
+    )
+    await read("overlap-old")
+    site.authority = new_authority
+    await read("overlap-new")
+
+    trusted[0] = TrustedIdentitySet(identities=(new_authority.identity,))
+    await read("retired-new")
+    site.authority = old_authority
+    with pytest.raises(SiteCapacityAuthenticationError, match="wrong_principal"):
+        await read("retired-old")
+
+    assert len(reads) == 5
+
+
+@pytest.mark.asyncio
+async def test_a_failing_trust_provider_fails_the_response_closed(
+    site: FakeSite, signer_pair: tuple[Signer, Signer]
+) -> None:
+    caller, _ = signer_pair
+
+    def unavailable() -> TrustedIdentitySet:
+        raise RuntimeError("durable identity state is unavailable")
+
+    def not_a_set() -> TrustedIdentitySet:
+        return None  # type: ignore[return-value]
+
+    for name, provider, expected in (
+        ("unavailable", unavailable, "could not be resolved"),
+        ("not-a-set", not_a_set, "no trusted identity set"),
+    ):
+        client = SiteCapacityClient(
+            "http://site-authority:8081",
+            caller,
+            provider,
+            transport=site.transport(),
+        )
+        with pytest.raises(SiteCapacityAuthenticationError, match=expected) as excinfo:
+            await client.snapshot(request_id=f"provider-{name}")
+        assert excinfo.value.status_code == 200
+
+
+def test_expected_authorities_must_be_a_trusted_set_or_a_provider(
+    signer_pair: tuple[Signer, Signer],
+) -> None:
+    caller, authority = signer_pair
+    with pytest.raises(TypeError, match="callable returning one"):
+        SiteCapacityClient(
+            "http://site-authority:8081",
+            caller,
+            (authority.identity,),  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_response_protocol_is_rejected_as_malformed(
+    capacity_client: SiteCapacityClient, site: FakeSite
+) -> None:
+    site.response_protocol = "arkhai.market-response.v1"
+
+    with pytest.raises(SiteCapacityAuthenticationError, match="missing or malformed") as excinfo:
+        await capacity_client.snapshot(request_id="protocol-unknown")
+    assert not isinstance(excinfo.value, SiteCapacityUnauthenticatedResponseError)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", (200, 405))
+async def test_an_answer_with_no_response_authentication_is_reported_unauthenticated(
+    signer_pair: tuple[Signer, Signer], status_code: int
+) -> None:
+    """Refused, and reported by status alone.
+
+    The unsigned answer's body and headers carry text that must not reach the
+    report: whatever sent it, the client cannot tell what it says is true.
+    """
+    caller, authority = signer_pair
+    sent: list[httpx.Request] = []
+
+    def unsigned(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(
+            status_code,
+            json={"detail": "body-canary"},
+            headers={"Allow": "header-canary"},
+        )
+
+    client = SiteCapacityClient(
+        "http://site-authority:8081",
+        caller,
+        TrustedIdentitySet(identities=(authority.identity,)),
+        transport=httpx.MockTransport(unsigned),
+    )
+    with pytest.raises(SiteCapacityUnauthenticatedResponseError) as excinfo:
+        await client.snapshot(request_id=f"unsigned-{status_code}")
+
+    report = str(excinfo.value)
+    assert excinfo.value.status_code == status_code
+    assert f"HTTP {status_code}" in report
+    assert "without response authentication" in report
+    request_signature = sent[0].headers["X-Market-Signature"]
+    for leaked in ("body-canary", "header-canary", request_signature):
+        assert leaked not in report
 
 
 @pytest.mark.asyncio
@@ -425,11 +576,28 @@ async def test_admin_transport_failure_keeps_the_typed_error_contract(
     )
     with pytest.raises(SiteCapacityAdminClientError) as excinfo:
         await client.register_resource(
-            "r1", total_units=1, request_id="transport-failure"
+            "r1", total_units=1, request_id="transport-failure",
+            pool_id="default",
         )
 
     assert excinfo.value.status_code is None
     assert "r1" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_or_refused_activation_surfaces_its_status(
+    capacity_client: SiteCapacityClient,
+) -> None:
+    with pytest.raises(SiteCapacityClientError) as unknown:
+        await capacity_client.activate_lease(capacity_reservation_id="missing")
+    assert unknown.value.status_code == 404
+
+    held = (await capacity_client.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={},
+    ))["capacity_reservation_id"]
+    with pytest.raises(SiteCapacityClientError) as refused:
+        await capacity_client.activate_lease(capacity_reservation_id=held)
+    assert refused.value.status_code == 409
 
 
 @pytest.mark.asyncio
@@ -438,3 +606,35 @@ async def test_commit_requires_a_reservation_id(
 ) -> None:
     with pytest.raises(ValueError, match="capacity_reservation_id"):
         await capacity_client.commit(capacity_reservation_id=None)
+
+
+@pytest.mark.asyncio
+async def test_caller_role_is_signed_and_only_seller_or_admin_is_accepted(
+    signer_pair: tuple[Signer, Signer],
+) -> None:
+    """An operator signs as ``admin``; the default stays the seller's role."""
+    caller, authority = signer_pair
+    seen: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers["X-Market-Role"])
+        return httpx.Response(503)
+
+    for role in ("seller", "admin"):
+        client = SiteCapacityAdminClient(
+            "http://site-authority:8081",
+            caller,
+            TrustedIdentitySet(identities=(authority.identity,)),
+            transport=httpx.MockTransport(handler),
+            caller_role=role,
+        )
+        with pytest.raises(SiteCapacityAdminClientError):
+            await client.list_resources()
+    assert seen == ["seller", "admin"]
+    with pytest.raises(ValueError, match="caller_role"):
+        SiteCapacityClient(
+            "http://site-authority:8081",
+            caller,
+            TrustedIdentitySet(identities=(authority.identity,)),
+            caller_role="service",
+        )

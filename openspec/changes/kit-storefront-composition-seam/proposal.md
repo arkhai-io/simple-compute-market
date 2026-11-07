@@ -37,7 +37,7 @@ least arguable — before the 914-line one.
   `storefront-domain-parameterization` establishes.
 - Move `negotiation_watchdog` and `alkahest_service` into kit and compose all three
   domains onto them, removing both domain-local copies rather than leaving one behind.
-- Give bare metal these two concerns by composition, which it does not have today.
+- Give bare metal these two concerns by composition; its storefront composes the shared watchdog and chain factory rather than carrying either.
 - Establish the pattern each later extraction follows: kit owns the mechanism, the
   domain supplies codecs and configuration, and no domain-local copy of an extracted
   concern survives the change that extracts it.

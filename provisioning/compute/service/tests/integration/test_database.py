@@ -1,0 +1,817 @@
+import pytest
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from compute_provisioning_service.db.database import run_migrations
+from compute_provisioning_service.db.migrations import (
+    MIGRATIONS,
+    SchemaDriftError,
+    _migrate_drop_job_contract_version,
+    check_schema_version,
+)
+from compute_provisioning_service.db.models import (
+    JobRecord,
+    DEFAULT_POOL_ID,
+    Host,
+    ResourcePool,
+)
+from vm_provisioning_adapter.db import AnsiblePoolConfig
+from market_site.ledger import CapacityLedgerService
+
+
+def _sqlite_memory_engine():
+    return create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+
+def _create_pre_pool_hosts(connection, names):
+    """The host table as a database from before resource pools held it."""
+    connection.execute(text(
+        """
+        CREATE TABLE hosts (
+            name VARCHAR NOT NULL,
+            kvm_host VARCHAR NOT NULL,
+            ssh_user VARCHAR NOT NULL,
+            ssh_key_type VARCHAR NOT NULL,
+            ssh_key_value VARCHAR NOT NULL,
+            gpu_count INTEGER NOT NULL,
+            enabled BOOLEAN NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            PRIMARY KEY (name)
+        )
+        """
+    ))
+    for name in names:
+        connection.execute(text(
+            """
+            INSERT INTO hosts (
+                name, kvm_host, ssh_user, ssh_key_type, ssh_key_value,
+                gpu_count, enabled
+            ) VALUES (
+                :name, '10.0.0.1', 'root', 'path', '/keys/id_ed25519',
+                0, 1
+            )
+            """
+        ), {"name": name})
+
+
+def _create_pre_migration_tables(engine):
+    with engine.begin() as connection:
+        connection.execute(text(
+            """
+            CREATE TABLE ansible_jobs (
+                id VARCHAR NOT NULL,
+                status VARCHAR NOT NULL,
+                params JSON NOT NULL,
+                result JSON,
+                logs TEXT,
+                error TEXT,
+                process_id VARCHAR,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                max_retries INTEGER NOT NULL DEFAULT 3,
+                next_retry_at DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                PRIMARY KEY (id)
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            INSERT INTO ansible_jobs (id, status, params, result)
+            VALUES (
+                'job-1', 'succeeded', '{"vm_action": "create", "vm_target": "vm-active"}',
+                '{"host_ip": "203.0.113.9", "ssh_port": "2222", "tenant_user": "t1",
+                  "timestamp": "2030-01-01T00:00:01Z"}'
+            )
+            """
+        ))
+        _create_pre_pool_hosts(connection, ("kvm1",))
+        # Legacy shape of the site-authority ledger tables: no
+        # capacity/dimensions/dimensions columns yet. A populated row
+        # here exercises the actual additive-column migration path,
+        # rather than only the fresh-create-all path a brand new table
+        # would take.
+        connection.execute(text(
+            """
+            CREATE TABLE site_resources (
+                resource_id VARCHAR NOT NULL,
+                resource_type VARCHAR NOT NULL,
+                resource_subtype VARCHAR,
+                total_units INTEGER NOT NULL,
+                attributes JSON,
+                enabled BOOLEAN NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                PRIMARY KEY (resource_id)
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            INSERT INTO site_resources (
+                resource_id, resource_type, resource_subtype, total_units,
+                attributes, enabled
+            ) VALUES (
+                'pre-existing-gpu', 'compute.gpu', 'h200', 8,
+                '{"vm_host": "kvm1", "pool_id": "legacy-pool"}', 1
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            CREATE TABLE site_allocations (
+                allocation_id VARCHAR NOT NULL,
+                resource_id VARCHAR NOT NULL,
+                units INTEGER NOT NULL,
+                state VARCHAR NOT NULL,
+                deal_ref JSON,
+                escrow_uid VARCHAR,
+                hold_expires_at VARCHAR,
+                offering_mode VARCHAR,
+                executor_target VARCHAR,
+                release_job_id VARCHAR,
+                executor_ref JSON,
+                vm_host VARCHAR,
+                vm_target VARCHAR,
+                lease_start_utc VARCHAR,
+                lease_end_utc VARCHAR,
+                create_job_id VARCHAR,
+                vm_remove_job_id VARCHAR,
+                failure_reason VARCHAR,
+                failure_message TEXT,
+                released_at VARCHAR,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                PRIMARY KEY (allocation_id)
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            INSERT INTO site_allocations (
+                allocation_id, resource_id, units, state, deal_ref
+            ) VALUES (
+                'pre-existing-alloc', 'pre-existing-gpu', 3, 'reserved', '{}'
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            CREATE TABLE vm_leases (
+                id VARCHAR PRIMARY KEY,
+                resource_id VARCHAR NOT NULL,
+                escrow_uid VARCHAR NOT NULL UNIQUE,
+                vm_host VARCHAR NOT NULL,
+                vm_target VARCHAR NOT NULL,
+                lease_start_utc TIMESTAMP,
+                lease_end_utc TIMESTAMP NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'pending',
+                create_job_id VARCHAR,
+                allocation_id VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            INSERT INTO vm_leases (
+                id, resource_id, escrow_uid, vm_host, vm_target, lease_end_utc,
+                status, create_job_id, allocation_id
+            ) VALUES (
+                'lease-active', 'pre-existing-gpu', 'escrow-active', 'kvm1',
+                'vm-active', '2099-01-01T00:00:00Z', 'leased', 'job-1',
+                'pre-existing-alloc'
+            )
+            """
+        ))
+    # Migration places existing hosts in `default` and refuses a database
+    # holding hosts without that pool, so this one holds it, with the VM
+    # configuration whose inventory group the lease conversion reads; the
+    # current model's table has no such column, so it is added here.
+    ResourcePool.__table__.create(bind=engine)
+    AnsiblePoolConfig.__table__.create(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE ansible_pool_configs ADD COLUMN inventory_group VARCHAR"
+        ))
+        connection.execute(text(
+            "INSERT INTO resource_pools (id, label, provider, enabled, policy_tags) "
+            "VALUES ('default', 'Default Pool', 'ansible', 1, '{}')"
+        ))
+        connection.execute(text(
+            "INSERT INTO ansible_pool_configs (pool_id, playbook_path, inventory_group, "
+            "extra_vars) VALUES ('default', '/configured/playbook.yaml', 'legacy_hosts', '{}')"
+        ))
+        connection.execute(text(
+            """
+            CREATE TABLE capacity_events (
+                version INTEGER NOT NULL,
+                kind VARCHAR NOT NULL,
+                resource_id VARCHAR,
+                occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                PRIMARY KEY (version)
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            INSERT INTO capacity_events (version, kind, resource_id)
+            VALUES (1, 'reserved', 'pre-existing-gpu')
+            """
+        ))
+
+
+def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
+    engine = _sqlite_memory_engine()
+    _create_pre_migration_tables(engine)
+    assert "vm_remove_job_id" not in {
+        column["name"] for column in inspect(engine).get_columns("vm_leases")
+    }
+
+    run_migrations(engine)
+
+    inspector = inspect(engine)
+    ansible_columns = {
+        column["name"] for column in inspector.get_columns("ansible_jobs")
+    }
+    host_columns = {column["name"] for column in inspector.get_columns("hosts")}
+    reservation_columns = {
+        column["name"] for column in inspector.get_columns("capacity_reservations")
+    }
+
+    assert "escrow_uid" not in ansible_columns
+    assert "deal_ref" not in ansible_columns
+    assert "contract_version" not in ansible_columns
+    assert {
+        "capacity_reservation_id",
+        "offering_mode",
+        "action_kind",
+        "idempotency_key",
+    }.issubset(ansible_columns)
+    # A host's connection is an envelope; the SSH columns are gone.
+    assert {"connection_kind", "connection_public", "connection_protected"} <= host_columns
+    assert "public_host" not in host_columns
+    # The final schema has no dead lease table or legacy reservation name.
+    assert "vm_leases" not in inspector.get_table_names()
+    assert "site_allocations" not in inspector.get_table_names()
+    assert {
+        "offering_mode",
+        "executor_target",
+        "release_job_id",
+        "executor_ref",
+    }.issubset(reservation_columns)
+
+    # capacity/dimensions columns land on genuinely
+    # pre-existing site-authority tables via the additive-column
+    # migration path, not only via create_all() on a brand new table
+    event_columns = {
+        column["name"] for column in inspector.get_columns("capacity_events")
+    }
+    assert "site_resources" not in inspector.get_table_names()
+    assert "capacity_buckets" in inspector.get_table_names()
+    assert "capacity_reservation_debits" in inspector.get_table_names()
+    bucket_indexes = {index["name"] for index in inspector.get_indexes("capacity_buckets")}
+    debit_indexes = {index["name"] for index in inspector.get_indexes("capacity_reservation_debits")}
+    assert "ix_capacity_buckets_backing_resource_id" in bucket_indexes
+    assert "ix_capacity_buckets_pool_id" in bucket_indexes
+    assert "ix_capacity_reservation_debits_capacity_bucket_id" in debit_indexes
+    debit_foreign_keys = inspector.get_foreign_keys("capacity_reservation_debits")
+    assert {fk["referred_table"] for fk in debit_foreign_keys} == {
+        "capacity_reservations", "capacity_buckets"
+    }
+    assert "dimensions" in reservation_columns
+    assert "dimensions" in event_columns
+
+    # The pre-existing row (inserted before the migration ran, with
+    # capacity/dimensions left NULL) reads correctly through the real
+    # ledger's fallback-to-legacy-fields logic, not just via a raw column
+    # check.
+    ledger = CapacityLedgerService(
+        sessionmaker(bind=engine),
+        unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
+    )
+    snapshot = {row["resource_id"]: row for row in ledger.snapshot()}
+    pre_existing = snapshot["pre-existing-gpu"]
+    assert pre_existing["capacity"] == {"gpu_count": 8}
+    assert pre_existing["available"] == {"gpu_count": 5}  # 8 total - 3 held
+    # pool_id is backfilled from the pre-existing row's attributes JSON,
+    # where the storefront's old sync push put it -- not left NULL just
+    # because the row predates the real column.
+    assert pre_existing["pool_id"] == "legacy-pool"
+    reservation = ledger.get_reservation("pre-existing-alloc")
+    assert reservation["dimensions"] == {"gpu_count": 3}
+
+    assert {"settlement_records", "provisioned_resources", "scheduling_cursors"}.issubset(
+        inspector.get_table_names()
+    )
+    settlement_indexes = {
+        index["name"] for index in inspector.get_indexes("settlement_records")
+    }
+    provisioned_indexes = {
+        index["name"] for index in inspector.get_indexes("provisioned_resources")
+    }
+    assert "ix_settlement_records_fulfillment_id" in settlement_indexes
+    assert "ix_settlement_records_settlement_resource_id" in settlement_indexes
+    assert "ix_provisioned_resources_capacity_reservation_id" in provisioned_indexes
+    assert "ix_provisioned_resources_fulfillment_id" in provisioned_indexes
+    provisioned_foreign_keys = inspector.get_foreign_keys("provisioned_resources")
+    assert {fk["referred_table"] for fk in provisioned_foreign_keys} == {
+        "settlement_records"
+    }
+    cursor_pk = inspector.get_pk_constraint("scheduling_cursors")
+    assert cursor_pk["constrained_columns"] == ["resource_kind"]
+
+    with engine.begin() as connection:
+        settlement = connection.execute(text(
+            "SELECT capacity_reservation_id, state, settlement_resource_id, provider "
+            "FROM settlement_records WHERE capacity_reservation_id='pre-existing-alloc'"
+        )).mappings().one()
+        resource = connection.execute(text(
+            "SELECT provisioned_resource_id FROM provisioned_resources "
+            "WHERE capacity_reservation_id='pre-existing-alloc'"
+        )).mappings().one()
+    assert settlement == {
+        "capacity_reservation_id": "pre-existing-alloc",
+        "state": "active",
+        "settlement_resource_id": "kvm1",
+        "provider": "vm.ansible",
+    }
+    assert resource["provisioned_resource_id"]
+
+    # New fulfillment tables are mounted by current metadata and initialization
+    # remains safe to run repeatedly.
+    run_migrations(engine)
+    check_schema_version(engine)
+
+    assert "resource_pools" in inspector.get_table_names()
+    assert "ansible_pool_configs" in inspector.get_table_names()
+    assert "pool_id" in host_columns
+
+    with Session(engine) as session:
+        host = session.query(Host).one()
+        job = session.query(JobRecord).one()
+        assert host.connection().public["public_host"] is None
+        assert job.capacity_reservation_id is None
+        # The pre-existing host (inserted before the migration ran) is
+        # placed in the default pool by the column's DB-level DEFAULT.
+        assert host.pool_id == DEFAULT_POOL_ID
+
+        # The fixture's pool is the only one; migration wrote none.
+        default_pool = session.query(ResourcePool).one()
+        assert default_pool.id == DEFAULT_POOL_ID
+        assert default_pool.label == "Default Pool"
+        assert default_pool.provider == "vm.ansible"
+        assert default_pool.enabled is True
+
+        # No ORM relationship crosses the resource_pools/ansible_pool_configs
+        # boundary — ResourcePool and AnsiblePoolConfig now live in separate
+        # declarative registries (market_resource_pools vs. this service's
+        # own Base), so navigation is by explicit pool_id lookup, matching
+        # how PoolConfigHandler implementations already read this table.
+        ansible_config = session.query(AnsiblePoolConfig).filter(
+            AnsiblePoolConfig.pool_id == DEFAULT_POOL_ID
+        ).one()
+        assert ansible_config.playbook_path == "/configured/playbook.yaml"
+        assert ansible_config.extra_vars == {}
+        # The fixture's configuration row survives the rebuild that drops its
+        # inventory group after the lease conversion read it.
+        assert ansible_config.default_vm_ram is None
+        assert ansible_config.default_vm_vcpus is None
+        assert ansible_config.default_vm_disk_size is None
+
+    ansible_pool_config_columns = {
+        column["name"] for column in inspector.get_columns("ansible_pool_configs")
+    }
+    assert {
+        "default_vm_ram", "default_vm_vcpus", "default_vm_disk_size",
+    }.issubset(ansible_pool_config_columns)
+    assert "inventory_group" not in ansible_pool_config_columns
+
+    host_migration_columns = {
+        column["name"] for column in inspector.get_columns("hosts")
+    }
+    # A host describes no hardware: the GPU columns an old table carried are
+    # gone once the chain has run.
+    assert not {"gpu_count", "gpu_model"} & host_migration_columns
+    replay_columns = {
+        column["name"]
+        for column in inspector.get_columns("provisioning_replay_reservations")
+    }
+    assert {
+        "principal_scheme",
+        "principal_identifier",
+        "request_id",
+        "dispatch_lease_expires_at",
+        "dispatch_attempt_count",
+        "request_hash",
+        "response_status",
+        "response_body",
+        "response_body_empty",
+        "response_media_type",
+    }.issubset(replay_columns)
+    assert {
+        "role",
+        "principal_scheme",
+        "principal_identifier",
+        "generation",
+        "valid_until",
+    }.issubset(
+        {
+            column["name"]
+            for column in inspector.get_columns(
+                "provisioning_trusted_principals"
+            )
+        }
+    )
+    assert {
+        "nonce",
+        "role",
+        "current_identifier",
+        "replacement_identifier",
+        "overlap_seconds",
+    }.issubset(
+        {
+            column["name"]
+            for column in inspector.get_columns(
+                "provisioning_identity_rotation_audit"
+            )
+        }
+    )
+    assert {
+        "capacity_reservation_id",
+        "attempt_count",
+        "delivered_at",
+    }.issubset(
+        {
+            column["name"]
+            for column in inspector.get_columns(
+                "capacity_release_callback_outbox"
+            )
+        }
+    )
+
+    with engine.begin() as connection:
+        migration_ids = {
+            row[0] for row in connection.execute(
+                text("SELECT id FROM schema_migrations")
+            )
+        }
+    assert migration_ids == {
+        "20260603_001_ansible_jobs_escrow_uid",
+        "20260603_002_hosts_public_host",
+        "20260603_003_vm_leases_table",
+        "20260603_004_vm_leases_allocation_id",
+        "20260707_001_site_allocations_executor_fields",
+        "20260713_001_ansible_jobs_contract_fields",
+        "20260713_002_resource_pools_and_hosts_pool_id",
+        "20260720_001_multidimensional_capacity",
+        "20260722_001_pools7_capacity_model_cutover",
+        "20260724_001_legacy_vm_leases_to_fulfillment",
+        "20260724_002_drop_vm_leases_table",
+        "20260803_001_ansible_pool_config_vm_size_defaults",
+        "20260804_001_hosts_gpu_model",
+        "20260811_001_provisioning_replay_reservations",
+        "20260815_001_pool_declared_offering_modes",
+        "20260901_001_relay_reachable_hosts",
+        "20260911_001_reservation_offering_mode_name",
+        "20260921_001_host_identity",
+        "20260921_002_capacity_declaration_contract",
+        "20260921_003_capacity_declaration_attributes",
+        "20260921_004_legacy_host_capacity_declarations",
+        "20260922_001_pool_advertisement_and_backing",
+        "20260927_001_drop_reservation_release_mirror",
+        "20261002_001_host_connection_envelope",
+        "20261002_002_job_envelopes",
+        "20261002_003_bare_metal_job_shapes",
+        "20261005_001_drop_job_contract_version",
+        "20261005_002_reservation_release_requested_at",
+        "20261006_001_drop_job_deal_correlation",
+        "20261006_002_vm_job_backed_fulfillment",
+        "20261006_003_vm_fulfillment_request_names_no_guest",
+        "20261006_004_active_fulfillment_targets_on_reservations",
+        "20261019_001_vm_provider_identity",
+        "20261023_001_vm_pool_playbook_optional",
+        "20261023_002_hosts_pool_optional",
+        "20261027_001_vm_fulfillment_request_carries_no_connectivity",
+        "20261028_001_retired_reservation_states",
+        "20261028_002_hosts_drop_gpu_columns",
+        "20261101_001_pool_relays",
+        "20261101_002_relay_grant_keys",
+        "20261101_003_relay_lease_grants",
+        "20261102_001_lease_end_reports",
+        "20261106_001_reservation_activated_at",
+    }
+
+
+def test_run_migrations_is_idempotent():
+    engine = _sqlite_memory_engine()
+    _create_pre_migration_tables(engine)
+
+    run_migrations(engine)
+    run_migrations(engine)
+
+    inspector = inspect(engine)
+    ansible_columns = [
+        column["name"] for column in inspector.get_columns("ansible_jobs")
+    ]
+    host_columns = [column["name"] for column in inspector.get_columns("hosts")]
+    reservation_columns = [
+        column["name"] for column in inspector.get_columns("capacity_reservations")
+    ]
+
+    assert ansible_columns.count("escrow_uid") == 0
+    assert ansible_columns.count("contract_version") == 0
+    assert reservation_columns.count("release_requested_at") == 1
+    assert reservation_columns.count("activated_at_utc") == 1
+    assert ansible_columns.count("capacity_reservation_id") == 1
+    assert ansible_columns.count("deal_ref") == 0
+    assert ansible_columns.count("offering_mode") == 1
+    assert ansible_columns.count("action_kind") == 1
+    assert ansible_columns.count("idempotency_key") == 1
+    assert host_columns.count("connection_public") == 1
+    assert host_columns.count("pool_id") == 1
+    assert host_columns.count("gpu_model") == 0
+    ansible_pool_config_columns = [
+        column["name"] for column in inspector.get_columns("ansible_pool_configs")
+    ]
+    assert ansible_pool_config_columns.count("default_vm_ram") == 1
+    assert ansible_pool_config_columns.count("default_vm_vcpus") == 1
+    assert ansible_pool_config_columns.count("default_vm_disk_size") == 1
+    assert "vm_leases" not in inspector.get_table_names()
+    assert "site_allocations" not in inspector.get_table_names()
+    assert reservation_columns.count("offering_mode") == 1
+    assert reservation_columns.count("executor_target") == 1
+    assert reservation_columns.count("release_job_id") == 1
+    assert reservation_columns.count("executor_ref") == 1
+    assert reservation_columns.count("dimensions") == 1
+    event_columns = [
+        column["name"] for column in inspector.get_columns("capacity_events")
+    ]
+    assert "site_resources" not in inspector.get_table_names()
+    assert "capacity_buckets" in inspector.get_table_names()
+    assert "capacity_reservation_debits" in inspector.get_table_names()
+    assert event_columns.count("dimensions") == 1
+
+    with Session(engine) as session:
+        assert session.query(ResourcePool).filter(
+            ResourcePool.id == DEFAULT_POOL_ID
+        ).count() == 1
+
+    with engine.begin() as connection:
+        migration_count = connection.execute(
+            text("SELECT COUNT(*) FROM schema_migrations")
+        ).scalar_one()
+    # Each migration recorded exactly once; the pinned-ID test names them.
+    assert migration_count == len(MIGRATIONS)
+
+
+def _migration_ids(engine) -> set[str]:
+    with engine.connect() as connection:
+        return {row[0] for row in connection.execute(text("SELECT id FROM schema_migrations"))}
+
+
+def _pool_rows(engine) -> tuple[int, int]:
+    with engine.connect() as connection:
+        return tuple(
+            connection.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one()
+            for table in ("resource_pools", "ansible_pool_configs")
+        )
+
+
+def test_a_fresh_database_holds_no_pool_after_migration():
+    engine = _sqlite_memory_engine()
+
+    run_migrations(engine)
+
+    assert _pool_rows(engine) == (0, 0)
+    check_schema_version(engine)
+
+
+def test_a_database_predating_resource_pools_with_no_hosts_migrates():
+    engine = _sqlite_memory_engine()
+    with engine.begin() as connection:
+        _create_pre_pool_hosts(connection, ())
+
+    run_migrations(engine)
+
+    assert _pool_rows(engine) == (0, 0)
+    pool = {c["name"]: c for c in inspect(engine).get_columns("hosts")}["pool_id"]
+    assert pool["nullable"] and pool["default"] is None
+    check_schema_version(engine)
+
+
+def test_a_database_with_hosts_and_no_default_pool_is_refused():
+    """Its hosts predate resource pools; placing them needs a pool and a
+    provider the migration does not know, so it creates none and places none."""
+    engine = _sqlite_memory_engine()
+    with engine.begin() as connection:
+        _create_pre_pool_hosts(connection, ("kvm1", "kvm2"))
+
+    with pytest.raises(SchemaDriftError) as refusal:
+        run_migrations(engine)
+
+    message = str(refusal.value)
+    assert "2 host(s) but no resource pool 'default'" in message
+    assert "20260713_002_resource_pools_and_hosts_pool_id" in message
+    assert "ansible_pool_configs" in message
+    assert _pool_rows(engine) == (0, 0)
+    assert "pool_id" not in {c["name"] for c in inspect(engine).get_columns("hosts")}
+    applied = _migration_ids(engine)
+    assert "20260713_001_ansible_jobs_contract_fields" in applied
+    assert "20260713_002_resource_pools_and_hosts_pool_id" not in applied
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT COUNT(*) FROM hosts")).scalar_one() == 2
+
+
+# ---------------------------------------------------------------------------
+# check_schema_version — the startup drift guard
+# ---------------------------------------------------------------------------
+
+
+class TestCheckSchemaVersion:
+    def test_passes_after_run_migrations(self):
+        engine = _sqlite_memory_engine()
+        run_migrations(engine)
+        check_schema_version(engine)  # must not raise
+
+    def test_raises_on_fresh_engine_with_no_migrations_table(self):
+        engine = _sqlite_memory_engine()
+        with pytest.raises(SchemaDriftError):
+            check_schema_version(engine)
+
+    def test_raises_when_behind_the_latest_migration(self):
+        engine = _sqlite_memory_engine()
+        run_migrations(engine)
+        # Simulate an older DB that's missing whatever migration this code
+        # currently treats as the latest.
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM schema_migrations WHERE id = :migration_id"),
+                {"migration_id": MIGRATIONS[-1].id},
+            )
+        with pytest.raises(SchemaDriftError):
+            check_schema_version(engine)
+
+
+def test_fresh_current_schema_contains_only_capacity_bucket_model():
+    engine = _sqlite_memory_engine()
+    run_migrations(engine)
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    assert "site_resources" not in tables
+    assert "site_allocations" not in tables
+    assert {
+        "capacity_buckets",
+        "capacity_reservations",
+        "capacity_reservation_debits",
+    }.issubset(tables)
+
+
+def test_dropping_the_job_contract_version_keeps_every_job_and_its_identity():
+    """A job's correlation identity outlives the dropped column: its values, the
+    reservation index, and the contract-identity uniqueness all survive."""
+    engine = _sqlite_memory_engine()
+    _create_pre_migration_tables(engine)
+    run_migrations(engine)
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE ansible_jobs ADD COLUMN contract_version VARCHAR"))
+        connection.execute(text(
+            "INSERT INTO ansible_jobs (id, status, params, contract_version, "
+            "capacity_reservation_id, action_kind, idempotency_key) "
+            "VALUES ('job-2', 'queued', '{}', '1.0', 'r-1', 'create', 'r-1:create')"
+        ))
+
+    _migrate_drop_job_contract_version(engine)
+
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("ansible_jobs")}
+    assert "contract_version" not in columns
+    with engine.connect() as connection:
+        row = connection.execute(text(
+            "SELECT capacity_reservation_id, action_kind, idempotency_key "
+            "FROM ansible_jobs WHERE id = 'job-2'"
+        )).one()
+        assert tuple(row) == ("r-1", "create", "r-1:create")
+        assert connection.execute(
+            text("SELECT COUNT(*) FROM ansible_jobs WHERE id = 'job-1'")
+        ).scalar() == 1
+    with pytest.raises(Exception):
+        with engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO ansible_jobs (id, status, params, capacity_reservation_id, "
+                "action_kind, idempotency_key) "
+                "VALUES ('job-3', 'queued', '{}', 'r-1', 'create', 'r-1:create')"
+            ))
+    _migrate_drop_job_contract_version(engine)
+
+
+_ACTIVATION_MIGRATION_ID = "20261106_001_reservation_activated_at"
+
+_RESERVATION_COLUMNS = (
+    "capacity_reservation_id, units, state, offering_mode, hold_expires_at, "
+    "executor_target, lease_start_utc, lease_end_utc, release_requested_at, "
+    "released_at"
+)
+
+_RESERVATIONS_BEFORE_ACTIVATION = (
+    ("r-leased", 1, "leased", "vm", None, "tenant-leased",
+     "2026-11-01T00:00:00+00:00", "2026-12-01T00:00:00+00:00", None, None),
+    ("r-releasing", 2, "releasing", "vm", None, "tenant-releasing",
+     "2026-10-01T00:00:00+00:00", "2026-11-01T00:00:00+00:00",
+     "2026-11-01T00:00:05+00:00", None),
+    ("r-released", 1, "released", "bare_metal", "2026-08-31T00:05:00+00:00",
+     "host-released",
+     "2026-09-01T00:00:00+00:00", "2026-10-01T00:00:00+00:00",
+     "2026-10-01T00:00:05+00:00", "2026-10-01T00:10:00+00:00"),
+)
+
+
+def _database_before_activation():
+    """A migrated database as it stood before the activation column, holding
+    leased, releasing and released reservations."""
+    engine = _sqlite_memory_engine()
+    run_migrations(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE capacity_reservations DROP COLUMN activated_at_utc")
+        )
+        connection.execute(
+            text("DELETE FROM schema_migrations WHERE id = :id"),
+            {"id": _ACTIVATION_MIGRATION_ID},
+        )
+        for row in _RESERVATIONS_BEFORE_ACTIVATION:
+            connection.execute(
+                text(
+                    f"INSERT INTO capacity_reservations ({_RESERVATION_COLUMNS}) "
+                    "VALUES (:id, :units, :state, :mode, :hold, :target, "
+                    ":start, :end, :requested, :released)"
+                ),
+                dict(zip(
+                    ("id", "units", "state", "mode", "hold", "target", "start",
+                     "end", "requested", "released"),
+                    row,
+                )),
+            )
+    return engine
+
+
+def _reservation_rows(engine) -> set[tuple]:
+    with engine.connect() as connection:
+        return {
+            tuple(row)
+            for row in connection.execute(text(
+                f"SELECT {_RESERVATION_COLUMNS}, activated_at_utc "
+                "FROM capacity_reservations"
+            ))
+        }
+
+
+def test_existing_reservations_migrate_with_no_activation_recorded():
+    """No backfill: every reservation, whatever its state, migrates with a
+    null instant, its state, window and release fields unchanged."""
+    engine = _database_before_activation()
+
+    run_migrations(engine)
+
+    assert _reservation_rows(engine) == {
+        row + (None,) for row in _RESERVATIONS_BEFORE_ACTIVATION
+    }
+    assert _ACTIVATION_MIGRATION_ID in _migration_ids(engine)
+    check_schema_version(engine)
+
+    run_migrations(engine)
+
+    assert _reservation_rows(engine) == {
+        row + (None,) for row in _RESERVATIONS_BEFORE_ACTIVATION
+    }
+
+
+def test_a_database_already_carrying_the_activation_column_migrates_unchanged():
+    engine = _database_before_activation()
+    with engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE capacity_reservations ADD COLUMN activated_at_utc VARCHAR"
+        ))
+        connection.execute(text(
+            "UPDATE capacity_reservations "
+            "SET activated_at_utc = '2026-11-01T00:07:00+00:00' "
+            "WHERE capacity_reservation_id = 'r-leased'"
+        ))
+    before = _reservation_rows(engine)
+
+    run_migrations(engine)
+
+    assert _reservation_rows(engine) == before
+    columns = [
+        column["name"]
+        for column in inspect(engine).get_columns("capacity_reservations")
+    ]
+    assert columns.count("activated_at_utc") == 1

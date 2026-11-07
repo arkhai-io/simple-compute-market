@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 
 [[package]]
@@ -156,22 +156,24 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.2.0"
+version = "0.5.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-registry"
-version = "0.2.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "alembic" },
+    { name = "arkhai-core" },
+    { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-identity" },
     { name = "fastapi" },
     { name = "jsonpath-ng" },
@@ -199,7 +201,9 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "alembic", specifier = ">=1.12.0" },
-    { name = "arkhai-kit-identity", specifier = "==0.3.0" },
+    { name = "arkhai-core", specifier = "==0.5.0" },
+    { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "jsonpath-ng", specifier = ">=1.6" },
     { name = "jsonschema", specifier = ">=4.20" },
@@ -214,7 +218,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "arkhai-core-registry-client", specifier = ">=0.11.0" },
+    { name = "arkhai-core-registry-client", specifier = ">=0.12.1" },
     { name = "black", specifier = ">=23.11.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "pytest", specifier = ">=7.4.0" },
@@ -224,7 +228,7 @@ dev = [
 
 [[package]]
 name = "arkhai-core-registry-client"
-version = "0.11.0"
+version = "0.12.3"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -232,12 +236,37 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_registry_client-0.11.0-py3-none-any.whl" },
+    { path = "arkhai_core_registry_client-0.12.3-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-deal-lifecycle"
+version = "0.2.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-deal-lifecycle-contracts" },
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_deal_lifecycle-0.2.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-deal-lifecycle-contracts"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_deal_lifecycle_contracts-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "cryptography" },
@@ -247,7 +276,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

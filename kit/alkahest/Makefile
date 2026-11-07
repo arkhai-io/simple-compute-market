@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
+
 DIST_DIR ?= ../../.dist
 
 .PHONY: build reinit test test-unit test-integration
@@ -6,9 +9,7 @@ build: ## Build the wheel into the shared .dist/
 	uv build --wheel --out-dir $(DIST_DIR)
 
 reinit: ## Refresh changed internal settlement dependencies.
-	uv sync --dev --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-core --reinstall-package arkhai-core \
-		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime
+	python3 ../../scripts/uv_project.py reinit
 
 test: test-unit ## Run the default test suite
 

@@ -69,13 +69,15 @@ install_base_packages() {
     unzip
 }
 
+node_supports_typescript() {
+  node -e 'const v=process.versions.node.split(".").map(Number); process.exit((v[0] > 22 || (v[0] === 22 && v[1] >= 6)) && ["strip", "transform"].includes(process.features.typescript) ? 0 : 1)' \
+    >/dev/null 2>&1
+}
+
 install_node() {
-  if command -v node >/dev/null 2>&1; then
-    node -e 'const v=process.versions.node.split(".").map(Number); process.exit(v[0] > 22 || (v[0] === 22 && v[1] >= 6) ? 0 : 1)' \
-      >/dev/null 2>&1 && {
-        log "node >= 22.6 already installed"
-        return
-      }
+  if node_supports_typescript; then
+    log "node >= 22.6 with native TypeScript type stripping already installed"
+    return
   fi
 
   log "installing nodejs 22.x"
@@ -186,13 +188,21 @@ check_tools() {
   require_command curl
   require_command jq
   require_command node
-  node -e 'const v=process.versions.node.split(".").map(Number); process.exit(v[0] > 22 || (v[0] === 22 && v[1] >= 6) ? 0 : 1)' \
-    >/dev/null 2>&1 || {
-      log "node >= 22.6 is required"
-      return 1
-    }
+  node_supports_typescript || {
+    log "node >= 22.6 with native TypeScript type stripping enabled is required; use a Node.js build with TypeScript support"
+    return 1
+  }
   require_command npm
   require_command cargo
+  require_command rustc
+  cargo --version >/dev/null 2>&1 && rustc --version >/dev/null 2>&1 || {
+    log "a working Cargo and rustc toolchain is required"
+    return 1
+  }
+  require_command cc || {
+    log "install native build tools with: sudo apt-get install build-essential"
+    return 1
+  }
   export PATH="$TARGET_HOME/.foundry/bin:$PATH"
   require_command anvil
   require_command python3

@@ -6,11 +6,11 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from compute_provisioning.client import (
+from compute_provisioning_contracts import (
     IDENTITY_IDENTIFIER_HEADER,
     IDENTITY_SCHEME_HEADER,
     REQUEST_ID_HEADER,
@@ -18,8 +18,9 @@ from compute_provisioning.client import (
     SIGNATURE_HEADER,
     SIGNATURE_VERSION_HEADER,
     TIMESTAMP_HEADER,
-    canonical_provisioning_request_body,
-    resolve_provisioning_route_contract,
+    ProvisioningRouteResolutionError,
+    ProvisioningRouteResourceUnbound,
+    ProvisioningRouteTable,
 )
 from fastapi import Request, status
 from fastapi.responses import JSONResponse, Response
@@ -44,10 +45,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from compute_provisioning_service.db.models import ProvisioningReplayReservation
 from compute_provisioning_service.identity import ProvisioningIdentityContext
+from compute_provisioning_service.route_table import canonical_request_body
 
 logger = logging.getLogger(__name__)
 
 EXCLUDED_PATHS = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
+
+#: The detail of the signed 500 answering a route that raised after
+#: authentication; it reveals nothing of the error.
+ROUTE_FAILURE_DETAIL = "Provisioning request failed"
 
 
 class SqlAlchemyProvisioningReplayStore:
@@ -207,9 +213,13 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
         identity_provider: Callable[[], ProvisioningIdentityContext],
         replay_store_provider: Callable[[], SqlAlchemyProvisioningReplayStore],
         principal_authority_provider: Callable[[], Any],
+        route_table: ProvisioningRouteTable,
         max_timestamp_skew: int = 300,
     ) -> None:
         super().__init__(app)
+        # The assembled table of every contributed route; a route outside it
+        # is refused before authentication.
+        self._route_table = route_table
         if max_timestamp_skew < 0:
             raise ValueError("max_timestamp_skew must not be negative")
         self._identity_provider = identity_provider
@@ -224,17 +234,22 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
         identity = self._identity_provider()
         replay_store = self._replay_store_provider()
         body, body_error = await _request_body(request)
-        if body_error is not None:
-            return _rejection(body_error, status.HTTP_400_BAD_REQUEST)
         try:
-            route, resource = resolve_provisioning_route_contract(
+            if body_error is not None:
+                # An unroutable request is answered by what failed to match
+                # whatever its body; only a routed one is refused for the body.
+                _route_by_path(request, self._route_table)
+                return _rejection(body_error, status.HTTP_400_BAD_REQUEST)
+            route, resource = self._route_table.resolve(
                 request.method,
                 request.url.path,
                 body,
             )
             operation = route.operation
-        except ValueError as exc:
-            return _rejection(str(exc), status.HTTP_404_NOT_FOUND)
+        except ProvisioningRouteResolutionError as exc:
+            # Unsigned: the service knows no operation, or no resource, to sign
+            # over, and a client verifies a proof against its own.
+            return _rejection(exc.detail, exc.status_code, headers=exc.headers)
 
         try:
             authenticated = _authenticated_request(
@@ -286,6 +301,23 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
             existing_replay=existing,
         )
         if not verification.verified or verification.reservation is None:
+            # Same reasoning as `market_site.auth`: the `detail` withholds
+            # what would have passed, the operator's log should not. Two
+            # site authorities refusing the same caller in different
+            # language is a cost paid by whoever holds both logs, so the
+            # wording matches deliberately.
+            logger.warning(
+                "Marketplace authentication refused: code=%s role=%r "
+                "principal=%s:%s operation=%r resource=%r %s %s",
+                verification.code.value,
+                authenticated.role,
+                authenticated.principal.scheme.value,
+                authenticated.principal.identifier,
+                operation,
+                resource,
+                request.method,
+                request.url.path,
+            )
             return _signed_rejection(
                 identity,
                 request=request,
@@ -350,10 +382,26 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
             f"{authenticated.principal.scheme.value}:"
             f"{authenticated.principal.identifier}"
         )
-        response = await call_next(request)
-        response_body_bytes = b"".join(
-            [chunk async for chunk in response.body_iterator]
-        )
+        try:
+            response = await call_next(request)
+            response_body_bytes = b"".join(
+                [chunk async for chunk in response.body_iterator]
+            )
+        except Exception:
+            # The caller is authenticated, so it gets a signed answer it can
+            # verify, recorded below like any outcome so an exact retry replays
+            # it rather than waiting out the dispatch lease. The detail is
+            # fixed: the error belongs in this service's log, not the response.
+            logger.exception(
+                "Provisioning route failed after authentication: %s %s",
+                request.method,
+                request.url.path,
+            )
+            response = JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": ROUTE_FAILURE_DETAIL},
+            )
+            response_body_bytes = bytes(response.body)
         response_body = _response_body(response, response_body_bytes)
         replay_store.record_outcome(
             verification.reservation,
@@ -451,7 +499,7 @@ async def _request_body(request: Request) -> tuple[Any, str | None]:
         values = request.query_params.getlist(key)
         query[key] = values[0] if len(values) == 1 else values
     try:
-        return canonical_provisioning_request_body(
+        return canonical_request_body(
             request.method,
             request.url.path,
             body,
@@ -571,8 +619,21 @@ def _signed_response_headers(
     }
 
 
-def _rejection(detail: str, status_code: int) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"detail": detail})
+def _route_by_path(request: Request, route_table: ProvisioningRouteTable) -> None:
+    """Raise the 404 or 405 an unroutable request gets, binding no body."""
+
+    try:
+        route_table.resolve(request.method, request.url.path)
+    except ProvisioningRouteResourceUnbound:
+        pass
+
+
+def _rejection(
+    detail: str, status_code: int, *, headers: Mapping[str, str] | None = None
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code, content={"detail": detail}, headers=headers
+    )
 
 
 def _verification_detail(code: VerificationCode) -> str:

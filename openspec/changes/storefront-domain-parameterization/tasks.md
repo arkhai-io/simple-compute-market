@@ -23,13 +23,37 @@
 
 - [x] 4.1 Verify implementation changed no persistence or carrier contract: do not add or edit `domains/vms/storefront/src/market_storefront/utils/migrations.py`, `core/storefront/src/core_storefront/sqlite_migrations.py`, public request/response models, contract fixtures, database columns, migration version, or backfill. Record in `design.md` if implementation evidence overturns this decision before introducing any such change.
 - [x] 4.2 Verify no operator selection or package-topology input was introduced: leave `domains/vms/storefront/settings.toml`, `domains/vms/storefront/src/market_storefront/utils/config.py`, Compose files, `helm/`, `domains/vms/storefront/Dockerfile`, `pyproject.toml`, and `uv.lock` unchanged except an explicitly justified test-target inclusion. Confirm existing VM and Alkahest configuration, routes, default command, wheel dependencies, and deployment renders require no migration step.
-- [ ] 4.3 The bare-metal reference suite was run after integration: `39 passed, 9 failed`. Failures expose existing canonical-principal, authenticated-opening, health-identity, and typed settlement-plan incompatibilities in the unfinished `market-platform-bare-metal-10-storefront-composition` prerequisite; this change does not weaken or bypass those contracts.
+- [ ] 4.3 Re-run at closeout; any remaining failure belongs to the bare-metal contribution and is recorded against `bare-metal-and-credits-domain-stacks` 4a. The bare-metal reference suite was run after integration: `39 passed, 9 failed`. Failures expose existing canonical-principal, authenticated-opening, health-identity, and typed settlement-plan incompatibilities in the unfinished `market-platform-bare-metal-10-storefront-composition` prerequisite; this change does not weaken or bypass those contracts.
 
 ## 5. Repository closeout
+
+Per `openspec/README.md#plan-closeout-requirements`.
+
+Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
 
 - [x] 5.1 **Comment hygiene:** direct review retained only current-state rationale; `make check-comment-hygiene` passed.
 - [x] 5.2 **Import placement:** inspect imports added or touched by this change, move them to module level wherever safe, and retain a local import only after proving a real circular import or deliberate lazy-load need with the owning VM storefront tests; do not broaden this into unrelated import cleanup.
 - [x] 5.3 **Permanent documentation compliance:** after code review and behavioral proof, synchronize the delta requirements into `openspec/specs/market-composition/spec.md`, `openspec/specs/storefront-publication/spec.md`, and `openspec/specs/test-compatibility/spec.md`; promote injection flow/rationale to `openspec/specs/market-composition/architecture.md` and `openspec/specs/storefront-publication/architecture.md`; record test ownership in `openspec/specs/test-compatibility/architecture.md` and `docs/development/TESTING.md#boundary-change-validation`; and update `docs/development/ARCHITECTURE.md#composition-from-above-and-below` with the current explicit storefront-contract boundary. Permanent documents describe the resulting system, not this change's history.
+      Archival uses `--skip-specs`: this task synchronized the specification by hand.
 - [x] 5.4 **Narrative compression:** preserve all completed checkboxes, reduce completed-task notes to final behavior, material validation evidence, unresolved/deferred work, and permanent destinations, and move any durable alternative or review rationale into `design.md` before deleting duplicated narrative.
 - [x] 5.5 **Roadmap currency:** update `docs/development/ROADMAP.md` under the multi-domain storefront goal so current state says the VM and bare-metal roots both inject contracts and the remaining gap is explicit per-record domain/offering-mode selection and persistence owned by `multi-domain-storefront-composition`; keep the gap-to-change mapping current and record the exact roadmap destination in the design-promotion record.
 - [x] 5.6 **Promotion record and closeout evidence:** update `design.md#permanent-promotion-map` with every accepted decision's final permanent location or explicit temporary/rejected/superseded classification, verify no production source references `openspec/changes/storefront-domain-parameterization`, disclose every focused/integration/package/type check run or unrun, and confirm `multi-domain-storefront-composition` and `kit-storefront-composition-seam` consume this seam without a fallback before marking the change complete.
+- [ ] 5.7 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 5.8 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=storefront-domain-parameterization` and resolve
+      every match, then `openspec validate storefront-domain-parameterization --strict`.
+- [ ] 5.9 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun.
+- [ ] 5.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 5.11 **Archival.** Last, once every other part is checked: `openspec archive
+      storefront-domain-parameterization -y --skip-specs` moves the change under
+      `openspec/changes/archive/` without merging the deltas, which 5.3 synchronized by
+      hand; point the index row at the archived directory, and run
+      `openspec validate --specs --strict`.

@@ -24,31 +24,42 @@ import logging
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from compute_provisioning import (
+from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningError,
+)
+from compute_provisioning_contracts import (
     FulfillmentAcceptanceResponse,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
     FulfillmentScheduleResponse,
     FulfillmentStatusResponse,
+    LeaseTermination,
+    LeaseView,
 )
 from core_storefront.aggregation import (
     PLACEMENT_POLICIES,
     AggregateCapacityClient,
     most_available,
 )
+from core_storefront.service_peers import ServicePeerTrust
 from market_capacity_publication import (
-    CapacityBinding,
+    CAPACITY_BUCKET,
+    RESOURCE_POOL,
+    run_capacity_event_pollers,
     CapacityReconcileContext,
     CapacityRuntime,
     CapacitySite,
+    PublicationBinding,
+    SiteProjectionState,
+    publication_binding,
 )
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
+from market_identity import TrustedIdentitySet
 from market_site import dict_resource_satisfies_claim
 from market_site_client import SiteCapacityClient
 
-from market_storefront.utils.config import get_provisioning_authorities, settings
+from market_storefront import container
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +72,12 @@ a VM-domain package, so it is necessarily duplicated at this composition
 site.
 """
 
+VM_MIRROR_DIMENSION = "gpu_count"
+"""Must match the VM capacity authority's mirror dimension, for the same
+reason as ``VM_UNIT_CLAIM_KEYS``: a legacy single-quantity claim is
+translated into this dimension on both sides of the boundary.
+"""
+
 SQLiteClientFactory = Callable[[], Any]
 
 
@@ -70,30 +87,65 @@ def _capacity_settings() -> tuple[dict[str, str], str]:
 
     cap = getattr(config.settings, "capacity", None)
     placement = str(getattr(cap, "placement", "") or "fill_first").strip()
-    raw_sites = getattr(cap, "sites", None)
-    if not raw_sites:
-        raise RuntimeError(
-            "No capacity site authority configured: [capacity.sites] must map "
-            "each stable site ID to an authority URL."
-        )
-    sites: dict[str, str] = {}
-    for raw_name, raw_url in dict(raw_sites).items():
-        site_id = str(raw_name).strip()
-        url = str(raw_url or "").strip().rstrip("/")
-        if not site_id or not url:
-            raise RuntimeError("capacity site IDs and authority URLs must be non-empty")
-        sites[site_id] = url
-    return sites, placement
+    return config.configured_capacity_sites(config.settings), placement
 
 
 _CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
 _MIXED_DIRECTION_DELTA_KINDS = frozenset({"capacity_changed"})
 
 
+SiteProjectionsProvider = Callable[[], SiteProjectionState | None]
+
+
+class _LateSiteProjections:
+    """The projection state a runtime's reconciler reads, bound after the runtime.
+
+    The state is composed over the runtime's own aggregate, so it cannot exist
+    when the runtime's reconciler does; the composition root binds it here once
+    it has built it. A runtime nothing has bound reconciles no delta.
+    """
+
+    def __init__(self) -> None:
+        self.provider: SiteProjectionsProvider = lambda: None
+
+    def __call__(self) -> SiteProjectionState | None:
+        return self.provider()
+
+
+class _LateServicePeerTrust:
+    """The service-peer trust a runtime's site clients verify against, bound
+    after the runtime is built.
+
+    The runtime is cached across compositions in one process, so each
+    composition root binds its own trust here; a site's provider reads whichever
+    is bound at each response. A runtime nothing has bound verifies no response.
+    The fulfillment clients built beside the runtime read the same binding, so
+    a site's capacity and fulfillment responses verify against one trust.
+    """
+
+    def __init__(self) -> None:
+        self.trust: ServicePeerTrust | None = None
+
+    def site_authorities(self, site_id: str) -> Callable[[], TrustedIdentitySet]:
+        def authorities() -> TrustedIdentitySet:
+            trust = self.trust
+            if trust is None:
+                raise RuntimeError("no service-peer trust is bound to the capacity runtime")
+            return trust.site_trusted_set(site_id)
+
+        return authorities
+
+
 def _capacity_reconciler(
     sqlite_client_factory: SQLiteClientFactory,
+    *,
+    site_projections: SiteProjectionsProvider,
 ) -> Callable[[CapacityReconcileContext], Any]:
-    """Supply VM candidate semantics to the kit-owned reconciliation loop."""
+    """Supply VM candidate semantics to the kit-owned reconciliation loop.
+
+    ``site_projections`` is read when a delta arrives, not when the reconciler
+    is built, so a state composed after the runtime reaches it.
+    """
 
     async def _reconcile(context: CapacityReconcileContext) -> None:
         from core_storefront.stage_log import stage_event
@@ -103,20 +155,29 @@ def _capacity_reconciler(
             reopen_available_compute_listings_after_capacity_change,
         )
 
-        home_site = context.projections[0].site_id
+        state = site_projections()
+        if state is None:
+            # No site's projection is held, so every listing's source is
+            # unknown and nothing may be closed or reopened on it.
+            logger.warning("[CAPACITY] no site projection state; delta not reconciled")
+            return
+        # A fungible listing's availability is read from its site's capacity
+        # buckets, which change with the event being reconciled; the held
+        # generation is the last poll's, older than the event. Refresh the
+        # event's site (every site, for a full reconcile) first, as inline
+        # reconciliation refreshes what it reconciles: this never wakes
+        # publication, and a failed fetch leaves the held generation stale,
+        # which is reconciled over as it stands.
+        delta_site = context.delta.site if context.delta is not None else None
+        for site_id in (
+            [delta_site]
+            if delta_site is not None
+            else [projection.site_id for projection in context.projections]
+        ):
+            await state.refresh_site(site_id, families=[CAPACITY_BUCKET])
         db = sqlite_client_factory()
-        projection = (
-            site_pool_projection()
-            if bool(
-                getattr(
-                    getattr(settings, "capacity", None),
-                    "use_site_projection_for_listings",
-                    False,
-                )
-            )
-            else None
-        )
-        buckets = site_capacity_buckets() if projection is not None else None
+        projection = site_pool_projection(state)
+        buckets = site_capacity_buckets(state)
         delta = context.delta
         close = (
             delta is None
@@ -132,8 +193,7 @@ def _capacity_reconciler(
             closed = await close_stale_compute_listings_after_capacity_change(
                 db.db_path,
                 sqlite_client=db,
-                home_site=home_site,
-                configured_site_count=len(context.projections),
+                configured_sites=[site.site_id for site in context.projections],
                 member_availability=dict(context.availability),
                 site_pool_projection=projection,
                 site_capacity_buckets=buckets,
@@ -151,7 +211,7 @@ def _capacity_reconciler(
             reopened = await reopen_available_compute_listings_after_capacity_change(
                 db.db_path,
                 sqlite_client=db,
-                home_site=home_site,
+                configured_sites=[site.site_id for site in context.projections],
                 member_availability=dict(context.availability),
                 site_pool_projection=projection,
                 site_capacity_buckets=buckets,
@@ -169,20 +229,36 @@ def _capacity_reconciler(
     return _reconcile
 
 
-_capacity_runtime_state: dict[str, Any] = {"key": None, "runtime": None}
+_capacity_runtime_state: dict[str, Any] = {
+    "key": None,
+    "runtime": None,
+    "site_projections": None,
+    "service_peer_trust": _LateServicePeerTrust(),
+}
 
 
 def build_capacity_runtime_for(
     sqlite_client_factory: SQLiteClientFactory,
     *,
     signer: Any,
+    site_projections: SiteProjectionsProvider | None = None,
+    service_peer_trust: ServicePeerTrust | None = None,
+    site_client_factory: Callable[[CapacitySite, Any], Any] | None = None,
 ) -> CapacityRuntime:
-    """Compose the kit runtime from explicit repository and signer collaborators."""
+    """Compose the kit runtime from explicit repository and signer collaborators.
+
+    ``site_projections`` is the composition root's provider of the projection
+    state its capacity reconciliation reads, and ``service_peer_trust`` the
+    trust each site's responses are verified against, that site's own service
+    peer's active principals; a caller that is not the root passes neither and
+    leaves the root's bindings in place. ``site_client_factory`` replaces how a
+    configured site's client is built, as the kit runtime's constructor allows,
+    and is part of what the cached runtime is keyed by.
+    """
 
     if signer is None:
         raise RuntimeError("storefront marketplace signer is unavailable")
     sites, placement_name = _capacity_settings()
-    expected_authorities = get_provisioning_authorities()
     placement = PLACEMENT_POLICIES.get(placement_name)
     if placement is None:
         raise RuntimeError(
@@ -195,31 +271,46 @@ def build_capacity_runtime_for(
             claim_matcher=functools.partial(
                 dict_resource_satisfies_claim,
                 unit_claim_keys=VM_UNIT_CLAIM_KEYS,
+                mirror_dimension=VM_MIRROR_DIMENSION,
             ),
         )
     db_path = str(getattr(sqlite_client_factory(), "db_path", ""))
+    # No principal is part of the key: each site's trust is read from the bound
+    # service-peer trust at every response, so a rotation reuses the runtime.
     key = (
         tuple(sorted(sites.items())),
         placement_name,
         signer.identity.scheme.value,
         signer.identity.identifier,
-        tuple(
-            (principal.scheme.value, principal.identifier)
-            for principal in expected_authorities.identities
-        ),
         db_path,
+        site_client_factory,
     )
     if _capacity_runtime_state["key"] != key:
+        late = _LateSiteProjections()
+        # A fresh binding for a fresh runtime, which verifies nothing until a
+        # root binds its trust; the fulfillment clients follow it.
+        late_trust = _LateServicePeerTrust()
         _capacity_runtime_state["key"] = key
+        _capacity_runtime_state["site_projections"] = late
+        _capacity_runtime_state["service_peer_trust"] = late_trust
         _capacity_runtime_state["runtime"] = CapacityRuntime(
             sites=tuple(
-                CapacitySite(site_id, url, expected_authorities)
+                CapacitySite(site_id, url, late_trust.site_authorities(site_id))
                 for site_id, url in sites.items()
             ),
             signer=signer,
             placement=placement,
-            reconcile=_capacity_reconciler(sqlite_client_factory),
+            reconcile=_capacity_reconciler(sqlite_client_factory, site_projections=late),
+            **(
+                {}
+                if site_client_factory is None
+                else {"site_client_factory": site_client_factory}
+            ),
         )
+    if site_projections is not None:
+        _capacity_runtime_state["site_projections"].provider = site_projections
+    if service_peer_trust is not None:
+        _capacity_runtime_state["service_peer_trust"].trust = service_peer_trust
     return _capacity_runtime_state["runtime"]
 
 
@@ -227,8 +318,6 @@ def build_capacity_runtime(
     sqlite_client_factory: SQLiteClientFactory,
 ) -> CapacityRuntime:
     """Return the root-composed runtime for legacy non-root VM call sites."""
-
-    from market_storefront import container
 
     return build_capacity_runtime_for(
         sqlite_client_factory,
@@ -245,9 +334,13 @@ def build_capacity_client(
 async def capacity_binding_for_listing(
     sqlite_client: Any,
     listing_id: str,
-) -> CapacityBinding:
-    """Resolve the VM candidate's exact durable site, mode, and source."""
-    from domains.vms.listings.models import Listing
+) -> PublicationBinding:
+    """Resolve the VM listing's exact durable site, mode, source, and backing.
+
+    Every capacity effect takes this binding, and the capacity runtime's guard
+    refuses one whose backing admits no effect before any site call.
+    """
+    from arkhai_vms_listings.models import Listing
 
     durable = await sqlite_client.load_listing_binding(listing_id=listing_id)
     row = await sqlite_client.load_listing(listing_id=listing_id)
@@ -261,13 +354,18 @@ async def capacity_binding_for_listing(
             f"listing {listing_id!r} has no complete durable capacity binding"
         )
     listing = Listing.model_validate(row)
-    mode = listing.offer_resource.virtualization_type
+    mode = listing.listing_resource.offering_mode
     offering_mode = mode.value if hasattr(mode, "value") else str(mode or "")
     if offering_mode != durable.binding.offering_mode:
         raise RuntimeError(
             f"listing {listing_id!r} offering mode disagrees with its durable binding"
         )
-    return CapacityBinding(durable.site_id, offering_mode, source_id)
+    return publication_binding(
+        capacity_backing=durable.capacity_backing,
+        site_id=durable.site_id,
+        offering_mode=offering_mode,
+        source_id=source_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +377,7 @@ async def capacity_binding_for_listing(
 # while schedule/begin/status/result live on the compute-provisioning
 # service's ``/fulfillment`` surface, reached through
 # ``ComputeProvisioningClient`` — a different wire contract
-# (``compute_provisioning.contracts``), already used for that service's
+# (``compute_provisioning_contracts``), already used for that service's
 # other domain-neutral surfaces (jobs, leases).
 # ---------------------------------------------------------------------------
 
@@ -442,12 +540,56 @@ class AggregateFulfillmentClient:
 
         return await self._sites[site_id].begin_fulfillment_teardown(fulfillment_id)
 
+    async def get_lease(self, capacity_reservation_id: str, *, site_id: str) -> LeaseView:
+        """Recover signed lease evidence only from the reservation's recorded site."""
+        return await self._sites[site_id].get_lease(capacity_reservation_id)
+
+    async def terminate_lease(
+        self,
+        capacity_reservation_id: str,
+        *,
+        site_id: str,
+        reason: str | None = None,
+    ) -> LeaseView:
+        """End the reservation's lease at its recorded site, and only there.
+
+        The site converges teardown through the lease's fulfillment and releases
+        the capacity once; terminating a lease already ending returns it as it is.
+        """
+
+        return await self._sites[site_id].terminate_lease(
+            capacity_reservation_id, LeaseTermination(reason=reason)
+        )
+
 
 _fulfillment_aggregate_state: dict[str, Any] = {"key": None, "client": None}
 
 
+#: Builds one site's fulfillment client from its site ID, authority URL, the
+#: storefront's signer, and the provider of that site's trusted principals.
+ProvisioningSiteClientFactory = Callable[
+    [str, str, Any, Callable[[], TrustedIdentitySet]], Any
+]
+
+
+def _provisioning_site_client(
+    _site_id: str,
+    url: str,
+    signer: Any,
+    authorities: Callable[[], TrustedIdentitySet],
+) -> ComputeProvisioningClient:
+    return ComputeProvisioningClient(
+        url,
+        signer=signer,
+        caller_role="seller",
+        expected_authorities=authorities,
+    )
+
+
 def build_fulfillment_client(
     capacity_client: AggregateCapacityClient,
+    *,
+    client_factory: ProvisioningSiteClientFactory | None = None,
 ) -> AggregateFulfillmentClient:
     """Assemble the storefront's fulfillment client, paired with ``capacity_client``.
 
@@ -457,33 +599,34 @@ def build_fulfillment_client(
     ``ARCHITECTURE.md``, "Runtime service map") and its exact
     ``reservation_sites`` dict instance, so routing knowledge learned by one
     aggregator is immediately visible to the other.
+
+    Each site's client verifies its responses against that site's own service
+    peer's active principals, through the trust the capacity runtime's site
+    clients read, so a rotation reaches both and one site's principal verifies
+    no other site's responses. ``client_factory`` replaces how a site's client
+    is built from its ID, URL, signer, and provider of trusted principals, and
+    is part of what the cached aggregate is keyed by.
     """
     sites, _ = _capacity_settings()
-    from market_storefront import container
-
     signer = container.resolved_marketplace_signer
     if signer is None:
         raise RuntimeError("storefront marketplace signer is unavailable")
-    expected_authorities = get_provisioning_authorities()
+    trust = _capacity_runtime_state["service_peer_trust"]
+    # No principal is part of the key, as for the capacity runtime: each
+    # site's trust is read from the bound service-peer trust at every response.
     key = (
         tuple(sorted(sites.items())),
         signer.identity.scheme.value,
         signer.identity.identifier,
-        tuple(
-            (principal.scheme.value, principal.identifier)
-            for principal in expected_authorities.identities
-        ),
+        trust,
+        client_factory,
     )
     if _fulfillment_aggregate_state["key"] == key:
         return _fulfillment_aggregate_state["client"]
+    build = client_factory or _provisioning_site_client
     aggregate = AggregateFulfillmentClient(
         {
-            name: ComputeProvisioningClient(
-                url,
-                signer=signer,
-                caller_role="seller",
-                expected_authorities=expected_authorities,
-            )
+            name: build(name, url, signer, trust.site_authorities(name))
             for name, url in sites.items()
         },
         reservation_sites=capacity_client.reservation_sites,
@@ -493,66 +636,80 @@ def build_fulfillment_client(
     return aggregate
 
 
+def site_pool_projection(state: SiteProjectionState) -> dict[str, list[dict[str, Any]]]:
+    """Resource-pool projection rows per site, from the storefront's one
+    per-site projection state.
 
+    Only sites holding a generation contribute, loaded or stale; a site that
+    has never loaded, or whose load failed with no earlier value, is absent. A
+    loaded site is included *even when its rows list is empty*: that is an
+    authoritative "this site has zero pools" answer, distinct from "this site's
+    answer is not known". Derivation holds the listings of every configured
+    site absent here rather than reading it as empty, and an empty mapping
+    derives nothing.
 
-def site_pool_projection() -> dict[str, list[dict[str, Any]]]:
-    """Resource-pool projection rows per site, from the storefront's own
-    background poller cache (``site_projection_cache``).
-
-    Only sites whose projection has ever loaded contribute -- ``None``
-    (never loaded, or currently unavailable/invalid) is excluded, but a
-    successfully loaded site is included *even when its own rows list is
-    empty* -- an authoritative "this site currently has zero pools"
-    answer, distinct from "this site's answer isn't known yet". Losing
-    that distinction (checking the rows list's truthiness instead of
-    whether it is ``None``) would make a site's genuine zero-pools state
-    indistinguishable from a site that hasn't loaded at all, and
-    `reconciler`'s projection-sourced path would then fall back to
-    stale local tables instead of correctly registering zero capacity --
-    the empty *result* mapping is meaningful too, and is what actually
-    signals "fall back to local data" one level up.
+    Publication, capacity reconciliation, the inventory guard, and override
+    status all read listing sources through this, so they never disagree about
+    which sites are known.
     """
-    from market_storefront.services.site_projection_cache import projection_caches
-
-    result: dict[str, list[dict[str, Any]]] = {}
-    for site, caches in projection_caches().items():
-        value = caches.resource_pools.view().value
-        if value is not None:
-            result[site] = value
-    return result
+    return dict(state.values(RESOURCE_POOL))
 
 
-def site_capacity_buckets() -> dict[str, list[dict[str, Any]]]:
-    """Grouped capacity-bucket rows per site, same cache/inclusion rule as
-    ``site_pool_projection`` (above) -- only a site whose capacity-bucket
-    family has ever loaded contributes, including an authoritative empty
-    list, for the same reason: `reconciler`'s fungible-mode row builder
+def site_capacity_buckets(state: SiteProjectionState) -> dict[str, list[dict[str, Any]]]:
+    """Grouped capacity-bucket rows per site, under ``site_pool_projection``'s
+    inclusion rule -- only a site whose capacity-bucket family holds a
+    generation contributes, including an authoritative empty list, for the
+    same reason: `reconciler`'s fungible-mode row builder
     (`_projected_pool_rows`) must be able to tell "no bucket data yet" from
     "genuinely zero buckets" and falls back to its own resource-list
     computation only in the former case.
     """
-    from market_storefront.services.site_projection_cache import projection_caches
+    return dict(state.values(CAPACITY_BUCKET))
 
-    result: dict[str, list[dict[str, Any]]] = {}
-    for site, caches in projection_caches().items():
-        value = caches.capacity_buckets.view().value
-        if value is not None:
-            result[site] = value
-    return result
+
+def site_projection_status(
+    state: SiteProjectionState,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Per-site, per-family load state as operator surfaces report it.
+
+    State and identity only, never the held rows. A missing site or a
+    `not_loaded`/`unavailable`/`invalid` state means the family has not been
+    confirmed; it must never be read as authoritative empty capacity.
+    """
+    return {
+        site_id: {family: status.model_dump() for family, status in families.items()}
+        for site_id, families in state.status().items()
+    }
 
 
 async def capacity_events_poller_loop(sqlite_client: Any) -> None:
-    """Delegate multi-site event delivery and reconciliation to the kit."""
-    from market_storefront.utils import config
+    """Delegate multi-site event delivery and reconciliation to the kit.
 
-    interval = float(
-        getattr(
-            getattr(config.settings, "capacity", None),
-            "poll_interval",
-            5,
-        )
-        or 5
+    The aggregate name is what the admin advance route addresses and what a
+    storefront with no site configured still reports; the per-site gates are
+    what actually hold the pollers, since the kit owns their fan-out, and each
+    site's timer cycles record their outcomes under the same per-site names,
+    declared as the aggregate loop's children.
+    """
+    from market_storefront.utils import config
+    from market_storefront.lifecycle import (
+        CAPACITY_EVENTS_POLLER,
+        capacity_site_cycle_recorder,
+        capacity_site_gate,
+        gate,
+        idle,
     )
-    await build_capacity_runtime(lambda: sqlite_client).poll_events(
-        interval_seconds=interval
+
+    interval = config.site_projection_poll_interval()
+    # The runtime the capacity-events step drains, so the timer and the step
+    # address one runtime's sites.
+    runtime = container.resolved_capacity_runtime or build_capacity_runtime(
+        lambda: sqlite_client
+    )
+    await run_capacity_event_pollers(
+        functools.partial(runtime.poll_events, interval_seconds=interval),
+        gate=functools.partial(gate, CAPACITY_EVENTS_POLLER),
+        site_gate=capacity_site_gate,
+        wait=idle,
+        record_site_cycle=capacity_site_cycle_recorder,
     )

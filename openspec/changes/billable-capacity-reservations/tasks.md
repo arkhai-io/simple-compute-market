@@ -5,17 +5,34 @@ boundary described in `design.md`.
 
 ## 1. Reservation carries a rate and a funded bound
 
-- [ ] 1.1 Re-verify `design.md`'s Context findings, particularly that
-      `CapacityReservation` still carries no rate or funding reference and that
-      `capped_hold_seconds` still caps a configured TTL.
+- [ ] 1.1 Re-verify `design.md`'s Context, particularly that `CapacityReservation`
+      still carries no rate or funding reference, that `capped_hold_seconds` still
+      caps a configured TTL, and that hold placement is still the kit's `place_hold`
+      hook.
 - [ ] 1.2 Add the burn rate and funded bound to the reservation, both nullable and
       unused at this stage.
-- [ ] 1.3 Derive the burn rate from `capacity-shape-pricing`'s rate structure through
-      its aggregation interface. Do not add a separate hold price and do not
-      reconstruct a total from individual dimension rates — that change's spec forbids
-      the shortcut and it would drift from consumption pricing.
-- [ ] 1.4 Focused tests: burn rate derived for a multi-dimension shape; a rate change
-      moves holding and consumption together.
+- [ ] 1.3 Add the hold rate beside the lease rate in each resolution tier —
+      `kit/pool-overrides`' VM terms contract, the pool pricing hint, and
+      `[pricing.defaults.<family>]` — in the same family-grouped form, and resolve it
+      through the same tiers, falling back to the lease rate at any tier that states
+      no hold rate.
+- [ ] 1.3a Derive the burn rate by evaluating the hold rate structure against the held
+      shape through `capacity-shape-pricing`'s aggregation interface, in exact integer
+      arithmetic with upward rounding; refuse a burn rate the asset's amount type
+      cannot represent. Do not reconstruct a total from individual dimension rates.
+      The negotiated lease multiplier is not an input.
+- [ ] 1.3b **Decision gate.** Decide where a buyer reads the posted hold rate before
+      a hold is placed, per `design.md`'s "Where a buyer reads the hold rate is a
+      decision gate", taking `store-registry-listings-as-published`'s accepted
+      carrier policy and `negotiation-driven-capacity-resize`'s rate-structure
+      carrier as inputs, and record the decision and reasoning in `design.md`. If
+      it needs the registry to keep a listing-level field, record the dependency here
+      and in the campaign index before any task relying on it starts.
+- [ ] 1.4 Focused tests: burn rate derived for a multi-dimension shape; a stated hold
+      rate wins over the lease rate at its tier; an unstated hold rate falls back to
+      the lease rate at that tier; a lease-rate change moves an unstated hold rate
+      with it and leaves a stated one alone; a base-unit amount above 2^63 survives
+      derivation.
 
 ## 2. Hold obligation lifecycle
 
@@ -53,7 +70,7 @@ placed.
       justification comment with one describing the new posture. The restoration is
       safe only because holding now costs the holder; state that in the comment rather
       than silently raising the value.
-- [ ] 3.5 Focused tests: funded bound governs below the ceiling; ceiling governs above
+- [ ] 3.6 Focused tests: funded bound governs below the ceiling; ceiling governs above
       it; exhaustion lapses the hold normally.
 
 ## 4. Supersede repricing
@@ -89,25 +106,64 @@ placed.
       verification reserves nothing and must remain free.
 - [ ] 6.3 Run `openspec validate --all --strict` against the baseline current at
       implementation time.
+- [ ] 6.4 **Comment hygiene and import placement, before the pre-closeout review.** Run
+      `make check-comment-hygiene` and read the comments this change added for any that
+      narrate the review or migration that introduced them; move each import the change
+      added to module level unless a verified circular import or a recorded lazy-load
+      reason keeps it local. Closeout only confirms both.
 
 ## 7. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 7.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read
-      `_place_capacity_hold`'s and `capped_hold_seconds`' docstrings directly; both
-      describe TTL as the primary source of hold duration.
-- [ ] 7.2 **Import placement.** Review imports this change adds or touches.
-- [ ] 7.3 **Documentation compliance.** Confirm the derived-duration and charged-hold
-      rules landed in the two specs, `ARCHITECTURE.md`'s capacity-reservation section
-      states what a hold costs, and the priced-not-rate-limited reasoning stayed in
-      `design.md`.
+- [ ] 7.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added for any that narrate the review or migration that
+      introduced them. Read `_place_capacity_hold`'s and `capped_hold_seconds`'
+      docstrings directly; both described TTL as the primary source of hold duration.
+      Do not edit code here: anything to rewrite returns the change to
+      implementation.
+- [ ] 7.2 **Import placement — confirm.** Check the imports this change added for any
+      still local without a recorded reason. One that should move returns the change to
+      implementation.
+- [ ] 7.3 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe: the derived-duration and charged-hold rules land
+      in the two specs, `ARCHITECTURE.md`'s capacity-reservation section states what a
+      hold costs, and the priced-not-rate-limited reasoning stays in `design.md`.
 - [ ] 7.4 **Narrative compression.** Compress completed-task notes to final behavior,
-      validation evidence, and promotion destinations.
-- [ ] 7.5 **Roadmap currency.** Record the disposition. If the capacity-economics work
-      has been recorded as a roadmap goal by then, update its current state; otherwise
-      record explicitly that no goal's current state changes.
-- [ ] 7.6 **Promotion.** Complete the design-promotion record below.
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
+- [ ] 7.5 **Roadmap currency.** Update the affected goal's current state and gap
+      mapping in `docs/development/ROADMAP.md`, or record that no goal is affected. If
+      the capacity-economics work has been recorded as a roadmap goal by then, update
+      its current state; otherwise record explicitly that no goal's current state
+      changes.
+- [ ] 7.6 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 7.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 7.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change (the path proving a hold
+      is charged and the remainder returned, 6.1), or an explicit blocker naming its
+      cause and the change that owns it, with the validations it gates treated as
+      unrun.
+- [ ] 7.9 **Promotion.** Write the permanent documents this change owes —
+      `docs/development/ARCHITECTURE.md`, capacity reservation: what a hold costs and
+      what bounds its duration — and complete the design-promotion record. A `spec.md`
+      the deltas cover (`openspec/specs/site-capacity/spec.md`,
+      `openspec/specs/settlement-servicing/spec.md`) is written by the archive in
+      7.11, not by hand; the record names it all the same.
+- [ ] 7.10 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=billable-capacity-reservations` and resolve
+      every match, then `openspec validate billable-capacity-reservations --strict`.
+- [ ] 7.11 **Archival.** Last, once every other part is checked: `openspec archive
+      billable-capacity-reservations -y` merges the deltas into `openspec/specs/` and
+      moves the change under `openspec/changes/archive/`; point the index row at the
+      archived directory, and run `openspec validate --specs --strict`.
 
 ## Design promotion record
 

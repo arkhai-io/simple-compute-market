@@ -5,27 +5,31 @@ just ``settings.wallet.address``. There is no per-chain on-chain registration
 step, no agent-card publication, and no heartbeat loop.
 """
 
-import asyncio
 import logging
 from functools import partial
+
+from market_storefront.services.listing_identity_carryover import carry_over_seller_state
+from market_storefront.services.publication_terms import (
+    configured_family_rate_problems,
+    retired_pricing_configuration_keys,
+)
+from market_storefront.lifecycle import start_loops
+from market_storefront.lifecycle_steps import register_vm_loops
 from typing import Any
 
 from core_storefront.app_startup import (
-    StorefrontBackgroundTask,
     StorefrontStartupStep,
     run_storefront_startup_steps,
-    start_storefront_background_task,
 )
-from core_storefront.stage_log import stage_event
 from market_core import MarketDomainContract
-from market_storefront_kit import (
-    NegotiationWatchdogPolicy,
-    run_negotiation_watchdog,
-)
 
+import market_storefront.container as _container
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
+    introduction_retention_sweep_interval,
     settings,
+    site_projection_poll_interval,
+    source_confirmation_seconds,
 )
 from market_storefront.utils.logging_config import setup_file_logging
 
@@ -34,52 +38,46 @@ setup_file_logging(settings.log_file_path or None, settings.log_level)
 logger = logging.getLogger(__name__)
 
 
+def _require_readable_family_rates() -> None:
+    """Refuse to start with a configured family rate that cannot be read.
 
-
-async def _preflight_provisioning() -> None:
-    """Block startup until the provisioning service responds, or give up."""
-    import httpx
-
-    url = settings.provisioning.service_url.rstrip("/") + "/health"
-    timeout_s = max(int(settings.provisioning.preflight_timeout), 1)
-    deadline = asyncio.get_event_loop().time() + timeout_s
-    last_error: str | None = None
-    attempt = 0
-
-    while True:
-        attempt += 1
-        try:
-            async with httpx.AsyncClient(timeout=5) as http:
-                resp = await http.get(url)
-            if resp.status_code == 200:
-                logger.info(
-                    "[STARTUP] Provisioning service reachable at %s (attempt %d)",
-                    settings.provisioning.service_url,
-                    attempt,
-                )
-                return
-            last_error = f"HTTP {resp.status_code}"
-        except Exception as exc:
-            last_error = f"{type(exc).__name__}: {exc}"
-
-        remaining = deadline - asyncio.get_event_loop().time()
-        if remaining <= 0:
-            break
-        await asyncio.sleep(min(2.0, remaining))
-
-    msg = (
-        f"[STARTUP] Provisioning service at {settings.provisioning.service_url} "
-        f"unreachable after {timeout_s}s ({last_error}). "
-        "For e2e tests without hardware, set ACTIVE_PROFILES=mock on the "
-        "provisioning-service container."
-    )
-    if settings.provisioning.fail_on_unreachable:
+    The configured defaults are the operator's own file: a rate in it that cannot
+    be read is a configuration error, not a pool to hold, and starting anyway
+    would hold every pool that falls through to it.
+    """
+    problems = configured_family_rate_problems()
+    if problems:
         raise RuntimeError(
-            msg + " Set [seller.provisioning].fail_on_unreachable = false "
-            "to start the storefront anyway (fulfillment will fail until the "
-            "service is reachable)."
+            "configured family rates cannot be read: " + "; ".join(problems)
         )
-    logger.error(msg + " Continuing because fail_on_unreachable=false.")
+
+
+def _require_source_confirmation_window() -> None:
+    """Refuse to start, naming the key, with a projection poll interval or a
+    source-confirmation window that is not a positive, finite number of seconds
+    that can be applied to an instant without leaving `datetime`'s range, rather
+    than start loops on it or refuse every negotiation round.
+
+    The poll interval is checked first: when the window is not stated it is
+    derived from it.
+    """
+    site_projection_poll_interval()
+    source_confirmation_seconds()
+
+
+def _report_retired_pricing_keys() -> None:
+    """Name pricing keys the configuration states that nothing reads any more.
+
+    They are accepted rather than refused, so an upgraded storefront starts with
+    its existing configuration; this is where an operator learns to remove them.
+    """
+    retired = retired_pricing_configuration_keys()
+    if retired:
+        logger.warning(
+            "[STARTUP] Configuration states retired pricing keys that are not "
+            "read: %s",
+            ", ".join(retired),
+        )
 
 
 def _maybe_join_zerotier_network() -> None:
@@ -128,61 +126,6 @@ def _initialize_negotiation_thread_store() -> None:
     )
 
 
-async def _seed_resources_if_empty() -> None:
-    import market_storefront.container as _container
-
-    result = await _container.resolved_system_service.seed_resources_if_empty(
-        csv_inline=settings.resources_csv_inline,
-        csv_path=settings.resources_csv_path,
-    )
-    if result["seeded"]:
-        logger.info(
-            "[STARTUP] Seeded %d resource(s) from %s",
-            result["imported_count"],
-            result["source"],
-        )
-    elif result["source"] is None:
-        logger.info(
-            "[STARTUP] No resource source configured - starting with empty inventory"
-        )
-    else:
-        logger.info(
-            "[STARTUP] Resource seeding skipped - %d resource(s) already present",
-            result["imported_count"],
-        )
-
-
-def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
-    return NegotiationWatchdogPolicy(
-        timeout_seconds=float(settings.negotiation_timeout_seconds),
-        interval_seconds=float(settings.negotiation_watchdog_interval),
-    )
-
-
-def _start_negotiation_watchdog(sqlite_client: Any) -> None:
-    policy = _negotiation_watchdog_policy()
-    start_storefront_background_task(
-        StorefrontBackgroundTask(
-            name="negotiation_watchdog",
-            task_factory=partial(
-                run_negotiation_watchdog,
-                sqlite_client,
-                policy,
-                emit_stage_event=stage_event,
-                logger=logger,
-            ),
-            log_message=(
-                "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)"
-            ),
-            log_args=(
-                policy.interval_seconds,
-                policy.timeout_seconds,
-            ),
-        ),
-        logger=logger,
-    )
-
-
 async def _preflight_settlement_mechanisms() -> None:
     import market_storefront.container as _container
     from market_storefront.settlement_composition import (
@@ -214,70 +157,37 @@ async def _backfill_escrow_identity(sqlite_client: Any) -> None:
         )
 
 
-def _start_settlement_servicing() -> None:
-    import market_storefront.container as _container
+async def _load_site_projections() -> None:
+    """The first load: one cycle of the poller, before its timer starts."""
+    await _container.site_projections().poll_once()
 
-    composition = _container.resolved_settlement_composition
-    if composition is None:
-        raise RuntimeError("settlement composition was not initialized")
-    start_storefront_background_task(
-        StorefrontBackgroundTask(
-            name="settlement_servicing",
-            task_factory=composition.worker.run,
-            log_message="[STARTUP] Settlement servicing started (interval=%ss)",
-            log_args=(getattr(settings, "claims_sweep_interval", 30),),
+
+def _start_lifecycle_loops() -> None:
+    """Register every loop under the running configuration and start them all.
+
+    After the first projection load, so neither the poller nor publication
+    runs its first cycle over projections nothing has loaded, and after
+    settlement preflight and the escrow backfill the servicing sweep depends
+    on. Nothing waits for a dependency to answer: a site, registry, or chain
+    that cannot be reached is reported in system status and retried by the
+    loop that calls it. Introduction retention runs only while contact
+    exchange is composed.
+    """
+    composition = _container.resolved_contact_exchange
+    retention = composition.retention() if composition is not None else None
+    probe = _container.resolved_alkahest_chain_probe
+    intervals = register_vm_loops(
+        retention_interval_seconds=(
+            introduction_retention_sweep_interval(retention.policy.sweep_interval_seconds)
+            if retention is not None
+            else None
         ),
-        logger=logger,
-    )
-
-
-def _start_fulfillment_resume(sqlite_client: Any) -> None:
-    from market_storefront.services.fulfillment_resume_runtime import (
-        fulfillment_resume_loop,
-    )
-
-    start_storefront_background_task(
-        StorefrontBackgroundTask(
-            name="fulfillment_resume",
-            task_factory=partial(fulfillment_resume_loop, sqlite_client),
-            log_message="[STARTUP] Fulfillment resume worker started (interval=%ss)",
-            log_args=(getattr(settings, "fulfillment_resume_sweep_interval", 30),),
+        alkahest_probe_interval_seconds=(
+            probe.interval_seconds if probe is not None else None
         ),
-        logger=logger,
     )
-
-
-def _start_capacity_events_poller(sqlite_client: Any) -> None:
-    # Tail every authority's capacity-event feed after provisioning preflight.
-    from market_storefront.services.capacity_client import capacity_events_poller_loop
-
-    start_storefront_background_task(
-        StorefrontBackgroundTask(
-            name="capacity_events_poller",
-            task_factory=partial(capacity_events_poller_loop, sqlite_client),
-        ),
-        logger=logger,
-    )
-
-
-async def _load_site_projections(sqlite_client: Any) -> None:
-    from market_storefront.services.site_projection_cache import load_site_projections
-
-    await load_site_projections(sqlite_client)
-
-
-def _start_site_projection_poller(sqlite_client: Any) -> None:
-    from market_storefront.services.site_projection_cache import (
-        site_projection_poller_loop,
-    )
-
-    start_storefront_background_task(
-        StorefrontBackgroundTask(
-            name="site_projection_poller",
-            task_factory=partial(site_projection_poller_loop, sqlite_client),
-        ),
-        logger=logger,
-    )
+    for name in start_loops():
+        logger.info("[STARTUP] %s started (interval=%ss)", name, intervals.get(name))
 
 
 def _assert_startup_registry(registry: Any, domain: MarketDomainContract) -> Any:
@@ -323,17 +233,28 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
         (
             StorefrontStartupStep("join_zerotier", _maybe_join_zerotier_network),
             StorefrontStartupStep(
+                "configured_family_rates",
+                _require_readable_family_rates,
+            ),
+            StorefrontStartupStep(
+                "source_confirmation_window",
+                _require_source_confirmation_window,
+            ),
+            StorefrontStartupStep(
+                "retired_pricing_keys",
+                _report_retired_pricing_keys,
+                continue_on_error=True,
+            ),
+            StorefrontStartupStep(
                 "negotiation_thread_store",
                 _initialize_negotiation_thread_store,
             ),
+            # Before any lifecycle loop: the first publication cycle would
+            # otherwise publish a pre-shape listing's successor without the
+            # seller's close or pause. Fail-fast, for the same reason.
             StorefrontStartupStep(
-                "seed_resources",
-                _seed_resources_if_empty,
-                error_message="[STARTUP] Resource seeding failed: %s",
-            ),
-            StorefrontStartupStep(
-                "negotiation_watchdog",
-                partial(_start_negotiation_watchdog, sqlite_client),
+                "listing_identity_carryover",
+                partial(carry_over_seller_state, sqlite_client),
             ),
             StorefrontStartupStep(
                 "settlement_mechanism_preflight",
@@ -344,25 +265,12 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
                 partial(_backfill_escrow_identity, sqlite_client),
                 error_message="[STARTUP] Escrow identity backfill failed: %s",
             ),
-            StorefrontStartupStep("settlement_servicing", _start_settlement_servicing),
-            StorefrontStartupStep(
-                "fulfillment_resume",
-                partial(_start_fulfillment_resume, sqlite_client),
-            ),
-            StorefrontStartupStep("preflight_provisioning", _preflight_provisioning),
             StorefrontStartupStep(
                 "load_site_projections",
-                partial(_load_site_projections, sqlite_client),
+                _load_site_projections,
                 error_message="[STARTUP] Site projection load failed: %s",
             ),
-            StorefrontStartupStep(
-                "site_projection_poller",
-                partial(_start_site_projection_poller, sqlite_client),
-            ),
-            StorefrontStartupStep(
-                "capacity_events_poller",
-                partial(_start_capacity_events_poller, sqlite_client),
-            ),
+            StorefrontStartupStep("lifecycle_loops", _start_lifecycle_loops),
         ),
         logger=logger,
     )

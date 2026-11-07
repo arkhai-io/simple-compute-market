@@ -1,0 +1,478 @@
+"""A mock-provisioned whole-host deal, on the bare-metal lane.
+
+Bare metal's run of the compute family's canonical deal, stage for stage with
+VM's typed-client deal. The stages bare metal shares with VM, and the mock-lane
+stages that hold and release its jobs at the mock rules' gates, are defined once
+in ``helpers/compute_deal_stages.py`` and declared here, in order, by
+subclassing; ``BareMetalComputeDealDriver`` supplies bare metal's part of them.
+Bare metal's own stages are inserted in place:
+
+  03a  Publication preview:  the dry run would publish the deal's machine
+  03b  Publication step:     one pass publishes it
+  09a2 Publication closes:   the dry run then the step close the held machine's
+                             listing as unavailable
+  09bb Evidence published:   one servicing step publishes the lease-ready
+                             evidence's digest; the buyer resolves the evidence
+  12a  Publication reopens:  after the release, a pass reopens the listing
+  12b  Second deal accepted: a second negotiation on the freed machine
+  12c  Second deal active:   escrowed, settled, and converged with no gate held
+  12d  Teardown sent twice:  the buyer's repeated teardown is the same operation
+  12e  Released once:        the site releases the machine once, and the
+                             storefront records one release
+
+Every transition is previewed where a preview exists, then advanced explicitly:
+the storefront's loops are held for the whole module, fulfillment convergence
+too, and the lease watchdog while a stage drives it. Wherever the site changes
+-- the supply seeded, the machine leased, then released -- a stage steps the
+storefront's site-projection poller before publication, which reads what the
+poller holds.
+"""
+
+from __future__ import annotations
+
+import base64
+import logging
+import time
+
+import pytest
+from compute_provisioning_contracts.lease_ends import SignedLeaseEndedReport, verify_lease_end
+from tests.e2e.roles.scenarios.bare_metal.conftest import _pinned, lane_setting
+
+from tests.e2e.roles.helpers.compute_deal import (
+    advance_fulfillment_to,
+    advance_storefront,
+    assert_lease_watchdog_held,
+    dry_run_storefront,
+    wait_for_stage_event,
+)
+from tests.e2e.roles.helpers.compute_deal_stages import (
+    BUYER_INITIAL_PRICE,
+    BUYER_MAX_PRICE,
+    DEAL_TOKEN,
+    DURATION_HOURS,
+    ESCROW_TTL_SECONDS,
+    Stage00_LifecycleHeld,
+    Stage00a_StorefrontHealth,
+    Stage00b_RegistryReachable,
+    Stage00c_ProvisioningHealth,
+    Stage00c2_ProvisioningContractPins,
+    Stage00d_NegotiationStrategy,
+    Stage00e_ProvisioningMockMode,
+    Stage00f1_ExecutorHostRegistry,
+    Stage00g_AlkahestConfigured,
+    Stage00h_ProvisioningStorefrontLink,
+    Stage04a_PrimaryRegistryPublish,
+    Stage05a_EvaluateNegotiate,
+    Stage05b_NegotiationStartsAndVisible,
+    Stage06b_ForceAcceptAndTerminal,
+    Stage07_OnChainEscrow,
+    Stage07a_ArmCreateGate,
+    Stage07b_VerifyEscrow,
+    Stage08a_EvaluateSettle,
+    Stage08b2_ReleaseCreateGateAndDrain,
+    Stage08b_SettlementSubmittedAndJobQueued,
+    Stage08c_EvaluateProvisioningJob,
+    Stage09a_FulfillmentConvergesToActive,
+    Stage09b_SettlementReadyAndCredentials,
+    Stage09c2_ArmTeardownGate,
+    Stage09c_LeaseRecorded,
+    Stage10a_LeaseExpirySetup,
+    Stage10b_LeaseCycleBeginsTeardown,
+    Stage11a2_ReleaseTeardownGateAndDrain,
+    Stage11a_TeardownDispatch,
+    Stage11b_TeardownCompletion,
+    alkahest_opening,
+)
+from tests.e2e.roles.helpers.domain_deal import require_state
+from tests.e2e.roles.helpers.escrow import create_buyer_escrow
+from tests.e2e.roles.scenarios.bare_metal.conftest import BareMetalDealState
+
+from tests.e2e.roles.scenarios.bare_metal.publication_stages import (
+    BareMetalPublicationClosesListing, BareMetalEvidencePublished,
+)
+
+log = logging.getLogger(__name__)
+
+pytestmark = [
+    # Listed first, so the holds are taken before, and released after, every
+    # other fixture of the module.
+    # The module advances the storefront's loops, fulfillment convergence, and
+    # lease expiry itself.
+    pytest.mark.usefixtures(
+        "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held"
+    ),
+    pytest.mark.e2e_bare_metal_mock_deal,
+]
+
+PUBLICATION = "publication"
+SITE_PROJECTIONS = "site-projections"
+
+
+def _actions(report: dict, action: str) -> list[dict]:
+    return [item for item in report.get("actions") or [] if item.get("action") == action]
+
+
+def _ours(items: list[dict], resource_id: str) -> list[dict]:
+    return [
+        item for item in items
+        if (item.get("source") or {}).get("physical_resource_id") == resource_id
+    ]
+
+
+def _with_listing(report: dict, listing_id: str) -> list[dict]:
+    return [
+        item for item in report.get("actions") or [] if item.get("listing_id") == listing_id
+    ]
+
+
+# ===========================================================================
+# Phase 0 — readiness
+# ===========================================================================
+
+class TestStage00_LifecycleHeld(Stage00_LifecycleHeld):
+    pass
+
+
+class TestStage00a_StorefrontHealth(Stage00a_StorefrontHealth):
+    pass
+
+
+class TestStage00b_RegistryReachable(Stage00b_RegistryReachable):
+    pass
+
+
+class TestStage00c_ProvisioningHealth(Stage00c_ProvisioningHealth):
+    pass
+
+
+class TestStage00c2_ProvisioningContractPins(Stage00c2_ProvisioningContractPins):
+    pass
+
+
+class TestStage00d_NegotiationStrategy(Stage00d_NegotiationStrategy):
+    pass
+
+
+class TestStage00e_ProvisioningMockMode(Stage00e_ProvisioningMockMode):
+    pass
+
+
+class TestStage00f1_ExecutorHostRegistry(Stage00f1_ExecutorHostRegistry):
+    pass
+
+
+class TestStage00g_AlkahestConfigured(Stage00g_AlkahestConfigured):
+    pass
+
+
+class TestStage00h_ProvisioningStorefrontLink(Stage00h_ProvisioningStorefrontLink):
+    pass
+
+
+# ===========================================================================
+# Phase 3 — publication (bare metal's own)
+# ===========================================================================
+
+class TestStage03a_PublicationDryRun:
+    def test_03a_the_preview_would_publish_the_deals_machine(
+        self, storefront_admin_client, deal_driver, deal_state: BareMetalDealState
+    ):
+        """The publication dry run reports the deal's machine as a publish.
+
+        The storefront's loops are held, so each publication cycle is one this
+        scenario asks for, over the projection the supply's seeding stepped the
+        poller to. The preview names the cause the step will act on, before
+        anything reaches the registry.
+        """
+        require_state(
+            deal_state, "_lifecycle_held", "_supply_seeded", "_registry_reachable"
+        )
+        preview = dry_run_storefront(storefront_admin_client, PUBLICATION)
+        assert preview.get("dry_run") is True, preview
+        ours = _ours(_actions(preview, "publish"), deal_driver.reserved_resource_id)
+        assert len(ours) == 1, preview
+        assert ours[0]["source"]["pool_id"] == deal_driver.pool_id, ours
+        deal_state._publication_previewed = True
+
+
+class TestStage03b_PublicationStepPublishes:
+    def test_03b_one_step_publishes_the_deals_listing(
+        self, storefront_admin_client, deal_driver, deal_state: BareMetalDealState
+    ):
+        require_state(deal_state, "_publication_previewed")
+        report = advance_storefront(storefront_admin_client, PUBLICATION)
+        (ours,) = _ours(_actions(report, "publish"), deal_driver.reserved_resource_id)
+        assert ours["status"] == "published", ours
+        listing_id = str(ours["listing_id"])
+        assert not [
+            item for item in _with_listing(report, listing_id) if item["action"] == "fail"
+        ], report
+
+        listing = storefront_admin_client.get_listing(listing_id)
+        assert listing.status == "open", listing
+        deal_state.seller_listing_id = listing_id
+        deal_state.listing_published = True
+        log.info("[03b] Listing %s published for %s", listing_id, deal_driver.reserved_resource_id)
+
+
+# ===========================================================================
+# Phases 4 to 9 — publication seen, negotiation, settlement, delivery
+# ===========================================================================
+
+class TestStage04a_PrimaryRegistryPublish(Stage04a_PrimaryRegistryPublish):
+    pass
+
+
+class TestStage05a_EvaluateNegotiate(Stage05a_EvaluateNegotiate):
+    pass
+
+
+class TestStage05b_NegotiationStartsAndVisible(Stage05b_NegotiationStartsAndVisible):
+    pass
+
+
+class TestStage06b_ForceAcceptAndTerminal(Stage06b_ForceAcceptAndTerminal):
+    pass
+
+
+class TestStage07_OnChainEscrow(Stage07_OnChainEscrow):
+    pass
+
+
+class TestStage07a_ArmCreateGate(Stage07a_ArmCreateGate):
+    pass
+
+
+class TestStage07b_VerifyEscrow(Stage07b_VerifyEscrow):
+    pass
+
+
+class TestStage08a_EvaluateSettle(Stage08a_EvaluateSettle):
+    pass
+
+
+class TestStage08c_EvaluateProvisioningJob(Stage08c_EvaluateProvisioningJob):
+    pass
+
+
+class TestStage08b_SettlementSubmittedAndJobQueued(Stage08b_SettlementSubmittedAndJobQueued):
+    pass
+
+
+class TestStage08b2_ReleaseCreateGateAndDrain(Stage08b2_ReleaseCreateGateAndDrain):
+    pass
+
+
+class TestStage09a_FulfillmentConvergesToActive(Stage09a_FulfillmentConvergesToActive):
+    pass
+
+
+class TestStage09a2_PublicationClosesTheListing(BareMetalPublicationClosesListing):
+    pass
+
+
+class TestStage09b_SettlementReadyAndCredentials(Stage09b_SettlementReadyAndCredentials):
+    pass
+
+
+class TestStage09bb_EvidencePublishedForTheFulfilledEscrow(BareMetalEvidencePublished):
+    pass
+
+
+class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
+    pass
+
+
+# ===========================================================================
+# Phases 10 and 11 — lease expiry, teardown, and release
+# ===========================================================================
+
+class TestStage09c2_ArmTeardownGate(Stage09c2_ArmTeardownGate):
+    pass
+
+
+class TestStage10a_LeaseExpirySetup(Stage10a_LeaseExpirySetup):
+    pass
+
+
+class TestStage10b_LeaseCycleBeginsTeardown(Stage10b_LeaseCycleBeginsTeardown):
+    pass
+
+
+class TestStage11a_TeardownDispatch(Stage11a_TeardownDispatch):
+    pass
+
+
+class TestStage11a2_ReleaseTeardownGateAndDrain(Stage11a2_ReleaseTeardownGateAndDrain):
+    pass
+
+
+class TestStage11b_TeardownCompletion(Stage11b_TeardownCompletion):
+    pass
+
+
+# ===========================================================================
+# Phase 12 — a second deal on the freed machine (bare metal's own)
+# ===========================================================================
+
+class TestStage12a_PublicationReopensTheListing:
+    def test_12a_a_pass_reopens_the_released_machines_listing(
+        self, storefront_admin_client, registry_client, deal_state: BareMetalDealState
+    ):
+        require_state(deal_state, "seller_listing_id", "teardown_fulfillment_id", "deal_lease")
+        lease = deal_state.deal_lease.refresh()
+        assert lease.get("status") == "released", (
+            f"the first deal's lease is not released, so its machine is not free: {lease}"
+        )
+        listing_id = deal_state.seller_listing_id
+        # The release freed the machine at the site; one poller step sees it.
+        advance_storefront(storefront_admin_client, SITE_PROJECTIONS)
+        preview = dry_run_storefront(storefront_admin_client, PUBLICATION)
+        assert [item["action"] for item in _with_listing(preview, listing_id)] == [
+            "reopen"
+        ], preview
+
+        report = advance_storefront(storefront_admin_client, PUBLICATION)
+        assert [item["action"] for item in _with_listing(report, listing_id)] == [
+            "reopen"
+        ], report
+        assert registry_client.get_listing(listing_id).status == "open"
+        assert storefront_admin_client.get_listing(listing_id).status == "open"
+        deal_state._listing_reopened = True
+
+
+class TestStage12b_SecondDealAccepted:
+    def test_12b_a_second_negotiation_is_accepted(
+        self, storefront_client, storefront_admin_client, registry_client, deal_driver,
+        deal_state: BareMetalDealState,
+    ):
+        require_state(deal_state, "_listing_reopened")
+        # The second deal's jobs run as a buyer's would, with no gate held.
+        deal_driver.disarm_gates()
+        deal_state._second_escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
+        _option, escrow = alkahest_opening(
+            registry_client.get_listing(deal_state.seller_listing_id)
+        )
+        opened = storefront_client.negotiate_new(
+            listing_id=deal_state.seller_listing_id,
+            initial_amount=BUYER_INITIAL_PRICE,
+            escrow_expiration_unix=deal_state._second_escrow_expiration_unix,
+            provision_terms=deal_driver.provision_terms(),
+            token=DEAL_TOKEN["contract_address"],
+            chain_name=escrow["chain_name"],
+            escrow_address=escrow["escrow_address"],
+            literal_fields=escrow["literal_fields"],
+            demands=[escrow["demand"]],
+        )
+        negotiation_id = opened.get("negotiation_id") if isinstance(opened, dict) else None
+        assert negotiation_id, opened
+        agreed = (BUYER_INITIAL_PRICE + BUYER_MAX_PRICE) // 2
+        accepted = storefront_admin_client.force_accept_negotiation(
+            deal_state.seller_listing_id, negotiation_id, amount=agreed
+        )
+        assert accepted.action == "accept", accepted
+        detail = storefront_admin_client.get_negotiation(
+            deal_state.seller_listing_id, negotiation_id
+        )
+        assert detail.terminal_state == "success", detail
+        deal_state.second_negotiation_id = negotiation_id
+
+
+class TestStage12c_SecondDealActive:
+    def test_12c_the_second_deal_settles_and_its_lease_becomes_active(
+        self, storefront_client, provisioning_client, provisioning_test_client,
+        buyer_config, seller_wallet, buyer_fulfillment, deal_state: BareMetalDealState,
+    ):
+        require_state(deal_state, "second_negotiation_id", "_second_escrow_expiration_unix")
+        escrow_uid = create_buyer_escrow(
+            buyer_private_key=buyer_config["private_key"],
+            seller_wallet_address=seller_wallet,
+            agreed_amount=(BUYER_INITIAL_PRICE + BUYER_MAX_PRICE) // 2,
+            duration_seconds=DURATION_HOURS * 3600,
+            token_contract_address=DEAL_TOKEN["contract_address"],
+            rpc_url=buyer_config["rpc_url"],
+            expiration_unix=deal_state._second_escrow_expiration_unix,
+        )
+        settled = storefront_client.settle_evm(
+            escrow_uid,
+            negotiation_id=deal_state.second_negotiation_id,
+            buyer_evm_address=buyer_config["wallet_address"],
+        )
+        assert settled.status == "settlement_verified", settled
+        fulfillment_id = buyer_fulfillment.status(deal_state.second_negotiation_id).get(
+            "fulfillment_id"
+        )
+        assert fulfillment_id, "the second settlement began no fulfillment"
+
+        provisioning_test_client.drain(timeout=30)
+        advance_fulfillment_to(provisioning_client, str(fulfillment_id), "active")
+        status = buyer_fulfillment.status(deal_state.second_negotiation_id)
+        assert status.get("state") == "active", status
+        deal_state.second_fulfillment_id = str(fulfillment_id)
+        deal_state._second_deal_active = True
+
+
+class TestStage12d_BuyerTeardownSentTwice:
+    def test_12d_a_repeated_teardown_is_the_same_operation(
+        self, provisioning_client, storefront_admin_client, buyer_fulfillment, deal_state: BareMetalDealState
+    ):
+        """The buyer's teardown, sent again, returns the operation it began.
+
+        The lease watchdog is held for the module, which this stage reads back,
+        so the release is the step 12e asks for, not a timer's.
+        """
+        require_state(deal_state, "_second_deal_active")
+        assert_lease_watchdog_held(provisioning_client)
+        negotiation_id = deal_state.second_negotiation_id
+        reservation_id = buyer_fulfillment.status(negotiation_id)["capacity_reservation_id"]
+        first = buyer_fulfillment.teardown(negotiation_id)
+        again = buyer_fulfillment.teardown(negotiation_id)
+        assert first["delivery"]["progress"] == "tearing_down", first
+        assert again["delivery"]["progress"] == "tearing_down", again
+        for name in ("negotiation_id", "operation_key", "receipt_at", "selected_end"):
+            assert again[name] == first[name], (name, first, again)
+        advance_storefront(storefront_admin_client, "delivery-recovery")
+        delivery = buyer_fulfillment.delivery(negotiation_id)["delivery"]
+        assert delivery["progress"] == "tearing_down", delivery
+        assert delivery["site_reports"], delivery
+        for item in delivery["site_reports"]:
+            report = SignedLeaseEndedReport.model_validate_json(base64.b64decode(item["body"]))
+            event = verify_lease_end(report, capacity_reservation_id=reservation_id,
+                                     site_id=lane_setting("site_id"), expected_sites=_pinned("site_authority"))
+            assert event.cause == "termination"
+        assert provisioning_client.get_lease(reservation_id).status != "released"
+        deal_state.second_teardown = {"capacity_reservation_id": reservation_id, "receipt": first,
+                                      "site_reports": delivery["site_reports"]}
+
+
+class TestStage12e_CapacityReleasedOnce:
+    def test_12e_the_site_releases_the_machine_once(
+        self, provisioning_client, storefront_admin_client, buyer_fulfillment,
+        deal_state: BareMetalDealState,
+    ):
+        require_state(deal_state, "second_teardown", "second_fulfillment_id")
+        # The release below is this stage's own lease cycle, not the timer's.
+        assert_lease_watchdog_held(provisioning_client)
+        negotiation_id = deal_state.second_negotiation_id
+        advance_fulfillment_to(
+            provisioning_client, deal_state.second_fulfillment_id, "torn_down"
+        )
+        provisioning_client.check_leases()
+        wait_for_stage_event(
+            storefront_admin_client, "fulfillment", "capacity_released",
+            negotiation_id=negotiation_id, timeout=10.0,
+        )
+
+        events = storefront_admin_client.get_events(
+            stage="fulfillment", negotiation_id=negotiation_id
+        )
+        released = [event for event in events.events if event.event == "capacity_released"]
+        assert len(released) == 1, events.events
+        assert (
+            released[0].data.get("capacity_reservation_id")
+            == deal_state.second_teardown.get("capacity_reservation_id")
+        ), released
+        assert buyer_fulfillment.status(negotiation_id).get("state") == "released"
+        delivery = buyer_fulfillment.delivery(negotiation_id)["delivery"]
+        assert delivery["progress"] == "released"
+        assert delivery["site_reports"] == deal_state.second_teardown["site_reports"]

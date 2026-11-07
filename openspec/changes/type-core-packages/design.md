@@ -23,6 +23,36 @@ Core and registry-client markers/config exist, but core typecheck fails and mark
 - **[Framework typing dominates work]** → Type stable boundaries first and leave shell internals at pragmatic levels.
 - **[Annotations alter runtime imports]** → Preserve dependency layers, including under `TYPE_CHECKING`, and run import-boundary tests.
 
+## Open question: declared-dependency completeness
+
+- **Typecheck ratchet versus undeclared imports.** *Gates the `core/storefront`
+  step.* `core_storefront` lazily imports three packages its `pyproject.toml` does
+  not declare: `market_alkahest.schemas` in `refund.py`, `web3` in
+  `token_transfer.py`, and `fastapi` in `app_composition.py` and `openapi.py`. A
+  per-package ratchet either fails on these, because the project's own environment
+  does not install them, or hides them behind ignores that erase the architectural
+  fact. The architecture check, `make check-architecture`, holds the internal one:
+  `market_alkahest` is an `undeclared_import` exception row in
+  `docs/development/ARCHITECTURE.toml` owned by `move-escrow-into-alkahest`,
+  whose move removes it (`docs/development/ARCHITECTURE.md`, "Where the current
+  tree diverges"). The check requires third-party declarations only of a package
+  with a package allowlist, which `core/storefront` has not, so `web3` and
+  `fastapi` are this ratchet's to catch. Suggested resolution: add "every distribution the source imports is declared,
+  and every declared internal distribution is imported or carries a stated runtime
+  reason" to the acceptance criterion for every ratcheted package, and sequence the `core/storefront` step after
+  `kit-owned-storefront-auth-and-persistence` and `move-escrow-into-alkahest` decide
+  whether `refund`, `token_transfer`, and `escrow_identity` leave for `kit/alkahest`
+  (the recommended outcome) or stay and are declared. The reverse direction is a warning
+  rather than a defect, since a declaration can exist to install a plugin or a
+  driver — the VM storefront's two bare-metal declarations install the bare-metal
+  contribution into the compute shell — and such a reason is recorded in the
+  declaring package's `[tool.arkhai.architecture.runtime-dependencies]`
+  (`docs/development/ARCHITECTURE.md`, "Repository layers"). Task 2.5 is the decision gate for
+  the "`kit/site` question" and stays one; the recommended answer for it is that
+  `kit/site` passes `ARCHITECTURE.md`'s third-domain placement test because API
+  credits composes it, stays repository-wide, and belongs in a kit typing ratchet
+  rather than this core campaign.
+
 ## Migration Plan
 
 Restore current advertised packages first, then add one package per coherent commit with passing wheel/type/runtime checks. Consumers require no wire migration. Roll back a package's marker only if its advertised support cannot be maintained, with release documentation corrected in the same change.

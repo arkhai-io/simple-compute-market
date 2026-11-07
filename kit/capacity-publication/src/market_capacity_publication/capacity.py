@@ -15,8 +15,21 @@ from typing import Any, Protocol
 
 from core_storefront.aggregation import AggregateCapacityClient, PlacementPolicy
 from core_storefront.capacity import CapacityDelta
-from core_storefront.capacity_remote import site_events_poller
+from market_resource_pools_contracts.backing import (
+    CapacityBacking,
+    UnknownCapacityBackingError,
+    capacity_backing as resolve_capacity_backing,
+)
 from market_site_client import SiteCapacityClient
+
+from .capacity_remote import (
+    SiteEventCycle,
+    SiteEventPreview,
+    drain_site_events_once,
+    preview_site_events,
+    site_event_cursor,
+    site_events_poller,
+)
 
 
 class CapacityConfigurationError(ValueError):
@@ -24,7 +37,12 @@ class CapacityConfigurationError(ValueError):
 
 
 class CapacityBindingError(ValueError):
-    """A capacity effect does not match its durable authority binding."""
+    """A capacity effect does not match its durable authority binding.
+
+    An identity fault -- an unknown site, a changed or unreadable binding.
+    Supply no admission authority stands behind is refused separately, with
+    the backing delegate's ``CapacityNotAdmittedError``.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,18 +67,23 @@ class CapacitySite:
 
 
 @dataclass(frozen=True, slots=True)
-class CapacityBinding:
-    """Exact publication/effect authority selected by domain composition.
+class PublicationBinding:
+    """A listing's durable identity and the backing behind it.
 
-    ``source_id`` is domain-owned and opaque to this kit (pool ID, quota
+    ``site_id`` is the site the listing originates from, which every listing
+    has. ``source_id`` is domain-owned and opaque to this kit (pool ID, quota
     resource ID, Physical Resource ID, or another stable candidate identity).
-    ``offering_mode`` is the exact pool-declared mode advertised by the
-    candidate and later passed to reservation/fulfillment policy.
+    ``offering_mode`` is the exact mode the listing advertises. ``backing`` is
+    the delegate its pool's declared label selects, and decides every effect
+    that differs by backing; the binding never says which backing it holds.
+    Because ``backing`` is a field, two bindings that differ only in backing
+    are unequal, so a durable comparison catches a changed backing.
     """
 
     site_id: str
     offering_mode: str
     source_id: str
+    backing: CapacityBacking
 
     def __post_init__(self) -> None:
         for field_name in ("site_id", "offering_mode", "source_id"):
@@ -68,6 +91,37 @@ class CapacityBinding:
             if not isinstance(value, str) or not value.strip():
                 raise CapacityBindingError(f"{field_name} must be non-empty")
             object.__setattr__(self, field_name, value.strip())
+        if not isinstance(self.backing, CapacityBacking):
+            raise CapacityBindingError("backing must be a capacity backing delegate")
+
+
+def publication_binding(
+    *,
+    capacity_backing: str,
+    site_id: str,
+    offering_mode: str,
+    source_id: str,
+) -> PublicationBinding:
+    """Load a binding from its durable record, refusing an unknown backing label.
+
+    There is no default: a label no delegate is registered for is a
+    durable-state error, not a listing to classify.
+    """
+    try:
+        backing = resolve_capacity_backing(capacity_backing)
+    except UnknownCapacityBackingError as exc:
+        raise CapacityBindingError(str(exc)) from exc
+    return PublicationBinding(site_id, offering_mode, source_id, backing)
+
+
+def backing_changed(binding: PublicationBinding, source_backing: CapacityBacking) -> bool:
+    """Whether the backing a listing's source now declares differs from its binding's.
+
+    A listing's backing is fixed for the life of its binding, so every domain
+    asks this first on every refresh, reopen, and source check: a changed
+    backing closes the listing rather than refreshing it.
+    """
+    return binding.backing is not source_backing
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +181,153 @@ async def capacity_availability(client: Any) -> dict[tuple[str, str], int]:
     return view
 
 
+def _at_site(
+    result: Mapping[str, Any] | None, binding: PublicationBinding
+) -> dict[str, Any] | None:
+    """An effect's result, tagged with the binding's site that produced it."""
+    if result is None:
+        return None
+    out = dict(result)
+    out["site"] = binding.site_id
+    return out
+
+
+class CapacityEffects:
+    """The one guarded boundary every storefront capacity effect passes.
+
+    Reserve, commit, lease activation, release, and lease truncation act only
+    at a listing's durable binding site, and only after the binding's backing
+    delegate admits the effect, before any site call. Composed over any
+    aggregate capacity client, so a storefront that builds its own aggregate --
+    one that records where each reservation lives, say -- passes the same guard
+    as one composed through :class:`CapacityRuntime`. Every effect names its site to the
+    aggregate, so only the sites it names are reachable and nothing is chosen
+    from response data or fanned out.
+    """
+
+    def __init__(self, client: AggregateCapacityClient) -> None:
+        self._client = client
+
+    def require_binding(
+        self, binding: PublicationBinding, effect: str
+    ) -> PublicationBinding:
+        binding.backing.require_admission(effect)
+        if binding.site_id not in self._client.site_names:
+            raise CapacityBindingError(
+                f"capacity binding references unconfigured site {binding.site_id!r}"
+            )
+        return binding
+
+    async def reserve(
+        self,
+        binding: PublicationBinding,
+        *,
+        claim: Mapping[str, Any],
+        deal_ref: Mapping[str, Any] | None = None,
+        ttl_seconds: float | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Reserve only at the candidate's recorded authority."""
+        self.require_binding(binding, "reserve")
+        reserved = await self._client.reserve(
+            claim=claim,
+            deal_ref=deal_ref,
+            ttl_seconds=ttl_seconds,
+            lease_start_utc=lease_start_utc,
+            lease_duration_seconds=lease_duration_seconds,
+            site=binding.site_id,
+        )
+        if reserved is not None and reserved.get("site") != binding.site_id:
+            raise CapacityBindingError("capacity authority returned a mismatched site")
+        return reserved
+
+    async def commit(
+        self,
+        binding: PublicationBinding,
+        *,
+        resource_id: str | None,
+        capacity_reservation_id: str,
+        lease_start_utc: str | None = None,
+        lease_end_utc: str | None = None,
+        idempotency_ref: str | None = None,
+        deal_ref: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Commit directly at the recorded site, including after restart.
+
+        Returns the reservation as the site recorded it; a repeat commit
+        returns the window the first one recorded. ``deal_ref`` correlates the
+        reservation with its deal.
+        """
+        self.require_binding(binding, "commit")
+        committed = await self._client.commit(
+            resource_id=resource_id,
+            capacity_reservation_id=capacity_reservation_id,
+            lease_start_utc=lease_start_utc,
+            lease_end_utc=lease_end_utc,
+            idempotency_ref=idempotency_ref,
+            deal_ref=deal_ref,
+            site_id=binding.site_id,
+        )
+        return _at_site(committed, binding)
+
+    async def release(
+        self,
+        binding: PublicationBinding,
+        *,
+        capacity_reservation_id: str,
+        deal_ref: Mapping[str, Any] | None = None,
+        failure_reason: str | None = None,
+        failure_message: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Release directly at the recorded site, without discovery fan-out."""
+        self.require_binding(binding, "release")
+        released = await self._client.release(
+            capacity_reservation_id=capacity_reservation_id,
+            deal_ref=deal_ref,
+            failure_reason=failure_reason,
+            failure_message=failure_message,
+            site_id=binding.site_id,
+        )
+        return _at_site(released, binding)
+
+    async def truncate_lease(
+        self,
+        binding: PublicationBinding,
+        *,
+        capacity_reservation_id: str,
+        lease_end_utc: str,
+    ) -> dict[str, Any] | None:
+        """Truncate only at the durable site binding."""
+        self.require_binding(binding, "lease truncation")
+        truncated = await self._client.truncate_lease(
+            capacity_reservation_id=capacity_reservation_id,
+            lease_end_utc=lease_end_utc,
+            site_id=binding.site_id,
+        )
+        return _at_site(truncated, binding)
+
+    async def activate_lease(
+        self,
+        binding: PublicationBinding,
+        *,
+        capacity_reservation_id: str,
+    ) -> dict[str, Any] | None:
+        """Activate only at the durable site binding, including after restart.
+
+        Returns the reservation as the site recorded it, with the instant its
+        first activation recorded; a site that refuses raises its error.
+        """
+        self.require_binding(binding, "lease activation")
+        activated = await self._client.activate_lease(
+            capacity_reservation_id=capacity_reservation_id,
+            site_id=binding.site_id,
+        )
+        if activated is not None and activated.get("site") != binding.site_id:
+            raise CapacityBindingError("capacity authority returned a mismatched site")
+        return _at_site(activated, binding)
+
+
 class CapacityRuntime:
     """One composed source for projection, reconciliation, and bound effects."""
 
@@ -158,6 +359,7 @@ class CapacityRuntime:
         self._reconcile_hook = reconcile
         self._site_client_factory = site_client_factory
         self._client: AggregateCapacityClient | None = None
+        self._effects: CapacityEffects | None = None
 
     @property
     def site_ids(self) -> tuple[str, ...]:
@@ -182,12 +384,14 @@ class CapacityRuntime:
             raise CapacityBindingError(f"unknown capacity site_id {site_id!r}")
         return self.client().site(site_id)
 
-    def require_binding(self, binding: CapacityBinding) -> CapacityBinding:
-        if binding.site_id not in self._sites:
-            raise CapacityBindingError(
-                f"capacity binding references unconfigured site {binding.site_id!r}"
-            )
-        return binding
+    def effects(self) -> CapacityEffects:
+        """Return the guarded effects over this runtime's aggregate, built once."""
+        if self._effects is None:
+            self._effects = CapacityEffects(self.client())
+        return self._effects
+
+    def require_binding(self, binding: PublicationBinding) -> PublicationBinding:
+        return self.effects().require_binding(binding, "capacity operation")
 
     async def projections(self) -> tuple[CapacityProjection, ...]:
         """Fetch each site separately so no row can choose its own authority."""
@@ -217,90 +421,29 @@ class CapacityRuntime:
         return view
 
     async def reserve(
-        self,
-        binding: CapacityBinding,
-        *,
-        claim: Mapping[str, Any],
-        deal_ref: Mapping[str, Any] | None = None,
-        ttl_seconds: float | None = None,
-        lease_start_utc: str | None = None,
-        lease_duration_seconds: int | None = None,
+        self, binding: PublicationBinding, **kwargs: Any
     ) -> dict[str, Any] | None:
-        """Reserve only at the candidate's recorded authority."""
-        binding = self.require_binding(binding)
-        reserved = await self.client().reserve(
-            claim=claim,
-            deal_ref=deal_ref,
-            ttl_seconds=ttl_seconds,
-            lease_start_utc=lease_start_utc,
-            lease_duration_seconds=lease_duration_seconds,
-            site=binding.site_id,
-        )
-        if reserved is not None and reserved.get("site") != binding.site_id:
-            raise CapacityBindingError("capacity authority returned a mismatched site")
-        return reserved
+        return await self.effects().reserve(binding, **kwargs)
 
     async def commit(
-        self,
-        binding: CapacityBinding,
-        *,
-        resource_id: str | None,
-        capacity_reservation_id: str,
-        lease_start_utc: str | None = None,
-        lease_end_utc: str | None = None,
-        idempotency_ref: str | None = None,
-    ) -> None:
-        """Commit directly at the recorded site, including after restart."""
-        binding = self.require_binding(binding)
-        await self.site_client(binding.site_id).commit(
-            resource_id=resource_id,
-            capacity_reservation_id=capacity_reservation_id,
-            lease_start_utc=lease_start_utc,
-            lease_end_utc=lease_end_utc,
-            idempotency_ref=idempotency_ref,
-        )
+        self, binding: PublicationBinding, **kwargs: Any
+    ) -> dict[str, Any] | None:
+        return await self.effects().commit(binding, **kwargs)
 
     async def release(
-        self,
-        binding: CapacityBinding,
-        *,
-        capacity_reservation_id: str,
-        deal_ref: Mapping[str, Any] | None = None,
-        failure_reason: str | None = None,
-        failure_message: str | None = None,
+        self, binding: PublicationBinding, **kwargs: Any
     ) -> dict[str, Any] | None:
-        """Release directly at the recorded site, without discovery fan-out."""
-        binding = self.require_binding(binding)
-        released = await self.site_client(binding.site_id).release(
-            capacity_reservation_id=capacity_reservation_id,
-            deal_ref=deal_ref,
-            failure_reason=failure_reason,
-            failure_message=failure_message,
-        )
-        if released is None:
-            return None
-        out = dict(released)
-        out["site"] = binding.site_id
-        return out
+        return await self.effects().release(binding, **kwargs)
 
     async def truncate_lease(
-        self,
-        binding: CapacityBinding,
-        *,
-        capacity_reservation_id: str,
-        lease_end_utc: str,
+        self, binding: PublicationBinding, **kwargs: Any
     ) -> dict[str, Any] | None:
-        """Truncate only at the durable site binding."""
-        binding = self.require_binding(binding)
-        truncated = await self.site_client(binding.site_id).truncate_lease(
-            capacity_reservation_id=capacity_reservation_id,
-            lease_end_utc=lease_end_utc,
-        )
-        if truncated is None:
-            return None
-        out = dict(truncated)
-        out["site"] = binding.site_id
-        return out
+        return await self.effects().truncate_lease(binding, **kwargs)
+
+    async def activate_lease(
+        self, binding: PublicationBinding, **kwargs: Any
+    ) -> dict[str, Any] | None:
+        return await self.effects().activate_lease(binding, **kwargs)
 
     async def reconcile_now(self) -> None:
         await self._run_reconcile(None)
@@ -327,8 +470,55 @@ class CapacityRuntime:
             )
         )
 
-    async def poll_events(self, *, interval_seconds: float) -> None:
-        """Tail every configured authority and reconcile at feed boundaries."""
+    async def preview_events_once(self, site_id: str) -> SiteEventPreview:
+        """Report what one site's next event cycle would do, changing nothing.
+
+        The read half of stepping a held loop: a caller can see the pending
+        events and the feed head before deciding to apply them, the same way
+        the evaluate routes dry-run a negotiation or a settlement.
+        """
+        return await preview_site_events(
+            self.site_client(site_id),
+            site_event_cursor(site_id),
+        )
+
+    async def drain_events_once(self, site_id: str) -> SiteEventCycle:
+        """Run exactly one event cycle for one site and report what it did.
+
+        Addresses the same cursor the running poller holds, because a second
+        position would replay or skip, and takes that cursor's lock, so a step
+        requested while the site's poller is mid-cycle runs after that cycle.
+        Another site's poller never delays it.
+        """
+        # `site_client` already fails closed on an unconfigured site, so
+        # there is no second guard here saying the same thing differently.
+        return await drain_site_events_once(
+            self.client(),
+            self.site_client(site_id),
+            site_event_cursor(site_id),
+            full_reconcile=self.reconcile_now,
+        )
+
+    async def poll_events(
+        self,
+        *,
+        interval_seconds: float,
+        paused: Callable[[str], Callable[[], bool]] | None = None,
+        wait: Callable[[float], Awaitable[None]] | None = None,
+        record: Callable[[str], Callable[[SiteEventCycle], None]] | None = None,
+    ) -> None:
+        """Tail every configured authority and reconcile at feed boundaries.
+
+        ``paused`` is a factory, not a predicate: it receives a site id and
+        returns that site's gate. The pollers run concurrently and each holds
+        its own feed position, so one site being held must not hold the others
+        -- a single shared predicate could only stop all of them together.
+        Supplying the gate per site keeps the naming with the caller, which is
+        the only party that knows what each loop is registered as. ``wait`` is
+        the interruptible wait each site poller uses between cycles. ``record``
+        is a factory in the same way: given a site id, it returns what that
+        site's poller reports each cycle it ran to.
+        """
         if interval_seconds <= 0:
             raise CapacityConfigurationError("poll interval must be positive")
         aggregate = self.client()
@@ -340,7 +530,66 @@ class CapacityRuntime:
                     self.site_client(site_id),
                     interval_seconds,
                     full_reconcile=self.reconcile_now,
+                    paused=paused(site_id) if paused is not None else None,
+                    wait=wait,
+                    record=record(site_id) if record is not None else None,
                 )
                 for site_id in self.site_ids
             )
         )
+
+
+#: How often the aggregate capacity-event loop returns to its gate. It performs
+#: no work -- the site pollers do the polling -- so this is purely how often it
+#: checks on the fan-out; a pause reaches it at once through the injected wait.
+AGGREGATE_GATE_SECONDS = 0.5
+
+_AGGREGATE_HELD_POLL_SECONDS = 0.05
+
+
+async def run_capacity_event_pollers(
+    poll_events: Callable[..., Awaitable[None]],
+    *,
+    gate: Callable[[], bool],
+    site_gate: Callable[[str], Callable[[], bool]],
+    wait: Callable[[float], Awaitable[None]],
+    record_site_cycle: Callable[[str], Callable[[SiteEventCycle], None]] | None = None,
+    gate_seconds: float = AGGREGATE_GATE_SECONDS,
+) -> None:
+    """Run the per-site capacity-event pollers under one gated aggregate loop.
+
+    ``poll_events`` is a runtime's ``poll_events`` with its interval bound; it
+    receives ``site_gate`` as its per-site gate factory, ``wait`` as the
+    interruptible wait each site poller uses between cycles, and
+    ``record_site_cycle`` as its per-site factory of where each cycle a site's
+    poller ran is reported. The fan-out serializes each site's cycles under its
+    own lock rather than the loop controller's, so this is how each site's
+    timer cycles reach the controller's record of outcomes, under that site's
+    loop name; the aggregate loop records none of its own, since it runs no
+    cycle. It gathers the site
+    pollers and never returns while a site is configured, so awaiting it from a
+    gated loop would let that loop gate exactly once and then sit inside the
+    call forever -- reaching its gate once is enough to be acknowledged and not
+    enough to ever observe a pause. It therefore runs as its own task, and this
+    loop gates and waits beside it, which also keeps a storefront with no site
+    configured reporting a capacity loop at all. A fan-out that fails is
+    surfaced here rather than idled over, so the aggregate loop ends with it.
+    """
+
+    pollers = asyncio.create_task(
+        poll_events(
+            paused=site_gate,
+            wait=wait,
+            **({} if record_site_cycle is None else {"record": record_site_cycle}),
+        )
+    )
+    try:
+        while True:
+            if gate():
+                await asyncio.sleep(_AGGREGATE_HELD_POLL_SECONDS)
+                continue
+            if pollers.done():
+                await pollers
+            await wait(gate_seconds)
+    finally:
+        pollers.cancel()

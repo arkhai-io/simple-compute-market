@@ -51,9 +51,10 @@ class LegacyFulfillmentBackfillDraft:
     state: str
     settlement_resource_id: str
     pool_id: str
-    executor_kind: str
+    offering_mode: str
     provider: str
     resource_attributes: dict[str, Any]
+    resource_host_id: str | None
     provider_metadata: dict[str, Any]
     teardown_provider_metadata: dict[str, Any] | None
     prepared_teardown_operation: dict[str, Any] | None

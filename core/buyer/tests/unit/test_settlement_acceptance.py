@@ -1,6 +1,6 @@
 """Buyer-side validation of an option-selected seller acceptance.
 
-The seller reply shape under test mirrors what every hosted storefront
+The seller reply shape under test mirrors what an option-selected storefront
 emits at acceptance: an obligation built from the advertised option plus
 the party principals, and a domain-namespaced ``service_terms`` package
 (``vm.v1`` / ``bare_metal.v1`` / api-credits equivalents).
@@ -8,21 +8,125 @@ the party principals, and a domain-namespaced ``service_terms`` package
 
 from __future__ import annotations
 
+import base64
+from types import SimpleNamespace
+
 import pytest
+from core_buyer.negotiation_client import (
+    NegotiationOutcome,
+    _parse_settlement_data,
+    _validate_settlement_acceptance,
+    negotiate_with_seller,
+    parse_accepted_terms_from_reply,
+)
 from market_core.schemas import (
+    Agreement,
+    RateValue,
     SettlementObligation,
     SettlementOption,
     SettlementPlan,
     SettlementSelection,
     derive_settlement_option_id,
 )
-from market_identity import Identity, TrustedIdentitySet
+from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
 
-from core_buyer.negotiation_client import _validate_settlement_acceptance
+
+def test_seller_settlement_data_survives_buyer_acceptance(monkeypatch) -> None:
+    buyer = Ed25519Signer(bytes([17]) * 32)
+    seller = Ed25519Signer(bytes([34]) * 32)
+    provision_terms = {"kind": "example.v1", "version": 1, "payload": {}}
+    agreement = Agreement(
+        negotiation_id="neg-1",
+        listing_id="listing-1",
+        listing_hash="0" * 64,
+        buyer=buyer.identity.model_dump(mode="json"),
+        seller=seller.identity.model_dump(mode="json"),
+        amount=4200,
+        duration_seconds=3600,
+        start_utc="2025-01-01T00:00:00Z",
+        accepted_at="2025-01-01T00:00:00Z",
+    )
+    agreement_bytes = agreement.model_dump_json(exclude_none=True).encode()
+    settlement_data = {"mandate": {"opaque": "to-core"}}
+    reply = {
+        "negotiation_id": "neg-1",
+        "action": "accept",
+        "proposal": {"fields": {"amount": 4200}},
+        "buyer_principal": buyer.identity.model_dump(mode="json"),
+        "seller_principal": seller.identity.model_dump(mode="json"),
+        "accepted_provision_terms": provision_terms,
+        "agreement": agreement.model_dump(mode="json", exclude_none=True),
+        "agreement_bytes": base64.b64encode(agreement_bytes).decode("ascii"),
+        "settlement_data": settlement_data,
+    }
+
+    monkeypatch.setattr(
+        "core_buyer.negotiation_client.run_negotiation_chain",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            action="counter", proposal={"fields": {"amount": 4200}}
+        ),
+    )
+    monkeypatch.setattr(
+        "core_buyer.negotiation_client._authenticated_json",
+        lambda *_args, **_kwargs: reply,
+    )
+    accepted = []
+    observed = []
+
+    def validate_acceptance(outcome):
+        assert observed == []
+        accepted.append(outcome)
+
+    outcome = negotiate_with_seller(
+        seller_url="http://seller",
+        principal=buyer.identity,
+        signer=buyer,
+        listing_id="listing-1",
+        resolve_seller_principals=lambda: TrustedIdentitySet(
+            identities=(seller.identity,)
+        ),
+        initial_price=4200,
+        max_price=4200,
+        unit_count=1,
+        provision_terms=provision_terms,
+        escrow_proposal={},
+        encode_escrow_proposal=lambda _proposal: {"fields": {"amount": 4200}},
+        chain=[],
+        validate_acceptance=validate_acceptance,
+        on_round=lambda *_args: observed.append("accepted"),
+    )
+
+    assert accepted == [outcome]
+    assert accepted[0] is outcome
+    assert observed == ["accepted"]
+    assert outcome.settlement_data == settlement_data
+    assert outcome.to_dict()["settlement_data"] == settlement_data
+    assert _parse_settlement_data({}) is None
+    with pytest.raises(ValueError, match="must be an object"):
+        _parse_settlement_data({"settlement_data": ["not", "an object"]})
+
+
+@pytest.mark.parametrize(
+    "terms",
+    [[{"maker": "buyer", "escrow_contract": "0x" + "33" * 20}], "not even a list"],
+    ids=["terms naming another escrow", "unreadable terms"],
+)
+def test_escrow_terms_an_accept_reply_carries_are_never_read(terms) -> None:
+    """A buyer funds only the escrow it derives, so a reply's terms are ignored."""
+    reply = {
+        "accepted_escrow_proposal": {"chain_name": "anvil"},
+        "accepted_escrow_terms": terms,
+    }
+
+    assert parse_accepted_terms_from_reply(reply) == (
+        None, {"chain_name": "anvil"}, None, None,
+    )
+    assert "accepted_escrow_terms" not in NegotiationOutcome.__dataclass_fields__
+
 
 _BUYER = Identity(scheme="eip191", identifier="0x" + "11" * 20)
 _SELLER = Identity(scheme="eip191", identifier="0x" + "22" * 20)
-_CONDITION = {"kind": "hosted_funding.v1", "resolver": "authority"}
+_CONDITION = {"kind": "example.condition.v1", "resolver": "authority"}
 _EXPIRATION = 1_900_000_000
 _AMOUNT = 4200
 _PARAMS = {
@@ -30,26 +134,46 @@ _PARAMS = {
     "claimant_principal": _SELLER.model_dump(mode="json"),
 }
 _OPTION_ID = derive_settlement_option_id(
-    mechanism="fiat.stripe.v1",
-    asset="usd",
-    rates=[],
-    params=_PARAMS,
+    price={"asset": "usd", "rates": []},
+    settlement={"schema": "example.payment.v1", **(_PARAMS or {})},
 )
 
 
 def _advertised_option() -> SettlementOption:
     return SettlementOption(
         option_id=_OPTION_ID,
-        mechanism="fiat.stripe.v1",
-        asset="usd",
-        rates=[],
-        params={key: dict(value) for key, value in _PARAMS.items()},
+        price={"asset": "usd", "rates": []},
+        settlement={
+            "schema": "example.payment.v1",
+            **({key: dict(value) for key, value in _PARAMS.items()} or {}),
+        },
+    )
+
+
+def _agreement(
+    option: SettlementOption,
+    *,
+    amount: int = _AMOUNT,
+    listing_id: str = "L-hosted",
+) -> Agreement:
+    return Agreement(
+        negotiation_id="neg-1",
+        listing_id=listing_id,
+        listing_hash="0" * 64,
+        buyer=_BUYER.model_dump(mode="json"),
+        seller=_SELLER.model_dump(mode="json"),
+        settlement=option,
+        amount=amount,
+        asset=option.price_asset,
+        duration_seconds=3600,
+        start_utc="2025-01-01T00:00:00Z",
+        accepted_at="2025-01-01T00:00:00Z",
     )
 
 
 def _seller_plan(service_terms: dict) -> SettlementPlan:
     option = _advertised_option()
-    params = dict(option.params)
+    params = dict(option.settlement_params)
     params["payer_principal"] = _BUYER.model_dump(mode="json")
     params["claimant_principal"] = _SELLER.model_dump(mode="json")
     return SettlementPlan(
@@ -66,7 +190,7 @@ def _seller_plan(service_terms: dict) -> SettlementPlan:
                 asset="usd",
                 expiration_unix=_EXPIRATION,
                 conditions=[dict(_CONDITION)],
-                mechanism="fiat.stripe.v1",
+                mechanism="example.payment.v1",
                 params=params,
             )
         ],
@@ -75,11 +199,13 @@ def _seller_plan(service_terms: dict) -> SettlementPlan:
 
 def _validate(plan: SettlementPlan) -> None:
     selection = SettlementSelection(
-        mechanism="fiat.stripe.v1",
         option_id=_OPTION_ID,
+        settlement={"schema": "example.payment.v1"},
         expiration_unix=_EXPIRATION,
     )
     _validate_settlement_acceptance(
+        agreement=_agreement(_advertised_option()),
+        expected_listing_id="L-hosted",
         reply={
             "buyer_principal": _BUYER.model_dump(mode="json"),
             "seller_principal": _SELLER.model_dump(mode="json"),
@@ -101,7 +227,7 @@ def test_accepts_seller_plan_with_domain_service_terms() -> None:
         service_terms={
             "vm.v1": {
                 "listing_id": "L-hosted",
-                "order": {"offer_resource": {"resource_id": "resource-hosted"}},
+                "order": {"listing_resource": {"resource_id": "resource-hosted"}},
                 "provision": {"ssh_public_key": "ssh-rsa AAAA"},
             }
         }
@@ -120,10 +246,7 @@ _CONTACT_PARAMS = {
     "claimant_principal": _SELLER.model_dump(mode="json"),
 }
 _CONTACT_OPTION_ID = derive_settlement_option_id(
-    mechanism="contact-exchange.v1",
-    asset="introduction",
-    rates=[],
-    params=_CONTACT_PARAMS,
+    settlement={"schema": "contact-exchange.v1", **(_CONTACT_PARAMS or {})}
 )
 
 
@@ -133,12 +256,9 @@ def test_accepts_amountless_introduction_plan() -> None:
 
     option = SettlementOption(
         option_id=_CONTACT_OPTION_ID,
-        mechanism="contact-exchange.v1",
-        asset="introduction",
-        rates=[],
-        params=dict(_CONTACT_PARAMS),
+        settlement={"schema": "contact-exchange.v1", **(dict(_CONTACT_PARAMS) or {})},
     )
-    params = dict(option.params)
+    params = dict(option.settlement_params)
     params["payer_principal"] = _BUYER.model_dump(mode="json")
     params["claimant_principal"] = _SELLER.model_dump(mode="json")
     plan = SettlementPlan(
@@ -168,11 +288,13 @@ def test_accepts_amountless_introduction_plan() -> None:
         ],
     )
     selection = SettlementSelection(
-        mechanism="contact-exchange.v1",
         option_id=_CONTACT_OPTION_ID,
+        settlement={"schema": "contact-exchange.v1"},
         expiration_unix=_EXPIRATION,
     )
     _validate_settlement_acceptance(
+        agreement=_agreement(option, amount=0, listing_id="L-contact"),
+        expected_listing_id="L-contact",
         reply={
             "buyer_principal": _BUYER.model_dump(mode="json"),
             "seller_principal": _SELLER.model_dump(mode="json"),
@@ -205,3 +327,74 @@ def test_rejects_tampered_params() -> None:
     tampered = plan.obligations[0].model_copy(update={"params": params})
     with pytest.raises(RuntimeError, match="params differ"):
         _validate(plan.model_copy(update={"obligations": [tampered]}))
+
+
+def _amountless_acceptance(raw_rates: list[dict]) -> None:
+    """Validate an amountless seller accept of an option carrying ``raw_rates``."""
+    rates = [RateValue.model_validate(rate) for rate in raw_rates]
+    params = {"claimant_principal": _SELLER.model_dump(mode="json")}
+    option_id = derive_settlement_option_id(
+        price={"asset": "introduction", "rates": rates},
+        settlement={"schema": "example.v1", **(params or {})},
+    )
+    option = SettlementOption(
+        option_id=option_id,
+        price={"asset": "introduction", "rates": rates},
+        settlement={"schema": "example.v1", **(dict(params) or {})},
+    )
+    obligation_params = {
+        **params,
+        "payer_principal": _BUYER.model_dump(mode="json"),
+    }
+    plan = SettlementPlan(
+        buyer_principal=_BUYER.model_dump(mode="json"),
+        seller_principal=_SELLER.model_dump(mode="json"),
+        service_terms={"example.v1": {"option_id": option_id}},
+        obligations=[
+            SettlementObligation(
+                payer="buyer",
+                claimant="seller",
+                payer_principal=_BUYER.model_dump(mode="json"),
+                claimant_principal=_SELLER.model_dump(mode="json"),
+                amount=None,
+                asset="introduction",
+                expiration_unix=_EXPIRATION,
+                conditions=[],
+                mechanism="example.v1",
+                params=obligation_params,
+            )
+        ],
+    )
+    selection = SettlementSelection(
+        option_id=option_id,
+        settlement={"schema": "example.v1"},
+        expiration_unix=_EXPIRATION,
+    )
+    _validate_settlement_acceptance(
+        agreement=_agreement(option, amount=0, listing_id="L-amountless"),
+        expected_listing_id="L-amountless",
+        reply={
+            "buyer_principal": _BUYER.model_dump(mode="json"),
+            "seller_principal": _SELLER.model_dump(mode="json"),
+        },
+        selection=selection,
+        plan=plan,
+        expected_selection=selection,
+        advertised_option=option,
+        agreed_amount=None,
+        expected_plan=None,
+        buyer_principal=_BUYER,
+        trusted_seller_principals=TrustedIdentitySet(identities=(_SELLER,)),
+        validate_advertised_plan=None,
+    )
+
+
+def test_accepts_amountless_plan_for_an_option_with_no_amount_rate() -> None:
+    """A rate on another field does not make an option bargain an amount, so
+    its acceptance carries none."""
+    _amountless_acceptance([{"field": "nativeAmount", "per": "hour", "value": "5"}])
+
+
+def test_rejects_amountless_plan_for_an_option_bargaining_an_amount() -> None:
+    with pytest.raises(RuntimeError, match="omitted the negotiated amount"):
+        _amountless_acceptance([{"field": "amount", "per": "hour", "value": "5"}])

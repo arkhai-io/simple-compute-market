@@ -280,7 +280,7 @@ It is currently composed end to end for the bare-metal domain.
 
 [Arkhai Compute](https://compute.arkhai.io/) provides a managed payment option alongside SCM's independently operated settlement mechanisms.
 
-See the [settlement specifications](./openspec/specs/README.md) and [current release status](./docs/development/ROADMAP.md#hosted-settlement-release-status).
+See the [settlement specifications](./openspec/specs/README.md).
 
 ## Repository map
 
@@ -301,7 +301,6 @@ simple-compute-market/
 ├── dev-env/        # Development environment and state generation
 ├── scripts/        # Build, installation, review, and validation scripts
 ├── tools/          # Developer and issue-discovery tools
-├── manifests/      # Hosted-settlement release trust manifests
 ├── make/           # Shared Makefile targets
 ├── Makefile        # Root build, test, and validation entry points
 ├── install.sh      # Installation entry point

@@ -1,0 +1,22 @@
+CREATE TABLE credit_grants (
+    id INTEGER NOT NULL,
+    key_id VARCHAR NOT NULL,
+    fulfillment_id VARCHAR,
+    negotiation_id VARCHAR,
+    service VARCHAR,
+    resource_id VARCHAR,
+    key_mode VARCHAR,
+    key_target_id VARCHAR,
+    owner_scheme VARCHAR,
+    owner_id VARCHAR,
+    request_digest VARCHAR,
+    capacity_reservation_id VARCHAR,
+    result_balance INTEGER,
+    quantity INTEGER NOT NULL,
+    reason VARCHAR NOT NULL,
+    granted_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    FOREIGN KEY(key_id) REFERENCES api_keys (key_id),
+    UNIQUE (fulfillment_id),
+    UNIQUE (negotiation_id)
+);

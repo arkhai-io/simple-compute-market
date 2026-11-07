@@ -95,3 +95,13 @@ None.
 - Independent of `billable-capacity-reservations`; either may land first.
 - The idempotency defect is present today and worth fixing regardless of whether either
   of those changes proceeds.
+- Takes, from `resolve-compute-family-findings`' design (2026-10-27, its decision D1), the
+  rest of the ledger's escrow keying: release by escrow, reachable only from the VM
+  storefront's failure actions when a context carries neither a reservation nor a
+  negotiation identity, and the `escrow_uid` field the callers repurpose — bare metal
+  stores its settlement reference there (a payment transaction or an introduction
+  obligation), API credits a fulfillment identity, and VM sends none. Jobs already
+  correlate on the capacity reservation.
+- `resolve-compute-family-findings` removes the `provisioning` and `provisioning_failed`
+  states and modifies the same "Reservation lifecycle" requirement's list of held states;
+  whichever archives second rebases its delta on the other's.

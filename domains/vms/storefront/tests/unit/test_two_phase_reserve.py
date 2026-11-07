@@ -14,10 +14,12 @@ from market_storefront.services.vm_fulfillment_service import (
 )
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_capacity_publication import CapacityBinding
+from market_capacity_publication import PublicationBinding
+from market_resource_pools_contracts.backing import BACKED
 from market_identity import Ed25519Signer
 from market_negotiation_runtime import Acceptance, AgreementTerms, NegotiationTerms
 from market_storefront.negotiation_runtime import _place_capacity_hold
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 
 
@@ -51,6 +53,9 @@ async def _place_hold(
             binding=binding,
         ),
         capacity_runtime=capacity,
+        site_projections=site_projection_state(
+            {"site-test": FakeProjectionSite(resource_pools=[])}
+        ),
     )
 
 class FakeCapacity:
@@ -83,7 +88,7 @@ def _future() -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=600)).isoformat()
 
 
-_BINDING = CapacityBinding("site-test", "vm", "pool-test")
+_BINDING = PublicationBinding("site-test", "vm", "pool-test", BACKED)
 
 
 def _hold(**overrides) -> dict:
@@ -91,7 +96,6 @@ def _hold(**overrides) -> dict:
         "capacity_reservation_id": "alloc-1",
         "resource_id": "res-1",
         "site": _BINDING.site_id,
-        "vm_host": "kvm1",
         "hold_expires_at": _future(),
     }
     base.update(overrides)
@@ -111,7 +115,7 @@ async def test_valid_hold_commits_before_provisioning():
         capacity=capacity,
         binding=_BINDING,
         held_reservation=_hold(),
-        escrow_uid="0xesc",
+        negotiation_id="neg-1",
         duration_seconds=3600,
         stage_event=stage_event,
     )
@@ -121,7 +125,7 @@ async def test_valid_hold_commits_before_provisioning():
     commit = capacity.commit_calls[0]
     assert commit["binding"] == _BINDING
     assert commit["capacity_reservation_id"] == "alloc-1"
-    assert commit["idempotency_ref"] == "0xesc"
+    assert commit["idempotency_ref"] == "neg-1"
     assert captured[0][1] == "capacity_hold_committed"
 
 
@@ -134,7 +138,7 @@ async def test_fresh_reservation_commits_before_provisioning():
         capacity=capacity,
         binding=_BINDING,
         reserved=_hold(),
-        escrow_uid="0xesc",
+        negotiation_id="neg-1",
         duration_seconds=3600,
         stage_event=stage_event,
     )
@@ -143,7 +147,7 @@ async def test_fresh_reservation_commits_before_provisioning():
     assert commit["capacity_reservation_id"] == "alloc-1"
     assert commit["resource_id"] == "res-1"
     assert commit["binding"] == _BINDING
-    assert commit["idempotency_ref"] == "0xesc"
+    assert commit["idempotency_ref"] == "neg-1"
     assert captured[0][1] == "capacity_reservation_committed"
 
 
@@ -157,7 +161,7 @@ async def test_fresh_reservation_commit_failure_is_not_ignored():
             capacity=capacity,
             binding=_BINDING,
             reserved=_hold(),
-            escrow_uid="0xesc",
+            negotiation_id="neg-1",
             duration_seconds=3600,
             stage_event=stage_event,
         )
@@ -173,7 +177,7 @@ async def test_lapsed_hold_falls_back_to_fresh_reserve():
         capacity=capacity,
         binding=_BINDING,
         held_reservation=_hold(hold_expires_at=past),
-        escrow_uid="0xesc",
+        negotiation_id="neg-1",
         duration_seconds=3600,
         stage_event=stage_event,
     ) is None
@@ -191,7 +195,7 @@ async def test_ledger_refusal_falls_back_to_fresh_reserve():
         capacity=capacity,
         binding=_BINDING,
         held_reservation=_hold(),
-        escrow_uid="0xesc",
+        negotiation_id="neg-1",
         duration_seconds=3600,
         stage_event=stage_event,
     ) is None
@@ -205,7 +209,7 @@ async def test_no_hold_means_no_commit():
         capacity=capacity,
         binding=_BINDING,
         held_reservation=None,
-        escrow_uid="0xesc",
+        negotiation_id="neg-1",
         duration_seconds=3600,
         stage_event=stage_event,
     ) is None
@@ -222,7 +226,7 @@ def _settings(ttl: float):
 
 ORDER = {
     "listing_id": "lst-1",
-    "offer_resource": {
+    "listing_resource": {
         "resource_id": "res-1", "gpu_model": "H200", "gpu_count": 2,
     },
 }
@@ -234,7 +238,7 @@ def test_claim_survives_listing_model_validation():
     Accept paths derive the same pinned resource claim before and after model
     validation rather than silently selecting whichever resource is first.
     """
-    from domains.vms.listings.models import Listing
+    from arkhai_vms_listings.models import Listing
     from market_storefront.services.vm_job_spec_service import (
         compute_capacity_claim_from_order,
     )
@@ -247,7 +251,7 @@ def test_claim_survives_listing_model_validation():
             "scheme": "eip191",
             "identifier": "0x2222222222222222222222222222222222222222",
         },
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": "res-pin", "gpu_model": "H200", "gpu_count": 2,
             "sla": 99.0, "region": "California, US",
         },
@@ -255,7 +259,7 @@ def test_claim_survives_listing_model_validation():
     }
     pinned = compute_capacity_claim_from_order(row)
     Listing.model_validate(row)
-    assert isinstance(row["offer_resource"], dict)
+    assert isinstance(row["listing_resource"], dict)
     assert compute_capacity_claim_from_order(row) == pinned
     assert pinned["resource_id"] == "res-pin"
 
@@ -270,7 +274,7 @@ def test_claim_prefers_resource_id_over_pool_id():
 
     row = {
         "listing_id": "lst-both",
-        "offer_resource": {
+        "listing_resource": {
             "pool_id": "pool-A", "resource_id": "res-pin", "gpu_model": "H200",
             "gpu_count": 2, "sla": 99.0, "region": "California, US",
         },
@@ -295,7 +299,7 @@ def test_claim_carries_dimensions_when_listing_declares_a_shape():
 
     row = {
         "listing_id": "lst-shaped",
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": "res-shaped", "gpu_model": "H200", "gpu_count": 2,
             "sla": 99.0, "region": "California, US",
             "vcpu_count": 8, "ram_gb": 64, "disk_gb": 500,
@@ -322,7 +326,7 @@ def test_claim_omits_undeclared_dimensions_for_older_listings():
 
     row = {
         "listing_id": "lst-unshaped",
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": "res-unshaped", "gpu_model": "H200", "gpu_count": 1,
             "sla": 99.0, "region": "California, US",
         },
@@ -349,7 +353,7 @@ def test_claim_rejects_invalid_legacy_identity(identity):
 
     row = {
         "listing_id": "lst-invalid",
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": identity,
             "gpu_model": "H200",
             "gpu_count": 1,
@@ -373,7 +377,7 @@ def test_claim_raises_when_neither_pool_id_nor_resource_id_present():
 
     row = {
         "listing_id": "lst-under-specified",
-        "offer_resource": {
+        "listing_resource": {
             "gpu_model": "H200", "gpu_count": 2,
             "sla": 99.0, "region": "California, US",
         },
@@ -412,18 +416,12 @@ async def test_acceptance_places_and_records_the_hold(tmp_path):
 
 @pytest.mark.asyncio
 async def test_acceptance_hold_pins_to_the_listings_mapped_site(tmp_path):
-    """A listing already mapped to a site (derived_compute_listings)
-    must place its acceptance-time hold there -- proves site_id
-    resolution reaches _place_capacity_hold's reserve() call, not just
-    that reserve() itself honors a site kwarg when given one."""
-    from domains.vms.listings.reconciler import record_derived_listing
-
+    """A listing whose durable binding names a site must place its
+    acceptance-time hold there -- proves the binding's site reaches
+    _place_capacity_hold's reserve() call, not just that reserve() itself
+    honors a site kwarg when given one."""
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
-    binding = CapacityBinding("dc-mapped", "vm", "pool-mapped")
-    record_derived_listing(
-        db.db_path, listing_id="lst-1", site_id=binding.site_id,
-        pool_id=binding.source_id, resource_id="res-1", gpu_count=2,
-    )
+    binding = PublicationBinding("dc-mapped", "vm", "pool-mapped", BACKED)
     capacity = FakeCapacity(
         reserve_result=_hold(site=binding.site_id),
     )
@@ -491,7 +489,7 @@ async def test_acceptance_hold_ttl_is_capped_by_the_listings_mapped_pool_prefere
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     capacity = FakeCapacity(reserve_result=_hold())
 
-    def pool_policy(repository, listing_id):
+    def pool_policy(repository, listing_id, _site_projections):
         assert repository is db
         assert listing_id == "lst-1"
         return {"max_reservation_hold_seconds": 30}
@@ -523,7 +521,7 @@ async def test_acceptance_hold_ttl_unchanged_when_no_pool_preference(tmp_path):
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     capacity = FakeCapacity(reserve_result=_hold())
 
-    def pool_policy(repository, listing_id):
+    def pool_policy(repository, listing_id, _site_projections):
         assert repository is db
         assert listing_id == "lst-1"
         return {}

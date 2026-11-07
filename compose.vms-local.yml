@@ -1,0 +1,103 @@
+# Development overlay for the VM stack: its services' identities, configuration
+# files, secret overlays, registry and site profiles, and the VM buyer service.
+#
+# Layered over compose.vms.yml, which includes compose.dev.yml for the dev
+# chain:
+#
+#     docker compose -p simple-market-service \
+#       -f compose.vms.yml -f compose.vms-local.yml up -d
+#
+# The VM end-to-end lane (`make -C e2e-tests test-e2e-vm`) adds the payments
+# double and compose.vms-lane.yml. The full local stack layers this file and
+# compose.apicredits-local.yml over docker-compose.yml instead; see that file.
+#
+# This is an overlay, applied with `-f`, not an `include`, because an
+# including file cannot redefine a service it imported, while later `-f` files
+# merge over earlier ones. The base topology stays `include`d: each domain file
+# resolves its relative paths against its own directory. Every path below is
+# relative to the repository root, the project directory of every `-f` file, and
+# every value it binds is committed. The one value a run supplies is
+# PROVISIONING_MODE, `mock` unless the run says `real`, which the provisioning
+# services take as their last profile.
+#
+# Every value it binds is a well-known development value that must never be
+# used on a public network; see dev-env/identities/README.md.
+
+services:
+  registry:
+    environment:
+      - CONFIG_DIRECTORY=/etc/arkhai/registry
+      - ACTIVE_PROFILES=registry-a
+    volumes:
+      - ./dev-env/registry:/etc/arkhai/registry:ro
+      - ./dev-env/identities/registry-a.eip191:/run/secrets/arkhai/registry-identity/credential:ro
+  registry-b:
+    environment:
+      - CONFIG_DIRECTORY=/etc/arkhai/registry
+      - ACTIVE_PROFILES=registry-b
+    volumes:
+      - ./dev-env/registry:/etc/arkhai/registry:ro
+      - ./dev-env/identities/registry-b.eip191:/run/secrets/arkhai/registry-identity/credential:ro
+  bob-storefront:
+    env_file:
+      - ./dev-env/identities/bob.identity.env
+    volumes:
+      - ./domains/vms/storefront/storefront.bob.toml:/etc/arkhai/storefront.toml:ro
+      # The wallet key, the registry-b token, and in the VM lane the payments
+      # key and the dispute credential.
+      - ./dev-env/identities/bob.storefront.secrets.toml:/etc/arkhai/storefront.secrets.toml:ro
+      # The dev chain's Alkahest address book, which the storefront's
+      # configuration names. The image holds only installed wheels, so it is
+      # bound to a fixed path rather than referenced in place.
+      - ./kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
+  alice-storefront:
+    env_file:
+      - ./dev-env/identities/alice.identity.env
+    volumes:
+      - ./domains/vms/storefront/storefront.alice.toml:/etc/arkhai/storefront.toml:ro
+      - ./dev-env/identities/alice.storefront.secrets.toml:/etc/arkhai/storefront.secrets.toml:ro
+      - ./kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
+  # Each provisioning authority loads the packaged base and container profiles
+  # from their source, then its site's profile -- the service's, storefront's
+  # and administrator's identities and its site id -- then the run's mode. A
+  # mode with no profile file, `real`, is skipped by the loader, and `mock` is
+  # selected by its name alone.
+  provisioning:
+    env_file:
+      - ./dev-env/identities/provisioning.identity.env
+    environment:
+      - CONFIG_DIRECTORY=/app/config
+      - ACTIVE_PROFILES=docker,vms-bob-site,${PROVISIONING_MODE:-mock}
+    volumes:
+      - ./provisioning/compute/service/src/compute_provisioning_service/config/config.yml:/app/config/config.yml:ro
+      - ./provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml:/app/config/config-docker.yml:ro
+      - ./dev-env/provisioning/config-vms-bob-site.yml:/app/config/config-vms-bob-site.yml:ro
+  alice-provisioning:
+    env_file:
+      - ./dev-env/identities/provisioning-alice.identity.env
+    environment:
+      - CONFIG_DIRECTORY=/app/config
+      - ACTIVE_PROFILES=docker,vms-alice-site,${PROVISIONING_MODE:-mock}
+    volumes:
+      - ./provisioning/compute/service/src/compute_provisioning_service/config/config.yml:/app/config/config.yml:ro
+      - ./provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml:/app/config/config-docker.yml:ro
+      - ./dev-env/provisioning/config-vms-alice-site.yml:/app/config/config-vms-alice-site.yml:ro
+  # A one-shot buyer, run by hand (`docker compose ... run --rm buyer-cli`). Its
+  # profile and run-state directories are Git-ignored and must exist before it
+  # runs, or Docker creates them owned by root, and uid and gid 1000, which it
+  # runs as, must be able to write them.
+  buyer-cli:
+    image: arkhai:e2e-tests
+    profiles: [buyer]
+    user: "1000:1000"
+    entrypoint: ["market"]
+    command: ["profile", "show"]
+    environment:
+      XDG_CONFIG_HOME: /etc
+      XDG_DATA_HOME: /var/lib/arkhai-buyer
+      XDG_STATE_HOME: /var/lib/arkhai-buyer-state
+    volumes:
+      - ./dev-env/identities/buyer.config.toml:/etc/arkhai/config.toml:ro
+      - ./.e2e-buyer/profile:/var/lib/arkhai-buyer/arkhai/buyer:rw
+      - ./.e2e-buyer/state:/var/lib/arkhai-buyer-state/arkhai:rw
+      - ./dev-env/identities/buyer.eip191:/run/secrets/arkhai/buyer-credential:ro

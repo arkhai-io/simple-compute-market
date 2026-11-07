@@ -31,7 +31,7 @@ def upgrade() -> None:
         sa.Column('agent_id', sa.String(), nullable=False),
         sa.Column('order_maker', sa.Text(), nullable=False),
         sa.Column('order_taker', sa.Text(), nullable=True),
-        sa.Column('offer_resource', sa.JSON(), nullable=False),
+        sa.Column('listing_resource', sa.JSON(), nullable=False),
         sa.Column('demand_resource', sa.JSON(), nullable=False),
         sa.Column('duration', sa.Integer(), nullable=False),
         sa.Column('maker_attestation', sa.Text(), nullable=True),

@@ -1,0 +1,31 @@
+# An example systemd unit running the plugin beside frps on the same host.
+#
+# The wheel is installed into its own environment, as README.md's "Installing"
+# describes, and the configuration is /etc/frp-grant-admission/config.toml.
+# `systemctl reload frp-grant-admission` sends SIGHUP: the plugin re-reads the file
+# and keeps the running configuration if the new one does not load.
+
+[Unit]
+Description=frps server plugin admitting proxies by signed grant
+After=network.target
+Before=frps.service
+
+[Service]
+Type=simple
+ExecStart=/opt/frp-grant-admission/bin/frp-grant-admission serve --config /etc/frp-grant-admission/config.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5s
+
+# The plugin needs no privilege: it binds a loopback port and reads one file, which
+# must be readable by any user. It runs as a user systemd allocates for it.
+DynamicUser=yes
+
+# Security hardening, as frps's own unit carries it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

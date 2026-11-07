@@ -12,15 +12,22 @@ commits, or a controlled failure rolls back, together.
 from __future__ import annotations
 
 from dependency_injector import providers
+from market_identity import Ed25519Signer
+from compute_provisioning_service.identity import ProvisioningIdentityContext
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from compute_provisioning_ansible import ssh_connection
+from compute_provisioning_contracts import HostCreate
 from compute_provisioning_service.container import Container
 from compute_provisioning_service.db.models import Base
 from market_fulfillment import FulfillmentBase, PhysicalSettlementRequest
-from market_resource_pools import PoolCreate
+from market_resource_pools_contracts import PoolCreate
 from market_resource_pools.db import Base as PoolsBase
+from vm_provisioning_adapter.db import Base as VmBase
+from compute_provisioning.hosts.db import Base as HostsBase
+from compute_provisioning.relays.db import Base as RelaysBase
 from market_site.db import Base as SiteBase
 
 
@@ -28,7 +35,7 @@ def _build_container():
     """A fresh `Container` instance wired to an isolated in-memory database.
 
     `ACTIVE_PROFILES=mock` (set for this whole test run, see Makefile)
-    makes `build_vm_runtime` compose `ProgrammableMockAnsibleService`
+    makes `build_vm_runtime` compose the mock Ansible runner
     instead of a real Ansible client, so resolving the container's VM
     runtime -- required to resolve `resource_pool_service`'s Ansible pool
     config handler -- performs no real network I/O.
@@ -40,13 +47,36 @@ def _build_container():
     )
     Base.metadata.create_all(bind=engine)
     PoolsBase.metadata.create_all(bind=engine)
+    HostsBase.metadata.create_all(bind=engine)
+    RelaysBase.metadata.create_all(bind=engine)
+    VmBase.metadata.create_all(bind=engine)
     SiteBase.metadata.create_all(bind=engine)
     FulfillmentBase.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine)
 
     container = Container()
     container.session_factory.override(providers.Object(session_factory))
+    # Public deterministic development principals; never use on a public network.
+    container.identity_context.override(ProvisioningIdentityContext(
+        signer=Ed25519Signer(bytes([1]) * 32),
+        storefront_principal=Ed25519Signer(bytes([2]) * 32).identity,
+        admin_principal=Ed25519Signer(bytes([3]) * 32).identity,
+        storefront_site_id="fixture-site",
+    ))
     return container, session_factory
+
+
+def _register_hosts(container, *host_ids: str) -> None:
+    """Register the hosts the declarations name: the real container's ledger
+    and scheduler offer a declaration only when its host takes new delivery.
+    The address is a documentation-range placeholder nothing connects to."""
+    for host_id in host_ids:
+        container.host_authority().register_host(HostCreate(
+            host_id=host_id,
+            connection=ssh_connection(
+                ssh_host="192.0.2.1", ssh_user="ubuntu", key_path="/keys/id"
+            ),
+        ))
 
 
 def test_real_container_resolves_scheduling_dependencies_to_one_boundary():
@@ -66,17 +96,21 @@ def test_real_container_resolves_scheduling_dependencies_to_one_boundary():
 
     pool_service.create_pool(
         PoolCreate(
-            id="pool-a", label="Pool A", provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            id="pool-a", label="Pool A", provider="vm.ansible",
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "p.yaml"},
         )
     )
+    # The real container supplies the providers' host requirement, and the
+    # Ansible provider delivers through a host, so the declaration names a
+    # registered one.
+    _register_hosts(container, "kvm1")
     ledger.register_resource(
         resource_id="r1", resource_type="compute.gpu",
-        total_units=10, enabled=True, pool_id="pool-a",
+        total_units=10, enabled=True, pool_id="pool-a", host_id="kvm1",
     )
     reservation = ledger.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"agreement_id": "composition-1", "market": "vms"},
     )
     assert reservation is not None
@@ -112,25 +146,26 @@ def test_real_container_composed_schedule_rolls_back_all_participating_tables():
 
     pool_service.create_pool(
         PoolCreate(
-            id="pool-a", label="Pool A", provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            id="pool-a", label="Pool A", provider="vm.ansible",
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "p.yaml"},
         )
     )
     pool_service.create_pool(
         PoolCreate(
-            id="pool-b", label="Pool B", provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            id="pool-b", label="Pool B", provider="vm.ansible",
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "p.yaml"},
         )
     )
+    _register_hosts(container, "kvm1", "kvm2")
     ledger.register_resource(
         resource_id="r1", resource_type="compute.gpu",
-        total_units=10, enabled=True, pool_id="pool-a",
+        total_units=10, enabled=True, pool_id="pool-a", host_id="kvm1",
     )
     ledger.register_resource(
         resource_id="r2", resource_type="compute.gpu",
-        total_units=10, enabled=True, pool_id="pool-b",
+        total_units=10, enabled=True, pool_id="pool-b", host_id="kvm2",
     )
 
     # Schedule a first reservation for real (no injected failure) so the
@@ -142,7 +177,7 @@ def test_real_container_composed_schedule_rolls_back_all_participating_tables():
     # real write, not a same-resource no-op, so its rollback is actually
     # exercised.
     first_reservation = ledger.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"agreement_id": "composition-rollback-warmup", "market": "vms"},
     )
     assert first_reservation is not None
@@ -153,7 +188,7 @@ def test_real_container_composed_schedule_rolls_back_all_participating_tables():
     )
 
     reservation = ledger.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"agreement_id": "composition-rollback-1", "market": "vms"},
     )
     assert reservation is not None

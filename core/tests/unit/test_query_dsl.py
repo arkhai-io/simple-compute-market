@@ -241,3 +241,80 @@ def test_descriptor_rejects_invalid_names_empty_operators_and_alias_duplicates()
             value_type=QueryValueType.STRING,
             operators=frozenset({ComparisonOperator.EQUAL}),
         )
+
+
+def _rate_descriptors() -> tuple[FieldDescriptor, ...]:
+    equality = frozenset({ComparisonOperator.EQUAL, ComparisonOperator.IN})
+    return (
+        FieldDescriptor(
+            name="asking_rate",
+            value_type=QueryValueType.DECIMAL,
+            operators=frozenset(
+                {ComparisonOperator.LESS_THAN, ComparisonOperator.LESS_THAN_OR_EQUAL}
+            ),
+            requires=("asking_rate_asset", "asking_rate_period"),
+        ),
+        FieldDescriptor(
+            name="asking_rate_asset", value_type=QueryValueType.STRING, operators=equality
+        ),
+        FieldDescriptor(
+            name="asking_rate_period", value_type=QueryValueType.STRING, operators=equality
+        ),
+    )
+
+
+def test_co_requirement_satisfied_compiles() -> None:
+    query = compile_query(
+        "asking_rate<=16.00 asking_rate_asset=usd asking_rate_period=hour",
+        _rate_descriptors(),
+    )
+    assert [comparison.field for comparison in query.comparisons] == [
+        "asking_rate",
+        "asking_rate_asset",
+        "asking_rate_period",
+    ]
+
+
+def test_missing_co_requirement_refused_at_the_bound() -> None:
+    source = "asking_rate_asset=usd asking_rate<=16.00"
+    with pytest.raises(QueryValidationError) as caught:
+        compile_query(source, _rate_descriptors())
+    assert caught.value.code == "missing_co_requirement"
+    assert caught.value.field == "asking_rate"
+    assert caught.value.position == source.index("asking_rate<=")
+    assert "asking_rate_period" in str(caught.value)
+
+
+def test_co_requirement_target_alone_compiles() -> None:
+    query = compile_query("asking_rate_asset=usd", _rate_descriptors())
+    assert len(query.comparisons) == 1
+
+
+def test_descriptor_refuses_requiring_itself() -> None:
+    with pytest.raises(ValueError, match="requires itself"):
+        FieldDescriptor(
+            name="asking_rate",
+            value_type=QueryValueType.DECIMAL,
+            operators=frozenset({ComparisonOperator.LESS_THAN}),
+            requires=("asking_rate",),
+        )
+
+
+def test_descriptor_set_refuses_undeclared_co_requirement() -> None:
+    lone = FieldDescriptor(
+        name="asking_rate",
+        value_type=QueryValueType.DECIMAL,
+        operators=frozenset({ComparisonOperator.LESS_THAN}),
+        requires=("asking_rate_asset",),
+    )
+    with pytest.raises(ValueError, match="undeclared"):
+        compile_query("asking_rate<1", (lone,))
+
+
+def test_field_reference_names_co_requirements_only_when_declared() -> None:
+    reference = {item["name"]: item for item in field_reference_json(_rate_descriptors())}
+    assert reference["asking_rate"]["requires"] == ["asking_rate_asset", "asking_rate_period"]
+    assert "requires" not in reference["asking_rate_asset"]
+    assert "requires=asking_rate_asset,asking_rate_period" in render_field_reference(
+        _rate_descriptors()
+    )

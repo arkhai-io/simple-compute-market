@@ -23,16 +23,15 @@ class ReservationState(str, enum.Enum):
     """Lifecycle states for a capacity reservation.
 
     The reservation row is the merged ledger entry the capacity design doc
-    calls for: the storefront's hold (``reserved → provisioning → leased``)
-    and the lease's temporal tail (``releasing → released``) are one row,
-    so release happens in a local transaction with no cross-service sync.
+    calls for: the storefront's hold (``reserved → leased``) and the lease's
+    temporal tail (``releasing → released``) are one row, so release happens
+    in a local transaction with no cross-service sync. Every state here is
+    one a lifecycle transition writes; none is set directly.
 
-    reserved     — capacity held for a deal; not yet provisioning. May carry
+    reserved     — capacity held for a deal, not yet committed. May carry
                    a TTL (``hold_expires_at``) for two-phase reserve.
-    provisioning — executor is building the workload.
-    provisioning_failed  — provisioning failed before a usable lease existed.
     leased       — committed into an active lease (``lease_end_utc`` set).
-    releasing    — lease ended; teardown/vm_remove job in flight.
+    releasing    — lease ended; teardown in flight under ``release_job_id``.
     released             — teardown succeeded and capacity returned to the pool.
     release_failed       — teardown failed/timed out; capacity remains held.
     unmanaged            — lifecycle oversight released; capacity remains held until admin repair.
@@ -40,8 +39,6 @@ class ReservationState(str, enum.Enum):
     """
 
     reserved = "reserved"
-    provisioning = "provisioning"
-    provisioning_failed = "provisioning_failed"
     leased = "leased"
     releasing = "releasing"
     released = "released"
@@ -54,7 +51,6 @@ class ReservationState(str, enum.Enum):
 # workload may not be torn down yet.
 HELD_RESERVATION_STATES = (
     ReservationState.reserved.value,
-    ReservationState.provisioning.value,
     ReservationState.leased.value,
     ReservationState.releasing.value,
     ReservationState.release_failed.value,
@@ -63,11 +59,24 @@ HELD_RESERVATION_STATES = (
 
 
 
+class LeaseEndedEvent(Base):
+    """Immutable intended-end events; acknowledgements belong to a separate outbox."""
+
+    __tablename__ = "site_lease_ended_events"
+    __table_args__ = (UniqueConstraint("capacity_reservation_id", "transition_key"),)
+
+    event_id = Column(String, primary_key=True)
+    capacity_reservation_id = Column(String, nullable=False, index=True)
+    transition_key = Column(String, nullable=False)
+    payload = Column(JSON, nullable=False)
+
+
 class CapacityBucket(Base):
-    """Provisioning-private host-level capacity accounting boundary.
+    """Provisioning-private per-declaration capacity accounting boundary.
 
     A bucket carries the currently reservable multidimensional balance for one
-    backing domain resource.  Its opaque identity and debit mappings never
+    capacity declaration, keyed by its backing resource, whether or not that
+    declaration names a host.  Its opaque identity and debit mappings never
     cross the storefront reservation contract.
     """
 
@@ -81,9 +90,17 @@ class CapacityBucket(Base):
         String, nullable=False, index=True,
     )
     pool_id = Column(String, nullable=True, index=True)
+    # The host this capacity is delivered through, when there is one. Opaque
+    # to the ledger: it is stored and copied into a reservation's
+    # ``executor_ref``, never resolved. Unique because one host carries one
+    # declaration — a second would sell the same connection twice. Null for
+    # capacity with no host, such as logical quota.
+    host_id = Column(String, nullable=True, unique=True)
     resource_type = Column(String, nullable=False, default="compute.gpu")
     resource_subtype = Column(String, nullable=True)
-    total_units = Column(Integer, nullable=False, default=0)
+    # Mirror of the composition's mirror dimension; null when the
+    # declaration does not name that dimension.
+    total_units = Column(Integer, nullable=True)
     capacity = Column(JSON, nullable=False, default=dict)
     attributes = Column(JSON, nullable=False, default=dict)
     enabled = Column(Boolean, nullable=False, default=True)
@@ -96,17 +113,15 @@ class CapacityBucket(Base):
 class CapacityReservation(Base):
     """A capacity hold and its lease tail, as one ledger row.
 
-    Merges the storefront's ``compute_allocations`` shape with the lease
-    fields previously duplicated into ``vm_leases``: when the watchdog
-    releases an expired lease it updates *this* row locally and emits
-    events, instead of PATCHing the storefront's resource table.
+    The hold and the lease it becomes are one record, so the lease watchdog
+    releases an expired lease by updating this row and emitting events; the
+    owning storefront learns of the release from those events.
 
     deal_ref is the opaque mapping the storefront passed at reserve time
     (listing_id, escrow_uid, owner callback) — the ledger never interprets
     it beyond routing deal-scoped events back to the owning storefront.
-    Timestamps are ISO-8601 TEXT, matching the storefront ledger they
-    replace; the reservation count per site is small enough to compare in
-    Python.
+    Timestamps are ISO-8601 TEXT; the reservation count per site is small
+    enough to compare in Python.
     """
 
     __tablename__ = "capacity_reservations"
@@ -116,26 +131,47 @@ class CapacityReservation(Base):
     # capacity-accounting choice is private to CapacityReservationDebit.
     settlement_resource_id = Column(String, nullable=True, index=True)
     units = Column(Integer, nullable=False, default=1)
-    # units mirrors dimensions["gpu_count"] for payload/caller compatibility.
-    # May be null when the multidimensional map is absent, in which case dimensions is {"gpu_count": units}.
+    # units mirrors the composition's mirror dimension in ``dimensions`` for
+    # payload/caller compatibility; when ``dimensions`` is null the held
+    # quantity is ``{<mirror>: units}``.
     dimensions = Column(JSON, nullable=True)
+    # The categorical half of the claim this reservation was admitted
+    # against, as matched at reserve time. Ledger-owned, never
+    # caller-supplied: `deal_ref` is the caller's dict, and a caller that
+    # could restate its own constraints here could also relax them.
+    #
+    # `dimensions` records how much was committed; this records what kind
+    # of resource was sold. Without it, scheduling can re-place a deal on
+    # any resource with room, because the only constraints surviving
+    # admission were the quantitative ones. NULL means a row predating
+    # this column, which is a different answer from `{}` ("admitted
+    # against no categorical constraint").
+    claim_attributes = Column(JSON, nullable=True)
     state = Column(
         String, nullable=False, default=ReservationState.reserved.value, index=True
     )
     deal_ref = Column(JSON, nullable=True)
     escrow_uid = Column(String, nullable=True, index=True)  # lifted from deal_ref
     hold_expires_at = Column(String, nullable=True)  # TTL soft hold (two-phase reserve)
-    executor_kind = Column(String, nullable=True)
+    offering_mode = Column(String, nullable=True)
     executor_target = Column(String, nullable=True)
     release_job_id = Column(String, nullable=True)
     executor_ref = Column(JSON, nullable=True)
     lease_start_utc = Column(String, nullable=True)
     lease_end_utc = Column(String, nullable=True)
     create_job_id = Column(String, nullable=True)
-    vm_remove_job_id = Column(String, nullable=True)
     failure_reason = Column(String, nullable=True)
     failure_message = Column(Text, nullable=True)
     released_at = Column(String, nullable=True)
+    # When the reservation last entered ``releasing``: the start of the release
+    # attempt a stalled teardown is timed from, whatever the lease's end.
+    release_requested_at = Column(String, nullable=True)
+    # When the site recorded that the lease began running against a provisioned
+    # resource. Written only by activation, once, from the site's clock; whether
+    # a lease is activated is derived from it and stored nowhere else. Null means
+    # only that no activation is recorded: a reservation stored before the
+    # column existed records none, and that says nothing about delivery.
+    activated_at_utc = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
@@ -188,4 +224,16 @@ class CapacityEvent(Base):
     # Null for events that don't change held capacity (e.g. "committed",
     # "lease_truncated") or when no dimensional delta is recorded.
     dimensions = Column(JSON, nullable=True)
+    # The categorical half of the claim this reservation was admitted
+    # against, as matched at reserve time. Ledger-owned, never
+    # caller-supplied: `deal_ref` is the caller's dict, and a caller that
+    # could restate its own constraints here could also relax them.
+    #
+    # `dimensions` records how much was committed; this records what kind
+    # of resource was sold. Without it, scheduling can re-place a deal on
+    # any resource with room, because the only constraints surviving
+    # admission were the quantitative ones. NULL means a row predating
+    # this column, which is a different answer from `{}` ("admitted
+    # against no categorical constraint").
+    claim_attributes = Column(JSON, nullable=True)
     occurred_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

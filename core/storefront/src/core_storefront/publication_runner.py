@@ -32,12 +32,55 @@ class PublicationPayload:
             raise ValueError("max_duration_seconds must be positive")
 
 
+#: The reason a source's close hook is given when the storefront's configuration
+#: rules out every settlement mechanism a candidate could publish.
+NO_SETTLEMENT_OPTION = "no_settlement_option"
+
+
+class NoSettlementOption(ValueError):
+    """A candidate whose payload would carry no settlement option and no accepted escrow.
+
+    A payload builder returns it in place of a payload. ``mechanisms`` are the
+    mechanisms of the candidate's admissible clauses, and ``unknown`` those
+    among them whose readiness could not be determined because a dependency
+    could not be reached. With none unknown, the storefront's configuration
+    rules every mechanism out and no longer says what it would sell, so the
+    candidate's open listing closes. While any is unknown the listing is held:
+    the offer it published is one the storefront would make again once the
+    dependency answers.
+
+    It is a ``ValueError``, so a path that raises it, such as an operator's
+    create, refuses it as any other unpublishable input.
+    """
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        mechanisms: Iterable[str] = (),
+        unknown: Iterable[str] = (),
+    ) -> None:
+        super().__init__(detail)
+        self.mechanisms = tuple(dict.fromkeys(mechanisms))
+        self.unknown = tuple(dict.fromkeys(unknown))
+        if not set(self.unknown) <= set(self.mechanisms):
+            raise ValueError("an unknown mechanism must be one the candidate could publish")
+
+    @property
+    def ruled_out_by_configuration(self) -> bool:
+        return not self.unknown
+
+
 Payload = PublicationPayload | LegacyPayload
 PayloadBuilder = Callable[
     [PublicationSource, dict[str, Any], dict[str, Any]],
-    Payload | str,
+    Payload | str | NoSettlementOption,
 ]
 PublishOffer = Callable[..., dict[str, Any]]
+
+# The status a source's ``reopen_existing`` returns when the listing bound under
+# a candidate's identity needs no publication this cycle.
+REOPEN_UNCHANGED = "unchanged"
 
 
 @dataclass(frozen=True)
@@ -110,7 +153,7 @@ class PublicationCommand:
     db_path: str
     base_url: str
     build_payload: PayloadBuilder
-    publish_offer: PublishOffer
+    publish_listing: PublishOffer
 
     def run(
         self,
@@ -125,7 +168,7 @@ class PublicationCommand:
             db_path=self.db_path,
             base_url=self.base_url,
             build_payload=self.build_payload,
-            publish_offer=self.publish_offer,
+            publish_listing=self.publish_listing,
             skip_ids=skip_ids,
             close_stale=close_stale,
             skip_open=skip_open,
@@ -171,14 +214,14 @@ class PublicationSourceSelection:
         db_path: str,
         base_url: str,
         build_payload: PayloadBuilder,
-        publish_offer: PublishOffer,
+        publish_listing: PublishOffer,
     ) -> PublicationCommand:
         return PublicationCommand(
             selection=self,
             db_path=db_path,
             base_url=base_url,
             build_payload=build_payload,
-            publish_offer=publish_offer,
+            publish_listing=publish_listing,
         )
 
     def run_cycle(
@@ -187,7 +230,7 @@ class PublicationSourceSelection:
         db_path: str,
         base_url: str,
         build_payload: PayloadBuilder,
-        publish_offer: PublishOffer,
+        publish_listing: PublishOffer,
         skip_ids: set[str] | None = None,
         close_stale: bool = True,
         skip_open: bool = True,
@@ -197,7 +240,7 @@ class PublicationSourceSelection:
                 db_path=db_path,
                 base_url=base_url,
                 build_payload=build_payload,
-                publish_offer=publish_offer,
+                publish_listing=publish_listing,
             )
             .run(
                 skip_ids=skip_ids,
@@ -235,7 +278,7 @@ def run_publication_cycle(
     db_path: str,
     base_url: str,
     build_payload: PayloadBuilder,
-    publish_offer: PublishOffer,
+    publish_listing: PublishOffer,
     skip_ids: set[str] | None = None,
     close_stale: bool = True,
     skip_open: bool = True,
@@ -264,7 +307,7 @@ def run_publication_cycle(
         db_path=db_path,
         base_url=base_url,
         build_payload=build_payload,
-        publish_offer=publish_offer,
+        publish_listing=publish_listing,
         skip_ids=covered,
     )
     return PublicationCycleResult(
@@ -281,7 +324,7 @@ def run_publication_command(
     db_path: str,
     base_url: str,
     build_payload: PayloadBuilder,
-    publish_offer: PublishOffer,
+    publish_listing: PublishOffer,
     skip_ids: set[str] | None = None,
     close_stale: bool = True,
     skip_open: bool = True,
@@ -292,7 +335,7 @@ def run_publication_command(
         db_path=db_path,
         base_url=base_url,
         build_payload=build_payload,
-        publish_offer=publish_offer,
+        publish_listing=publish_listing,
         skip_ids=skip_ids,
         close_stale=close_stale,
         skip_open=skip_open,
@@ -306,7 +349,7 @@ def publish_round(
     db_path: str,
     base_url: str,
     build_payload: PayloadBuilder,
-    publish_offer: PublishOffer,
+    publish_listing: PublishOffer,
     skip_ids: set[str] | None = None,
 ) -> tuple[
     list[dict[str, Any]], list[tuple[dict[str, Any], str]], list[dict[str, Any]]
@@ -316,6 +359,11 @@ def publish_round(
     Returns ``(published, failed, skipped)``. Domain semantics live in each
     ``PublicationSource``; settlement and HTTP side effects live in caller
     callbacks. The control flow is intentionally schema-opaque.
+
+    A payload the builder refuses is a failed candidate, and its listing is
+    left as it is, except a :class:`NoSettlementOption` whose every mechanism
+    the storefront's configuration rules out: the source's close hook closes
+    that candidate's open listing first.
     """
     skip_ids = skip_ids or set()
     published: list[dict[str, Any]] = []
@@ -328,8 +376,19 @@ def publish_round(
                 skipped.append(candidate)
                 continue
 
-            offer = source.offer_resource(candidate)
-            payload = build_payload(source, candidate, offer)
+            listing_resource = source.listing_resource(candidate)
+            payload = build_payload(source, candidate, listing_resource)
+            if isinstance(payload, NoSettlementOption):
+                reason = str(payload)
+                if payload.ruled_out_by_configuration:
+                    try:
+                        source.close_candidate_listing(
+                            db_path, base_url, candidate, NO_SETTLEMENT_OPTION
+                        )
+                    except Exception as exc:
+                        reason = f"close listing with no settlement option: {exc}"
+                failed.append((candidate, reason))
+                continue
             if isinstance(payload, str):
                 failed.append((candidate, payload))
                 continue
@@ -351,7 +410,7 @@ def publish_round(
                         db_path,
                         base_url,
                         candidate,
-                        offer,
+                        listing_resource,
                         accepted_escrows,
                         demands,
                         max_duration_seconds,
@@ -363,7 +422,7 @@ def publish_round(
                         db_path,
                         base_url,
                         candidate,
-                        offer,
+                        listing_resource,
                         accepted_escrows,
                         demands,
                         max_duration_seconds,
@@ -373,6 +432,13 @@ def publish_round(
                 continue
 
             if reopened is not None:
+                # A source may report that the listing already bound under the
+                # candidate's identity needs nothing: it is current, or it is
+                # withheld for a reason the source records. Neither is a failure,
+                # and neither may fall through to creating a second listing.
+                if reopened.get("status") == REOPEN_UNCHANGED:
+                    skipped.append(candidate)
+                    continue
                 if reopened.get("status") in {"published", "disabled"}:
                     published.append(
                         {
@@ -395,8 +461,8 @@ def publish_round(
 
             try:
                 if extended_payload:
-                    response = publish_offer(
-                        offer,
+                    response = publish_listing(
+                        listing_resource,
                         accepted_escrows,
                         demands,
                         max_duration_seconds,
@@ -404,8 +470,8 @@ def publish_round(
                         publication_clauses=publication_clauses,
                     )
                 else:
-                    response = publish_offer(
-                        offer,
+                    response = publish_listing(
+                        listing_resource,
                         accepted_escrows,
                         demands,
                         max_duration_seconds,

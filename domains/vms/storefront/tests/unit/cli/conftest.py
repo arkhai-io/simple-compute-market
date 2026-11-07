@@ -37,7 +37,6 @@ def fake_chain(name: str = "anvil") -> Any:
         name=name,
         rpc_url="http://localhost:8545",
         chain_id=31337,
-        alkahest_address_config_path=None,
     )
 
 

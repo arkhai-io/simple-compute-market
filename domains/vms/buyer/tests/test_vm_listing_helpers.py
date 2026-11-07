@@ -1,4 +1,4 @@
-from domains.vms.listings import format_resource
+from arkhai_vms_listings import format_resource
 
 
 

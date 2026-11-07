@@ -2,32 +2,48 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
+import sqlite3
 from collections.abc import Mapping
 from typing import Any
 
 import pytest
-from core_storefront.models.negotiation_models import NegotiateNewRequest
-from market_core.schemas import derive_settlement_option_id
-from market_identity import Eip191Signer
-from market_settlement_runtime import (
-    AcceptedObligationArtifacts,
-    MechanismRegistration,
-    MechanismReadiness,
-    SettlementConfig,
-    SettlementConfigurationRegistry,
-)
-from pydantic import BaseModel, ConfigDict
-
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
-from arkhai_bare_metal_storefront.negotiation_service import (
-    BareMetalNegotiationService,
-    NegotiationRequestError,
+from arkhai_bare_metal_storefront.listing_source_check import build_listing_source_check
+from arkhai_bare_metal_storefront.negotiation import default_seller_round_hook
+from arkhai_bare_metal_storefront.negotiation_runtime import (
+    BareMetalNegotiationRefusal,
+    build_bare_metal_negotiation_runtime,
 )
 from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
-from market_hosted_settlement import StripeSettlementConfig
+from core_storefront.models.negotiation_models import (
+    NegotiateNewRequest,
+    NegotiateNewResponse,
+)
+from market_core import SettlementStageTable
+from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
+from arkhai_bare_metal_storefront.settlement_stages import (
+    PaymentStage,
+    SellerStage,
+)
+from market_identity import Eip191Signer
+from market_settlement_runtime import (
+    AcceptedObligationArtifacts,
+    MechanismReadiness,
+    MechanismRegistration,
+    SettlementConfig,
+    SettlementConfigurationRegistry,
+)
+from market_storefront_kit import TradingPause
+from pydantic import BaseModel, ConfigDict
+
+from source_sites import loaded_source_projections
 
 BUYER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
 SELLER_SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
@@ -54,7 +70,9 @@ def _intro_registration() -> MechanismRegistration:
         section: BaseModel, option: Any, context: Mapping[str, Any]
     ) -> AcceptedObligationArtifacts:
         raw = option if isinstance(option, Mapping) else option.model_dump()
-        params = dict(raw["params"])
+        params = {
+            key: value for key, value in raw["settlement"].items() if key != "schema"
+        }
         return AcceptedObligationArtifacts(
             obligation={
                 "payer": "buyer",
@@ -95,6 +113,20 @@ def _intro_registration() -> MechanismRegistration:
     )
 
 
+def _intro_stages():
+    return SettlementStageTable(
+        {
+            INTRO_MECHANISM: SellerStage(
+                _intro_registration,
+                None,
+                None,
+                False,
+                completes_outside_settlement=True,
+            )
+        }
+    )
+
+
 def _intro_dispatch():
     registry = SettlementConfigurationRegistry((_intro_registration(),))
     config = SettlementConfig(
@@ -119,19 +151,39 @@ def _intro_option() -> dict[str, Any]:
     }
     return {
         "option_id": derive_settlement_option_id(
-            mechanism=INTRO_MECHANISM,
-            asset="introduction",
-            rates=[],
-            params=params,
+            price={"asset": "introduction", "rates": []},
+            settlement={"schema": INTRO_MECHANISM, **(params or {})},
         ),
-        "mechanism": INTRO_MECHANISM,
-        "asset": "introduction",
-        "rates": [],
-        "params": params,
+        "price": {"asset": "introduction", "rates": []},
+        "settlement": {"schema": INTRO_MECHANISM, **(params or {})},
     }
 
 
-async def _service(tmp_path) -> tuple[BareMetalNegotiationService, dict[str, Any]]:
+class _Opening:
+    """Opens a negotiation through the bare-metal runtime, as ``negotiate/new`` does."""
+
+    def __init__(self, db: SQLiteClient, runtime: Any) -> None:
+        self.db = db
+        self._runtime = runtime
+
+    async def open(
+        self, *, request: NegotiateNewRequest, buyer_principal: Any
+    ) -> NegotiateNewResponse:
+        result = await self._runtime.start(
+            repository=self.db,
+            listing_id=request.listing_id,
+            buyer_principal=buyer_principal,
+            seller_principal=SELLER_SIGNER.identity,
+            actor_principal=buyer_principal,
+            proposal=request.proposal,
+            terms=request.provision_terms,
+            seller_agent_url="http://seller:8000",
+            buyer_agent_url=request.buyer_agent_url,
+        )
+        return NegotiateNewResponse(**result)
+
+
+async def _service(tmp_path) -> tuple[_Opening, dict[str, Any]]:
     domain = get_market_domain_contract()
     db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
     option = _intro_option()
@@ -146,39 +198,50 @@ async def _service(tmp_path) -> tuple[BareMetalNegotiationService, dict[str, Any
         pool_id="pool-a",
         physical_resource_id="resource-1",
         listing={
-            "kind": "bare_metal.v1",
-            "machine_id": "machine-1",
+            "capacity_backing": "backed",
+            **LISTING_HARDWARE,
+            "kind": "bare_metal.v2",
+            "host_id": "machine-1",
             "physical_host_id": "physical-host-1",
             "access_methods": ["ssh"],
         },
         accepted_escrows=[],
         settlement_options=[option],
     )
-    service = BareMetalNegotiationService(
-        db=db,
+    runtime = build_bare_metal_negotiation_runtime(
         domain=domain,
         seller_principal=SELLER_SIGNER.identity,
-        round_hook=None,  # type: ignore[arg-type]
-        build_plan=lambda **kwargs: {},
+        round_hook=default_seller_round_hook(),
+        listing_source_check=build_listing_source_check(
+            db, await loaded_source_projections(), confirmation_window_seconds=60
+        ),
+        trading_pause=TradingPause(),
+        plan_builder=lambda **kwargs: {},
         accepted_obligation_dispatch=_intro_dispatch(),
+        seller_stages=_intro_stages(),
     )
-    return service, option
+    return _Opening(db, runtime), option
 
 
-def _request(option: dict[str, Any], *, fields: dict[str, Any] | None = None):
+def _request(
+    option: dict[str, Any],
+    *,
+    fields: dict[str, Any] | None = None,
+    payload: dict[str, Any] | None = None,
+):
     return NegotiateNewRequest(
         listing_id="intro-listing",
         buyer_principal=BUYER_SIGNER.identity,
         buyer_agent_url="https://buyer.example",
         provision_terms={
-            "kind": "bare_metal.v1",
+            "kind": "bare_metal.v2",
             "version": 1,
-            "payload": {"duration_seconds": 3600, "access_method": "none"},
+            "payload": payload or {"duration_seconds": 3600, "access_method": "none"},
         },
         proposal={
             "settlement_selection": {
-                "mechanism": option["mechanism"],
                 "option_id": option["option_id"],
+                "settlement": {"schema": option["settlement"]["schema"]},
                 "expiration_unix": 1_900_000_000,
             },
             "fields": fields or {},
@@ -210,8 +273,11 @@ async def test_non_scalar_selection_accepts_without_provisioning_inputs(
 
 async def test_selection_with_uncomposed_mechanism_is_rejected(tmp_path) -> None:
     service, option = await _service(tmp_path)
-    tampered = dict(option, mechanism="unknown.v1")
-    with pytest.raises(NegotiationRequestError, match="unsupported mechanism"):
+    tampered = {
+        **option,
+        "settlement": {**option["settlement"], "schema": "unknown.v1"},
+    }
+    with pytest.raises(BareMetalNegotiationRefusal, match="unsupported mechanism"):
         await service.open(
             request=_request(tampered),
             buyer_principal=BUYER_SIGNER.identity,
@@ -221,7 +287,7 @@ async def test_selection_with_uncomposed_mechanism_is_rejected(tmp_path) -> None
 async def test_non_scalar_selection_rejects_a_proposed_amount(tmp_path) -> None:
     service, option = await _service(tmp_path)
     with pytest.raises(
-        NegotiationRequestError, match="does not negotiate a settlement amount"
+        BareMetalNegotiationRefusal, match="does not negotiate a settlement amount"
     ):
         await service.open(
             request=_request(option, fields={"amount": "100"}),
@@ -232,7 +298,7 @@ async def test_non_scalar_selection_rejects_a_proposed_amount(tmp_path) -> None:
 async def test_selection_must_exact_match_one_listing_option(tmp_path) -> None:
     service, option = await _service(tmp_path)
     tampered = dict(option, option_id="ee" * 32)
-    with pytest.raises(NegotiationRequestError, match="does not exact-match"):
+    with pytest.raises(BareMetalNegotiationRefusal, match="does not exact-match"):
         await service.open(
             request=_request(tampered),
             buyer_principal=BUYER_SIGNER.identity,
@@ -241,9 +307,8 @@ async def test_selection_must_exact_match_one_listing_option(tmp_path) -> None:
 
 def test_composition_dispatch_exposes_only_priority_builders() -> None:
     composition = BareMetalStorefrontSettlementComposition(
-        registry=SettlementConfigurationRegistry(
-            (_intro_registration(),)
-        ),
+        registry=SettlementConfigurationRegistry((_intro_registration(),)),
+        seller_stages=_intro_stages(),
         config=SettlementConfig(
             priority=(INTRO_MECHANISM,),
             mechanisms={"demo_intro": DemoIntroConfig(enabled=True)},
@@ -253,15 +318,197 @@ def test_composition_dispatch_exposes_only_priority_builders() -> None:
     assert set(dispatch) == {INTRO_MECHANISM}
 
 
-def test_composition_dispatch_includes_the_hosted_builder() -> None:
-    composition = BareMetalStorefrontSettlementComposition.from_raw_config(
+PAYMENT_MECHANISM = "demo.payment.v1"
+
+
+def _payment_option(hourly: int = 100) -> dict[str, Any]:
+    rates = [RateValue(field="amount", per="hour", value=hourly)]
+    return SettlementOption(
+        option_id=derive_settlement_option_id(
+            price={"asset": "usd", "rates": rates},
+            settlement={"schema": PAYMENT_MECHANISM, **({} or {})},
+        ),
+        price={"asset": "usd", "rates": rates},
+        settlement={"schema": PAYMENT_MECHANISM, **({} or {})},
+    ).model_dump(mode="json")
+
+
+def _payment_stages():
+    """A seller entry that provisions the listed machine and settles from the Agreement."""
+    return SettlementStageTable(
         {
-            "priority": ["fiat.stripe.v1"],
-            "stripe": StripeSettlementConfig(enabled=True).model_dump(
-                mode="json", exclude_none=True, exclude_defaults=True
+            PAYMENT_MECHANISM: PaymentStage(
+                _intro_registration,
+                None,
+                None,
+                True,
+                completes_outside_settlement=False,
             )
-            | {"enabled": True},
         }
     )
-    dispatch = composition.accepted_obligation_dispatch()
-    assert set(dispatch) == {"fiat.stripe.v1"}
+
+
+async def _payment_service(
+    tmp_path, settlement_data_calls: list, *, hourly: int = 100
+) -> tuple[_Opening, dict[str, Any]]:
+    """A listing offering one mechanism that settles from the Agreement alone."""
+    domain = get_market_domain_contract()
+    db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
+    option = _payment_option(hourly)
+    await db.upsert_bare_metal_listing(
+        listing_id="intro-listing",
+        status="open",
+        created_at="2026-01-01T00:00:00Z",
+        updated_at="2026-01-01T00:00:00Z",
+        seller_principal=SELLER_SIGNER.identity,
+        storefront_url="http://seller:8000",
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
+        listing={
+            "capacity_backing": "backed",
+            **LISTING_HARDWARE,
+            "kind": "bare_metal.v2",
+            "host_id": "machine-1",
+            "physical_host_id": "physical-host-1",
+            "access_methods": ["ssh"],
+        },
+        accepted_escrows=[],
+        settlement_options=[option],
+    )
+
+    def settlement_data(agreement: dict[str, Any]) -> dict[str, Any]:
+        settlement_data_calls.append(agreement)
+        return {"negotiation_id": agreement["negotiation_id"], "amount": agreement["amount"]}
+
+    runtime = build_bare_metal_negotiation_runtime(
+        domain=domain,
+        seller_principal=SELLER_SIGNER.identity,
+        round_hook=default_seller_round_hook(),
+        listing_source_check=build_listing_source_check(
+            db, await loaded_source_projections(), confirmation_window_seconds=60
+        ),
+        trading_pause=TradingPause(),
+        plan_builder=lambda **kwargs: {},
+        # Composed with no obligation builder: it settles from the Agreement.
+        accepted_obligation_dispatch={PAYMENT_MECHANISM: None},
+        settlement_data_dispatch={PAYMENT_MECHANISM: settlement_data},
+        seller_stages=_payment_stages(),
+    )
+    return _Opening(db, runtime), option
+
+
+async def test_agreement_only_selection_is_accepted_with_its_agreement(tmp_path) -> None:
+    calls: list = []
+    service, option = await _payment_service(tmp_path, calls)
+    # The deal provisions the listed machine, so it asks for SSH access.
+    request = _request(
+        option,
+        payload={
+            "duration_seconds": 3600,
+            "access_method": "ssh",
+            "ssh_public_key": "ssh-ed25519 buyer",
+        },
+    )
+    response = await service.open(request=request, buyer_principal=BUYER_SIGNER.identity)
+
+    assert response.action == "accept"
+    assert response.settlement_plan is None
+    # One hour at the option's hourly rate.
+    assert response.proposal["fields"] == {"amount": "100"}
+    agreement_bytes = base64.b64decode(response.agreement_bytes)
+    agreement = json.loads(agreement_bytes)
+    assert agreement["negotiation_id"] == response.negotiation_id
+    assert agreement["settlement"]["settlement"]["schema"] == PAYMENT_MECHANISM
+    # Settlement data is derived from the exact Agreement bytes both parties keep.
+    assert calls == [agreement]
+    assert response.settlement_data == {
+        "negotiation_id": response.negotiation_id,
+        "amount": agreement["amount"],
+    }
+
+    thread = await service.db.load_negotiation_thread_row(
+        negotiation_id=response.negotiation_id
+    )
+    assert thread["agreement_bytes"] == agreement_bytes
+    assert thread["settlement_data"] == response.settlement_data
+    record = await service.db.load_bare_metal_settlement_record(
+        negotiation_id=response.negotiation_id
+    )
+    assert record["mechanism"] == PAYMENT_MECHANISM
+    assert record["agreement_sha256"] == hashlib.sha256(agreement_bytes).hexdigest()
+    assert record["status"] == "accepted"
+    # The same terms an escrow deal records: the listed host, as the buyer asked.
+    terms = await service.db.load_bare_metal_terms(negotiation_id=response.negotiation_id)
+    assert terms.host_id == "machine-1"
+    assert terms.ssh_public_key == "ssh-ed25519 buyer"
+
+
+async def test_a_provisioning_selection_is_held_to_the_listing_admission_rules(tmp_path) -> None:
+    service, option = await _payment_service(tmp_path, [])
+    with pytest.raises(BareMetalNegotiationRefusal, match="bare_metal_access_method"):
+        await service.open(request=_request(option), buyer_principal=BUYER_SIGNER.identity)
+
+
+def _ssh_purchase(duration_seconds: int) -> dict[str, Any]:
+    return {
+        "duration_seconds": duration_seconds,
+        "access_method": "ssh",
+        "ssh_public_key": "ssh-ed25519 buyer",
+    }
+
+
+async def _nothing_accepted(service: _Opening, settlement_data_calls: list) -> None:
+    """No negotiation, Agreement, settlement data, or settlement record was kept."""
+    assert await service.db.list_negotiations_for_listing(listing_id="intro-listing") == []
+    assert settlement_data_calls == []
+    with sqlite3.connect(service.db.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM bare_metal_settlement_records").fetchone()[0] == 0
+
+
+# The synthetic option charges 1000000 base units an hour; half an hour is 500000.
+@pytest.mark.parametrize("proposed", ["250000", "1000000"], ids=["undercharge", "overcharge"])
+async def test_an_amount_off_the_options_total_is_refused_and_nothing_is_kept(
+    tmp_path, proposed: str
+) -> None:
+    calls: list = []
+    service, option = await _payment_service(tmp_path, calls, hourly=1_000_000)
+    request = _request(option, fields={"amount": proposed}, payload=_ssh_purchase(1800))
+    with pytest.raises(BareMetalNegotiationRefusal, match="differs from the trusted accepted amount"):
+        await service.open(request=request, buyer_principal=BUYER_SIGNER.identity)
+    await _nothing_accepted(service, calls)
+
+
+@pytest.mark.parametrize(
+    ("duration_seconds", "fields", "total"),
+    [
+        (1800, {"amount": "500000"}, "500000"),
+        (1800, {}, "500000"),
+        (1801, {}, "500277"),
+        (7200, {"amount": "2000000"}, "2000000"),
+    ],
+    ids=["exact-amount", "no-amount", "truncated", "two-hours"],
+)
+async def test_a_selection_is_accepted_at_the_options_total_for_its_duration(
+    tmp_path, duration_seconds: int, fields: dict[str, str], total: str
+) -> None:
+    calls: list = []
+    service, option = await _payment_service(tmp_path, calls, hourly=1_000_000)
+    request = _request(option, fields=fields, payload=_ssh_purchase(duration_seconds))
+    response = await service.open(request=request, buyer_principal=BUYER_SIGNER.identity)
+
+    assert response.action == "accept"
+    assert response.proposal["fields"] == {"amount": total}
+    agreement = json.loads(base64.b64decode(response.agreement_bytes))
+    assert (agreement["amount"], agreement["duration_seconds"]) == (total, duration_seconds)
+    assert response.settlement_data["amount"] == total
+
+
+async def test_a_duration_the_option_prices_at_zero_is_refused_and_nothing_is_kept(tmp_path) -> None:
+    calls: list = []
+    service, option = await _payment_service(tmp_path, calls, hourly=1)
+    for fields in ({}, {"amount": "1"}):
+        request = _request(option, fields=fields, payload=_ssh_purchase(60))
+        with pytest.raises(BareMetalNegotiationRefusal, match="at zero"):
+            await service.open(request=request, buyer_principal=BUYER_SIGNER.identity)
+    await _nothing_accepted(service, calls)

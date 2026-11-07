@@ -1,14 +1,21 @@
 # VM compute (vms.compute) market — domain stack.
 #
 # The seller side of the VM compute market: two registry/indexer instances,
-# Bob's and Alice's storefronts, the Redis job queue, and provisioning. The
+# Bob's and Alice's storefronts and their provisioning authorities. The
 # domain stack has no unconditional chain dependency. An explicit Alkahest
 # storefront profile may add Anvil through the root development overlay;
-# a hosted-only profile composes without it.
+# a payments-only profile composes without it.
 #
 # Paths below are relative to THIS file's directory (domains/vms/) — Compose
 # `include:` resolves an included file's relative paths against its own
 # location.
+#
+# This file holds topology only: service names, ports, container paths, and the
+# values the topology fixes. A deployment's identities, configuration files,
+# secret overlays and registry and site profiles are bound by its overlay
+# (compose.vms-local.yml for development), and nothing here gives one a
+# fallback, so without an overlay the registries, storefronts and provisioning
+# authorities refuse to start for want of their identities.
 
 services:
   # 1. Registry/Indexer service (vms.compute filter-spec — the image default).
@@ -40,22 +47,11 @@ services:
     image: arkhai:registry
     ports:
       - "8082:8080"
+    # Its read and write gates, admin key and bootstrap key are the deployment's,
+    # in its registry profile; never commit a key to this Compose file or the
+    # public storefront profile.
     env_file:
       - ../../core/registry/.env.docker-compose
-    environment:
-      # Private-registry config: read and write gate independently, both
-      # on here, so every non-admin request must carry
-      # ``Authorization: Bearer <key>`` matching a non-revoked row in
-      # api_keys. The BOOTSTRAP_API_KEY seeds a single write-scoped row at
-      # startup (write implies read) so the storefront can publish to
-      # registry-b on a fresh ``compose up`` without an out-of-band mint
-      # step, and the buyer can discover from it with the same token.
-      # Operator-provided secret values; never commit them to this Compose file
-      # or the public storefront profile.
-      - REGISTRY_REQUIRE_READ_API_KEY=true
-      - REGISTRY_REQUIRE_WRITE_API_KEY=true
-      - REGISTRY_ADMIN_API_KEY=${VMS_REGISTRY_ADMIN_API_KEY:?set VMS_REGISTRY_ADMIN_API_KEY}
-      - REGISTRY_BOOTSTRAP_API_KEY=${VMS_REGISTRY_BOOTSTRAP_API_KEY:?set VMS_REGISTRY_BOOTSTRAP_API_KEY}
     volumes:
       - ../../shared-env:/app/shared-env
     restart: unless-stopped
@@ -85,6 +81,8 @@ services:
         condition: service_healthy
       provisioning:
         condition: service_healthy
+      mailpit:
+        condition: service_healthy
     ports:
       - "8001:8001"
     cap_add:
@@ -94,26 +92,12 @@ services:
       - /dev/net/tun:/dev/net/tun
     environment:
       # Sole config-bearing env var: tell the typed config loader where
-      # to find the mounted TOML. The storefront config loader resolves
-      # $XDG_CONFIG_HOME/arkhai/config.toml → /etc/arkhai/storefront.toml.
+      # to find the mounted files, /etc/arkhai/storefront.toml and its secret
+      # overlay /etc/arkhai/storefront.secrets.toml, which the overlay binds.
       - XDG_CONFIG_HOME=/etc
-      # Provisioning-mode override stays a host-level env var because
-      # tests flip it per-invocation (e.g. PROVISIONING_MODE=mock make
-      # e2e-mock-happy). Wired into the storefront runtime via TOML override.
-      - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
-      - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
       # The storefront's policy discovery needs `domains/` on PYTHONPATH
-      # so it can find domains.vms.negotiation.rl callables.
+      # so it can find arkhai_vms_negotiation.rl callables.
       - PYTHONPATH=/app:/app/src
-    volumes:
-      # Chain-/seller-specific config is the one environment-supplied mount;
-      # override $VMS_BOB_STOREFRONT_CONFIG to point at a different chain's
-      # TOML (the default is the dev/anvil seller config).
-      - ${VMS_BOB_STOREFRONT_CONFIG:-./storefront/storefront.bob.toml}:/etc/arkhai/storefront.toml:ro
-      - ${VMS_BOB_STOREFRONT_SECRETS_FILE:?set VMS_BOB_STOREFRONT_SECRETS_FILE}:/etc/arkhai/storefront.secrets.toml:ro
-      # Compute inventory seed CSV — storefront.bob.toml's
-      # seller.resources_csv_path expects this at /app/resources.csv.
-      - ./storefront/src/market_storefront/data/kvm1-machine.csv:/app/resources.csv:ro
     deploy:
       resources:
         limits:
@@ -124,6 +108,19 @@ services:
       timeout: 5s
       retries: 6
       start_period: 10s
+
+  # 2a. Mailpit — receives the storefront's seller-side introduction mail.
+  # An off-the-shelf SMTP server with a query API, so a scenario can read
+  # what the seller would have been sent.
+  mailpit:
+    image: docker.io/axllent/mailpit:v1.27
+    ports:
+      - "8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   # 2b. Alice's storefront — exercises heterogeneous registry
   # topology in the multi-registry e2e scenario. Alice's config.toml
@@ -138,7 +135,7 @@ services:
     depends_on:
       registry:
         condition: service_healthy
-      provisioning:
+      alice-provisioning:
         condition: service_healthy
     ports:
       - "8002:8002"
@@ -149,16 +146,7 @@ services:
       - /dev/net/tun:/dev/net/tun
     environment:
       - XDG_CONFIG_HOME=/etc
-      - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
-      - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
       - PYTHONPATH=/app:/app/src
-    volumes:
-      - ${VMS_ALICE_STOREFRONT_CONFIG:-./storefront/storefront.alice.toml}:/etc/arkhai/storefront.toml:ro
-      # Reuses Bob's seed CSV — the multi-registry test seeds inventory
-      # at runtime via admin_import_resources anyway, so the on-disk CSV
-      # content is irrelevant. Bind-mounted to satisfy the config's
-      # resources_csv_path requirement.
-      - ./storefront/src/market_storefront/data/kvm1-machine.csv:/app/resources.csv:ro
     deploy:
       resources:
         limits:
@@ -170,7 +158,8 @@ services:
       retries: 6
       start_period: 10s
 
-  # 3. Redis (job queue for provisioning service)
+  # 3. Retained Redis service. Provisioning uses process-local job queues
+  # and does not consume this service.
   redis:
     image: redis:7-alpine
     ports:
@@ -182,10 +171,11 @@ services:
       retries: 3
 
   # 4. Provisioning service.
-  # Configuration is bundled in the compute provisioning service wheel,
-  # plus dynaconf profile loading via ACTIVE_PROFILES). Compose-time
-  # overrides go in `environment:` below.
-  provisioning:
+  # Configuration is bundled in the compute provisioning service wheel; its
+  # `docker` profile names the image's IaC paths. A deployment's overlay points
+  # CONFIG_DIRECTORY at its own profiles, its site's identities among them, and
+  # extends ACTIVE_PROFILES with them.
+  provisioning: &provisioning
     image: arkhai:compute-provisioning
     platform: linux/amd64
     command: ["sh", "-c", "compute-provisioning-migrate && exec compute-provisioning-api"]
@@ -197,11 +187,13 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - DATABASE_URL=sqlite:////app/data/provisioning.db
+      - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
       - REDIS_URL=redis://redis:6379
-      # Mounts /test/* router used by integration tests' provisioning_test_client
-      # (TestStage07 mock-rules). Should never be set in staging/prod.
-      - ACTIVE_PROFILES=mock
+      # Real provisioning. The development overlay appends its site profile and
+      # the run's mode, `mock` selecting the mock runner in place of Ansible
+      # and the /test/* controls the end-to-end scenarios hold jobs through.
+      # Never mock in staging or production.
+      - ACTIVE_PROFILES=docker
       # Storefront callback target for the lease watchdog.
       # When the watchdog releases a lease, it PATCHes this URL to mark the
       # storefront resource available. Must match the bob-storefront service
@@ -221,3 +213,17 @@ services:
       resources:
         limits:
           memory: 384m
+
+  # Each authority keeps its database and in-process job queue in its own
+  # container. Neither storefront shares physical authority.
+  alice-provisioning:
+    <<: *provisioning
+    depends_on:
+      registry:
+        condition: service_healthy
+    ports:
+      - "8083:8081"
+    environment:
+      - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
+      - ACTIVE_PROFILES=docker
+      - PROVISIONING_STOREFRONT_URL=http://alice-storefront:8002

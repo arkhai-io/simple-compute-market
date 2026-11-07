@@ -6,36 +6,6 @@ Define test-level ownership, shared contract fixtures, deterministic e2e staging
 
 ## Requirements
 
-### Requirement: Expanded hosted consumer behavior is tested at owned boundaries
-
-Credential-free tests MUST cover exact funding-profile config/option identity, independent readiness/publication, local persistent payer binding, direct payer and exact authorization calls, bounded automation policy, storefront mediation, transient actions, delayed funding, immutable runtime journals, legacy card recovery, fulfillment gates, reclaim races, and sanitized evidence. They MUST use the exact released client models with deterministic hosted-port outcomes and MUST NOT claim external Stripe behavior.
-
-Protected integration MUST attribute only the external assertions actually exercised for `card.v1`, `us_bank_transfer.v1`, `us_ach_debit.v1`, and off-session `requires_action`. Each scenario MUST identify marketplace and hosted releases independently and MUST mark unavailable provider prerequisites rather than simulate or substitute them.
-
-#### Scenario: Contributor runs default marketplace checks
-
-- **WHEN** no hosted service, Stripe credential, browser, or provider prerequisite is configured
-- **THEN** config, adapter, buyer, storefront, runtime, packaging, typing, redaction, and deterministic recovery tests complete without external calls or silent omissions
-
-#### Scenario: Protected ACH prerequisite is absent
-
-- **WHEN** the selected connected account cannot exercise an ACH availability/return boundary
-- **THEN** the protected report marks only those ACH assertions unavailable and does not attribute card, simulated provider, or credential-free outcomes to them
-
-### Requirement: Consumer fault cases preserve exact identity
-
-Deterministic integration tests MUST inject acknowledgement loss, timeout, restart, duplicate request, changed request conflict, delayed visibility, readiness loss, expiry race, and operator-required outcome around direct authorization and mediated escrow boundaries. Assertions MUST prove one buyer profile owner, one funding authorization, one marketplace operation, one hosted escrow/financial operation, and no cross-profile or cross-mechanism fallback. Test clocks and event controls MUST be injected directly rather than selected through runtime configuration.
-
-#### Scenario: Authorization succeeds before timeout
-
-- **WHEN** the deterministic authority applies an exact authorization but the buyer loses acknowledgement and restarts
-- **THEN** retry returns the same authorization reference and storefront start creates at most one hosted obligation
-
-#### Scenario: Profile readiness changes during recovery
-
-- **WHEN** a pending bank obligation resumes after that profile is disabled for new purchases
-- **THEN** recovery uses the accepted profile and identities rather than switching to card or Alkahest
-
 ### Requirement: Layered behavioral verification
 Unit, integration, smoke, and end-to-end tests MUST each defend the narrowest observable contract appropriate to their level and MUST NOT rely on e2e alone for component behavior.
 
@@ -63,150 +33,6 @@ Every staged e2e state field MUST use one exact producer/consumer name, and ever
 #### Scenario: Test author adds staged state
 - **WHEN** a test adds a field to `DealState`
 - **THEN** a downstream stage consumes that exact attribute name and coverage verifies the transition
-
-### Requirement: Stripe-backed hosted settlement system evidence
-
-The marketplace-owner wallet-free VM lifecycle against Stripe test mode MUST verify one exact signed hosted release at the producer boundary and one exact marketplace consumer release, then exercise ordinary marketplace publication, discovery, negotiation, accepted funding authorization, hosted materialization, buyer action, authoritative funding, VM fulfillment evidence, condition evaluation, collection or eligible reclaim, status, restart, and recovery for each selected exact profile. The report MUST record marketplace source/commit separately from hosted manifest, client wheel, service image, contract/schema, migrations, provenance, release repository/workflow/ref/source, capability set, and protected workflow run. Every provider assertion MUST derive from the selected profile's supported Stripe test-mode behavior; unavailable external prerequisites MUST remain explicit and MUST NOT be replaced by local simulation.
-
-How a saved instrument becomes ready MUST follow the bound release rather than the harness. Where the bound release declares direct payer instrument setup, a bank-funded saved-instrument lane MUST complete its setup by submitting the payer's own verification evidence and MUST NOT require a browser. Where it does not, the existing interactive setup path MUST stand unchanged. A profile for which the bound release offers no saved-instrument path at all MUST be reported as an unavailable prerequisite, not as a failure of the lane.
-
-#### Scenario: Successful `card.v1` purchase
-
-- **WHEN** Chromium completes required card interaction and hosted retrieval proves accepted funding and transfer outcomes
-- **THEN** the report records one signed marketplace-to-storefront-to-hosted lifecycle with exact artifact identities and sanitized payment/transfer evidence
-
-#### Scenario: Successful `us_bank_transfer.v1` purchase
-
-- **WHEN** the test uses issued instructions and attributable test funds through the configured supported Stripe test path
-- **THEN** the report records awaiting-payment, authoritative funding, fulfillment, and collection boundaries without storing bank instructions or provider IDs
-
-#### Scenario: Successful `us_ach_debit.v1` purchase
-
-- **WHEN** the exact test debit crosses mandate/confirmation and availability gates
-- **THEN** the report records delayed state, authoritative funding, fulfillment, and collection or declared return/reclaim boundary without claiming card behavior
-
-#### Scenario: A bank-funded saved instrument is set up without a browser
-
-- **WHEN** the bound release declares direct payer instrument setup and a saved-instrument lane selects a bank-funded profile
-- **THEN** the lane submits the payer's own verification evidence, the instrument becomes ready without a browser session, and the report records the setup boundary without the submitted evidence or any provider identifier
-
-#### Scenario: The bound release predates direct setup
-
-- **WHEN** a saved-instrument lane runs against a bound release that does not declare direct payer instrument setup
-- **THEN** the interactive setup path runs exactly as it does today, and the lane's recorded evidence is unchanged
-
-#### Scenario: Off-session action fallback
-
-- **WHEN** a bounded automated card purchase returns `requires_action`
-- **THEN** the same accepted obligation/authorization/operation continues interactively and the report proves no profile, instrument, amount, destination, or identity substitution
-
-#### Scenario: Real Stripe collection succeeds
-
-- **WHEN** an authorized protected run completes the selected profile's real Stripe test-mode funding path, delivers or reconciles authoritative provider state, and satisfies the accepted fulfillment condition
-- **THEN** the ordinary authority worker converges to collected and authoritative retrieval identifies exactly one related funding operation and destination transfer with the expected amount, currency, destination, transfer group or normalized relation, stable idempotency identity, and marketplace operation identity
-
-#### Scenario: Real Stripe reclaim succeeds
-
-- **WHEN** a distinct funded test-mode obligation remains unfulfilled until its profile-specific pre-transfer reclaim is eligible
-- **THEN** buyer-authorized reclaim converges to exactly one related return, cancellation, or refund, recovery under the original operation identity creates no second reversal, and no transfer exists for that obligation
-
-#### Scenario: Missed webhook is reconciled
-
-- **WHEN** real profile funding completes while webhook forwarding or the reconciliation worker is stopped and ordinary processes later restart against preserved authority state
-- **THEN** authoritative Stripe retrieval converges the accepted obligation without recreating funding and any transfer or reversal uses the original operation identity exactly once
-
-### Requirement: Deterministic hosted recovery is tested at the provider port
-Deterministic tests for timeout placement, unknown acknowledgement, delayed authoritative visibility, provider unavailability, exact-attempt failures, and duplicate or out-of-order normalized events MUST inject declared outcomes at the hosted service's internal financial-provider or webhook-inbox boundary. They MUST exercise the production operation journal, immutable request fingerprints, leases, retry policy, idempotency, reconciliation, webhook inbox, and lifecycle logic without exposing a provider-compatible API, reproducing Stripe objects, requiring provider credentials, or packaging the collaborator with production artifacts. Assertions MUST describe Arkhai state, calls, and effects under a scripted provider outcome; every assertion presented as Stripe behavior MUST be covered separately by Stripe test-mode evidence.
-
-#### Scenario: Submission acknowledgement is unknown
-- **WHEN** a test-only scripted provider records one immutable effect and returns an unknown acknowledgement before bounded retrieval exposes it
-- **THEN** the production journal records uncertainty, reconciliation retrieves the original effect through the provider interface, and retry retains one operation identity and one effect
-
-#### Scenario: Provider failure is prescribed
-- **WHEN** a test prescribes a timeout, retryable failure, terminal failure, delayed visibility, or unavailability at a named provider-interface operation
-- **THEN** it asserts only Arkhai's resulting state transition, retry, reconciliation, and idempotency behavior and makes no claim that Stripe produces the failure in that way
-
-### Requirement: Public and protected hosted checks remain distinct
-
-Public/default checks MUST cover deterministic provider-neutral hosted client/adapter/payer/authorization behavior, state-machine integration, configuration, package contents, typing, release verification, browser action dispatch, consumer redaction, and evidence-schema validation without credentials. The marketplace MUST verify signed producer conformance evidence for producer-owned webhook-inbox recovery rather than importing, simulating, or claiming that internal behavior. Protected Stripe checks MUST require explicit role-scoped test credentials, exact signed release inputs, selected profile prerequisites, and fail-closed enablement.
-
-A public check MUST NOT require a signed producer release in order to obtain a producer artifact it compiles against. Where the artifact it needs belongs to a version that has one, it MUST use it and verify it. Where the version has none, the check MAY obtain the artifact from an access-controlled internal channel instead, and MUST treat what it obtained as unattested: it MUST NOT verify, claim, or record provenance for it, and it MUST NOT thereby satisfy anything reserved to a check with signed release inputs.
-
-Which of the two applies MUST follow from the version the consumer pins and the version the trusted release names, and MUST NOT be selected by a separate switch. A check that cannot reach the channel it needs MUST report the version and the channel as the unavailable prerequisite, rather than failing as though the artifact did not exist.
-
-#### Scenario: Contributor runs public checks
-
-- **WHEN** no Stripe credential or protected hosted release access is present
-- **THEN** default collection and execution succeed without probing provider controls or attempting hosted financial E2E, while all required credential-free consumer tests still run
-
-#### Scenario: Protected profile selection is incomplete
-
-- **WHEN** the protected lane requests a funding profile but lacks its exact account capability, test instrument/funding path, browser action, or release contract
-- **THEN** preflight stops before publication/funding mutation and records the exact unavailable prerequisite
-
-#### Scenario: Explicit protected run lacks a prerequisite
-
-- **WHEN** an operator selects hosted Stripe system E2E without one required release, credential, network, webhook, browser, account, or selected-profile prerequisite
-- **THEN** preflight reports the exact unmet prerequisite before payment creation and does not cite focused or simulated output as Stripe evidence
-
-#### Scenario: A public check compiles against an unreleased producer version
-
-- **WHEN** the consumer pins a producer version that the trusted release does not name
-- **THEN** the public check obtains that version's artifact from the internal channel, runs its suites against it, and neither verifies nor records provenance for it
-
-#### Scenario: A public check compiles against a released producer version
-
-- **WHEN** the pinned version and the version the trusted release names are the same
-- **THEN** the public check obtains the signed release assets and verifies them exactly as it does today
-
-#### Scenario: The internal channel is unreachable
-
-- **WHEN** a public check needs an unreleased producer artifact and cannot authenticate to the internal channel
-- **THEN** it reports the version and the channel as the unavailable prerequisite, and does not report the artifact as missing or the suite as broken
-
-### Requirement: Protected hosted evidence is attributable and sanitized
-
-Every protected marketplace-hosted run MUST produce a schema-validated report signed by the marketplace repository's designated evidence signer. It MUST record exact independent consumer and producer release identities, selected profile/currency, public lifecycle stages, normalized outcomes, attempts, timestamps, workflow/run identity, and permitted hashed opaque correlations. It MUST exclude credentials, provider/customer/payment-method/mandate/bank/card identifiers or data, raw actions/URLs, provider payloads/events/requests, source-bearing local paths, and unrestricted logs.
-
-#### Scenario: Sensitive provider data reaches a report field
-
-- **WHEN** schema validation or recursive canary scanning finds credential, provider/customer/payment-method/mandate/bank/card data, raw action, payload, URL, or source-bearing path
-- **THEN** the report is rejected before signing or publication
-
-#### Scenario: Consumer and producer releases differ
-
-- **WHEN** the protected run uses marketplace and hosted artifacts from distinct repositories or commits
-- **THEN** the report records both exact identity sets without collapsing them into one source claim
-
-#### Scenario: Protected assertion is unavailable
-
-- **WHEN** a rail, return, confirmation, account capability, browser, or external system is unavailable
-- **THEN** the report records the assertion and missing prerequisite as unavailable and does not replace it with simulated or local evidence
-
-#### Scenario: Report is altered after signing
-
-- **WHEN** a reviewer verifies a modified report
-- **THEN** signature verification fails
-
-#### Scenario: Stripe is unavailable during setup
-
-- **WHEN** a protected run cannot reach Stripe before any marketplace or financial mutation
-- **THEN** it reports an `environment` failure with separately identified consumer and hosted release coordinates and records no secret or provider payload
-
-#### Scenario: Connected account is not ready
-
-- **WHEN** the allowlisted test connected account fails its ownership, capability, or readiness checks
-- **THEN** preflight reports an `account` failure before publishing the hosted option or creating payment state
-
-#### Scenario: Terminal state violates the contract
-
-- **WHEN** prerequisites are valid and the observed signature, state, amount, relation, cardinality, or marketplace transition contradicts the accepted scenario
-- **THEN** the run reports a `product` failure with bounded sanitized evidence and does not hide it behind an environment or timeout classification
-
-#### Scenario: A valid observation does not converge
-
-- **WHEN** prerequisites remain valid but a named observable state does not arrive within its declared bound
-- **THEN** the run reports a `timeout` failure under the original operation identity without issuing a replacement mutation
 
 ### Requirement: Buyer profile compatibility is deterministic across domains
 
@@ -269,45 +95,854 @@ fulfillment result, private authority state, or teardown carrier.
 
 #### Scenario: An external authority is unavailable
 
-- **WHEN** a live seller, site/provisioning authority, chain, hosted authority, credential, or real access target required by the selected scenario is absent
+- **WHEN** a live seller, site/provisioning authority, chain, payments authority, credential, or real access target required by the selected scenario is absent
 - **THEN** that exact live assertion remains blocked or unavailable and static composition is not reported as end-to-end success
 
-### Requirement: Bare-metal hosted evidence is attributed by layer
+### Requirement: Payment evidence is attributed at its owning boundary
 
-Focused local suites MUST cover exact option/party/resource derivation, hosted-only composition, profile publication filtering, no provisioning before funding, selected-site exactly-once fulfillment, portable evidence, restart/collect/reclaim races, return/loss projection, teardown independence, and Alkahest non-regression. Protected Stripe qualification MUST use the ordinary signed hosted release. Whole-host release acceptance MUST observe real access and later revocation/teardown on a disposable host; mocks and local success flags do not satisfy that protected lane.
+Credential-free SCM tests MUST prove generated wire contracts, JCS hashes, mandate policy, signed-receipt rejection, exact Agreement and settlement-data persistence, selected-mechanism dispatch, retryable pending, and idempotent domain delivery through deterministic ports. They MUST NOT claim live ledger or provider behavior, which remains producer-owned evidence.
 
-#### Scenario: External lanes are unavailable
+#### Scenario: Local payment smoke uses controlled collaborators
 
-- **WHEN** signed producer artifacts, protected Stripe inputs, or a disposable live host are unavailable
-- **THEN** local deterministic evidence may pass but the corresponding protected task remains explicitly blocked
-- **AND** no synthetic evidence is recorded as release acceptance
+- **WHEN** a local VM smoke drives pending to provisioning to ready with controlled HTTP and delivery
+- **THEN** its evidence establishes SCM receipt gating and one delivery, not live payment-service or hardware acceptance
 
-### Requirement: Hosted API-credit evidence is attributed at its owning boundary
+#### Scenario: API-credit payment is retried
 
-Credential-free focused tests MUST cover mechanism-neutral listing/selection,
-hosted-only composition, accepted-state mismatch rejection, shared buyer and
-storefront transport, delayed funding gates, deterministic fulfillment/grant
-identity, canonical principal ownership, unknown-outcome retrieval, exact-once
-issuance, secret-safe credential delivery, signed portable evidence,
-collect/reclaim exclusion, restart, and Alkahest independence at the lowest
-owning package. They MUST use deterministic ports and MUST NOT claim Stripe,
-signed producer release, protected browser, or live external-resolver evidence.
+- **WHEN** seller progress is nonterminal after an issuance acknowledgement is lost
+- **THEN** focused domain tests use the same transaction and grant identity and assert no duplicate balance or quota mutation
 
-#### Scenario: Default API-credit checks run
-- **WHEN** no wallet, chain, hosted authority, Stripe credential, browser, or external resolver is configured
-- **THEN** domain, buyer, storefront, credits authority, migration, package, runtime, and redaction checks can exercise their local contracts without external calls
+### Requirement: External payment qualification names its target
 
-#### Scenario: Protected API-credit lane is unavailable
-- **WHEN** the exact signed hosted release, protected Stripe account, or deployed portable resolver is unavailable
-- **THEN** only that external evidence remains blocked and deterministic local results are not substituted for it
+External qualification MUST identify the actual payments target and consumer revision and check readiness before mutations. Unavailable external prerequisites MUST report blocked/unrun; a configured lane missing required settings, or a lane-owned payments target failing readiness, MUST fail setup by name before scenarios. Neither MUST substitute another mechanism.
 
-## Evidence
+#### Scenario: Bare-metal qualification lacks hardware
 
-- Layer ownership: package unit/integration suites, role-level E2E scenarios, and the independently released hosted producer's financial-provider and webhook-inbox integration suites.
-- Cross-language API-credit protocol behavior: `middleware/conformance/session.json` and the Python, TypeScript, and Rust conformance runners.
-- Explicit staged dependencies: `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py`, scenario `require_state` calls, and `e2e-tests/tests/e2e/roles/README.md`.
-- Protected hosted system evidence: the canonical `hosted-stripe-test` target and workflow, their schema-validated sanitized report, and the exact ordinary hosted production release recorded by that report.
-- Frozen registry and lifecycle boundary matrix: `core/storefront/tests/unit/test_domain_registry.py`, `test_domain_plugins.py`, `test_domain_lifecycle.py`, `test_publication_plugins.py`, and `test_publication_runner.py`.
-- VM contribution, immutable bindings, migration, publication, settlement, and selected-site recovery adapters: `domains/vms/storefront/tests/unit/test_domain_registry.py`, `test_domain_thread_bindings.py`, `test_domain_migration.py`, `test_publication_wiring.py`, `test_settlement_composition.py`, and `test_fulfillment_resume_runtime.py`.
+- **WHEN** a disposable selected-site host is unavailable
+- **THEN** local deterministic tests do not claim authenticated access, revocation, or physical teardown
 
-Additive/optional client coexistence during a staged rollout is not established as a general baseline contract; registry rollout work remains proposed in `migrate-registry-to-postgres`.
+#### Scenario: A configured payments run lacks a buyer credential
+
+- **WHEN** a payments target is configured but the buyer's marketplace credential is not
+- **THEN** the payment scenario fails naming the missing setting, before mutations rather than disguising a configured-target setup failure as an unavailable external prerequisite
+
+#### Scenario: A lane-owned payments target is not ready
+
+- **WHEN** a lane's settings mark its payments target as the lane's own and the target, or a storefront's authenticated payments check, is not ready
+- **THEN** lane setup or the scenario fails naming the target, rather than reporting a blocked skip
+
+#### Scenario: An external payments target is not ready
+
+- **WHEN** a configured external payments target does not report itself ready
+- **THEN** the payment scenario reports a blocked skip naming the target and makes no purchase
+
+### Requirement: Signed receipts in tests come from the kit fixture
+
+A test that needs a signed receipt over its own Agreement MUST sign it through the payments kit's receipt fixture with an injected signer. The fixture ships no key material, and a kit unit test reproduces the published receipt vector byte for byte.
+
+#### Scenario: A storefront test needs a verified receipt
+
+- **WHEN** an integration test settles a payments deal
+- **THEN** it builds the receipt with the kit's fixture and a test signer, and the vector test proves the fixture signs what the service signs
+
+### Requirement: A deployable domain's deal runs on every end-to-end run
+
+Every market domain intended for deployment MUST have a complete-deal scenario that runs
+on every run of the end-to-end pipeline, against running services using that domain's
+ordinary local or test authorities. A domain whose delivery crosses compute provisioning
+MUST run provisioning in its mock profile. The scenario MUST hold every storefront loop
+it depends on, preview each transition it advances through that loop's or route's dry
+run where one exists, and advance it explicitly. That scenario proves the services
+compose into a working deal. Mocked delivery MUST NOT be reported as evidence of real
+delivery: where a domain's release acceptance requires a real external resource, that
+remains a separate protected lane.
+
+#### Scenario: Bare metal runs its deal in the pipeline
+
+- **WHEN** the bare-metal end-to-end lane runs
+- **THEN** a whole-host deal completes through discovery, negotiation, Alkahest
+  settlement, mock-provisioned delivery, lease expiry, and teardown, observed through
+  typed clients, with every dry-run stage VM's deal runs
+- **AND** the site releases the Physical Resource's reservation, the storefront receives
+  the capacity-released callback, and the next publication pass reopens the listing
+
+#### Scenario: Buyer teardown is repeated
+
+- **WHEN** the bare-metal lane's second deal requests teardown twice
+- **THEN** both requests return the same lease release operation and the site releases
+  the reservation once
+
+#### Scenario: Real access is required
+
+- **WHEN** release acceptance requires observing real access and its revocation
+- **THEN** the mock-provisioned deal does not satisfy it, and the protected lane's
+  requirement stands
+
+### Requirement: The canonical compute deal's shared stages are defined once
+
+The compute family's canonical complete deal, settled through Alkahest, MUST take each
+stage its lanes run identically from one shared definition, whether the lane delivers
+through the provisioning mock profile or through a real host. A lane MUST subclass a
+shared stage without replacing its body and MUST supply its differences through
+fixtures and a per-domain driver. A lane MAY insert stages of its own; a stage whose
+body differs between lanes is not shared.
+
+The stages from fulfillment onwards — convergence to active, settlement readiness, the
+lease record, the lease's ending and teardown completion — MUST be keyed on the deal's
+settlement reference, which an earlier stage writes, rather than on an Alkahest escrow, so
+the buyer purchase settled through `arkhai.payments.v1` runs the same definitions. How a
+lease ends is not shared across endings: the lease-watchdog expiry and the teardown
+dispatch it starts are shared by every scenario whose lease ends by expiry, and a
+scenario whose lease ends another way, such as by the buyer's teardown, runs its own
+ending stage, which ends in the state teardown completion starts from. A shared stage
+from fulfillment onwards MUST read each input it checks from state an earlier stage
+wrote independently of the lease under check: the expected host from the Alkahest
+settlement preview or from the driver's declared host, and the teardown's fulfillment
+from whichever ending ran.
+
+A shared stage MUST NOT depend on the mock profile. Holding a provisioning job before
+its result, releasing it, and evaluating a mock rule are mock gates: they are stages of
+their own, run only by lanes that deliver through the mock profile, and are supplied by
+a driver part that only mock drivers implement. A stage that would call a gate is split
+at the gate, and its gate-free part stays shared.
+
+#### Scenario: A shared stage changes
+
+- **WHEN** a shared stage's preview, advance, or assertion changes
+- **THEN** every compute lane that runs the canonical deal runs the changed stage without
+  a per-domain edit
+
+#### Scenario: A domain's part of a shared stage
+
+- **WHEN** a shared stage needs supply seeding, provision terms, the lease view,
+  settlement-preview expectations, the settlement's dispatch, result and access
+  assertions, or the claim that re-reserves released supply and its release
+- **THEN** the domain's driver supplies it and the stage's body is unchanged
+
+#### Scenario: A mock lane holds a job
+
+- **WHEN** a lane that delivers through the mock profile holds its create or teardown
+  job before the result, or evaluates the mock rule for it
+- **THEN** it does so in a mock-only stage, through its driver's mock-gate part, between
+  the shared stages it surrounds
+
+#### Scenario: The preflight before settlement fails
+
+- **WHEN** the lane's last stage before settlement — the mock rule's evaluation in a
+  mock lane, the check of the previewed host in a real lane — fails
+- **THEN** the shared settlement stage skips and submits nothing
+
+#### Scenario: A real lane runs the canonical deal
+
+- **WHEN** a lane delivers through a real host
+- **THEN** it runs every shared stage, none of which calls a mock gate, and its driver
+  implements no mock-gate part
+
+#### Scenario: A buyer purchase reaches fulfillment
+
+- **WHEN** a compute buyer purchase settled through `arkhai.payments.v1` has dispatched
+  its fulfillment
+- **THEN** it runs the shared stages from fulfillment onwards, keyed on its settlement
+  reference, and keeps its own stages before fulfillment; its lease's ending is the
+  shared expiry stages when the lease ends by expiry, as the VM purchase's does, and a
+  stage of its own when it ends by the buyer's teardown, as the bare-metal purchase's
+  does
+- **AND** the lease record's host is checked against its driver's declared host, and
+  teardown completion advances the fulfillment its ending reported, so each shared
+  stage's body is the Alkahest set's
+
+#### Scenario: A deal outside the canonical deal
+
+- **WHEN** a compute scenario settles another way before fulfillment, or a domain outside
+  the compute family runs a complete deal
+- **THEN** it keeps its own stages up to fulfillment, and a domain outside the compute
+  family keeps all of its own stages
+
+#### Scenario: A compute domain differs in negotiation
+
+- **WHEN** a compute domain would need its own negotiation stage
+- **THEN** the difference is resolved in its storefront composition, not in the stage
+
+### Requirement: Each domain runs in its own lane
+
+The end-to-end pipeline MUST run each market domain's scenarios in a lane of its own, as
+a pipeline job separate from every other domain's lane, so a failure in one domain's
+lane cannot hide or stand in for another's evidence. Each lane MUST build the images its
+own stack runs and compose only its own services, including every registry its
+scenarios read.
+
+#### Scenario: The pipeline runs
+
+- **WHEN** the end-to-end pipeline runs
+- **THEN** the VM, bare-metal, and API-credit lanes each build their own stack's images
+  and run their own stack and scenarios, in parallel
+- **AND** the VM lane's stack does not include the API-credit services
+
+#### Scenario: A scenario reads a registry of another schema
+
+- **WHEN** a lane's scenario discovers across registries of more than one schema
+- **THEN** the lane deploys each of those registries in its own stack, and the scenario
+  reads them from that lane's settings
+
+#### Scenario: A compute lane provisions through the mock profile
+
+- **WHEN** a compute lane runs
+- **THEN** its provisioning services run their mock profile because the run selects mock
+  provisioning, not because the lane's local overlay or stack hard-codes it
+- **AND** no storefront in the lane carries a provisioning mode
+
+### Requirement: Bare-metal storefront restart recovery is proven at integration level
+
+Bare-metal storefront restart recovery MUST be proven by integration tests that rebuild
+the production application over the same database. After a rebuild following settlement
+commit or teardown acceptance, the buyer MUST retrieve the same operation without a
+second obligation, mechanism selection, or physical teardown, and duplicate polling and
+result reads MUST be idempotent. The end-to-end lane starts from empty state and does
+not restart services.
+
+#### Scenario: Process stops after settlement commit
+
+- **WHEN** the settlement authority committed the recorded operation but the buyer did not receive its response
+- **THEN** after the rebuild, resume retrieves the same operation and continues without a second obligation or mechanism selection
+
+#### Scenario: Process stops while the lease is active
+
+- **WHEN** the storefront is rebuilt while a delivered lease is active
+- **THEN** repeated status, result, access, and settlement-status reads return what they returned before, with no second reservation or fulfillment start
+
+#### Scenario: Process stops after teardown acceptance
+
+- **WHEN** teardown was accepted before the response was lost
+- **THEN** after the rebuild, a repeated teardown returns the same lease release operation and the site releases capacity once
+
+### Requirement: A configured bare-metal payment purchase is qualified end to end
+
+With a ready payments target configured, the bare-metal lane MUST qualify one fixed-term whole-host purchase settled through `arkhai.payments.v1`: discovery, negotiation, payment approval, receipt-gated mock delivery, re-drive of the original run's settlement, the buyer's physical teardown through `market bare-metal teardown`, and seller refund, with the teardown and the refund as separate operations. Its discovery, purchase, correlation, delivery and teardown steps MUST be the shared buyer-purchase stages, and its re-drive and refund its own inserted stages. In the bare-metal lane the target is the lane's payments double, whose result is never hosted-ledger evidence. Mock access is evidence of composition, never of real SSH access or revocation. The scenario MUST leave no payment hold, allocated host, mock rule, or held loop behind, whether it passes or fails, except a payment it cannot refund, which it MUST report by its negotiation and transaction together with any host its seller may still deliver for it, and a host whose fulfillment it cannot read or tear down, which it MUST report as a failed cleanup step. Without a configured target, or with an unready external one, it MUST report a named blocked prerequisite; an unready lane-owned target MUST fail setup by name. It MUST never fall back to Alkahest or count an unrun purchase as qualification.
+
+#### Scenario: Bare-metal payment purchase is qualified
+
+- **WHEN** the bare-metal payment scenario runs with a ready configured payments target
+- **THEN** the shared purchase stages discover a distinct backed whole-host listing, negotiate
+  and approve one hourly payment option with a wallet-free profiled Ed25519 buyer,
+  and observe receipt-gated durable mock delivery
+- **AND** recovery reads the original run and resolves its retained signer, repeats the
+  canonical lifecycle commit for the same negotiation, and requires the original
+  transaction, fulfillment identity, and durable result
+- **AND** the buyer requests physical teardown through `market bare-metal teardown`,
+  converging mock reclaim, then the pinned seller separately refunds the payment, still
+  held, before selected-site capacity release is confirmed
+
+#### Scenario: A stage fails after the payment is approved
+
+- **WHEN** a stage of the bare-metal payment scenario fails after the buyer approved the payment
+- **THEN** the scenario's cleanup refunds the deal's payment if it is not already refunded,
+  then reads the deal's fulfillment and tears down a host it finds not yet torn down,
+  reading the deal's identifiers from the original run when the purchase command failed
+- **AND** a host delivered while the refund was being requested is found and torn down,
+  and one whose fulfillment cannot be read or torn down is reported as a failed step
+- **AND** a refund the seller refuses because the payment is not yet verified, or the
+  payments service or storefront is unavailable, is retried for a bounded time, and a
+  refund that still fails fails the scenario naming the negotiation and transaction
+- **AND** a failed cleanup step is reported without preventing the later ones, and the
+  held loops are resumed whatever an earlier step did
+
+#### Scenario: No payments target is configured
+
+- **WHEN** the bare-metal payment scenario runs with no payments target configured, or an unready external one
+- **THEN** it reports a named blocked prerequisite and makes no purchase
+
+#### Scenario: The lane's own payments target is unready
+
+- **WHEN** the bare-metal lane's payments double is not ready
+- **THEN** lane setup fails naming it, before any purchase
+
+### Requirement: Scenarios hold shared services for the whole module
+
+Every end-to-end scenario module a compute pipeline lane selects MUST hold, for the whole
+module, its lane's storefront lifecycle loops, provisioning's fulfillment convergence,
+and its lease watchdog; a module the VM lane selects MUST also hold Alice's storefront
+loops. A lane's selection is its marker expression, not its directory; a module no lane
+selects is outside this rule, and so is a module under `scenarios/core/`, which reaches
+only the dev chain and messages no storefront or provisioning service. Each hold MUST be the
+lane's hold fixture, built on one shared helper per pause kind, taken before the module's
+first stage, waiting until each held loop reports itself paused at its gate, and released
+in a finaliser whatever the module's outcome, after the module's other cleanup. A stage
+MUST assert a hold and MUST NOT pause or resume a service itself. Source checks MUST refuse
+a scenario or stage that calls a pause route directly, and a module this rule covers whose
+resolved fixtures lack one of its lane's holds. Every lane that holds
+MUST use the same mechanism.
+
+#### Scenario: A deal scenario fails part-way
+
+- **WHEN** a VM or bare-metal deal scenario fails in a stage after its storefront's loops
+  and the lease watchdog were held
+- **THEN** both are resumed when the module ends, and the next module finds them running
+
+#### Scenario: The Helm deal test passes
+
+- **WHEN** the in-cluster deal test completes against a persistent Helm release
+- **THEN** the seller storefront's lifecycle loops report running afterwards
+
+#### Scenario: A stage pauses a service
+
+- **WHEN** a scenario module or stage calls a storefront or provisioning pause route
+  directly
+- **THEN** the source check fails, naming the call
+
+#### Scenario: A compute-lane module omits a hold
+
+- **WHEN** the resolved fixtures of a scenario module a compute pipeline lane selects,
+  outside `scenarios/core/`, lack its lane's storefront, fulfillment-convergence, or lease-watchdog hold, or a module the
+  VM lane selects lacks Alice's storefront hold
+- **THEN** the source check fails, naming the module and the missing hold
+
+#### Scenario: A module no lane selects
+
+- **WHEN** a scenario module in a compute lane's directory is selected by no pipeline
+  lane, such as one run by hand against a real host
+- **THEN** the hold check does not require its lane's holds of it
+
+#### Scenario: A lane selects a module outside its directory
+
+- **WHEN** a compute lane's marker expression selects a scenario module outside the lane's
+  directory
+- **THEN** the hold check requires the lane's holds of it, unless it is a chain-only module
+  under `scenarios/core/`, such as the Alkahest escrow codec module the VM lane selects
+
+### Requirement: A real-provisioning VM scenario proves delivery on a real host
+
+A VM scenario MUST exist that runs the canonical compute deal against a provisioning
+service outside its mock profile and a real KVM host, and proves what the mock profile
+cannot: that the service's VM execution is not mocked; that the create and teardown
+jobs ran and succeeded; that the buyer, with the key it negotiated, reaches the VM with
+the delivered access as the delivered user and finds the listing shape's vCPU count,
+memory within a stated tolerance, and at least its disk; that an unrelated public
+key is refused for the delivered user; and that once the lease expires and its
+capacity is released the host's VM list no longer names the guest and the delivered
+access no longer connects. It makes no claim about the guest's other configured
+credentials.
+
+The scenario MUST run under either access mode its target names. Under relay access it
+MUST require the delivered address to be the relay's and the port the leased one. In
+either mode, between its first deal's access checks and that deal's expiry, it MUST
+hold an established session to the first guest while a second deal on the same listing
+is created and torn down, and MUST fail if that session ends or stalls beyond a stated
+bound; it MUST check the host's connectivity through the provisioning service before
+and after each create and teardown; and under relay access it MUST read the relay's
+holdings to show the second deal's port released and held by no other lease.
+
+The scenario MUST register the pool, executor host, and capacity declaration it deals
+on from its target description, publishing the target's listing shape, and MUST be able
+to deal on a shape that declares no GPUs. It MUST keep every worker hold and explicit
+advance that exists outside the mock profile, and MUST wait for a real job, found
+through its fulfillment's capacity reservation, by reading its state, within a stated
+bound, where a mock lane would release a gate. It MUST register the host with the
+connection its target describes, replacing the connection of a host an earlier run left
+behind, and MUST write nothing to the stack before its target is validated, its VM
+execution is found real, and, under relay access, its relay is found enabled with a
+token and an active grant key. It MUST NOT submit settlement unless the settlement
+preview chose the target host. When it fails after a fulfillment is dispatched and
+before its own teardown completes, it MUST truncate each of its live deals' leases so
+the provisioning service tears the guests down, and MUST fail naming the fulfillment,
+reservation, jobs, guest, and host where removal is not confirmed; it MUST NOT release
+reservations beyond its own. It MUST generate the buyer's key for the run and MUST trust
+the guest's host key on first use for the run only, failing if a later connection in the
+run presents another. It belongs to no default lane and MUST skip, naming the profile
+it needs, when its target names no VM host.
+
+#### Scenario: A real deal is delivered
+
+- **WHEN** the scenario runs with a target describing a prepared KVM host
+- **THEN** the create job runs on that host, the fulfillment reaches `active`, and the
+  buyer's connection with the delivered access shows the delivered user, the listing
+  shape's vCPU count, memory within tolerance, and at least its disk
+
+#### Scenario: A relayed deal is delivered
+
+- **WHEN** the target describes the host with relay access
+- **THEN** the delivered access names the relay's address and the port leased for the
+  guest, and connects
+
+#### Scenario: A session survives a second deal
+
+- **WHEN** a session to the first guest is open while a second deal's guest is created
+  and then torn down
+- **THEN** the session stays established throughout, the second guest is reached at its
+  own port, and its port is shown released afterwards
+
+#### Scenario: An unrelated key is refused
+
+- **WHEN** the scenario connects to the delivered VM as the delivered user with a public
+  key it did not negotiate
+- **THEN** the connection is refused
+
+#### Scenario: Teardown removes the VM and its access
+
+- **WHEN** the lease is expired and the watchdog and convergence cycles are advanced
+  until its capacity is released
+- **THEN** the teardown job has succeeded, a VM list job on the host succeeds without
+  naming the guest the create job reported, and the delivered access fails to connect
+  within the stated bound
+
+#### Scenario: The run fails with a guest on the host
+
+- **WHEN** a stage fails after a fulfillment is dispatched and before the scenario's
+  own teardown of it completes
+- **THEN** the scenario truncates that deal's lease so the provisioning service tears
+  the guest down, and fails naming the fulfillment, reservation, jobs, guest, and host
+  where it cannot confirm the guest's removal
+
+#### Scenario: The settlement preview chooses another host
+
+- **WHEN** the settlement preview chooses a host other than the target's
+- **THEN** the scenario does not submit settlement
+
+#### Scenario: The service's VM execution is mocked
+
+- **WHEN** the provisioning service reports no VM executor, or reports it mocked
+- **THEN** the scenario fails at its first check, before any registration or deal
+  mutation, rather than reporting mock delivery as real
+
+#### Scenario: No target is present
+
+- **WHEN** the run does not select the target profile, its file is absent, or it names
+  no VM host
+- **THEN** the scenario skips with a message naming the profile and file it needs,
+  having written nothing to the stack
+
+### Requirement: A real-provisioning target is a typed, versioned settings section
+
+The real-provisioning scenarios' target MUST be read from a versioned settings section
+loaded from a profile file the repository ignores, beside a committed example whose
+values are visibly fictitious. The section MUST be validated before any stage runs: a
+missing or misspelled field MUST fail naming the field, an unknown version MUST be
+refused, and a field that does not belong to a host's domain or access mode MUST be
+refused. Version 2 describes a list of hosts, at most one per domain, each with its
+domain, its identity, the connection the provisioning service reaches it at (address,
+user, port, and the path at which the service reads its key), its access — a relay
+named by its identifier, or direct access with a tenant address — and the capacity it
+sells; a VM host also states the listing shape its scenario publishes, which MUST fit
+twice within its capacity, and a bare-metal host its physical machine identity and its
+SSH host public key. A relay named by a host is resolved in the provisioning service
+that host's scenario runs against. The section MUST NOT carry the private key the
+provisioning service reaches hosts with, nor any relay token or key.
+
+#### Scenario: A field is misspelled
+
+- **WHEN** the target section names a field the model does not define, or omits one it
+  requires
+- **THEN** the scenario fails before its first stage, naming the field
+
+#### Scenario: A newer target reaches an older reader
+
+- **WHEN** the section's version is one the scenario does not know
+- **THEN** the scenario refuses it rather than interpreting it
+
+#### Scenario: Relay access is requested under version 1
+
+- **WHEN** a section states version 1, whatever access mode it names
+- **THEN** it is refused with a message naming the version 2 profile and how its fields
+  map
+
+#### Scenario: A listing shape does not fit twice
+
+- **WHEN** a VM host's listing shape exceeds half its capacity on any dimension
+- **THEN** the target is refused, naming the dimension
+
+#### Scenario: Relay access names a tenant address
+
+- **WHEN** a host under relay access states a tenant address, or one under direct access
+  names a relay
+- **THEN** the target is refused, naming the field
+
+### Requirement: External authority effects retain their evidence owner
+
+Payment-service ledger, hold release/extensions, fees, top-ups, payouts and provider recovery MUST remain the payments service's evidence; cases and outcomes MUST remain the dispute authority's. Deterministic local evidence MUST NOT claim physical hardware effects.
+
+#### Scenario: A deterministic lane passes
+
+- **WHEN** contract qualification passes against local doubles
+- **THEN** the report claims no external ledger, adjudication or hardware outcome
+
+### Requirement: A real-provisioning bare-metal scenario proves relay access on a real host
+
+A bare-metal scenario MUST exist that runs the canonical compute deal against a
+provisioning service outside its mock profile and a real host reached through a relay,
+and proves: that the service's bare-metal execution is not mocked; that the grant and
+reclaim jobs ran on the target host and succeeded; that the buyer, with a key generated
+for the run and negotiated in the deal, reaches the host as the delivered tenant at the
+relay's address and the leased port; that an unrelated key is refused; that after the
+lease expires and its capacity is released the delivered access no longer connects and
+the relay's holdings show the port released; and that the host's connectivity through
+the provisioning service holds before and after the grant and the reclaim. It MUST
+register its pool, host, and declaration from its target, MUST write nothing before its
+target, its execution, and its relay are checked, MUST NOT submit settlement unless the
+settlement preview chose the target host, MUST pin the host's key from its target, MUST
+truncate its lease on a failure after dispatch so reclaim runs and name what it cannot
+confirm, and belongs to no default lane, skipping when its target names no bare-metal
+host.
+
+#### Scenario: A relayed bare-metal deal is delivered
+
+- **WHEN** the scenario runs with a target describing a prepared bare-metal host under
+  relay access
+- **THEN** the grant job succeeds and the buyer connects as the delivered tenant at the
+  relay's address and the leased port, while an unrelated key is refused
+
+#### Scenario: Reclaim ends the relayed access
+
+- **WHEN** the lease is expired and the cycles are advanced until its capacity is
+  released
+- **THEN** the reclaim job has succeeded, the delivered access no longer connects, and
+  the relay's holdings show the lease released
+
+#### Scenario: The service's bare-metal execution is mocked
+
+- **WHEN** the provisioning service reports no bare-metal executor, or reports it mocked
+- **THEN** the scenario fails at its first check, before any registration or deal
+  mutation
+
+### Requirement: Real-lane SSH access goes through one helper
+
+Every end-to-end scenario that opens SSH to a delivered resource MUST do so through one
+shared helper, which offers a key generated for the run, trust on first use for a run or
+a pinned host key, a session held open with a liveness check, and the classification of
+a refused connection.
+
+#### Scenario: A scenario opens SSH
+
+- **WHEN** any end-to-end scenario connects to a delivered guest or host
+- **THEN** it uses the shared helper, and no scenario builds its own SSH command
+
+### Requirement: Arkhai physical qualification uses ordinary buyer settlement
+
+Arkhai real-hardware qualification MUST use the shipped buyer and external payments authority, correlate each signed TEST payment to its physical delivery, and keep buyer credentials separate from operator observations. It MUST report unrun prerequisites and MUST NOT label an unexecuted payment-specific pytest driver passed.
+
+#### Scenario: A real Arkhai rental is qualified
+
+- **WHEN** a configured campaign executes a VM or bare-metal rental using `arkhai.payments.v1`
+- **THEN** the buyer negotiates and pays through the shipped client, verifies pinned delivered SSH and the negotiated shape, and observes ordinary teardown, fresh access denial and restored capacity with correlated payment, reservation and job identities
+
+#### Scenario: An operator supplies independent physical observations
+
+- **WHEN** qualification needs host inventory, management continuity or cleanup observations unavailable to the tenant
+- **THEN** those observations use a separate operator authority and neither its key nor its management route is available to the ordinary buyer
+
+#### Scenario: A prerequisite or driver is unrun
+
+- **WHEN** a payment, physical target or required observation is missing or a named alternative driver was not executed
+- **THEN** qualification records that observation as unproven and does not substitute mock, native component or historical evidence for the missing real lifecycle
+
+#### Scenario: An operator supplements finite host network-policy evidence
+
+- **WHEN** an operator probes the paid deployment's shared host network policy from a separate CPU guest bound to the same pinned guest base, default bridge, virtio NIC, and loaded policy structure
+- **THEN** the recorded result is limited to the finite network paths and rules exercised; it does not replace paid-buyer evidence for customer identity, credentials, privilege, grant, GPU work, payment, delivery, teardown, access revocation, or restored capacity, and it does not establish universal network isolation
+
+### Requirement: Equivalent physical proof preserves lifecycle invariants
+
+An alternative payment-specific qualification method MUST retain the original physical acceptance observations: relay and direct VM access, concurrent-deal and management continuity, lease expiry, repeat registration/adoption, bare-metal cleanup and refusal recovery. It MUST recover only its own rentals and preserve relay quarantine and consumed tenant identities.
+
+#### Scenario: Two VM deals share a host
+
+- **WHEN** the second CPU-only VM is created and torn down while the first buyer session is active
+- **THEN** the first session and management connection remain usable, both delivered shapes match their agreements, an unrelated key is refused, and ordinary expiry removes each guest and ends access
+
+#### Scenario: Direct access is qualified
+
+- **WHEN** the equivalent VM cycle uses direct access
+- **THEN** it runs in a drained controlled pool without exposing host management or rebinding a pool that retains active reservations or relay holdings, and its result is distinguished from external relay acceptance
+
+#### Scenario: Bare-metal cleanup refuses an unsafe descendant
+
+- **WHEN** an ordinary reclaim encounters the nonce-scoped foreign-owned test descendant
+- **THEN** capacity remains unavailable, retry and actionable notification are observed, and fixture-only repair permits the same nonterminal job to complete without resetting tenant identity history or bypassing cleanup
+
+#### Scenario: A campaign is repeated
+
+- **WHEN** registrations and listings are reconciled for another qualified cycle
+- **THEN** canonical identities are retained, no duplicate allocator is created, and consumed UIDs and unexpired relay quarantine remain protected
+
+### Requirement: Lanes run payment scenarios against an in-lane payments double
+
+The VM, bare-metal and API-credit lanes MUST each run a payments double that wraps the payments kit's `PaymentsAuthority` engine and mirrors the payments service's HTTP API: its routes, bearer authentication, approval admission, read authorization, idempotency and error codes. The double MUST always sign `livemode: false`, MUST be reached over HTTPS under a lane CA the lane's callers trust through their payments configuration's CA bundle path, and MUST hold only labelled public development fixtures. Its suite and documentation MUST claim only the once-only surface; passing against it MUST NOT be reported as hosted-ledger, funding or live evidence.
+
+#### Scenario: A lane's once-only payment scenario runs
+
+- **WHEN** the bare-metal or API-credit lane runs its payment scenario
+- **THEN** the scenario approves, receives a verified receipt and is refunded through the double, and does not skip
+
+#### Scenario: The VM payment scenario's once-only stages run
+
+- **WHEN** the VM lane runs its payment scenario's once-only stages
+- **THEN** they approve, receive a verified receipt, deliver, replay the commit and reach servicing through the double without skipping, and the held payment stays in the double until the lane ends
+
+#### Scenario: An approval is retried after its mandate expires
+
+- **WHEN** a payer repeats an approval the double has already made, after the mandate's expiry
+- **THEN** the double returns the original receipt rather than refusing the mandate as expired
+
+#### Scenario: The double mirrors a refusal
+
+- **WHEN** a caller approves a mandate it is not the payer of, or reads a transaction or balance it may not read
+- **THEN** the double refuses it with the payments service's status and error code
+
+#### Scenario: The pinned dispute authority cannot answer
+
+- **WHEN** a lane's registries recommend the lane's dispute authority
+- **THEN** its origin is under `.invalid`, its record key has no usable private half, and its account has no bearer token at the double
+
+#### Scenario: A result against the double is reported
+
+- **WHEN** a lane's payment scenario passes against the double
+- **THEN** the result establishes SCM's use of the payments boundary, not the payments service's ledger, funding or availability
+
+### Requirement: The VM payment scenario's case stages need a mediation target
+
+The VM payment scenario's stages that need a dispute authority to accept a filed case MUST report a blocked skip naming the missing mediation target when none is configured, while its once-only stages run against the configured payments target. The VM lane's storefront MUST hold an identity-bound dispute credential for the pinned dispute authority, a labelled public development value, so that servicing reports the deal `running` while that authority cannot be reached.
+
+#### Scenario: The VM lane has no mediation target
+
+- **WHEN** the VM lane runs its payment scenario with the lane's payments double and no mediation target
+- **THEN** the commit, delivery, replay and servicing stages run, servicing reporting the deal `running`, and the operator-end case and refund stages report a blocked skip naming the mediation target
+
+### Requirement: A lane's runner reads committed lane profiles
+
+Each lane MUST run its test runner under committed profiles: a shared payments profile holding the lane double's target, accounts, CA bundle path and buyer credentials, then a profile of the lane's own holding only what differs by lane, selected by the lane target's choice of profiles. The runner's environment MUST carry no payments setting or credential. The buyer's payments token MUST reach the buyer process under the variable the payments settings name, written by the harness from its resolved settings. Every value a lane profile restates from a fixture or identity file MUST be held to it by a test.
+
+#### Scenario: A lane runs its payment scenario
+
+- **WHEN** a lane target runs its markers against its stack
+- **THEN** the runner loads the shared payments profile and the lane's own profile, and the payment scenario reaches the double with the configured CA and the buyer's token
+
+#### Scenario: A run selects no lane profile
+
+- **WHEN** the runner runs with no lane profile selected
+- **THEN** it has no payments target, and the payment scenarios report their blocked prerequisite
+
+#### Scenario: A restated value drifts from its fixture
+
+- **WHEN** a lane profile states a token, account or key that differs from the fixture or identity file it restates
+- **THEN** a repository test fails naming both
+
+### Requirement: An external-topology scenario extends a locally verifiable scenario
+
+An end-to-end scenario that makes a deal against services or hosts this repository does
+not deploy — a hosted payments target, a real host — MUST extend a locally verifiable
+scenario that runs against this repository's own stack. It MUST share that scenario's
+stages wherever their bodies agree and add only the stages its external parts require.
+An external-topology scenario that makes no deal, observing state that such deal
+scenarios left on the same stack, extends no scenario and MUST name the scenarios whose
+state it reads. Setup or teardown that needs knowledge this repository lacks, such as
+funding a payer account, MUST be left to the deployment and MUST NOT be performed by the
+scenario.
+
+#### Scenario: An external-topology scenario is added
+
+- **WHEN** a scenario making a deal against a real host or a hosted payments target is
+  added
+- **THEN** a locally verifiable scenario running the same shared stages runs in a
+  pipeline lane, and the external scenario adds only the stages its external parts need
+
+#### Scenario: An external-topology follow-up makes no deal
+
+- **WHEN** an external-topology scenario reads and changes only state the deal scenarios
+  left on the same stack
+- **THEN** it extends no locally verifiable scenario, and it names the scenarios it
+  follows
+
+#### Scenario: The deployment has not funded the payer
+
+- **WHEN** an external-topology payment scenario runs and the payer cannot approve
+- **THEN** the scenario fails or skips naming the payer, and performs no funding itself
+
+### Requirement: A compute buyer purchase settled through Arkhai payments runs in each compute lane
+
+The VM and bare-metal lanes MUST each run a buyer purchase that discovers, negotiates and
+pays through the shipped buyer CLI (`market buy`, `market bare-metal buy`) in
+`arkhai.payments.v1` against the lane's payments double, delivers through mock
+provisioning, and ends: the VM lease through back-dating and a stepped lease-watchdog
+cycle, the bare-metal lease through the buyer's `market bare-metal teardown`. The
+purchase stages MUST be defined once and shared by every scenario that buys this way,
+and each stage MUST log the identifiers it reads. The bare-metal lane's purchase is its
+qualified payment purchase, which runs the shared stages and inserts its own; the VM
+lane's purchase lists a resource of its own on a registered host, since a listing's
+binding to its resource outlives the listing.
+
+#### Scenario: A VM lane purchase completes
+
+- **WHEN** the VM lane runs its buyer purchase
+- **THEN** `market buy` approves the payment, the seller delivers after a verified
+  receipt, and back-dating the lease and stepping one watchdog cycle tears the guest down
+  and releases its capacity
+
+#### Scenario: A bare-metal lane purchase ends by the buyer
+
+- **WHEN** the bare-metal lane runs its buyer purchase and the buyer runs
+  `market bare-metal teardown`
+- **THEN** the reclaim runs and the whole host's capacity is restored
+
+#### Scenario: The bare-metal purchase's steps change
+
+- **WHEN** a discovery, purchase, correlation, delivery or buyer-teardown step of the
+  bare-metal lane's purchase changes
+- **THEN** it changes in the shared stage, and the observation 4 and 5 module runs the
+  changed stage without an edit of its own
+
+#### Scenario: A purchase is checked against its payment records
+
+- **WHEN** a buyer purchase completes
+- **THEN** each transaction is bound to its Agreement, its receipt covers that mandate,
+  its snapshot names the configured payer and payee with gross equal to the Agreement's
+  price, and the payer's available balance fell by exactly the scenario's own debits
+
+#### Scenario: The buyer's delivery-end filing reaches no authority
+
+- **WHEN** the bare-metal buyer's teardown files a delivery-end case with a pinned
+  dispute authority that does not answer
+- **THEN** the scenario neither fails on the filing nor reads it as delivery, access-end
+  or refund evidence
+
+### Requirement: Real-provisioning qualification scenarios make the owed observations
+
+External-topology modules MUST make the runbook's observations 2, 4, 5 and 6 against a
+configured real-provisioning target and payments target: observations 2, 4 and 5 by
+extending the buyer purchase, and observation 6 as a follow-up that makes no deal, run
+after them on the stack their purchases populated. Each MUST belong to no default lane,
+MUST report a blocked skip without both targets, MUST skip a stage whose topology input is absent naming that input, and MUST
+never wait out the wall clock for a state it can step to.
+
+- Observation 2 MUST buy two CPU-only VMs, hold a heartbeat on the first guest across
+  the second's create and teardown, end both leases through the watchdog's expiry path,
+  and read the host's diagnostics before, during and after.
+- Observations 4 and 5 MUST run the normal bare-metal cycle and then the successor and
+  refusal cycle in one module, ending each lease by the buyer's teardown, and check no
+  GPU.
+- Observation 6 MUST reapply both hosts' canonical registrations and run a publication
+  cycle, reading the consumed-UID history through the working-data operator route before
+  and after.
+
+A module whose stage fails after the buyer approved a payment MUST, in its cleanup, refund
+that payment if it is not refunded, unless the module had begun ending the purchase
+itself, and MUST end a delivered guest or host through its lease's own lifecycle; it MUST
+report by negotiation and transaction any payment it cannot refund and any delivery it
+cannot end. A purchase the module ended itself is left as it is.
+
+#### Scenario: The first session survives the second guest
+
+- **WHEN** the observation 2 module creates and then tears down the second guest
+- **THEN** the first guest's heartbeat shows no gap over five seconds and both leases end
+  through back-dating and stepped watchdog cycles
+
+#### Scenario: A host service restarts during observation 2
+
+- **WHEN** the host's diagnostics show the management unit's invocation changed, or
+  libvirtd's restart count grew, between the reads
+- **THEN** the observation 2 module fails naming the unit
+
+#### Scenario: Grant admission is read from the plugin's log
+
+- **WHEN** a relayed lease is delivered and the target names the relay's admission log
+- **THEN** the module requires an `admit` line, verified, whose `jti` is the reservation,
+  and whose remote port and `kid` are the remote port and grant key that the relay's
+  leases read records for that same lease, not the relay's active key
+
+#### Scenario: A topology input is absent
+
+- **WHEN** the target names no management unit or no admission log
+- **THEN** the stage that needs it skips naming the field, every other stage runs, and
+  each observation that requires the skipped stage is recorded unproven naming the
+  field, even when its other stages pass
+
+#### Scenario: The refusal is observed
+
+- **WHEN** the successor cycle's reclaim meets the planted foreign descendant
+- **THEN** the reclaim job is queued for retry with its error recorded and a next retry
+  time set, its log names the descendant, the lease stays `releasing`, and after
+  fixture-only repair the same job completes
+
+#### Scenario: Registration is reapplied
+
+- **WHEN** the observation 6 module reapplies the canonical registrations and runs a
+  publication cycle
+- **THEN** existing listings are adopted with identities, states and pauses intact, no
+  duplicate host, pool, resource, allocator or listing appears, unexpired relay
+  quarantine is retained, and the consumed-UID history is unchanged
+
+#### Scenario: A qualification stage fails after the payment is approved
+
+- **WHEN** a stage of a qualification module fails after the buyer approved a purchase's
+  payment, before the module ended that purchase
+- **THEN** the module's cleanup refunds the payment as the seller, retrying while its
+  receipt may still verify, unless the module had begun ending the purchase, then ends
+  any guest or host delivered for it through its lease's expiry or reclaim
+- **AND** a refund that stays refused, or a delivery that cannot be read or ended, fails
+  the cleanup naming the purchase's negotiation and transaction
+
+#### Scenario: No target is configured
+
+- **WHEN** the real-provisioning target or the payments target is absent
+- **THEN** each qualification module reports a blocked skip and writes nothing to the
+  stack
+
+### Requirement: A real resource's listing offers every composed deal mechanism
+
+On a real-provisioning target, the listing on the target's resource MUST offer a
+settlement option for each deal mechanism the storefront composes and reports ready,
+Alkahest and Arkhai payments, created or adopted through one shared helper; contact
+exchange settles no deal and is stated on no compute listing. A module adopting the
+listing MUST require it to offer that module's own mechanism and otherwise MUST fail
+naming the listing and its options, changing nothing.
+
+#### Scenario: An Alkahest module and a qualification module share a stack
+
+- **WHEN** both run against one stack composing Alkahest and Arkhai payments, in either
+  order
+- **THEN** both adopt the same listing, and no second listing is created
+
+#### Scenario: The listing lacks the module's mechanism
+
+- **WHEN** a module finds the resource's listing offering no option of its mechanism
+- **THEN** it fails naming the listing and its options before any deal
+
+### Requirement: The real-provisioning target names diagnostics and admission inputs
+
+Target version 2 MUST accept an optional `management_unit` on a VM host, a systemd
+service unit name, and an optional `admission_log` on relay access, an absolute
+harness-local path. An invalid unit name or a relative path MUST be refused naming the
+field.
+
+#### Scenario: A relative admission log path
+
+- **WHEN** a relay access names `admission_log` as a relative path
+- **THEN** the target is refused before any stage, naming the field
+
+### Requirement: Pipeline scenarios advance only by their own steps
+
+An end-to-end scenario in a compute pipeline lane — the VM or bare-metal lane, whose
+modules hold their lane's timers — MUST prove a deterministic sequence of state changes,
+never the passage of time. A transition a service's timer would make MUST be made
+by the stage stepping that loop while it is held. A stage MUST wait only for an effect of
+a request it made, bounded, and MUST NOT wait for a duration or a window to pass. Where a
+service reads another's state live, the stage MUST read the effect once after its step
+rather than poll for it.
+
+#### Scenario: A buy reaches ready with convergence held
+
+- **WHEN** a compute-lane scenario runs `market buy` while its lane's fulfillment
+  convergence is held
+- **THEN** the stage advances convergence once the buy's job is submitted, and the buy
+  reaches `ready` with no convergence timer cycle
+
+#### Scenario: A stage awaits a message its request sent
+
+- **WHEN** a stage's request causes a service to send a message off the request path,
+  such as an introduction's seller-side delivery
+- **THEN** the stage waits for that message, bounded, and fails naming it if it does not
+  arrive
+
+#### Scenario: A behaviour depends on a window passing
+
+- **WHEN** a behaviour is defined by a window or interval elapsing, such as the
+  introduction retention sweep
+- **THEN** no pipeline stage waits for it; a test at the level that can drive the clock
+  proves it

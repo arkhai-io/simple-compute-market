@@ -1,0 +1,187 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1450" height="870" viewBox="0 0 1450 870">
+<title>A step run's life</title>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f3350"/></marker>
+</defs>
+<rect x="0" y="0" width="1450" height="870" fill="#ffffff"/>
+<g stroke-width="1.2">
+<rect x="20" y="80" width="1415" height="100" fill="#ffffff" stroke="#c9ccd8"/>
+<rect x="20" y="180" width="1415" height="160" fill="#f7f8fb" stroke="#c9ccd8"/>
+<rect x="20" y="340" width="1415" height="220" fill="#ffffff" stroke="#c9ccd8"/>
+<rect x="20" y="560" width="1415" height="120" fill="#f7f8fb" stroke="#c9ccd8"/>
+<rect x="20" y="680" width="1415" height="140" fill="#ffffff" stroke="#c9ccd8"/>
+<rect x="20" y="80" width="150" height="100" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="20" y="180" width="150" height="160" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="20" y="340" width="150" height="220" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="20" y="560" width="150" height="120" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="20" y="680" width="150" height="140" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="805" y="95" width="180" height="70" rx="5" fill="#fdf2fb" stroke="#c98ac4"/>
+<rect x="1030" y="95" width="185" height="70" rx="5" fill="#fdf2fb" stroke="#c98ac4"/>
+<rect x="190" y="190" width="180" height="70" rx="5" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="395" y="190" width="180" height="70" rx="5" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="805" y="190" width="180" height="70" rx="5" fill="#f4f5f9" stroke="#8a8fa8"/>
+<rect x="190" y="352" width="180" height="70" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="190" y="474" width="180" height="70" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="395" y="352" width="180" height="70" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="600" y="474" width="180" height="70" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="805" y="352" width="180" height="70" rx="5" fill="#eefaf6" stroke="#6fc2a5"/>
+<rect x="1030" y="352" width="185" height="70" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="1230" y="474" width="195" height="70" rx="5" fill="#fff6ec" stroke="#e3a765"/>
+<rect x="395" y="585" width="180" height="70" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="600" y="585" width="180" height="70" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="1030" y="585" width="185" height="70" rx="5" fill="#f3faea" stroke="#9fbf6a"/>
+<rect x="395" y="700" width="180" height="70" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="805" y="700" width="180" height="85" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="1030" y="700" width="185" height="85" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+<rect x="1230" y="700" width="195" height="85" rx="5" fill="#ffffff" stroke="#8a8fa8"/>
+</g>
+<g fill="none" stroke="#2f3350" stroke-width="1.2">
+<polyline points="280,260 280,352" marker-end="url(#arrow)"/>
+<polyline points="280,422 280,474" marker-end="url(#arrow)"/>
+<polyline points="280,544 280,620 395,620" marker-end="url(#arrow)"/>
+<polyline points="805,130 485,130 485,190" marker-end="url(#arrow)"/>
+<polyline points="485,260 485,352" marker-end="url(#arrow)"/>
+<polyline points="485,422 485,585" marker-end="url(#arrow)"/>
+<polyline points="575,620 600,620" marker-end="url(#arrow)"/>
+<polyline points="485,655 485,700" marker-end="url(#arrow)"/>
+<polyline points="690,585 690,544" marker-end="url(#arrow)"/>
+<polyline points="780,509 795,509 795,742.5 805,742.5" marker-end="url(#arrow)"/>
+<polyline points="895,700 895,422" marker-end="url(#arrow)"/>
+<polyline points="895,352 895,260" marker-end="url(#arrow)"/>
+<polyline points="895,190 895,165" marker-end="url(#arrow)"/>
+<polyline points="840,260 840,300 230,300 230,260" marker-end="url(#arrow)"/>
+<polyline points="1122.5,165 1122.5,352" marker-end="url(#arrow)"/>
+<polyline points="1030,400 1016,400 1016,742.5 1030,742.5" marker-end="url(#arrow)"/>
+<polyline points="1122.5,422 1122.5,585" marker-end="url(#arrow)"/>
+<polyline points="1215,620 1290,620 1290,544" marker-end="url(#arrow)"/>
+<polyline points="1385,544 1385,700" marker-end="url(#arrow)"/>
+<polyline points="1008,50 1008,820" stroke="#8a8fa8" stroke-dasharray="6 4"/>
+</g>
+<g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#1f2340">
+<text x="20" y="28" font-size="16" font-weight="bold">A step run's life: unattended, answered, and interactive</text>
+<text x="190" y="67" font-size="13" font-weight="bold">An unattended run, and the answer to its question</text>
+<text x="1030" y="67" font-size="13" font-weight="bold">An interactive run</text>
+<text x="20" y="846" font-size="12">A run that crashes, or ends without a valid outcome, is logged stopped by the wrapper itself. An answer resumes the waiting run named by its seq; the wrapper refuses one that no longer waits.</text>
+</g>
+<g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#1f2340" text-anchor="middle">
+<text x="95" y="134" font-weight="bold">the owner</text>
+<text x="95" y="249" font-weight="bold">relay</text>
+<text x="95" y="264">the orchestrating</text>
+<text x="95" y="279">session</text>
+<text x="95" y="431.5" font-weight="bold">the command</text>
+<text x="95" y="446.5">scripts/change-</text>
+<text x="95" y="461.5">workflow: cli,</text>
+<text x="95" y="476.5">wrapper, log</text>
+<text x="95" y="609" font-weight="bold">harness session</text>
+<text x="95" y="624">claude -p, or a</text>
+<text x="95" y="639">plain claude</text>
+<text x="95" y="739" font-weight="bold">files</text>
+<text x="95" y="754">the change's</text>
+<text x="95" y="769">reviews/</text>
+<text x="895" y="112" font-weight="bold">the owner</text>
+<text x="895" y="127">reads each message as</text>
+<text x="895" y="142">written; answers a</text>
+<text x="895" y="157">question</text>
+<text x="1122.5" y="112" font-weight="bold">the owner</text>
+<text x="1122.5" y="127">start &lt;step&gt; &lt;change&gt;,</text>
+<text x="1122.5" y="142">without --unattended</text>
+<text x="280" y="207" font-weight="bold">start --unattended</text>
+<text x="280" y="222">start &lt;step&gt; &lt;change&gt;</text>
+<text x="280" y="237">--unattended, or make</text>
+<text x="280" y="252">with UNATTENDED=1</text>
+<text x="485" y="207" font-weight="bold">resume</text>
+<text x="485" y="222">resume &lt;change&gt; --seq N</text>
+<text x="485" y="237">--answer …: the owner's</text>
+<text x="485" y="252">answer, relayed</text>
+<text x="895" y="207" font-weight="bold">relays</text>
+<text x="895" y="222">shows the step's message</text>
+<text x="895" y="237">as written; runs the</text>
+<text x="895" y="252">step next names</text>
+<text x="280" y="369" font-weight="bold">start</text>
+<text x="280" y="384">refuses what the step</text>
+<text x="280" y="399">cannot take; opens the</text>
+<text x="280" y="414">log with its format line</text>
+<text x="485" y="369" font-weight="bold">wrapper.resume</text>
+<text x="485" y="384">seq N must still wait:</text>
+<text x="485" y="399">its step's latest run,</text>
+<text x="485" y="414">a question or a stop</text>
+<text x="895" y="369" font-weight="bold">next</text>
+<text x="895" y="384">the next step, computed</text>
+<text x="895" y="399">from the files and</text>
+<text x="895" y="414">the log</text>
+<text x="1122.5" y="369" font-weight="bold">start</text>
+<text x="1122.5" y="384">opens the log with its</text>
+<text x="1122.5" y="399">format line; launches</text>
+<text x="1122.5" y="414">claude /change-&lt;step&gt;</text>
+<text x="280" y="491" font-weight="bold">wrapper</text>
+<text x="280" y="506">skill and rules from the</text>
+<text x="280" y="521">step table; models from</text>
+<text x="280" y="536">the configuration</text>
+<text x="690" y="491" font-weight="bold">wrapper</text>
+<text x="690" y="506">checks the outcome; logs</text>
+<text x="690" y="521">stopped if none or</text>
+<text x="690" y="536">bad; adds denials, cost</text>
+<text x="1327.5" y="491" font-weight="bold">record</text>
+<text x="1327.5" y="506">the session's last act:</text>
+<text x="1327.5" y="521">record &lt;change&gt; &lt;step&gt;</text>
+<text x="1327.5" y="536">--outcome …</text>
+<text x="485" y="602" font-weight="bold">claude -p</text>
+<text x="485" y="617">/change-&lt;step&gt; &lt;change&gt;,</text>
+<text x="485" y="632">the step's rules, the</text>
+<text x="485" y="647">outcome schema</text>
+<text x="690" y="602" font-weight="bold">outcome</text>
+<text x="690" y="617">finished · question ·</text>
+<text x="690" y="632">returned · blocked ·</text>
+<text x="690" y="647">stopped</text>
+<text x="1122.5" y="602" font-weight="bold">plain session</text>
+<text x="1122.5" y="617">the owner's own</text>
+<text x="1122.5" y="632">permissions; the owner</text>
+<text x="1122.5" y="647">works the step in it</text>
+<text x="485" y="717" font-weight="bold">transcript</text>
+<text x="485" y="732">reviews/transcripts/</text>
+<text x="485" y="747">NN-&lt;step&gt;.jsonl, and a</text>
+<text x="485" y="762">.progress line per call</text>
+<text x="895" y="717" font-weight="bold">log line</text>
+<text x="895" y="732">reviews/workflow.jsonl:</text>
+<text x="895" y="747">seq, step, outcome,</text>
+<text x="895" y="762">session, commit, model,</text>
+<text x="895" y="777">transcript, cost</text>
+<text x="1122.5" y="717" font-weight="bold">opening line</text>
+<text x="1122.5" y="732">reviews/workflow.jsonl:</text>
+<text x="1122.5" y="747">step start, outcome</text>
+<text x="1122.5" y="762">opened, format 2,</text>
+<text x="1122.5" y="777">interactive: true</text>
+<text x="1327.5" y="717" font-weight="bold">outcome line</text>
+<text x="1327.5" y="732">the outcome, session id,</text>
+<text x="1327.5" y="747">HEAD, interactive: true;</text>
+<text x="1327.5" y="762">the id from the harness's</text>
+<text x="1327.5" y="777">CLAUDE_CODE_SESSION_ID</text>
+</g>
+<g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#4a4f6a" text-anchor="middle">
+<rect x="310.5" y="611" width="58" height="18" fill="#ffffff"/>
+<text x="339.5" y="624">launches</text>
+<rect x="583" y="121" width="64" height="18" fill="#ffffff"/>
+<text x="615" y="134">an answer</text>
+<rect x="428.5" y="487.5" width="113" height="32" fill="#ffffff"/>
+<text x="485" y="500.5">the same session,</text>
+<text x="485" y="514.5">on its model</text>
+<rect x="444" y="668.5" width="82" height="18" fill="#ffffff"/>
+<text x="485" y="681.5">event stream</text>
+<rect x="799.5" y="614.25" width="51" height="18" fill="#ffffff"/>
+<text x="825" y="627.25">appends</text>
+<rect x="854" y="552" width="82" height="18" fill="#ffffff"/>
+<text x="895" y="565">read by next</text>
+<rect x="847.5" y="297" width="95" height="18" fill="#ffffff"/>
+<text x="895" y="310">names the step</text>
+<rect x="490.5" y="291" width="89" height="18" fill="#ffffff"/>
+<text x="535" y="304">the next step</text>
+<rect x="1097" y="249.5" width="51" height="18" fill="#ffffff"/>
+<text x="1122.5" y="262.5">by hand</text>
+<rect x="1093.5" y="494.5" width="58" height="18" fill="#ffffff"/>
+<text x="1122.5" y="507.5">launches</text>
+<rect x="1241" y="610.5" width="82" height="18" fill="#ffffff"/>
+<text x="1282" y="623.5">its last act</text>
+<rect x="1359.5" y="613" width="51" height="18" fill="#ffffff"/>
+<text x="1385" y="626">appends</text>
+</g>
+</svg>

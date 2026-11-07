@@ -1,9 +1,10 @@
-"""Buyer- and storefront-side TOML config, XDG-aware.
+"""Buyer- and storefront-side config files, XDG-aware.
 
 Canonical locations:
 
 * buyer:      ``$XDG_CONFIG_HOME/arkhai/buyer.toml``
-* storefront: ``$XDG_CONFIG_HOME/arkhai/storefront.toml``
+* storefront: ``$XDG_CONFIG_HOME/arkhai/storefront.toml``, with a rendered
+  ``storefront.json`` and a ``storefront.secrets.toml`` overlay beside it
 
 Both default to ``~/.config/arkhai/`` when XDG is unset.
 
@@ -21,7 +22,6 @@ Schema (storefront and buyer share wallet/chains/registry tables):
     [chains.ethereum_sepolia]
     rpc_url = "https://..."
     chain_id = 11155111
-    # alkahest_address_config_path = "/etc/arkhai/alkahest.json"  # anvil only
 
     [chains.base_sepolia]
     rpc_url = "https://..."
@@ -53,6 +53,8 @@ from typing import Any, Callable, Optional, TypeVar
 
 import tomllib
 
+from dynaconf import Dynaconf
+
 
 T = TypeVar("T")
 
@@ -74,7 +76,6 @@ class ChainConfig:
     name: str
     rpc_url: str
     chain_id: int
-    alkahest_address_config_path: Optional[str] = None
 
 
 def user_config_dir() -> Path:
@@ -155,10 +156,10 @@ def user_config_files() -> list[Path]:
 def storefront_config_file() -> Path:
     """Return the path to the storefront's primary ``storefront.toml``.
 
-    Mirrors :func:`user_config_file` for the storefront's own file pair
-    (``storefront.toml`` + ``storefront.secrets.toml``). The storefront has
-    a separate identity and role-scoped knobs, so it gets its own file
-    rather than reusing the buyer's ``config.toml``. On a host that runs
+    Mirrors :func:`user_config_file` for the storefront's own operator file,
+    the first of the layers :func:`storefront_config_files` lists. The
+    storefront has a separate identity and role-scoped knobs, so it gets its
+    own file rather than reusing the buyer's ``config.toml``. On a host that runs
     both buyer and seller, this prevents one role's CLI scaffold from
     clobbering the other's.
 
@@ -172,13 +173,13 @@ def storefront_config_file() -> Path:
 
 
 def storefront_config_files() -> list[Path]:
-    """Return the ordered list of TOML files the storefront loader merges.
+    """Return the ordered list of files the storefront loader merges.
 
-    Mirrors :func:`user_config_files` but for the storefront's own files
-    (``storefront.toml`` + ``storefront.secrets.toml``) instead of the buyer's
-    shared ``config.toml``. The storefront has a separate identity and
-    role-scoped knobs, so it gets its own file pair rather than reusing the
-    buyer's. See ARCHITECTURE.md "Storefront chart layout".
+    ``storefront.toml`` (an operator's own file), then ``storefront.json``
+    (the public document a chart renders), then ``storefront.secrets.toml``
+    (the Secret overlay, which wins on conflict). The storefront has a
+    separate identity and role-scoped knobs, so it gets its own files rather
+    than reusing the buyer's. See docs/development/DEPLOYMENT_AND_CONFIG.md.
 
     Pytest guard mirrors :func:`user_config_files` — when XDG hasn't been
     pointed at a tmp dir, returns ``[]`` so the developer's ambient
@@ -192,22 +193,64 @@ def storefront_config_files() -> list[Path]:
                 return []
         except (OSError, RuntimeError):
             return []
-    return [base / "storefront.toml", base / "storefront.secrets.toml"]
+    return [
+        base / "storefront.toml",
+        base / "storefront.json",
+        base / "storefront.secrets.toml",
+    ]
+
+
+def storefront_public_config_files() -> list[Path]:
+    """Return the storefront's public layers, in load order, excluding the overlay."""
+    return [
+        path
+        for path in storefront_config_files()
+        if path.name != "storefront.secrets.toml"
+    ]
 
 
 def load_storefront_config() -> dict[str, Any]:
-    """Read the storefront's layered TOML config as a single merged dict.
+    """Read the storefront's layered config as one merged mapping.
 
-    Mirrors :func:`load_user_config` (no-path form) but walks
-    :func:`storefront_config_files` instead of :func:`user_config_files`.
-    Use this from the storefront's ``config show`` / ``config get`` CLI
-    commands so they reflect what the storefront server actually reads,
-    not the buyer's layered files.
+    The merge is Dynaconf's, over the same files the server includes, because
+    Dynaconf matches keys case-insensitively at every level: ``[Chains.anvil]``
+    in one layer and ``[chains.anvil]`` in another are one table to the server,
+    and a plain dictionary merge would report them as two. Environment
+    variables and packaged defaults are not layers here, so the result is what
+    the files say. Top-level keys are returned in lowercase.
     """
-    merged: dict[str, Any] = {}
-    for p in storefront_config_files():
-        _deep_merge(merged, _read_one(p))
-    return merged
+    present = [path for path in storefront_config_files() if path.exists()]
+    if not present:
+        return {}
+    try:
+        merged = _file_only_dynaconf(present)
+        own_keys = set(merged.store) - set(_file_only_dynaconf([]).store)
+    except Exception as exc:  # noqa: BLE001 - any unreadable layer is reported, not raised
+        print(f"[config] could not read storefront layers: {exc}", file=sys.stderr)
+        return {}
+    return {key.lower(): _plain(merged.get(key)) for key in sorted(own_keys)}
+
+
+def _file_only_dynaconf(paths: list[Path]) -> Dynaconf:
+    """Merge ``paths`` as the server does, with no environment layer."""
+    settings = Dynaconf(
+        settings_files=[],
+        includes=[str(path) for path in paths],
+        environments=False,
+        merge_enabled=True,
+        load_dotenv=False,
+        loaders=[],
+    )
+    return settings
+
+
+def _plain(value: Any) -> Any:
+    """Detach Dynaconf containers into plain dicts and lists."""
+    if hasattr(value, "items"):
+        return {str(key): _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    return value
 
 
 # Set by ``set_user_config_path`` from a CLI ``--config`` callback so
@@ -497,195 +540,7 @@ def chains_from_config(
         if not chain_id:
             chain_id = KNOWN_CHAIN_IDS.get(name, 0)
 
-        alkahest_path = (
-            str(sub.get("alkahest_address_config_path", "") or "").strip()
-            or None
-        )
-
-        out[name] = ChainConfig(
-            name=name,
-            rpc_url=rpc_url,
-            chain_id=chain_id,
-            alkahest_address_config_path=alkahest_path,
-        )
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Escrow templates — operator-defined shapes for accepted_escrows entries
-# ---------------------------------------------------------------------------
-# A template captures the part of an escrow that doesn't change between
-# resources: the chain it lives on, the escrow contract address, every
-# literal field on the obligation data (token addresses, tokenIds,
-# array indices), and a named slot for each field whose value scales per
-# unit of negotiated quantity (the canonical case is `amount per hour`).
-#
-# CSV rows reference templates by name and supply rate values via a
-# `template:slot=value` DSL — the per-resource override surface is just
-# numbers, never contract field paths.
-#
-# Wire-format mapping at publish time (cli_publish):
-#   literal_fields      ← template.literal_fields
-#   rates[i].field      ← template.rate_slots[name].field
-#   rates[i].per        ← template.rate_slots[name].per
-#   rates[i].value      ← per-resource CSV cell (multiplied by duration
-#                          on the buyer side)
-
-
-@dataclass(frozen=True)
-class RateSlot:
-    """One rate-bearing field on an escrow template.
-
-    ``field`` is the dotted/indexed path into the obligation data
-    (``"amount"``, ``"erc20Amounts[0]"``). ``per`` is the unit the
-    rate scales by (``"hour"`` is the only one wired through today;
-    ``"request"``, ``"kWh"``, etc. are reserved for later).
-    """
-
-    field: str
-    per: str = "hour"
-
-
-@dataclass(frozen=True)
-class EscrowTemplate:
-    """One ``[escrow_templates.<name>]`` table.
-
-    ``name`` is the TOML table key — CSV cells reference templates by
-    this identifier. ``chain`` must match a configured ``[chains.<name>]``
-    entry. ``escrow_address`` is resolved at config-load time: a literal
-    ``0x...`` string passes through; an ``auto:<obligation-kind>`` value
-    routes through the chain's alkahest address config (override JSON
-    when present, alkahest-py SDK default otherwise).
-
-    ``literal_fields`` covers obligation-data keys whose values are
-    fixed by the operator. ``rate_slots`` covers fields whose values
-    scale per ``per`` unit; the dict is order-preserving so single-slot
-    ergonomic sugar (drop the slot name in the CSV cell when only one
-    slot exists) has a well-defined target.
-    """
-
-    name: str
-    chain: str
-    escrow_address: str
-    literal_fields: dict[str, Any]
-    rate_slots: dict[str, RateSlot]
-
-
-EscrowAddressResolver = Callable[[str, ChainConfig], str]
-
-
-def escrow_templates_from_config(
-    config: Optional[dict[str, Any]] = None,
-    *,
-    chains: Optional[dict[str, ChainConfig]] = None,
-    address_resolver: Optional[EscrowAddressResolver] = None,
-) -> dict[str, EscrowTemplate]:
-    """Return every ``[escrow_templates.<name>]`` table from the merged TOML.
-
-    Each template's ``chain`` must match a key in ``chains``; templates
-    referencing an unknown chain are dropped with a stderr warning so a
-    typo never silently changes which escrow the publish path picks.
-    ``escrow_address`` values starting with ``auto:`` are delegated to the
-    installed mechanism's injected address resolver; literal values pass
-    through unchanged.
-
-    Invalid templates (missing chain, unresolvable auto: key, malformed
-    rates) are dropped with a warning rather than raising, so a bad
-    template never prevents the operator from starting the storefront.
-    """
-    cfg = config if config is not None else load_user_config()
-    raw = cfg.get("escrow_templates")
-    if not isinstance(raw, dict):
-        return {}
-    if chains is None:
-        chains = chains_from_config(cfg)
-
-    out: dict[str, EscrowTemplate] = {}
-    for name, sub in raw.items():
-        if not isinstance(name, str) or not isinstance(sub, dict):
-            continue
-        chain_name = str(sub.get("chain", "") or "").strip()
-        if not chain_name:
-            print(
-                f"[config] escrow_templates.{name}: missing 'chain'; skipping",
-                file=sys.stderr,
-            )
-            continue
-        chain_cfg = chains.get(chain_name)
-        if chain_cfg is None:
-            print(
-                f"[config] escrow_templates.{name}: unknown chain {chain_name!r}; "
-                f"skipping",
-                file=sys.stderr,
-            )
-            continue
-        raw_addr = str(sub.get("escrow_address", "") or "").strip()
-        if not raw_addr:
-            print(
-                f"[config] escrow_templates.{name}: missing 'escrow_address'; "
-                f"skipping",
-                file=sys.stderr,
-            )
-            continue
-        if raw_addr.startswith("auto:"):
-            try:
-                if address_resolver is None:
-                    raise ValueError(
-                        "auto: escrow address requires a mechanism-provided resolver"
-                    )
-                escrow_address = address_resolver(
-                    raw_addr[len("auto:"):], chain_cfg
-                )
-            except ValueError as exc:
-                print(
-                    f"[config] escrow_templates.{name}: {exc}; skipping",
-                    file=sys.stderr,
-                )
-                continue
-        else:
-            escrow_address = raw_addr
-        literal_raw = sub.get("literal") or {}
-        if not isinstance(literal_raw, dict):
-            print(
-                f"[config] escrow_templates.{name}: 'literal' must be a table; skipping",
-                file=sys.stderr,
-            )
-            continue
-        literal_fields = dict(literal_raw)
-
-        rates_raw = sub.get("rates") or {}
-        if not isinstance(rates_raw, dict):
-            print(
-                f"[config] escrow_templates.{name}: 'rates' must be a table; skipping",
-                file=sys.stderr,
-            )
-            continue
-        rate_slots: dict[str, RateSlot] = {}
-        slot_ok = True
-        for slot_name, slot_sub in rates_raw.items():
-            if not isinstance(slot_name, str) or not isinstance(slot_sub, dict):
-                continue
-            field_name = str(slot_sub.get("field", "") or "").strip()
-            if not field_name:
-                print(
-                    f"[config] escrow_templates.{name}.rates.{slot_name}: "
-                    f"missing 'field'; skipping template",
-                    file=sys.stderr,
-                )
-                slot_ok = False
-                break
-            per_unit = str(slot_sub.get("per", "hour") or "hour").strip() or "hour"
-            rate_slots[slot_name] = RateSlot(field=field_name, per=per_unit)
-        if not slot_ok:
-            continue
-
-        out[name] = EscrowTemplate(
-            name=name,
-            chain=chain_name,
-            escrow_address=escrow_address,
-            literal_fields=literal_fields,
-            rate_slots=rate_slots,
-        )
+        out[name] = ChainConfig(name=name, rpc_url=rpc_url, chain_id=chain_id)
     return out
 
 
