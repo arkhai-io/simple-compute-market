@@ -36,6 +36,7 @@ from tests.e2e.roles.helpers.ssh_access import (
     SshKey,
     SshOutcome,
     classify_ssh,
+    _PCI_PROBE,
     _PROBE,
     CONNECT_TIMEOUT_SECONDS,
     MEMORY_SHORTFALL_TOLERANCE,
@@ -45,6 +46,7 @@ from tests.e2e.roles.helpers.ssh_access import (
     SshEndpoint,
     SshSession,
     memory_within_tolerance,
+    parse_pci_probe,
     parse_probe,
     ssh_session,
 )
@@ -506,6 +508,85 @@ def test_the_probe_command_parses_as_shell():
     can at least refuse a command that would not parse there."""
     parsed = subprocess.run(["bash", "-n", "-c", _PROBE], capture_output=True, text=True)
     assert parsed.returncode == 0, parsed.stderr
+
+
+# PCI class codes and vendor IDs as sysfs reports them.
+VGA, DISPLAY_3D, AUDIO, ETHERNET = "0x030000", "0x030200", "0x040300", "0x020000"
+NVIDIA, AMD, QEMU_VGA, VIRTIO, ASPEED, INTEL = (
+    "0x10de", "0x1002", "0x1234", "0x1af4", "0x1a03", "0x8086",
+)
+
+
+def _pci_probe_against(tmp_path, devices: dict[str, tuple[str, str]] | None) -> str:
+    """The PCI probe's output against a fixture sysfs tree: ``None`` for a
+    machine whose sysfs lists no PCI bus at all."""
+    root = tmp_path / "sys"
+    if devices is not None:
+        listing = root / "bus/pci/devices"
+        listing.mkdir(parents=True)
+        for address, (pci_class, vendor) in devices.items():
+            (listing / address).mkdir()
+            (listing / address / "class").write_text(pci_class + "\n")
+            (listing / address / "vendor").write_text(vendor + "\n")
+    result = subprocess.run(
+        ["bash", "-c", _PCI_PROBE], capture_output=True, text=True,
+        env={**os.environ, "SYSFS_ROOT": str(root)},
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
+def _gpus(output: str) -> list[str]:
+    return [device.address for device in parse_pci_probe(output) if device.is_gpu]
+
+
+def test_a_passed_through_gpu_is_found(tmp_path):
+    output = _pci_probe_against(tmp_path, {
+        "0000:00:01.0": (VGA, QEMU_VGA),
+        "0000:06:00.0": (VGA, NVIDIA),
+        "0000:06:00.1": (AUDIO, NVIDIA),
+        "0000:07:00.0": (DISPLAY_3D, AMD),
+    })
+    assert _gpus(output) == ["0000:06:00.0", "0000:07:00.0"]
+
+
+def test_an_emulated_display_is_no_gpu(tmp_path):
+    output = _pci_probe_against(tmp_path, {
+        "0000:00:01.0": (VGA, QEMU_VGA),
+        "0000:00:02.0": (VGA, VIRTIO),
+        "0000:00:03.0": (VGA, ASPEED),
+        "0000:00:04.0": (ETHERNET, INTEL),
+    })
+    assert len(parse_pci_probe(output)) == 4
+    assert _gpus(output) == []
+
+
+def test_a_readable_list_with_no_devices_reads_as_no_gpu(tmp_path):
+    assert parse_pci_probe(_pci_probe_against(tmp_path, {})) == ()
+
+
+def test_a_pci_list_that_cannot_be_read_is_no_reading(tmp_path):
+    output = _pci_probe_against(tmp_path, None)
+    assert output.strip() == "pci=unavailable"
+    with pytest.raises(SshAccessError, match="could not be read"):
+        parse_pci_probe(output)
+
+
+@pytest.mark.parametrize(
+    "output",
+    ["", "pci=read\nunreadable=0000:06:00.0\n", "pci=read\ndevice=0000:06:00.0 0x030000\n"],
+    ids=["nothing", "unreadable-device", "device-missing-vendor"],
+)
+def test_an_incomplete_pci_probe_is_refused(output: str):
+    with pytest.raises(SshAccessError):
+        parse_pci_probe(output)
+
+
+def test_the_pci_probe_reads_the_guests_devices(session: SshSession, fake_ssh):
+    fake_ssh.plan({"host_key": HOST_KEY,
+                   "stdout": f"pci=read\ndevice=0000:06:00.0 {VGA} {NVIDIA}\n"})
+    (device,) = session.pci_devices(ENDPOINT, session.new_key("buyer"))
+    assert device.is_gpu
 
 
 def test_memory_is_the_negotiated_amount_less_a_strict_tolerance():

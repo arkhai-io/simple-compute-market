@@ -26,10 +26,21 @@ has nothing to compensate. The module is in no lane.
 It holds both storefronts' loops and the VM site's convergence and lease
 watchdog. The bare-metal site's two timers are left running: that site may be
 the same provisioning service as the VM site, and a second hold of one service
-would resume it when the first ended. The module steps neither timer, and
-what they could change meanwhile leaves its comparison sound: an expiring lease
-only adds a quarantined port, and a port leaves quarantine only once its
-grants expire, which the comparison allows.
+would resume it when the first ended. The module steps neither timer and
+needs neither held: neither writes a host row, pool or capacity declaration;
+a release writes a lease's release time only on a lease not yet released, and
+its owner and grant expiry are written only when the port is leased, which
+never takes a quarantined port. So neither can restore what a faulty reapply
+removed. Relay-port reconciliation, which runs ungated on both sites, could
+release again a lease the reapply un-released; the comparison catches that by
+comparing each quarantined lease's whole record, its release time included
+(``registration_faults``).
+
+The observation is of an idle stack after the other modules' cleanup. A port
+active before and released after is no fault, since an unheld watchdog may end
+a live lease, so the module claims nothing about a live tenancy surviving; and
+its quarantine and consumed-UID comparisons prove preservation only where the
+state read before names some, which the logged snapshot shows.
 """
 
 from __future__ import annotations
@@ -44,7 +55,11 @@ from compute_provisioning_client import SyncComputeProvisioningClient
 
 from e2e_harness.real_provisioning_target import SECTION, BareMetalHost, VmHost
 from e2e_harness.settings import settings
-from tests.e2e.roles.helpers.compute_deal import SiteCapacity, advance_storefront
+from tests.e2e.roles.helpers.compute_deal import (
+    SiteCapacity,
+    advance_storefront,
+    dry_run_storefront,
+)
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.payments import configured_payments
 from tests.e2e.roles.helpers.qualification import (
@@ -77,7 +92,7 @@ from tests.e2e.roles.scenarios.vms.composed_listing import listings_on_resource,
 from tests.e2e.roles.scenarios.vms.conftest import (
     capacity_site_id,
     capacity_source_for,
-    step_listing_reconciliation,
+    one_site,
 )
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
     REAL_RESOURCE_ID as VM_RESOURCE_ID,
@@ -279,10 +294,59 @@ def _registrations(
     }
 
 
+#: How many capacity-event cycles draining the VM storefront's feed may take,
+#: the bound a deal's reconciliation also allows.
+CAPACITY_EVENT_CYCLES = 5
+
+
+def drain_capacity_events(storefront_admin_client) -> tuple[int, int]:
+    """Refresh the VM storefront's site projections and apply every capacity
+    event pending, returning how many were pending and how many were applied.
+
+    A deal's reconciliation (``step_listing_reconciliation``) requires events
+    pending, since its deal reserved capacity. This module makes no deal, and a
+    reapplied registration that changes nothing adds no event, so an empty feed
+    is the expected case here. A cycle's error fails, and a feed still
+    truncated after the bounded cycles fails rather than reading as drained.
+    """
+    pending = one_site(dry_run_storefront(storefront_admin_client, "capacity-events"))
+    assert pending["error"] is None, (
+        f"capacity-event dry run failed for site {pending['site']!r}: {pending['error']}"
+    )
+    assert not pending["would_position"], (
+        "the dry run would position at the feed head rather than apply the pending "
+        "events, so the poller's cursor was lost"
+    )
+    projections = advance_storefront(storefront_admin_client, "site-projections")
+    assert projections.get("sites"), (
+        "the site-projections advance reported no site state, so the projection "
+        "the capacity cycle decides from was not refreshed"
+    )
+    applied = 0
+    for step in range(CAPACITY_EVENT_CYCLES):
+        cycle = one_site(advance_storefront(storefront_admin_client, "capacity-events"))
+        assert cycle["error"] is None, (
+            f"capacity-event cycle {step} failed for site {cycle['site']!r}: {cycle['error']}"
+        )
+        applied += int(cycle["applied_count"])
+        if not cycle["truncated"]:
+            break
+    else:
+        raise AssertionError(
+            f"the capacity-event feed still reports a truncated page after "
+            f"{CAPACITY_EVENT_CYCLES} cycles (applied {applied} events)"
+        )
+    assert applied >= pending["pending_count"], (
+        f"the cycles applied {applied} event(s) where the dry run named "
+        f"{pending['pending_count']} pending"
+    )
+    return pending["pending_count"], applied
+
+
 def _publication_cycle(storefront_admin_client, bare_metal_storefront_admin) -> str:
     """One publication cycle on each storefront: VM's capacity events, bare
     metal's site projections and publication."""
-    pending, applied = step_listing_reconciliation(storefront_admin_client)
+    pending, applied = drain_capacity_events(storefront_admin_client)
     advance_storefront(bare_metal_storefront_admin, "site-projections")
     report = advance_storefront(bare_metal_storefront_admin, "publication")
     return (f"VM capacity events: {pending} pending, {applied} applied; bare-metal "

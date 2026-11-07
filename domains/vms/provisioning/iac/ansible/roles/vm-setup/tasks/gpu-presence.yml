@@ -14,7 +14,10 @@
 # exactly the GPU-less hosts this rule spares. A display or 3D controller (0300,
 # 0302) from NVIDIA (10de) or AMD (1002) -- the vendors whose GPUs are passed
 # through -- is a GPU; another vendor's is treated as none until the operator
-# sets `gpu_passthrough: enabled`.
+# sets `gpu_passthrough: enabled`. The end-to-end suite's guest probe classifies
+# a delivered guest's devices by the same class and vendor rule
+# (e2e-tests/tests/e2e/roles/helpers/ssh_access.py), failing on a device it
+# cannot read where this task skips it.
 #
 # Binding is not decided here: it still follows an assessable audit after the
 # reboot (gpu-bind.yml).

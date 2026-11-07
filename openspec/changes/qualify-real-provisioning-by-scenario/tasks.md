@@ -1432,9 +1432,61 @@ their wiring; `e2e-tests/README.md`'s marker list.
   allocates the host's capacity from; "pool" is the pool those rows and the host name;
   "resource" is the site's declaration. The storefront's own resource rows and a pool
   listing are not read: no typed read of either is used by the lanes. The bare-metal
-  site's convergence and lease watchdog are not held: it may be the VM site's service,
-  whose second hold would resume it early, and nothing they could change makes the
-  comparison wrong (the module docstring says why).
+  site's convergence and lease watchdog are not held, because the module does not need
+  them held, which is the scope of the module-hold requirement
+  (`openspec/specs/test-compatibility/spec.md`, "Scenarios hold shared services for the
+  whole module": a scenario holds each shared timer it needs held). Reconciled at the
+  round-2 triage (70 O1) against that requirement, D3 and the runbook's observation 6:
+  - **No stage steps or asserts either timer.** The module's only advances are
+    storefront cycles, whose loops are held: the VM storefront's `site-projections` and
+    `capacity-events` (`drain_capacity_events`), and the bare-metal storefront's
+    `site-projections` and `publication`, `seed_supply` also advancing its
+    `site-projections`. It calls no convergence advance, `check_leases` or
+    `assert_lease_watchdog_held` on either site, and waits on no wall-clock state.
+  - **Nothing either timer writes can make the comparison pass falsely**, by the
+    service's state guards rather than by their writes only adding. The reapply writes
+    the pool, host and capacity declaration and steps projections; `configured_relay`
+    only reads. Neither timer writes host rows, pools or declarations, which only the
+    operator paths and resource registration write. A release writes `released_at` only
+    on a lease not yet released (`relays/allocator.py`, `release_in_session`); a
+    reservation already released returns before its release effect runs
+    (`market_site/ledger.py`); a relay lease's owner and grant expiry are written only
+    at allocation, which never takes a still-quarantined port (`relays/allocator.py`).
+    So neither timer can restore a host row, declaration or quarantine the reapply
+    removed. Stage 06 compares the consumed-UID history through the working-data route,
+    which grows only with a new tenancy: a timer could add to it (a false failure),
+    never restore it.
+  - **Relay-port reconciliation, a third timer, is ungated and unheld on both sites**
+    (`relays/allocator.py`, `reconcile`, run by `relays/composition.py`): each sweep
+    releases an unreleased lease allocated longer ago than the configured grace (an
+    hour by default) whose owner is released, writing a new `released_at`. Were the reapply to un-release a quarantined lease, a sweep
+    before stage 05 would quarantine the same lease again. `registration_faults`
+    therefore compares each still-unexpired quarantined port by its whole record —
+    lease, port, owner, grant expiry and release time — so a re-release is named
+    (68 T2), and a grant that expired meanwhile may still end its quarantine. The
+    service returns a lease's times without a zone, in UTC; `quarantined_ports` reads
+    them as UTC, since comparing them with the module's aware `now` raised before any
+    comparison was made (found by the triage's compliance check, fixed with 68 T2).
+  - **Scope and limits.** The observation is of an idle stack after the qualification
+    modules' cleanup. A port active before and released after is not a fault: an unheld
+    bare-metal watchdog may end a live lease legitimately, so the comparison claims
+    nothing about a live tenancy surviving. The history claims (quarantine, consumed
+    UIDs) are evidence only when the before-state names some; an empty before-state
+    proves nothing about preserving them, which the operator judges from the logged
+    snapshot at the target run. Where the bare-metal site is distinct from the VM site
+    and an earlier module left a bare-metal lease still releasing, convergence may
+    complete that reclaim during the module and a listing reopen at stage 04, failing
+    observation 6 for that module's leftover: a false failure, never a false pass; the
+    bare-metal module verifies each reclaim (11a3, 11c) or reports the delivery it could
+    not end, and no precondition guards it.
+  - **The publication cycle** drains the VM storefront's capacity events with the
+    module's own `drain_capacity_events` (68 T1): the deal reconciliation
+    `step_listing_reconciliation` requires pending events, and an idempotent reapply adds
+    none, so stage 04 would have failed a correct reapply. An empty feed succeeds, a
+    cycle error fails, and a feed still truncated after five cycles fails.
+  The site may also be the VM site's own service, whose timers the module already
+  holds; a second hold of that service would resume it when the first hold ended (the
+  module docstring).
 - [x] 8.4 Common to the three (D1, D8, D9, D10). Each module is in no lane, reports a
   blocked skip and writes nothing to the stack without both targets, reads the runner's
   `PAYMENTS` section (D19), holds the loops for the whole module, and never waits out the
@@ -1457,8 +1509,10 @@ their wiring; `e2e-tests/README.md`'s marker list.
   - **Targets first.** Each module lists `payments_config`, its real-provisioning target
     fixture(s) (`target_host`, a blocked skip naming the missing target or host) and its
     services' executions before any hold.
-  - **Holds.** Each holds the storefront loops, convergence and lease watchdog for the
-    module (observation 6's exception in 8.3). Leases end by back-dating and stepped
+  - **Holds.** Each holds, for the whole module, every shared timer it needs held.
+    Observations 2, 4 and 5 hold their storefront's loops and their site's convergence
+    and lease watchdog; observation 6 holds both storefronts' loops and the VM site's
+    timers, and needs none of the bare-metal site's timers held (8.3 gives the evidence). Leases end by back-dating and stepped
     cycles. Every wait is on an event, bounded: real jobs (`JobWatch`), the buyer's
     command's run log, the settle wait, storefront stage events, the admission log's
     copy, and compensation's refund retry and dispatch read.
@@ -1598,14 +1652,56 @@ Handoff from section 8:
   storefronts before its "before" read (a listing the earlier modules left closed would
   have read as changed); the consumed-UID read asking for no unused UID; the teardown flag
   written before the command; the compensation helper's docstring; overstated notes.
-  Declined: holding the bare-metal site's convergence and watchdog in observation 6 (a
-  second hold of one service resumes it early, and nothing they change spoils the
-  comparison; the module docstring says so); reading the storefront's resource rows and a
+  Declined: holding the bare-metal site's convergence and watchdog in observation 6 (the
+  module does not need them held, and where that site is the VM site's service a second
+  hold would resume it when the first ended; 8.3 gives the evidence, reconciled at the
+  round-2 triage); reading the storefront's resource rows and a
   pool listing for observation 6 (no typed read the lanes use); making the bare-metal
   conftest's `_pinned` and `_signer` public (the lane payment module already imports
   them); constructing drivers without `object.__new__` in the unit cases; a VM flag
   written before the back-date (`10a`'s checks failing after a successful back-date is the
   only case it would change).
+
+Round-2 triage fixes (review 61, records 67 and 70, and two points the triage's
+compliance check raised, 68 T1 and T2; dispositions delegated under the owner's
+best-judgment direction):
+
+- **61 F1 — observation 2 checks each guest has no GPU.** `helpers/ssh_access.py` gains a
+  guest PCI probe (`_PCI_PROBE`, `PciDevice`, `parse_pci_probe`,
+  `SshSession.pci_devices`) classifying a display or 3D controller from NVIDIA or AMD as a
+  GPU, the rule host preparation's `gpu-presence.yml` applies; an unavailable list, an
+  unreadable or dangling device, or a malformed line fails the probe rather than reading
+  as no GPU. `_assert_negotiated_shape` asserts no GPU for both guests (09d, 09k); no
+  other lane asserts it.
+- **70 O1 — holds reconciled.** 8.3, 8.4 and D3 state the module-hold requirement's scope
+  (each shared timer a scenario needs held) and observation 6's evidence and limits; no
+  code change for this point.
+- **68 T1 — observation 6 drains capacity events itself** (8.3).
+- **68 T2 — quarantine compared by the whole lease record** (8.3), with the service's
+  zone-less lease times read as UTC.
+- **Checks**, over the final tree:
+  - Unit: `make test-e2e-unit`, 745 passed (727 before the round's fixes): the PCI probe
+    run against fixture sysfs trees and its refusals; the capacity drain through a fake
+    storefront admin client (empty feed, truncated feed drained, cycle error, fewer
+    applied than pending, the bound exceeded); the full-record quarantine comparison (a
+    re-release, a changed owner or grant expiry, active-to-released not a fault,
+    zone-less service times).
+  - Unit: `make test-provisioning-iac` passed (the GPU-presence task's comment).
+  - `make test`, the fix round's one full run: every suite through `test-e2e-unit`
+    passed, `test-apicredits` included. It stopped at `test-release-tooling`: 56 failed
+    and 41 errored, each where Git ran `git maintenance run --auto --detach` and the Git
+    on the path refused `--detach`, the host's mixed Git installation; the fixes touch
+    nothing under `scripts/`. The suites after it were run alone and passed:
+    `make -C helm test-render`, `test-frp-grant-admission` (203 passed, 15 skipped) and
+    `test-payments-lane-double` (50 passed). `test-release-tooling` has not passed on
+    this tree.
+  - `make check-packaging` and `make check-change` (12 checks) passed.
+  - Fresh-context compliance checks, three passes. Fixed: four overstated claims in the
+    8.3 notes, a dangling PCI entry now read as unreadable, the 09g–09p docstring line,
+    the Ansible comment's precision, the reconciliation mask (68 T2), the zone-less
+    lease times, the reconciliation grace's wording, and the reapply module docstring.
+    Raised and disposed of: 68 T1, 68 T2. None declined.
+  - Not run: the three qualification modules, which need a real-provisioning target.
 
 ## 9. Closeout
 

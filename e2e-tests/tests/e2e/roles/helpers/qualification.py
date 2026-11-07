@@ -35,7 +35,7 @@ import logging
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -233,6 +233,10 @@ class QuarantinedPort:
     remote_port: int
     owner_id: str
     grant_expires_at: datetime
+    #: When the lease was released. A release writes it only on a lease not yet
+    #: released, so a later value for the same lease means it was un-released
+    #: and released again, which its identity alone would not show.
+    released_at: datetime
 
 
 @dataclass(frozen=True)
@@ -255,14 +259,22 @@ class RegistrationSnapshot:
     active_ports: tuple[int, ...] = ()
 
 
+def _utc(moment: datetime) -> datetime:
+    """``moment`` in UTC. The provisioning service stores and returns a relay
+    lease's times without a zone, in UTC; comparing one with an aware ``now``
+    would raise rather than compare."""
+    return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment
+
+
 def quarantined_ports(leases: Iterable[Any], now: datetime) -> tuple[QuarantinedPort, ...]:
-    """The released relay leases whose grants are still unexpired at ``now``."""
+    """The released relay leases whose grants are still unexpired at ``now``,
+    an aware time."""
     return tuple(sorted(
         (QuarantinedPort(str(lease.lease_id), int(lease.remote_port), str(lease.owner_id),
-                         lease.grant_expires_at)
+                         _utc(lease.grant_expires_at), _utc(lease.released_at))
          for lease in leases
          if lease.released_at is not None and lease.grant_expires_at is not None
-         and lease.grant_expires_at > now),
+         and _utc(lease.grant_expires_at) > now),
         key=lambda port: (port.remote_port, port.lease_id),
     ))
 
@@ -275,7 +287,14 @@ def registration_faults(
     Nothing may be duplicated or dropped: one host row, one declaration, one
     listing, each as it was, the listing's identity, state and pause intact.
     Every port quarantined before stays quarantined until its grant expires,
-    with no new owner.
+    with no new owner, and its lease record unchanged: the same owner, grant
+    expiry and release time. Matching the lease by identity alone would let
+    relay-port reconciliation, which runs on its own ungated timer, hide a
+    quarantine the reapply cleared by releasing the lease again.
+
+    A port active before and released after is not a fault: an unheld lease
+    watchdog may end a live lease legitimately, so this comparison makes no
+    claim that a live tenancy survives.
     """
     faults = []
     for kind, rows in (("host", after.hosts), ("capacity declaration", after.declarations),
@@ -287,13 +306,18 @@ def registration_faults(
                               ("listings", before.listings, after.listings)):
         if was != now_is:
             faults.append(f"{name}: {kind} changed from {was} to {now_is}")
-    kept = {port.lease_id for port in after.quarantined}
+    kept = {port.lease_id: port for port in after.quarantined}
     for port in before.quarantined:
         if port.grant_expires_at <= now:
             continue
-        if port.lease_id not in kept:
+        now_is = kept.get(port.lease_id)
+        if now_is is None:
             faults.append(f"{name}: relay port {port.remote_port} (lease {port.lease_id}) left "
                           f"quarantine before its grants expire at {port.grant_expires_at}")
+        elif now_is != port:
+            faults.append(f"{name}: relay port {port.remote_port} (lease {port.lease_id}) is "
+                          f"still quarantined but its lease record changed from {port} to "
+                          f"{now_is}")
         if port.remote_port in after.active_ports:
             faults.append(f"{name}: quarantined relay port {port.remote_port} has a new owner")
     return faults

@@ -187,8 +187,18 @@ teardown`, which starts the reclaim. That is a buyer end, not an expiry, which i
 observations 4 and 5 follow. §29 excludes only a forced release, a manual retry, or a
 consumed-UID reset.
 
-**Holds.** Every scenario holds its loops for the whole module, as the spec requires. The
-VM buyer CLI polls its settlement while the stage steps convergence, as
+**Holds.** Every scenario holds, for the whole module, each shared timer it needs held, as
+the spec requires (`openspec/specs/test-compatibility/spec.md`, "Scenarios hold shared
+services for the whole module"). A scenario that steps a timer needs it held; one may need
+a timer held without stepping it. Observation 6 steps no timer of the bare-metal site, and
+the service's state guards keep that site's fulfillment convergence and lease watchdog
+from restoring anything a faulty reapply removed, so it holds the storefronts' loops and
+the VM site's timers only. Relay-port reconciliation runs ungated on both sites and could
+re-release a lease the reapply un-released; the comparison catches that by comparing each
+quarantined lease's whole record, release time included, not by a hold (tasks 8.3 gives
+the evidence, the idle-stack scope, and the limits: a false failure from a lease an
+earlier module left releasing, and no claim that a live tenancy survives). The VM buyer
+CLI polls its settlement while the stage steps convergence, as
 `test_full_deal_buyer_cli.py` does.
 
 **Rejected:**

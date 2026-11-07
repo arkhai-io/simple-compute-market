@@ -10,6 +10,7 @@ its targets before any hold is ``test_scenario_cleanup_order.py``'s.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -36,6 +37,10 @@ from tests.e2e.roles.scenarios.bare_metal.real_purchase_driver import RealBareMe
 from tests.e2e.roles.scenarios.vms.real_purchase_driver import (
     RealVmPurchaseDriver,
     listing_status_after,
+)
+from tests.e2e.roles.scenarios.vms.test_real_provisioning_reapply import (
+    CAPACITY_EVENT_CYCLES,
+    drain_capacity_events,
 )
 from tests.unit.test_real_provisioning_target import EXAMPLE
 
@@ -240,6 +245,9 @@ def test_a_bare_metal_purchases_tenancy_is_ended_by_its_negotiation_with_its_kno
 
 NOW = datetime(2027, 1, 1, tzinfo=timezone.utc)
 LATER = NOW + timedelta(days=1)
+#: When the quarantined lease was released, before the module's first read.
+RELEASED = NOW - timedelta(hours=2)
+QUARANTINED = QuarantinedPort("lease-1", 6101, "reservation-1", LATER, RELEASED)
 
 
 def _snapshot(**changes) -> RegistrationSnapshot:
@@ -247,7 +255,7 @@ def _snapshot(**changes) -> RegistrationSnapshot:
         hosts=(("example-bm-1", "pool-1", True),),
         declarations=(("resource-1", "pool-1"),),
         listings=(("listing-1", "open", False),),
-        quarantined=(QuarantinedPort("lease-1", 6101, "reservation-1", LATER),),
+        quarantined=(QUARANTINED,),
         active_ports=(6102,),
     )
     fields.update(changes)
@@ -273,8 +281,37 @@ def test_a_duplicate_a_change_or_a_lost_quarantine_is_named(after, named):
 
 
 def test_a_quarantine_whose_grants_expired_meanwhile_may_end():
-    expired = _snapshot(quarantined=(QuarantinedPort("lease-1", 6101, "reservation-1", NOW),))
+    expired = _snapshot(quarantined=(dataclasses.replace(QUARANTINED, grant_expires_at=NOW),))
     assert registration_faults("bare_metal", expired, _snapshot(quarantined=()), now=NOW) == []
+
+
+def test_a_quarantined_lease_released_again_is_named_though_its_identity_is_kept():
+    """Un-released by the reapply and released again by relay-port
+    reconciliation's ungated sweep: the same lease, quarantined, owned and
+    expiring as before, with only its release time new."""
+    released_again = _snapshot(
+        quarantined=(dataclasses.replace(QUARANTINED, released_at=NOW),),
+    )
+    faults = registration_faults("bare_metal", _snapshot(), released_again, now=NOW)
+    assert len(faults) == 1 and "lease record changed" in faults[0], faults
+
+
+@pytest.mark.parametrize("change", [
+    {"owner_id": "reservation-2"}, {"grant_expires_at": LATER + timedelta(hours=1)},
+], ids=["owner", "grant-expiry"])
+def test_a_quarantined_leases_changed_owner_or_grant_expiry_is_named(change):
+    changed = _snapshot(quarantined=(dataclasses.replace(QUARANTINED, **change),))
+    faults = registration_faults("bare_metal", _snapshot(), changed, now=NOW)
+    assert any("lease record changed" in fault for fault in faults), faults
+
+
+def test_a_port_active_before_and_released_after_is_no_fault():
+    """The stated limit: an unheld watchdog may end a live lease, so the
+    comparison claims nothing about a live tenancy surviving."""
+    ended = dataclasses.replace(QUARANTINED, lease_id="lease-2", remote_port=6102,
+                                owner_id="reservation-2", released_at=NOW)
+    after = _snapshot(quarantined=(QUARANTINED, ended), active_ports=())
+    assert registration_faults("bare_metal", _snapshot(), after, now=NOW) == []
 
 
 def test_only_released_unexpired_leases_are_quarantined():
@@ -286,3 +323,85 @@ def test_only_released_unexpired_leases_are_quarantined():
     leases = [lease("lease-1", NOW, LATER), lease("lease-2", None, LATER),
               lease("lease-3", NOW, NOW - timedelta(seconds=1)), lease("lease-4", NOW, None)]
     assert [port.lease_id for port in quarantined_ports(leases, NOW)] == ["lease-1"]
+    (port,) = quarantined_ports(leases, NOW)
+    assert port.released_at == NOW
+
+
+def test_the_services_zoneless_lease_times_are_read_as_utc():
+    """The provisioning service returns a relay lease's times without a zone,
+    in UTC, and the module's ``now`` is aware: they compare rather than raise."""
+    def naive(moment: datetime) -> datetime:
+        return moment.replace(tzinfo=None)
+
+    leases = [
+        SimpleNamespace(lease_id="lease-1", remote_port=6101, owner_id="reservation-1",
+                        released_at=naive(RELEASED), grant_expires_at=naive(LATER)),
+        SimpleNamespace(lease_id="lease-2", remote_port=6102, owner_id="reservation-2",
+                        released_at=naive(RELEASED), grant_expires_at=naive(NOW)),
+    ]
+    assert quarantined_ports(leases, NOW) == (QUARANTINED,)
+    assert registration_faults(
+        "bare_metal", _snapshot(), _snapshot(quarantined=quarantined_ports(leases, NOW)), now=NOW,
+    ) == []
+
+
+# ---------------------------------------------------------------------------
+# Observation 6's VM capacity-event drain
+# ---------------------------------------------------------------------------
+
+class _FakeStorefrontAdmin:
+    """A held storefront's lifecycle routes, answering from a plan: one dry run
+    of the capacity-event loop, then each capacity-event cycle in turn."""
+
+    def __init__(self, pending: int, cycles: list[dict]) -> None:
+        self._pending = pending
+        self._cycles = list(cycles)
+        self.ran: list[str] = []
+
+    def admin_dry_run_lifecycle_cycle(self, loop: str) -> dict:
+        assert loop == "capacity-events", loop
+        return {"sites": [{"site": "site-1", "error": None, "would_position": False,
+                           "pending_count": self._pending, "cursor": "c", "feed_head": "h"}]}
+
+    def admin_run_lifecycle_cycle(self, loop: str) -> dict:
+        self.ran.append(loop)
+        if loop == "site-projections":
+            return {"sites": [{"site": "site-1"}]}
+        assert loop == "capacity-events", loop
+        return {"sites": [self._cycles.pop(0)]}
+
+
+def _cycle(applied: int, *, truncated: bool = False, error: str | None = None) -> dict:
+    return {"site": "site-1", "error": error, "applied_count": applied, "truncated": truncated}
+
+
+def test_an_empty_capacity_feed_drains_as_nothing_pending():
+    admin = _FakeStorefrontAdmin(0, [_cycle(0)])
+    assert drain_capacity_events(admin) == (0, 0)
+    assert admin.ran == ["site-projections", "capacity-events"]
+
+
+def test_a_truncated_capacity_feed_is_drained_across_cycles():
+    admin = _FakeStorefrontAdmin(3, [_cycle(2, truncated=True), _cycle(1)])
+    assert drain_capacity_events(admin) == (3, 3)
+    assert admin.ran.count("capacity-events") == 2
+
+
+def test_a_capacity_cycle_error_fails_the_drain():
+    admin = _FakeStorefrontAdmin(1, [_cycle(0, error="feed unavailable")])
+    with pytest.raises(AssertionError, match="feed unavailable"):
+        drain_capacity_events(admin)
+
+
+def test_fewer_events_applied_than_were_pending_fails_the_drain():
+    admin = _FakeStorefrontAdmin(2, [_cycle(1)])
+    with pytest.raises(AssertionError, match="applied 1 event"):
+        drain_capacity_events(admin)
+
+
+def test_a_feed_still_truncated_after_the_bound_fails_rather_than_reading_drained():
+    admin = _FakeStorefrontAdmin(
+        CAPACITY_EVENT_CYCLES, [_cycle(1, truncated=True)] * CAPACITY_EVENT_CYCLES,
+    )
+    with pytest.raises(AssertionError, match="still reports a truncated page"):
+        drain_capacity_events(admin)

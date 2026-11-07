@@ -86,6 +86,31 @@ _PROBE = (
     "printf 'root_disk_bytes=%s\\n' \"$(lsblk -bdno SIZE \"/dev/${parent:-${src#/dev/}}\")\""
 )
 
+#: Prints each PCI device the guest's sysfs lists, with its class and vendor,
+#: after a line saying the device list was read; a list that cannot be read,
+#: or a device whose class or vendor cannot, prints a line saying so instead,
+#: so an unreadable list is never taken for one with no GPU. ``SYSFS_ROOT``
+#: replaces ``/sys`` only where the command is run against a fixture tree.
+_PCI_PROBE = (
+    "devices=\"${SYSFS_ROOT:-/sys}/bus/pci/devices\"; "
+    "if [ ! -d \"$devices\" ] || [ ! -r \"$devices\" ]; then echo pci=unavailable; exit 0; fi; "
+    "echo pci=read; "
+    "for dev in \"$devices\"/*; do "
+    "[ -e \"$dev\" ] || [ -L \"$dev\" ] || continue; "
+    "if [ -r \"$dev/class\" ] && [ -r \"$dev/vendor\" ]; then "
+    "printf 'device=%s %s %s\\n' \"${dev##*/}\" \"$(cat \"$dev/class\")\" \"$(cat \"$dev/vendor\")\"; "
+    "else printf 'unreadable=%s\\n' \"${dev##*/}\"; fi; "
+    "done"
+)
+#: A display or 3D controller, by the first two bytes of its PCI class.
+_GPU_CLASSES = frozenset({"0x0300", "0x0302"})
+#: The vendors whose GPUs are passed through: NVIDIA and AMD. An emulated
+#: display (QEMU's VGA, virtio-gpu) or a management controller's display is a
+#: display controller too, from another vendor, and is no GPU. Host preparation
+#: decides a host's GPU presence by the same rule
+#: (domains/vms/provisioning/iac/ansible/roles/vm-setup/tasks/gpu-presence.yml).
+_GPU_VENDORS = frozenset({"0x10de", "0x1002"})
+
 
 class SshAccessError(AssertionError):
     """What a scenario expected of an SSH connection did not happen."""
@@ -150,6 +175,46 @@ class GuestShape:
     vcpu_count: int
     memory_gib: float
     root_disk_gib: float
+
+
+@dataclass(frozen=True)
+class PciDevice:
+    """One PCI device a connection's machine lists."""
+
+    address: str
+    #: The class code as sysfs reports it, such as ``0x030000``.
+    pci_class: str
+    #: The vendor ID as sysfs reports it, such as ``0x10de``.
+    vendor: str
+
+    @property
+    def is_gpu(self) -> bool:
+        """A display or 3D controller from a vendor whose GPUs are passed through."""
+        return self.pci_class[:6] in _GPU_CLASSES and self.vendor in _GPU_VENDORS
+
+
+def parse_pci_probe(output: str) -> tuple[PciDevice, ...]:
+    """The PCI devices the PCI probe printed.
+
+    Refuses output that does not show the device list was read, or that names a
+    device it could not read: neither is evidence that the machine has no GPU.
+    """
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if "pci=read" not in lines:
+        raise SshAccessError(f"the machine's PCI devices could not be read: {output!r}")
+    devices = []
+    for line in lines:
+        if line == "pci=read":
+            continue
+        name, _, value = line.partition("=")
+        if name == "unreadable":
+            raise SshAccessError(f"PCI device {value} could not be read: {output!r}")
+        fields = value.split()
+        if name != "device" or len(fields) != 3:
+            raise SshAccessError(f"the PCI probe printed {line!r}, not a device: {output!r}")
+        devices.append(PciDevice(address=fields[0], pci_class=fields[1].lower(),
+                                 vendor=fields[2].lower()))
+    return tuple(devices)
 
 
 def memory_within_tolerance(memory_gib: float, ram_gb: int) -> bool:
@@ -593,6 +658,11 @@ class SshSession:
     def probe(self, endpoint: SshEndpoint, key: SshKey) -> GuestShape:
         """The user, vCPU count, memory, and root disk a connection shows."""
         return parse_probe(self.run(endpoint, key, _PROBE))
+
+    def pci_devices(self, endpoint: SshEndpoint, key: SshKey) -> tuple[PciDevice, ...]:
+        """The PCI devices a connection's machine lists; a list that cannot be
+        read fails rather than reading as empty."""
+        return parse_pci_probe(self.run(endpoint, key, _PCI_PROBE))
 
 
 @contextmanager

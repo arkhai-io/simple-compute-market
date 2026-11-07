@@ -25,10 +25,12 @@ first purchase's delivery and its ending. Its own stages:
   03c       Host diagnostics, before any guest
   08b3      The first create job ran on the target and succeeded
   09a2      Capacity events stepped
-  09d–09f   The first guest: the negotiated shape, an unrelated key refused,
+  09d–09f   The first guest: the negotiated shape and no GPU passed through,
+            an unrelated key refused,
             the grant admitted, the heartbeat opened, diagnostics
   09g–09p   The second purchase: bought, created, its payment and the sum of
-            both, delivered and admitted, its lease expired, released; the
+            both, delivered with the negotiated shape and no GPU passed
+            through, admitted, its lease expired, released; the
             heartbeat checked after its create and its removal, diagnostics
   10b2, 11a3, 11c, 11d  The first guest's real teardown, gone from the host
   12a, 12b  libvirtd and the management unit kept their generations
@@ -340,6 +342,14 @@ def _assert_negotiated_shape(ssh, endpoint: SshEndpoint, key, target, label: str
         f"the guest has {shape.memory_gib:.2f} GiB of memory; {sold.ram_gb} GiB were sold")
     assert shape.root_disk_gib >= sold.disk_gb, (
         f"the guest's root disk is {shape.root_disk_gib:.2f} GiB; {sold.disk_gb} GiB were sold")
+    # The listing selling no GPU proves only what was offered; the guest's own
+    # PCI devices show what was delivered. A list the guest cannot read fails
+    # the probe rather than reading as no GPU.
+    devices = ssh.pci_devices(endpoint, key)
+    gpus = [device for device in devices if device.is_gpu]
+    log.info("[%s] the guest lists %d PCI device(s), %d of them a GPU", label, len(devices),
+             len(gpus))
+    assert not gpus, f"the guest was sold no GPU but has one passed through: {gpus}"
 
 
 def _gross(state: PurchaseState) -> dict[str, int]:
