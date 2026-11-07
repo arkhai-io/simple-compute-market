@@ -178,6 +178,11 @@ def settlement_admin_routes(
             return {"status": "ready", "fulfillment_state": state}
         if state in _FAILED_STATES:
             return {"status": "failed", "fulfillment_state": state}
+        if await runtime.lifecycle.ended_before_delivery(str(escrow["negotiation_id"])):
+            # A deal ended before it was delivered, a settlement placement
+            # that found no capacity among them, has no fulfillment state to
+            # reach; its end is the settlement's outcome.
+            return {"status": "ended", "fulfillment_state": state}
         return {"status": str(escrow.get("status") or ""), "fulfillment_state": state}
 
     timing: dict[str, Any] = {}
@@ -189,7 +194,7 @@ def settlement_admin_routes(
         verify=verify,
         preview_fulfillment=preview,
         settle_status=settle_status,
-        is_terminal=lambda status: status.get("status") in {"ready", "failed"},
+        is_terminal=lambda status: status.get("status") in {"ready", "failed", "ended"},
         **timing,
     )
 

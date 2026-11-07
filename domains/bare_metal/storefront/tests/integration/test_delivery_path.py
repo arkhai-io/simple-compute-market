@@ -16,9 +16,10 @@ import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
-import httpx
 import pytest
+from core_buyer.negotiation_client import AuthenticatedHTTPError
 from core_storefront import StorefrontFulfillmentContext, StorefrontFulfillmentPorts
+from loopback import serving
 from market_deal_lifecycle_contracts.models import Rejected
 from market_deal_servicing import Classification, EndSession, FinalRequest
 from market_deal_servicing.evidence import transaction
@@ -29,7 +30,7 @@ from test_http_settlement import (
     _accepted_runtime,
     _app,
     _CapacityClient,
-    _headers,
+    _fulfillment_client,
     _ProvisioningClient,
     _settle_body,
 )
@@ -301,31 +302,28 @@ def _end_recorded(runtime, negotiation_id) -> None:
 
 
 async def test_an_exact_access_retry_after_an_end_reads_again_and_is_refused(tmp_path) -> None:
-    """Rejection path: the buyer's transport mints a request identity per call,
-    so the exact retry is the same signed request sent twice; only statuses and
-    the stored record are asserted."""
+    """The buyer's transport repeats one request identity: the exact retry
+    reads access again, and once an end is journaled it is refused rather
+    than replayed, its recorded outcome keeping no host, port or username."""
     runtime, negotiation_id = await _verified(tmp_path)
     await _deliver(runtime, negotiation_id)
-    headers = _headers(
-        "bare_metal_fulfillment_access", negotiation_id, method="GET"
-    )
-    app = _app(runtime)
-    async with app.router.lifespan_context(app):
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://seller"
-        ) as client:
-            path = f"/api/v1/fulfillments/{negotiation_id}/access"
-            first = await client.get(path, headers=headers)
-            retried = await client.get(path, headers=headers)
-            _end_recorded(runtime, negotiation_id)
-            refused = await client.get(path, headers=headers)
+    request_id = "access-retry-1"
+    with serving(_app(runtime)) as base_url:
+        buyer = _fulfillment_client(base_url)
+        first = buyer.access(negotiation_id, request_id=request_id)
+        retried = buyer.access(negotiation_id, request_id=request_id)
+        _end_recorded(runtime, negotiation_id)
+        with pytest.raises(AuthenticatedHTTPError) as refused:
+            buyer.access(negotiation_id, request_id=request_id)
 
-    assert (first.status_code, retried.status_code, refused.status_code) == (200, 200, 410)
+    assert first == retried
+    assert (first["method"], first["username"]) == ("ssh", "tenant-a")
+    assert refused.value.status_code == 410
     with sqlite3.connect(runtime.db.db_path) as conn:
         status, body = conn.execute(
             "SELECT response_status, response_body FROM auth_replay_reservations "
             "WHERE request_id=?",
-            (headers["X-Market-Request-ID"],),
+            (request_id,),
         ).fetchone()
     assert status == 200
     assert '"host"' not in body and '"port"' not in body and '"username"' not in body

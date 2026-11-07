@@ -501,7 +501,9 @@ The site and library contracts are reviewed before either storefront is rewritte
 
 ### D15 — Lane qualification waits for the Agreement's instants, and restarts are recovery steps
 
-Settled while implementing section 8. The lanes' controls hold and step loops;
+Settled while implementing section 8, and ratified by the owner in the triage of
+the round's implementation review (39 F1), which restated task 8.3 to this
+evidence boundary. The lanes' controls hold and step loops;
 none moves the wall clock. A late settlement must be late to the second the
 servicing record keeps, and a forward deal must reach its start, so a stage
 waits for an instant the Agreement fixes (`wait_until`, bounded), then advances

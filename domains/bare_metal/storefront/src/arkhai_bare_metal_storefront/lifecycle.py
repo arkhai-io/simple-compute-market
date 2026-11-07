@@ -203,6 +203,29 @@ class BareMetalLifecycle:
         record = await in_transaction(self.path, lambda conn: EndSession(conn).read(negotiation_id))
         return record.available_at is not None
 
+    async def ended_before_delivery(self, negotiation_id):
+        """Whether the deal's end has taken effect while it was never available.
+
+        Delivery stops at an end in effect, so such a deal is never delivered
+        later. An end recorded for a later instant has not taken effect: the
+        deal may still be delivered before it.
+        """
+        def read(conn):
+            session = EndSession(conn)
+            try:
+                record = session.read(negotiation_id)
+            except KeyError:
+                return None, None
+            return record, session.selected_end(negotiation_id)
+
+        record, end = await in_transaction(self.path, read)
+        return (
+            record is not None
+            and record.available_at is None
+            and end is not None
+            and end.ended_at <= self.clock()
+        )
+
     async def apply_end(self, negotiation_id, *, terminate, at, operation_key):
         # Do not terminate a lease before its in-flight dispatch has been adopted.
         # The end is already durable; the fulfillment hook, once it releases the

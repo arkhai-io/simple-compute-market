@@ -202,7 +202,9 @@ pipeline is by far the slowest part, so it runs while everything else does:
    conclusion; a successful fetch means the logs arrived, not that the run passed.
    Run it as written, with no shell redirect of its output: a redirect is a
    write no rule admits unattended, and the harness keeps a background command's
-   output in a file, which is what the wait below reads.
+   output in a file, which is what the wait below reads. Give the background
+   call the harness's longest `timeout`, 7200000 ms: the pipeline runs longer
+   than the default ten minutes, which stops the fetch before the run ends.
 5. For each workflow owed (step 1), `make run-ci WORKFLOW=<file>`: it dispatches
    the workflow on the branch, refusing one off the list, and first prints the
    newest run of it there as `CI_AFTER_RUN=<id>`. Then `make validate-ci

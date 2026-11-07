@@ -1205,6 +1205,19 @@ controls and mock-provisioning rules.
       refusal recorded as seller failure, released through the no-dispatch path, and
       recovered across a restart without a second reservation. Record the run evidence;
       the deadline-caused refusal is `renewable-compute-lease-deadlines`'.
+      Restated by the owner, ratifying D15 (39 F1): the lanes show a restart as one
+      recovery-loop step, and a seller failure before dispatch as a settlement
+      placement that finds no capacity. The reserve, dispatch, activation and
+      billing-start acknowledgement gaps, a refused commit of a live hold or
+      reservation released without dispatch, and the replay under the placement key
+      are qualified below the lanes: library integration in
+      `domains/compute/delivery/tests/integration/` (`test_drive_commit.py`'s lost
+      reserve and hold-commit answers and refused commits, `test_drive_dispatch.py`'s
+      lost dispatch acknowledgement, `test_drive_delivery.py`'s lost billing-start
+      acknowledgement and unanswered activation), the placement-key replay against
+      `kit/site`'s real router and ledger (`test_site_reservation.py`), and both
+      storefronts' application integration (5.5, 7.5). No lane control injects these
+      faults, and none is added.
       Done with differences, for the round's review to weigh. A restart is emulated
       by one step of the storefront's recovery loop, the existing control and what a
       restarted storefront runs first. Bare metal, in the new
@@ -1277,6 +1290,7 @@ controls and mock-provisioning rules.
       deal ended before delivery its status probably reports the escrow's status
       rather than `ended`. If so, an admin wait on such a deal runs out its timeout,
       as VM's did. This was not verified: no bare-metal stage waits on it.
+      Confirmed and fixed in the round's triage (39 F2; the note after 8.4).
 - [x] 8.4 Run the complete-deal markers in the ready lanes — `e2e_deal`,
       `e2e_deal_buyer_cli`, `e2e_vm_payment_deal`, `e2e_bare_metal_mock_deal`,
       `e2e_bare_metal_payment_deal`, and `e2e_credits_payment_deal` as the API-credit
@@ -1357,6 +1371,54 @@ controls and mock-provisioning rules.
         `TESTING.md` now states.
       - Large session: both sections' lane iterations ran in one session that did
         not compact; this round's triage should start fresh.
+
+Round 2's triage fixes (review 39, validation 41 passed at `312e67ccd`), outside the
+plan's tasks:
+
+- 39 F1: the owner ratified D15; 8.3's note now states the evidence boundary, and
+  D15 records the ratification. No code.
+- 39 F2: bare metal's admin settle wait now ends on a deal ended before delivery.
+  `deal_controls.py`'s `settle_status` answers a terminal `ended` once the deal's
+  end has taken effect and it was never available, read through
+  `BareMetalLifecycle.ended_before_delivery` (`lifecycle.py`; an end recorded for
+  later is not yet in effect), and `is_terminal` takes `ended`, as VM's does.
+  Application integration through the typed admin client,
+  `test_deal_controls.py::test_wait_answers_a_deal_ended_before_delivery_at_once`:
+  a settlement placement finding no capacity, then a wait whose deadline is shorter
+  than one poll answers `ended`, ready, with nothing begun. Against the unfixed
+  predicate it ran out a 5 s wait unready (`status` `ended`, `ready` false), the
+  timeout 8.3's note suspected. The owner also had a gap recorded:
+  `docs/development/ROADMAP.md` Goal 8's unowned table now asks whether stage 09b
+  should step delivery explicitly rather than use the admin wait.
+- 39 F3: the exact-retry test goes through the buyer's typed transport.
+  `core_buyer.signed_storefront_json` takes an optional `request_id`, passed to
+  `_signed_json`, which already took one; `BareMetalFulfillmentTransport.status` and
+  `.access` take it too. `test_delivery_path.py`'s
+  `test_an_exact_access_retry_after_an_end_reads_again_and_is_refused` (application
+  integration over the loopback server) repeats one request identity: 200, the same
+  answer again, then the transport's `AuthenticatedHTTPError` 410 after an end, the
+  recorded outcome holding no host, port or username. The replay fingerprint leaves
+  the timestamp out (`market_identity.canonical.request_hash`), so the retry is exact
+  across a second boundary. This replaces 7.5's deferral of the request-identity seam.
+- 31 R1 / 42 R1: `.agents/skills/change-validate/SKILL.md` step 4 gives the e2e log
+  fetch the harness's longest background timeout, since all three validations of
+  this change lost the default ten minutes to it. Workflow guidance, outside the
+  change's scope.
+
+Checks: `make test-bare-metal` passed (storefront 595, buyer 224, domain 126, IaC
+32 and 137); `make test-core` passed (core buyer 168); `make check-packaging` passes,
+with the buyer wheels rebuilt and no version bump or relock; `make test` passed
+whole; `make check-comment-hygiene` passes; `make check-change` fails only on the
+closeout citation of `openspec/specs/compute-delivery/architecture.md` (9.9). The two
+changed test modules passed again (26) after the check's fixes below. No lane ran:
+validation of the fix commit is their evidence, and no stage changed.
+Fresh-context check: no correctness, layering, import or comment-hygiene defect.
+Fixed from it: the new wait test asserted elapsed time and now uses a deadline
+shorter than one poll; 8.3's note still called the bare-metal wait unfixed; the
+ROADMAP row now gives 09b's 60 s request beside the route's 120 s cap. For closeout:
+no permanent specification names the statuses that end the settle wait, VM's
+`ended` included; 9.9's promotion should place it in `settlement-servicing` or the
+domain specifications.
 
 ## 9. Closeout
 
