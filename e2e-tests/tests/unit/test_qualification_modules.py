@@ -2,8 +2,10 @@
 
 Read from source, or called on constructed inputs: the modules themselves need a
 real-provisioning target and a payments target, which no lane has. That each
-module extends the purchase stages without replacing a body is
-``test_buyer_purchase_stages.py``'s check, where each is a row; that each checks
+deal module, observation 2's and observations 4 and 5's, extends the purchase
+stages without replacing a body is ``test_buyer_purchase_stages.py``'s check,
+where each is a row; observation 6's module makes no deal and extends none,
+following them on the stack their purchases populated. That every module checks
 its targets before any hold is ``test_scenario_cleanup_order.py``'s.
 """
 
