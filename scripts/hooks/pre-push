@@ -1,10 +1,7 @@
 #!/bin/sh
-# Both public-content checks read the ref updates Git gives on standard input, so
-# the updates are read once and given to each; either refuses the push.
+# The repository's pre-push checks are one make target, which the workflow's guarded
+# push runs too; Git's ref updates reach it on standard input, and the remote as
+# REMOTE.
 set -u
 cd "$(git rev-parse --show-toplevel)" || exit 1
-updates=$(cat)
-status=0
-printf '%s' "$updates" | python3 scripts/check_public_content.py --pre-push "$1" || status=1
-printf '%s' "$updates" | python3 scripts/check_secrets.py --pre-push "$1" || status=1
-exit "$status"
+exec make --no-print-directory -s pre-push REMOTE="$1"

@@ -2,7 +2,8 @@
 
 A change worked in its own clone keeps its history there: its records under
 `reviews/` — reviews, triage, the owner's notes, the workflow log, transcripts —
-and the validation evidence they name under `.snapshot/`. None of it is tracked,
+and the validation evidence they name, under the evidence directories the
+workflow configuration's validation parts declare. None of it is tracked,
 so no merge carries it, and removing the clone would lose it. Archive cleanup
 copies it, as its last act, to the same paths in the owner's workspace, where
 sessions working other changes find it (`find --records`); removing the
@@ -19,12 +20,14 @@ owner's call. Only regular files are copied. Nothing rebuildable is: only
 `reviews/` and the evidence directories its records name, never a wheelhouse, an
 environment, or a zip of logs.
 
-The evidence a change's records name is each `.snapshot/validation/<commit>/` and
-`.snapshot/e2e-logs/<run>/` they cite, the evidence of each validation record's
-commit (`**Commit:**`, kept under its first twelve characters), and each record's
-pipeline run (`**Pipeline:** run <id>`). Transcripts are not read for it: they
-cite whatever a session read, another clone's evidence included. Named evidence
-the clone does not hold is reported, not refused.
+An evidence directory holds one directory per commit or run it is evidence of. The
+evidence a change's records name is, under each declared evidence directory, each
+`<directory>/<name>` they cite, and the evidence of each validation record's commit
+(`**Commit:**`, kept under its first twelve characters) and of each record's
+pipeline run (`**Pipeline:** run <id>`), under whichever directories hold it.
+Transcripts are not read for it: they cite whatever a session read, another clone's
+evidence included. Named evidence the clone does not hold is reported, not refused:
+a cited path absent, and a commit or run no evidence directory holds, under each.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-hak6 and CW-rf50.
 """
@@ -40,16 +43,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
+from . import config
 from .common import StepError, repository_root
 from .find import REVIEWS, ChangeNotFound, change_directory, is_archived, workspace_of
 
-VALIDATION = Path(".snapshot/validation")
-E2E_LOGS = Path(".snapshot/e2e-logs")
-_CITED_VALIDATION = re.compile(r"\.snapshot/validation/([0-9a-f]{7,40})(?![0-9A-Za-z])")
-_CITED_RUN = re.compile(r"\.snapshot/e2e-logs/([0-9]+)(?![0-9A-Za-z])")
 _VALIDATED_COMMIT = re.compile(r"^- \*\*Commit:\*\*\s*([0-9a-f]{12,40})\b", re.M)
 _PIPELINE_RUN = re.compile(r"^- \*\*Pipeline:\*\*\s*run\s+([0-9]+)\b", re.M)
-# validate_slice.py keeps a commit's evidence under its first twelve characters.
+# A validation keeps a commit's evidence under its first twelve characters.
 _SHORT_COMMIT = 12
 
 
@@ -70,24 +70,36 @@ class Synced:
     absent: list[str] = field(default_factory=list)
 
 
-def named_evidence(reviews: Path) -> list[Path]:
-    """The evidence directories the records in `reviews` name, relative to the checkout."""
-    named: set[Path] = set()
+def _cited(directory: Path) -> re.Pattern[str]:
+    """A citation of a commit's or run's evidence under `directory`, its name taken."""
+    return re.compile(re.escape(directory.as_posix()) + r"/([0-9A-Za-z][0-9A-Za-z_-]*)"
+                      r"(?![0-9A-Za-z_-])")
+
+
+def named_evidence(reviews: Path, evidence: Sequence[str]) -> tuple[list[Path], list[str]]:
+    """What the records in `reviews` name under the evidence directories `evidence`,
+    relative to the checkout: each cited path, and the name of each validated commit,
+    under its first twelve characters, and each pipeline run, whose directory the
+    records do not say."""
+    directories = [Path(entry.rstrip("/")) for entry in evidence]
+    cited: set[Path] = set()
+    keys: set[str] = set()
     for record in sorted(reviews.iterdir()):
         if not record.is_file():
             continue
         text = record.read_text("utf-8", errors="replace")
-        named.update(VALIDATION / commit for commit in _CITED_VALIDATION.findall(text))
-        named.update(VALIDATION / commit[:_SHORT_COMMIT]
-                     for commit in _VALIDATED_COMMIT.findall(text))
-        named.update(E2E_LOGS / run
-                     for run in _CITED_RUN.findall(text) + _PIPELINE_RUN.findall(text))
-    return sorted(named)
+        for directory in directories:
+            cited.update(directory / name for name in _cited(directory).findall(text))
+        keys.update(commit[:_SHORT_COMMIT] for commit in _VALIDATED_COMMIT.findall(text))
+        keys.update(_PIPELINE_RUN.findall(text))
+    return sorted(cited), sorted(keys)
 
 
-def _history(clone: Path, change: str) -> tuple[list[Path], list[Path]]:
+def _history(clone: Path, change: str, evidence: Sequence[str] | None = None
+             ) -> tuple[list[Path], list[Path]]:
     """The directories of the change's history the clone holds, relative to it —
-    its records, then the evidence they name — and the named evidence it does not."""
+    its records, then the evidence they name — and the named evidence it does not.
+    The evidence directories are the clone's configuration's unless given."""
     try:
         directory = change_directory(clone, change)
     except ChangeNotFound as exc:
@@ -98,10 +110,22 @@ def _history(clone: Path, change: str) -> tuple[list[Path], list[Path]]:
     reviews = directory / REVIEWS
     if not reviews.is_dir():
         raise HistoryError(f"{reviews.relative_to(clone)} does not exist in {clone}")
-    named = named_evidence(reviews)
-    held = [path for path in named if (clone / path).is_dir()]
-    absent = [path for path in named if not (clone / path).is_dir()]
-    return [reviews.relative_to(clone), *held], absent
+    if evidence is None:
+        try:
+            evidence = config.load(clone).evidence()
+        except StepError as exc:
+            raise HistoryError(str(exc)) from exc
+    cited, keys = named_evidence(reviews, evidence)
+    directories = [Path(entry.rstrip("/")) for entry in evidence]
+    held = [path for path in cited if (clone / path).is_dir()]
+    absent = [path for path in cited if not (clone / path).is_dir()]
+    for key in keys:
+        found = [directory / key for directory in directories if (clone / directory / key).is_dir()]
+        held += [path for path in found if path not in held]
+        if not found:
+            absent += [directory / key for directory in directories
+                       if directory / key not in absent]
+    return [reviews.relative_to(clone), *sorted(held)], sorted(absent)
 
 
 def _files(clone: Path, tops: Sequence[Path]) -> list[Path]:

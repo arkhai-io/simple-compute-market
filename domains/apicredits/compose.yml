@@ -119,7 +119,8 @@ services:
       - APICREDITS_MIDDLEWARE_AUTHORITY_PRINCIPALS=[{"scheme":"ed25519","identifier":"MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c"}]
       - APICREDITS_MIDDLEWARE_AMOUNT_PER_REQUEST=1
       # Short verify cache so a re-purchase (top-up) becomes visible to
-      # the gate quickly — the e2e polls through this window.
+      # the gate within seconds. The end-to-end lane's overlay
+      # (compose.apicredits-lane.yml) runs it with no cache at all.
       - APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS=3
       - APICREDITS_MIDDLEWARE_PURCHASE_SERVICE_NAME=weather-api
       - APICREDITS_MIDDLEWARE_PURCHASE_STOREFRONT_URL=http://credits-storefront:8000

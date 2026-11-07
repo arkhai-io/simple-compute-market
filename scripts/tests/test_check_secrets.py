@@ -18,8 +18,10 @@ import io
 import json
 import os
 import secrets
+import shlex
 import string
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 from typing import Sequence
@@ -46,6 +48,18 @@ def random_text(length: int) -> str:
     """Random letters and digits, the shape of a generated token or password."""
     return "".join(secrets.choice(string.ascii_letters + string.digits)
                    for _ in range(length))
+
+
+def wordless_password() -> str:
+    """40 random characters, each letter followed by a digit.
+
+    `generic-api-key` passes any value holding one of its stop words, common words
+    such as `menu` or `boot`; about one 40-character draw of letters and digits in
+    eighty holds one. No two letters here are adjacent, so no word of letters can
+    form, and no draw has escaped the rule in fifty thousand.
+    """
+    return "".join(secrets.choice(string.ascii_letters) + secrets.choice(string.digits)
+                   for _ in range(20))
 
 
 def key_body() -> str:
@@ -437,7 +451,7 @@ def test_a_development_fixture_is_added(repo: Path) -> None:
 def test_the_audit_reports_what_the_gate_passes(
         repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = git(repo, "rev-parse", "HEAD")
-    password = random_text(40)
+    password = wordless_password()
     commit(repo, "build-vars.yaml", f"root_password: {password}\n")
 
     assert checker.main(["--audit"], root=repo) == 0
@@ -477,12 +491,23 @@ def branch(repo: Path, tmp_path: Path) -> Path:
     git(repo, "remote", "add", "origin", str(remote))
     git(repo, "push", "-q", "-u", "origin", "dev")
     git(repo, "checkout", "-q", "-b", "feat/change")
+    # Its upstream, a branch of its own name on `origin`, as a change's clone sets it.
+    git(repo, "config", "branch.feat/change.remote", "origin")
+    git(repo, "config", "branch.feat/change.merge", "refs/heads/feat/change")
     return repo
 
 
 def provide_gate(repo: Path, version_problem: str | None = None) -> None:
-    """The stand-in gate, ignored so the worktree stays clean; `version_problem`
-    stands in for a gitleaks that cannot run."""
+    """The stand-in gate, and the workflow configuration whose `pre-push` runs it as
+    the guarded push runs a pre-push hook, both ignored so the worktree stays clean;
+    `version_problem` stands in for a gitleaks that cannot run."""
+    (repo / ".agents").mkdir(exist_ok=True)
+    (repo / ".agents/workflow.toml").write_text(
+        '[repository]\nprotected-branches = ["main", "dev"]\n[hooks]\n'
+        f'pre-push = "{shlex.quote(sys.executable)} scripts/{Path(checker.__file__).name} '
+        '--pre-push {remote}"\n', "utf-8")
+    with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+        exclude.write("/.agents/\n")
     injected = ("" if version_problem is None
                 else f", version_problem=lambda: {version_problem!r}")
     gate = repo / "scripts" / Path(checker.__file__).name

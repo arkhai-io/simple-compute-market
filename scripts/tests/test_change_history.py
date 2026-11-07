@@ -27,6 +27,23 @@ COMMIT = "0123456789abcdef0123456789abcdef01234567"
 VALIDATION = Path(".snapshot/validation") / COMMIT[:12]
 CITED = Path(".snapshot/validation/fedcba987654")
 RUN = Path(".snapshot/e2e-logs/39744936158")
+# The evidence directories the workspace's validation parts declare, as the clone's
+# checkout carries them; two parts share one.
+EVIDENCE = [".snapshot/e2e-logs/", ".snapshot/validation/"]
+CONFIGURATION = """
+[validation.parts.pipeline]
+start = "true"
+collect = "true"
+evidence = ".snapshot/e2e-logs/"
+
+[validation.parts.local]
+run = "true"
+evidence = ".snapshot/validation/"
+
+[validation.parts.helm]
+run = "true"
+evidence = ".snapshot/validation/"
+"""
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -59,10 +76,12 @@ def workspace(tmp_path: Path) -> Path:
     (work / ".gitignore").write_text(
         ".claude/settings.local.json\n.snapshot/\nopenspec/changes/**/reviews/\n", "utf-8")
     (work / "README.md").write_text("1\n", "utf-8")
+    (work / ".agents").mkdir()
+    (work / ".agents/workflow.toml").write_text(CONFIGURATION, "utf-8")
     _git(work, "add", "--all")
     _git(work, "commit", "-q", "-m", "start")
     _git(work, "remote", "add", "origin", str(origin))
-    _git(work, "push", "-q", "origin", "dev")
+    _git(work, "push", "-q", "-u", "origin", "dev")
     return work
 
 
@@ -115,15 +134,26 @@ def test_the_records_name_cited_paths_validated_commits_and_pipeline_runs(
     # A transcript cites whatever its session read, so it names nothing.
     _write(reviews, "transcripts/03-validate.jsonl", ".snapshot/e2e-logs/222/actions.log\n")
 
-    assert history.named_evidence(reviews) == sorted([
-        VALIDATION, CITED, RUN, Path(".snapshot/e2e-logs/111")])
+    cited, keys = history.named_evidence(reviews, EVIDENCE)
+
+    assert cited == sorted([CITED, Path(".snapshot/e2e-logs/111")])
+    # Which directory holds a validated commit's or a pipeline run's evidence the
+    # records do not say; the copy looks under each.
+    assert keys == sorted([COMMIT[:12], RUN.name])
 
 
 def test_a_records_directory_naming_nothing_names_no_evidence(tmp_path: Path) -> None:
     reviews = tmp_path / "reviews"
     _write(reviews, "01-implementation.md", "- **Commit:** short\nno evidence\n")
 
-    assert history.named_evidence(reviews) == []
+    assert history.named_evidence(reviews, EVIDENCE) == ([], [])
+
+
+def test_a_directory_no_part_declares_is_never_named(tmp_path: Path) -> None:
+    reviews = tmp_path / "reviews"
+    _write(reviews, "05-implementation.triage.md", f"Read `{CITED}/helm/1/`.\n")
+
+    assert history.named_evidence(reviews, [".snapshot/e2e-logs/"]) == ([], [])
 
 
 # Synchronizing.
@@ -160,12 +190,30 @@ def test_evidence_the_records_name_that_the_clone_lacks_is_reported(
         workspace: Path, clone: Path) -> None:
     _history(clone)
     _write(clone, REVIEWS / "04-validation.md",
-           "- **Commit:** 999999999999aaaa on feat/seed-pool\n")
+           "- **Commit:** 999999999999aaaa on feat/seed-pool\n"
+           "Read `.snapshot/validation/777777777777/local/1/`.\n")
 
     synced = history.sync(clone, workspace, CHANGE)
 
-    assert synced.absent == [".snapshot/validation/999999999999"]
+    # A commit no evidence directory holds is reported under each; a cited path
+    # where it was cited.
+    assert synced.absent == [".snapshot/e2e-logs/999999999999",
+                             ".snapshot/validation/777777777777",
+                             ".snapshot/validation/999999999999"]
     assert synced.refused == []
+
+
+def test_evidence_under_a_directory_no_part_declares_is_not_copied(
+        workspace: Path, clone: Path) -> None:
+    _history(clone)
+    (clone / ".agents/workflow.toml").write_text(
+        "[validation.parts.local]\nrun = 'true'\nevidence = '.snapshot/validation/'\n", "utf-8")
+
+    synced = history.sync(clone, workspace, CHANGE)
+
+    assert not any(name.startswith(".snapshot/e2e-logs/") for name in synced.copied)
+    assert (VALIDATION / "local/1/summary.json").as_posix() in synced.copied
+    assert not (workspace / RUN).exists()
 
 
 def test_a_second_copy_extends_what_grew_adds_what_is_new_and_leaves_the_rest(

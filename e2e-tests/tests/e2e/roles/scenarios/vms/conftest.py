@@ -825,16 +825,17 @@ def alice_loops_held(alice_admin_client):
 
 @pytest.fixture(scope="module")
 def fulfillment_convergence_held(provisioning_client):
-    """Bob's provisioning service's fulfillment convergence, held for a module
-    that advances it itself."""
+    """Bob's provisioning service's fulfillment convergence, held for the
+    module; a module that needs a transition advances it itself."""
     with compute_deal.fulfillment_convergence_held(provisioning_client) as held:
         yield held
 
 
 @pytest.fixture(scope="module")
 def lease_watchdog_held(provisioning_client):
-    """Bob's provisioning service's lease watchdog, held for a module that steps
-    lease expiry itself; stages read the hold back through system status."""
+    """Bob's provisioning service's lease watchdog, held for the module; a
+    module that needs lease expiry steps it itself, and stages read the hold
+    back through system status."""
     with compute_deal.lease_watchdog_held(provisioning_client) as held:
         yield held
 

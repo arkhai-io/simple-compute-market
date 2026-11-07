@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import MutableMapping
+from typing import Any
 
 from compute_provisioning.startup import (
     ComputeProvisioningBackgroundTask,
@@ -34,16 +36,23 @@ def refuse_retired_settings() -> None:
     settings.refuse_retired_settings()
 
 
-def apply_ansible_config() -> None:
+def apply_ansible_config(
+    config: Any = None, environ: MutableMapping[str, str] | None = None
+) -> None:
     """Export ``ANSIBLE_CONFIG`` for every playbook the service runs.
 
-    The profile's ``ansible_cfg`` when it names one, otherwise the Ansible
-    distribution's own defaults, which belong to no domain.
+    The profile's ``ansible_cfg`` when it names one, verbatim, so an operator's
+    own configuration, a log file included, is never overridden; otherwise the
+    Ansible distribution's own defaults, which belong to no domain and name no
+    log file. Nothing else is exported: the service sets no log path.
+    ``config`` is the service's settings and ``environ`` the process
+    environment unless given.
     """
-
-    ansible_cfg = str(getattr(settings, "ansible_cfg", "") or "").strip()
-    os.environ["ANSIBLE_CONFIG"] = ansible_cfg or str(DEFAULT_ANSIBLE_CONFIG)
-    logger.info("ANSIBLE_CONFIG set to %s", os.environ["ANSIBLE_CONFIG"])
+    config = settings if config is None else config
+    environ = os.environ if environ is None else environ
+    ansible_cfg = str(getattr(config, "ansible_cfg", "") or "").strip()
+    environ["ANSIBLE_CONFIG"] = ansible_cfg or str(DEFAULT_ANSIBLE_CONFIG)
+    logger.info("ANSIBLE_CONFIG set to %s", environ["ANSIBLE_CONFIG"])
 
 
 def initialise_container_resources() -> None:

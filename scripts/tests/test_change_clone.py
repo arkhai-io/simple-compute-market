@@ -20,7 +20,7 @@ from typing import Sequence
 
 import pytest
 
-from change_workflow import cli, running
+from change_workflow import cli, find, running
 from change_workflow import clone as clones
 
 CHANGE = "seed-pool"
@@ -59,9 +59,14 @@ def workspace(tmp_path: Path) -> Path:
     # records and evidence.
     (work / ".gitignore").write_text(
         ".claude/settings.local.json\n.snapshot/\nopenspec/changes/**/reviews/\n", "utf-8")
+    # The evidence directory history copies from, as a validation part declares it.
+    (work / ".agents").mkdir()
+    (work / ".agents/workflow.toml").write_text(
+        "[validation.parts.local]\nrun = 'true'\nevidence = '.snapshot/validation/'\n", "utf-8")
     _commit(work, "README.md", "1\n")
     _git(work, "remote", "add", "origin", str(origin))
-    _git(work, "push", "-q", "origin", "dev")
+    # The workspace's dev tracks origin's, so a change landing on it pushes there.
+    _git(work, "push", "-q", "-u", "origin", "dev")
     return work
 
 
@@ -82,8 +87,10 @@ class Spawned:
 
 
 def _create(workspace: Path, spawn: Spawned | None = None, **options) -> clones.Created:
-    return clones.create(workspace, CHANGE, bootstrap=("make", "init"),
-                         spawn=spawn or Spawned(), **options)
+    """The clone, its checkout declaring `post-clone = "make init"` unless a test
+    gives the bootstrap another way to read it."""
+    options.setdefault("bootstrap", lambda _: ("make init",))
+    return clones.create(workspace, CHANGE, spawn=spawn or Spawned(), **options)
 
 
 def _git_file(clone: Path, name: str) -> Path:
@@ -109,7 +116,7 @@ def test_a_fresh_clone_has_both_remotes_the_branch_the_link_and_a_bootstrap(
     assert _git(clone, "rev-parse", "HEAD") == _git(workspace, "rev-parse", "dev")
     assert os.readlink(clone / ".claude/settings.local.json") == str(
         workspace.resolve() / ".claude/settings.local.json")
-    assert spawn.calls == [(["make", "init"], clone)]
+    assert spawn.calls == [(["make init"], clone)]
     assert created.bootstrap == clones.Bootstrap("succeeded",
                                                  _git_file(clone, clones.BOOTSTRAP_LOG))
     assert json.loads(_git_file(clone, clones.BOOTSTRAP).read_text("utf-8"))["pid"] == os.getpid()
@@ -120,10 +127,99 @@ def test_the_clone_tracks_nothing_in_the_workspace(workspace: Path) -> None:
     clone = _create(workspace).clone
 
     # No push from the clone goes to the workspace: the branch it was made on is
-    # gone, and the change's branch has no upstream until it is pushed.
+    # gone, and the change's branch tracks a branch of its own name on origin, the
+    # landing branch's upstream remote, before its first push.
     assert _git(clone, "branch", "--format=%(refname:short)") == BRANCH
+    assert _git(clone, "config", f"branch.{BRANCH}.remote") == "origin"
+    assert _git(clone, "config", f"branch.{BRANCH}.merge") == f"refs/heads/{BRANCH}"
+
+
+@pytest.mark.parametrize("landing", ["dev", "main"])
+def test_a_clone_records_the_branch_the_workspace_had_checked_out(workspace: Path,
+                                                                  landing: str) -> None:
+    """CW-s3ju: the branch the change lands on is the workspace's checked-out branch
+    as the clone is made; the new branch starts from it."""
+    if landing != "dev":
+        _git(workspace, "switch", "-q", "-c", landing)
+        _commit(workspace, "on-main.txt", "main\n")
+        _git(workspace, "push", "-q", "-u", "origin", landing)
+
+    clone = _create(workspace).clone
+
+    assert json.loads(_git_file(clone, clones.MARKER).read_text("utf-8"))["base"] == landing
+    assert find.landing_branch(workspace, CHANGE) == landing
+    assert find.landing_branch(clone, CHANGE) == landing
+    assert _git(clone, "rev-parse", "HEAD") == _git(workspace, "rev-parse", landing)
+
+
+def test_a_from_names_the_branch_the_change_lands_on(workspace: Path) -> None:
+    _git(workspace, "switch", "-q", "-c", "main")
+
+    clone = _create(workspace, from_ref="dev").clone
+
+    assert find.landing_branch(workspace, CHANGE) == "dev"
+    assert _git(clone, "rev-parse", "HEAD") == _git(workspace, "rev-parse", "dev")
+
+
+def test_orchestration_is_run_again_from_another_branch(
+        workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-s3ju: the recorded branch stands when the clone is made again from a
+    workspace with another branch checked out, and `find --json` prints it."""
+    _create(workspace)
+    _git(workspace, "switch", "-q", "-c", "main")
+    (workspace / "openspec/changes" / CHANGE).mkdir(parents=True)
+
+    _create(workspace)
+
+    assert cli.main(["find", "--json", CHANGE], root=workspace) == 0
+    assert json.loads(capsys.readouterr().out)["base"] == "dev"
+
+
+def test_a_from_contradicting_the_recorded_branch_is_refused(workspace: Path) -> None:
+    _create(workspace)
+
+    with pytest.raises(clones.CloneError, match="lands on dev, not main"):
+        _create(workspace, from_ref="main")
+    assert find.landing_branch(workspace, CHANGE) == "dev"
+
+
+def test_a_landing_branch_tracking_another_remote_gives_the_clone_that_remote(
+        workspace: Path) -> None:
+    _git(workspace, "remote", "add", "upstream", _git(workspace, "remote", "get-url", "origin"))
+    _git(workspace, "push", "-q", "-u", "upstream", "dev")
+
+    clone = _create(workspace).clone
+
+    assert _git(clone, "remote", "get-url", "upstream") == _git(workspace, "remote", "get-url",
+                                                                 "upstream")
+    assert _git(clone, "config", f"branch.{BRANCH}.remote") == "upstream"
+
+
+def test_a_landing_branch_tracking_nothing_gives_the_new_branch_no_upstream(
+        workspace: Path) -> None:
+    _git(workspace, "branch", "--quiet", "--unset-upstream", "dev")
+
+    clone = _create(workspace).clone
+
     assert subprocess.run(["git", "config", f"branch.{BRANCH}.remote"], cwd=clone,
                           capture_output=True).returncode == 1
+
+
+def test_the_bootstraps_base_is_the_branch_the_change_lands_on(workspace: Path) -> None:
+    spawn = Spawned(status=None)
+    _git(workspace, "switch", "-q", "-c", "main")
+
+    _create(workspace, spawn, bootstrap=lambda _: ("make init BASE={base}",))
+
+    assert spawn.calls[0][0] == ["make init BASE=main"]
+
+
+def test_a_workspace_with_no_branch_checked_out_needs_from(workspace: Path) -> None:
+    _git(workspace, "checkout", "-q", "--detach")
+
+    with pytest.raises(clones.CloneError, match="give it with --from <branch>"):
+        _create(workspace)
+    assert not clones.clone_directory(workspace, CHANGE).exists()
 
 
 def test_an_existing_branch_is_checked_out_at_its_furthest_point(workspace: Path) -> None:
@@ -192,8 +288,7 @@ def test_a_checkout_interrupted_before_its_upstream_was_settled_is_settled(
     assert created.done == ("settings", "bootstrap")
     assert sentinel.read_text("utf-8") == "kept\n"
     assert _git(clone, "branch", "--format=%(refname:short)") == BRANCH
-    assert subprocess.run(["git", "config", f"branch.{BRANCH}.remote"], cwd=clone,
-                          capture_output=True).returncode == 1
+    assert _git(clone, "config", f"branch.{BRANCH}.remote") == "origin"
 
 
 def test_a_new_branch_starts_from_the_given_branch(workspace: Path) -> None:
@@ -347,12 +442,72 @@ def test_the_real_spawn_records_the_commands_output_and_exit_status(workspace: P
     status = _git_file(clone, clones.BOOTSTRAP_STATUS)
     status.unlink()
 
-    pid = clones._spawn(["sh", "-c", "echo building; exit 3"], clone, log, status)
+    pid = clones._spawn(["echo building; exit 3"], clone, log, status)
     os.waitpid(pid, 0)
 
     assert log.read_text("utf-8") == "building\n"
     assert status.read_text("utf-8") == "3\n"
     assert clones.bootstrap_state(clone).state == "failed"
+
+
+def _committed_configuration(workspace: Path, text: str) -> None:
+    (workspace / ".agents").mkdir(exist_ok=True)
+    (workspace / ".agents/workflow.toml").write_text(text, "utf-8")
+    _git(workspace, "add", "--all")
+    _git(workspace, "commit", "-q", "-m", "configure")
+
+
+def _waited(clone: Path) -> clones.Bootstrap:
+    """The bootstrap's state once its process, this test's child, has ended."""
+    os.waitpid(json.loads(_git_file(clone, clones.BOOTSTRAP).read_text("utf-8"))["pid"], 0)
+    return clones.bootstrap_state(clone)
+
+
+def test_the_bootstrap_failed(workspace: Path) -> None:
+    """CW-8npg's recorded state, library integration with the real spawn: the
+    clone's checkout's `post-clone` runs every command whatever an earlier one
+    reported, and the state records the commands it resolved to, its log, and the
+    first failure's status. The computation's reading of a failed bootstrap is the
+    next-step suite's."""
+    _committed_configuration(workspace, '[hooks]\npost-clone = ["echo for {change}; exit 4", '
+                                        '"echo second; exit 5"]\n')
+
+    created = clones.create(workspace, CHANGE)
+
+    state = _waited(created.clone)
+    assert state == clones.Bootstrap("failed", _git_file(created.clone, clones.BOOTSTRAP_LOG))
+    assert state.log is not None and state.log.read_text("utf-8") == f"for {CHANGE}\nsecond\n"
+    assert _git_file(created.clone, clones.BOOTSTRAP_STATUS).read_text("utf-8") == "4\n"
+    recorded = json.loads(_git_file(created.clone, clones.BOOTSTRAP).read_text("utf-8"))
+    assert recorded["command"] == [f"echo for {CHANGE}; exit 4", "echo second; exit 5"]
+    assert recorded["log"] == str(state.log)
+
+
+def test_the_state_names_the_command_the_bootstrap_resolved_to(workspace: Path) -> None:
+    spawn = Spawned(status=None)
+
+    created = _create(workspace, spawn, bootstrap=lambda _: ("make init NAME={change}",))
+
+    assert spawn.calls == [([f"make init NAME={CHANGE}"], created.clone)]
+    recorded = json.loads(_git_file(created.clone, clones.BOOTSTRAP).read_text("utf-8"))
+    assert recorded["command"] == [f"make init NAME={CHANGE}"]
+
+
+@pytest.mark.parametrize("declared", ["", "[hooks]\npost-clone = []\n"])
+def test_a_clone_with_no_post_clone_is_usable_at_once(workspace: Path, declared: str) -> None:
+    """With no `post-clone`, or one declared empty, the bootstrap succeeds at once,
+    running nothing, and the clone is usable."""
+    if declared:
+        _committed_configuration(workspace, declared)
+    spawn = Spawned()
+
+    created = clones.create(workspace, CHANGE, spawn=spawn)
+
+    assert spawn.calls == []
+    assert created.bootstrap.state == "succeeded"
+    assert clones.where(workspace, CHANGE) == created.clone
+    recorded = json.loads(_git_file(created.clone, clones.BOOTSTRAP).read_text("utf-8"))
+    assert recorded["command"] == []
 
 
 def test_the_real_spawn_records_itself_before_its_command_runs(workspace: Path) -> None:
@@ -366,7 +521,7 @@ def test_the_real_spawn_records_itself_before_its_command_runs(workspace: Path) 
     ready = _git_file(clone, "bootstrap-ready")
 
     # The process that spawned it records nothing, as when it is killed at once.
-    pid = clones._spawn(["sh", "-c", f"touch {ready}; sleep 30"], clone, log, status)
+    pid = clones._spawn([f"touch {ready}; sleep 30"], clone, log, status)
     try:
         deadline = time.monotonic() + 10
         while not ready.exists() and time.monotonic() < deadline:
@@ -418,7 +573,8 @@ def test_the_clone_of_another_change_is_refused(workspace: Path) -> None:
 
 
 def test_a_from_naming_nothing_is_refused_and_records_no_branch(workspace: Path) -> None:
-    with pytest.raises(clones.CloneError, match="--from nowhere names no branch"):
+    with pytest.raises(clones.CloneError, match="nowhere, the branch it lands on, names no "
+                                                "branch"):
         _create(workspace, from_ref="nowhere")
     clone = clones.clone_directory(workspace, CHANGE)
     assert not _git_file(clone, clones.MARKER).exists()
@@ -492,12 +648,72 @@ def test_a_settings_file_that_is_not_the_link_is_refused(workspace: Path) -> Non
     assert settings.read_text("utf-8") == "{}\n"
 
 
-def test_a_workspace_without_an_origin_is_refused(workspace: Path) -> None:
+def _upstream(workspace: Path) -> Path:
+    """A second bare remote, `upstream`, which the workspace's dev now tracks."""
+    upstream = workspace.parent / "upstream.git"
+    _git(workspace.parent, "init", "-q", "--bare", "-b", "dev", str(upstream))
+    _git(workspace, "remote", "add", "upstream", str(upstream))
+    _git(workspace, "push", "-q", "-u", "upstream", "dev")
+    return upstream
+
+
+def test_a_workspace_without_an_origin_clones_onto_its_landing_branchs_remote(
+        workspace: Path) -> None:
+    """CW-8jyb: the engine names no remote, so a workspace whose dev tracks `upstream`
+    and that has no `origin` clones, the new branch tracking `upstream`."""
+    _upstream(workspace)
     _git(workspace, "remote", "remove", "origin")
 
-    with pytest.raises(clones.CloneError, match="no origin remote"):
-        _create(workspace)
-    assert not clones.clone_directory(workspace, CHANGE).exists()
+    clone = _create(workspace).clone
+
+    assert _git(clone, "remote").split() == ["upstream", "workspace"]
+    assert _git(clone, "config", f"branch.{BRANCH}.remote") == "upstream"
+    assert _git(clone, "rev-parse", "HEAD") == _git(workspace, "rev-parse", "dev")
+
+
+def test_a_branch_of_the_changes_name_on_another_remote_is_not_taken(workspace: Path) -> None:
+    """CW-8jyb: with dev tracking `upstream`, a stale branch of the change's name on
+    `origin` is neither the branch's start nor its upstream."""
+    _upstream(workspace)
+    _git(workspace, "switch", "-q", "-c", "stale")
+    _commit(workspace, "stale.txt", "stale\n")
+    _git(workspace, "push", "-q", "origin", f"stale:{BRANCH}")
+    _git(workspace, "switch", "-q", "dev")
+
+    clone = _create(workspace).clone
+
+    assert _git(clone, "config", f"branch.{BRANCH}.remote") == "upstream"
+    assert _git(clone, "rev-parse", "HEAD") == _git(workspace, "rev-parse", "dev")
+
+
+def test_a_change_branch_tracking_a_removed_remote_falls_to_the_landing_branchs(
+        workspace: Path) -> None:
+    """CW-8jyb: a workspace branch of the change whose upstream names a remote the
+    workspace does not have is read as tracking none, so the clone takes dev's."""
+    _git(workspace, "branch", "--quiet", BRANCH, "dev")
+    _git(workspace, "config", f"branch.{BRANCH}.remote", "gone")
+    _git(workspace, "config", f"branch.{BRANCH}.merge", f"refs/heads/{BRANCH}")
+
+    clone = _create(workspace).clone
+
+    assert _git(clone, "config", f"branch.{BRANCH}.remote") == "origin"
+    assert "gone" not in _git(clone, "remote").split()
+
+
+def test_a_change_branch_tracking_its_own_remote_keeps_it(workspace: Path) -> None:
+    """CW-8jyb: a fork's change branch, tracking `origin` in the workspace while dev tracks
+    `upstream`, keeps tracking `origin` in the clone, and starts where it is."""
+    _upstream(workspace)
+    _git(workspace, "switch", "-q", "-c", BRANCH)
+    head = _commit(workspace, "work.txt", "work\n")
+    _git(workspace, "push", "-q", "-u", "origin", BRANCH)
+    _git(workspace, "switch", "-q", "dev")
+
+    clone = _create(workspace).clone
+
+    assert _git(clone, "config", f"branch.{BRANCH}.remote") == "origin"
+    assert _git(clone, "rev-parse", "HEAD") == head
+    assert _git(clone, "remote", "get-url", "upstream") == str(workspace.parent / "upstream.git")
 
 
 def test_creating_a_clone_from_a_clone_is_refused(workspace: Path) -> None:
@@ -550,6 +766,77 @@ def _refused(workspace: Path, match: str) -> clones.RemovalRefused:
     with pytest.raises(clones.RemovalRefused, match=match) as raised:
         clones.remove(workspace, CHANGE)
     return raised.value
+
+
+def test_a_change_landed_on_another_branch(workspace: Path) -> None:
+    """CW-xx5f: a clone made from `main`, its branch merged into `main` on its
+    upstream's remote but not into `dev`, is removed, its branch counted merged."""
+    _git(workspace, "switch", "-q", "-c", "main")
+    _git(workspace, "push", "-q", "-u", "origin", "main")
+    clone = _create(workspace).clone
+    _commit(clone, "feature.txt", "the change\n")
+    _git(clone, "push", "-q", "origin", f"{BRANCH}:{BRANCH}", f"{BRANCH}:main")
+    (clone / REVIEWS).mkdir(parents=True)
+    (clone / REVIEWS / "workflow.jsonl").write_text('{"step": "archive-cleanup"}\n', "utf-8")
+
+    removed = clones.remove(workspace, CHANGE)
+
+    assert not removed.clone.exists()
+
+
+def test_a_branch_merged_only_into_another_branch_than_its_own_is_not_merged(
+        workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+    marker = _git_file(clone, clones.MARKER)
+    marker.write_text(json.dumps({"change": CHANGE, "branch": BRANCH, "base": "release"}),
+                      "utf-8")
+
+    _refused(workspace, f"{BRANCH} is not merged into origin/release")
+
+    assert clone.is_dir()
+
+
+def test_a_branch_given_overrides_the_recorded_one_for_the_removal(workspace: Path) -> None:
+    """A change whose merge brought in another branch than the recorded one, and that
+    landed there, is judged against the branch given."""
+    _git(workspace, "switch", "-q", "-c", "main")
+    _git(workspace, "push", "-q", "-u", "origin", "main")
+    _git(workspace, "switch", "-q", "dev")
+    clone = _create(workspace).clone
+    _commit(clone, "feature.txt", "the change\n")
+    _git(clone, "push", "-q", "origin", f"{BRANCH}:{BRANCH}", f"{BRANCH}:main")
+    (clone / REVIEWS).mkdir(parents=True)
+    (clone / REVIEWS / "workflow.jsonl").write_text('{"step": "archive-cleanup"}\n', "utf-8")
+
+    _refused(workspace, f"{BRANCH} is not merged into origin/dev")
+    removed = clones.remove(workspace, CHANGE, "main")
+
+    assert not removed.clone.exists()
+
+
+def test_a_branch_tracking_no_remote_refuses_removal(workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+    _git(clone, "branch", "--quiet", "--unset-upstream", BRANCH)
+
+    _refused(workspace, f"{BRANCH} tracks no remote")
+
+    assert clone.is_dir()
+
+
+def test_a_clone_recorded_no_landing_branch(workspace: Path) -> None:
+    """CW-xx5f: a clone whose marker records no branch the change lands on is
+    refused without one given, naming the argument, nothing copied or deleted;
+    given, it is judged against it."""
+    clone = _merged_clone(workspace)
+    _git_file(clone, clones.MARKER).write_text(json.dumps({"change": CHANGE, "branch": BRANCH}),
+                                               "utf-8")
+
+    with pytest.raises(clones.CloneError, match="give it with --base <branch>"):
+        clones.remove(workspace, CHANGE)
+    assert clone.is_dir() and not (workspace / REVIEWS).exists()
+
+    assert cli.main(["clone-remove", CHANGE, "--base", "dev"], root=workspace) == 0
+    assert not clone.exists()
 
 
 def test_a_merged_clone_is_removed_once_its_history_is_copied(workspace: Path) -> None:
@@ -758,7 +1045,8 @@ def test_the_clone_of_another_change_is_not_removed(workspace: Path) -> None:
 def test_a_branch_the_clone_lacks_refuses_removal(workspace: Path) -> None:
     clone = _merged_clone(workspace)
     marker = _git_file(clone, clones.MARKER)
-    marker.write_text(json.dumps({"change": CHANGE, "branch": "feat/gone"}), "utf-8")
+    marker.write_text(json.dumps({"change": CHANGE, "branch": "feat/gone", "base": "dev"}),
+                      "utf-8")
 
     _refused(workspace, "feat/gone is not a branch of the clone")
 

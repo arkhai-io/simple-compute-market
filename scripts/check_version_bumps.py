@@ -10,7 +10,7 @@ therefore one step from the merge-base, and passes. A package the change leaves
 at its version is not checked, since the rule asks for no bump, and neither is
 a package that did not exist at the merge-base.
 
-Run by `make check-change`. Usage: `check_version_bumps.py [--base <branch>]`.
+Run by `make check-repository`, the change workflow's `pre-commit`. Usage: `check_version_bumps.py [--base <branch>]`.
 
 Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek.
 """

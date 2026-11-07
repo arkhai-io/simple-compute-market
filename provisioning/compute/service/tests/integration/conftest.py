@@ -918,7 +918,8 @@ async def client_and_queue(
         capacity_ledger=capacity_ledger_service,
     )
     # Status composed as production composes it: the composed executor table,
-    # the lease lifecycle, and the readiness components the container builds.
+    # the lease lifecycle, and the readiness components the container builds,
+    # over the harness's own host authority and connection codecs.
     system_status_service = SystemStatusService(
         settings=mock_settings,
         session_factory=session_factory,
@@ -926,7 +927,7 @@ async def client_and_queue(
         lease_lifecycle=lease_lifecycle_service,
         job_executors=job_executor_table,
         components=_container_module._make_status_components(
-            job_executor_table, host_authority
+            job_executor_table, host_authority, connection_codecs
         ),
         identity_resolver=lambda: identity_context,
     )

@@ -2,14 +2,16 @@
 
 Run by the project's `SessionStart` hook for the `compact` source; Claude Code adds
 the hook's standard output to the session's context. Compaction keeps a summary
-of the task but drops the documents `AGENTS.md` requires reading, and guidance
-compliance falls sharply once they are gone. The documents themselves are far
-larger than the 10,000 characters a hook may inject, and a digest of their rules
-would be a second copy that drifts, so this names what to re-read rather than
-restating it, together with the branch and the changes being worked to orient the
-session.
+of the task but drops the documents every step's skill reads as it starts, and
+guidance compliance falls sharply once they are gone. Those documents are the
+workflow configuration's `load.common`: the hook cannot tell the session's step, so
+it names the documents common to every step, and the skill being followed names
+its own. The documents themselves are far larger than the 10,000 characters a hook
+may inject, and a digest of their rules would be a second copy that drifts, so this
+names what to re-read rather than restating it, together with the branch and the
+changes being worked to orient the session.
 
-Contract: openspec/specs/change-workflow/spec.md.
+Contract: openspec/specs/change-workflow/spec.md, CW-l7hn.
 """
 
 from __future__ import annotations
@@ -18,15 +20,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import config
 from .common import StepError, repository_root
 from .index import INDEX
 
-REQUIRED = (
-    "docs/development/ARCHITECTURE.md",
-    "docs/development/TESTING.md",
-    "docs/development/DEPLOYMENT_AND_CONFIG.md",
-    "openspec/README.md",
-)
 LIMIT = 9_000
 
 
@@ -53,15 +50,29 @@ def _branch(root: Path) -> str:
     return result.stdout.strip() or "(detached HEAD)"
 
 
+def _documents(root: Path) -> list[str]:
+    """What to re-read: the configuration's `load.common`, or, when the configuration
+    cannot be read, what to do about that, so the session is still told."""
+    try:
+        documents = config.load(root).documents(config.COMMON_DOCUMENTS)
+    except StepError as exc:
+        return [f"The workflow configuration cannot be read, so the documents to re-read "
+                f"are unknown: {exc}",
+                "Re-read the repository's guidance your skill names before continuing."]
+    if not documents:
+        return ["The workflow configuration lists no documents every step reads "
+                "(load.common); re-read those your skill names before continuing."]
+    return ["Before continuing, re-read these in full with your file tools:",
+            *(f"- {path}" for path in documents)]
+
+
 def context(root: Path) -> str:
     index = root / INDEX
     progress = changes_in_progress(index.read_text("utf-8")) if index.is_file() else []
     lines = [
         "Your context was just compacted. The summary keeps your task state but not the",
         "repository guidance, and work done without it drifts from the guidance.",
-        "Before continuing, re-read these in full with your file tools (AGENTS.md is",
-        "still in context):",
-        *(f"- {path}" for path in REQUIRED),
+        *_documents(root),
         "If you are working an OpenSpec change, also re-read its design, the section of",
         "its task list you are on with that section's notes, and the skill you are",
         "following (.agents/skills/<skill>/SKILL.md).",

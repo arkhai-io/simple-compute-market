@@ -52,9 +52,12 @@ pytestmark = [
     # while the holds stand.
     # The module steps the storefront's loops and fulfillment convergence (a
     # timer cycle could claim a row mid-provider-call, and the module's own
-    # explicit cycle would then reach nothing) itself.
+    # explicit cycle would then reach nothing) itself. Alice's loops and the
+    # lease watchdog are held as in every VM-lane module, so no cycle a stage
+    # did not ask for runs while it observes the stack.
     pytest.mark.usefixtures(
-        "storefront_loops_held", "fulfillment_convergence_held",
+        "storefront_loops_held", "alice_loops_held",
+        "fulfillment_convergence_held", "lease_watchdog_held",
         "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
     ),
     pytest.mark.e2e_non_erc20_settlement,

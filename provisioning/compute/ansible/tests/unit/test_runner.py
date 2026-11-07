@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import configparser
 import json
 import logging
 import os
@@ -15,10 +16,15 @@ from types import SimpleNamespace
 
 import pytest
 from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost, ProtectedValue
+from compute_provisioning_contracts import ConnectivityResult
 from cryptography.fernet import Fernet, InvalidToken
 from market_config import encrypt_secret
 
-from compute_provisioning_ansible import SshConnectionCodec
+from compute_provisioning_ansible import (
+    DEFAULT_ANSIBLE_CONFIG,
+    ProtectedKeyUnreadableError,
+    SshConnectionCodec,
+)
 from compute_provisioning_ansible.runner import (
     AnsibleRun,
     AnsibleRunner,
@@ -89,9 +95,11 @@ def test_a_key_that_cannot_be_decrypted_leaves_nothing_behind(tmp_path, monkeypa
     runner = AnsibleRunner(SimpleNamespace(), ssh_codec=SshConnectionCodec(_KEY))
     wrong_key = Fernet.generate_key().decode()
 
-    with pytest.raises(InvalidToken):
+    with pytest.raises(ProtectedKeyUnreadableError) as raised:
         runner.write_inventory([_embedded(), _embedded("kvm2", key=wrong_key)], group="nodes")
 
+    assert raised.value.host_id == "kvm2"
+    assert isinstance(raised.value.__cause__, InvalidToken)
     assert list(tmp_path.iterdir()) == []
 
 
@@ -473,3 +481,78 @@ def test_streamed_debug_lines_are_redacted_by_the_callers_redactor(caplog) -> No
     assert not any("s3cret" in message for message in debug), debug
     # What the caller receives is raw: its consumer redacts it.
     assert "s3cret" in result.stdout
+
+
+def test_the_packaged_configuration_names_no_log_file() -> None:
+    """Without ``log_path`` here or ``ANSIBLE_LOG_PATH``, Ansible writes no log,
+    so a run's output is kept only as the job's redacted logs."""
+    parser = configparser.ConfigParser(interpolation=None)
+    assert parser.read(DEFAULT_ANSIBLE_CONFIG) == [str(DEFAULT_ANSIBLE_CONFIG)]
+
+    assert "log_path" not in parser.defaults()
+    assert not any(parser.has_option(section, "log_path") for section in parser.sections())
+
+
+# The stand-in ``ansible`` prints the configuration it was given and output a
+# credential could reach. ``hunter2`` and ``id_test`` are fixture values, never
+# real credentials.
+_STAND_IN_OUTPUT = (
+    'echo "ANSIBLE_CONFIG=${ANSIBLE_CONFIG-unset}"\n'
+    'echo "ANSIBLE_LOG_PATH=${ANSIBLE_LOG_PATH-unset}"\n'
+    'echo "password: hunter2"\n'
+    'echo "ssh -i /home/appuser/.ssh/id_test ops@192.0.2.10"\n'
+)
+
+
+def _stand_in_ansible(directory: Path, *, reachable: bool) -> None:
+    script = directory / "ansible"
+    stream, status = ("", 0) if reachable else (" >&2", 1)
+    body = "".join(f"{line}{stream}\n" for line in _STAND_IN_OUTPUT.splitlines())
+    script.write_text(f"#!/bin/sh\n{body}exit {status}\n", encoding="utf-8")
+    script.chmod(0o700)
+
+
+def _check(tmp_path: Path) -> ConnectivityResult:
+    runner = AnsibleRunner(SimpleNamespace(ansible_timeout_seconds=10))
+    inventory = tmp_path / "inventory.ini"
+    inventory.write_text("[connectivity_probe]\nkvm1\n", encoding="utf-8")
+    return asyncio.run(runner.check_connectivity_with_inventory("kvm1", inventory))
+
+
+@pytest.mark.parametrize("reachable", [True, False], ids=["reachable", "unreachable"])
+def test_a_connectivity_checks_output_is_returned_redacted(
+    tmp_path, monkeypatch, reachable
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _stand_in_ansible(bin_dir, reachable=reachable)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    operator_config = tmp_path / "operator.cfg"
+    monkeypatch.setenv("ANSIBLE_CONFIG", str(operator_config))
+    monkeypatch.delenv("ANSIBLE_LOG_PATH", raising=False)
+
+    result = _check(tmp_path)
+
+    assert result.host == "kvm1" and result.reachable is reachable
+    assert "hunter2" not in result.detail
+    assert "id_test" not in result.detail
+    assert "password: [REDACTED]" in result.detail
+    # The runner passes the operator's configuration through unchanged and
+    # sets no log path of its own.
+    assert f"ANSIBLE_CONFIG={operator_config}" in result.detail
+    assert "ANSIBLE_LOG_PATH=unset" in result.detail
+
+
+def test_an_error_running_the_check_is_returned_redacted(tmp_path, monkeypatch) -> None:
+    """A stand-in the operating system cannot execute makes running ``ansible``
+    raise; the detail is the redacted text of that error."""
+    script = tmp_path / "ansible"
+    script.write_text("not a program\n", encoding="utf-8")
+    script.chmod(0o600)
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    result = _check(tmp_path)
+
+    assert result.reachable is False
+    assert result.detail.startswith("Failed to run ansible ping: ")
+    assert result.detail == redact_ansible_output(result.detail)

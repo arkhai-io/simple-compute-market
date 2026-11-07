@@ -4,8 +4,12 @@ asks of an adopting repository has a provision here.
 
 The roles are stated twice: in `change-workflow`'s `README.md`, what any adopting
 repository provides, and in `market-change-workflow`'s, how this one provides each.
-This test reads the two documents' tables, never the engine's modules: whether the
-table of the engine's own assumptions is complete is review's to judge.
+This repository provides them in two places: its workflow configuration,
+`.agents/workflow.toml`, whose hooks' and validation parts' commands are provisions as
+they stand, and its statement of what the configuration does not hold. This test reads
+the configuration's commands and the two documents' tables, never the engine's
+modules: whether the table of the engine's own assumptions is complete is review's to
+judge, and the engine checks the configuration itself whenever it reads it.
 
 A name is collected from code, never from prose: a skill's code spans and fenced
 blocks, each rule of the step table, and the fragment's text and the targets it
@@ -35,6 +39,7 @@ STEP_TABLE = ROOT / ".claude/change-steps.toml"
 FRAGMENT = ROOT / "scripts/change_workflow/workflow.mk"
 ROLES = ROOT / "openspec/specs/change-workflow/README.md"
 PROVISIONS = ROOT / "openspec/specs/market-change-workflow/README.md"
+CONFIGURATION = ROOT / ".agents/workflow.toml"
 ROLES_HEADING = "What an adopting repository provides"
 PROVISIONS_HEADING = "How this repository provides the workflow's roles"
 
@@ -204,6 +209,31 @@ def provided(markdown: str, heading: str, root: Root) -> set[str]:
     return listed
 
 
+def configured(text: str, root: Root) -> set[str]:
+    """Every make target and path the configuration's commands name: each hook's, the
+    validation preflight's, and each part's `run`, `start`, `collect`, and `cleanup`,
+    each a command or a list of them."""
+    def each(value: object) -> list[str]:
+        if isinstance(value, str):
+            return [value]
+        return [command for command in value if isinstance(command, str)] \
+            if isinstance(value, list) else []
+
+    configuration = tomllib.loads(text)
+    validation = configuration.get("validation", {})
+    commands = [command for value in configuration.get("hooks", {}).values()
+                for command in each(value)]
+    commands += each(validation.get("preflight"))
+    for part in validation.get("parts", {}).values():
+        for key in ("run", "start", "collect", "cleanup"):
+            commands += each(part.get(key))
+    listed: set[str] = set()
+    for command in commands:
+        listed.update(make_targets(command))
+        listed.update(paths(command, root))
+    return listed
+
+
 def unlisted(where: dict[str, set[str]], listed: set[str]) -> list[str]:
     return [f"{name} (named in {', '.join(sorted(where[name]))})"
             for name in sorted(set(where) - listed)]
@@ -221,11 +251,17 @@ def role_problems(general: str, here: str) -> list[str]:
                for role in provided_for if role not in stated])
 
 
+def listed_here(root: Root) -> set[str]:
+    """What this repository provides: its statement's tables and its configuration's
+    commands."""
+    return (provided(PROVISIONS.read_text("utf-8"), PROVISIONS_HEADING, root)
+            | configured(CONFIGURATION.read_text("utf-8"), root))
+
+
 def test_every_target_and_path_the_workflow_names_is_provided_here() -> None:
     root = tracked_root()
-    listed = provided(PROVISIONS.read_text("utf-8"), PROVISIONS_HEADING, root)
 
-    missing = unlisted(collected(root), listed)
+    missing = unlisted(collected(root), listed_here(root))
 
     assert not missing, "this repository's provision of the workflow's roles does not " \
                         "list:\n" + "\n".join(missing)
@@ -286,10 +322,15 @@ def _sources(tmp_path: Path, skill: str = "", table: str = "", fragment: str = "
 
 
 def test_a_skill_naming_an_unlisted_target_is_named(tmp_path: Path) -> None:
-    where = _sources(tmp_path, skill="Run `make check-something`, then `make test`.\n")
+    """CW-m4ps's "A skill names a new target", against what this repository provides:
+    its statement and its configuration's commands, the latter alone providing
+    validation's preflight, `make check-uv-version`."""
+    assert "make check-uv-version" not in provided(PROVISIONS.read_text("utf-8"),
+                                                   PROVISIONS_HEADING, tracked_root())
+    where = _sources(tmp_path, skill="Run `make check-something`, then `make test`, then "
+                                     "`make check-uv-version`.\n")
 
-    missing = unlisted(where, provided(PROVISIONS.read_text("utf-8"), PROVISIONS_HEADING,
-                                       tracked_root()))
+    missing = unlisted(where, listed_here(tracked_root()))
 
     assert missing == [f"make check-something (named in "
                        f"{tmp_path / 'skills/change-extra/SKILL.md'})"]
@@ -317,6 +358,30 @@ def test_the_step_table_and_the_fragment_name_their_targets_and_paths(tmp_path: 
     assert set(where) == {"make lock*", "openspec/**", "make -C helm teardown*", "Makefile",
                           "make design"}
     assert where["make design"] == {str(tmp_path / "workflow.mk")}
+
+
+def test_the_configurations_commands_are_provisions() -> None:
+    """A hook's commands, the preflight's, and each part's are what the configuration
+    provides; a document it loads or a value it holds is not a command."""
+    text = """
+[repository]
+inert-paths = ["docs/"]
+[hooks]
+pre-commit = "make check-repository CHANGE={change}"
+pre-commit-functional = ["make test", "make check-packaging"]
+[load]
+common = ["AGENTS.md"]
+[validation]
+preflight = ["make check-uv-version"]
+[validation.parts.helm]
+run = "make validate-helm CHANGE={change}"
+evidence = ".snapshot/validation/"
+cleanup = ["make -C helm teardown CHANGE={change}"]
+"""
+
+    assert configured(text, ROOT_OF_TEST) == {
+        "make check-repository", "make test", "make check-packaging",
+        "make check-uv-version", "make validate-helm", "make -C helm teardown"}
 
 
 def test_a_role_with_no_provision_is_named() -> None:

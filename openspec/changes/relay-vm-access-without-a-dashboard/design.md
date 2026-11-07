@@ -536,9 +536,13 @@ configuration is wrong, not the moment, and a retry against unchanged
 configuration would fail identically.
 
 The resolved variables file is secret material for the same reason a decrypted
-host key file is, and gets the same treatment — owner-only, in a directory the
-operation owns and removes. That work belongs with the host key material change
-rather than half here, because it is one mechanism serving both.
+host key file is, and gets the same treatment: it is created owner-only and
+`O_EXCL` under a uuid name in the process temporary directory, and removed on
+every ending of the run, which is what `physical-provisioning` requires of it.
+A directory the operation owns and removes was weighed for these files and
+rejected in `contain-embedded-host-key-material`'s design (D3), to be revisited
+when a run gains a third secret file or the provisioning container is shared
+with another user.
 
 **Lease release attaches to the settlement record's terminal transition.**
 

@@ -11,7 +11,7 @@ heading passes, reported as not checked: it records its decisions some other
 way, and this check cannot read them. Headings inside fenced code blocks are
 examples, not decisions.
 
-Run by `make check-change`. Usage: `check_decision_destinations.py <change>`.
+Run by `make check-repository`, the change workflow's `pre-commit`. Usage: `check_decision_destinations.py <change>`.
 
 Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek.
 """

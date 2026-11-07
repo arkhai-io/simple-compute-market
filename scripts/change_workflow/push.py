@@ -1,48 +1,50 @@
 """Check that HEAD may be pushed unattended to its own branch, and push it.
 
 An unattended push needs a mechanical definition of "the change's own branch".
-HEAD must be attached to a branch other than `main` or `dev`, the worktree must be
-clean, untracked files included, and the branch's upstream, if it has one, must be
-the branch of the same name. A branch with no upstream yet is pushed to the same
-name on `origin` and the upstream set, because every new change branch starts
-that way.
+HEAD must be attached to a branch none of the workflow configuration's
+`repository.protected-branches`, the worktree must be clean, untracked files
+included, and the branch's upstream, if it has one, must be the branch of the same
+name. The push goes to the upstream's remote, or the remote `--remote` names; a
+branch with no upstream is pushed to the same name on the remote given and the
+upstream set, and refused with none given. A change's clone gives its new branch
+its upstream as it is made, so its first push needs no argument.
 
 The check reports and never repairs: each refused state means something
 unexpected happened, and fixing it automatically would hide that. The push sends
 exactly HEAD and is never forced, so a remote branch that has moved on rejects it.
 
-Before either action reports success, the repository's pre-push checks, those it
-provides, read what the push would send, and any of them may refuse it. Here they
-are the two public-content checks: `check_public_content.py`'s rules and the pinned
-gitleaks of `check_secrets.py`, the same pair `scripts/hooks/pre-push` runs. Each
-check is a command the engine runs, never a module it imports, so the engine loads
-in a repository that provides none. Each is run as Git runs a pre-push hook: the
-remote as its argument, and one line on standard input naming the branch, `HEAD`,
-and an all-zero remote object, so it reads every commit the remote's refs lack.
-Every check runs whatever another reports, so one refusal names every reason.
+Before either action reports success, the configuration's `pre-push` hook reads what
+the push would send, and may refuse it. Each of its commands runs through the hook
+runner (`hooks`) as Git runs a pre-push hook: the remote as `{remote}`, and one line
+on standard input naming the branch, `HEAD`, and an all-zero remote object, so it
+reads every commit the remote's refs lack. Its output goes to standard error, where
+its reasons belong, leaving standard output to the check's own report. Every
+command runs whatever another reports, so one refusal names every reason. With no
+`pre-push` declared, the push goes ahead once its own check passes. Each command
+run is kept, as `pre-push`, for the line of the session pushing, with the command
+it resolved to and its exit status.
 
-Contract: openspec/specs/change-workflow/spec.md, CW-59c7, CW-p7kq;
+Contract: openspec/specs/change-workflow/spec.md, CW-59c7, CW-p7kq, CW-q5fy;
 openspec/specs/market-change-workflow/spec.md, MCW-farr, MCW-q8vd.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
-from .common import StepError, repository_root
+from . import config
+from .common import SESSION_ID, StepError, repository_root
+from .find import WORKSPACE_REMOTE
+from .hooks import Hooks, Invoked, command_environment
+from .running import invocations_directory, keep_invocations
 
-PROTECTED = ("main", "dev")
-DEFAULT_REMOTE = "origin"
-# The repository's pre-push checks, each a Python script relative to its root run
-# with the engine's own interpreter, and the arguments before the remote's name. A
-# script absent is a check the repository does not provide.
-PRE_PUSH_CHECKS = (("scripts/check_public_content.py", "--pre-push"),
-                   ("scripts/check_secrets.py", "--pre-push"))
+PRE_PUSH = "pre-push"
 _NO_OBJECT = "0" * 40
 
 
@@ -61,14 +63,21 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
 
 
-def check(root: Path) -> tuple[PushTarget | None, list[str]]:
-    """The push HEAD may receive, or every reason it may not be pushed."""
+def check(root: Path, protected: Sequence[str],
+          remote: str | None = None) -> tuple[PushTarget | None, list[str]]:
+    """The push HEAD may receive, or every reason it may not be pushed; `protected`
+    the branches no step pushes, and `remote` the remote given for this push, in
+    place of the upstream's."""
     problems: list[str] = []
+    if remote in (WORKSPACE_REMOTE, "."):
+        # A change's clone names the owner's workspace by this remote, and a step
+        # pushes nothing into the owner's workspace.
+        problems.append(f"{remote} is no remote a change's branch is pushed to")
     attached = _git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
     branch = attached.stdout.strip() if attached.returncode == 0 else ""
     if not branch:
         problems.append("HEAD is detached; check out the change's branch")
-    elif branch in PROTECTED:
+    elif branch in protected:
         problems.append(f"{branch} is a protected branch; a step pushes only a change's "
                         "own branch")
 
@@ -80,51 +89,68 @@ def check(root: Path) -> tuple[PushTarget | None, list[str]]:
 
     target = None
     if branch:
-        remote = _git(root, "config", f"branch.{branch}.remote").stdout.strip()
+        tracked = _git(root, "config", f"branch.{branch}.remote").stdout.strip()
         merge = _git(root, "config", f"branch.{branch}.merge").stdout.strip()
-        if not remote and not merge:
-            target = PushTarget(branch, DEFAULT_REMOTE, set_upstream=True)
-        elif merge != f"refs/heads/{branch}" or not remote or remote == ".":
-            upstream = (f"{remote}/{merge.removeprefix('refs/heads/')}" if remote and merge
-                        else remote or merge)
+        if not tracked and not merge:
+            if remote:
+                target = PushTarget(branch, remote, set_upstream=True)
+            else:
+                problems.append(f"{branch} has no upstream, so the remote to push to is "
+                                "unknown; give it with --remote <remote>")
+        elif merge != f"refs/heads/{branch}" or not tracked or tracked == ".":
+            upstream = (f"{tracked}/{merge.removeprefix('refs/heads/')}" if tracked and merge
+                        else tracked or merge)
             problems.append(f"{branch} tracks {upstream}, not a branch of its own name")
         else:
-            target = PushTarget(branch, remote, set_upstream=False)
+            target = PushTarget(branch, remote or tracked, set_upstream=False)
     return (None if problems else target), problems
 
 
-def pre_push_findings(root: Path, target: PushTarget) -> list[str]:
-    """Every reason the repository's pre-push checks refuse the push, of those it
-    provides."""
+def _fed(line: str):
+    """A hook command run with `line` on its standard input, as Git feeds a pre-push
+    hook, its output, both streams in order, written to standard error."""
+    def run(command: str, root: Path) -> int:
+        result = subprocess.run(["sh", "-c", command], cwd=root, input=line, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                env=command_environment())
+        sys.stderr.write(result.stdout)
+        sys.stderr.flush()
+        return result.returncode
+    return run
+
+
+def pre_push(root: Path, configuration: config.Configuration, target: PushTarget,
+             environ: Mapping[str, str]) -> tuple[bool, list[Invoked]]:
+    """Run the configuration's `pre-push` on what the push would send: whether it
+    passed, a hook not declared passing, and every command it ran."""
     head = _git(root, "rev-parse", "--verify", "HEAD").stdout.strip()
     ref = f"refs/heads/{target.branch}"
-    findings: list[str] = []
-    for script, *arguments in PRE_PUSH_CHECKS:
-        if not (root / script).is_file():
-            continue
-        result = subprocess.run(
-            [sys.executable, str(root / script), *arguments, target.remote], cwd=root,
-            input=f"{ref} {head} {ref} {_NO_OBJECT}\n", capture_output=True, text=True)
-        if result.returncode == 0:
-            continue
-        # A check may give its reasons on either stream, as a Git hook may.
-        reasons = [line.removeprefix("REFUSED: ")
-                   for line in (result.stderr + result.stdout).splitlines() if line.strip()]
-        findings.extend(reasons or [f"the pre-push check {script} exited with status "
-                                    f"{result.returncode}"])
-    return findings
+    hooks = Hooks(root, configuration, environ,
+                  shell=_fed(f"{ref} {head} {ref} {_NO_OBJECT}\n"),
+                  echo=lambda shown: print(shown, file=sys.stderr, flush=True))
+    try:
+        passed = hooks.engine_hook(PRE_PUSH, {"remote": target.remote})
+    except StepError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        passed = False
+    return passed, hooks.invoked
 
 
-def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
+def main(argv: Sequence[str] | None = None, root: Path | None = None,
+         environ: Mapping[str, str] = os.environ) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("action", choices=("check", "push"))
+    parser.add_argument("--remote", default=None,
+                        help="the remote to push to, in place of the branch's upstream's")
     args = parser.parse_args(argv)
     try:
         root = repository_root() if root is None else root
+        configuration = config.load(root)
+        config.require(configuration, config.PROTECTED_BRANCHES, needed_by="the guarded push")
     except StepError as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 1
-    target, problems = check(root)
+    target, problems = check(root, configuration.protected_branches or (), args.remote)
     if problems:
         for problem in problems:
             print(f"REFUSED: {problem}", file=sys.stderr)
@@ -132,10 +158,18 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
               file=sys.stderr)
         return 1
     assert target is not None
-    findings = pre_push_findings(root, target)
-    if findings:
-        for finding in findings:
-            print("REFUSED: " + finding, file=sys.stderr)
+    passed, invoked = pre_push(root, configuration, target, environ)
+    # Kept for the line of the session pushing, whatever the hook found; a failure to
+    # keep it is the record's, and refuses no push.
+    try:
+        keep_invocations(invocations_directory(root), environ.get(SESSION_ID),
+                         [entry.entry() for entry in invoked])
+    except (OSError, StepError) as exc:
+        print(f"WARNING: the pre-push hook's commands could not be kept for the session's "
+              f"line: {exc}", file=sys.stderr)
+    if not passed:
+        print("REFUSED: the repository's pre-push hook refused the push; nothing was pushed.",
+              file=sys.stderr)
         return 1
     if args.action == "check":
         upstream = "no upstream yet; the push sets it" if target.set_upstream else "upstream matches"

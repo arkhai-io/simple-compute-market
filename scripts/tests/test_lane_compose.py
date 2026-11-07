@@ -144,6 +144,16 @@ def test_the_api_credit_lane_composes_its_own_compute_registry() -> None:
     )
 
 
+def test_only_the_api_credit_lane_runs_the_sample_app_with_no_verify_cache() -> None:
+    """The lane's scenario makes one request after a top-up and expects it
+    served, which holds whatever the top-up's duration only if the gate
+    re-verifies every request; the local stack keeps its short cache."""
+    lane = _render("apicredits")["services"]["sample-app"]["environment"]
+    full = _render("full")["services"]["sample-app"]["environment"]
+    assert lane["APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS"] == "0"
+    assert full["APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS"] == "3"
+
+
 def test_the_full_stack_has_one_chain_and_no_lane_registry() -> None:
     model = _render("full")
     services = set(model["services"])

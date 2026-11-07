@@ -6,7 +6,8 @@ numbered file in `reviews/` and its transcripts, so a record written beside a ru
 is never overwritten by it. A triage's outcome names the records it triaged by
 these names (`outcome.triaged_problems`). A validation record clears a commit for what follows
 it when it names that commit, or an ancestor from which the commit changes only
-changes' records — or, at closeout's gate, only documentation.
+changes' records — or, at closeout's gate, only changes' records and the repository's
+inert paths (`exempting`).
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
 from .common import CHANGES
 
@@ -35,21 +36,25 @@ ChangedSince = Callable[[Path, str, str], list[str] | None]
 RECORD_PATH = re.compile(
     rf"^{re.escape(str(CHANGES))}/(?:archive/)?(?!archive/)[^/]+/(interventions\.jsonl$|reviews/)")
 
-# The documents. A commit after a pre-closeout review, or a closeout correction, may
-# change them without a validation, since closeout's own checks (`make check-change`,
-# `make check-packaging`) read them again before the archive; a skill or the step
-# table changes behaviour, so `.agents/` and `.claude/` are outside. Before then only
-# changes' records are exempt: documentation the packaging checks read, such as
-# `docs/development/ARCHITECTURE.toml`, is checked by nothing but the next validation.
-DOCUMENTATION = ("openspec/", "docs/")
-
-
 def is_record(path: str) -> bool:
     return bool(RECORD_PATH.match(path))
 
 
-def is_documentation(path: str) -> bool:
-    return path.startswith(DOCUMENTATION)
+def inert(path: str, inert_paths: Sequence[str] | None) -> bool:
+    """Whether `path`, relative to the root, lies under one of the inert paths: an
+    entry names a directory or a file, matched whole, so `docs/` covers `docs/a.md`
+    and not `docsite/a.md`. With none declared, no path is inert."""
+    return any(path == entry.rstrip("/") or path.startswith(entry.rstrip("/") + "/")
+               for entry in inert_paths or ())
+
+
+def exempting(inert_paths: Sequence[str] | None) -> Callable[[str], bool]:
+    """Whether a path is a change's record or lies under the repository's inert
+    paths. A commit after a pre-closeout review, or a closeout correction, may change
+    only these without a validation, since closeout's own checks read them again
+    before the archive; before then only changes' records are exempt, since an inert
+    path the packaging checks read is checked by nothing but the next validation."""
+    return lambda path: is_record(path) or inert(path, inert_paths)
 
 
 def has_records(reviews: Path) -> bool:

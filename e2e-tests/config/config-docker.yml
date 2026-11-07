@@ -150,7 +150,7 @@ bare_metal_lane:
   seller_wallet_address: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
   # The storefront's contact-exchange settings, as its development
   # storefront.toml states them: a development contact on a reserved domain and
-  # the short retention window the introduction scenario watches expire.
+  # the retention window the introduction scenario finds disclosed.
   seller_contact_email: "seller@bare-metal-e2e.invalid"
   introduction_retention_seconds: "5"
 

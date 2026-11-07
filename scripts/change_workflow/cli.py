@@ -9,10 +9,11 @@ archived change for a step whose node takes only an active one, an active change
 for archive cleanup — and, for implementation and every step after it, an open
 round view (`ROUND_VIEW_CLOSED`); then it opens the change's workflow log with a line
 carrying the record set's format, refusing records of another format
-(`log.open_log`). `start orchestrate` opens the orchestrating session on the step
-table's `[orchestrator]` row. `resume` resumes a waiting run with the owner's answer;
-`review` runs a review; `stop` sends SIGTERM to the change's run in progress — in its
-clone when it has one, else in this checkout — on the owner's word, which the run
+(`log.open_log`). `start orchestrate` opens the orchestrating session on the model
+and effort the workflow configuration's `models.orchestrator` names. `resume`
+resumes a waiting run with the owner's answer; `review` runs a review; `stop`
+sends SIGTERM to the change's run in progress — in its clone when it has one, else
+in this checkout — on the owner's word, which the run
 logs as `stopped`; `log` and `note` read and write the workflow log, `note --resumes`
 recording the owner's direction to revisit a finished triage; `watch` follows the
 steps as they run, and `denials` reports a run's denials. `record` is a
@@ -24,11 +25,21 @@ change's records into the log's format, shown first and written on the owner's
 The others reach the module that holds them: `next` the next-step computation,
 `find` a change's directory and records, `clone`, `clone where`, and `clone-remove`
 a change's clone, `round-view` and `round-done` the round view, `history` the copy
-of a change's history, `cost` its cost report, `push` the guarded push, `check` the
-index, task-list, push, skill, and round-view checks and the graph diagram's
-comparison with the graph table, `hook post-compaction` the post-compaction
-hook, and `wait` the bounded wait on a background command's output. `check graph` is internal: it maintains the engine's own diagram, and no
-repository or runner relies on it.
+of a change's history, `cost` its cost report, `push` the guarded push, `config`
+how the repository's workflow configuration resolved, `config load` a step's
+documents, or with `common` those every session reads, and `config parts`
+validation's plan for a change, `run` and `openspec`
+the repository's hooks and its OpenSpec command (`hooks`), `check` the
+configuration's, index, task-list, push, skill, and round-view checks, a change's
+default checks (`check change`), and the graph diagram's comparison with the graph
+table, `hook post-compaction` the post-compaction hook, and `wait` the bounded wait
+on a background command's output. `check graph` is internal: it maintains the
+engine's own diagram, and no repository or runner relies on it.
+
+Before a step starts, `start` checks the configuration whole and refuses a step
+whose required fields are absent, naming them, before anything is launched or
+logged (`config.require_for_step`): an unattended run also needs its step's models,
+and the orchestrating session its own.
 
 The repository is found once, from the working directory, and every subcommand acts
 on it. Every exit status is one of three: 0 for success; 1 for a refusal or a failed
@@ -50,29 +61,23 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from . import clone as clones
-from . import (cost_report, diagram, find, graph, history, hook, index, next_step, push,
-               round_view, skills, tasks, wait)
+from . import (config, cost_report, diagram, find, graph, history, hook, hooks, index,
+               next_step, push, round_view, skills, tasks, wait)
 from .clone import clone_of
-from .common import ORCHESTRATOR, StepError, repository_root
+from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, StepError, repository_root
 from .convert import convert_change
 from .find import ChangeNotFound, change_directory, is_archived
 from .graph import KINDS, STEPS
-from .harness import UNATTENDED_RUN
 from .log import (branch_decisions, direction, history_log_path, last_entries, log_path,
                   note_orchestrator, note_round, open_log, read_log, record_interactive)
 from .records import git_head
-from .review import DEFAULT_BASE, review_and_log
-from .running import stop
-from .steps import STEP_TABLE, load_orchestrator
+from .review import review_and_log
+from .running import drop_invocations, invocations_directory, kept_invocations, stop
 from .watch import denial_report, watch
 from .wrapper import Wrapper
 
 DESCRIPTION = "Run the steps of an OpenSpec change, and keep its workflow log."
-# Where Claude Code gives every command it starts the id of its session. The
-# variable is not documented, so a run where it is unset is refused rather than
-# recorded without a session, and `--session` gives the id instead.
-SESSION_ID = "CLAUDE_CODE_SESSION_ID"
-ORCHESTRATE = "orchestrate"
+ORCHESTRATE = config.ORCHESTRATOR_STEP
 # The steps `start` starts: every step the graph runs but the review, which has a
 # subcommand of its own, and the orchestrating session.
 STARTABLE = tuple(step for step in STEPS if step != "review") + (ORCHESTRATE,)
@@ -110,13 +115,17 @@ ARCHIVED_ONLY = _taking(graph.ARCHIVED)
 
 def interactive_outcome(change: str, step: str, outcome_text: str, session: str | None,
                         environ: Mapping[str, str], root: Path,
-                        head: Callable[[Path], str | None] = git_head) -> dict:
+                        head: Callable[[Path], str | None] = git_head,
+                        invocations: Callable[[Path], Path | None] = invocations_directory
+                        ) -> dict:
     """Record the outcome of `step`, run interactively on `change`, and return its line.
 
     Refused, writing nothing, inside a run the wrapper started, whose outcome the
     wrapper records, so it is never written twice; without a session id, naming the
     variable; and for an outcome that is not JSON, or that the log's writer
-    refuses.
+    refuses. What the session invoked for this change through `run`, and through
+    the guarded push, that no line has taken yet is recorded as `invoked`, and
+    forgotten once the line is written, so a refused record keeps it for the next.
     """
     if environ.get(UNATTENDED_RUN):
         raise StepError(f"this run is the wrapper's ({UNATTENDED_RUN} is set), and the "
@@ -129,8 +138,12 @@ def interactive_outcome(change: str, step: str, outcome_text: str, session: str 
         outcome = json.loads(outcome_text)
     except json.JSONDecodeError as exc:
         raise StepError(f"--outcome is not JSON: {exc}") from exc
-    return record_interactive(log_path(root, change), step, outcome, session=session,
-                              commit=head(root))
+    directory = invocations(root)
+    invoked = kept_invocations(directory, session, change)
+    line = record_interactive(log_path(root, change), step, outcome, session=session,
+                              commit=head(root), invoked=invoked)
+    drop_invocations(directory, session, invoked)
+    return line
 
 
 def expand_sections(text: str) -> list[int | str]:
@@ -206,14 +219,16 @@ def _parser() -> argparse.ArgumentParser:
                        "models")
     review.add_argument("change")
     review.add_argument("--kind", required=True, choices=KINDS)
-    review.add_argument("--base", default=DEFAULT_BASE)
+    review.add_argument("--base", default=None,
+                        help="the branch the change is read against, for this run; the "
+                             "branch it lands on, as its clone recorded it, by default")
     review.add_argument("--model", default=None,
                         help="the owner's choice of reviewer for this run, outside the review "
-                             "row's policy: a claude- model runs on Claude, any other on Codex, "
+                             "models' policy: a claude- model runs on Claude, any other on Codex, "
                              "with no fallback")
     review.add_argument("--effort", default=None,
                         help="the owner's choice of effort for this run: the given model's, or "
-                             "every entry's of the review row")
+                             "every entry's of the review's models")
     review.add_argument("--fresh", action="store_true",
                         help="start a new reviewer session instead of continuing the last one")
     review.add_argument("--unvalidated", action="store_true",
@@ -320,7 +335,8 @@ def _parser() -> argparse.ArgumentParser:
     found.add_argument("--records", action="store_true",
                        help="its records: this checkout's, else the owner's workspace's")
     find_.add_argument("--json", action="store_true",
-                       help="print name, directory, archived, and records as JSON")
+                       help="print name, directory, archived, records, format, and base, the "
+                            "branch the change lands on, as JSON")
     find_.add_argument("change")
     clone = commands.add_parser(
         "clone", help="create or finish a change's clone; `clone where <change>` prints a "
@@ -331,11 +347,15 @@ def _parser() -> argparse.ArgumentParser:
     clone.add_argument("--branch", default=None,
                        help="the change's branch; feat/<change> by default")
     clone.add_argument("--from", dest="from_ref", default=None,
-                       help="where a new branch starts; dev by default")
+                       help="the branch the change lands on, where a new branch starts; the "
+                            "workspace's checked-out branch by default")
     removing = commands.add_parser(
         "clone-remove", help="delete a merged change's clone once its history is in the "
                              "workspace")
     removing.add_argument("change")
+    removing.add_argument("--base", default=None,
+                          help="the branch the change landed on, for a clone that recorded "
+                               "none")
     viewing = commands.add_parser(
         "round-view", help="show an implementation round as uncommitted changes")
     viewing.add_argument("change")
@@ -346,9 +366,39 @@ def _parser() -> argparse.ArgumentParser:
     history_.add_argument("change")
     cost = commands.add_parser("cost", help="report what a change's runs cost")
     cost.add_argument("change")
-    commands.add_parser("push", help="push exactly HEAD to its own branch, once it may be")
+    push_ = commands.add_parser("push", help="push exactly HEAD to its own branch, once it may be")
+    push_.add_argument("--remote", default=None,
+                       help="the remote to push to, in place of the branch's upstream's")
+    config_ = commands.add_parser(
+        "config", help="list how every field of the repository's workflow configuration "
+                       "resolved; `config load <step>` a step's documents, `config load "
+                       "common` those every session reads; `config parts <change>` "
+                       "validation's plan")
+    config_.add_argument("action", nargs="?", choices=("load", "parts"), default=None)
+    config_.add_argument("subject", nargs="?", default=None, metavar="step|change")
+    config_.add_argument("--json", action="store_true", help="print it as JSON")
+    run_ = commands.add_parser(
+        "run", help="run one of the repository's hooks for a change, as the engine's hook "
+                    "table allows the step")
+    run_.add_argument("hook", choices=(*hooks.NAMED, hooks.VALIDATION, hooks.CLEANUP))
+    run_.add_argument("change")
+    run_.add_argument("part", nargs="?", default=None,
+                      help="validation only: `preflight`, or the part to run")
+    run_.add_argument("phase", nargs="?", default=None, choices=hooks.PHASES,
+                      help="validation's part only: run, start, or collect")
+    run_.add_argument("--owed", default=None,
+                      help="an owed part only: the workflow its run is for")
+    run_.add_argument("--base", default=None,
+                      help="the branch the change lands on, for a command naming {base}; "
+                           "the one its clone recorded by default")
+    commands.add_parser(
+        "openspec", help="run the configured OpenSpec command with the arguments given",
+        add_help=False)
     check = commands.add_parser("check", help="run one of the workflow's checks")
     checks = check.add_subparsers(dest="check", required=True)
+    checks.add_parser("config", help="the repository's workflow configuration, checked whole")
+    change_ = checks.add_parser("change", help="pre-commit's default checks of a change, alone")
+    change_.add_argument("change")
     checks.add_parser("index", help="the change index against the change directories")
     tasks_ = checks.add_parser("tasks", help="every task under its own section's heading")
     tasks_.add_argument("change")
@@ -362,9 +412,10 @@ def _parser() -> argparse.ArgumentParser:
     waiting.add_argument("pattern")
     waiting.add_argument("--timeout", type=float, default=wait.DEFAULT_TIMEOUT_S)
     hook_ = commands.add_parser("hook", help="run a harness hook")
-    hooks = hook_.add_subparsers(dest="hook", required=True)
-    hooks.add_parser("post-compaction",
-                     help="print what a session re-reads after its context is compacted")
+    harness_hooks = hook_.add_subparsers(dest="hook", required=True)
+    harness_hooks.add_parser("post-compaction",
+                             help="print what a session re-reads after its context is "
+                                  "compacted")
     return parser
 
 
@@ -393,6 +444,25 @@ def _takes(root: Path, step: str, change: str) -> None:
                         "archives it")
 
 
+# The merge's invocation names the branch it brings in first, after the change:
+# `<change> from <branch>`.
+_FROM = re.compile(r"from\s+\S")
+
+
+def merge_arguments(root: Path, change: str, arguments: str) -> str:
+    """The merge's arguments, naming the branch it brings in: the one given, `from
+    <branch>`, or else the branch the change lands on, as its clone recorded it;
+    refused, naming the argument, with neither."""
+    if _FROM.match(arguments):
+        return arguments
+    base = find.landing_branch(root, change)
+    if base is None:
+        raise StepError(f"the merge brings in the branch {change} lands on, and none is "
+                        "recorded, since the change has no clone that recorded one: give it "
+                        "with FROM=<branch>, or --arguments 'from <branch>'")
+    return " ".join(part for part in (f"from {base}", arguments) if part)
+
+
 def start(args: argparse.Namespace, root: Path, wrapper: Wrapper, launch: Launch) -> int:
     if not args.unattended and (args.allow or args.session or args.fresh):
         raise _Usage("--allow, --session, and --fresh qualify an unattended run; an "
@@ -408,9 +478,15 @@ def start(args: argparse.Namespace, root: Path, wrapper: Wrapper, launch: Launch
     _takes(root, args.step, args.change)
     if args.step in ROUND_VIEW_CLOSED:
         _round_view_closed(root)
+    # Checked whole, and the fields the step needs required, before anything is
+    # launched or logged.
+    configuration = config.load(root)
+    config.require_for_step(configuration, args.step, unattended=args.unattended)
     arguments = " ".join(part for part in (words, args.arguments) if part)
+    if args.step == "merge":
+        arguments = merge_arguments(root, args.change, arguments)
     if args.step == ORCHESTRATE:
-        model = load_orchestrator(root / STEP_TABLE)
+        model = configuration.orchestrator_model()
         command = ["claude", "--model", model.model,
                    *(["--effort", model.effort] if model.effort else []),
                    f"/change-{ORCHESTRATE} {args.change}"]
@@ -489,6 +565,15 @@ class _Usage(Exception):
 def main(argv: Sequence[str] | None = None, root: Path | None = None,
          wrapper: Wrapper | None = None, environ: Mapping[str, str] = os.environ,
          launch: Launch = _launch, send: Callable[[int, int], None] = os.kill) -> int:
+    given = list(sys.argv[1:] if argv is None else argv)
+    if given[:1] == ["openspec"]:
+        # Every argument is OpenSpec's, flags included, so none is parsed here.
+        try:
+            root = repository_root() if root is None else root
+            return hooks.run_openspec(config.load(root), given[1:], root)
+        except StepError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     parser = _parser()
     try:
         args = parser.parse_args(argv)
@@ -529,14 +614,17 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
                              *(["--branch", args.branch] if args.branch else []),
                              *(["--from", args.from_ref] if args.from_ref else [])]
     simple: dict[str, Delegated] = {
-        "clone-remove": (clones.main, ["remove", getattr(args, "change", "")]),
+        "clone-remove": (clones.main, ["remove", getattr(args, "change", ""),
+                                       *(["--base", args.base]
+                                         if getattr(args, "base", None) else [])]),
         "round-view": (round_view.main, ["start", getattr(args, "change", ""),
                                          *(["--base", args.base]
                                            if getattr(args, "base", None) else [])]),
         "round-done": (round_view.main, ["done"]),
         "history": (history.main, ["sync", getattr(args, "change", "")]),
         "cost": (cost_report.main, [getattr(args, "change", "")]),
-        "push": (push.main, ["push"]),
+        "push": (push.main, ["push", *(["--remote", args.remote]
+                                       if getattr(args, "remote", None) else [])]),
         "hook": (hook.main, None),
     }
     if args.command in simple:
@@ -546,8 +634,35 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
                 "tasks": (tasks.main, [getattr(args, "change", "")]),
                 "push": (push.main, ["check"]),
                 "round-view": (round_view.main, ["check"]),
+                "config": (config.main, ["check"]),
                 "graph": (_graph, None)}[args.check]
+    if args.command == "config" and args.action != "parts":
+        if args.action == "load":
+            if args.subject is None or args.json:
+                raise _Usage("config load takes the step whose documents it prints, or "
+                             "`common`, and no --json")
+            return config.main, ["load", args.subject]
+        if args.subject is not None:
+            raise _Usage("config alone takes no argument; `config load <step>` and `config "
+                         "parts <change>` take one")
+        return config.main, ["show", *(["--json"] if args.json else [])]
     return None
+
+
+def _config_parts(args: argparse.Namespace, root: Path) -> int:
+    """Validation's plan for the change: the configuration's parts, an owed part
+    once per workflow its complete sections owe."""
+    if args.subject is None:
+        raise _Usage("config parts takes the change whose plan it prints")
+    configuration = config.load(root)
+    try:
+        directory = change_directory(root, args.subject)
+    except ChangeNotFound as exc:
+        raise StepError(str(exc)) from exc
+    runs = config.plan(configuration, tasks.owed_lines(directory / next_step.TASKS_FILE))
+    print(config.plan_json(configuration, runs) if args.json
+          else "\n".join(config.plan_lines(configuration, runs)))
+    return 0
 
 
 def _graph(root: Path) -> int:
@@ -562,12 +677,34 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         return start(args, root, wrapper, launch)
     if args.command == "clone" and args.change == "where":
         return _clone_where(args, root)
+    if args.command == "config" and args.action == "parts":
+        return _config_parts(args, root)
+    if args.command == "run":
+        if args.hook == hooks.VALIDATION:
+            if args.part is None or (args.part == hooks.PREFLIGHT) != (args.phase is None):
+                raise _Usage("run validation takes `preflight`, or a part and its phase")
+        elif (args.part, args.phase, args.owed) != (None, None, None):
+            raise _Usage(f"run {args.hook} takes the change alone")
+        # The branch the change lands on, for a command naming `{base}`: the one
+        # given, or the one its clone recorded.
+        base = args.base or find.landing_branch(root, args.change)
+        return hooks.main(args.hook, args.change, root=root, configuration=config.load(root),
+                          environ=environ, base=base, part=args.part, phase=args.phase,
+                          owed=args.owed)
+    if args.command == "check" and args.check == "change":
+        configuration = config.load(root)
+        try:
+            change_directory(root, args.change)
+        except ChangeNotFound as exc:
+            raise StepError(str(exc)) from exc
+        return 0 if hooks.Hooks(root, configuration, environ).check_change(args.change) else 1
     if args.command == "wait":
         return _wait(args)
     if (reached := delegated(args)) is not None:
         main_, arguments = reached
         if args.command == "push":
             _round_view_closed(root)
+            return push.main(arguments, root=root, environ=environ)
         return main_(root) if arguments is None else main_(arguments, root=root)
     if args.command == "watch":
         # A change worked in its own clone writes its progress files there, and the
@@ -591,7 +728,7 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
     path = (history_log_path if args.command == "log" else log_path)(wrapper.root, args.change)
     if args.command == "record":
         line = interactive_outcome(args.change, args.step, args.outcome, args.session,
-                                   environ, wrapper.root, wrapper.head)
+                                   environ, wrapper.root, wrapper.head, wrapper.invocations)
         print(json.dumps(line, ensure_ascii=False))
         return 0
     if args.command == "convert":

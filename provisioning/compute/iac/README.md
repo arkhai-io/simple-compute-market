@@ -3,9 +3,11 @@
 The shared roles own buyer relay installation and proxy edits for compute hosts.
 Run `make test` for structural checks and local-file, shell, HTTP, and native
 Ansible behavior tests. Native tests skip when supported Ansible or its JSON
-callback is missing; `make native-ansible-gate` fails on a skip. Set `PYTHON` to
-the Python environment containing PyYAML when invoking the native gate directly.
-The root `make test-provisioning-iac-native` runs it in the provisioning image.
+callback is missing; `make native-ansible-gate` runs each native test in its own
+process, as many at once as the host has CPUs, prints each test's output whole,
+and fails on a skip. Set `PYTHON` to the Python environment containing PyYAML when
+invoking the native gate directly. The root `make test-provisioning-iac-native`
+runs it in the provisioning image.
 
 `frp-binary` takes `frp_binary_name` (`frpc` or `frps`) and returns
 `frp_binary_path`. Version 0.61.1 and linux_amd64 are the defaults. An operator

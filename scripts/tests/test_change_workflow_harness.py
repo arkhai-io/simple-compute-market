@@ -16,15 +16,26 @@ from change_workflow.running import Terminated, termination_ends_the_run
 from change_workflow.steps import Model, StepRules
 
 
-def test_the_process_a_claude_run_starts_sees_it_is_the_wrappers(tmp_path: Path) -> None:
+_MARKER = f"import os; print(os.environ.get({UNATTENDED_RUN!r}))"
+
+
+def test_the_process_a_claude_run_starts_sees_the_step_it_is_the_run_of(
+        tmp_path: Path) -> None:
     # The run's process stands in for Claude Code, whose own commands inherit its
     # environment.
     said: list[str] = []
-    command = [sys.executable, "-c", f"import os; print(os.environ.get({UNATTENDED_RUN!r}))"]
 
-    status = run_claude(command, tmp_path, said.append)
+    status = run_claude([sys.executable, "-c", _MARKER], tmp_path, said.append, "validate")
 
-    assert (status, said) == (0, ["1\n"])
+    assert (status, said) == (0, ["validate\n"])
+
+
+def test_the_process_a_codex_review_starts_sees_it_is_the_reviews(tmp_path: Path) -> None:
+    log = tmp_path / "review.log"
+
+    assert run_codex([sys.executable, "-c", _MARKER], log) == 0
+
+    assert log.read_text("utf-8") == "review\n"
 
 
 # A process that writes its id to the file it is given, signals the run that
@@ -57,7 +68,8 @@ def test_a_terminated_claude_run_ends_its_agent(tmp_path: Path) -> None:
     started = tmp_path / "agent.pid"
 
     with pytest.raises(Terminated), termination_ends_the_run():
-        run_claude([sys.executable, "-c", _SIGNALLING, str(started)], tmp_path, lambda _: None)
+        run_claude([sys.executable, "-c", _SIGNALLING, str(started)], tmp_path, lambda _: None,
+                   "implement")
 
     assert _gone(int(started.read_text("utf-8")))
 

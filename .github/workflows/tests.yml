@@ -39,6 +39,7 @@ jobs:
       fail-fast: false
       matrix:
         target:
+          - test-domains
           - test-core
           - test-kits
           - test-compute-provisioning-contracts
@@ -49,14 +50,6 @@ jobs:
           - test-provisioning-iac
           - test-registry
           - test-registry-client
-          - test-storefront
-          - test-provisioning-adapter
-          - test-bare-metal
-          - test-compute
-          - test-compute-delivery
-          - test-vms-domain
-          - test-vms-buyer
-          - test-apicredits
           - test-e2e-unit
           - test-deployment-packaging
           - test-frp-grant-admission
@@ -69,13 +62,13 @@ jobs:
         with:
           version: "0.12.22"
       # The API-credits suite includes the TypeScript and Rust middleware.
-      - if: matrix.target == 'test-apicredits'
+      - if: matrix.target == 'test-domains'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - if: matrix.target == 'test-apicredits'
+      - if: matrix.target == 'test-domains'
         uses: dtolnay/rust-toolchain@stable
-      - if: matrix.target == 'test-apicredits'
+      - if: matrix.target == 'test-domains'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: domains/apicredits/middleware/rust
