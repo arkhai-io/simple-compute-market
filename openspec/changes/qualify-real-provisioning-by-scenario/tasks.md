@@ -1,5 +1,15 @@
 # Tasks
 
+## Current validation job mapping
+
+The merged CI matrix runs domain suites through `test · test-domains`.
+That job runs `make -C domains test`, including the storefront, bare-metal,
+API-credit, VM provisioning adapter and VM IaC suites. The root
+`test · test-provisioning-iac` job runs common provisioning IaC separately.
+The obligations below name the current jobs; completed command results and
+historical job names remain evidence for the revisions that produced them.
+Validation must inspect the aggregate job's logs for the owed domain suites.
+
 Planned against the design settled in `design.md` and advanced by
 `reviews/31-design.triage.md`; replanned from section 2 onwards against D22's revised
 cadence and D23, advanced by `reviews/44-design.triage.md`. Section 1 is implemented as
@@ -310,8 +320,8 @@ lock `make lock` rewrites.
   by escrow). No API-credit scenario calls the settle wait; its application-integration
   cases are its evidence. Section 3's `e2e_bare_metal_payment_deal` is the first scenario
   to wait on a bare-metal payments deal.
-  Owed by validation: `tests.yml`, jobs `test · test-kits`, `test · test-storefront`,
-  `test · test-bare-metal` and `test · test-apicredits` — pass with the kit's resolution
+  Owed by validation: `tests.yml`, jobs `test · test-kits` and `test · test-domains`
+  — pass with the kit's resolution
   and the three storefronts' bindings.
   Unit: `make test-kits` passed (every kit, the settlement runtime's admin-route cases
   among them). Application integration: `make test-storefront` (1215 unit, 530
@@ -328,8 +338,8 @@ lock `make lock` rewrites.
   as its settlement reference (`settlement_stages.py`, `reference=source["escrow_uid"]`);
   `e2e_vm_payment_deal` (VM lane) by negotiation; `e2e_bare_metal_mock_deal`
   (bare-metal lane, `09b` by escrow) by reference. No API-credit scenario calls the wait.
-  Owed by validation: `tests.yml`, jobs `test · test-kits`, `test · test-storefront`,
-  `test · test-bare-metal` and `test · test-apicredits` — pass with the kit's resolution
+  Owed by validation: `tests.yml`, jobs `test · test-kits` and `test · test-domains`
+  — pass with the kit's resolution
   and the three storefronts' bindings (confirmed).
 
 Handoff from section 2:
@@ -1055,7 +1065,7 @@ lock `make lock` rewrites.
   End-to-end: no pipeline marker runs the job; section 8's observation 2 module, in no
   lane, is its first system-level caller. None is owed in the pipeline.
   Owed by validation: `tests.yml`, jobs `test · test-provisioning`,
-  `test · test-provisioning-adapter` and `test · test-provisioning-iac` — pass with the
+  `test · test-domains` and `test · test-provisioning-iac` — pass with the
   new action, client and playbook task.
   On the final tree, after both fresh-context passes' fixes:
   - `make test-provisioning`: 703 unit and 584 application-integration passed.
@@ -1077,7 +1087,7 @@ lock `make lock` rewrites.
   fakes, run in a test play with the script beside it, not for the role's include and
   dispatch (read only structurally) and not for a real host.
   Owed by validation: `tests.yml`, jobs `test · test-provisioning`,
-  `test · test-provisioning-adapter` and `test · test-provisioning-iac` — pass with the
+  `test · test-domains` and `test · test-provisioning-iac` — pass with the
   new action, client and playbook task (confirmed).
 
 Handoff from section 6:
