@@ -1713,6 +1713,23 @@ best-judgment direction):
     Raised and disposed of: 68 T1, 68 T2. None declined.
   - Not run: the three qualification modules, which need a real-provisioning target.
 
+Merge repair (validation 84; owner's direction, workflow log seq 154): `tests.yml` run
+42334700781 failed `test · test-deployment-packaging` on
+`test_provisioning_build_produces_the_tag_consumed_by_push_images`, which `dev` fails
+too: `dev` moved image publication out of `make push-images` into
+`scripts/publish_artifacts.py`, and the test still looked for the docker commands in
+`make --dry-run` output. `scripts/tests/test_image_publication_contract.py` now takes
+the publisher invocation `push-images` makes for the `provisioning` target, runs the
+publisher's own argument parsing on it, and asserts the docker tag and push commands it
+issues start from the image the provisioning build tags. The image names are unchanged,
+and so is runtime behaviour. `make test-release-tooling` passed (2680). Through
+`scripts/change-workflow run pre-commit`: `make lock` (nothing changed), `make dist-clean`,
+`make check-packaging`, the index, tasks and skills checks, `scripts/openspec validate
+--strict` and `make check-repository` passed. Following the owner's direction (workflow log
+seq 146, 154 and 158), its `make test` was interrupted after 14 s (exit 130) and did not
+pass. A fresh full CI run replaces it, so the hook as a whole has not passed. The original
+failure stays recorded in validation 84.
+
 ## 9. Closeout
 
 The closeout task's eleven parts, in order (`openspec/README.md#plan-closeout-requirements`).
