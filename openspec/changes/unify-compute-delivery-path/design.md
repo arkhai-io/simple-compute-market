@@ -559,6 +559,7 @@ Planned destinations, completed at closeout:
 | D9 billing-start evidence | `compute-delivery` spec; `deal-lifecycle` spec (wording) |
 | D10 Alkahest adapter | `deal-lifecycle` architecture companion (adapter composition) |
 | D11 end hand-off | `compute-delivery` spec, referencing `deal-lifecycle` |
+| 53 F1 the settle wait's terminal `ended` | `compute-delivery` spec |
 | D15 lane qualification | `docs/development/TESTING.md` "The discipline every scenario follows", the VM and bare-metal lane entries and "The real-provisioning lane" (written in section 8) |
 | Capability index | `openspec/specs/README.md` adds `compute-delivery` |
 | Goal and campaign currency | `docs/development/ROADMAP.md` Goal 8; `openspec/changes/README.md` |

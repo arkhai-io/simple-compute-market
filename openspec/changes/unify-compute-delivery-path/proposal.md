@@ -55,7 +55,8 @@ kits own compute delivery. This is the delivery portion of Goal 8 in
 
 - `compute-delivery`: the compute family's delivery order, ports and `drive`
   operation, Agreement windows and the future-start wait, activation, billing-start
-  evidence, the end hand-off and the access check.
+  evidence, the end hand-off, the settle wait's terminal `ended` for a deal ended
+  before delivery, and the access check.
 
 ### Modified Capabilities
 

@@ -193,6 +193,15 @@ Before availability, a refusal, provisioning failure, elapsed window or lapsed a
 - **WHEN** settlement completes after the Agreement's end
 - **THEN** nothing is dispatched and never-delivered evidence is supplied, with no buyer fault inferred from the lateness
 
+### Requirement: A deal ended before delivery settles the wait as ended
+
+A compute storefront's settlement status MUST report `ended` for a deal whose end took effect before it was delivered, and its administrator's settle wait MUST take `ended` as terminal beside `ready` and `failed`, returning at once rather than polling to its deadline. An end recorded for later MUST NOT be reported as `ended` before it takes effect.
+
+#### Scenario: A placement finds no capacity
+
+- **WHEN** a settlement placement finds no capacity, the deal ends before delivery, and an administrator then waits on its settlement
+- **THEN** the wait returns at once with status `ended`, and nothing was begun
+
 ### Requirement: Credentials are disclosed only through a live, admitted read
 
 A buyer's credential read MUST require `available` or `converged`, the Agreement start reached and end service's admission; it MUST fetch from provisioning's fulfillment result outside any transaction and recheck the revision and due end before the response is signed, discarding the fetched material if an end won. It MUST NOT read a payment snapshot. A credential-capable route's exact retry MUST run this read again. Because a recorded replay body names no route, each compute storefront MUST clear access material from every recorded body by its shape when it upgrades, leaving each record's status and completion in place.

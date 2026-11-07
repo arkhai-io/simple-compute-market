@@ -1417,8 +1417,8 @@ Fixed from it: the new wait test asserted elapsed time and now uses a deadline
 shorter than one poll; 8.3's note still called the bare-metal wait unfixed; the
 ROADMAP row now gives 09b's 60 s request beside the route's 120 s cap. For closeout:
 no permanent specification names the statuses that end the settle wait, VM's
-`ended` included; 9.9's promotion should place it in `settlement-servicing` or the
-domain specifications.
+`ended` included. Pre-closeout triage (53 F1) placed it in the `compute-delivery`
+delta, which 9.9 names.
 
 ## 9. Closeout
 
@@ -1466,7 +1466,9 @@ Documentation only; a code defect returns to implementation. Parts in the order 
       `openspec/specs/deal-lifecycle/architecture.md` "Package and counterpart
       boundaries" (the Alkahest once-only adapter);
       `openspec/specs/fulfillment/architecture.md` "Storefront pull composition"
-      (boundary only). The archive writes the six `spec.md` deltas. Complete the design
+      (boundary only). The archive writes the six `spec.md` deltas, `compute-delivery`'s
+      "A deal ended before delivery settles the wait as ended" among them, the settle
+      wait's terminal `ended` that the 8.4 note flagged (53 F1). Complete the design
       promotion record with each exact heading.
 - [ ] 9.10 **Documentation citations.** Run
       `make check-doc-citations CHANGE=unify-compute-delivery-path`, then
