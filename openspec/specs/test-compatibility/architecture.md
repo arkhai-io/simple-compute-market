@@ -109,7 +109,7 @@ The ordinary buyer method may replace a payment-specific scenario driver, but it
 
 ## Current limits
 
-The e2e harness predominantly uses HTTP clients and explicit test seams, but it is not yet completely external to service packages and a few scenarios retain private-client dependencies. Pipeline scenarios advance only by their own steps ([spec](spec.md#requirement-pipeline-scenarios-advance-only-by-their-own-steps)); the real-host scenarios, which run outside every pipeline lane, still poll the hardware they drive. The architecture therefore states the desired boundary only where current tests establish it and treats full harness extraction as separate work.
+The e2e harness predominantly uses HTTP clients and explicit test seams, but it is not yet completely external to service packages and a few scenarios retain private-client dependencies. Compute pipeline scenarios advance only by their own steps ([spec](spec.md#requirement-pipeline-scenarios-advance-only-by-their-own-steps)); the API-credit lane steps its storefront's chain probe and listing seed but holds none of its loops, so an unstepped timer can still run beside its stages; the real-host scenarios, which run outside every pipeline lane, still poll the hardware they drive. The architecture therefore states the desired boundary only where current tests establish it and treats full harness extraction as separate work.
 
 Repository-wide typed-client ownership, universal sync/async parity, and a closed list of raw-HTTP exceptions are not established baseline guarantees.
 

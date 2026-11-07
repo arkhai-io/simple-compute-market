@@ -698,8 +698,9 @@ Each lane MUST run its test runner under committed profiles: a shared payments p
 
 ### Requirement: Pipeline scenarios advance only by their own steps
 
-An end-to-end scenario in a pipeline lane MUST prove a deterministic sequence of state
-changes, never the passage of time. A transition a service's timer would make MUST be made
+An end-to-end scenario in a compute pipeline lane — the VM or bare-metal lane, whose
+modules hold their lane's timers — MUST prove a deterministic sequence of state changes,
+never the passage of time. A transition a service's timer would make MUST be made
 by the stage stepping that loop while it is held. A stage MUST wait only for an effect of
 a request it made, bounded, and MUST NOT wait for a duration or a window to pass. Where a
 service reads another's state live, the stage MUST read the effect once after its step
