@@ -785,6 +785,14 @@ parsing on `push-images`' invocation and asserts the tag and push commands start
 provisioning build's image. `make test-release-tooling` passed (2680). Validations 88 and
 91 passed full CI after it.
 
+Second merge repair (`dev` held every compute lane module's timers, #356): the merge kept
+both sides of `ARCHITECTURE.md`'s testing strategy and the test-compatibility
+specification, kept this change's `test_bare_metal_payment_deal.py` (its stages already
+step delivery under held convergence) and `dev`'s `test_image_publication_contract.py`, and
+added `alice_loops_held` to `test_vm_payment_purchase.py`, the one lane module the new
+lane-holds check found without it. `make test-e2e-unit` 782 passed and
+`make check-comment-hygiene` passed on the merge.
+
 Dispute coverage as a run setting (pre-closeout triage 78, revisited on the owner's
 delegated direction, workflow log seq 164; outside the plan; `design.md`, "Implementation
 findings"): `helpers/payments.py`'s `dispute_window_seconds` reads

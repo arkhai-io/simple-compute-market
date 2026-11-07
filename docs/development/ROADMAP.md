@@ -97,6 +97,7 @@ service and the storefronts calling it upgrade together.
 | Every provisioning route admits the administrator; whether every other service should take the same stance has not been decided | Unowned — needs a repository-wide decision |
 | Under a bare-metal delivery conflict — the site reporting a delivery other than the recorded result — the buyer's teardown answers the 409 `delivery_conflict` refusal instead of ending the lease, since it reads the fulfillment's status first. Whether teardown proceeds past a conflict is undecided | Unowned — needs a new change |
 | A concurrent dispatch retry for one owner can end as a false `RelayWindowExhaustedError`: `RelayPortAllocator.allocate_in_session` retries the next port on every `IntegrityError`, including the one an owner's own concurrent allocation raises. Whether it re-reads the owner's lease or refuses as a conflict is undecided | Unowned — needs a new change in compute-family relay allocation |
+| No workflow runs the bare-metal cleanup native gate (`make test-bare-metal-iac-native`), so the bare-metal working-data helper's native account, filesystem, and IPC tests run only when someone runs them locally. The gate needs a container with `SYS_ADMIN` and AppArmor unconfined, which has never run on a hosted runner | Unowned — needs a new change |
 
 Dropping the frozen tables is deliberately excluded from the retirement and belongs to a later follow-up, once operators have had a deployment cycle to extract what they need from them.
 

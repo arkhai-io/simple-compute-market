@@ -5,9 +5,12 @@ site's operator declares one pool with two whole hosts, and a storefront pool
 override offers that pool by introduction alone. A buyer discovers each
 listing, negotiates it, and reveals the introduction through the production
 buyer's own transport, reading the retention window on the storefront's
-public readiness before committing a contact and again in the reveal. An
-operator deletes the first introduction's payloads; the retention sweep, held
-and stepped, deletes the second's once its window has passed.
+public readiness before committing a contact and again in the reveal. The
+scenario ends with an operator deleting the first introduction's payloads. The
+held retention sweep is defined by its window passing, which no stage waits
+for: the storefronts' integration tests prove it, back-dating a reveal and
+stepping the held sweep
+(`domains/bare_metal/storefront/tests/test_http_introductions.py`).
 
 Two hosts rather than one listing taken twice: each whole host is one exclusive
 unit, so each introduction gets a listing of its own. Re-delivery is a command
@@ -38,9 +41,13 @@ from tests.e2e.roles.helpers.hosts import register_e2e_host
 from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting
 
 pytestmark = [
-    # Listed first, so the hold is taken before, and released after, every
-    # other fixture of the module.
-    pytest.mark.usefixtures("storefront_loops_held"),
+    # Listed first, so the holds are taken before, and released after, every
+    # other fixture of the module. Every bare-metal-lane module holds the lane's
+    # timers, so no cycle a stage did not ask for runs while it observes the
+    # stack.
+    pytest.mark.usefixtures(
+        "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held",
+    ),
     pytest.mark.e2e_bare_metal_introduction,
 ]
 
@@ -48,18 +55,12 @@ BARE_METAL = "bare_metal"
 CONTACT_MECHANISM = "contact-exchange.v1"
 PUBLICATION = "publication"
 SITE_PROJECTIONS = "site-projections"
-RETENTION = "introduction-retention"
 REGION = "us-west"
 GPU_MODEL = "H200"
 WHOLE_HOST_CAPACITY = {"units": 1, "gpu_count": 8, "ram_gb": 2048}
 # Development fixtures on a reserved domain, never to be used on a public network.
 BUYER_CONTACT = {"email": "buyer@bare-metal-e2e.invalid"}
 BUYER_AGENT_URL = "https://buyer.bare-metal-e2e.invalid"
-# How long to wait for the retention window to pass before the preview reports
-# an introduction: the window is seconds long, so this bounds a failure rather
-# than paces a success.
-EXPIRY_DEADLINE_SECONDS = 60.0
-EXPIRY_POLL_SECONDS = 0.5
 
 
 @dataclass
@@ -312,33 +313,3 @@ class TestStage03_OperatorDeletion:
                 contact_payload=dict(BUYER_CONTACT),
             )
         state.operator_deleted = True
-
-
-class TestStage04_RetentionSweep:
-    def test_04_the_held_sweep_previews_then_deletes_the_expired_introduction(
-        self,
-        bare_metal_storefront_admin,
-        introductions: IntroductionTransport,
-        state: IntroductionState,
-    ):
-        require_state(state, "operator_deleted")
-        second = state.obligation_refs[1]
-
-        # The preview is the observable transition: it names the introduction
-        # once its reveal is a window old, and writes nothing while it waits.
-        deadline = time.monotonic() + EXPIRY_DEADLINE_SECONDS
-        while True:
-            preview = bare_metal_storefront_admin.admin_dry_run_lifecycle_cycle(RETENTION)
-            if second in preview["eligible"]:
-                break
-            assert time.monotonic() < deadline, preview
-            time.sleep(EXPIRY_POLL_SECONDS)
-        # The operator-deleted introduction is no longer eligible: only the
-        # one whose window passed is.
-        assert preview["eligible"] == [second], preview
-
-        stepped = bare_metal_storefront_admin.admin_run_lifecycle_cycle(RETENTION)
-
-        assert stepped == {"loop": "introduction_retention", "deleted": 1}, stepped
-        with pytest.raises(IntroductionPayloadsDeleted):
-            introductions.read(obligation_ref=second)

@@ -311,16 +311,17 @@ def bare_metal_storefront_loops_held(bare_metal_storefront_admin):
 
 @pytest.fixture(scope="module")
 def fulfillment_convergence_held(provisioning_client):
-    """The site's fulfillment convergence, held for a module that advances it
-    itself."""
+    """The site's fulfillment convergence, held for the module; a module that
+    needs a transition advances it itself."""
     with compute_deal.fulfillment_convergence_held(provisioning_client) as held:
         yield held
 
 
 @pytest.fixture(scope="module")
 def lease_watchdog_held(provisioning_client):
-    """The site's lease watchdog, held for a module that steps lease expiry
-    itself; stages read the hold back through system status."""
+    """The site's lease watchdog, held for the module; a module that needs
+    lease expiry steps it itself, and stages read the hold back through system
+    status."""
     with compute_deal.lease_watchdog_held(provisioning_client) as held:
         yield held
 

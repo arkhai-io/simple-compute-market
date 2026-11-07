@@ -53,7 +53,8 @@ OFFER_RESOURCE = {**_DEAL_RESOURCE, "resource_id": PAYMENT_RESOURCE_ID}
 
 pytestmark = [
     pytest.mark.usefixtures(
-        "payments_config", "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held",
+        "payments_config", "storefront_loops_held", "alice_loops_held",
+        "fulfillment_convergence_held", "lease_watchdog_held",
         "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
     ),
     pytest.mark.e2e_vm_payment_deal,

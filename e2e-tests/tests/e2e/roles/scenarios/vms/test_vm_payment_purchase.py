@@ -87,7 +87,8 @@ pytestmark = [
     # every other fixture of the module; the lane's cleanup and the purchase's
     # follow them, so they run while the holds stand.
     pytest.mark.usefixtures(
-        "payments_config", "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held",
+        "payments_config", "storefront_loops_held", "alice_loops_held",
+        "fulfillment_convergence_held", "lease_watchdog_held",
         "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
         "purchase_cleanup",
     ),

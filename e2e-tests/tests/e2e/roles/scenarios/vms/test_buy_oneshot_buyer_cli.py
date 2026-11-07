@@ -6,8 +6,7 @@ as two explicit buyer commands (``market negotiate`` then
 intermediate seller state. This suite exercises the *other* buyer entry
 point: the single ``market buy`` command, which discovers → negotiates →
 escrows → settles → polls end to end in one subprocess (the
-``run_buy``/``_settle_one`` orchestrator, untested at the live-subprocess
-level until now).
+``run_buy``/``_settle_one`` orchestrator), as a live subprocess.
 
 Crucially, ``market buy`` is discovery-driven — it has no ``--seller``
 override — so it reaches the seller at the URL the registry advertises
@@ -23,7 +22,10 @@ B1a Supply:           register the executor and declare its capacity at
                       only this listing)
 B2  Publish listing:  create paused → resume → confirm present in registry
 B3  Arm provisioning: non-pausing mock create rule that returns tenant creds
-B4  market buy:       discovery-driven one-shot reaches status=ready, exit 0
+B4  market buy:       discovery-driven one-shot in the background; once its job
+                      is submitted the stage drains it and steps convergence to
+                      active, and the buy reaches status=ready, exit 0
+B4c Capacity events:  dry run then advance; the listing closes
 B5  Seller + lease:   listing closes while capacity is held, primary escrow ready with a
                       fulfillment_uid, provisioning lease recorded
 """
@@ -42,16 +44,17 @@ from market_alkahest.alkahest import (
     resolve_alkahest_address_config,
 )
 from e2e_harness.settings import settings
-from tests.e2e.roles.buyer_cli import MarketRun
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_BUY_HOST,
     E2E_BUY_POOL_ID,
     provision_e2e_executor,
     refresh_storefront_projections,
 )
+from tests.e2e.roles.helpers.buy import buy_to_ready
 from tests.e2e.roles.helpers.compute_deal import (
     DealLease,
     advance_storefront,
+    assert_lease_watchdog_held,
     assert_storefront_loops_held,
     delete_mock_rules_if_present,
     dry_run_storefront,
@@ -66,11 +69,13 @@ from tests.e2e.roles.scenarios.vms.conftest import (
 log = logging.getLogger(__name__)
 
 pytestmark = [
-    # Listed first, so the hold is taken before, and released after, every
-    # other fixture of the module; the lane's cleanup follows it, so it runs
-    # while the hold stands.
+    # Listed first, so the holds are taken before, and released after, every
+    # other fixture of the module; the lane's cleanup follows them, so it runs
+    # while the holds stand. The buy reaches ready only when B4 steps
+    # convergence, and no timer adds capacity events between B4c's dry runs.
     pytest.mark.usefixtures(
-        "storefront_loops_held",
+        "storefront_loops_held", "alice_loops_held",
+        "fulfillment_convergence_held", "lease_watchdog_held",
         "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
     ),
     pytest.mark.e2e_buy,
@@ -117,48 +122,6 @@ ACCEPTED_ESCROWS = [
 ]
 
 
-#: Run-log fields safe to print into CI output, and sufficient to say what
-#: the buy did. The whole event carries proposals, accepted terms and
-#: tenant credentials; an assertion message is not the place for those.
-_REPORTABLE_EVENT_FIELDS = (
-    "event",
-    "status",
-    "reason",
-    "error",
-    "listing_id",
-    "seller_url",
-    "negotiation_id",
-    "round",
-    "rounds",
-    "agreed_amount",
-    "attempts",
-)
-
-
-def _run_log_digest(run: MarketRun) -> str:
-    """Summarize a finished `market buy` run-log for a failure message.
-
-    ``market buy`` reports one aggregate reason for a buy that agreed with
-    nobody, and stdout carries no per-candidate detail. The run-log does:
-    the negotiation events say whether the buyer opened, what the seller
-    answered, and what the outcome was. Read without waiting — the process
-    has exited, so the log is final and ``run_id`` would only raise a
-    second, less informative failure.
-    """
-    events = run.events_or_empty()
-    if not events:
-        return "run-log: none written"
-    lines = []
-    for event in events:
-        fields = {
-            key: event[key]
-            for key in _REPORTABLE_EVENT_FIELDS
-            if key in event and event[key] is not None
-        }
-        lines.append(" ".join(f"{k}={v!r}" for k, v in fields.items()))
-    return "run-log events:\n  " + "\n  ".join(lines)
-
-
 DURATION_HOURS = 1
 #: Whole tokens, as `market buy` takes them: under the 10-token asking
 #: rate so round 0 counters, ceiling over it so the buyer accepts the
@@ -166,7 +129,7 @@ DURATION_HOURS = 1
 #: JSON safe-integer range and so carried as decimal-digit strings.
 BUYER_INITIAL_PRICE = 7
 BUYER_MAX_PRICE = 12
-BUY_RULE_ID = "e2e-buy-create"  # non-pausing mock rule: create job returns immediately
+BUY_RULE_ID = "e2e-buy-create"  # non-pausing mock rule: the create job completes once drained
 
 _REGISTRY_A = str(settings.REGISTRY.API_URL or "http://registry:8080")
 
@@ -314,7 +277,7 @@ class TestStageB2_PublishListing:
 
 
 # ===========================================================================
-# Phase B3 — arm provisioning (non-pausing: the one-shot buy runs to ready)
+# Phase B3 — arm provisioning (non-pausing: B4 drains the job, then steps)
 # ===========================================================================
 
 
@@ -322,10 +285,10 @@ class TestStageB3_ArmProvisioning:
     def test_b3_arm_create_rule_no_pause(self, provisioning_test_client, deal_state: DealState):
         """Arm a mock create rule that returns tenant creds without pausing.
 
-        Unlike the staged full-deal suite (which pauses the create job to
-        observe in-flight state), the one-shot buy is a single blocking
-        command — so the create job must complete on its own for the buy to
-        reach status=ready.
+        Unlike the staged full-deal suite, which pauses the create job to
+        observe in-flight state, this scenario observes none: once the
+        storefront logs the buy's job submitted, B4 drains the job, then steps
+        convergence to active.
         """
         require_state(deal_state, "_provisioning_mock_mode", "resume_confirmed")
 
@@ -351,13 +314,20 @@ class TestStageB3_ArmProvisioning:
 
 
 class TestStageB4_MarketBuy:
-    def test_b4_market_buy_reaches_ready(self, buyer_cli, deal_state: DealState):
+    def test_b4_market_buy_reaches_ready(
+        self, buyer_cli, storefront_admin_client, storefront_client,
+        provisioning_client, provisioning_test_client, deal_state: DealState,
+    ):
         """`market buy` discovers, negotiates, escrows, settles, polls → ready.
 
         Pure discovery (no seller override): the buyer resolves the seller from
         the registry-advertised storefront URL and reaches it over the network.
         The typed resource query returns only this suite's listing, and the
         settlement clause selects its advertised Alkahest token option.
+
+        Fulfillment convergence is held, so the buy runs in the background and
+        `buy_to_ready` steps convergence to active once the buy's job is
+        submitted; the buy then reads ready on its next poll.
 
         Explicit negotiation prices mirror the full-deal suite, in whole
         tokens as the CLI takes them: initial 7 (below the 10-token asking
@@ -366,9 +336,9 @@ class TestStageB4_MarketBuy:
         """
         require_state(deal_state, "seller_listing_id", "provisioning_gate_armed")
 
-        run = buyer_cli.run(
+        run, terminal = buy_to_ready(
+            buyer_cli,
             [
-                "buy",
                 "--resource",
                 f'gpu_model="{BUY_GPU_MODEL}"',
                 "--settlement",
@@ -391,24 +361,13 @@ class TestStageB4_MarketBuy:
                 "3600",
                 "--yes",
             ],
-            timeout=300.0,
-        )
-
-        assert run.returncode == 0, (
-            f"`market buy` exited {run.returncode}; expected 0 (ready).\n"
-            f"stdout (tail): {run.stdout()[-2500:]}\n"
-            f"stderr (tail): {run.stderr()[-2500:]}\n"
-            f"{_run_log_digest(run)}"
+            storefront_admin_client=storefront_admin_client,
+            storefront_client=storefront_client,
+            provisioning_client=provisioning_client,
+            provisioning_test_client=provisioning_test_client,
         )
 
         events = run.read_events()
-        terminal = next(
-            (e for e in reversed(events) if e.get("event") == "run_ended"),
-            None,
-        )
-        assert terminal is not None, (
-            f"Buy run-log missing run_ended. events tail: {[e.get('event') for e in events[-6:]]}"
-        )
         assert terminal.get("status") == "ready", (
             f"Expected run_ended.status=ready, got {terminal.get('status')!r}. "
             f"reason={terminal.get('reason')!r}"
@@ -446,7 +405,7 @@ class TestStageB4_MarketBuy:
 
 class TestStageB4c_CapacityEventCycle:
     def test_b4c_capacity_events_dry_run_then_advance(
-        self, storefront_admin_client, deal_state: DealState
+        self, storefront_admin_client, provisioning_client, deal_state: DealState
     ):
         """Step the capacity-event loop: read the cause, then apply it.
 
@@ -467,6 +426,10 @@ class TestStageB4c_CapacityEventCycle:
             "seller_listing_id",
             "settlement_status",
         )
+        # The two dry runs below must agree. The lease watchdog's cycle drains
+        # the capacity-release outbox, so a running watchdog could add capacity
+        # events between them.
+        assert_lease_watchdog_held(provisioning_client)
 
         before = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert before.status == "open", (

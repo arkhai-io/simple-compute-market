@@ -45,9 +45,13 @@ from tests.e2e.roles.scenarios.bare_metal.introduction_driver import (
 )
 
 pytestmark = [
-    # Listed first, so the hold is taken before, and released after, every
-    # other fixture of the module.
-    pytest.mark.usefixtures("storefront_loops_held"),
+    # Listed first, so the holds are taken before, and released after, every
+    # other fixture of the module. Every bare-metal-lane module holds the lane's
+    # timers, so no cycle a stage did not ask for runs while it observes the
+    # stack.
+    pytest.mark.usefixtures(
+        "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held",
+    ),
     pytest.mark.e2e_bare_metal_unbacked_introduction,
 ]
 

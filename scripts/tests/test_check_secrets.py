@@ -50,6 +50,18 @@ def random_text(length: int) -> str:
                    for _ in range(length))
 
 
+def wordless_password() -> str:
+    """40 random characters, each letter followed by a digit.
+
+    `generic-api-key` passes any value holding one of its stop words, common words
+    such as `menu` or `boot`; about one 40-character draw of letters and digits in
+    eighty holds one. No two letters here are adjacent, so no word of letters can
+    form, and no draw has escaped the rule in fifty thousand.
+    """
+    return "".join(secrets.choice(string.ascii_letters) + secrets.choice(string.digits)
+                   for _ in range(20))
+
+
 def key_body() -> str:
     """Random base64 the length of an RSA key's body, which no real key shares."""
     return base64.b64encode(os.urandom(1190)).decode()
@@ -439,7 +451,7 @@ def test_a_development_fixture_is_added(repo: Path) -> None:
 def test_the_audit_reports_what_the_gate_passes(
         repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     base = git(repo, "rev-parse", "HEAD")
-    password = random_text(40)
+    password = wordless_password()
     commit(repo, "build-vars.yaml", f"root_password: {password}\n")
 
     assert checker.main(["--audit"], root=repo) == 0

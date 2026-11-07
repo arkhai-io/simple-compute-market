@@ -19,7 +19,6 @@ bearer secret, exactly as a real client of that API would.
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
 import httpx
@@ -257,23 +256,15 @@ def test_credits_full_deal(
     )
 
     # --- 4. Consume succeeds again, then the top-up grant exhausts ----------
-    # The middleware's short verify cache hides the top-up briefly; poll
-    # through that window (TTL is 3s in the sample app's compose env).
-    deadline = time.monotonic() + 20.0
-    last = None
-    while time.monotonic() < deadline:
-        response = _forecast(secret, base_url)
-        if response.status_code == 200:
-            assert response.json()["forecast"] == "sunny"
-            break
-        last = response
-        time.sleep(1.0)
-    else:
-        raise AssertionError(
-            "consume did not recover to 200 after top-up within 20s; "
-            f"last={getattr(last, 'status_code', None)}: "
-            f"{getattr(last, 'text', '')}"
-        )
+    # The lane runs the sample app with no verify cache, so the very next
+    # request re-verifies the key and sees the top-up.
+    recovered = _forecast(secret, base_url)
+    assert recovered.status_code == 200, (
+        f"the first request after the top-up answered {recovered.status_code}: "
+        f"{recovered.text}. The lane's sample app re-verifies every request "
+        "(APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS=0 in compose.apicredits-lane.yml)."
+    )
+    assert recovered.json()["forecast"] == "sunny"
     final_credit = _forecast(secret, base_url)
     assert final_credit.status_code == 200, final_credit.text
     exhausted_again = _forecast(secret, base_url)

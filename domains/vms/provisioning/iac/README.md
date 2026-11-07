@@ -281,7 +281,8 @@ cases need the `ansible.posix.json` callback).
 `make test-provisioning-iac-native` from the repository root runs the packaged VM
 and family suites in a built provisioning image, with external networking disabled.
 It also parses both domains with their own configuration and the image's shared
-service configuration. The VM end-to-end lane runs the root target.
+service configuration. The end-to-end pipeline runs the root target as its own
+`native-ansible-gate` job, beside the lanes, in the provisioning image it builds.
 
 `ansible-lint` is not part of the default validation path in this repo yet.
 
