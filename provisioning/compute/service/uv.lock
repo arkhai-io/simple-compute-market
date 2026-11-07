@@ -203,7 +203,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.25.0"
+version = "0.26.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -220,22 +220,23 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.25.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.26.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-ansible"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
     { name = "arkhai-kit-config" },
+    { name = "cryptography" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_ansible-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_ansible-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -268,7 +269,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-service"
-version = "0.23.0"
+version = "0.24.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -324,8 +325,8 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "arkhai-bare-metal-provisioning-adapter", marker = "extra == 'adapters'", specifier = ">=0.13.0" },
-    { name = "arkhai-compute-provisioning", specifier = ">=0.25.0" },
-    { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.7.0" },
+    { name = "arkhai-compute-provisioning", specifier = ">=0.26.0" },
+    { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.8.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.13.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-storefront-client", specifier = "==0.29.0" },

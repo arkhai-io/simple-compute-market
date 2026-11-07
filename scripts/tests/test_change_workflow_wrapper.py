@@ -22,10 +22,10 @@ from change_workflow.outcome import harness_schema, load_schema, outcome_problem
 from change_workflow.running import Run, Terminated, live_runs, recorded_run, runs_directory
 from change_workflow.steps import Model, load_steps
 from change_workflow.wrapper import Wrapper
-from change_workflow_fixtures import (CHANGE, COMMIT, LIMIT, NETWORK, OPUS, SESSION, VALID,
-                                      FakeClaude, clock, event_lines, failed_run, make_wrapper,
-                                      not_installed, option, option_rules,
-                                      without_session_id)
+from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LIMIT, MODELS, NETWORK, OPUS,
+                                      SESSION, VALID, FakeClaude, clock, configured,
+                                      event_lines, failed_run, make_wrapper, not_installed,
+                                      option, option_rules, without_session_id)
 
 
 def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path) -> None:
@@ -404,7 +404,7 @@ def test_a_resume_needs_an_answer(tmp_path: Path) -> None:
 
 
 def test_a_run_that_cannot_start_is_logged_stopped(tmp_path: Path) -> None:
-    def missing(command, cwd, feed) -> int:
+    def missing(command, cwd, feed, step) -> int:
         raise not_installed("claude")
 
     line = Wrapper(root=make_wrapper(tmp_path, FakeClaude()).root, runner=missing,
@@ -421,7 +421,7 @@ def test_a_run_whose_wrapper_is_terminated_is_logged_stopped_naming_the_signal(
 ) -> None:
     """A wrapper killed by SIGTERM's default action would write nothing, and the
     log would read the run as still waiting on its previous outcome."""
-    def terminated(command, cwd, feed) -> int:
+    def terminated(command, cwd, feed, step) -> int:
         for line in event_lines(VALID["finished"], result=False):
             feed(line)
         os.kill(os.getpid(), signal.SIGTERM)
@@ -490,7 +490,7 @@ def test_a_stop_before_the_agent_starts_ends_the_run_as_it_would_start(
 
 def test_a_file_the_run_cannot_find_is_no_unavailability(tmp_path: Path) -> None:
     # Only the program failing to launch says the harness cannot serve its model.
-    def lost(command, cwd, feed) -> int:
+    def lost(command, cwd, feed, step) -> int:
         raise not_installed(str(tmp_path / "gone" / "01-closeout.jsonl"))
 
     line = Wrapper(root=make_wrapper(tmp_path, FakeClaude()).root, runner=lost,
@@ -507,7 +507,7 @@ def test_a_run_that_archives_its_change_is_logged_in_the_archive(tmp_path: Path)
     archived = tmp_path / "openspec/changes/archive" / f"2026-10-21-{CHANGE}"
     lines = event_lines(VALID["finished"], tools=(("Bash", {"command": "openspec archive"}),))
 
-    def archiving(command, cwd, feed) -> int:
+    def archiving(command, cwd, feed, step) -> int:
         for line in lines[:2]:
             feed(line)
         archived.parent.mkdir(parents=True)
@@ -617,8 +617,32 @@ def test_a_resume_whose_model_is_unavailable_stops_and_tries_no_other(tmp_path: 
     assert LIMIT in line["reason"]
 
 
+def test_a_steps_first_model_is_available(tmp_path: Path) -> None:
+    """CW-ebmo: the step's models are the configuration's, in order; the first
+    available runs, and the line names it and its effort."""
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    configured(tmp_path, CONFIGURED.replace(
+        'validate = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]',
+        'validate = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]'))
+
+    line = make_wrapper(tmp_path, claude).run("validate", CHANGE)
+
+    assert [option(command, "--model") for command in claude.commands] == ["claude-opus-5-5"]
+    assert (line["harness"], line["model"], line["effort"]) == ("claude", "claude-opus-5-5",
+                                                               "high")
+
+
+def test_a_step_with_no_models_configured_is_refused_naming_the_field(tmp_path: Path) -> None:
+    claude = FakeClaude()
+    configured(tmp_path, CONFIGURED.replace(MODELS, ""))
+
+    with pytest.raises(StepError, match="models.design"):
+        make_wrapper(tmp_path, claude).run("design", CHANGE)
+    assert claude.commands == []
+
+
 def test_an_unavailable_model_falls_to_the_next_in_order(tmp_path: Path) -> None:
-    """The step loader allows one Claude model per row today, so the fallback between
+    """The models' policy allows one Claude model per step, so the fallback between
     Claude entries is proven on the wrapper's turn with the models given directly."""
     claude = FakeClaude((failed_run(LIMIT), 1), (event_lines(VALID["finished"]), 0))
     wrapper = make_wrapper(tmp_path, claude)
@@ -660,7 +684,7 @@ def test_a_session_from_before_models_were_recorded_resumes_on_the_steps_first(
 
 
 def test_an_interrupted_run_is_logged_stopped_and_the_interrupt_kept(tmp_path: Path) -> None:
-    def interrupted(command, cwd, feed) -> int:
+    def interrupted(command, cwd, feed, step) -> int:
         for line in event_lines(result=False):
             feed(line)
         raise KeyboardInterrupt
@@ -741,9 +765,9 @@ def test_a_run_is_recorded_while_it_runs_and_forgotten_once_its_line_is_written(
     seen: list[list[Run]] = []
 
     class Watching(FakeClaude):
-        def __call__(self, command, cwd, feed) -> int:
+        def __call__(self, command, cwd, feed, step) -> int:
             seen.append(live_runs(runs))
-            return super().__call__(command, cwd, feed)
+            return super().__call__(command, cwd, feed, step)
 
     wrapper = make_wrapper(tmp_path, Watching((event_lines(VALID["finished"]), 0)))
     wrapper.runs = lambda _: runs
@@ -764,7 +788,7 @@ def test_a_run_is_recorded_while_it_runs_and_forgotten_once_its_line_is_written(
 def test_an_interrupted_run_forgets_its_record_after_its_line(tmp_path: Path) -> None:
     runs = tmp_path / "git" / "change-runs"
 
-    def interrupted(command, cwd, feed) -> int:
+    def interrupted(command, cwd, feed, step) -> int:
         assert live_runs(runs)
         raise KeyboardInterrupt
 

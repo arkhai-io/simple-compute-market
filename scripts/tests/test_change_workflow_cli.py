@@ -21,13 +21,12 @@ from typing import Callable, Sequence
 
 import pytest
 
-from change_workflow import (clone, cli, cost_report, diagram, find, history, hook, index,
+from change_workflow import (clone, cli, config, cost_report, diagram, find, history, hook, index,
                              next_step, push, round_view, skills, tasks)
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
-from change_workflow.steps import load_orchestrator, load_steps
-from change_workflow_fixtures import (CHANGE, VALID, FakeClaude, event_lines, make_wrapper,
-                                      option_rules)
+from change_workflow_fixtures import (CHANGE, CONFIGURED, VALID, FakeClaude, configured,
+                                      event_lines, make_wrapper, option_rules)
 
 REPO = Path(__file__).resolve().parents[2]
 FRAGMENT = REPO / "scripts" / "change_workflow" / "workflow.mk"
@@ -50,9 +49,11 @@ def _git(cwd: Path, *args: str) -> str:
 
 
 def _repository(path: Path, *changes: str) -> Path:
-    """A checkout with a commit, and an active directory for each of `changes`."""
+    """A checkout with a commit, its workflow configuration, and an active directory
+    for each of `changes`."""
     path.mkdir(parents=True, exist_ok=True)
     _git(path, "init", "-q", "-b", "main")
+    configured(path)
     for change in changes:
         (path / "openspec/changes" / change).mkdir(parents=True, exist_ok=True)
         (path / "openspec/changes" / change / "README").write_text("x\n", "utf-8")
@@ -115,10 +116,12 @@ def _printed(capsys: pytest.CaptureFixture[str], run: Callable[[], int]) -> tupl
 def test_a_subcommand_does_what_its_modules_command_line_does(
         tmp_path: Path, capsys: pytest.CaptureFixture[str], subcommand: list[str],
         module: Callable[[Path], int]) -> None:
-    # A workspace with no origin, a dirty worktree, and no round view: every
-    # subcommand here reads it or refuses, and none changes it.
+    # A workspace whose change's clone directory is a file, a dirty worktree, and no
+    # round view: every subcommand here reads it or refuses, and none changes it.
     root = _repository(tmp_path / "workspace", CHANGE)
     (root / "openspec/changes/README.md").write_text("", "utf-8")
+    (tmp_path / "workspace.changes").mkdir()
+    (tmp_path / "workspace.changes" / CHANGE).write_text("not a clone\n", "utf-8")
 
     expected = _printed(capsys, lambda: module(root))
     assert _printed(capsys, lambda: cli.main(subcommand, root=root)) == expected
@@ -229,7 +232,8 @@ def test_a_failed_push_exits_1_whatever_git_returned(
     _git(root, "remote", "add", "origin", str(tmp_path / "no-such-remote"))
     _git(root, "checkout", "-q", "-b", "feat/x")
 
-    status, out, err = _printed(capsys, lambda: cli.main(["push"], root=root))
+    status, out, err = _printed(capsys, lambda: cli.main(["push", "--remote", "origin"],
+                                                         root=root))
     assert status == 1
     assert out.startswith("+ git push")
     assert "ERROR: git push exited with status" in err
@@ -351,6 +355,43 @@ def test_an_interactive_start_opens_the_steps_skill(tmp_path: Path, arguments: l
     assert cli.main(["start", arguments[0], CHANGE, *arguments[1:]], root=root,
                     launch=launched) == 0
     assert launched.commands == [["claude", prompt]]
+
+
+def test_a_change_worked_in_place_merges_with_no_base_given(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-s3ju: with no clone to have recorded the branch the change lands on, and
+    none given, the merge refuses, naming the argument that gives it, and starts
+    nothing."""
+    root = _repository(tmp_path / "workspace", CHANGE)
+    launched = Launched()
+
+    status, _, err = _printed(capsys, lambda: cli.main(["start", "merge", CHANGE], root=root,
+                                                       launch=launched))
+
+    assert status == 1
+    assert "FROM=<branch>" in err and "--arguments 'from <branch>'" in err
+    assert launched.commands == []
+
+
+def test_the_merge_brings_in_the_branch_the_clone_recorded(tmp_path: Path) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+    clone_root = find.clone_directory(root, CHANGE)
+    _git(tmp_path, "clone", "-q", "--origin", "workspace", str(root), str(clone_root))
+    (clone_root / ".git" / find.CLONE_MARKER).write_text(
+        json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": "release/2.1"}),
+        "utf-8")
+    launched = Launched()
+
+    assert cli.main(["start", "merge", CHANGE], root=clone_root, launch=launched) == 0
+    assert cli.main(["start", "merge", CHANGE, "--arguments", "from main"], root=clone_root,
+                    launch=launched) == 0
+    # Only a leading `from <branch>` names the branch; other words are the skill's.
+    assert cli.main(["start", "merge", CHANGE, "--arguments", "keep notes from me"],
+                    root=clone_root, launch=launched) == 0
+
+    assert [command[-1] for command in launched.commands] == [
+        f"/change-merge {CHANGE} from release/2.1", f"/change-merge {CHANGE} from main",
+        f"/change-merge {CHANGE} from release/2.1 keep notes from me"]
 
 
 def test_an_interactive_session_that_fails_exits_1_naming_its_status(
@@ -518,17 +559,17 @@ def test_start_refuses_records_of_another_format_and_starts_nothing(
     assert {path.name: path.read_text("utf-8") for path in reviews.iterdir()} == before
 
 
-def test_start_orchestrate_opens_the_session_on_the_orchestrator_row(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_owner_starts_the_orchestrating_session(tmp_path: Path) -> None:
+    """CW-w2ld: on the model and effort the configuration's `models.orchestrator`
+    names."""
     root = _repository(tmp_path / "workspace", CHANGE)
-    (root / ".claude").mkdir()
-    (root / ".claude/change-steps.toml").write_text(
-        '[orchestrator]\nmodel = "claude-opus-5-5"\neffort = "medium"\n', "utf-8")
-    monkeypatch.chdir(root)
+    configured(root, CONFIGURED.replace(
+        'orchestrator = { model = "claude-opus-5-5", effort = "medium" }',
+        'orchestrator = { model = "claude-sonnet-5-5", effort = "low" }'))
     launched = Launched()
 
     assert cli.main(["start", "orchestrate", CHANGE], root=root, launch=launched) == 0
-    assert launched.commands == [["claude", "--model", "claude-opus-5-5", "--effort", "medium",
+    assert launched.commands == [["claude", "--model", "claude-sonnet-5-5", "--effort", "low",
                                   f"/change-orchestrate {CHANGE}"]]
 
 
@@ -540,54 +581,39 @@ def test_start_orchestrate_takes_the_change_alone(tmp_path: Path, flags: list[st
                     launch=Launched()) == 2
 
 
-def test_start_orchestrate_refuses_a_table_without_the_row(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str]) -> None:
+def test_start_orchestrate_refuses_a_configuration_without_its_model(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
-    (root / ".claude").mkdir()
-    (root / ".claude/change-steps.toml").write_text("", "utf-8")
-    monkeypatch.chdir(root)
+    configured(root, CONFIGURED.replace(
+        'orchestrator = { model = "claude-opus-5-5", effort = "medium" }\n', ""))
+    launched = Launched()
 
     status, _, err = _printed(capsys, lambda: cli.main(["start", "orchestrate", CHANGE],
-                                                       root=root, launch=Launched()))
+                                                       root=root, launch=launched))
     assert status == 1
-    assert "[orchestrator]" in err
+    assert "models.orchestrator" in err
+    assert launched.commands == []
 
 
-@pytest.mark.parametrize("row,problem", [
-    ('model = "claude-opus-5-5"\nallow = ["Bash(ls)"]', "carries no permission rules"),
-    ('model = "claude-opus-5-5"\ndeny = []', "carries no permission rules"),
-    ('effort = "medium"', "names a model"),
-    ('model = "claude-opus-5-5"\nmodels = []', "names a model"),
-    ('model = "claude-fable-5-1"', "never runs on"),
-    ('model = "claude-opus-5-5"\neffort = ""', "not a name"),
+@pytest.mark.parametrize("entry,problem", [
+    ('{ model = "claude-opus-5-5", allow = ["Bash(ls)"] }',
+     "models.orchestrator.allow is no field"),
+    ('{ model = "claude-opus-5-5", harness = "claude" }',
+     "models.orchestrator.harness is no field"),
+    ('{ effort = "medium" }', "models.orchestrator.model must be a non-empty string"),
+    ('{ model = "claude-opus-5-5", effort = "" }', "models.orchestrator.effort must be"),
 ])
-def test_an_orchestrator_row_is_a_model_and_effort_and_nothing_else(
-        tmp_path: Path, row: str, problem: str) -> None:
-    table = tmp_path / "change-steps.toml"
-    table.write_text(f"[orchestrator]\n{row}\n", "utf-8")
-
+def test_the_orchestrators_model_is_a_model_and_effort_and_nothing_else(
+        entry: str, problem: str) -> None:
     with pytest.raises(StepError, match=problem):
-        load_orchestrator(table)
-    with pytest.raises(StepError, match=problem):
-        load_steps(table)
+        config.check(f"[models]\norchestrator = {entry}\n", Path("workflow.toml"))
 
 
-def test_this_repositorys_orchestrator_row_is_opus_at_medium_effort() -> None:
+def test_this_repositorys_orchestrator_is_opus_at_medium_effort() -> None:
     # The orchestrating session relays and routes rather than judging: it needs a
     # large context for a change's relayed turns, not a high effort.
-    model = load_orchestrator(REPO / ".claude/change-steps.toml")
+    model = config.load(REPO).orchestrator_model()
     assert (model.harness, model.model, model.effort) == ("claude", "claude-opus-5-5", "medium")
-    load_steps(REPO / ".claude/change-steps.toml")
-
-
-def test_an_orchestrator_row_gives_its_model_and_effort(tmp_path: Path) -> None:
-    table = tmp_path / "change-steps.toml"
-    table.write_text('[orchestrator]\nmodel = "claude-opus-5-5"\neffort = "medium"\n', "utf-8")
-
-    model = load_orchestrator(table)
-    assert (model.harness, model.model, model.effort) == ("claude", "claude-opus-5-5", "medium")
-    assert load_steps(table) == {}
 
 
 # `find --json`.
@@ -598,13 +624,31 @@ def test_find_json_prints_the_change_for_a_program(
     (root / "openspec/changes" / CHANGE / "reviews").mkdir()
 
     assert _printed(capsys, lambda: cli.main(["find", "--json", CHANGE], root=root))[0] == 0
+    # A change worked in place, with no clone, records no branch it lands on.
     assert _printed(capsys, lambda: cli.main(["find", "--json", CHANGE], root=root))[1] == (
         json.dumps({"name": CHANGE, "directory": f"openspec/changes/{CHANGE}",
                     "archived": False, "records": f"openspec/changes/{CHANGE}/reviews",
-                    "format": FORMAT}) + "\n")
+                    "format": FORMAT, "base": None}) + "\n")
     status, out, _ = _printed(capsys, lambda: cli.main(["find", "--json", "other"], root=root))
     assert status == 0
     assert json.loads(out)["records"] is None
+
+
+def test_find_json_prints_the_branch_a_clone_recorded(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-s3ju: `base` is the branch the change's clone recorded, read from the
+    workspace in the clone beside it, and in the clone itself."""
+    root = _repository(tmp_path / "workspace", CHANGE)
+    clone_root = find.clone_directory(root, CHANGE)
+    _git(tmp_path, "clone", "-q", "--origin", "workspace", str(root), str(clone_root))
+    marker = clone_root / ".git" / find.CLONE_MARKER
+    marker.write_text(json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}",
+                                  "base": "release/2.1"}), "utf-8")
+
+    for checkout in (root, clone_root):
+        status, out, _ = _printed(capsys, lambda: cli.main(["find", "--json", CHANGE],
+                                                           root=checkout))
+        assert status == 0 and json.loads(out)["base"] == "release/2.1"
 
 
 def test_find_json_says_an_archived_change_is_archived(
@@ -615,7 +659,8 @@ def test_find_json_says_an_archived_change_is_archived(
     status, out, _ = _printed(capsys, lambda: cli.main(["find", "--json", CHANGE], root=root))
     assert status == 0
     assert json.loads(out) == {"name": CHANGE, "directory": ARCHIVED, "archived": True,
-                               "records": f"{ARCHIVED}/reviews", "format": FORMAT}
+                               "records": f"{ARCHIVED}/reviews", "format": FORMAT,
+                               "base": None}
     assert cli.main(["find", "--active", "--json", CHANGE], root=root) == 1
 
 
@@ -708,10 +753,10 @@ def test_clone_where_run_in_a_clone_looks_beside_its_workspace(
 # The make fragment.
 
 def _fragment(tmp_path: Path, target: str, *variables: str) -> list[str]:
-    """What `make -n` prints for `target` of a Makefile that sets this repository's
-    merge branch and includes the fragment, with no step variable inherited."""
+    """What `make -n` prints for `target` of a Makefile that includes the fragment,
+    with no step variable inherited."""
     makefile = tmp_path / "Makefile"
-    makefile.write_text(f"CHANGE_WORKFLOW_MERGE_FROM := main\ninclude {FRAGMENT}\n", "utf-8")
+    makefile.write_text(f"include {FRAGMENT}\n", "utf-8")
     env = {key: value for key, value in os.environ.items()
            if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "ALLOW", "ARGUMENTS",
                           "SESSION_ID", "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT",
@@ -743,8 +788,9 @@ COMMAND = "scripts/change-workflow"
     ("implement", ["SECTION=3", "UNATTENDED=1", "ARGUMENTS=it's", "SESSION_ID=s-1"],
      [f"{COMMAND} start implement \"X\" --sections \"3\" --arguments 'it'\\''s' "
       "--session 's-1' --unattended"]),
+    # No base given: the engine reads the branch the change lands on.
     ("review", ["KIND=design"],
-     [f'{COMMAND} review "X" --kind "design" --base "dev"    ']),
+     [f'{COMMAND} review "X" --kind "design"     ']),
     ("review", ["KIND=closeout", "REVIEW_BASE=main", "REVIEW_MODEL=m", "REVIEW_EFFORT=high",
                 "FRESH=1", "UNVALIDATED=1"],
      [f'{COMMAND} review "X" --kind "closeout" --base "main" --model "m" --effort "high" '
@@ -752,7 +798,7 @@ COMMAND = "scripts/change-workflow"
     ("triage", ["UNATTENDED=1"], [f'{COMMAND} start triage "X" --unattended']),
     ("validate", ["ARGUMENTS=with HELM_ALL_SCENARIOS=1"],
      [f"{COMMAND} start validate \"X\" --arguments 'with HELM_ALL_SCENARIOS=1'"]),
-    ("merge", [], [f"{COMMAND} start merge \"X\" --arguments 'from main'"]),
+    ("merge", [], [f'{COMMAND} start merge "X"']),
     ("merge", ["FROM=release", "UNATTENDED=1"],
      [f"{COMMAND} start merge \"X\" --arguments 'from release' --unattended"]),
     ("closeout", [], [f'{COMMAND} start closeout "X"']),
@@ -762,6 +808,7 @@ COMMAND = "scripts/change-workflow"
     ("change-clone", ["BRANCH=b", "FROM=main"],
      [f'{COMMAND} clone "X" --branch "b" --from "main"']),
     ("change-clone-remove", [], [f'{COMMAND} clone-remove "X"']),
+    ("change-clone-remove", ["BASE=main"], [f'{COMMAND} clone-remove "X" --base "main"']),
     ("round-view", ["BASE=abc"], [f'{COMMAND} round-view "X" --base "abc"']),
     ("round-done", [], [f"{COMMAND} round-done"]),
     ("round-view-closed", [], [f"{COMMAND} check round-view"]),
@@ -782,7 +829,7 @@ def test_a_fragment_target_runs_the_command(tmp_path: Path, target: str,
 
 def test_a_value_set_before_the_include_stands(tmp_path: Path) -> None:
     makefile = tmp_path / "Makefile"
-    makefile.write_text("CHANGE_WORKFLOW := bin/cw\nCHANGE_WORKFLOW_REVIEW_BASE := trunk\n"
+    makefile.write_text("CHANGE_WORKFLOW := bin/cw\nREVIEW_BASE := trunk\n"
                         f"include {FRAGMENT}\n", "utf-8")
     output = subprocess.run(["make", "-n", "--no-print-directory", "-f", str(makefile), "review",
                              "CHANGE=X", "KIND=design"], cwd=tmp_path, capture_output=True,

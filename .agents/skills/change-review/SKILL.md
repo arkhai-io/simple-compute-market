@@ -49,11 +49,11 @@ change's next `NN-<kind>-external.md` and triages it like any other review.
 
 Read all of this before forming a view:
 
-- `AGENTS.md` and every document it requires: `docs/development/ARCHITECTURE.md`,
-  `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, and
-  `openspec/README.md`.
-- `docs/development/ROADMAP.md`, the goal the change serves, and the change's row,
-  campaign, and dependencies in `openspec/changes/README.md`.
+- The documents `scripts/change-workflow config load review` prints: the
+  repository's guidance, which its configuration names.
+- The goal the change serves, in the roadmap `openspec/README.md`'s documentation
+  placement names, and the change's row, campaign, and dependencies in
+  `openspec/changes/README.md`.
 - Every file in the change's directory, including `specs/` and
   `interventions.jsonl`. The directory is what `scripts/change-workflow find
   <change>` prints: `openspec/changes/<change>/`, or for a closeout review, which
@@ -80,9 +80,13 @@ Read all of this before forming a view:
   for one: validation runs beside an implementation review, and its results are
   triaged with yours. A pre-closeout review starts only once a passing validation
   of `HEAD` exists — or of an ancestor `HEAD` differs from only in changes' ledgers
-  and reviews, or, after an earlier pre-closeout review's triage, only in paths
-  under `openspec/` and `docs/` — unless the owner overrides it; when none exists, say so in
-  your readiness section rather than as a finding.
+  and reviews, or, after an earlier pre-closeout review's triage, only in the
+  repository's inert paths — unless the owner overrides it; when none exists, say so in
+  your readiness section rather than as a finding. The repository's checks before a
+  commit change nothing, so you may run them for evidence:
+  `scripts/change-workflow run pre-commit <change>`, which on the clean checkout
+  you read runs `pre-commit` alone — the workflow's default checks and the
+  repository's closing checks.
 
 Check claims against the files, never against the prose describing them. A checked
 task, a "promoted to" note, or a "verified" line is a claim; open the file and

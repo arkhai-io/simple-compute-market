@@ -35,6 +35,10 @@ exit or by the owner's direction, which checks no exit guard. An unwaivable one
 refuses every entry while it is not met (`entry_refusal`); a waivable one takes the
 owner's direction as its override.
 
+Beside the graph, `HOOK_STEPS` holds which steps may run each of the repository's
+hooks through `scripts/change-workflow run`; like the graph, no repository changes
+it (CW-u4pc).
+
 The change-workflow architecture shows the table as a diagram laid out by hand,
 `openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio`, held to the
 boxes and edges the table draws (`drawing`; see `diagram`). A durable
@@ -49,13 +53,18 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .common import StepError
-from .records import is_documentation, is_record
 
 Result = dict[str, Any]
 # What the reading of where the change stands hands a guard: the run whose outcome
 # named the exit, the review a triage's outcome named, and what the round's reading
 # of it found.
 Context = Mapping[str, Any]
+
+# Which paths a commit may change past a validation without needing another, as a
+# guard names them for the readings to resolve: changes' records alone, or those and
+# the repository's inert paths (`records.exempting`). The table holds no
+# repository's paths, so it names the kind and the readings supply the paths.
+RECORDS, INERT = "records", "inert"
 
 OWNER = "owner"
 # The remedy of a guard no step satisfies by running: the computation holds the
@@ -97,12 +106,12 @@ class Readings(Protocol):
     review is that computation's record of one, read for its file and its triage
     file's names; a run is a line of the workflow log."""
 
-    def validated(self, why: str, exempt: Callable[[str], bool] = is_record,
+    def validated(self, why: str, exempt: str = RECORDS,
                   failed: Node | None = None) -> Result | None: ...
 
-    def fixed_since(self, review: Any, exempt: Callable[[str], bool] = is_record) -> bool: ...
+    def fixed_since(self, review: Any, exempt: str = RECORDS) -> bool: ...
 
-    def changed_outside_documentation(self, review: Any) -> str | None: ...
+    def changed_outside_inert(self, review: Any) -> str | None: ...
 
     def return_confirmed(self, run: Mapping[str, Any]) -> bool: ...
 
@@ -226,14 +235,13 @@ def _return_confirmed(readings: Readings, context: Context) -> Result | None:
                  "the run and directs the step returned to, or decides what follows")
 
 
-def _validated(why: str, exempt: Callable[[str], bool] = is_record,
-               failed: Node | None = None) -> Check:
+def _validated(why: str, exempt: str = RECORDS, failed: Node | None = None) -> Check:
     """`HEAD` validated; a validation of it that failed names `failed`, when given,
     rather than the owner."""
     return lambda readings, _: readings.validated(why, exempt, failed)
 
 
-def _fix_validated(exempt: Callable[[str], bool]) -> Check:
+def _fix_validated(exempt: str) -> Check:
     """A fix the triage accepted, once committed since its review read `HEAD`,
     validated before the review runs again; with no fix, the same commit is
     reviewed again whatever its validation said."""
@@ -263,7 +271,7 @@ def _correction_validated(readings: Readings, context: Context) -> Result | None
     fix an earlier round of closeout reviews committed is still unvalidated when
     the latest review read it."""
     first = context["first"]
-    if not (changed := readings.changed_outside_documentation(first)):
+    if not (changed := readings.changed_outside_inert(first)):
         return None
     return readings.validated(f"HEAD changes {changed} since {first.path.name} reviewed the "
                               "archive, so it is validated before archive cleanup")
@@ -284,21 +292,21 @@ ROUND_FIX_VALIDATED = Guard("the fix commit validated, records exempt", VALIDATE
                             _validated("the round's fixes need validating"))
 REPEAT_FIX_READ = Guard("a fix committed since the review read", ROUND_VIEW, check=_fix_read)
 REPEAT_FIX_VALIDATED = Guard("a fix committed since the review validated", VALIDATE,
-                             VALIDATION_FAILED, _fix_validated(is_record))
+                             VALIDATION_FAILED, _fix_validated(RECORDS))
 # The merged `HEAD`: a validation of it that failed found what the merge broke,
 # which the merge step repairs, since it holds what each side changed; an
 # inconclusive one is missing evidence, the owner's to settle.
-MERGE_VALIDATED = Guard("the merged HEAD validated, openspec/ and docs/ exempt", VALIDATE,
+MERGE_VALIDATED = Guard("the merged HEAD validated, inert paths exempt", VALIDATE,
                         MERGE_VALIDATION_FAILED,
                         _validated("closeout needs a passing validation of the merged HEAD",
-                                   is_documentation, failed=MERGE))
+                                   INERT, failed=MERGE))
 MERGE_REVIEW_VALIDATED = Guard("the merged HEAD validated, records exempt", VALIDATE,
                                MERGE_VALIDATION_FAILED,
                                _validated("a pre-closeout review of the merge needs a passing "
                                           "validation of HEAD", failed=MERGE))
-DOCUMENTED_FIX_VALIDATED = Guard("a fix outside openspec/ and docs/ validated", VALIDATE,
-                                 VALIDATION_FAILED, _fix_validated(is_documentation))
-CORRECTION_VALIDATED = Guard("a path outside openspec/ and docs/ changed since the first "
+DOCUMENTED_FIX_VALIDATED = Guard("a fix outside the inert paths validated", VALIDATE,
+                                 VALIDATION_FAILED, _fix_validated(INERT))
+CORRECTION_VALIDATED = Guard("a path outside the inert paths changed since the first "
                              "closeout review: HEAD validated", VALIDATE, VALIDATION_FAILED,
                              _correction_validated)
 
@@ -344,7 +352,7 @@ NEVER_DIRECTED = EntryGuard("reached only by archive cleanup's exit", check=_nev
 # owner's direction to it, or `--unvalidated`, as the override.
 REVIEW_VALIDATED = EntryGuard("the latest validation passed for HEAD, or for an ancestor it "
                               "differs from only in records, or after a pre-closeout triage "
-                              "only in openspec/ and docs/", waivable=True)
+                              "only in inert paths", waivable=True)
 
 ROUND_JOIN = Join((("the round's sections checked", ROUND),
                    ("the owner's reading", ROUND_VIEW),
@@ -443,6 +451,24 @@ _KINDED = {node.step for node in NODES if node.kind}
 STEPS: tuple[str, ...] = tuple(dict.fromkeys(d.runs for d in TABLE if d.runs))
 KINDS: tuple[str, ...] = tuple(dict.fromkeys(node.kind for node in NODES
                                              if node.step == "review" and node.kind))
+
+# Which steps may run each hook through `scripts/change-workflow run`: the workflow's
+# structure, which no repository changes. Only implementation, triage, and the merge
+# make functional changes, so only they relock or run the functional checks;
+# validation changes nothing it validates (CW-af15), and so runs only its own parts.
+# A `pre-commit` reports and changes nothing, so a review may run it. `validation`
+# is the preflight and every part's commands, `cleanup` every part's cleanup as one
+# list. `pre-push` and `post-clone` are run by the engine's own push and clone, by
+# no step.
+HOOK_STEPS: dict[str, frozenset[str]] = {
+    "after-functional-change": frozenset({"implement", "triage", "merge"}),
+    "pre-commit-functional": frozenset({"implement", "triage", "merge"}),
+    "pre-commit": frozenset({"design", "plan", "implement", "triage", "merge", "closeout",
+                             "archive-cleanup", "review"}),
+    "pre-archive": frozenset({"closeout"}),
+    "validation": frozenset({"validate"}),
+    "cleanup": frozenset({"archive-cleanup"}),
+}
 
 
 class TargetError(StepError):

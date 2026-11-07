@@ -105,7 +105,7 @@ def including(repository: Path) -> Path:
     """A repository whose Makefile, like this one's, takes the workflow's targets from
     the engine's fragment."""
     (repository / "Makefile").write_text(
-        f"CHANGE_WORKFLOW_MERGE_FROM := dev\ninclude {ROOT}/scripts/change_workflow/workflow.mk\n"
+        f"include {ROOT}/scripts/change_workflow/workflow.mk\n"
         "check-change:\n\t@true\n", "utf-8")
     return repository
 

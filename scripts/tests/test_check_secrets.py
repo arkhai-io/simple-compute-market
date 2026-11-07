@@ -18,8 +18,10 @@ import io
 import json
 import os
 import secrets
+import shlex
 import string
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 from typing import Sequence
@@ -477,12 +479,23 @@ def branch(repo: Path, tmp_path: Path) -> Path:
     git(repo, "remote", "add", "origin", str(remote))
     git(repo, "push", "-q", "-u", "origin", "dev")
     git(repo, "checkout", "-q", "-b", "feat/change")
+    # Its upstream, a branch of its own name on `origin`, as a change's clone sets it.
+    git(repo, "config", "branch.feat/change.remote", "origin")
+    git(repo, "config", "branch.feat/change.merge", "refs/heads/feat/change")
     return repo
 
 
 def provide_gate(repo: Path, version_problem: str | None = None) -> None:
-    """The stand-in gate, ignored so the worktree stays clean; `version_problem`
-    stands in for a gitleaks that cannot run."""
+    """The stand-in gate, and the workflow configuration whose `pre-push` runs it as
+    the guarded push runs a pre-push hook, both ignored so the worktree stays clean;
+    `version_problem` stands in for a gitleaks that cannot run."""
+    (repo / ".agents").mkdir(exist_ok=True)
+    (repo / ".agents/workflow.toml").write_text(
+        '[repository]\nprotected-branches = ["main", "dev"]\n[hooks]\n'
+        f'pre-push = "{shlex.quote(sys.executable)} scripts/{Path(checker.__file__).name} '
+        '--pre-push {remote}"\n', "utf-8")
+    with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+        exclude.write("/.agents/\n")
     injected = ("" if version_problem is None
                 else f", version_problem=lambda: {version_problem!r}")
     gate = repo / "scripts" / Path(checker.__file__).name

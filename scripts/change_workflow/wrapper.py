@@ -1,7 +1,8 @@
 """Running a step unattended, and resuming a waiting run with the owner's answer.
 
 `Wrapper.run` starts the step's skill as a headless Claude Code session on the first
-available of the models the step's row names, in order: a model whose harness is
+available of the step's models, which the repository's workflow configuration names
+in order of preference (`models.<step>`): a model whose harness is
 missing, not signed in, or at its usage limit is passed over, and the line names
 each one passed over and the model that ran; a network error is retried on the
 same model, never passed over. `Wrapper.resume` continues the session of a waiting
@@ -13,7 +14,9 @@ for that one run, passed on its command line and recorded as `granted` on its li
 never added to the step table.
 
 Either way the run's event stream is kept as its transcript, and its outcome is
-appended to the workflow log. A run that crashes, ends without an outcome, or ends
+appended to the workflow log, with what the run invoked as `invoked`: what each of
+its attempts' sessions invoked for the change through `run`, and through the
+guarded push, that no line has taken yet. A run that crashes, ends without an outcome, or ends
 with one the schema rejects is logged `stopped` by the wrapper itself, and so is
 a triage whose outcome does not name the records it triaged. A step
 denied a tool ends `stopped` only when it cannot go on without it; one that went
@@ -23,7 +26,7 @@ turns after an outcome is logged with its last, the earlier ones kept beside it 
 `earlier`.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-js86, CW-4vma, CW-1a4d,
-CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, and CW-yzer.
+CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, CW-yzer, and CW-q5fy.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from . import config
 from .common import ORCHESTRATOR, Clock, Entry, StepError, repository_root, utc_now
 from .cost import conversation_file, measured_before, measured_cost, read_conversation
 from .harness import (NETWORK_RETRIES, Runner, claude_command, missing_program, run_claude,
@@ -40,7 +44,8 @@ from .harness import (NETWORK_RETRIES, Runner, claude_command, missing_program, 
 from .log import last_run, log_path, read_log, record_outcome, revisit_direction, revisit_refusal
 from .outcome import load_schema, outcome_problems, triage_outcome_problems
 from .records import git_head, next_transcript
-from .running import recorded_run, runs_directory, termination_deferred, termination_ends_the_run
+from .running import (drop_invocations, invocations_directory, kept_invocations, recorded_run,
+                      runs_directory, termination_deferred, termination_ends_the_run)
 from .steps import Model, StepRules, load_steps
 from .stream import Stream
 from .subagents import subagent_denials
@@ -154,6 +159,9 @@ class Wrapper:
     conversation: Callable[[Path, str], Path] = conversation_file
     # Where a run in progress is recorded, so no round view moves its checkout.
     runs: Callable[[Path], Path | None] = runs_directory
+    # Where a session's invocations through `run` and the guarded push wait for its
+    # line.
+    invocations: Callable[[Path], Path | None] = invocations_directory
 
     def run(self, step: str, change: str, *, arguments: str = "",
             sections: Sequence[int | str] | None = None, fresh: bool = False,
@@ -178,7 +186,7 @@ class Wrapper:
         if sections and step != "implement":
             raise StepError("only implementation takes sections")
         session = None
-        models = rules.models
+        models = config.load(self.root).step_models(step)
         extra: Entry = {}
         if continuing is not None:
             if step != "implement":
@@ -186,7 +194,7 @@ class Wrapper:
             if fresh:
                 raise StepError("a run continuing a session cannot also start fresh")
             previous = continued_run(read_log(log), change, continuing)
-            session, models = continuing, _session_models(previous, rules)
+            session, models = continuing, _session_models(previous, models)
             extra["continues"] = previous["seq"]
         elif rules.resume_from and not fresh:
             previous = last_run(log, [rules.resume_from, step])
@@ -196,7 +204,7 @@ class Wrapper:
                                 f"{step} with --fresh, or {previous['step']} again")
             if previous is not None:
                 session = previous["session"]
-                models = _session_models(previous, rules)
+                models = _session_models(previous, models)
         if sections:
             extra["sections"] = list(sections)
         if granted:
@@ -220,7 +228,7 @@ class Wrapper:
         and noted on this run's log line, never added to the step table, so the
         step's next run is held to its table again.
 
-        The session resumes on the model it ran on, never the next in its row: a
+        The session resumes on the model it ran on, never the step's next one: a
         session cannot move between harnesses, so a resume whose model is
         unavailable ends stopped, saying when its limit resets.
         """
@@ -266,7 +274,7 @@ class Wrapper:
             extra["granted"] = list(granted)
         # Framed, so an answer starting with `-` is never read as a flag.
         return self._turn(step, steps[step], change, log, f"The owner's answer: {answer}",
-                          _session_models(previous, steps[step]),
+                          _session_models(previous, config.load(self.root).step_models(step)),
                           session=previous["session"], granted=granted, extra=extra)
 
     def _turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
@@ -293,7 +301,7 @@ class Wrapper:
         network error is retried on the same model, and then stops the run. The
         line names the last model tried even when none could run, with
         `unavailable` saying so: a resume of that run continues its session on
-        that model, never the next in the row.
+        that model, never the step's next one.
 
         The line goes to the log where the change is when the run ends: closeout
         archives the change it runs for, moving `reviews/` while the run writes
@@ -307,7 +315,7 @@ class Wrapper:
         named = transcript.relative_to(log.parent).as_posix()
         attempts: list[Stream] = []
         outcome, status, failure, model, stream, passed_over, logged = (
-            self._attempt_models(rules, prompt, schema, models, session, granted,
+            self._attempt_models(step, rules, prompt, schema, models, session, granted,
                                  transcript, progress, attempts))
         extra = {**(extra or {}), **model.entry(), "exit_status": status, "transcript": named}
         if passed_over:
@@ -316,6 +324,15 @@ class Wrapper:
         if earlier := earlier_outcomes([r for a in attempts for r in a.results], logged):
             extra["earlier"] = earlier
         extra.update(self._cost(attempts or [stream], session, before))
+        ran = stream.session or session
+        directory = self.invocations(self.root)
+        # Every attempt's session: a retried or passed-over attempt ran under a
+        # session of its own, and what it invoked is this run's too.
+        sessions = list(dict.fromkeys(s for s in (session, *(a.session for a in attempts), ran)
+                                      if s))
+        taken = {s: kept_invocations(directory, s, change) for s in sessions}
+        if invoked := [entry for s in sessions for entry in taken[s]]:
+            extra["invoked"] = invoked
         try:
             log = log_path(self.root, change)
         except StepError:
@@ -324,23 +341,28 @@ class Wrapper:
             pass
         if step == "triage":
             outcome = triage_outcome(outcome, log.parent)
-        line = record_outcome(log, step, outcome, session=stream.session or session,
+        line = record_outcome(log, step, outcome, session=ran,
                               commit=self.head(self.root), extra=extra, schema=schema,
                               clock=self.clock)
+        # Forgotten only once the line holds them; a resumed turn's line takes only
+        # what the session invoked since.
+        for s in sessions:
+            drop_invocations(directory, s, taken[s])
         if failure is not None and not isinstance(failure, Exception):
             raise failure
         return line
 
-    def _attempt_models(self, rules: StepRules, prompt: str, schema: dict[str, Any],
+    def _attempt_models(self, step: str, rules: StepRules, prompt: str, schema: dict[str, Any],
                         models: Sequence[Model], session: str | None,
                         granted: Sequence[str], transcript: Path, progress: Path,
                         attempts: list[Stream],
                         ) -> tuple[Entry, int | None, BaseException | None, Model, Stream,
                                    list[Entry], dict[str, Any] | None]:
-        """Run the turn on the first available of `models`: its outcome, exit
-        status, any failure, the model last tried, its stream, the models passed
-        over, and the result the outcome was logged from, when the step gave one.
-        Every attempt's stream is appended to `attempts`."""
+        """Run the turn of `step` on the first available of `models`, marked as that
+        step's unattended run: its outcome, exit status, any failure, the model last
+        tried, its stream, the models passed over, and the result the outcome was
+        logged from, when the step gave one. Every attempt's stream is appended to
+        `attempts`."""
         failure: BaseException | None = None
         passed_over: list[Entry] = []
         outcome: Entry = {}
@@ -359,7 +381,7 @@ class Wrapper:
                 failure, status, reached = None, None, None
                 try:
                     with termination_ends_the_run():
-                        status = self.runner(command, self.root, stream.feed)
+                        status = self.runner(command, self.root, stream.feed, step)
                     reached = unreachable(stream.failure_text(status))
                 except FileNotFoundError as exc:
                     if missing_program(exc, command):
@@ -458,7 +480,7 @@ def continued_run(entries: Sequence[Entry], change: str, session: str) -> Entry:
     return named[-1]
 
 
-def _session_models(previous: Entry, rules: StepRules) -> tuple[Model, ...]:
+def _session_models(previous: Entry, models: Sequence[Model]) -> tuple[Model, ...]:
     """The model a run continuing `previous`'s session runs on: the one it ran on.
 
     A line written before runs recorded their model names none; the step's first
@@ -467,4 +489,4 @@ def _session_models(previous: Entry, rules: StepRules) -> tuple[Model, ...]:
     if isinstance(previous.get("model"), str) and previous["model"]:
         return (Model(previous.get("harness") or "claude", previous["model"],
                       previous.get("effort")),)
-    return rules.models[:1]
+    return tuple(models[:1])

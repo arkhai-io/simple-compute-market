@@ -33,6 +33,12 @@ class FakeSite:
             return_value={"capacity_reservation_id": "r-1", "lease_end_utc": "2099-01-01 01:00"}
         )
         self.release = AsyncMock(return_value={"capacity_reservation_id": "r-1"})
+        self.activate_lease = AsyncMock(
+            return_value={
+                "capacity_reservation_id": "r-1",
+                "activated_at_utc": "2099-01-01T00:07:00+00:00",
+            }
+        )
 
     async def snapshot(self):
         return list(self.rows)
@@ -151,11 +157,65 @@ async def test_capacity_effects_refuse_an_unbacked_binding_before_any_site_call(
             capacity_reservation_id="r-1",
             lease_end_utc="2026-09-23T00:00:00Z",
         )
+    with pytest.raises(CapacityNotAdmittedError, match="lease activation"):
+        await composed.activate_lease(unbacked, capacity_reservation_id="r-1")
 
     for remote in remotes.values():
         remote.reserve.assert_not_awaited()
         remote.commit.assert_not_awaited()
         remote.release.assert_not_awaited()
+        remote.activate_lease.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_activation_reaches_only_the_binding_s_site(runtime):
+    composed, remotes, _ = runtime
+    binding = PublicationBinding("site-b", "vm", "pool-1", BACKED)
+
+    activated = await composed.activate_lease(
+        binding, capacity_reservation_id="r-after-restart"
+    )
+
+    assert activated["site"] == "site-b"
+    assert activated["activated_at_utc"] == "2099-01-01T00:07:00+00:00"
+    remotes["site-b"].activate_lease.assert_awaited_once_with(
+        capacity_reservation_id="r-after-restart"
+    )
+    remotes["site-a"].activate_lease.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_activation_under_an_unconfigured_site_fails_closed(runtime):
+    composed, remotes, _ = runtime
+
+    with pytest.raises(CapacityBindingError, match="unconfigured site"):
+        await composed.activate_lease(
+            PublicationBinding("removed-site", "vm", "pool-1", BACKED),
+            capacity_reservation_id="r-1",
+        )
+
+    for remote in remotes.values():
+        remote.activate_lease.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_activation_answered_for_another_site_is_refused():
+    aggregate = AsyncMock()
+    aggregate.site_names = ("site-a", "site-b")
+    aggregate.activate_lease.return_value = {
+        "capacity_reservation_id": "r-1", "site": "site-b",
+    }
+    effects = CapacityEffects(aggregate)
+
+    with pytest.raises(CapacityBindingError, match="mismatched site"):
+        await effects.activate_lease(
+            PublicationBinding("site-a", "vm", "pool-1", BACKED),
+            capacity_reservation_id="r-1",
+        )
+
+    aggregate.activate_lease.assert_awaited_once_with(
+        capacity_reservation_id="r-1", site_id="site-a"
+    )
 
 
 @pytest.mark.asyncio

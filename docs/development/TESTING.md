@@ -1160,7 +1160,7 @@ gate's list of native modules to every module defining its skip guard. The VM
 end-to-end lane runs this gate once it has built the image.
 
 The bounded bare-metal working-data helper has its own evidence boundaries.
-`make test-bare-metal-iac` exercises its unit and library-integration behavior;
+`make -C domains test-bare-metal-iac` exercises its unit and library-integration behavior;
 `make build-provisioning` followed by `make test-bare-metal-iac-native`
 executes native account, filesystem and IPC behavior in a disposable isolated
 environment and fails on missing prerequisites or skips. Neither gate proves

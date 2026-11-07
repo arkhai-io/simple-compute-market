@@ -420,6 +420,64 @@ async def test_commit_unknown_reservation_404s(capacity: CapacityApi):
     assert refused.value.status_code == 404
 
 
+async def _committed_lease(
+    capacity: CapacityApi, escrow: str, *, lease_end_utc: str | None = "2099-01-01 01:00"
+) -> str:
+    reserved = await capacity.reserve(
+        {"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
+        {"escrow_uid": escrow},
+    )
+    await capacity.commit(
+        reserved["capacity_reservation_id"],
+        resource_id="compute-kvm1-001",
+        lease_start_utc="2099-01-01T00:00:00+00:00",
+        lease_end_utc=lease_end_utc,
+    )
+    return reserved["capacity_reservation_id"]
+
+
+@pytest.mark.asyncio
+async def test_a_lease_is_activated_once_through_the_canonical_client(
+    capacity: CapacityApi,
+):
+    """Activation answers as commit does: the reservation with the site's
+    instant, the same instant on a retry, 404 for a reservation the site does
+    not hold, and 409 for one a release claimed or one with no lease tail."""
+    await capacity.register_hosts("kvm1")
+    await capacity.register(
+        "compute-kvm1-001", pool_id="default", total_units=8, host_id="kvm1", attributes={}
+    )
+    lease = await _committed_lease(capacity, "0xactivated")
+    assert (await capacity.site.get_reservation(lease))["activated_at_utc"] is None
+
+    activated = await capacity.site.activate_lease(capacity_reservation_id=lease)
+    again = await capacity.site.activate_lease(capacity_reservation_id=lease)
+
+    assert activated["state"] == "leased"
+    assert activated["activated_at_utc"] is not None
+    assert again["activated_at_utc"] == activated["activated_at_utc"]
+    read = await capacity.site.get_reservation(lease)
+    assert read["activated_at_utc"] == activated["activated_at_utc"]
+
+    with pytest.raises(SiteCapacityClientError) as unknown:
+        await capacity.site.activate_lease(capacity_reservation_id="missing")
+    assert unknown.value.status_code == 404
+
+    released = await _committed_lease(capacity, "0xreleased-first")
+    await capacity.release(capacity_reservation_id=released)
+    with pytest.raises(SiteCapacityClientError) as claimed:
+        await capacity.site.activate_lease(capacity_reservation_id=released)
+    assert claimed.value.status_code == 409
+    assert "released" in str(claimed.value)
+
+    open_ended = await _committed_lease(capacity, "0xopen-ended", lease_end_utc=None)
+    with pytest.raises(SiteCapacityClientError) as tailless:
+        await capacity.site.activate_lease(capacity_reservation_id=open_ended)
+    assert tailless.value.status_code == 409
+    assert "no lease tail" in str(tailless.value)
+    assert (await capacity.site.get_reservation(open_ended))["activated_at_utc"] is None
+
+
 @pytest.mark.asyncio
 async def test_site_resource_pools_projection_surfaces_pool_metadata(
     capacity: CapacityApi, client_and_queue,

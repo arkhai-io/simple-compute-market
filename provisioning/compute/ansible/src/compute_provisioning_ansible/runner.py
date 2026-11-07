@@ -563,7 +563,8 @@ class AnsibleRunner:
         and every such key file: the caller must ``cleanup()`` it in a
         ``finally`` (or use it as a context manager), and if writing fails
         part way, what was already written is removed before the error
-        propagates.
+        propagates. A key that cannot be decrypted raises
+        ``ProtectedKeyUnreadableError`` naming its host.
         """
         nonce = uuid.uuid4().hex
         directory = Path(tempfile.gettempdir())
@@ -577,7 +578,10 @@ class AnsibleRunner:
                     key_file = directory / f"{host.host_id}_key_{nonce}"
                     inventory.key_paths.append(key_file)
                     _write_owner_only(
-                        key_file, self._ssh_codec.decrypt_private_key(host.ssh_key_value)
+                        key_file,
+                        self._ssh_codec.decrypt_private_key(
+                            host.ssh_key_value, host_id=host.host_id
+                        ),
                     )
                     key_ref = str(key_file)
 
@@ -621,6 +625,9 @@ class AnsibleRunner:
         """Run ``ansible -m ping`` using the supplied *inventory_path*.
 
         The caller renders the inventory and is responsible for cleaning it up.
+        The result's ``detail`` leaves the service, so it is redacted, with the
+        generic secret fields only, since a probe runs no domain's playbook:
+        Ansible's output and the text of an error running it alike.
         """
         cmd = [
             "ansible",
@@ -651,13 +658,17 @@ class AnsibleRunner:
             )
         except Exception as exc:
             return ConnectivityResult(
-                host=host, reachable=False, detail=f"Failed to run ansible ping: {exc}"
+                host=host,
+                reachable=False,
+                detail=redact_ansible_output(f"Failed to run ansible ping: {exc}"),
             )
 
         reachable = returncode == 0
         detail = stdout.strip() if reachable else (stderr.strip() or stdout.strip())
         logger.info("Connectivity check for %s: reachable=%s", host, reachable)
-        return ConnectivityResult(host=host, reachable=reachable, detail=detail)
+        return ConnectivityResult(
+            host=host, reachable=reachable, detail=redact_ansible_output(detail)
+        )
 
 
 __all__ = [

@@ -114,9 +114,9 @@
 <text x="1122.5" y="399">format line; launches</text>
 <text x="1122.5" y="414">claude /change-&lt;step&gt;</text>
 <text x="280" y="491" font-weight="bold">wrapper</text>
-<text x="280" y="506">the step table's row:</text>
-<text x="280" y="521">skill, permissions,</text>
-<text x="280" y="536">models; first available</text>
+<text x="280" y="506">skill and rules from the</text>
+<text x="280" y="521">step table; models from</text>
+<text x="280" y="536">the configuration</text>
 <text x="690" y="491" font-weight="bold">wrapper</text>
 <text x="690" y="506">checks the outcome; logs</text>
 <text x="690" y="521">stopped if none or</text>

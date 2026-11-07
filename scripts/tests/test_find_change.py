@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -160,3 +162,45 @@ def test_records_outside_a_clone_are_looked_for_in_the_checkout_alone(tmp_path: 
         finder.find_records(root, "shape-bounds", lambda _: None)
 
     assert "workspace" not in str(raised.value)
+
+
+# The branch a change lands on, as its clone recorded it (CW-s3ju).
+
+def test_a_change_with_no_clone_has_no_base(tmp_path: Path) -> None:
+    root = _tree(tmp_path, "shape-bounds")
+
+    found = finder.found(root, "shape-bounds", root / "openspec/changes/shape-bounds")
+
+    assert found["base"] is None
+
+
+def _marked(checkout: Path, recorded: dict) -> Path:
+    """`checkout` a Git repository whose clone marker records `recorded`."""
+    checkout.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+    (checkout / ".git" / finder.CLONE_MARKER).write_text(json.dumps(recorded), "utf-8")
+    return checkout
+
+
+def test_base_is_the_branch_the_clone_recorded(tmp_path: Path) -> None:
+    """Library integration: the marker is read through a real Git directory, in the
+    clone itself and from the workspace beside it."""
+    workspace = _tree(tmp_path / "work", "shape-bounds")
+    clone = _marked(finder.clone_directory(workspace, "shape-bounds"),
+                    {"change": "shape-bounds", "branch": "feat/shape-bounds", "base": "main"})
+
+    assert finder.landing_branch(clone, "shape-bounds") == "main"
+    assert finder.landing_branch(workspace, "shape-bounds") == "main"
+    assert finder.found(workspace, "shape-bounds",
+                        workspace / "openspec/changes/shape-bounds")["base"] == "main"
+
+
+@pytest.mark.parametrize("recorded", [
+    {"change": "other", "branch": "feat/other", "base": "main"},
+    {"change": "shape-bounds", "branch": "feat/shape-bounds"},
+])
+def test_no_base_is_read_from_another_changes_clone_or_one_that_recorded_none(
+        tmp_path: Path, recorded: dict) -> None:
+    clone = _marked(tmp_path / "clone", recorded)
+
+    assert finder.landing_branch(clone, "shape-bounds") is None

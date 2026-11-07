@@ -14,6 +14,14 @@ from core_storefront.aggregation import (
 from core_storefront.capacity import CapacityClient, CapacityDelta
 
 
+class SiteRefusal(LookupError):
+    """A site's refusal carrying its HTTP status, as the site client's error does."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class FakeSite:
     """In-memory single-resource site ledger."""
 
@@ -22,8 +30,12 @@ class FakeSite:
         self.units = units
         self.broken = broken
         self.reservations: dict[str, int] = {}
+        # Reservations this site knows but has released: it refuses writes
+        # to them with a 409, where an unknown reservation gets a 404.
+        self.released: set[str] = set()
         self.committed: list[str] = []
         self.committed_deals: list[dict | None] = []
+        self.activations: list[str] = []
         self.reserve_call_count = 0
         self._seq = 0
 
@@ -85,8 +97,7 @@ class FakeSite:
                      lease_start_utc=None, lease_duration_seconds=None,
                      lease_end_utc=None, idempotency_ref=None, deal_ref=None) -> dict:
         self._check()
-        if capacity_reservation_id not in self.reservations:
-            raise LookupError(f"unknown reservation {capacity_reservation_id}")
+        self._require_held(capacity_reservation_id)
         self.committed.append(capacity_reservation_id)
         self.committed_deals.append(deal_ref)
         return {
@@ -108,6 +119,27 @@ class FakeSite:
         if capacity_reservation_id not in self.reservations:
             return None
         return {"capacity_reservation_id": capacity_reservation_id, "lease_end_utc": lease_end_utc}
+
+    async def activate_lease(self, *, capacity_reservation_id):
+        self._check()
+        self.activations.append(capacity_reservation_id)
+        self._require_held(capacity_reservation_id)
+        return {
+            "capacity_reservation_id": capacity_reservation_id,
+            "activated_at_utc": "2099-01-01T00:07:00+00:00",
+        }
+
+    def _require_held(self, capacity_reservation_id) -> None:
+        if capacity_reservation_id in self.released:
+            raise SiteRefusal(
+                f"{self.resource_id} reservation {capacity_reservation_id} is released",
+                409,
+            )
+        if capacity_reservation_id not in self.reservations:
+            raise SiteRefusal(
+                f"{self.resource_id} holds no reservation {capacity_reservation_id}",
+                404,
+            )
 
     def subscribe(self, subscriber):
         return lambda: None
@@ -229,6 +261,100 @@ async def test_writes_route_to_the_owning_site():
     released = await client.release(capacity_reservation_id=capacity_reservation_id)
     assert released["site"] == "dc-a"
     assert a.available == 4
+
+
+@pytest.mark.asyncio
+async def test_an_activation_naming_its_site_reaches_only_that_site():
+    client, a, b = _aggregate(placement=fill_first)
+    reserved = await client.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={},
+    )
+
+    activated = await client.activate_lease(
+        capacity_reservation_id=reserved["capacity_reservation_id"], site_id="dc-a",
+    )
+
+    assert activated["site"] == "dc-a"
+    assert activated["activated_at_utc"] == "2099-01-01T00:07:00+00:00"
+    assert (a.activations, b.activations) == ([reserved["capacity_reservation_id"]], [])
+
+
+@pytest.mark.asyncio
+async def test_an_activation_naming_no_site_goes_past_a_refusing_site():
+    """With a cold routing cache, as after a restart, route order tries each
+    site; one that does not hold the reservation refuses with an error, and
+    the site that holds it answers."""
+    client, a, b = _aggregate(placement=fill_first)
+    b.reservations["held-at-b"] = 1
+
+    activated = await client.activate_lease(capacity_reservation_id="held-at-b")
+
+    assert activated["site"] == "dc-b"
+    assert (a.activations, b.activations) == (["held-at-b"], ["held-at-b"])
+
+
+@pytest.mark.asyncio
+async def test_an_activation_no_site_records_raises_a_not_found():
+    client, a, b = _aggregate(placement=fill_first)
+
+    with pytest.raises(SiteRefusal, match="^res-b holds no reservation missing$") as raised:
+        await client.activate_lease(capacity_reservation_id="missing")
+
+    assert raised.value.status_code == 404
+    assert (a.activations, b.activations) == (["missing"], ["missing"])
+
+
+@pytest.mark.asyncio
+async def test_an_activation_refused_by_its_site_is_not_hidden_by_a_later_not_found():
+    """The site holding the reservation released it, as an expiry at the
+    site would, and refuses with a 409; the next site in route order does
+    not know it. The caller sees the conflict, not the later 404."""
+    client, a, b = _aggregate(placement=fill_first)
+    a.released.add("released-at-a")
+
+    with pytest.raises(SiteRefusal, match="is released$") as raised:
+        await client.activate_lease(capacity_reservation_id="released-at-a")
+
+    assert raised.value.status_code == 409
+    assert (a.activations, b.activations) == (["released-at-a"], ["released-at-a"])
+
+
+@pytest.mark.asyncio
+async def test_an_activation_at_an_unreachable_site_is_not_hidden_by_a_later_not_found():
+    """An unreachable site may hold the reservation, so its failure, not the
+    other site's 404, is what the caller sees."""
+    client, a, b = _aggregate(placement=fill_first)
+    a.broken = True
+
+    with pytest.raises(ConnectionError):
+        await client.activate_lease(capacity_reservation_id="anywhere")
+
+    assert b.activations == ["anywhere"]
+
+
+@pytest.mark.asyncio
+async def test_an_activation_refused_by_its_site_is_not_hidden_by_a_later_unreachable_site():
+    client, a, b = _aggregate(placement=fill_first)
+    a.released.add("released-at-a")
+    b.broken = True
+
+    with pytest.raises(SiteRefusal, match="is released$") as raised:
+        await client.activate_lease(capacity_reservation_id="released-at-a")
+
+    assert raised.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_a_commit_refused_by_its_site_is_not_hidden_by_a_later_not_found():
+    client, a, b = _aggregate(placement=fill_first)
+    a.released.add("released-at-a")
+
+    with pytest.raises(SiteRefusal, match="is released$") as raised:
+        await client.commit(
+            capacity_reservation_id="released-at-a", lease_end_utc="2099-01-01 01:00",
+        )
+
+    assert raised.value.status_code == 409
 
 
 @pytest.mark.asyncio

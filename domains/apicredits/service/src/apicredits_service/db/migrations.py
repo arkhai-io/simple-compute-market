@@ -326,6 +326,29 @@ def _migrate_retired_reservation_states(engine: Engine) -> None:
             )
 
 
+def _migrate_reservation_activated_at(engine: Engine) -> None:
+    """Add ``capacity_reservations.activated_at_utc``, null on every existing row.
+
+    This service hosts the whole site ledger as its quota ledger, and that
+    ledger keeps a compute lease's tail on the same row as every quota grant, so
+    its table takes every column the ledger maps. No code of this service reads
+    or writes the column; the composed ledger only shows it on the reservation
+    views it serves, and never activates a reservation here, because every quota
+    grant is an open-ended hold, which activation refuses.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    if _column_exists(engine, "capacity_reservations", "activated_at_utc"):
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE capacity_reservations "
+                "ADD COLUMN activated_at_utc VARCHAR"
+            )
+        )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260731_001_apicredits_schema_baseline",
@@ -350,5 +373,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261028_006_retired_reservation_states",
         _migrate_retired_reservation_states,
+    ),
+    Migration(
+        "20261106_007_reservation_activated_at",
+        _migrate_reservation_activated_at,
     ),
 )

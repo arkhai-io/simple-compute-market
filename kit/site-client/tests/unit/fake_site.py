@@ -6,6 +6,7 @@ import itertools
 import json
 import time
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -367,6 +368,7 @@ class FakeSite:
                 "units": match["allocated_gpu_count"],
                 "state": "reserved",
                 "deal_ref": body.get("deal_ref") or {},
+                "activated_at_utc": None,
             }
             self._emit("reserved", match["resource_id"])
             public_match = {
@@ -430,6 +432,19 @@ class FakeSite:
                 return 200, {"reservation": None}
             reservation["lease_end_utc"] = body["lease_end_utc"]
             self._emit("lease_truncated", reservation["resource_id"])
+            return 200, {"reservation": reservation}
+
+        if path.endswith("/activate-lease"):
+            capacity_reservation_id = path.split("/")[-2]
+            reservation = self.reservations.get(capacity_reservation_id)
+            if reservation is None:
+                return 404, {"detail": "not found"}
+            if reservation["state"] != "leased":
+                return 409, {"detail": f"is {reservation['state']}; cannot activate"}
+            if reservation.get("lease_end_utc") is None:
+                return 409, {"detail": "has no lease tail; cannot activate"}
+            if reservation["activated_at_utc"] is None:
+                reservation["activated_at_utc"] = datetime.now(timezone.utc).isoformat()
             return 200, {"reservation": reservation}
 
         if request.method == "GET" and path == "/api/v1/capacity/reservations":

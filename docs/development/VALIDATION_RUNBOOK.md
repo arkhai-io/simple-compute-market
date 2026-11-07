@@ -1037,7 +1037,7 @@ make -C e2e-tests test-module MODULE=e2e_bare_metal_real_provisioning ACTIVE_PRO
 ```
 
 The bounded helper gates are separate from deployed lifecycle evidence. Run
-`make test-bare-metal-iac` for helper unit/library integration tests and
+`make -C domains test-bare-metal-iac` for helper unit/library integration tests and
 `make build-provisioning` followed by `make test-bare-metal-iac-native`
 for the isolated native filesystem, NSS and IPC gate. A skipped or unavailable
 native prerequisite fails that dedicated gate. Deployed qualification must separately prove an actual grant/reclaim, cleanup

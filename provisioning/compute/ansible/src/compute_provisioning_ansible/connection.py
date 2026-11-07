@@ -5,7 +5,9 @@ A host with an ``ssh`` connection is reached by connecting to ``ssh_host`` on
 a file on the provisioning service's own filesystem and not secret, or
 ``private_key``, key material submitted with the connection, which this codec
 protects with the service's Fernet key (scheme ``fernet-v1``) before anything is
-stored, and decrypts only to materialize the connection for one execution.
+stored, and decrypts only to materialize the connection for one execution, or
+in memory, the plaintext discarded at once, to check that it decrypts when the
+Ansible executor's readiness is reported.
 ``public_host`` and ``public_port`` are the address and port tenants use to reach
 what the host delivers when they reach it on a different route than the
 provisioner does; each, when absent, is the connection's own.
@@ -27,6 +29,7 @@ from typing import Any
 
 from compute_provisioning.hosts import ConnectionEnvelope, ProtectedValue
 from compute_provisioning_contracts import ConnectionSubmission
+from cryptography.fernet import InvalidToken
 from market_config import decrypt_secret, encrypt_secret
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -76,6 +79,19 @@ class SshConnection(BaseModel):
         if not value.strip():
             raise ValueError("must not be blank")
         return value
+
+
+class ProtectedKeyUnreadableError(ValueError):
+    """A host's protected private key cannot be decrypted with the configured key.
+
+    The message names the host, why, and how to recover, and carries no
+    ciphertext or key material, so whoever catches it can show it as it is.
+    Running again meets the same configuration, so nothing gains by retrying.
+    """
+
+    def __init__(self, host_id: str, reason: str) -> None:
+        self.host_id = host_id
+        super().__init__(f"host {host_id!r}: its protected private key cannot be decrypted {reason}")
 
 
 class SshConnectionCodec:
@@ -167,14 +183,38 @@ class SshConnectionCodec:
             protected=dict(envelope.protected),
         )
 
-    def decrypt_private_key(self, ciphertext: str) -> str:
-        """A protected ``private_key``'s material, for one execution only.
+    def decrypt_private_key(self, ciphertext: str, *, host_id: str) -> str:
+        """A protected ``private_key``'s material, for one execution or one
+        readiness check, never kept.
 
-        Raises ``ValueError`` when no key is configured, and
-        ``cryptography.fernet.InvalidToken`` when the ciphertext was not
-        protected with this codec's key.
+        ``host_id`` names the host whose key this is, and is used only for the
+        error. Raises ``ProtectedKeyUnreadableError`` for every reason the key
+        cannot be decrypted: no key is configured, the ciphertext is malformed,
+        or it was protected under another key.
         """
-        return decrypt_secret(ciphertext, self._encryption_key or "")
+        if not self._encryption_key:
+            # A host's key cannot be submitted again until some key is
+            # configured to protect it, but any key will do, so both recoveries
+            # start by configuring one.
+            raise ProtectedKeyUnreadableError(
+                host_id,
+                "because no ssh_decryption_key is configured; configure the "
+                "ssh_decryption_key it was protected under, or configure one and "
+                "submit the host's private key again",
+            )
+        try:
+            return decrypt_secret(ciphertext, self._encryption_key)
+        except (InvalidToken, ValueError) as exc:
+            # Fernet reports a key protected under another key, and malformed
+            # ciphertext, as InvalidToken; market_config reports a configured
+            # key that is not a Fernet key as a ValueError. Neither names the
+            # ciphertext or the key.
+            raise ProtectedKeyUnreadableError(
+                host_id,
+                "under the configured ssh_decryption_key; restore the "
+                "ssh_decryption_key it was protected under, or submit the host's "
+                "private key again",
+            ) from exc
 
     @staticmethod
     def parse(envelope: ConnectionEnvelope) -> SshConnection:
@@ -235,6 +275,7 @@ def ssh_connection(
 __all__ = [
     "FERNET_SCHEME",
     "PRIVATE_KEY",
+    "ProtectedKeyUnreadableError",
     "SSH_CONNECTION_KIND",
     "SSH_CONNECTION_VERSION",
     "SshConnection",

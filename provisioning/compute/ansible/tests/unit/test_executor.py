@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +29,7 @@ from compute_provisioning_ansible import (
     AnsibleJobExecutor,
     AnsibleJobInterpretation,
     AnsibleJobPlan,
+    ProtectedKeyUnreadableError,
     SshConnectionCodec,
 )
 from compute_provisioning_ansible.runner import (
@@ -298,3 +300,37 @@ def test_no_file_outlives_its_run(ending) -> None:
     assert not seen["inventory"].exists()
     variables_path = runner.start_playbook.call_args.kwargs["extra_vars_path"]
     assert not variables_path.exists()
+
+
+def test_a_key_that_cannot_be_decrypted_fails_the_run_naming_the_host(
+    tmp_path, monkeypatch
+) -> None:
+    """The typed error leaves ``execute`` for the job engine to record, before
+    any playbook starts, and nothing the run wrote remains. Both keys are
+    generated for this test and protect nothing real."""
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    configured, other = Fernet.generate_key().decode(), Fernet.generate_key().decode()
+    runner = _runner()
+    runner.write_inventory = AnsibleRunner(
+        SimpleNamespace(), ssh_codec=SshConnectionCodec(configured)
+    ).write_inventory
+    ciphertext = encrypt_secret("PEM", other)
+    host = ExecutionHost(
+        host_id="node-1",
+        pool_id="default",
+        connection=ConnectionEnvelope(
+            kind="ssh",
+            version=2,
+            public={"ssh_host": "10.0.1.1", "ssh_port": 22, "ssh_user": "ops", "key_path": None},
+            protected={"private_key": ProtectedValue("fernet-v1", ciphertext)},
+        ),
+    )
+    run, _, _ = _run(host=host)
+
+    with pytest.raises(ProtectedKeyUnreadableError) as raised:
+        asyncio.run(_executor(runner).execute(run))
+
+    assert raised.value.host_id == "node-1"
+    assert ciphertext not in str(raised.value)
+    runner.start_playbook.assert_not_called()
+    assert list(tmp_path.iterdir()) == []

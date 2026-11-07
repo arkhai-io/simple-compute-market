@@ -1,0 +1,21 @@
+#!/bin/sh
+# Runs the pinned OpenSpec CLI through whichever package runner this machine has:
+# bunx when Bun is installed, otherwise npx, which needs only Node.js. Arguments
+# pass through unchanged, so `scripts/openspec validate <change> --strict` is the
+# CLI's own `validate`.
+#
+# The version stays at 1.14.0: 1.14.1 adds a strict-mode failure for requirement
+# text over 500 characters, which most permanent specifications do not yet meet
+# (openspec/README.md).
+set -eu
+
+package=@fission-ai/openspec@1.14.0
+
+if command -v bunx >/dev/null 2>&1; then
+  exec bunx "$package" "$@"
+fi
+if command -v npx >/dev/null 2>&1; then
+  exec npx --yes "$package" "$@"
+fi
+echo "scripts/openspec: neither bunx nor npx is installed; install Bun or Node.js" >&2
+exit 127

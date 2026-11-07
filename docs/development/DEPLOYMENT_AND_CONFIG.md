@@ -2083,3 +2083,10 @@ Kubernetes deployment topology (no Helm chart) does not yet have an
 equivalent deployment-config story — see the "Migrations at startup"
 section above and the relevant subsystem's `architecture.md` for how
 such a service currently starts up instead.
+
+### Artifact publishing destination
+
+Root publishing targets require explicit `AR_PROJECT` and `AR_LOCATION`, supplied
+on the make command line or in the environment. `AR_PREFIX` defaults to
+`AR_PROJECT`; it selects the repository-name prefix. For example,
+`make push-images AR_PROJECT=<project> AR_LOCATION=<region>`.

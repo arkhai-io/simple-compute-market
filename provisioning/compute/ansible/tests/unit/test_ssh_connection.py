@@ -15,6 +15,7 @@ from market_config import decrypt_secret
 from compute_provisioning_ansible import (
     FERNET_SCHEME,
     SSH_CONNECTION_VERSION,
+    ProtectedKeyUnreadableError,
     SshConnectionCodec,
     ssh_connection,
 )
@@ -65,6 +66,66 @@ def test_a_submitted_private_key_is_protected_and_never_kept_in_plaintext() -> N
     assert decrypt_secret(protected.ciphertext, _KEY) == _PEM
     assert "ciphertext" not in repr(protected) and protected.ciphertext not in repr(envelope)
     assert envelope.protected_schemes() == {"private_key": FERNET_SCHEME}
+
+
+def test_a_protected_key_decrypts_under_the_key_it_was_protected_with() -> None:
+    codec = SshConnectionCodec(_KEY)
+    envelope = codec.build({"ssh_host": "10.0.0.1"}, {"private_key": _PEM})
+
+    assert codec.decrypt_private_key(envelope.protected["private_key"].ciphertext, host_id="h1") == _PEM
+
+
+# Each way a protected key cannot be read: protected under another key (also
+# generated for this module, protecting nothing real), malformed ciphertext, a
+# configured key that is not a Fernet key, and a codec with no key configured.
+_OTHER_KEY = Fernet.generate_key().decode()
+
+
+def _protected_under(key: str) -> str:
+    return (
+        SshConnectionCodec(key)
+        .build({"ssh_host": "10.0.0.1"}, {"private_key": _PEM})
+        .protected["private_key"]
+        .ciphertext
+    )
+
+
+_RESTORE_OR_RESUBMIT = (
+    "under the configured ssh_decryption_key; restore the ssh_decryption_key it "
+    "was protected under, or submit the host's private key again"
+)
+
+
+@pytest.mark.parametrize(
+    "codec_key,ciphertext,reason",
+    [
+        (_KEY, _protected_under(_OTHER_KEY), _RESTORE_OR_RESUBMIT),
+        (_KEY, "not-a-fernet-token", _RESTORE_OR_RESUBMIT),
+        ("not-a-fernet-key", _protected_under(_KEY), _RESTORE_OR_RESUBMIT),
+        # Without a key a private key cannot be submitted again, so both
+        # recoveries named start by configuring one.
+        (
+            None,
+            _protected_under(_KEY),
+            "because no ssh_decryption_key is configured; configure the "
+            "ssh_decryption_key it was protected under, or configure one and "
+            "submit the host's private key again",
+        ),
+    ],
+    ids=["another-key", "malformed", "invalid-key", "no-key"],
+)
+def test_a_protected_key_that_cannot_be_decrypted_is_named(codec_key, ciphertext, reason) -> None:
+    with pytest.raises(ProtectedKeyUnreadableError) as raised:
+        SshConnectionCodec(codec_key).decrypt_private_key(ciphertext, host_id="kvm-7")
+
+    error = raised.value
+    assert isinstance(error, ValueError)
+    assert error.host_id == "kvm-7"
+    message = str(error)
+    assert message == f"host 'kvm-7': its protected private key cannot be decrypted {reason}"
+    assert ciphertext not in message
+    assert "material" not in message and "PRIVATE KEY" not in message
+    assert _KEY not in message and _OTHER_KEY not in message
 
 
 def test_a_private_key_cannot_be_submitted_without_a_protecting_key() -> None:

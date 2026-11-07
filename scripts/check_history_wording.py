@@ -15,7 +15,7 @@ multi-line string is read as a comment: in this repository such blocks hold
 embedded shell or configuration — a workflow's `run:`, a chart's config file —
 whose comments the rule covers. A string line that trips the check is reworded.
 
-Run by `make check-change`, against the merge-base with the branch the change
+Run by `make check-repository`, the change workflow's `pre-commit`, against the merge-base with the branch the change
 lands on. Usage: `check_history_wording.py [--base <branch>]`.
 
 Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek.

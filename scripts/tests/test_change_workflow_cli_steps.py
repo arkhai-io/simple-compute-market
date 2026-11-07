@@ -18,16 +18,17 @@ from change_workflow.cli import expand_sections, main, parse_sections, split_rul
 from change_workflow.common import StepError
 from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow.running import live_runs, recorded_run, select_run, signal_run, stop
-from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, FakeClaude, event_lines,
-                                      log_file, make_wrapper, option, option_rules, repository,
-                                      review_text)
+from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, FakeClaude, configured,
+                                      event_lines, log_file, make_wrapper, option, option_rules,
+                                      repository, review_text)
 
 
 def _checkout(path: Path) -> Path:
-    """`path` as a Git checkout: a step that reads `HEAD` is started only once the
-    checkout shows no round view open."""
+    """`path` as a Git checkout with its workflow configuration: a step that reads
+    `HEAD` is started only once the checkout shows no round view open, and one that
+    commits or validates only once the fields it needs are declared."""
     subprocess.run(["git", "init", "-q", str(path)], check=True)
-    return path
+    return configured(path)
 
 
 def test_the_command_line_records_a_branch_decision(
@@ -559,8 +560,8 @@ sys.path.insert(0, sys.argv[1])
 root, runs, started = Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]
 from change_workflow.harness import run_claude
 from change_workflow.wrapper import Wrapper
-def runner(command, cwd, feed):
-    return run_claude([sys.executable, "-c", sys.argv[5], started], cwd, feed)
+def runner(command, cwd, feed, step):
+    return run_claude([sys.executable, "-c", sys.argv[5], started], cwd, feed, step)
 Wrapper(root=root, runner=runner, head=lambda _: "c0ffee", echo=None,
         conversation=lambda _, session: root / "conversations" / f"{session}.jsonl",
         runs=lambda _: runs).run("validate", sys.argv[6])
@@ -679,8 +680,7 @@ def _make_n(*arguments: str) -> list[str]:
            if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "HELM_ALL_SCENARIOS",
                           "ALLOW", "ARGUMENTS", "SESSION_ID", "FROM", "BASE", "BRANCH",
                           "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT", "UNVALIDATED",
-                          "CHANGE_WORKFLOW", "CHANGE_WORKFLOW_MERGE_FROM",
-                          "CHANGE_WORKFLOW_REVIEW_BASE",
+                          "CHANGE_WORKFLOW", "CHANGE_BASE",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
     output = subprocess.run(["make", "-n", "--no-print-directory", *arguments],
                             cwd=Path(__file__).resolve().parents[2], capture_output=True,
@@ -689,12 +689,17 @@ def _make_n(*arguments: str) -> list[str]:
 
 
 @pytest.mark.parametrize("target,variables,commands", [
-    # A change lands on dev, so the merge brings dev in unless FROM names another.
-    ("merge", [], [f"{COMMAND} start merge \"X\" --arguments 'from dev'"]),
+    # CW-h8vm, "A repository includes the fragment": the merge brings in the branch
+    # the change lands on, which the engine reads, unless FROM names another; the
+    # repository sets no branch of its own.
+    ("merge", [], [f'{COMMAND} start merge "X"']),
     ("merge", ["FROM=release/2.1", "UNATTENDED=1"],
      [f"{COMMAND} start merge \"X\" --arguments 'from release/2.1' --unattended"]),
-    # A review reads the change against dev.
-    ("review", ["KIND=design"], [f'{COMMAND} review "X" --kind "design" --base "dev"    ']),
+    # A review reads the change against the branch it lands on, unless REVIEW_BASE
+    # names another.
+    ("review", ["KIND=design"], [f'{COMMAND} review "X" --kind "design"     ']),
+    ("review", ["KIND=design", "REVIEW_BASE=main"],
+     [f'{COMMAND} review "X" --kind "design" --base "main"    ']),
     ("design", ["UNATTENDED=1", "ALLOW=Bash(make lock)"],
      [f"{COMMAND} start design \"X\" --unattended --allow 'Bash(make lock)'"]),
     ("orchestrate", [], [f'{COMMAND} start orchestrate "X"']),
@@ -704,9 +709,13 @@ def _make_n(*arguments: str) -> list[str]:
     ("check-push-ready", [], [f"{COMMAND} check round-view", f"{COMMAND} check push"]),
     ("push-branch", [], [f"{COMMAND} push"]),
     ("change-graph", [], [f"{COMMAND} check graph"]),
-    ("check-change", [], ['python3 scripts/check_change.py "X"']),
-    # The diff checks read from the branch the change lands on, dev unless named.
-    ("check-change", ["CHANGE_BASE=release"],
+    # The owner's complete closing check is the workflow's whole pre-commit, whose
+    # hook is this repository's check-repository; each reads the branch the change
+    # lands on, which the clone recorded, unless CHANGE_BASE names another.
+    ("check-change", [], [f'{COMMAND} run pre-commit "X"']),
+    ("check-change", ["CHANGE_BASE=release"], [f'{COMMAND} run pre-commit "X" --base "release"']),
+    ("check-repository", [], ['python3 scripts/check_change.py "X"']),
+    ("check-repository", ["CHANGE_BASE=release"],
      ['python3 scripts/check_change.py "X" --base "release"']),
 ])
 def test_the_root_makefile_runs_the_command_through_the_fragment(
@@ -714,7 +723,24 @@ def test_the_root_makefile_runs_the_command_through_the_fragment(
     assert _make_n(target, "CHANGE=X", *variables) == commands
 
 
-@pytest.mark.parametrize("target", ["code-snapshot", "validate-local", "run-ci"])
+@pytest.mark.parametrize("target,variables,commands", [
+    ("run-e2e", [], [f"{COMMAND} check round-view", "python3 scripts/ci_evidence.py pipeline"]),
+    ("run-ci", ["WORKFLOW=tests.yml"],
+     [f"{COMMAND} check round-view", 'python3 scripts/ci_evidence.py dispatch "tests.yml"']),
+    ("pre-push", ["REMOTE=origin"], []),
+])
+def test_validations_dispatches_and_the_pre_push_checks_run_the_repositorys_scripts(
+        target: str, variables: list[str], commands: list[str]) -> None:
+    printed = _make_n(target, *variables)
+
+    if commands:
+        assert printed == commands
+    else:
+        assert any("check_public_content.py --pre-push \"origin\"" in line for line in printed)
+        assert any("check_secrets.py --pre-push \"origin\"" in line for line in printed)
+
+
+@pytest.mark.parametrize("target", ["run-e2e", "validate-local", "run-ci"])
 def test_a_repository_target_refuses_while_a_round_view_is_open(target: str) -> None:
     # The repository's own targets that read or publish HEAD keep the fragment's
     # round-view check as their first prerequisite.

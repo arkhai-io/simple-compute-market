@@ -1,8 +1,9 @@
 """VM-domain interpretation of the domain-neutral `region`/`sla` hints.
 
-`kit/resource-pools.hints` owns the key names and generic reads; this
-module owns how the VM domain resolves them against the storefront's own
-override tier, the site-scoped override store (see `resolve_sla` below).
+`market_resource_pools_contracts.hints`, in `kit/resource-pools-contracts`,
+owns the key names and generic reads; this module owns how the VM domain
+resolves them against the storefront's own override tier, the site-scoped
+override store (see `resolve_sla` below).
 
 Region and SLA are treated differently on purpose. Region is a plain fact
 about where hardware sits -- no storefront override makes sense, since a
@@ -18,6 +19,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from market_resource_pools_contracts.hints import raw_region, sla_value
+
 
 def resolve_region(policy_tags: Mapping[str, Any]) -> str | None:
     """The pool's region: its declared hint, or ``None``.
@@ -28,12 +31,6 @@ def resolve_region(policy_tags: Mapping[str, Any]) -> str | None:
     human-readable descriptive text, not a value a consumer needs to
     further interpret, so a malformed value is not propagated.
     """
-    # Local import -- see resolve_vm_listing_cardinality_mode's own comment
-    # in arkhai_vms_listings.listing_cardinality_mode for the reason (kept
-    # out of any consumer that imports this module's signatures without
-    # calling it).
-    from market_resource_pools_contracts.hints import raw_region
-
     hint = raw_region(policy_tags)
     if isinstance(hint, str) and hint:
         return hint
@@ -66,9 +63,6 @@ def resolve_sla(
     if storefront_override is not None:
         return storefront_override
     if accept_pool_declared_sla:
-        # Local import -- same reason as resolve_region, above.
-        from market_resource_pools_contracts.hints import sla_value
-
         hint = sla_value(policy_tags)
         if hint is not None:
             return hint

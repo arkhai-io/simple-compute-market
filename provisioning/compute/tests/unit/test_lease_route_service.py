@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 
 import pytest
 from compute_provisioning_contracts import (
@@ -103,6 +104,22 @@ async def test_terminate_and_oversight_report_the_lease_view():
 
     assert (terminated.status, terminated.release_job_id) == (LeaseState.RELEASING, "f-1")
     assert handed.status == LeaseState.UNMANAGED
+
+
+def test_the_lease_view_maps_the_recorded_activation_instant_or_none():
+    activated = {
+        **_reservation("vm-1", "vm"),
+        "activated_at_utc": "2026-01-01T00:07:41.204118+00:00",
+    }
+    service = LeaseRouteService(
+        FakeLeases(activated, {**_reservation("vm-2", "vm"), "activated_at_utc": None}),
+        FakeLifecycle(),
+    )
+
+    assert service.get("vm-1").activated_at_utc == datetime(
+        2026, 1, 1, 0, 7, 41, 204118, tzinfo=timezone.utc
+    )
+    assert service.get("vm-2").activated_at_utc is None
 
 
 def test_a_reservation_recording_no_mode_is_a_conflict_not_a_guess():

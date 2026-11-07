@@ -398,11 +398,22 @@ rest nor withheld from a read.
       Level 2 through the canonical typed client. This is the surface that
       published it, so this is the surface the test has to use.
 - [ ] 2A.7 The rendered vars file holds the decrypted token, so it needs the
-      same lifetime and permissions as decrypted host key material — owner-only,
-      in a directory the operation owns and removes. **Implement that in
-      `contain-embedded-host-key-material`,** which is building exactly that
-      mechanism for key files; doing half of it here would leave two owners for
-      one problem. Record the dependency in both changes.
+      same lifetime and access restrictions as other decrypted secret material
+      on the execution path, as `physical-provisioning`'s "Relay admission
+      tokens are resolved at execution" requires. The existing handling meets
+      that requirement: `write_extra_vars` creates the file owner-only (`0600`)
+      and `O_EXCL`, under a uuid name in the process temporary directory, and
+      the Ansible job executor removes it in a `finally` covering success,
+      failure, timeout, and cancellation (`test_no_file_outlives_its_run`), as
+      decrypted key files are. No change records a dependency for it.
+      *Revised:* this task first asked for the file in a directory the
+      operation owns and removes, built in `contain-embedded-host-key-material`.
+      That change weighed a per-operation directory and rejected it (its design
+      D3): it fixes no failure anyone can name, and touches six code sites and
+      four fixtures. D3's revisit trigger is a third secret file per run, such
+      as a per-run `known_hosts` if SSH host-key checking is enabled, or a
+      provisioning container shared with another user. Ticking this task is a
+      decision for this change's closeout.
 
 **Validation:** `make test` in `provisioning/compute/service`.
 
@@ -970,6 +981,10 @@ Listed in an earlier order; closeout works the parts in `openspec/README.md`'s o
       `contain-embedded-host-key-material`. The disposition itself is written
       into the goal so a later reader finds the reasoning rather than only its
       absence.
+      *Correction:* Goal 1's per-host-key gap row was removed at
+      `contain-embedded-host-key-material`'s closeout, since per-host keys are
+      registered through the host API; the goal's current state records them,
+      and its gap table does not name that change.
 - [x] 11.6 **Promotion.**
       Archival uses `--skip-specs`: this task synchronized the specification by hand.
 
@@ -1000,7 +1015,7 @@ Listed in an earlier order; closeout works the parts in `openspec/README.md`'s o
 | Import and digest commit together, which requires a session-scoped import | `openspec/specs/resource-pool-management/spec.md` |
 | Relay uniformity per host is a limit of one client per host, not of the model | `openspec/specs/physical-provisioning/architecture.md` |
 | Encrypting a configured secret at rest is part of the configuration pattern | `kit/config` module docstring |
-| One SSH key currently reaches every host in an environment; per-host material is supported and unused | recorded in this change's `design.md`; the fix is owned by `contain-embedded-host-key-material` |
+| One SSH key currently reaches every host in an environment; per-host material is supported and unused | recorded in this change's `design.md`; per-host keys are registered through the host API, and `contain-embedded-host-key-material` names one that cannot be decrypted, so no fix is owed |
 - [ ] 11.7 **Campaign index currency.** Update this change's row, and its campaign's
       dependency graph, in `openspec/changes/README.md`, or record that both are
       unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
@@ -1031,16 +1046,17 @@ rented host, and host preparation is the step that can lose one.
 section 8, because a host reached through a management tunnel cannot be
 registered without it.
 
-`contain-embedded-host-key-material` is a practical prerequisite for section 8
-whenever the rented host's operator supplies its own SSH key rather than
-accepting the deployment's shared one. It shares no code with this change and
-either may land first.
+`contain-embedded-host-key-material` is not a prerequisite for section 8. A
+rented host whose operator supplies its own SSH key is registered with it
+through the host API (`POST /api/v1/hosts` with `secrets`, or the INI import's
+`embedded` mode); that change names such a key when it cannot be decrypted. It
+shares no code with this change, and neither depends on the other.
 
 ## Implementation progress
 
 142 of 170 tasks complete. What remains is listed below and is not padding: the
-live-hardware gates, one decision gate, work this change hands to a sibling, the
-Level 2 tests still owed, and closeout.
+live-hardware gates, two decision gates, the Level 2 tests still owed, and
+closeout.
 
 **Done — the service.** The relay resource, its controller, encryption at rest
 under the profile key, the redacted/execution reader split, preserve-on-absent,
@@ -1064,9 +1080,12 @@ documentation.
   for that reason alone.
 - *A decision gate:* 1A.7, relay deletion with live leases. Deliberately open;
   the schema forecloses none of the three answers.
-- *Owned elsewhere:* 2A.7, the vars file's permissions and lifetime, which
-  `contain-embedded-host-key-material` builds the mechanism for. Neither change
-  is complete without it.
+- *A decision gate met by existing handling:* 2A.7, the vars file's
+  permissions and lifetime. The file is created owner-only and `O_EXCL` and
+  removed on every ending of the run, which meets the permanent requirement;
+  the per-operation directory the task first named was rejected in
+  `contain-embedded-host-key-material`'s D3. Ticking it is this change's
+  closeout's.
 - *Level 2 tests:* complete. The relay controller, the lease lifecycle, and
   relay-bearing requests are all driven through the real application and the
   canonical client.
