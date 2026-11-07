@@ -167,7 +167,14 @@ class BareMetalLifecycle:
         return MediationAdapter(binding, json.loads(self.agreement_bytes(binding.negotiation_id)), client, clock=self.clock)
 
     def watch(self, deal, payment, dispute):
-        account = payment.data.mandate.to.root if payment else ""
+        # Only an Arkhai payment carries a mandate naming the two accounts; an
+        # Alkahest deal's once-only adapter names none, and moves no money.
+        mandate = (
+            payment.data.mandate
+            if payment is not None and deal.payment.mechanism == "arkhai.payments.v1"
+            else None
+        )
+        account = mandate.to.root if mandate is not None else ""
         agreement, _ = self.agreement(deal.negotiation_id)
         buyer = Identity.model_validate(agreement.buyer)
 
@@ -178,8 +185,8 @@ class BareMetalLifecycle:
 
         def actor(value):
             return payment_actor(
-                value, payer_account=payment.data.mandate.from_.root if payment else None,
-                payee_account=account if payment else None, buyer=buyer,
+                value, payer_account=mandate.from_.root if mandate is not None else None,
+                payee_account=account if mandate is not None else None, buyer=buyer,
                 seller=self.runtime.seller_principal,
                 authority_account=deal.dispute.account if deal.dispute else None, authority=authority,
             )

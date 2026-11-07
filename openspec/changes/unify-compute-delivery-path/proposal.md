@@ -152,3 +152,6 @@ lane deal stages change. API credits is a regression consumer.
 - D12: no permanent destination — the deltas themselves are merged by the archive.
 - D13: no permanent destination — index rows are planning state.
 - D14: no permanent destination — the cadence is the plan's, not current behaviour.
+- D15 lane qualification: `docs/development/TESTING.md` — the stage discipline's
+  wait for an Agreement instant, the VM and bare-metal lane entries, and the
+  real-provisioning lane's clock precondition.

@@ -354,7 +354,11 @@ under ["Pause the loop, then advance it explicitly"](#2-integration-tests), and
 initializes what the deal needs. Then, for each transition, it previews the
 move through the route's evaluate twin or the loop's dry run, advances exactly
 one side effect, and measures that effect against expectations through typed
-clients, with no sleeps: the only wait is on a request the stage made. What a
+clients, with no sleeps: the only wait is on a request the stage made, or for
+an instant the deal's Agreement fixes, such as its start, since no control
+moves the wall clock (`wait_until` in
+`e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`); a stage waiting
+for an instant then advances what acts on it explicitly. What a
 stage produced goes into the shared deal state for the stages that depend on
 it, and whatever happened, the fixture's finaliser resumes the loops.
 
@@ -473,15 +477,23 @@ evidence. Each lane builds only the images its stack runs
 project of its own:
 
 - **VM lane** (`make -C e2e-tests test-e2e-vm`): Bob's and Alice's storefronts
-  and provisioning authorities, the two VM registries, and the dev chain.
+  and provisioning authorities, the two VM registries, and the dev chain. After
+  the canonical deal and a buyer's surrender, its typed-client deal runs two
+  deals on the freed capacity: one whose Agreement starts later, committed at
+  settlement and dispatched only by a resume-pass step once its start is
+  reached, and one whose lapsed hold leaves its settlement placement no
+  capacity, which ends as the seller's failure with nothing dispatched.
 - **Bare-metal lane** (`make -C e2e-tests test-e2e-bare-metal`): one site
   trusting the bare-metal storefront, a bare-metal registry, and the dev chain.
   Its publication scenario declares pools and whole-host capacity through the
   site's operator clients, steps publication, and follows one listing through
   discovery, withdrawal, and reinstatement at the registry. Its mock-provisioned
   deal runs the canonical compute deal for one whole host, stage for stage with
-  VM's, then a second deal on the freed host whose buyer teardown, sent twice,
-  returns one operation and releases capacity once. Its separate
+  VM's, stepping the storefront's `delivery-recovery` cycle after dispatch and
+  after readiness, as a restart would; then a second deal on the freed host
+  whose buyer teardown, sent twice, returns one operation and releases capacity
+  once; then a third whose machine is taken before settlement, which ends as
+  the seller's failure with nothing reserved. Its separate
   `e2e_bare_metal_payment_deal` scenario uses a wallet-free profiled buyer for
   one fixed-term USD/6 purchase, receipt-gated mock access, same-transaction and
   same-fulfillment re-drive through `settle_agreement`, then seller refund and
@@ -671,7 +683,11 @@ release. Where a mock lane releases a gate, the real lane waits for the real job
 instead, found through the fulfillment's capacity reservation in the operator
 job list and read by its status within a named bound. That poll is the one wait
 the lane adds to the stage discipline, which otherwise waits only on a request a
-stage made; a failed or timed-out job fails the stage with its logs.
+stage made or for an instant the Agreement fixes; a failed or timed-out job
+fails the stage with its logs. The shared stages compare the runner's clock
+with the stack's — settlement is timed against the Agreement start, and the
+lease's start and activation against settlement — so the operator's machine
+keeps its clock synchronized with the stack's to within a second.
 
 A rerun against the same stack reconciles rather than duplicates. The host's
 connection is replaced where it differs and the declaration rewritten, and the

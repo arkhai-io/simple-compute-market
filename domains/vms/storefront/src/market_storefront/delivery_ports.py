@@ -498,8 +498,9 @@ async def drive_vm_delivery(
     failed. A converged deal is ``ready``; an ended one is ``ended``. When the
     end is the path's own record of a delivery failure, the seller's
     configured failure policy runs once, as the delivery record first becomes
-    terminal. The ``provision`` stage events report a fulfillment's acceptance
-    and the delivery's outcome, each once, as the records first show them.
+    terminal. The ``provision`` stage events report the deal's reservation, a
+    fulfillment's acceptance and the delivery's outcome, each once, as the
+    records first show them.
     """
     before = await db.load_vm_delivery(negotiation_id=negotiation_id) or {}
     try:
@@ -516,6 +517,8 @@ async def drive_vm_delivery(
         "capacity_reservation_id": outcome.capacity_reservation_id,
         "fulfillment_id": outcome.fulfillment_id,
     }
+    if after.get("capacity_reservation_id") and not before.get("capacity_reservation_id"):
+        stage_event("provision", "reserved", **identities)
     if after.get("fulfillment_id") and not before.get("fulfillment_id"):
         stage_event("provision", "job_submitted", **identities)
     if outcome.kind is OutcomeKind.CONVERGED:

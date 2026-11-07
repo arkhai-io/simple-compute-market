@@ -499,6 +499,27 @@ Two rounds, each implemented in two sessions, then closeout.
 
 The site and library contracts are reviewed before either storefront is rewritten.
 
+### D15 — Lane qualification waits for the Agreement's instants, and restarts are recovery steps
+
+Settled while implementing section 8. The lanes' controls hold and step loops;
+none moves the wall clock. A late settlement must be late to the second the
+servicing record keeps, and a forward deal must reach its start, so a stage
+waits for an instant the Agreement fixes (`wait_until`, bounded), then advances
+what acts on it explicitly; `docs/development/TESTING.md`'s stage discipline
+admits that one wait. A restart is emulated by one step of the storefront's
+recovery loop, what a restarted storefront runs first. VM's canonical deal
+cannot be re-driven that way, since its settle call holds the delivery's claim
+while provisioning settles, so VM's recovery is shown by the forward deal, which
+only the resume pass carries past its start. The lanes reach a seller failure
+before dispatch through a settlement placement that finds no capacity; no
+existing control loses an acknowledgement or makes the site refuse a live
+commit, so those interleavings stay with library and application integration.
+
+Rejected: a requested start in the past to make settlement late, which tests a
+deal no buyer asks for; an injected storefront clock, a test seam in every
+service for one assertion; fault injection at the site, a new control surface
+in `kit/site` for interleavings integration tests already prove.
+
 ## Dependencies
 
 - `agreed-evidence-and-early-termination` and `activate-compute-leases-at-the-site`
@@ -536,5 +557,6 @@ Planned destinations, completed at closeout:
 | D9 billing-start evidence | `compute-delivery` spec; `deal-lifecycle` spec (wording) |
 | D10 Alkahest adapter | `deal-lifecycle` architecture companion (adapter composition) |
 | D11 end hand-off | `compute-delivery` spec, referencing `deal-lifecycle` |
+| D15 lane qualification | `docs/development/TESTING.md` "The discipline every scenario follows", the VM and bare-metal lane entries and "The real-provisioning lane" (written in section 8) |
 | Capability index | `openspec/specs/README.md` adds `compute-delivery` |
 | Goal and campaign currency | `docs/development/ROADMAP.md` Goal 8; `openspec/changes/README.md` |

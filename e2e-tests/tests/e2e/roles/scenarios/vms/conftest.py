@@ -106,6 +106,14 @@ class DealState(ComputeDealState):
     lease_status: Optional[str] = None
     # The second deal observes buyer surrender independently of natural expiry.
     lifecycle_purchase: Optional[Any] = None
+    # The deal whose Agreement starts later (`delivery_timing_deal.py`):
+    # agreed and committed at 13a, delivered at 13b, released at 13c, which the
+    # no-capacity deal after it requires.
+    forward_deal: Optional[Any] = None
+    forward_reservation_id: Optional[str] = None
+    _forward_events_since: Optional[int] = None
+    forward_fulfillment_id: Optional[str] = None
+    _forward_deal_released: bool = False
 
 
 # ---------------------------------------------------------------------------

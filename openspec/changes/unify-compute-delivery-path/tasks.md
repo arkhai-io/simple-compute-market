@@ -1148,26 +1148,215 @@ and the VM and bare-metal deal scenario modules under
 `e2e-tests/tests/e2e/roles/scenarios/`, using their existing typed clients, loop
 controls and mock-provisioning rules.
 
-- [ ] 8.1 Extend the shared compute deal stages to read the lease through `LeaseView`
+- [x] 8.1 Extend the shared compute deal stages to read the lease through `LeaseView`
       after delivery and assert `activated_at_utc` is set and the end equals the
       Agreement end, in both domains' complete-deal scenarios.
-- [ ] 8.2 Add a stage settling a deal after its Agreement start, asserting the
+      Done in the shared stages, so both canonical deals (`e2e_deal`,
+      `e2e_bare_metal_mock_deal`) run it, and both real-provisioning modules declare
+      it; they are in no lane and were not run.
+      `DealLease.refresh` (`helpers/compute_deal.py`) reports the lease contract's
+      `lease_start_utc`, `lease_end_utc` and `activated_at_utc`. 06b reads the
+      Agreement window from the accepted negotiation (`requested_start_utc`, the
+      buyer's requested start or else the acceptance instant, and
+      `agreed_duration_seconds`) into the new state fields `agreement_start` and
+      `agreement_end`; 09c holds the lease's start and end to them within a second
+      (`WINDOW_TOLERANCE`: the servicing record keeps the window in whole seconds, the
+      negotiation to the microsecond) and requires an activation recorded after
+      settlement and inside the window.
+- [x] 8.2 Add a stage settling a deal after its Agreement start, asserting the
       committed window is the Agreement's; and a forward deal asserting nothing is
       dispatched before its start and delivery follows it, using the lane's loop
       controls rather than sleeps.
-- [ ] 8.3 Drive, with the existing loop and mock-rule controls, a restart at each
+      Late settlement is the canonical deal's own 08b, in both domains: the dev chain
+      funds an escrow within a second of acceptance (the first lane run settled
+      0.34 s after the start), too close to tell at the second, so 08b waits until
+      the Agreement start is `LATE_SETTLEMENT` (3 s) behind and records when it
+      settled, and 09c also requires the lease to start before settlement. The wait
+      is `wait_until` (`compute_deal_stages.py`), bounded at two minutes and repeated
+      when a sleep returns early (it did once on this host): the stages' one wait not
+      on a request, for an instant the Agreement fixes. Its clock and sleep are
+      injected; unit tests in `e2e-tests/tests/unit/test_compute_deal_stages.py`
+      cover a sleep returning early, a past instant and the bound.
+      `docs/development/TESTING.md` is amended, a file the plan did not name: its
+      stage discipline admits the wait, the real-provisioning lane states that the
+      runner's clock must agree with the stack's to within a second (08b and 09c
+      compare them), and the VM and bare-metal lane entries name the new deals.
+      D15 records the decision.
+      The forward deal is VM's, in the new `vms/delivery_timing_deal.py` (13a–13c,
+      declared after 12c in `test_full_deal.py`; new state fields in VM's
+      `DealState`): `compute.v1`'s `start_utc` asks for a start 30 s ahead
+      (`FORWARD_LEAD`). Settle answers before its delivery runs, so 13a waits for the
+      delivery's new `provision/reserved` stage event (below), then finds the deal's
+      one reservation `leased` under the Agreement window, with no activation, no
+      fulfillment and no `job_submitted` event; with a resume-pass step before the
+      start nothing is dispatched either, though nothing shows that step drove the
+      deal (the settle call may still hold its claim). After
+      `wait_until(start + 1 s)` a resume step
+      dispatches, convergence makes the fulfillment active, a further resume step
+      activates the lease no earlier than the start, and the deal is ready on its one
+      reservation; the buyer then ends it and its capacity returns. Bare metal has no
+      forward deal: its negotiation gives every Agreement the acceptance instant as
+      its start (`agreement_terms` in its negotiation runtime sets no start), so no
+      bare-metal deal waits in a lane; its wait is 7.5's library integration
+      (`test_a_deal_that_starts_later_waits_for_its_start`).
+- [x] 8.3 Drive, with the existing loop and mock-rule controls, a restart at each
       adjacent step and each intent/acknowledgement gap (reserve, dispatch, activation,
       billing start) recovering the same reservation and fulfillment, and a commit
       refusal recorded as seller failure, released through the no-dispatch path, and
       recovered across a restart without a second reservation. Record the run evidence;
       the deadline-caused refusal is `renewable-compute-lease-deadlines`'.
-- [ ] 8.4 Run the complete-deal markers in the ready lanes — `e2e_deal`,
+      Done with differences, for the round's review to weigh. A restart is emulated
+      by one step of the storefront's recovery loop, the existing control and what a
+      restarted storefront runs first. Bare metal, in the new
+      `bare_metal/recovery_stages.py`: 09a1 steps `delivery-recovery` once the
+      fulfillment is active. The lease is unactivated before the step and nothing
+      else drives the deal meanwhile, and after it the lease is activated on the
+      deal's one reservation with the fulfillment unchanged, so the activation is the
+      re-drive's. 08b1 steps the cycle between dispatch and readiness: the same
+      reservation, the same fulfillment, still `dispatching`. Such a drive only polls
+      the fulfillment, so nothing shows it ran. The cycle's selection rule (started,
+      not available) says it does, and its report counts the deals it read, not
+      those it drove. VM's
+      canonical deal cannot be re-driven this way: its settle call drives the
+      delivery in the background and holds the delivery's claim while provisioning
+      settles, so a resume step skips the deal. A first cut put both re-drives in the
+      shared stages; VM's dispatch re-drive passed only because nothing ran, and its
+      readiness re-drive failed. VM's recovery evidence is the forward deal, which the
+      resume pass alone carries from commit through dispatch and activation once the
+      settle call has returned it waiting.
+      Commit refusal: no lane control makes the site refuse the commit of a live
+      reservation. The case the lanes can reach is D11's replacement placement that
+      finds no capacity. VM's 13d releases the acceptance hold at the site and takes
+      the resource with an administrative reservation, then waits on the settlement
+      long-poll until the settlement is `ended`. The deal's only reservation is the
+      hold, `released`, so no `:settlement` placement was made; the stage does not
+      observe the refused commit or the `:hold` replay themselves. Bare metal's 13a
+      (in `recovery_stages.py`, after 12e, which now produces
+      `_second_deal_released` for it) takes the machine after acceptance; its settle
+      call drives the deal. In both, the buyer's lifecycle read shows the end
+      recorded by the seller with cause `capacity_unavailable` and source
+      `delivery`, nothing is dispatched and no reservation of the deal's own exists.
+      A recovery step afterwards leaves all of it as it was, but neither recovery
+      loop drives an ended deal, so that step shows no recovery. The no-dispatch
+      release has nothing to release here, since the deal never held capacity.
+      Not driven in the lanes, since no existing control loses an acknowledgement or
+      makes the site refuse a live commit: the reserve, activation and billing-start
+      acknowledgement gaps and a refused live commit. Library integration covers them
+      (3.8, 4.6), and so does application integration (5.5, 7.5). No filing is
+      dispatched in a lane: an Alkahest deal's `delivery_end` filing is unsupported
+      (D10), and a payment deal's filing lane waits for
+      `add-arkhai-payments-lane-double`.
+      Outside the plan, two defects the lanes found, both from this round's code:
+      - VM's settlement wait (`controllers/settle_controller.py`) counted only
+        `ready` and `failed` as terminal. Section 5's path records `ended` for a deal
+        ended before delivery, so a wait on such a deal ran out its timeout. `ended`
+        is now terminal. Application integration in `test_vm_delivery_path.py`
+        (`test_a_settlement_wait_returns_once_delivery_has_ended`: a forward deal
+        ended while it waits, re-driven, then waited on through the admin settle
+        routes with their identity middleware) answers at once with `ended`. It was
+        not run against the unfixed predicate.
+      - Bare metal's lifecycle watch (`lifecycle.py`) read `payment.data.mandate`
+        from whatever adapter resolved. Since section 7 an Alkahest deal resolves the
+        once-only adapter, which has none, so every lifecycle read of an Alkahest
+        bare-metal deal answered 500 (the lane's 12d). It now reads a mandate only
+        for an Arkhai payment, as VM's watch does. Integration over the real
+        storefront runtime, not through the HTTP route, in `test_delivery_path.py`
+        (`test_an_alkahest_deals_lifecycle_read_shows_delivery_with_no_payment_account`):
+        it calls the seller servicing's read, which the lifecycle route calls, for a
+        delivered Alkahest deal; delivery is shown and the authority view stays
+        rejected naming `alkahest.v1`. It was not run against the unfixed watch; the
+        lane's 12d, through the route, passes with the fix.
+      Added for the lanes: VM's delivery emits `provision/reserved` once, when its
+      record first shows a reservation (`delivery_ports.drive_vm_delivery`, beside
+      `job_submitted`), so a stage can tell the background drive has committed. That
+      is an observability seam `TESTING.md` asks for. The payment-deal test in
+      `test_vm_delivery_path.py` now expects `reserved`, `job_submitted`,
+      `fulfilled`, with the event naming the reservation.
+      Not fixed, for the round's review: bare metal's settlement wait
+      (`deal_controls.py`) treats only `ready` and `failed` as terminal, and for a
+      deal ended before delivery its status probably reports the escrow's status
+      rather than `ended`. If so, an admin wait on such a deal runs out its timeout,
+      as VM's did. This was not verified: no bare-metal stage waits on it.
+- [x] 8.4 Run the complete-deal markers in the ready lanes — `e2e_deal`,
       `e2e_deal_buyer_cli`, `e2e_vm_payment_deal`, `e2e_bare_metal_mock_deal`,
       `e2e_bare_metal_payment_deal`, and `e2e_credits_payment_deal` as the API-credit
       regression — through `make -C e2e-tests test-e2e-vm`, `test-e2e-bare-metal` and
       `test-e2e-apicredits`. The mediation and filing lane runs wait for
       `add-arkhai-payments-lane-double`; until it lands they are recorded as blocked,
       never as passing. End-to-end: these markers are the section's evidence.
+      System, run locally with `make -C e2e-tests test-e2e` (the three lanes in turn,
+      each with its default markers, which include all six named) on the working tree
+      of this section's commit over `eb488f40b`: VM lane 157 passed and 2 skipped;
+      bare-metal lane 73 passed; API-credit lane 4 passed; exit 0. The two skips are
+      `e2e_vm_payment_deal`'s mediation case stages
+      (`test_operator_end_files_one_case_without_a_local_payment_remedy`,
+      `test_seller_refund_is_financial_and_release_waits_for_the_callback`), a blocked
+      skip with no mediation target configured in the lane: blocked on
+      `add-arkhai-payments-lane-double`, not passing. Earlier focused runs found the
+      defects 8.3 records and confirmed each fix (`e2e_deal` 42 passed,
+      `e2e_bare_metal_mock_deal` 42 passed). A baseline VM run before this section's
+      stages, on `eb488f40b` itself, passed `e2e_deal_buyer_cli` and
+      `e2e_vm_payment_deal`: sections 5–7 deliver VM deals through the path in the
+      lane. The pipeline's own run is validation's. End-to-end: these markers,
+      confirmed. Owed by validation: none.
+      Not lane-verified: the fresh-context check's fixes made after that three-lane
+      run. They are VM's `provision/reserved` event and 13a's wait on it, 13d's
+      released-hold assertion, the typed forward-deal fields, bare metal's 09a1
+      before-read and 13a's new prerequisite. Every later lane rebuild failed on this
+      host before any test ran: Docker's credential helper timed out through WSL
+      (`error getting credentials`, `UtilAcceptVsock ... accept4 failed 110`), three
+      times. The VM storefront suites (unit 1166, integration 546), the e2e unit
+      suite (558, which now parses the new stage modules) and `make test` cover
+      them. The round's validation pipeline is their lane evidence.
+      Checks on the final tree: `make test` passed, both before and after the
+      fresh-context fixes; `make test-bare-metal` passed (storefront 594); no
+      dependency changed, so no relock, and `make check-packaging` passes;
+      `make check-comment-hygiene` passes; `make check-change` fails only on the
+      citation of `openspec/specs/compute-delivery/architecture.md`, which closeout
+      creates (9.9).
+      Fresh-context check (one pass, after the full lane run). It found no
+      layering, comment-hygiene or packaging defect. Fixed from it:
+      - 13a measured before VM's background delivery had run; it now waits on the
+        new `reserved` event.
+      - Re-drives that cannot fail are now either made measurable (09a1's
+        before-read) or described as what they are: 08b1, and the recovery steps
+        over ended deals in 13d and bare metal's 13a.
+      - 13d's note claimed the refused commit and the `:hold` replay, which it does
+        not observe; it now asserts the hold `released` and the note says what is
+        seen.
+      - The 8.1 note claimed the real lanes ran.
+      - The stage-set unit check did not parse domain stage modules outside
+        `publication_stages.py`; it now reads `recovery_stages.py`,
+        `lifecycle_deal.py` and `delivery_timing_deal.py`.
+      - A dict was handed between stages; it is now typed fields.
+      - Bare metal's 13a required a field 12d produces rather than 12e's.
+      - `TESTING.md` was stale in three places: the lane entries, the real lane's
+        "one wait" and its clock precondition.
+      - There was no design record of the wait (D15 now).
+      - `test_full_deal.py`'s stage map was stale.
+      - `wait_until` was untestable.
+      - The bare-metal regression test was labelled library integration.
+      - A `conftest.py` comment was wrong.
+      Declined: splitting the later deals' stages into one effect each, and
+      previewing their settlement. 12b–12c already run a deal per stage, and the
+      canonical deal previews settlement once per lane; the bare-metal module's
+      docstring now says the later deals are not previewed again. Recorded, not
+      fixed: bare metal's settlement wait and `ended` (8.3's notes).
+      Handoff for closeout and the round's review:
+      - Section 8 touched files the plan did not name. They are
+        `docs/development/TESTING.md`; `helpers/compute_deal.py`;
+        `vms/delivery_timing_deal.py`, `bare_metal/recovery_stages.py` and both
+        lanes' `conftest.py`; `e2e-tests/tests/unit/test_compute_deal_stages.py`;
+        VM's `settle_controller.py`, `delivery_ports.py` and
+        `test_vm_delivery_path.py`; and bare metal's `lifecycle.py` and
+        `test_delivery_path.py`.
+      - The TESTING.md edits are already the D15 promotion, so closeout 9.9 only
+        records them.
+      - The real-provisioning modules gained no stage of their own. They run the
+        shared 08b and 09c changes, unrun here, under the clock precondition
+        `TESTING.md` now states.
+      - Large session: both sections' lane iterations ran in one session that did
+        not compact; this round's triage should start fresh.
 
 ## 9. Closeout
 

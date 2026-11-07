@@ -252,7 +252,9 @@ class AdminSettleController:
             verify=verify,
             preview_fulfillment=preview,
             settle_status=settle_status,
-            is_terminal=lambda status: status.get("status") in {"ready", "failed"},
+            # `ended` is the delivery outcome recorded when the deal ended
+            # before it was delivered; nothing later moves it.
+            is_terminal=lambda status: status.get("status") in {"ready", "failed", "ended"},
         )
 
     async def _routed(self, call):

@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 from core_storefront import StorefrontFulfillmentContext, StorefrontFulfillmentPorts
+from market_deal_lifecycle_contracts.models import Rejected
 from market_deal_servicing import Classification, EndSession, FinalRequest
 from market_deal_servicing.evidence import transaction
 from market_site_client import SiteCapacityClientError
@@ -124,6 +125,21 @@ async def test_an_alkahest_deal_is_activated_before_it_is_available(tmp_path) ->
     receipt = await runtime.db.load_bare_metal_receipt(negotiation_id=negotiation_id)
     assert result.ssh_user == "tenant-a" and "host" not in result.model_dump()
     assert receipt.status == "ready"
+
+
+async def test_an_alkahest_deals_lifecycle_read_shows_delivery_with_no_payment_account(tmp_path) -> None:
+    """The read resolves the deal's once-only adapter, which names no payment
+    account: delivery is shown, and the authority view stays rejected naming
+    the mechanism."""
+    runtime, negotiation_id = await _verified(tmp_path)
+    await _deliver(runtime, negotiation_id)
+
+    read = await runtime.lifecycle.seller.read(negotiation_id)
+
+    assert read.delivery.recorded_end is None
+    assert read.delivery.progress == "active"
+    assert isinstance(read.authority.outcome, Rejected)
+    assert "alkahest.v1" in read.authority.outcome.reason
 
 
 async def test_settlement_after_the_start_commits_the_agreement_window(tmp_path) -> None:

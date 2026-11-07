@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from types import SimpleNamespace
@@ -46,12 +47,21 @@ from market_deal_servicing.evidence import transaction
 from market_identity import TrustedIdentitySet
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from storefront_client import StorefrontClientError
+from storefront_client.client import StorefrontClient
 
 import market_storefront.container as _container
-from market_storefront.controllers.settle_controller import router, settlements_router
+from market_storefront.controllers.settle_controller import (
+    admin_settle_router,
+    router,
+    settlements_router,
+)
 from market_storefront.deal_lifecycle import VmDealLifecycle
 from market_storefront.delivery_ports import VmDeliveryDomain
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.middleware.admin_identity import (
+    administrator_identity_middleware,
+    initialize_administrator_identities,
+)
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.services.fulfillment_resume_runtime import resume_incomplete_fulfillments_once
@@ -67,6 +77,7 @@ from tests.integration.test_payment_settlement import (
     _config,
     _seed,
 )
+from tests.integration.test_settle_controller import ADMIN_SIGNER, ADMINISTRATORS
 
 
 def _instant(value: str) -> datetime:
@@ -175,14 +186,16 @@ async def test_a_payment_deal_is_activated_before_billing_and_available_without_
     assert deal_ref["negotiation_id"] == NEGOTIATION
     assert deal_ref["placement_key"] == f"{NEGOTIATION}:settlement"
     assert "escrow_uid" not in deal_ref
-    # The accepted fulfillment and the delivery are each reported once.
+    # The reservation, the accepted fulfillment and the delivery are each
+    # reported once.
     with sqlite3.connect(rig.db.db_path) as conn:
         events = conn.execute(
             "SELECT event, data FROM stage_events WHERE stage='provision' AND negotiation_id=?",
             (NEGOTIATION,),
         ).fetchall()
-    assert [event for event, _ in events] == ["job_submitted", "fulfilled"]
-    assert json.loads(events[0][1])["fulfillment_id"] == row["fulfillment_id"]
+    assert [event for event, _ in events] == ["reserved", "job_submitted", "fulfilled"]
+    assert json.loads(events[0][1])["capacity_reservation_id"] == reservation
+    assert json.loads(events[1][1])["fulfillment_id"] == row["fulfillment_id"]
     assert rig.provisioning.scheduled == [reservation]
     record, intents = _servicing(rig.db, NEGOTIATION)
     assert record.available_at is not None
@@ -226,6 +239,48 @@ async def test_settle_status_reads_credentials_live_and_records_none(payment_rig
     with sqlite3.connect(rig.db.db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM credentials").fetchone()[0] == 0
     assert all("tenant_credentials" not in body for body in _recorded_bodies(rig.db))
+
+
+@asynccontextmanager
+async def _administrator(rig, monkeypatch):
+    """The storefront's administrator, through the admin settle routes and
+    their identity authentication, over the rig's database."""
+    monkeypatch.setattr(
+        "market_storefront.middleware.admin_identity.get_administrator_configs",
+        lambda: {"integration-admin": ADMINISTRATORS},
+    )
+    monkeypatch.setattr(_container, "resolved_alkahest_clients", {})
+    initialize_administrator_identities(rig.db.db_path)
+    app = FastAPI()
+    app.include_router(admin_settle_router)
+    app.middleware("http")(administrator_identity_middleware)
+    async with StorefrontClient(
+        "http://test", signer=ADMIN_SIGNER, caller_role="admin",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER.identity,)),
+        transport=httpx.ASGITransport(app=app),
+    ) as client:
+        yield client
+
+
+@pytest.mark.asyncio
+async def test_a_settlement_wait_returns_once_delivery_has_ended(payment_rig, monkeypatch):
+    """A deal whose delivery ended is terminal to the settlement wait, which
+    answers at once rather than waiting out its timeout."""
+    # A deal that waits for its start, ended while it waits, ends undelivered
+    # on its next drive.
+    rig = await payment_rig(start=(datetime.now(timezone.utc) + timedelta(hours=2)).replace(microsecond=0))
+    await rig.settle()
+    await rig.delivered()
+    _end_now(rig)
+    await resume_incomplete_fulfillments_once(
+        sqlite_client=rig.db, capacity=CapacityEffects(rig.site), fulfillment_client=rig.provisioning,
+        composition=rig.composition,
+    )
+    async with _administrator(rig, monkeypatch) as administrator:
+        waited = await administrator.wait_for_settlement(NEGOTIATION, timeout=5.0)
+
+    assert waited.ready is True
+    assert waited.status == "ended"
 
 
 @pytest.mark.asyncio
