@@ -678,14 +678,18 @@ deploy, such as a hosted payments target or a real host. It runs only where a
 deployment supplies them, and it is the only evidence for what they bring: real
 delivery, access, and revocation on a host, and a payments target's records.
 
-An external-topology scenario minimally extends a locally verifiable one. It
-subclasses that scenario's shared stages wherever their bodies agree and adds
-only the stages its external parts require, so the path both kinds run is proven
-on every pipeline run and the external run adds only what no lane can observe.
-The real-provisioning qualification modules extend the lanes' buyer purchases
-this way ([the real-provisioning lane](#the-real-provisioning-lane)). Setup or
-teardown that needs knowledge this repository lacks — funding a payer account at
-a payment provider's sandbox, providing the hosts — is the deployment's topology.
+An external-topology scenario that makes a deal minimally extends a locally
+verifiable one. It subclasses that scenario's shared stages wherever their bodies
+agree and adds only the stages its external parts require, so the path both kinds
+run is proven on every pipeline run and the external run adds only what no lane
+can observe. The real-provisioning qualification modules for observations 2, 4
+and 5 extend the lanes' buyer purchases this way
+([the real-provisioning lane](#the-real-provisioning-lane)). An external-topology
+scenario that makes no deal extends nothing: it follows the deal scenarios on the
+same stack and names them, as observation 6's module follows the other two.
+Setup or teardown that needs knowledge this repository lacks — funding a payer
+account at a payment provider's sandbox, providing the hosts — is the
+deployment's topology.
 No scenario performs it. An absent target is a blocked skip, and a stage whose
 input the target does not name skips naming that field.
 
@@ -822,11 +826,12 @@ no deal and is stated on no compute listing. A module adopting the listing
 requires it to offer the module's own mechanism, and otherwise fails naming the
 listing and its options before any deal.
 
-Three external-topology modules, also in no lane, extend the lanes' buyer
-purchases to make the runbook's
+Three external-topology modules, also in no lane, make the runbook's
 [owed observations](VALIDATION_RUNBOOK.md#observations-the-qualification-owes)
-2, 4, 5, and 6 against the target and a payments target: the runner's `PAYMENTS`
-section, with `LANE_OWNED` unset so an unready target is a blocked skip. Without
+2, 4, 5, and 6 against the target and a payments target. Two extend the lanes'
+buyer purchases; the third, observation 6's, makes no deal and runs after them on
+the stack their purchases populated. The payments target is the runner's
+`PAYMENTS` section, with `LANE_OWNED` unset so an unready target is a blocked skip. Without
 either target they report a blocked skip before any hold or write.
 
 - `e2e_vm_qualification` (observation 2) buys two CPU-only guests through

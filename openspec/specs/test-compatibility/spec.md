@@ -701,18 +701,29 @@ Each lane MUST run its test runner under committed profiles: a shared payments p
 
 ### Requirement: An external-topology scenario extends a locally verifiable scenario
 
-An end-to-end scenario that needs services or hosts this repository does not deploy — a
-hosted payments target, a real host — MUST extend a locally verifiable scenario that
-runs against this repository's own stack. It MUST share that scenario's stages wherever
-their bodies agree and add only the stages its external parts require. Setup or teardown
-that needs knowledge this repository lacks, such as funding a payer account, MUST be
-left to the deployment and MUST NOT be performed by the scenario.
+An end-to-end scenario that makes a deal against services or hosts this repository does
+not deploy — a hosted payments target, a real host — MUST extend a locally verifiable
+scenario that runs against this repository's own stack. It MUST share that scenario's
+stages wherever their bodies agree and add only the stages its external parts require.
+An external-topology scenario that makes no deal, observing state that such deal
+scenarios left on the same stack, extends no scenario and MUST name the scenarios whose
+state it reads. Setup or teardown that needs knowledge this repository lacks, such as
+funding a payer account, MUST be left to the deployment and MUST NOT be performed by the
+scenario.
 
 #### Scenario: An external-topology scenario is added
 
-- **WHEN** a scenario needing a real host or a hosted payments target is added
+- **WHEN** a scenario making a deal against a real host or a hosted payments target is
+  added
 - **THEN** a locally verifiable scenario running the same shared stages runs in a
   pipeline lane, and the external scenario adds only the stages its external parts need
+
+#### Scenario: An external-topology follow-up makes no deal
+
+- **WHEN** an external-topology scenario reads and changes only state the deal scenarios
+  left on the same stack
+- **THEN** it extends no locally verifiable scenario, and it names the scenarios it
+  follows
 
 #### Scenario: The deployment has not funded the payer
 
@@ -768,10 +779,11 @@ binding to its resource outlives the listing.
 
 ### Requirement: Real-provisioning qualification scenarios make the owed observations
 
-External-topology modules MUST extend the buyer purchase to make the runbook's
-observations 2, 4, 5 and 6 against a configured real-provisioning target and payments
-target. Each MUST belong to no default lane, MUST report a blocked skip without both
-targets, MUST skip a stage whose topology input is absent naming that input, and MUST
+External-topology modules MUST make the runbook's observations 2, 4, 5 and 6 against a
+configured real-provisioning target and payments target: observations 2, 4 and 5 by
+extending the buyer purchase, and observation 6 as a follow-up that makes no deal, run
+after them on the stack their purchases populated. Each MUST belong to no default lane,
+MUST report a blocked skip without both targets, MUST skip a stage whose topology input is absent naming that input, and MUST
 never wait out the wall clock for a state it can step to.
 
 - Observation 2 MUST buy two CPU-only VMs, hold a heartbeat on the first guest across

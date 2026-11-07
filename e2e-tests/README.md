@@ -326,7 +326,11 @@ substitutes for a completed real purchase, SSH access and reclaim observation.
 ### Real-provisioning qualification
 
 Three modules make the [runbook's owed observations](../docs/development/VALIDATION_RUNBOOK.md#observations-the-qualification-owes)
-2, 4, 5 and 6 as external-topology extensions of the lanes' buyer purchases.
+2, 4, 5 and 6: `e2e_vm_qualification` (observation 2) and
+`e2e_bare_metal_qualification` (observations 4 and 5) as external-topology
+extensions of the lanes' buyer purchases, and `e2e_real_provisioning_reapply`
+(observation 6) as a follow-up that makes no deal, on the stack their purchases
+populated.
 Each is in no lane and needs both the `real-provisioning-target` profile and a
 configured `PAYMENTS` target (with `LANE_OWNED` unset, so an unready target is a
 blocked skip); without either it is a blocked skip before any hold or write.
