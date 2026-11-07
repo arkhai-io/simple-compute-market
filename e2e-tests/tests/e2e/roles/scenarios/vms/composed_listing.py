@@ -31,7 +31,7 @@ from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 
 from e2e_harness.real_provisioning_target import VmHost
 from tests.e2e.roles.helpers.compute_deal_stages import DEAL_TOKEN, LISTED_HOURLY_RATE
-from tests.e2e.roles.helpers.payments import payment_setting
+from tests.e2e.roles.helpers.payments import dispute_window_seconds, payment_setting
 from tests.e2e.roles.scenarios.vms.conftest import capacity_source_for
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import REAL_REGION, REAL_RESOURCE_ID
 
@@ -42,9 +42,8 @@ DEAL_MECHANISMS = (ALKAHEST_MECHANISM, ARKHAI_PAYMENTS_MECHANISM)
 #: The most listings one read of the storefront's listings asks for: the
 #: largest page the storefront serves, which refuses a larger limit.
 _LISTING_PAGE = 200
-#: Compute dispute coverage: the authority's minimum filing window plus the
-#: delivery latency the seller allows for.
-DISPUTE_WINDOW_SECONDS = 15 * 86400
+#: The delivery latency the seller allows for, which the dispute coverage
+#: (``dispute_window_seconds``) covers.
 DELIVERY_DEADLINE_SECONDS = 300
 
 
@@ -52,14 +51,17 @@ def payments_settlement(
     *, seller_account: str, dispute_window: str, hourly_rate: str = "1.00",
 ) -> dict[str, Any]:
     """A VM listing's Arkhai payments settlement: ``hourly_rate`` USD an hour,
-    paid to ``seller_account``, under the seller's dispute window."""
+    paid to ``seller_account``, under the seller's dispute window, with the
+    run's dispute coverage."""
     return {
         "mechanism": ARKHAI_PAYMENTS_MECHANISM, "asset": "USD/6", "rate": hourly_rate,
         "per": "hour",
         "mechanism_input": {
             "payee_account": seller_account, "asset": "USD/6", "window": dispute_window,
             "delivery_deadline_seconds": DELIVERY_DEADLINE_SECONDS,
-            "dispute_window_seconds": DISPUTE_WINDOW_SECONDS,
+            "dispute_window_seconds": dispute_window_seconds(
+                delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+            ),
         },
     }
 

@@ -1730,6 +1730,51 @@ seq 146, 154 and 158), its `make test` was interrupted after 14 s (exit 130) and
 pass. A fresh full CI run replaces it, so the hook as a whole has not passed. The original
 failure stays recorded in validation 84.
 
+Dispute coverage as a run setting (pre-closeout triage 78, revisited on the owner's
+delegated direction, workflow log seq 164; outside the plan): the harness stated and
+expected a fixed 15-day compute dispute coverage, so a run against a test dispute authority
+advertising a short minimum filing window could not buy under a short hold. The VM real
+target's listing, created by `listing_settlements` through `payments_settlement`, stated
+it, and the VM purchase check required it.
+
+- `helpers/payments.py` gains `dispute_window_seconds`, reading
+  `PAYMENTS.DISPUTE_WINDOW_SECONDS`. It defaults to 15 days, the mediation contract's
+  14-day default minimum plus a day, and no lane profile sets it, so every lane states what
+  it did before. A value that is not an integer, is a bool, or is less than the delivery
+  deadline fails naming the setting. The authority's own minimum is enforced at
+  publication.
+- It replaces the duplicated 15-day constants in `vms/composed_listing.py` and
+  `bare_metal/purchase_driver.py`, both in what they state and in the option checks, and the
+  literal in `test_vm_payment_deal.py`'s listing.
+- The real bare-metal machine's listing is the deployment storefront's, which the harness
+  neither writes nor checks for coverage, so it is unchanged.
+- `e2e-tests/README.md` documents the setting.
+- Production code, service images, charts and defaults are unchanged. `e2e-tests/tests`
+  is copied into the e2e runner image (`e2e-tests/Dockerfile`), so that image's source
+  changes.
+- **Checks:**
+  - Unit: `make test-e2e-unit`, 767 passed (745 before). The 22 new cases in
+    `tests/unit/test_dispute_coverage.py` cover:
+    - the default, kept when the setting is unset or blank;
+    - the accepted and refused values;
+    - the setting reaching the VM settlement and the bare-metal pool override, each
+      parsed as the seller's publication input;
+    - both purchase checks accepting the run's coverage and refusing another.
+  - Fresh-context compliance check. Fixed: the lane listing's literal coverage, and the
+    source of the 14-day minimum, now named. Declined: matching the refusal tests'
+    `AssertionError` on a message, since each refused option differs from an accepted one
+    only in its coverage.
+  - Passed: `make check-comment-hygiene`; `make check-packaging`, whose closing lines
+    report the locks, wheelhouse, Python selection and the layer, scope, dependency and
+    kind rules OK; `make check-repository` for the change against `dev`, all eight of its
+    checks; and `scripts/change-workflow check index`.
+  - Not run:
+    - the qualification modules, which need a real target;
+    - the dirty-tree `run pre-commit`, which the owner's direction excludes (seq 158,
+      164);
+    - `scripts/openspec validate --strict`, which the session's permissions refused. The
+      fix touches no specification or delta.
+
 ## 9. Closeout
 
 The closeout task's eleven parts, in order (`openspec/README.md#plan-closeout-requirements`).

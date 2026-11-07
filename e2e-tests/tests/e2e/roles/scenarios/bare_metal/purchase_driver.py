@@ -30,6 +30,7 @@ from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buy
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
 from tests.e2e.roles.helpers.payments import (
     buyer_payments_environment,
+    dispute_window_seconds,
     payment_config_toml,
     payment_setting,
 )
@@ -43,9 +44,8 @@ from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import (
 
 #: The listed price of an hour of the whole host, in USD/6 base units.
 HOURLY_GROSS = 1_000_000
-#: Compute dispute coverage: the authority's minimum filing window plus the
-#: delivery latency the seller allows for.
-DISPUTE_WINDOW_SECONDS = 15 * 86400
+#: The delivery latency the seller allows for, which the dispute coverage
+#: (``dispute_window_seconds``) covers.
 DELIVERY_DEADLINE_SECONDS = 300
 #: How long the buyer waits for its payment's receipt before giving up.
 PAYMENT_TIMEOUT_SECONDS = 300
@@ -230,7 +230,9 @@ class BareMetalPurchaseDriver(BareMetalPurchaseParts, BareMetalComputeDealDriver
                 "mechanism_input": {
                     "payee_account": self.seller_account,
                     "asset": "USD/6", "window": self.dispute_window,
-                    "dispute_window_seconds": DISPUTE_WINDOW_SECONDS,
+                    "dispute_window_seconds": dispute_window_seconds(
+                        delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+                    ),
                     "case_hold_max_seconds": None,
                     "delivery_deadline_seconds": DELIVERY_DEADLINE_SECONDS,
                 },
@@ -250,14 +252,16 @@ class BareMetalPurchaseDriver(BareMetalPurchaseParts, BareMetalComputeDealDriver
 
     def check_purchase_option(self, listing: Any, option: SettlementOption) -> None:
         """The listing and option, with the terms the lane's pool override
-        states: an hour at ``HOURLY_GROSS``, with the seller's dispute
-        coverage."""
+        states: an hour at ``HOURLY_GROSS``, with the seller's dispute window
+        and the run's dispute coverage."""
         # The pool override offers the payments option alone.
         assert len(listing.settlement_options) == 1, listing.settlement_options
         self.check_payments_listing(listing, option)
         assert option.settlement_params["window"] == self.dispute_window, option
         adjudication = option.lifecycle["adjudication"]
-        assert adjudication["dispute_window_seconds"] == DISPUTE_WINDOW_SECONDS, option
+        assert adjudication["dispute_window_seconds"] == dispute_window_seconds(
+            delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+        ), option
         assert adjudication["case_hold_max_seconds"] is None, option
         assert option.lifecycle["delivery_deadline_seconds"] == DELIVERY_DEADLINE_SECONDS
         assert compute_rate_total(option.price_rates[0], 3600) == HOURLY_GROSS, option

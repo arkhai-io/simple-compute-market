@@ -92,6 +92,20 @@ unready one fails the scenario naming it rather than skipping; LANE_OWNED with n
 SERVICE_URL fails too. `config-docker.yml` carries no `PAYMENTS` section, so a run
 selecting the `docker` profile alone has no payments target.
 
+DISPUTE_WINDOW_SECONDS is the dispute coverage, in whole seconds, of every compute
+payments option the harness states — a VM listing's payments settlement, the
+bare-metal lane's pool override — and the coverage its purchase checks expect of
+those options. It defaults to 1296000 (15 days), which covers the 14-day minimum
+filing window of the Arkhai mediation contract's default authority description
+(`kit/arkhai-mediation`) plus the 300-second delivery deadline; no lane profile
+sets it. A run against a dispute authority advertising a
+shorter minimum may name a shorter coverage, no less than the delivery deadline plus
+that minimum: 360 for a 60-second minimum. A value that is not an integer, or is less
+than the delivery deadline, fails the scenario naming the setting; the storefront
+refuses one below the authority's minimum. It is separate from DISPUTE_WINDOW, the
+payment's own `window` input. A listing created under one coverage keeps it, so a
+later run naming another fails the purchase's option check against that listing.
+
 FEE_BPS defaults to 250. LIVEMODE, DEVELOPMENT_AUTH and LANE_OWNED default to
 false and must be `true` or `false`; generated buyer tables explicitly pin the
 receipt mode. Choose either DEVELOPMENT_AUTH=true (literal loopback service URL
@@ -317,8 +331,12 @@ Each is in no lane and needs both the `real-provisioning-target` profile and a
 configured `PAYMENTS` target (with `LANE_OWNED` unset, so an unready target is a
 blocked skip); without either it is a blocked skip before any hold or write.
 The payer is funded by the deployment, never by a module, and is assumed
-dedicated to the run. Run each through `test-module`, observation 6 after the
-other two on the same stack:
+dedicated to the run. The VM host's listing, which the VM module creates unless
+an earlier module did, states `PAYMENTS.DISPUTE_WINDOW_SECONDS` as its payments
+option's dispute coverage, so a target whose dispute authority advertises a short
+minimum filing window can be bought under a short hold; the bare-metal machine's
+listing states the coverage its storefront's own configuration gives. Run each
+through `test-module`, observation 6 after the other two on the same stack:
 
 ```bash
 make test-module MODULE=e2e_vm_qualification ACTIVE_PROFILES=local,real-provisioning-target
@@ -461,9 +479,9 @@ USD 1.00/hour option for a one-hour term. The registry recommends the lane's
 pinned dispute authority, which the option names but which never answers; the
 buyer's teardown files a delivery-end case with it, whose `Unknown` outcome the
 scenario neither fails on nor reads as evidence. The option includes a
-300-second delivery deadline, a 15-day dispute window and an unbounded case
-hold. The dispute window covers the delivery deadline plus the authority's
-minimum filing window; the payment `window=P7D` is a separate input.
+300-second delivery deadline, a 15-day dispute window (PAYMENTS.DISPUTE_WINDOW_SECONDS's
+default) and an unbounded case hold. The dispute window covers the delivery deadline
+plus the authority's minimum filing window; the payment `window=P7D` is a separate input.
 
 The installed `market bare-metal buy` emits
 `run_started → negotiation_completed(status=agreed) → payment_approved →

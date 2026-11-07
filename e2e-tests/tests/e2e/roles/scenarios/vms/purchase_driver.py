@@ -26,6 +26,7 @@ from tests.e2e.roles.helpers.compute_deal import wait_for_stage_event
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
 from tests.e2e.roles.helpers.payments import (
     buyer_payments_environment,
+    dispute_window_seconds,
     payment_config_toml,
     payment_setting,
 )
@@ -35,7 +36,6 @@ from tests.e2e.roles.scenarios.vms.compute_deal_driver import (
 )
 from tests.e2e.roles.scenarios.vms.composed_listing import (
     DELIVERY_DEADLINE_SECONDS,
-    DISPUTE_WINDOW_SECONDS,
     payments_settlement,
 )
 
@@ -113,10 +113,13 @@ class VmPurchaseParts:
 
     def check_payments_option(self, option: SettlementOption) -> None:
         """What a VM listing's payments option states: an hour in USD/6 at
-        ``HOURLY_GROSS``, with the dispute coverage the seller states."""
+        ``HOURLY_GROSS``, with the seller's dispute window and the run's
+        dispute coverage, which the listing's settlement stated."""
         assert option.settlement_params["window"] == self.dispute_window, option
         adjudication = option.lifecycle["adjudication"]
-        assert adjudication["dispute_window_seconds"] == DISPUTE_WINDOW_SECONDS, option
+        assert adjudication["dispute_window_seconds"] == dispute_window_seconds(
+            delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+        ), option
         assert option.lifecycle["delivery_deadline_seconds"] == DELIVERY_DEADLINE_SECONDS
         assert option.price_asset == "USD/6", option
         assert option.price_rates[0].per == "hour", option
