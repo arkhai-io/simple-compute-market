@@ -205,10 +205,13 @@ async def test_a_rateless_introduction_listing_is_found_by_its_asking_rate(
             "settlement": {"schema": "arkhai.payments.v1"},
         }
 
-    row.settlement_options = [
-        priced("USD/2"),
-        priced("USD/6") | {"lifecycle": lifecycle},
-    ]
+    row.published_document = {
+        **row.published_document,
+        "settlement_options": [
+            priced("USD/2"),
+            priced("USD/6") | {"lifecycle": lifecycle},
+        ],
+    }
     db_session.commit()
     assert await _ids(registry_client, "early_termination.payer=true") == {"intro-1"}
     assert await _ids(

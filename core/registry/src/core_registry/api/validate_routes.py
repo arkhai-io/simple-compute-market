@@ -8,8 +8,7 @@ POST /api/v1/listings/validate-publish
 
 Validation is driven by the registry's filter-spec ``listing_shape``
 (JSON Schema, draft 2020-12) — the same schema buyers see at
-GET /filter-spec.  Hardcoded compute/token heuristics are gone; what
-counts as a valid listing is now whatever the YAML says.
+GET /filter-spec and the publication route uses at admission.
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
-from core_registry.api.filter_spec import get_loaded_spec
+from core_registry.api.filter_spec import compute_etag, get_loaded_spec
 from core_registry.api.validate_model import ValidatePublishRequest, ValidatePublishResponse
 from core_registry.api.api_key_auth import require_read_access
 from core_registry.api.publisher_auth import (
@@ -39,38 +38,27 @@ router = APIRouter(prefix="/api/v1/listings", tags=["validate"])
 
 
 @lru_cache(maxsize=1)
-def _validator() -> Draft202012Validator:
-    """Validator built once from the loaded listing_shape."""
+def _validator_for(etag: str) -> Draft202012Validator:
+    """Cache only for the currently served schema identity."""
     return Draft202012Validator(get_loaded_spec().listing_shape)
+
+
+def _validator() -> Draft202012Validator:
+    return _validator_for(compute_etag(get_loaded_spec()))
 
 
 def _reset_cache() -> None:
     """Drop the cached validator — for tests that hot-swap the spec."""
-    _validator.cache_clear()
+    _validator_for.cache_clear()
 
 
 def reject_retired_listing_shape(body: Any) -> None:
-    """Refuse a listing whose shape uses a retired spelling.
+    """Give configured retired names specific errors before general validation.
 
-    The same `listing_shape` schema the dry-run route validates against and
-    `GET /filter-spec` serves, applied at the mutation boundary so that a
-    publisher cannot be told `valid=false` by the dry run and still publish
-    successfully. A shape opinion that only the dry run holds is advisory.
-
-    Scoped to the retired spellings rather than enforcing the whole schema
-    here. Full enforcement at publish would reject listings this registry has
-    accepted for as long as it has existed -- a different and larger decision
-    than closing the cutover. `additionalProperties` stays open, so a seller
-    may carry any attribute the schema does not name; what is refused is
-    exactly `offer`, `offer_resource`, and `listing_resource.virtualization_type`.
-
-    Refused rather than ignored because this boundary's skew is invisible: the
-    offering-mode field is optional, so a listing carrying the retired
-    spelling publishes, stores, and then matches nothing a buyer filters on,
-    with no signal to the seller. Naming the field and its replacement is safe
-    disclosure -- the prohibition is already public in the served spec.
+    The prohibitions come from the served schema, so another market's listing
+    vocabulary needs no registry code change. A named replacement helps a
+    publisher correct a spelling that would otherwise match no query.
     """
-
     shape = get_loaded_spec().listing_shape
     retired: list[str] = []
     for key in ("offer", "offer_resource"):
@@ -94,6 +82,32 @@ def reject_retired_listing_shape(body: Any) -> None:
                 ),
             },
         )
+
+
+RESERVED_LISTING_FIELDS = frozenset({
+    "publisher_id", "publisher_principals", "created_at", "updated_at",
+    "publisher_publication", "publisher_updates",
+})
+
+
+def listing_validation_errors(candidate: dict[str, Any]) -> list[str]:
+    """Use the complete candidate, including opaque terms, without model defaults."""
+    errors = [
+        f"{name}: reserved registry metadata"
+        for name in sorted(RESERVED_LISTING_FIELDS.intersection(candidate))
+    ]
+    errors.extend(
+        f"{_format_path(err)}: {err.message}"
+        for err in sorted(_validator().iter_errors(candidate), key=lambda e: str(e.absolute_path))
+    )
+    return errors
+
+
+def validate_listing_publication(candidate: dict[str, Any]) -> None:
+    reject_retired_listing_shape(candidate)
+    errors = listing_validation_errors(candidate)
+    if errors:
+        raise HTTPException(status_code=422, detail={"error": "invalid_listing", "errors": errors})
 
 
 def _forbidden_properties(schema: dict[str, Any]) -> list[str]:
@@ -135,10 +149,10 @@ def _format_path(err: ValidationError) -> str:
     summary="Validate a listing payload without writing (dry-run)",
     description=(
         "Validates a listing body against the registry's ``listing_shape`` "
-        "JSON Schema (the same one served at GET /filter-spec).  No database "
-        "writes, no authentication required.  Returns ``valid=True`` when the "
-        "payload would be accepted by POST /agents/{agent_id}/listings (modulo "
-        "agent registration and auth)."
+        "JSON Schema (the same one served at GET /filter-spec). Authenticated "
+        "through the ordinary registry exchange, without listing or publisher "
+        "mutations. Returns valid=True when the complete payload satisfies "
+        "publication's structural checks; ownership is checked at publication."
     ),
 )
 async def validate_publish(
@@ -146,9 +160,8 @@ async def validate_publish(
     body: ValidatePublishRequest,
     db: Session = Depends(get_db),
 ):
-    # Authenticate against the bytes the caller signed. `body` stays the parsed
-    # model for the validation below, but its `model_dump` materializes every
-    # defaulted field, which is a different document from the one hashed.
+    # Both authentication and validation use the caller's complete document;
+    # materializing model defaults would change the signed/admitted content.
     authenticated = authenticate_publisher_request(
         request=request,
         db=db,
@@ -163,22 +176,8 @@ async def validate_publish(
     replay = cached_response(authenticated, signer=signer)
     if replay is not None:
         return replay
-    candidate: dict[str, Any] = {
-        "listing_id": body.listing_id,
-        "storefront_url": body.storefront_url,
-        "listing_resource": body.listing_resource,
-        "accepted_escrows": body.accepted_escrows,
-        "settlement_options": body.settlement_options,
-        "demands": body.demands,
-        "max_duration_seconds": body.max_duration_seconds,
-    }
-
-    errors = [
-        f"{_format_path(err)}: {err.message}"
-        for err in sorted(
-            _validator().iter_errors(candidate), key=lambda e: list(e.absolute_path)
-        )
-    ]
+    candidate = wire_body(await request.body())
+    errors = listing_validation_errors(candidate)
 
     response_body = ValidatePublishResponse(
         valid=not errors,
