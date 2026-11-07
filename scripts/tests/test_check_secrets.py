@@ -552,3 +552,22 @@ def test_an_outgoing_commit_adding_a_key_fixture_is_pushed(branch: Path) -> None
 
     assert pushed.returncode == 0, pushed.stderr
     assert remote_head(branch) == head
+
+
+@pytest.mark.usefixtures("gitleaks")
+def test_historical_fingerprints_do_not_exempt_staged_or_new_keys(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    block, body = wrapped_key(64)
+    historical = commit(repo, "tls.pem", block, "published fixture")
+    fingerprint = f"{historical}:tls.pem:private-key-block:1"
+    stage(repo, ".gitleaksignore", fingerprint + "\n")
+    assert checker.scan(repo, base=base) == []
+
+    commit(repo, "tls.pem", "no key material\n")
+    stage(repo, "tls.pem", block)
+    assert_refused_without_echo(checker.scan(repo, staged=True), body, "tls.pem:1")
+    git(repo, "commit", "-qm", "new key addition")
+    findings = checker.scan(repo, base=base)
+    assert_refused_without_echo(findings, body, "tls.pem:1")
+    assert all(not finding.startswith(historical + ":") for finding in findings)
+    assert_refused_without_echo(checker.audit(repo), body, "tls.pem:1")
