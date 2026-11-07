@@ -322,3 +322,82 @@ round's validation provides once.
 ## Open Questions
 
 None.
+
+## Implementation findings
+
+What implementation settled beyond the decisions, kept here as the tasks' notes were
+compressed at closeout.
+
+- **D2, the runner.** A module that fails to import fails the gate naming it, and each
+  module pattern must match a test, not only the run as a whole. The summary ends with
+  the gate's wall time. Each child runs unbuffered with the tests directory on its
+  `sys.path`, since the native modules import one another by name; the parent finds the
+  child's JSON line by searching back from the end, so output at interpreter exit cannot
+  hide it, and judges skips, including one raised in a class fixture, from that line.
+  Measured: the compute gate took 89.8 s on the pipeline's runner (E2E run 42356524201),
+  inside the design's 70–90 s, from 273 s serially; locally, on 28 CPUs, 26.8 s against
+  131.9 s serially. The admission tests did not contend.
+- **D6, the lane-hold check.** The setup plan runs with skip marks unevaluated
+  (`-p no:skipping`): otherwise a module skipped where the check runs would drop out of
+  the plan and pass unchecked. Two limits remain. A module skipped at collection
+  (`pytest.skip` at module level, `importorskip`) escapes the plan, as it escapes
+  collection. The lane variable is read as its first non-empty assignment in
+  `e2e-tests/Makefile`, so a later `+=` or conditional assignment would read the lane
+  short; each lane variable has one `?=` today. The check imports `module_plans` from
+  `test_scenario_cleanup_order.py`, which imports `HOLD_FIXTURE_NAMES` from
+  `test_scenario_holds.py`, so moving either parser moves both checks. No module gaining
+  convergence or watchdog holds relied on a running timer (the design's risk): each was
+  read, and the lanes passed with the holds.
+- **D7, the buy helper.** The negotiation id is read from the run log's last
+  `negotiation_completed` event with status `agreed`; `escrow_created` carries none, so a
+  buyer CLI that stops writing it there breaks the helper at its named step. After
+  `run_ended` the helper requires the process to exit 0, as the stages' foreground buys
+  did, and each wait has its own bound. `MarketRun.terminate` killed a process that
+  outlived SIGTERM without waiting for it; it now waits, bounded, after the kill, so the
+  helper's `finally` reaps what it starts, which a unit test over a real child ignoring
+  SIGTERM proves (review 17 F2). The helper serves the VM lane only; a bare-metal buy
+  would need its own stage-event and settle-status clients and the same sequence.
+- **D5, the verify TTL.** With a TTL of 0 the gate's cached verify expires at once, so
+  every request re-verifies and a valid verify clears the key's cached exhaustion; the
+  first drain still answers 402 through the consume path. The lane run alone cannot
+  separate a TTL of 0 from 3, since the top-up's negotiation and settlement likely
+  outlast a 3 s cache, so `scripts/tests/test_lane_compose.py` renders both stacks and
+  pins the lane's `0` and the full stack's `3`.
+- **D4, declined.** The introduction scenario still declares two hosts and reveals two
+  introductions, though only the first now feeds a later stage. Dropping to one host is
+  a scenario edit the design did not ask for.
+- **Defects fixed outside the stated scope** (`openspec/README.md#defects-found-during-a-change`).
+  `scripts/tests/test_image_publication_contract.py` failed on the branch point: it
+  expected a `docker tag` line that `push-images` no longer prints since it moved onto
+  `scripts/publish_artifacts.py`. It now reads the `image` arguments from `push-images`'
+  dry-run command line and hands them to `push_image` with a recording runner, so the
+  build's tag and the pushed tag must agree. `scripts/tests/test_check_secrets.py`'s
+  audit test failed in CI (validation 24 V1): the pinned gitleaks' `generic-api-key` rule
+  passes a value holding one of its stop words, which about 1 in 100 of the test's random
+  passwords did. The owner chose option A, a draw of a letter then a digit twenty times
+  (`wordless_password()`), of which 0 in 50,000 escaped; `market-change-workflow`'s
+  README, "Secret scanning", states the audit's limit. Texts describing the removed
+  retention stage (the marker in `e2e-tests/pyproject.toml`, comments in
+  `storefront.dev.toml` and `config-docker.yml`) and the VM IaC README naming the VM lane
+  as the gate's runner were corrected.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 — the native Ansible gate runs as its own job beside the lanes | `docs/development/TESTING.md#ansible-syntax-and-native-checks`; the lanes' introduction in `docs/development/TESTING.md#4-system-integration-tests-end-to-end` |
+| D2 — the compute gate runs one interpreter per test, concurrently, each test's output whole | `docs/development/TESTING.md#ansible-syntax-and-native-checks` |
+| D3 — no workflow runs the bare-metal cleanup native gate | `docs/development/ROADMAP.md#goal-1--consolidate-physical-resource-authority-in-the-provisioning-service`, open-gap row, unowned |
+| D4 — the held retention sweep is proven at integration level; the introduction scenario ends with operator deletion | The bare-metal lane's bullet in `docs/development/TESTING.md#4-system-integration-tests-end-to-end`; the ADDED requirement's scenario "A behaviour depends on a window passing", `openspec/specs/test-compatibility/spec.md#requirement-pipeline-scenarios-advance-only-by-their-own-steps` |
+| D5 — the API-credit lane runs the sample app with no verify cache; the conformance trace proves the cache | The API-credit lane's bullet in `docs/development/TESTING.md#4-system-integration-tests-end-to-end` |
+| D6 — every module a compute pipeline lane selects holds its lane's timers, checked from the setup plan of the lane's marker selection; `scenarios/core/` exempt | `openspec/specs/test-compatibility/spec.md#requirement-scenarios-hold-shared-services-for-the-whole-module` (MODIFIED, written by the archive); the hold rule in `docs/development/TESTING.md#2-integration-tests` ("Pause the loop, then advance it explicitly") |
+| D7 — buy scenarios run `market buy` in the background and step convergence through one helper that reaps on failure | The stepping paragraph after the hold rule, `docs/development/TESTING.md#2-integration-tests`; scenario "A buy reaches ready with convergence held" of the ADDED requirement |
+| D8 — a single read after a step where a service reads another live | `openspec/specs/test-compatibility/spec.md#requirement-pipeline-scenarios-advance-only-by-their-own-steps` (ADDED, written by the archive); the wait paragraph in `docs/development/TESTING.md#the-discipline-every-scenario-follows` |
+| D9 — the Mailpit wait stays, a wait on a message the stage's request sent | Scenario "A stage awaits a message its request sent" of the ADDED requirement; the wait paragraph in `docs/development/TESTING.md#the-discipline-every-scenario-follows` |
+| D10 — the gate job's build target and logs | No destination beyond D1's: `build-e2e-native-gate` and the job are named in `TESTING.md#ansible-syntax-and-native-checks` and self-describing in `e2e.yml` and the `Makefile` |
+| The principle: an end-to-end test proves a deterministic sequence of state changes, never wall-clock time | `docs/development/TESTING.md#the-discipline-every-scenario-follows`; `docs/development/ARCHITECTURE.md#testing-strategy`; the ADDED requirement |
+| Pipeline scenarios no longer carry timing dependencies; real-host scenarios still poll hardware | `openspec/specs/test-compatibility/architecture.md#current-limits` (beyond the plan's list: its sentence on retained timing dependencies no longer held for pipeline scenarios) |
+| Roadmap currency | `docs/development/ROADMAP.md`, Goal 1's gap row (D3); no goal's current state otherwise changes |
+| Campaign index currency | `openspec/changes/README.md`, this change's row in "Lesser goal — End-to-end harness determinism" (status `in closeout`, linking the archive) and `apicredits-end-to-end-lane`'s note that its loop holding adopts the hold rule; no dependency graph and no `Depends on` changed |
+
+`openspec/specs/README.md` needs no change: no capability or companion is added.

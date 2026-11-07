@@ -1217,6 +1217,8 @@ Use an existing open-source library wherever one meets the requirements, and bui
 
 Tests belong at the lowest level that can prove the behavior: unit, integration, smoke, and end-to-end, each defending the narrowest observable contract appropriate to its level — no level should rely on end-to-end tests alone for behavior it could prove itself. See [`docs/development/TESTING.md`](TESTING.md) for the level definitions, coverage jurisdiction between them, the client-contract "no raw calls" rule, contract fixtures, boundary-change validation, cross-language conformance, and offline review validation, and [the testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md) for the normative requirements.
 
+An end-to-end test proves a deterministic sequence of state changes, never wall-clock time: a pipeline scenario holds the timers its stages can meet, steps each transition itself, and waits only for an effect of its own request ([`TESTING.md`, "The discipline every scenario follows"](TESTING.md#the-discipline-every-scenario-follows)).
+
 A test double of a service mirrors its producer's API — routes, authentication, admission, read authorization, idempotency, and error codes — unless there is a compelling reason to deviate, and states any deviation. A double that answers differently from its producer proves only that a client agrees with the double. Where a double wraps a kit's engine, it serves what that engine serves, and its claims, not its behaviour, are what is narrowed. The end-to-end lanes' payments double, `tools/payments-lane-double`, is the current example ([`TESTING.md`, "Private Service Dependencies"](TESTING.md#private-service-dependencies)).
 
 ## Capability documentation index

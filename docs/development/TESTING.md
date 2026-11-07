@@ -239,12 +239,28 @@ wherever a site changed before stepping publication or negotiating, and the
 end-to-end lanes widen the window to an hour so a scenario's rounds are not
 refused between steps.
 
-A scenario that needs a shared service's timer held — a storefront's lifecycle loops,
-provisioning's fulfillment convergence or lease watchdog — takes that lane's hold fixture
-for the whole module with `usefixtures`, listed first so it is released last. A hold is
-taken before the module's first stage and waits until each loop is at its gate, and is
-released in a finaliser whatever the module's outcome. Stages assert a hold; they never
-pause or resume a service themselves, and a source check enforces it.
+Every scenario module a compute pipeline lane selects holds its lane's timers for the
+whole module: the storefront's lifecycle loops, provisioning's fulfillment convergence,
+and its lease watchdog, and in the VM lane also Alice's storefront loops, since her
+publication cycle writes to registries other modules read. Holding every timer the
+lane's stages can meet, rather than those an author judges a module depends on, is
+what keeps a loop no one thought of from racing an observation. The module takes the
+lane's hold fixtures with `usefixtures`, listed first so they are released last. A hold
+is taken before the module's first stage and waits until each loop is at its gate, and
+is released in a finaliser whatever the module's outcome. Stages assert a hold; they
+never pause or resume a service themselves, and a source check enforces it. Two kinds
+of module are outside the rule: one no lane selects, such as the real-host modules an
+operator runs by hand, keeps the holds it has; and one under `scenarios/core/` reaches
+only the dev chain and messages no storefront or provisioning service, so it takes
+none.
+
+With convergence held, a stage makes each transition convergence would make. A buy
+scenario runs `market buy` in the background through `buy_to_ready`
+(`e2e-tests/tests/e2e/roles/helpers/buy.py`): it waits for the buy's escrow and
+settlement events and the storefront's dispatch, drains the mock job queue, advances
+convergence to `active`, and waits for the buy to end `ready`. A foreground buy would
+block on a convergence cycle no one steps. On any failure the helper terminates and
+reaps the buy it started, so a failed stage leaves no buyer polling the stack.
 
 The hold helpers are `storefront_loops_held`, `fulfillment_convergence_held`, and
 `lease_watchdog_held` in `e2e-tests/tests/e2e/roles/helpers/compute_deal.py`; each
@@ -258,7 +274,14 @@ stopped while the cleanup runs. `e2e-tests/tests/unit/test_scenario_holds.py` re
 from source, any pause or resume call or route outside the hold helpers and the
 conftests' hold fixtures, and `e2e-tests/tests/unit/test_scenario_cleanup_order.py`
 reads the fixture order pytest resolves for every compute-lane scenario module and
-refuses a hold released before the module's other cleanup. A module killed by `helm
+refuses a hold released before the module's other cleanup.
+`e2e-tests/tests/unit/test_scenario_lane_holds.py` reads each compute lane's marker
+expression from `e2e-tests/Makefile`, where lane membership is written once, collects
+the setup plan pytest resolves for it as the lane's own run collects, with skip marks
+unevaluated so a module skipped where the check runs is still held to the rule, and
+refuses a module missing one of its lane's holds, naming the module and the hold. A
+module joining a lane, from any directory, comes under the rule with no second list to
+update. A module killed by `helm
 test`'s timeout runs no finaliser, and only a restart clears its pause; modules in a
 lane run serially.
 
@@ -345,6 +368,11 @@ in draw.io.
 
 #### The discipline every scenario follows
 
+An end-to-end test proves a deterministic sequence of state changes — a sequence
+diagram run repeatably — never wall-clock time. A timer left running is an
+unscripted participant in that diagram, and a scenario whose duration a timer sets
+measures the timer rather than the work.
+
 A scenario asserts only on side effects it asked for. While a service's timer
 loops run, an observation races them: a listing reconciled a second later reads
 differently from one reconciled a second earlier, and waiting for the system to
@@ -357,6 +385,15 @@ one side effect, and measures that effect against expectations through typed
 clients, with no sleeps: the only wait is on a request the stage made. What a
 stage produced goes into the shared deal state for the stages that depend on
 it, and whatever happened, the fixture's finaliser resumes the loops.
+
+A wait is legitimate only on an effect the stage's own request caused, bounded:
+a stage event its request emits, or a message it sends off the request path,
+such as the seller-side introduction mail the introduction stages read back from
+the lane's Mailpit. Where one service reads another's state live, the stage
+reads the effect once after its step rather than polling for it. A behaviour
+defined by a window or interval elapsing, such as the introduction retention
+sweep, is proven at a level that can drive the clock; no pipeline stage waits
+for it.
 
 ![How an end-to-end scenario holds the loops once, then previews, advances, and measures each transition](diagrams/e2e-stage-discipline.svg)
 
@@ -468,7 +505,9 @@ observability seams for e2e-visible behavior accordingly.
 
 The pipeline runs one lane per market domain, each as its own job, so each
 failure's logs stand alone and one domain's failure never hides another's
-evidence. Each lane builds only the images its stack runs
+evidence. The native Ansible gate is a pipeline job beside the lanes, not a
+lane, since it composes no stack ([Ansible Syntax and Native
+Checks](#ansible-syntax-and-native-checks)). Each lane builds only the images its stack runs
 (`make build-e2e-<lane>`) and brings up only its own services, as a compose
 project of its own:
 
@@ -507,11 +546,21 @@ project of its own:
   `access_methods`, and only `contact-exchange.v1`. The buyer reveals the
   introduction through the CLI into its own file sink, the storefront mails the
   buyer's contact to the seller through the lane's Mailpit, and the deal's
-  fulfillment status route answers 404.
+  fulfillment status route answers 404. Its `e2e_bare_metal_introduction`
+  scenario discloses the retention window before commitment, reveals
+  introductions through the production buyer transport, and ends with the
+  operator's deletion of one. No stage waits for the window to pass: the held
+  retention sweep is proven where its clock can be driven, by the storefronts'
+  integration tests (`domains/bare_metal/storefront/tests/test_http_introductions.py`,
+  `domains/vms/storefront/tests/integration/test_introduction_retention.py`).
 - **API-credit lane** (`make -C e2e-tests test-e2e-apicredits`): the credits
   registry, service, storefront, and gated sample app, a compute-schema registry
   of the lane's own that the credits deal's discovery is routed away from, and
-  the dev chain.
+  the dev chain. The lane's overlay (`compose.apicredits-lane.yml`) runs the
+  sample app with no verify cache, so every request re-verifies its key and a
+  top-up is visible to the next request; the cache's own behaviour, including no
+  service call on a key known to be exhausted, is proven by the middleware
+  conformance trace.
 
 Each lane also runs the payments double (`compose.payments-double.yml`), which
 its payment storefront — Bob, the bare-metal storefront, the credits storefront
@@ -1156,8 +1205,18 @@ A missing image, supported Ansible or required callback, no native test, or a
 skipped native test fails the gate. Both domains' playbooks are parsed with their
 own configuration and with the shared service configuration and image role path.
 The shared configuration contains no domain path. A structure test holds the VM
-gate's list of native modules to every module defining its skip guard. The VM
-end-to-end lane runs this gate once it has built the image.
+gate's list of native modules to every module defining its skip guard, and the VM
+gate runs its few native tests in series. The compute family's gate
+(`provisioning/compute/iac/scripts/native_gate_runner.py`) runs each native test
+in its own interpreter, as many at once as the host has CPUs, so no test's
+working directory, environment, or umask reaches another; it prints each test's
+output whole under the test's id as the test ends, then a summary of what ran,
+failed, and skipped.
+
+The end-to-end pipeline runs this gate as its own job, `native-ansible-gate`,
+beside the domain lanes: it builds only the wheels and the provisioning image
+(`make build-e2e-native-gate`), composes no stack, and leaves its output in the
+job log.
 
 The bounded bare-metal working-data helper has its own evidence boundaries.
 `make -C domains test-bare-metal-iac` exercises its unit and library-integration behavior;
