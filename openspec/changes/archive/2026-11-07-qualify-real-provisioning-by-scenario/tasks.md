@@ -767,6 +767,20 @@ their wiring; `e2e-tests/README.md`'s marker list.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the wiring
   checks (confirmed).
 
+Post-merge deployment run (owner's notes, sanitized): an independent operator
+deployment ran the three modules on the merged revision, over relay access only, against
+CPU-only hosts, with both storefronts settling TEST payments through a hosted payments
+service over TLS and a pinned dispute authority that does not answer. Observation 2 made
+(47 passed); observations 4 and 5 made (67 passed, the normal cycle's refusal-only stage
+skipped by design); observation 6 made (7 passed); four purchases, each payer check
+exact. Three causes found before the passing runs, none in the scenarios: the runner
+lacked a `market` carrying `market bare-metal` (named with `MARKET_CLI_BIN`); the
+cleanup qualification's operator route was one only the provisioning service could
+reach; and a storefront started before its registry served held no recommended dispute
+authority and refused the payments listing until restarted, recorded as an unowned gap
+in `docs/development/ROADMAP.md`. The runbook's qualification section states all
+three. Observations 1 and 3 were not run.
+
 Round-2 triage fixes (review 61, records 67 and 70, and 68 T1 and T2; dispositions
 delegated under the owner's best-judgment direction): 61 F1, each VM guest probed for no
 GPU (`helpers/ssh_access.py`'s PCI probe); 70 O1, the holds reconciled in 8.3, 8.4 and D3
