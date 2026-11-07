@@ -46,7 +46,7 @@ HOLD_HELPER_NAMES = frozenset(
     {"storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held"}
 )
 #: The lane conftests' hold fixtures, each built on one hold helper.
-HOLD_FIXTURE_NAMES = HOLD_HELPER_NAMES | {"alice_loops_held"}
+HOLD_FIXTURE_NAMES = HOLD_HELPER_NAMES | {"alice_loops_held", "bare_metal_storefront_loops_held"}
 
 
 def _checked_sources() -> list[Path]:

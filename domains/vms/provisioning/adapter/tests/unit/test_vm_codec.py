@@ -32,8 +32,11 @@ from compute_provisioning_ansible.runner import (
 )
 from types import SimpleNamespace
 
+from vm_provisioning_operator.models import HOST_DIAGNOSTICS_RESULT_KIND
+
 from vm_provisioning_adapter.codec import (
     VM_CREATE_DETAIL,
+    VM_DIAGNOSTICS_FIELDS,
     VM_INVENTORY_GROUP,
     GoldenImageCredentials,
     VmAnsibleCodec,
@@ -45,6 +48,7 @@ from vm_provisioning_adapter.codec import (
     parse_vm_output,
     split_credentials,
     vm_job_params,
+    vm_result_kind,
 )
 from vm_provisioning_adapter.models.jobs_model import VmJobParams
 from compute_provisioning_contracts import CREATE_JOB_RESULT_KIND, CreateJobResult
@@ -169,6 +173,7 @@ class TestStoredParameters:
             "golden_image_name": "base-v3",
             "gcs_bucket_url": "gs://bucket",
             "gcs_image_path": "images/img.qcow2",
+            "management_unit": "operator-agent.service",
         }
         params = vm_job_params(raw)
         for name, value in raw.items():
@@ -276,6 +281,11 @@ class TestVariables:
         variables = _variables(gcs_bucket_url="gs://bucket", gcs_image_path="images/img.qcow2")
         assert variables["gcs_bucket_url"] == "gs://bucket"
         assert variables["gcs_image_path"] == "images/img.qcow2"
+
+    def test_a_diagnosis_passes_its_management_unit_to_the_playbook_only_when_named(self):
+        named = _variables(vm_action="diagnose", vm_target=None, management_unit="agent.service")
+        assert named["management_unit"] == "agent.service"
+        assert "management_unit" not in _variables(vm_action="diagnose", vm_target=None)
 
     def test_no_bare_metal_variable_is_rendered(self):
         assert not any(name.startswith("bare_metal_") for name in _variables())
@@ -497,6 +507,7 @@ class TestExtractVmFact:
             ("reset_password", "vm_password_reset_data"),
             ("vm_remove", "vm_remove_data"),
             ("check", "check_data"),
+            ("diagnose", "host_diagnostics_data"),
         ],
     )
     def test_every_vm_action_has_its_fact(self, action, fact_name):
@@ -629,6 +640,25 @@ class TestBuildResultPayload:
         resources = {"vcpus_total": 32}
         payload = build_result_payload(_output(ansible_result={"action": "check", "resources": resources}))
         assert payload["resources"] == resources
+
+    def test_a_diagnostics_fact_is_reported_as_printed_its_zeros_and_nulls_included(self):
+        units = {"libvirtd.service": {"restart_count": 0}}
+        fact = {
+            "action": "diagnose", "boot_id": "b", "uptime_seconds": 1.5, "kernel": "k",
+            "running_guests": 0, "management_unit": None, "units": units,
+        }
+        payload = build_result_payload(_output(ansible_result=fact))
+        assert {name: payload[name] for name in VM_DIAGNOSTICS_FIELDS} == {
+            "boot_id": "b", "uptime_seconds": 1.5, "kernel": "k",
+            "running_guests": 0, "management_unit": None, "units": units,
+        }
+
+    def test_another_actions_result_carries_no_diagnostics_field(self):
+        payload = build_result_payload(_output(ansible_result={"action": "list", "vms": []}))
+        assert not set(VM_DIAGNOSTICS_FIELDS) & set(payload)
+
+    def test_a_diagnosis_result_is_of_the_kind_the_operator_client_reads(self):
+        assert vm_result_kind("diagnose") == HOST_DIAGNOSTICS_RESULT_KIND
 
 
 class TestCredentials:

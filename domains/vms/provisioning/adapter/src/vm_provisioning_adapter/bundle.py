@@ -43,6 +43,7 @@ VM_JOB_ACTIONS = frozenset(
         "reset_password",
         "vm_remove",
         "check",
+        "diagnose",
     }
 )
 

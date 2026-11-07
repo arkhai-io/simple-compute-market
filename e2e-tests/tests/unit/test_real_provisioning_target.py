@@ -135,6 +135,58 @@ def test_dimensions_require_positive_strict_integers(dimension, value, field):
     assert f"{field}.{dimension}" in str(error.value)
 
 
+def test_optional_inputs_are_absent_by_default():
+    target = load_real_provisioning_target({SECTION: _example()})
+    assert target.host_for("vm").management_unit is None
+    assert target.host_for("bare_metal").access.admission_log is None
+
+
+def test_the_examples_commented_optional_inputs_are_valid_once_uncommented():
+    text = EXAMPLE.read_text()
+    for field in ("management_unit", "admission_log"):
+        assert f"# {field}: " in text
+        text = text.replace(f"# {field}: ", f"{field}: ")
+    target = load_real_provisioning_target(yaml.safe_load(text))
+    assert target.host_for("vm").management_unit
+    assert target.host_for("bare_metal").access.admission_log
+
+
+def test_management_unit_and_admission_log_are_accepted():
+    def change(section):
+        section["hosts"][0]["management_unit"] = "operator-agent@by\\x2dlabel.service"
+        section["hosts"][1]["access"]["admission_log"] = "/var/lib/example/frps-admission.log"
+
+    target = load_real_provisioning_target(_with(change))
+    assert target.host_for("vm").management_unit == "operator-agent@by\\x2dlabel.service"
+    assert target.host_for("bare_metal").access.admission_log == "/var/lib/example/frps-admission.log"
+
+
+@pytest.mark.parametrize("unit", ["agent", "agent.socket", "../agent.service", "an agent.service", ""])
+def test_management_unit_that_is_not_a_service_name_is_refused_naming_it(unit):
+    with pytest.raises(TargetInvalid) as error:
+        load_real_provisioning_target(_with(lambda s: s["hosts"][0].update(management_unit=unit)))
+    assert "hosts.0.vm.management_unit" in str(error.value)
+
+
+def test_management_unit_is_a_vm_host_field_only():
+    with pytest.raises(TargetInvalid) as error:
+        load_real_provisioning_target(_with(lambda s: s["hosts"][1].update(management_unit="agent.service")))
+    assert "management_unit" in str(error.value)
+
+
+@pytest.mark.parametrize("path", ["frps-admission.log", "./frps.log", "/var/lib/../etc/frps.log", ""])
+def test_relative_or_escaping_admission_log_is_refused_naming_it(path):
+    with pytest.raises(TargetInvalid) as error:
+        load_real_provisioning_target(_with(lambda s: s["hosts"][1]["access"].update(admission_log=path)))
+    assert "hosts.1.bare_metal.access.relay.admission_log" in str(error.value)
+
+
+def test_admission_log_is_a_relay_access_field_only():
+    with pytest.raises(TargetInvalid) as error:
+        load_real_provisioning_target(_with(lambda s: s["hosts"][0]["access"].update(admission_log="/var/log/frps.log")))
+    assert "admission_log" in str(error.value)
+
+
 def test_relay_vm_access_and_direct_bare_metal_access_are_both_valid():
     section = _example()
     section["hosts"][0]["access"] = {"mode": "relay", "relay_id": "example-vm-relay"}

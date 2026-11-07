@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
 from market_alkahest.escrow_verification import EscrowVerificationError
 from market_identity import Identity
-from market_settlement_runtime import SettlementAdminRouteService
+from market_settlement_runtime import SettlementAdminRouteService, SettlementLookup
 from storefront_client.settlement_routes import REFUND, SETTLE, SETTLE_STATUS
 
 import apicredits_storefront.container as container
@@ -165,12 +165,23 @@ class AdminSettleController:
             resource=f"{escrow_uid}?timeout={raw_timeout}",
         )
 
-        async def settle_status(uid: str):
-            return await self._db.load_issuance_progress(reference=uid)
+        async def by_reference(settlement_ref: str):
+            return await self._db.load_settlement_evidence_by_ref(settlement_ref=settlement_ref)
+
+        async def by_negotiation(negotiation_id: str):
+            return await self._db.load_settlement_evidence(negotiation_id=negotiation_id)
+
+        async def delivery_status(evidence):
+            # Delivery is credit issuance; a settlement whose issuance has not
+            # begun reports its evidence's own status. Pending, verified and
+            # refund statuses keep the wait polling; failed evidence ends it,
+            # since that settlement will never be delivered.
+            progress = await self._db.load_issuance_progress(reference=evidence.negotiation_id)
+            return progress if progress is not None else {"status": evidence.status}
 
         waited = await SettlementAdminRouteService(
-            settle_status=settle_status,
-            is_terminal=lambda status: status.get("status") in {"ready", "failed"},
+            settlements=SettlementLookup(by_reference=by_reference, by_negotiation=by_negotiation),
+            delivery_status=delivery_status,
         ).wait(escrow_uid, timeout=timeout)
         return SettleWaitResponse(
             ready=waited["ready"],

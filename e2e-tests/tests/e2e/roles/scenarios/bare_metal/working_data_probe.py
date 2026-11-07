@@ -211,8 +211,10 @@ def operator(request):
         unavailable.update(row.pw_gid for row in pwd.getpwall())
         unavailable.update(row.gr_gid for row in grp.getgrall())
         available = (uid for uid in range(policy["uid_min"], policy["uid_max"] + 1) if uid not in unavailable)
+        # Zero reads the established policy and ledger alone, as a history
+        # comparison does, needing no unused UID.
         needed = request.get("needed_uids", 2)
-        assert type(needed) is int and needed in (1, 2)
+        assert type(needed) is int and needed in (0, 1, 2)
         for _ in range(needed):
             assert next(available, None) is not None, "qualification has insufficient unused UID/GID pairs"
         for root in [policy["home_parent"], *policy["scratch_roots"], *policy["ipc_roots"]]:

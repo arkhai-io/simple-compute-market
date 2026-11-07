@@ -466,6 +466,50 @@ empty body; the real lane runs every shared stage in that order and no mock-lane
 stage; no shared stage names a mock gate or the mock test client; and every
 state field has one producer that runs before any stage reads it.
 
+A compute buyer purchase — a deal bought through the shipped buyer CLI,
+`market buy` or `market bare-metal buy`, in `arkhai.payments.v1` — runs the same
+stages from fulfillment onwards. Convergence to active, settlement readiness,
+the lease record, the lease's ending, and teardown completion are keyed on the
+deal's settlement reference, which an earlier stage writes: the Alkahest escrow,
+written by the canonical deal's settlement, or the payments negotiation, written
+by the purchase. Every storefront's settle wait resolves a deal by either
+([settlement servicing](../../openspec/specs/settlement-servicing/spec.md)), so
+settlement readiness keeps one body. Each shared stage reads the inputs it
+checks from state an earlier stage wrote independently of the lease it checks:
+the expected host from the Alkahest settlement preview or from the purchase
+driver's declared host — the one host the scenario registered enabled for its
+resource, or a real target's host — and the teardown's fulfillment from
+whichever ending ran. How a lease ends is shared only among scenarios that end
+the same way. The expiry stages back-date the lease, step one lease-watchdog
+cycle, and advance convergence to tearing down; the Alkahest set and the VM
+purchase run them. The bare-metal purchases end by the buyer's
+`market bare-metal teardown` in a stage of their own, which ends in the state
+teardown completion starts from.
+
+The purchase's own stages are defined once, in
+`e2e-tests/tests/e2e/roles/helpers/buyer_purchase_stages.py`, and declared by
+each purchase module in order as the canonical deal's are. They read the payer's
+balance, discover the listing and its payments option, buy through the CLI,
+correlate the run's events to one paid deal, and check the payment records: the
+transaction is bound to its Agreement, its receipt covers that mandate, its
+snapshot names the configured payer and payee with gross equal to the
+Agreement's price, and the payer's available balance, read through the payments
+kit with the buyer's own token, fell by exactly the scenario's own debits. The
+purchase command runs in the background from the buy on, because `market buy`
+polls its settlement until delivery while fulfillment convergence is held and
+later stages step it. Each domain's purchase driver
+(`e2e-tests/tests/e2e/roles/scenarios/vms/purchase_driver.py`,
+`e2e-tests/tests/e2e/roles/scenarios/bare_metal/purchase_driver.py`) supplies its
+command and arguments, its declared host, and its teardown.
+`e2e-tests/tests/unit/test_buyer_purchase_stages.py` holds every purchase module
+to the stage order.
+
+Each compute lane runs one buyer purchase against its payments double. VM's
+`e2e_vm_payment_purchase` lists a resource, host, and pool of its own, since a
+listing's binding to its resource outlives the listing, and ends its lease by
+expiry. Bare metal's is `e2e_bare_metal_payment_deal`, which inserts its own
+re-drive and seller refund between the shared stages.
+
 Settlement by introduction is defined once the same way, in
 `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py`: disclosure of the
 retention window before any contact is given, backed and unbacked supply
@@ -521,19 +565,22 @@ project of its own:
   deal runs the canonical compute deal for one whole host, stage for stage with
   VM's, then a second deal on the freed host whose buyer teardown, sent twice,
   returns one operation and releases capacity once. Its separate
-  `e2e_bare_metal_payment_deal` scenario uses a wallet-free profiled buyer for
-  one fixed-term USD/6 purchase, receipt-gated mock access, same-transaction and
-  same-fulfillment re-drive through `settle_agreement`, then seller refund and
-  separate physical teardown with restored whole-host capacity. Unless the
-  refund stage completed the deal's teardown, the module's cleanup finds the
-  purchase in the buyer's run log, refunds it if the log records the payment
-  approved — retrying for a bounded time while the seller has not yet verified
-  it or a service is unavailable — then releases a host it finds after the
-  refund, reporting one it cannot read or tear down; a refund that still fails
-  fails the run with the negotiation and
-  transaction for an operator. Each cleanup step is
-  attempted even after an earlier one fails, and the module's holds are
-  released last.
+  `e2e_bare_metal_payment_deal` scenario is the lane's
+  [buyer purchase](#the-canonical-compute-deal): a wallet-free profiled buyer
+  buys one fixed-term USD/6 purchase through `market bare-metal buy` on the
+  shared purchase stages, then receipt-gated mock access, readiness read through
+  the storefront's settle wait on the negotiation, same-transaction and
+  same-fulfillment re-drive through the canonical lifecycle `commit`, the
+  buyer's `market bare-metal teardown`, then the seller's separate refund of the
+  still-held payment and restored whole-host capacity. Unless the last stage
+  recorded the deal ended, the module's cleanup opens any mock gate still
+  closed, finds the purchase in the buyer's run log, refunds it if the log
+  records the payment approved — retrying for a bounded time while the seller
+  has not yet verified it or a service is unavailable — then releases a host it
+  finds after the refund, reporting one it cannot read or tear down; a refund
+  that still fails fails the run with the negotiation and transaction for an
+  operator. Each cleanup step is attempted even after an earlier one fails, and
+  the module's holds are released last.
   It settles against the lane's payments double; no real SSH claim is made. Its `e2e_bare_metal_unbacked_introduction` scenario is the compute
   family's introduction scenario on bare metal: the site's operator declares a
   whole machine in a capacity-backed pool naming its host, one in an unbacked
@@ -668,6 +715,58 @@ containing that directory and its logs. Repeated fetches replace the ZIP.
 An unavailable artifact is reported without discarding other logs. A successful
 fetch means diagnostics were retrieved; it does not mean the tests passed.
 
+#### Locally verifiable and external-topology scenarios
+
+End-to-end scenarios come in two kinds, each with its own coverage. A *locally
+verifiable* scenario runs against this repository's own stack — a lane's Compose
+project or a Helm release — with provisioning in its mock profile and the
+payments service replaced by the in-lane double. It runs on every pipeline run
+and proves that the services compose into a working deal. An
+*external-topology* scenario needs services or hosts this repository does not
+deploy, such as a hosted payments target or a real host. It runs only where a
+deployment supplies them, and it is the only evidence for what they bring: real
+delivery, access, and revocation on a host, and a payments target's records.
+
+An external-topology scenario that makes a deal minimally extends a locally
+verifiable one. It subclasses that scenario's shared stages wherever their bodies
+agree and adds only the stages its external parts require, so the path both kinds
+run is proven on every pipeline run and the external run adds only what no lane
+can observe. The real-provisioning qualification modules for observations 2, 4
+and 5 extend the lanes' buyer purchases this way
+([the real-provisioning lane](#the-real-provisioning-lane)). An external-topology
+scenario that makes no deal extends nothing: it follows the deal scenarios on the
+same stack and names them, as observation 6's module follows the other two.
+Setup or teardown that needs knowledge this repository lacks — funding a payer
+account at a payment provider's sandbox, providing the hosts — is the
+deployment's topology.
+No scenario performs it. An absent target is a blocked skip, and a stage whose
+input the target does not name skips naming that field.
+
+Evidence from an external-topology run is supplied by whoever deploys the
+topology. The scenarios assert, and log the identifiers each stage reads — the
+buyer run, Agreement, transaction, reservation, jobs, relay port, and grant. The
+deployment's operator presents the outcome as a free-form summary it has
+sanitized. Raw logs and records stay in the operator's restricted storage and
+never enter this repository, and no record format is defined.
+
+A qualification module's outcome is per observation, not per module, because a
+pytest run that passes with a skipped stage has not run every check an
+observation requires. An observation is *made* when every stage requiring it
+passed, *failed* when one failed, and *unproven* when none failed and one skipped
+naming a prerequisite, which the outcome names. A stage the run did not collect
+counts as not run, so deselecting a stage cannot make an observation. Every stage
+of a qualification module requires the module's observations, or its cycle's in
+a module run once per cycle, unless the stage narrows that to fewer; the module
+logs each observation's outcome after its last stage
+(`e2e-tests/tests/e2e/roles/helpers/qualification.py`).
+
+Neither kind waits out the wall clock for a state it can step to. A VM lease's
+end is reached by moving its agreed end into the past and stepping one
+lease-watchdog cycle with the watchdog held, which runs exactly the service code
+a wall-clock expiry runs. That is how "Tests wait on events, never on durations"
+([Integration Tests](#2-integration-tests)) applies to a lease's end; lease
+durations stay fixed.
+
 #### The real-provisioning lane
 
 `e2e_vm_real_provisioning`
@@ -764,6 +863,70 @@ refusal, ordinary expiry/release, closed access and released/quarantined relay
 holdings require a configured real host. The module belongs to no pipeline lane;
 without its target it skips before any holds or supply writes. Unit and mock
 pipeline results do not substitute for this physical qualification.
+
+The real-provisioning modules and the qualification modules below share the
+target's resource, and a capacity source backs one listing for good. So the
+resource's listing offers a settlement option for each deal mechanism the
+storefront composes and reports ready, Alkahest and Arkhai payments. On VM
+every module creates or adopts it through one helper
+(`e2e-tests/tests/e2e/roles/scenarios/vms/composed_listing.py`); bare metal's
+published options already are the composed mechanisms. Contact exchange settles
+no deal and is stated on no compute listing. A module adopting the listing
+requires it to offer the module's own mechanism, and otherwise fails naming the
+listing and its options before any deal.
+
+Three external-topology modules, also in no lane, make the runbook's
+[owed observations](VALIDATION_RUNBOOK.md#observations-the-qualification-owes)
+2, 4, 5, and 6 against the target and a payments target. Two extend the lanes'
+buyer purchases; the third, observation 6's, makes no deal and runs after them on
+the stack their purchases populated. The payments target is the runner's
+`PAYMENTS` section, with `LANE_OWNED` unset so an unready target is a blocked skip. Without
+either target they report a blocked skip before any hold or write.
+
+- `e2e_vm_qualification` (observation 2) buys two CPU-only guests through
+  `market buy`, keeps an SSH heartbeat on the first across the second's create
+  and teardown, reads the host's diagnostics before, during, and after through
+  the VM operator job (`diagnose_host`, read through `HostDiagnostics`), and
+  ends both leases by back-dating and stepped watchdog cycles.
+- `e2e_bare_metal_qualification` (observations 4 and 5) runs the normal cycle,
+  then the successor and refusal cycle, which needs the first cycle's consumed
+  UID, each lease ended by the buyer's `market bare-metal teardown`. It checks no
+  GPU.
+- `e2e_real_provisioning_reapply` (observation 6) reapplies both hosts'
+  canonical registrations, steps a publication cycle, and reads the consumed-UID
+  history through the working-data operator route before and after. It holds the
+  storefronts' loops and the VM site's timers and steps no bare-metal timer,
+  since the service's state guards keep that site's convergence and watchdog
+  from restoring anything a faulty reapply removed. Relay-port reconciliation
+  runs ungated on both sites, so it compares each quarantined relay lease's whole
+  record, release time included.
+
+A module failing after the buyer approved a payment refunds it as the seller,
+unless the module had begun ending that purchase, ends a delivered guest or host
+through its lease's own expiry or reclaim, and names by negotiation and
+transaction whatever it cannot refund or end.
+[`e2e-tests/README.md`](../../e2e-tests/README.md#real-provisioning-qualification)
+gives the steps.
+
+Target version 2 accepts two optional inputs these modules read. A VM host's
+`management_unit` names the operator's management client, a systemd service
+unit, which the diagnostics report beside libvirtd and the buyer tunnel client.
+Observation 2 requires that the management unit keep one invocation, stay
+active, and add no restarts across the reads, and that libvirtd add no
+restarts, report no failed result, and keep one invocation across the reads
+taken while the first guest runs; libvirtd is socket-activated and may exit when
+idle. A relay access's `admission_log` is an absolute harness-local path to a
+copy of the relay's admission plugin log
+([the log](../../tools/frp-grant-admission/README.md#the-log)), which the
+deployment keeps current. For each delivered relayed lease the module requires a
+verified `admit` line whose `jti` is the reservation and whose remote port and
+`kid` are those the relay's lease record names
+(`GET /api/v1/relays/{relay_id}/leases`). The key compared is the one that signed
+the lease's latest grant, not the relay's active key, since a rotation keeps a
+retired key's grants valid. Without either field the stage that needs it skips
+naming the field, and each observation requiring that stage is unproven: the
+management reads by observation 2, the admission check by observations 2, 4,
+and 5.
 
 ## Coverage Contract Between Levels
 
@@ -1194,7 +1357,8 @@ can refuse.
 ships from one list, which a structure test holds equal to the playbooks
 present; `make validate-playbooks` runs it. Tests that run shipped tasks through
 real `ansible-playbook` are library integration: the VM suite renders both create
-facts and exercises its family-role call boundary, and the family suite runs its
+facts, exercises its family-role call boundary, and runs the host diagnostics
+task file against faked `systemctl` and `virsh`, and the family suite runs its
 installer and authenticated status wait against controlled local file and HTTP
 boundaries. Native tests skip in the default suite without supported Ansible;
 the family HTTP tests also require the `ansible.posix.json` callback.

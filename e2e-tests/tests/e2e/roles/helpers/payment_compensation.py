@@ -4,9 +4,12 @@ A payment scenario that fails part-way can leave an approved payment held at
 the payments service and a host delivered at the site. Its cleanup finds the
 purchase in the buyer's run log — which records each step as it happens, so a
 purchase is found even when the buy command failed or timed out — refunds an
-approved payment, then releases a host it finds; a host it cannot read or tear
-down is reported, not released. Refund and release are idempotent, so they need
-not know how far the scenario's stages got.
+approved payment, then releases a host or guest it finds; one it cannot read or
+end is reported by the purchase's negotiation and payment, not released. Each
+domain supplies the release: a mock lane's through its fulfillment transport, a
+real lane's through its own recovery of the lease. Refund and release are
+idempotent, so the steps need know only whether the scenario settled the
+purchase itself, or had begun ending it.
 
 The buyer records a payment approved before the seller has verified its
 receipt, and the seller refuses to refund a payment it has not verified. A
@@ -122,6 +125,18 @@ class UnresolvedPayment(AssertionError):
         )
 
 
+class UnreleasedDelivery(AssertionError):
+    """A delivery cleanup could not read or end."""
+
+    def __init__(self, purchase: Purchase, cause: BaseException) -> None:
+        self.purchase = purchase
+        super().__init__(
+            f"the delivery of negotiation {purchase.negotiation_id} (payment "
+            f"{purchase.transaction_id}) could not be read or ended ({cause}); an "
+            "operator ends it by hand"
+        )
+
+
 @dataclass
 class PurchaseCompensation:
     """The cleanup steps that refund and release one outstanding purchase.
@@ -142,8 +157,13 @@ class PurchaseCompensation:
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
 
-    def steps(self, *, settled: bool) -> list[CleanupStep]:
-        """The steps for ``run_cleanup``; none once the scenario settled the deal itself."""
+    def steps(self, *, settled: bool, ending_begun: bool = False) -> list[CleanupStep]:
+        """The steps for ``run_cleanup``; none once the scenario settled the deal itself.
+
+        Once the scenario has begun ending a delivered purchase itself, the
+        purchase was delivered and is being ended, not abandoned, so its
+        payment is not refunded; its delivery is still ended.
+        """
 
         if settled:
             return []
@@ -176,13 +196,16 @@ class PurchaseCompensation:
             # recorded refund stops any later delivery start, so after a refund
             # this read is final, whichever of the two the seller recorded first.
             # After a failed refund it reads only what has happened so far.
-            status = self.status(purchase.negotiation_id)
-            if status is not None and status.get("state") != "released":
-                self.release(purchase.negotiation_id, status)
+            try:
+                status = self.status(purchase.negotiation_id)
+                if status is not None and status.get("state") != "released":
+                    self.release(purchase.negotiation_id, status)
+            except Exception as error:
+                raise UnreleasedDelivery(purchase, error) from error
 
         return [
             ("find the outstanding purchase", find),
-            ("refund the outstanding purchase", refund),
+            *([] if ending_begun else [("refund the outstanding purchase", refund)]),
             ("release the outstanding purchase's host", release),
         ]
 
@@ -190,6 +213,7 @@ class PurchaseCompensation:
 __all__ = [
     "Purchase",
     "PurchaseCompensation",
+    "UnreleasedDelivery",
     "UnresolvedPayment",
     "fulfillment_or_none",
     "purchase_from_run_logs",

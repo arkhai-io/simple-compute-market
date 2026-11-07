@@ -1,48 +1,58 @@
 """A receipt-gated, fixed-term whole-host purchase on the mock bare-metal lane.
 
-The profiled Ed25519 buyer has no wallet. Financial reversal and physical
-release are separate operations; mock access is never evidence of real SSH.
+The bare-metal lane's buyer purchase: a profiled Ed25519 buyer with no wallet
+buys one whole host through ``market bare-metal buy`` in ``arkhai.payments.v1``
+against the lane's payments double. It runs the shared buyer-purchase stages
+(``helpers/buyer_purchase_stages.py``) and the canonical deal's stages from
+fulfillment onwards, ``BareMetalPurchaseDriver`` supplying bare metal's part,
+and inserts bare metal's publication close (09a2, shared with the canonical
+deal's bare-metal lanes) and its own:
+
+  03   Publication:   one pass publishes the purchase's machine
+  09d  Re-drive:      the run's commit, repeated from its retained identity,
+                      keeps the transaction, fulfillment and durable result
+  11   Seller refund: after the buyer's teardown, the seller refunds the
+                      still-held payment, every part reversed
+  12   Ended:         the deal reads released and the whole host is available
+
+Financial reversal and physical release are separate operations: the buyer's
+teardown ends delivery, not the payment. Mock access is never evidence of real
+SSH.
 
 The storefront's loops, fulfillment convergence, and the lease watchdog are held
 for the whole module, so publication, delivery, and release are each the step a
-stage or the supply fixture asks for, and the purchase's cleanup runs before the
-holds are released.
+stage asks for, and the purchase's cleanup runs before the holds are released.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 import os
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Optional
 
 import pytest
-from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
-from compute_provisioning_contracts import MockRuleCreate
-from core_buyer.profile_service import BuyerProfileService
-from core_buyer.run_log import read_run, read_run_identity
-from market_arkhai_payments import (
-    ArkhaiPaymentsConfig,
-    PaymentSettlementData,
-    agreement_from_bytes,
-)
-from market_core.schemas import SettlementOption, compute_rate_total
+from core_buyer.run_log import read_run
+from market_arkhai_payments import ArkhaiPaymentsConfig, agreement_from_bytes
 from market_deal_lifecycle_client import LifecycleClient
 from market_deal_lifecycle_contracts.models import CommitMessage
-from market_identity import (
-    Ed25519Signer,
-    Identity,
-    IdentityScheme,
-    ProfileRepository,
-    TrustedIdentitySet,
-    create_signer,
-)
+from market_identity import Ed25519Signer
 from market_pool_overrides import SyncPoolOverrideClient
-from registry_client import SyncRegistryClient
-from storefront_client import SyncStorefrontClient
 
-from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
+from tests.e2e.roles.buyer_cli import BuyerCli
+from tests.e2e.roles.helpers.buyer_purchase_stages import (
+    Purchase01_PayerBalanceBefore,
+    Purchase02_ListingDiscovered,
+    Purchase03_Bought,
+    Purchase04_PurchaseCorrelated,
+    Purchase05_PaymentRecordsChecked,
+    Purchase09_PurchaseRunEnded,
+    Purchase10_BuyerTeardown,
+    PurchaseState,
+)
 from tests.e2e.roles.helpers.cleanup import run_cleanup
 from tests.e2e.roles.helpers.compute_deal import (
     advance_fulfillment_to,
@@ -50,13 +60,25 @@ from tests.e2e.roles.helpers.compute_deal import (
     dry_run_storefront,
     wait_for_stage_event,
 )
-from tests.e2e.roles.helpers.domain_deal import (
-    DealStage,
-    DomainDealState,
-    assert_market_run_succeeded,
-    ordered_events,
-    require_state,
+from tests.e2e.roles.helpers.compute_deal_stages import (
+    Stage00_LifecycleHeld,
+    Stage00a_StorefrontHealth,
+    Stage00b_RegistryReachable,
+    Stage00c2_ProvisioningContractPins,
+    Stage00c_ProvisioningHealth,
+    Stage00e_ProvisioningMockMode,
+    Stage00f1_ExecutorHostRegistry,
+    Stage00h_ProvisioningStorefrontLink,
+    Stage07a_ArmCreateGate,
+    Stage08b2_ReleaseCreateGateAndDrain,
+    Stage09a_FulfillmentConvergesToActive,
+    Stage09b_SettlementReadyAndCredentials,
+    Stage09c2_ArmTeardownGate,
+    Stage09c_LeaseRecorded,
+    Stage11a2_ReleaseTeardownGateAndDrain,
+    Stage11b_TeardownCompletion,
 )
+from tests.e2e.roles.helpers.domain_deal import ordered_events, require_state
 from tests.e2e.roles.helpers.payment_compensation import (
     PurchaseCompensation,
     fulfillment_or_none,
@@ -64,47 +86,46 @@ from tests.e2e.roles.helpers.payment_compensation import (
 )
 from tests.e2e.roles.helpers.payments import (
     buyer_payments_client,
-    buyer_payments_environment,
     configured_payments,
-    payment_config_toml,
     payment_setting,
 )
-from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import (
-    MACHINE_ADDRESS,
-    WHOLE_HOST_CAPACITY,
-    BareMetalComputeDealDriver,
+from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import WHOLE_HOST_CAPACITY
+from tests.e2e.roles.scenarios.bare_metal.conftest import _pinned, lane_setting
+from tests.e2e.roles.scenarios.bare_metal.publication_stages import (
+    BareMetalPublicationClosesListing,
 )
-from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting
+from tests.e2e.roles.scenarios.bare_metal.purchase_driver import (
+    HOURLY_GROSS,
+    BareMetalPurchaseDriver,
+    bare_metal_purchase_cli,
+    purchase_fulfillment_transport,
+    purchase_registry_client,
+    purchase_signer,
+    seller_refund,
+)
 
 pytestmark = [
     # Listed first, so the holds are taken before, and released after, every
-    # other fixture of the module.
+    # other fixture of the module; the purchase's cleanup is listed after them.
     pytest.mark.usefixtures(
-        "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held"
+        "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held",
+        "purchase_cleanup",
     ),
     pytest.mark.e2e_bare_metal_payment_deal,
 ]
 
+PUBLICATION = "publication"
 
-def _pins(role: str) -> TrustedIdentitySet:
-    return TrustedIdentitySet(identities=(Identity(
-        scheme=IdentityScheme(lane_setting(f"{role}_scheme")),
-        identifier=lane_setting(f"{role}_identifier"),
-    ),))
+log = logging.getLogger(__name__)
 
 
-def _purchase_signer(cli: BuyerCli, run_id: str | None = None) -> Any:
-    service = BuyerProfileService(
-        repository=ProfileRepository(cli.data_dir / "arkhai/buyer/profiles.json"),
-        environ=cli.credential_env,
-        run_logs_directory=cli.run_dir,
-    )
-    if run_id is None:
-        return service.resolve_fresh_signer()[1]
-    recorded = read_run_identity(run_id, directory=cli.run_dir)
-    return service.resolve_recovery_signer(
-        profile_id=recorded.profile_id, principal=recorded.principal,
-    )[1]
+@dataclass
+class BareMetalPurchaseState(PurchaseState):
+    """The bare-metal purchase's own observations over the purchase's state."""
+
+    domain_identity: str = "bare_metal.v1"
+    #: The seller's refund of the held payment (``RefundResult``).
+    refund: Optional[Any] = None
 
 
 @pytest.fixture(scope="module")
@@ -115,59 +136,63 @@ def payments_config() -> ArkhaiPaymentsConfig:
     assert config.livemode is False
     for key in ("SELLER_ACCOUNT", "COMPUTE_HOURLY_GROSS", "DISPUTE_WINDOW"):
         assert payment_setting(key), f"PAYMENTS.{key} is required for the whole-host fixture"
-    assert str(payment_setting("COMPUTE_HOURLY_GROSS")) == "1000000"
+    assert str(payment_setting("COMPUTE_HOURLY_GROSS")) == str(HOURLY_GROSS)
     assert str(payment_setting("DISPUTE_WINDOW")) == "P7D"
     return config
 
 
 @pytest.fixture(scope="module")
-def payment_buyer_cli(payments_config, buyer_cli_binary, tmp_path_factory) -> BuyerCli:
-    url = lane_setting("registry_url")
-    scheme = lane_setting("registry_scheme")
-    identifier = lane_setting("registry_identifier")
-    authority = lane_setting("registry_authority_id")
-    sections = (
-        "[bare_metal]",
-        f"registry_url = {_toml_quote(url)}",
-        f"registry_authority = {_toml_quote(authority)}",
-        "registry_principals = [{ scheme = " + _toml_quote(scheme)
-        + ", identifier = " + _toml_quote(identifier) + " }]",
-        f"payer_account = {_toml_quote(str(payment_setting('BUYER_ACCOUNT')))}",
-        "",
-        *payment_config_toml(payments_config, table="bare_metal.arkhai_payments"),
-    )
-    return create_profiled_buyer_cli(
-        binary=buyer_cli_binary,
-        base=tmp_path_factory.mktemp("bare_metal_payment_buyer"),
-        domain_identity="bare_metal.v1",
-        marketplace_scheme=IdentityScheme.ED25519,
-        marketplace_credential=str(payment_setting("BUYER_MARKETPLACE_CREDENTIAL")),
-        registries=(url,),
-        registry_authorities={url: {"authority": authority,
-                                   "identities": [{"scheme": scheme, "identifier": identifier}]}},
-        credential_environment=buyer_payments_environment(payments_config),
-        toml_sections=sections,
+def purchase_cli(payments_config, buyer_cli_binary, tmp_path_factory) -> BuyerCli:
+    return bare_metal_purchase_cli(
+        payments_config, buyer_cli_binary, tmp_path_factory.mktemp("bare_metal_payment_buyer"),
     )
 
 
 @pytest.fixture(scope="module")
-def payment_deal_state() -> DomainDealState:
-    return DomainDealState(domain_identity="bare_metal.v1")
+def deal_state() -> BareMetalPurchaseState:
+    return BareMetalPurchaseState()
 
 
 @pytest.fixture(scope="module")
-def payment_run() -> dict[str, Any]:
-    return {}
+def purchase_fulfillment(purchase_cli) -> BareMetalFulfillmentTransport:
+    """The purchase profile's own fulfillment transport."""
+    return purchase_fulfillment_transport(purchase_cli)
 
 
 @pytest.fixture(scope="module")
-def payment_fulfillment(payment_buyer_cli) -> BareMetalFulfillmentTransport:
-    signer = _purchase_signer(payment_buyer_cli)
-    return BareMetalFulfillmentTransport(
-        seller_url=lane_setting("storefront_url"),
-        principal=signer.identity,
-        signer=signer,
-        resolve_seller_principals=lambda: _pins("storefront"),
+def purchase_registry(purchase_cli):
+    """The registry, signed as the purchase profile rather than the lane buyer."""
+    client = purchase_registry_client(purchase_cli)
+    yield client
+    client.close()
+
+
+@pytest.fixture(scope="module")
+def deal_driver(
+    payments_config, purchase_cli, purchase_fulfillment, purchase_registry,
+    bare_metal_site_operator, bare_metal_site_capacity, provisioning_client,
+    provisioning_test_client, storefront_admin_client, site_capacity,
+) -> BareMetalPurchaseDriver:
+    # Only the public SSH key leaves this fixture's memory.
+    public = Ed25519Signer(os.urandom(32)).identity.identifier
+    public_bytes = base64.urlsafe_b64decode(public + "=" * (-len(public) % 4))
+    ssh_blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + public_bytes
+    return BareMetalPurchaseDriver(
+        site_operator=bare_metal_site_operator,
+        site_capacity_admin=bare_metal_site_capacity,
+        provisioning_client=provisioning_client,
+        provisioning_test_client=provisioning_test_client,
+        storefront_admin_client=storefront_admin_client,
+        fulfillment=purchase_fulfillment,
+        site_capacity=site_capacity,
+        buyer_config={"ssh_public_key": "ssh-ed25519 " + base64.b64encode(ssh_blob).decode("ascii")},
+        site_id=lane_setting("site_id"),
+        purchase_registry=purchase_registry,
+        pool_overrides=SyncPoolOverrideClient(storefront_admin_client),
+        storefront_pins=_pinned("storefront"),
+        config_path=str(purchase_cli.config_path),
+        seller_account=str(payment_setting("SELLER_ACCOUNT")),
+        dispute_window=str(payment_setting("DISPUTE_WINDOW")),
     )
 
 
@@ -186,254 +211,269 @@ def _release(transport, negotiation_id, fulfillment_id, provisioning_client, adm
     return released
 
 
-def _seller_refund(negotiation_id: str):
-    """Refund the purchase as the lane's pinned seller; a repeat returns the same result."""
-    seller = create_signer(
-        lane_setting("storefront_scheme"), str(payment_setting("SELLER_MARKETPLACE_CREDENTIAL")),
-    )
-    assert seller.identity in _pins("storefront").identities
-    with SyncStorefrontClient(
-        lane_setting("storefront_url"), signer=seller, caller_role="seller",
-        expected_publishers=_pins("storefront"),
-    ) as storefront:
-        return storefront.refund_settlement(negotiation_id)
-
-
 @pytest.fixture(scope="module")
-def payment_supply(
-    payments_config, payment_buyer_cli, payment_fulfillment, payment_deal_state, payment_run,
-    bare_metal_site_operator, bare_metal_site_capacity, provisioning_client,
-    provisioning_test_client, storefront_admin_client, site_capacity,
+def purchase_cleanup(
+    purchase_cli, purchase_fulfillment, deal_driver: BareMetalPurchaseDriver,
+    deal_state: BareMetalPurchaseState, provisioning_client, provisioning_test_client,
+    storefront_admin_client,
 ):
-    # Only the public SSH key leaves this fixture's memory.
-    public = Ed25519Signer(os.urandom(32)).identity.identifier
-    public_bytes = base64.urlsafe_b64decode(public + "=" * (-len(public) % 4))
-    ssh_blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + public_bytes
-    ssh_key = "ssh-ed25519 " + base64.b64encode(ssh_blob).decode("ascii")
-    driver = BareMetalComputeDealDriver(
-        site_operator=bare_metal_site_operator,
-        site_capacity_admin=bare_metal_site_capacity,
-        provisioning_client=provisioning_client,
-        provisioning_test_client=provisioning_test_client,
-        storefront_admin_client=storefront_admin_client,
-        fulfillment=payment_fulfillment,
-        site_capacity=site_capacity,
-        buyer_config={"ssh_public_key": ssh_key},
-        site_id=lane_setting("site_id"),
+    """Whatever the stages left: a held job, an unrefunded payment, a held host.
+
+    A deal stage 12 did not record ended is still outstanding at the payments
+    service and the site. Its gates are opened first, since a removed rule
+    leaves a job it holds waiting and a held teardown would stall the release.
+    """
+    yield
+    compensation = PurchaseCompensation(
+        run_dir=purchase_cli.run_dir,
+        status=lambda negotiation_id: fulfillment_or_none(
+            purchase_fulfillment.status, negotiation_id,
+        ),
+        refund=seller_refund,
+        release=lambda negotiation_id, status: _release(
+            purchase_fulfillment, negotiation_id, str(status["fulfillment_id"]),
+            provisioning_client, storefront_admin_client,
+        ),
+        retryable=refund_may_clear,
     )
-    overrides = SyncPoolOverrideClient(storefront_admin_client)
-    try:
-        driver.seed_supply()
-        overrides.put_pool_override({
-            "site_id": driver.site_id, "pool_id": driver.pool_id,
-            "offering_mode": "bare_metal",
-            "settlements": [{
-                "mechanism": "arkhai.payments.v1", "asset": "USD/6",
-                "rate": "1.00", "per": "hour",
-                "mechanism_input": {
-                    "payee_account": str(payment_setting("SELLER_ACCOUNT")),
-                    "asset": "USD/6", "window": str(payment_setting("DISPUTE_WINDOW")),
-                    # Compute dispute coverage includes delivery latency in
-                    # addition to the authority's minimum filing window.
-                    "dispute_window_seconds": 15 * 86400,
-                    "case_hold_max_seconds": None,
-                    "delivery_deadline_seconds": 300,
-                },
-            }],
-        })
-        for rule_id, action in (
-            (driver.create_rule_id, NODE_GRANT_ACCESS_ACTION),
-            (driver.teardown_rule_id, NODE_RECLAIM_ACCESS_ACTION),
-        ):
-            provisioning_test_client.bare_metal_rules.add_rule(
-                MockRuleCreate(
-                    rule_id=rule_id, match={"action": action, "host_id": driver.host_id},
-                    pause_before_result=False,
-                )
-            )
-        preview = dry_run_storefront(storefront_admin_client, "publication")
+    run_cleanup(
+        [
+            ("open the purchase's mock gates", deal_driver.open_gates),
+            *compensation.steps(settled=deal_state.teardown is not None),
+            # Deleting a rule that is already gone reports it not deleted;
+            # only a real failure raises, and it is reported like any step's.
+            ("remove the access-grant mock rule", lambda: provisioning_test_client
+             .bare_metal_rules.delete_rule(deal_driver.create_rule_id)),
+            ("remove the access-reclaim mock rule", lambda: provisioning_test_client
+             .bare_metal_rules.delete_rule(deal_driver.teardown_rule_id)),
+            ("drain provisioning", lambda: provisioning_test_client.drain(timeout=30)),
+            ("remove the pool override", deal_driver.remove_pool_override),
+        ],
+    )
+
+
+# ===========================================================================
+# Readiness and supply
+# ===========================================================================
+
+class TestStage00_LifecycleHeld(Stage00_LifecycleHeld):
+    pass
+
+
+class TestStage00a_StorefrontHealth(Stage00a_StorefrontHealth):
+    pass
+
+
+class TestStage00b_RegistryReachable(Stage00b_RegistryReachable):
+    pass
+
+
+class TestStage00c_ProvisioningHealth(Stage00c_ProvisioningHealth):
+    pass
+
+
+class TestStage00c2_ProvisioningContractPins(Stage00c2_ProvisioningContractPins):
+    pass
+
+
+class TestStage00e_ProvisioningMockMode(Stage00e_ProvisioningMockMode):
+    pass
+
+
+class TestStage00f1_ExecutorHostRegistry(Stage00f1_ExecutorHostRegistry):
+    pass
+
+
+class TestStage00h_ProvisioningStorefrontLink(Stage00h_ProvisioningStorefrontLink):
+    pass
+
+
+class TestStage03_PublicationPublishesTheMachine:
+    def test_03_one_publication_pass_publishes_the_purchase_listing(
+        self, storefront_admin_client, deal_driver: BareMetalPurchaseDriver,
+        deal_state: BareMetalPurchaseState,
+    ):
+        """The dry run would publish the machine, and one pass publishes it."""
+        require_state(deal_state, "_supply_seeded")
+        resource_id = deal_driver.reserved_resource_id
+        preview = dry_run_storefront(storefront_admin_client, PUBLICATION)
         assert any(
             item.get("action") == "publish"
-            and item.get("source", {}).get("physical_resource_id") == driver.reserved_resource_id
+            and item.get("source", {}).get("physical_resource_id") == resource_id
             for item in preview["actions"]
         ), preview
-        report = advance_storefront(storefront_admin_client, "publication")
+        report = advance_storefront(storefront_admin_client, PUBLICATION)
         listings = [
             str(item["listing_id"]) for item in report["actions"]
             if item["action"] == "publish"
-            and item["source"]["physical_resource_id"] == driver.reserved_resource_id
+            and item["source"]["physical_resource_id"] == resource_id
         ]
         assert len(listings) == 1, report
-        resource = next(row for row in site_capacity.snapshot()
-                        if row["resource_id"] == driver.reserved_resource_id)
-        assert resource["available"]["units"] == WHOLE_HOST_CAPACITY["units"]
-        payment_run["listing_id"] = listings[0]
-        payment_run["ssh_public_key"] = ssh_key
-        yield driver
-    finally:
-        # A deal the refund stage did not finish is still outstanding at the
-        # payments service and the site.
-        compensation = PurchaseCompensation(
-            run_dir=payment_buyer_cli.run_dir,
-            status=lambda negotiation_id: fulfillment_or_none(
-                payment_fulfillment.status, negotiation_id,
-            ),
-            refund=_seller_refund,
-            release=lambda negotiation_id, status: _release(
-                payment_fulfillment, negotiation_id, str(status["fulfillment_id"]),
-                provisioning_client, storefront_admin_client,
-            ),
-            retryable=refund_may_clear,
+        assert deal_driver.available_units() == WHOLE_HOST_CAPACITY["units"]
+        deal_state.seller_listing_id = listings[0]
+        deal_state.listing_published = True
+        log.info("[03] Listing %s published for machine %s", listings[0], resource_id)
+
+
+# ===========================================================================
+# The purchase
+# ===========================================================================
+
+class TestPurchase01_PayerBalanceBefore(Purchase01_PayerBalanceBefore):
+    pass
+
+
+class TestPurchase02_ListingDiscovered(Purchase02_ListingDiscovered):
+    pass
+
+
+class TestStage07a_ArmCreateGate(Stage07a_ArmCreateGate):
+    pass
+
+
+class TestPurchase03_Bought(Purchase03_Bought):
+    pass
+
+
+class TestPurchase04_PurchaseCorrelated(Purchase04_PurchaseCorrelated):
+    pass
+
+
+class TestStage08b2_ReleaseCreateGateAndDrain(Stage08b2_ReleaseCreateGateAndDrain):
+    pass
+
+
+class TestPurchase05_PaymentRecordsChecked(Purchase05_PaymentRecordsChecked):
+    pass
+
+
+# ===========================================================================
+# Delivery
+# ===========================================================================
+
+class TestStage09a_FulfillmentConvergesToActive(Stage09a_FulfillmentConvergesToActive):
+    pass
+
+
+class TestStage09a2_PublicationClosesTheListing(BareMetalPublicationClosesListing):
+    pass
+
+
+class TestStage09b_SettlementReadyAndCredentials(Stage09b_SettlementReadyAndCredentials):
+    pass
+
+
+class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
+    pass
+
+
+class TestPurchase09_PurchaseRunEnded(Purchase09_PurchaseRunEnded):
+    pass
+
+
+class TestStage09d_SettlementReDriven:
+    def test_09d_the_runs_commit_re_driven_is_the_same_settlement(
+        self, purchase_cli: BuyerCli, purchase_fulfillment, deal_state: BareMetalPurchaseState,
+    ):
+        """The original run's commit, repeated under its retained identity.
+
+        Recovery reads the signed run, resolves its recorded profile and
+        principal, and commits the same negotiation and transaction again; the
+        transaction, the fulfillment and the durable result are unchanged.
+        """
+        require_state(deal_state, "purchase_run", "negotiation_id", "settlement_id",
+                      "fulfillment_id", "agreement", "settlement_status")
+        run_id = deal_state.purchase_run.run_id
+        signer = purchase_signer(purchase_cli, run_id)
+        assert signer.identity == purchase_fulfillment.principal
+        _, accepted, approved, ended = ordered_events(
+            read_run(run_id, signer=signer, directory=purchase_cli.run_dir),
+            "run_started", "negotiation_completed", "payment_approved", "run_ended",
         )
-        run_cleanup(
-            [
-                *compensation.steps(settled=payment_deal_state.teardown is not None),
-                # Deleting a rule that is already gone reports it not deleted;
-                # only a real failure raises, and it is reported like any step's.
-                ("remove the access-grant mock rule", lambda: provisioning_test_client
-                 .bare_metal_rules.delete_rule(driver.create_rule_id)),
-                ("remove the access-reclaim mock rule", lambda: provisioning_test_client
-                 .bare_metal_rules.delete_rule(driver.teardown_rule_id)),
-                ("drain provisioning", lambda: provisioning_test_client.drain(timeout=30)),
-                ("remove the pool override", lambda: overrides.delete_pool_override(
-                    driver.site_id, driver.pool_id, "bare_metal",
-                )),
-            ],
-        )
+        assert accepted["negotiation_id"] == deal_state.negotiation_id
+        assert approved["transaction_id"] == ended["transaction_id"] == deal_state.settlement_id
+        assert agreement_from_bytes(
+            base64.b64decode(accepted["agreement_bytes"], validate=True)
+        ) == deal_state.agreement
+        delivered = purchase_fulfillment.result(deal_state.negotiation_id)
+
+        async def commit():
+            async with LifecycleClient(lane_setting("storefront_url"), signer, _pinned("storefront")) as buyer:
+                again = await buyer.commit(CommitMessage(
+                    negotiation_id=deal_state.negotiation_id,
+                    commitment_ref=deal_state.settlement_id,
+                    operation_key="commit:" + deal_state.settlement_id,
+                ))
+                assert again.outcome.status == "accepted", again
+                read = await buyer.read(deal_state.negotiation_id)
+                assert read.commitment_ref == deal_state.settlement_id, read
+
+        asyncio.run(commit())
+        status = purchase_fulfillment.status(deal_state.negotiation_id)
+        assert status["fulfillment_id"] == deal_state.fulfillment_id, status
+        assert purchase_fulfillment.result(deal_state.negotiation_id) == delivered
+        log.info("[09d] Run %s re-committed Agreement %s under transaction %s; fulfillment %s "
+                 "unchanged", run_id, deal_state.negotiation_id, deal_state.settlement_id,
+                 deal_state.fulfillment_id)
 
 
-def test_payment_deal_delivers_after_a_verified_receipt(
-    payment_buyer_cli: BuyerCli, payment_deal_state: DomainDealState, payment_run: dict,
-    payment_supply, payment_fulfillment, provisioning_client, site_capacity,
-) -> None:
-    with _purchase_registry(payment_buyer_cli) as registry:
-        listing = registry.get_listing(payment_run["listing_id"])
-    assert listing.status == "open"
-    assert listing.listing_resource["capacity_backing"] == "backed"
-    assert listing.publisher_principals == _pins("storefront")
-    options = [SettlementOption.model_validate(item) for item in listing.settlement_options]
-    assert len(options) == 1
-    option = options[0]
-    assert option.settlement_schema == "arkhai.payments.v1"
-    assert option.settlement_params["payee_account"] == str(payment_setting("SELLER_ACCOUNT"))
-    assert option.settlement_params["window"] == str(payment_setting("DISPUTE_WINDOW"))
-    assert option.lifecycle["adjudication"]["dispute_window_seconds"] == 15 * 86400
-    assert option.lifecycle["adjudication"]["case_hold_max_seconds"] is None
-    assert option.lifecycle["delivery_deadline_seconds"] == 300
-    assert option.price_asset == "USD/6"
-    assert option.price_rates[0].per == "hour"
-    assert compute_rate_total(option.price_rates[0], 3600) == 1000000
-    payment_deal_state.complete(DealStage.DISCOVERY, listing_id=str(listing.id))
-    buy = payment_buyer_cli.run([
-        "bare-metal", "buy", str(listing.id),
-        "--option-id", option.option_id,
-        "--ssh-public-key", payment_run["ssh_public_key"],
-        "--duration-seconds", "3600", "--payment-timeout-seconds", "300",
-        "--config", str(payment_buyer_cli.config_path),
-    ], timeout=330.0)
-    payment_run["buy"] = buy
-    assert_market_run_succeeded(buy, command="market bare-metal buy (arkhai.payments.v1)")
-    started, accepted, approved, ended = ordered_events(
-        buy.read_events(), "run_started", "negotiation_completed", "payment_approved", "run_ended",
-    )
-    assert ended["status"] == "agreed"
-    assert started["listing_id"] == payment_deal_state.listing_id
-    assert started["option_id"] == option.option_id
-    assert all(event["run_id"] == buy.run_id for event in (started, accepted, approved, ended))
-    assert accepted["agreement_ref"] == accepted["negotiation_id"] == ended["negotiation_id"]
-    agreement = agreement_from_bytes(base64.b64decode(accepted["agreement_bytes"], validate=True))
-    data = PaymentSettlementData.parse(accepted["settlement_data"])
-    data.require_bound_to(agreement)
-    assert agreement["settlement"]["option_id"] == option.option_id
-    assert approved["transaction_id"] == data.transaction_id == ended["transaction_id"]
-    assert ended["fulfillment"]["settlement_ref"] == data.transaction_id
-    assert ended["fulfillment"]["negotiation_id"] == accepted["negotiation_id"]
-    payment_run["run_id"] = buy.run_id
-    payment_deal_state.complete(DealStage.NEGOTIATION, negotiation_id=accepted["negotiation_id"])
-    payment_deal_state.complete(DealStage.SETTLEMENT, settlement_id=data.transaction_id)
-    status = payment_fulfillment.status(payment_deal_state.negotiation_id)
-    payment_deal_state.fulfillment_ref = str(status["fulfillment_id"])
-    advance_fulfillment_to(
-        provisioning_client, payment_deal_state.fulfillment_ref, "active", max_advances=8,
-    )
-    delivered_status = payment_fulfillment.status(payment_deal_state.negotiation_id)
-    assert delivered_status["state"] == "active", (
-        "the storefront reads provisioning's fulfillment status live, so once "
-        f"provisioning reports it active the storefront does too: {delivered_status}"
-    )
-    payment_supply.assert_delivery(payment_deal_state)
-    delivered = payment_fulfillment.result(payment_deal_state.negotiation_id)
-    assert delivered["receipt"]["access_ref"]["fulfillment_id"] == payment_deal_state.fulfillment_ref
-    assert delivered["receipt"]["host_id"] == payment_supply.host_id
-    assert payment_fulfillment.access(payment_deal_state.negotiation_id)["host"] == MACHINE_ADDRESS
-    resource = next(row for row in site_capacity.snapshot()
-                    if row["resource_id"] == payment_supply.reserved_resource_id)
-    assert resource["available"]["units"] == 0
-    payment_deal_state.complete(
-        DealStage.DELIVERY, fulfillment_ref=payment_deal_state.fulfillment_ref, delivery=delivered,
-    )
+# ===========================================================================
+# The buyer's teardown, then the seller's refund
+# ===========================================================================
+
+class TestStage09c2_ArmTeardownGate(Stage09c2_ArmTeardownGate):
+    pass
 
 
-def _purchase_registry(cli):
-    """The discovery client signs as the purchase profile, not the lane buyer."""
-    return SyncRegistryClient(
-        lane_setting("registry_url"), signer=_purchase_signer(cli), caller_role="buyer",
-        expected_registries=_pins("registry"), registry_authority=lane_setting("registry_authority_id"),
-    )
+class TestPurchase10_BuyerTeardown(Purchase10_BuyerTeardown):
+    pass
 
 
-def test_settlement_re_driven_from_the_run_log_is_idempotent(
-    payment_buyer_cli: BuyerCli, payment_deal_state: DomainDealState, payment_run: dict,
-    payment_fulfillment,
-) -> None:
-    require_state(payment_deal_state, "settlement_id", "fulfillment_ref", "delivery")
-    signer = _purchase_signer(payment_buyer_cli, payment_run["run_id"])
-    events = read_run(payment_run["run_id"], signer=signer, directory=payment_buyer_cli.run_dir)
-    _, accepted, approved, ended = ordered_events(
-        events, "run_started", "negotiation_completed", "payment_approved", "run_ended",
-    )
-    assert accepted["negotiation_id"] == payment_deal_state.negotiation_id
-    assert approved["transaction_id"] == ended["transaction_id"] == payment_deal_state.settlement_id
-    assert accepted["agreement_bytes"] == payment_run["buy"].wait_for_event("negotiation_completed")["agreement_bytes"]
-    assert signer.identity == payment_fulfillment.principal
-    async def commit():
-        async with LifecycleClient(lane_setting("storefront_url"), signer, _pins("storefront")) as buyer:
-            again = await buyer.commit(CommitMessage(
-                negotiation_id=accepted["negotiation_id"],
-                commitment_ref=payment_deal_state.settlement_id,
-                operation_key="commit:" + payment_deal_state.settlement_id,
-            ))
-            assert again.outcome.status == "accepted"
-            assert (await buyer.read(accepted["negotiation_id"])).commitment_ref == payment_deal_state.settlement_id
-
-    asyncio.run(commit())
-    status = payment_fulfillment.status(accepted["negotiation_id"])
-    assert status["fulfillment_id"] == payment_deal_state.fulfillment_ref
-    assert payment_fulfillment.result(accepted["negotiation_id"]) == payment_deal_state.delivery
+class TestStage11a2_ReleaseTeardownGateAndDrain(Stage11a2_ReleaseTeardownGateAndDrain):
+    pass
 
 
-def test_the_seller_refund_reverses_the_held_payment(
-    payment_deal_state: DomainDealState, payments_config: ArkhaiPaymentsConfig,
-    payment_supply, payment_fulfillment, provisioning_client, storefront_admin_client, site_capacity,
-) -> None:
-    require_state(payment_deal_state, "negotiation_id", "settlement_id", "fulfillment_ref")
-    refunded = _seller_refund(payment_deal_state.negotiation_id)
-    assert refunded.status == "refunded"
-    assert refunded.settlement_ref == payment_deal_state.settlement_id
-    with buyer_payments_client(payments_config, str(payment_setting("BUYER_ACCOUNT"))) as client:
-        snapshot = client.get_transaction(str(payment_deal_state.settlement_id)).snapshot
-    assert snapshot.parts and {part.status.value for part in snapshot.parts} == {"reversed"}
-    assert all(part.rate is None and part.reversed.root == part.gross.root
-               and part.released.root == "0" and part.held.root == "0"
-               for part in snapshot.parts)
-    released = _release(
-        payment_fulfillment, payment_deal_state.negotiation_id, payment_deal_state.fulfillment_ref,
-        provisioning_client, storefront_admin_client,
-    )
-    resource = next(row for row in site_capacity.snapshot()
-                    if row["resource_id"] == payment_supply.reserved_resource_id)
-    assert resource["available"]["units"] == WHOLE_HOST_CAPACITY["units"]
-    payment_deal_state.complete(DealStage.TEARDOWN, teardown={
-        "transaction": refunded.settlement_ref, "physical": released,
-    })
-    payment_deal_state.assert_complete()
+class TestStage11_SellerRefundsTheHeldPayment:
+    def test_11_the_seller_refunds_the_payment_the_teardown_left_held(
+        self, payments_config: ArkhaiPaymentsConfig, deal_state: BareMetalPurchaseState,
+    ):
+        """After the buyer's teardown, the seller reverses every part of the payment.
+
+        The teardown ended delivery, not the payment, so the payment is still
+        held and its reverse takes every part.
+        """
+        require_state(deal_state, "negotiation_id", "settlement_id", "teardown_fulfillment_id")
+        refunded = seller_refund(deal_state.negotiation_id)
+        assert refunded.status == "refunded", refunded
+        assert refunded.settlement_ref == deal_state.settlement_id, refunded
+        with buyer_payments_client(payments_config, str(payment_setting("BUYER_ACCOUNT"))) as client:
+            snapshot = client.get_transaction(str(deal_state.settlement_id)).snapshot
+        assert snapshot.parts and {part.status.value for part in snapshot.parts} == {"reversed"}
+        assert all(part.rate is None and part.reversed.root == part.gross.root
+                   and part.released.root == "0" and part.held.root == "0"
+                   for part in snapshot.parts), snapshot.parts
+        deal_state.refund = refunded
+        log.info("[11] Seller refunded Agreement %s: transaction %s reversed",
+                 deal_state.negotiation_id, deal_state.settlement_id)
+
+
+class TestStage11b_TeardownCompletion(Stage11b_TeardownCompletion):
+    pass
+
+
+class TestStage12_PurchaseEnded:
+    def test_12_the_deal_is_released_and_the_whole_host_available(
+        self, purchase_fulfillment, deal_driver: BareMetalPurchaseDriver,
+        deal_state: BareMetalPurchaseState,
+    ):
+        """The buyer reads the deal released, and the site the whole machine free."""
+        require_state(deal_state, "refund", "teardown_fulfillment_id")
+        released = purchase_fulfillment.status(deal_state.negotiation_id)
+        assert released["state"] == "released", released
+        assert deal_driver.available_units() == WHOLE_HOST_CAPACITY["units"]
+        deal_state.teardown = {
+            "transaction": deal_state.refund.settlement_ref, "physical": released,
+        }
+        log.info("[12] Agreement %s released; fulfillment %s; machine %s available",
+                 deal_state.negotiation_id, deal_state.teardown_fulfillment_id,
+                 deal_driver.reserved_resource_id)

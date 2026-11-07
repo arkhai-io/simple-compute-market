@@ -14,6 +14,7 @@ from storefront_client import StorefrontClientError
 from tests.e2e.roles.helpers.payment_compensation import (
     Purchase,
     PurchaseCompensation,
+    UnreleasedDelivery,
     UnresolvedPayment,
     fulfillment_or_none,
     purchase_from_run_logs,
@@ -172,10 +173,39 @@ def test_a_fulfillment_read_that_fails_is_reported_not_taken_for_no_host(tmp_pat
     find[1]()
     refund[1]()
 
-    with pytest.raises(ConnectionError):
+    with pytest.raises(UnreleasedDelivery) as unreleased:
         release[1]()
 
+    assert isinstance(unreleased.value.__cause__, ConnectionError)
+    assert "negotiation-1" in str(unreleased.value) and "transaction-1" in str(unreleased.value)
     assert ("release", "f-1") not in seller.calls
+
+
+def test_a_purchase_the_scenario_began_ending_is_ended_not_refunded(tmp_path: Path):
+    seller = Seller(delivered={"fulfillment_id": "f-1", "state": "releasing"})
+
+    _run(seller.compensation(_run_log(tmp_path, _ACCEPTED, _APPROVED))
+         .steps(settled=False, ending_begun=True))
+
+    assert seller.calls == [("status", "negotiation-1"), ("release", "f-1")]
+
+
+def test_a_delivery_that_cannot_be_ended_is_reported_naming_the_purchase(tmp_path: Path):
+    seller = Seller(delivered={"fulfillment_id": "f-1", "state": "active"})
+
+    def unended(negotiation_id: str, status: dict[str, Any]) -> None:
+        raise AssertionError("the guest's removal could not be confirmed")
+
+    compensation = seller.compensation(_run_log(tmp_path, _ACCEPTED, _APPROVED))
+    compensation.release = unended
+    find, refund, release = compensation.steps(settled=False)
+    find[1]()
+    refund[1]()
+    with pytest.raises(UnreleasedDelivery) as unreleased:
+        release[1]()
+
+    text = str(unreleased.value)
+    assert "negotiation-1" in text and "transaction-1" in text and "removal" in text
 
 
 def test_an_already_released_host_is_not_released_again(tmp_path: Path):

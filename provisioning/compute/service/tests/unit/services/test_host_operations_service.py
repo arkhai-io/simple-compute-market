@@ -1,4 +1,4 @@
-"""VM's host operation: the capacity check job.
+"""VM's host operations: the capacity check and host diagnostics jobs.
 
 Connectivity is the family's host route service, probing through each kind's
 probe; the Ansible probe is the Ansible distribution's, tested there.
@@ -12,7 +12,7 @@ from compute_provisioning.hosts.service import HostNotFoundError
 from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning_contracts import JobSubmitResponse
 from vm_provisioning_adapter.services.host_operations_service import HostOperationsService
-from vm_provisioning_operator.models import VmActionRequest
+from vm_provisioning_operator.models import HostDiagnosticsRequest, VmActionRequest
 
 
 def _service(*registered: str) -> tuple[HostOperationsService, MagicMock]:
@@ -48,3 +48,36 @@ async def test_check_capacity_submits_a_check_job_on_the_host():
     assert submitted["params"]["vm_target"] is None
     assert submitted["max_retries"] == 2
     assert submitted["job_queue"] == "q"
+
+
+@pytest.mark.asyncio
+async def test_diagnose_submits_a_diagnose_job_carrying_the_management_unit():
+    service, engine = _service("kvm1")
+
+    response = await service.diagnose(
+        host="kvm1", body=HostDiagnosticsRequest(management_unit="operator-agent.service")
+    )
+
+    assert response.job_id == "job-1"
+    submitted = engine.submit.await_args.kwargs
+    assert (submitted["host_id"], submitted["action"]) == ("kvm1", "diagnose")
+    assert submitted["params"]["vm_target"] is None
+    assert submitted["params"]["management_unit"] == "operator-agent.service"
+
+
+@pytest.mark.asyncio
+async def test_diagnose_without_a_management_unit_carries_none():
+    service, engine = _service("kvm1")
+
+    await service.diagnose(host="kvm1", body=HostDiagnosticsRequest())
+
+    assert engine.submit.await_args.kwargs["params"]["management_unit"] is None
+
+
+@pytest.mark.asyncio
+async def test_diagnose_requires_a_registered_host():
+    service, engine = _service()
+
+    with pytest.raises(HostNotFoundError):
+        await service.diagnose(host="ghost", body=HostDiagnosticsRequest())
+    engine.submit.assert_not_called()

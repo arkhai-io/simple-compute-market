@@ -236,8 +236,8 @@ class TestPlaybookStructure(unittest.TestCase):
 
     def test_vm_management_task_files_are_imported_for_the_syntax_check(self) -> None:
         """So that --syntax-check parses the task files a create, a remove, an
-        undefine, and a capacity check run, which the role reaches only through
-        include_tasks.
+        undefine, a capacity check and host diagnostics run, which the role
+        reaches only through include_tasks.
 
         Each is imported statically and in the role's context, the play refuses to
         run before any import under any tag selection, and `make
@@ -260,6 +260,7 @@ class TestPlaybookStructure(unittest.TestCase):
         self.assertEqual(sorted(imported), sorted([
             "prerequisites", "vm-create", "gpu-virt-install-retry",
             "gpu-virt-install-multi-retry", "vm-remove", "vm-undefine", "vm-check",
+            "host-diagnostics",
         ]))
         self.assertIn(str(path.relative_to(ROOT)), syntax_checked_playbooks())
 

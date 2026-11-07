@@ -193,6 +193,10 @@ class VmComputeDealDriver(VmDealDriverBase):
     reserved_resource_id: str = E2E_RESOURCE_ID
     host: str = E2E_DEAL_HOST
     pool_id: str = E2E_DEAL_POOL_ID
+    #: The GPU model the resource declares, which its listing advertises: a
+    #: scenario buying by discovery names its own, so a query by model finds
+    #: only its listing.
+    gpu_model: str = E2E_DEAL_GPU_MODEL
 
     def seed_supply(self) -> None:
         """Register this scenario's executor and declare its sellable capacity.
@@ -209,7 +213,7 @@ class VmComputeDealDriver(VmDealDriverBase):
             resource_id=self.reserved_resource_id,
             sellable_units=E2E_DEAL_GPU_COUNT,
             attributes={
-                "gpu_model": E2E_DEAL_GPU_MODEL,
+                "gpu_model": self.gpu_model,
                 "region": "California, US",
                 "sla": "90.0",
             },
@@ -275,7 +279,7 @@ class VmComputeDealDriver(VmDealDriverBase):
     ) -> Any:
         reserved = storefront_admin_client.admin_reserve_capacity(
             required_attributes=claim_attributes(
-                {"gpu_model": E2E_DEAL_GPU_MODEL, "gpu_count": E2E_DEAL_GPU_COUNT},
+                {"gpu_model": self.gpu_model, "gpu_count": E2E_DEAL_GPU_COUNT},
                 resource_id=self.reserved_resource_id,
             ),
             listing_id=listing_id,

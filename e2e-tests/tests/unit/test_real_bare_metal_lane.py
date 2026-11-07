@@ -231,7 +231,7 @@ def test_released_holding_retains_quarantine_expiry():
 
 def test_wrong_preview_host_blocks_settlement_preflight():
     instance = driver()
-    state = RealBareMetalDealState(_evaluate_settle_passed=True, _evaluate_settle_host_id="other")
+    state = RealBareMetalDealState(_evaluate_settle_passed=True, expected_host_id="other")
     with pytest.raises(AssertionError, match="another host"):
         lane.TestStage08a2_SettlementPreviewChoseTheTarget().test_08a2_preview_selected_target(instance, state)
     assert not state._settle_preflight_passed
