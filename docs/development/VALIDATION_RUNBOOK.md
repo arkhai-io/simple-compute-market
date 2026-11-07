@@ -1106,7 +1106,12 @@ Before them, the deployment supplies what they cannot:
 - a pinned dispute authority identity whose account is real at the payments
   target; nothing needs to answer at its origin;
 - in the target, optionally, the VM host's `management_unit` and each relay
-  access's `admission_log` (section 24's file; the committed example shows both).
+  access's `admission_log` (section 24's file; the committed example shows both),
+  and the bare-metal host's `cleanup_qualification`, whose operator route is one
+  the harness itself reaches, not the provisioning service's;
+- storefronts started once their registry serves: a storefront reads the
+  registry's recommended dispute authorities only at start, so one started before
+  it holds none and refuses a payments listing until restarted.
 
 Then run each storefront chart's `helm test`, whose payments-check pod runs
 `check-payments` from the storefront's own image, mounts and secret overlay. A
@@ -1119,6 +1124,12 @@ make -C e2e-tests test-module MODULE=e2e_vm_qualification ACTIVE_PROFILES=local,
 make -C e2e-tests test-module MODULE=e2e_bare_metal_qualification ACTIVE_PROFILES=local,real-provisioning-target
 make -C e2e-tests test-module MODULE=e2e_real_provisioning_reapply ACTIVE_PROFILES=local,real-provisioning-target
 ```
+
+Add the profiles holding the `PAYMENTS` section and its secret profile to
+`ACTIVE_PROFILES`. The bare-metal module runs `market bare-metal`, which the
+e2e environment's own `market` carries; name it with
+`MARKET_CLI_BIN=$PWD/e2e-tests/.venv/bin/market`, since without it the harness
+may find the VM buyer's `market`, which carries only the VM commands.
 
 Each module logs every observation's outcome after its last stage — made,
 failed, or unproven naming what a skipped stage lacked — and the identifiers each
