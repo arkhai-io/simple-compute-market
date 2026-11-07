@@ -522,6 +522,80 @@ deal no buyer asks for; an injected storefront clock, a test seam in every
 service for one assertion; fault injection at the site, a new control surface
 in `kit/site` for interleavings integration tests already prove.
 
+### D16 — Refinements settled while implementing
+
+Decisions implementation made within the decisions above, kept here when closeout
+compressed the task notes that first recorded them.
+
+- **Site (D6).** The site lifts the key into a unique `placement_key` column and
+  records the request as asked in `placement_request`; a replay is compared with
+  that record, never the row, since commit and truncation move the row's window.
+  The TTL is not compared. The placement lookup runs first, then the escrow
+  lookup, which adopts an unkeyed held row under the key and refuses a row held
+  under another key. `resize_reservation` lifts no key: it has no caller, and
+  lifting would put two rows under one key. The reserve route maps every
+  `CapacityConflictError` to 409; it had mapped only the undeclared offering mode,
+  so the existing escrow offering-mode mismatch surfaced as 500.
+- **Alkahest adapter (D10).** The module is `market_alkahest.payment_adapter`, named
+  for a payment adapter because in the specifications a lifecycle adapter is what
+  gives an option lifecycle terms, which Alkahest still lacks. Each storefront
+  writes its own commitment validator rather than one in `kit/alkahest`: VM's
+  commitment is the escrow reference with a schema version, bare metal's the
+  Agreement digest compared by Agreement bytes, so the checks differ.
+- **Library (D1).** It declares what it imports (`arkhai-core`, the lifecycle kits,
+  `kit/capacity-publication`, the site client, the provisioning contracts, the
+  identity kit) and not `arkhai-compute` or `kit/fulfillment`, which it does not
+  import. The path holds no lock; the caller serializes drives. Authorization
+  evidence holds only what is fixed before the phase, because end service keys an
+  authorization by phase and revision and refuses a changed retry — the first run
+  of the late-settlement test hit that refusal. Billing start waits while the
+  site's activation instant is ahead of this clock, and changed ready evidence is
+  `domain_result_invalid`, for the same reason. Library integration journals the
+  seller's filing and asserts it rather than running the in-process mediation
+  fake, since the path never sends a filing and a fake would exercise servicing.
+- **Scheduling.** The library calls only `begin_fulfillment`, and provisioning accepts
+  a fulfillment only for a scheduled reservation. VM's site adapter schedules
+  inside `begin_fulfillment`, since its request names no resource; bare metal
+  schedules in `fulfillment_request`, before the dispatch authorization, since its
+  request names the assigned resource and assignment is idempotent, not provider
+  execution. Rejected: a schedule step in the library's `SiteFulfillment`
+  contract, which would order a step only one domain needs before dispatch.
+- **VM composition.** `update_vm_delivery` no longer admits, since the path admits
+  every protected step and the Alkahest continuation's writes must survive an end
+  after availability; `VmPhysicalEnd.apply_end` writes no `status='ended'`, which
+  would stop the resume pass driving an ended deal whose continuation is pending;
+  the failure policy's release adopts an end the path recorded instead of
+  recording a second; `provision/reserved` is emitted once so a lane stage can tell
+  the background drive has committed; the settle wait takes `ended` as terminal.
+  Rejected, in the round's checks: new seams in place of `lifecycle.end.physical`
+  and `fake_site`'s module patch, and a container provider for the credential
+  reader, since the existing harnesses do the same and the change is not about
+  test seams.
+- **Bare-metal composition.** The status read drives a deal whose fulfillment is
+  active and not yet available, as the old status read recorded availability,
+  because the admin settle wait and the payment lane's buyer read rely on it; the
+  access read does not drive, reaching no payment authority. The settlement gate
+  rechecks the Alkahest chain on every drive, as `physical-provisioning` "Bare-metal
+  evidence is independent of escrow rows" requires; a first cut relaxed it after
+  dispatch. Migration 0016 marks a row with a saved materialization and no
+  fulfillment as dispatched, so it is adopted rather than released. The hook keeps
+  the row's physical `state` as the lifecycle state, which settle and the Alkahest
+  step read, with the disposition beside it; the drive's exception can still be
+  masked by the physical end in the hook's `finally`, as before; a continuation
+  failure is logged and left pending, as VM's is. The settle wait answers `ended`
+  once the end has taken effect and the deal was never available
+  (`BareMetalLifecycle.ended_before_delivery`).
+- **Versions.** No version bump of `kit/alkahest`, `kit/site` or either storefront:
+  each is already past its released version on `dev`, and `RELEASING.md` bumps a
+  package at most once before it is released. `arkhai-compute-delivery` is a new
+  published distribution; its PyPI trusted publisher and GitHub environment are the
+  owner's to create before the next release (5.6).
+- **Classification.** End service's `record_end` takes the caller's classification,
+  so the path chooses between its failure and an earlier lawful end itself, as
+  VM's failure action and bare metal's lifecycle do. Moving that choice behind an
+  `EndSession` method is a `kit/deal-servicing` change, recorded as unowned work in
+  `openspec/changes/README.md`.
+
 ## Dependencies
 
 - `agreed-evidence-and-early-termination` and `activate-compute-leases-at-the-site`
@@ -545,21 +619,27 @@ None.
 
 ## Design promotion record
 
-Planned destinations, completed at closeout:
+Completed at closeout. Spec paths are under `openspec/specs/`; each `spec.md`
+requirement named was written by the archive from this change's deltas.
 
-| Accepted decision | Permanent destination |
+| Accepted decision | Permanent location |
 |---|---|
-| D1 family path, ports, `drive` | `compute-delivery` spec and architecture companion; `docs/development/ARCHITECTURE.md` "Family kits" and "Fulfillment"; `openspec/specs/fulfillment/architecture.md` (boundary only) |
-| D2 additive upgrade | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `vm-storefront-fulfillment` architecture companion |
-| D3 bare metal through the hook | `physical-provisioning` spec and architecture companion |
-| D4 window and future-start wait | `compute-delivery` spec and architecture companion |
-| D5 live access and credential routes | `compute-delivery`, `vm-storefront-fulfillment` and `marketplace-identity` specs; `ARCHITECTURE.md` "Fulfillment status and results" and "Marketplace identity" |
-| D6 placement key | `site-capacity` spec and architecture companion; `ARCHITECTURE.md` "Capacity reservation" |
-| D7, D8 activation | `compute-delivery` spec |
-| D9 billing-start evidence | `compute-delivery` spec; `deal-lifecycle` spec (wording) |
-| D10 Alkahest adapter | `deal-lifecycle` architecture companion (adapter composition) |
-| D11 end hand-off | `compute-delivery` spec, referencing `deal-lifecycle` |
-| 53 F1 the settle wait's terminal `ended` | `compute-delivery` spec |
-| D15 lane qualification | `docs/development/TESTING.md` "The discipline every scenario follows", the VM and bare-metal lane entries and "The real-provisioning lane" (written in section 8) |
-| Capability index | `openspec/specs/README.md` adds `compute-delivery` |
-| Goal and campaign currency | `docs/development/ROADMAP.md` Goal 8; `openspec/changes/README.md` |
+| D1 family path, ports, `drive` | `compute-delivery/spec.md#requirement-compute-storefronts-deliver-through-one-family-path-behind-domain-ports` and `#requirement-delivery-is-driven-one-deal-at-a-time-and-reports-where-it-stands`; `compute-delivery/architecture.md#position`, `#ports-and-drive` and `#the-delivery-order`; `docs/development/ARCHITECTURE.md#family-kits` and `#fulfillment`; `fulfillment/architecture.md#storefront-pull-composition` (boundary only); `vm-storefront-fulfillment/spec.md#requirement-full-settlement-convergence-ownership` and `#requirement-physical-fulfillment-resumption` |
+| D2 additive upgrade | `docs/development/DEPLOYMENT_AND_CONFIG.md#migrations-at-startup`; `vm-storefront-fulfillment/architecture.md#evidence-and-delivery-ownership`; `physical-provisioning/architecture.md#bare-metal-storefront-pull-boundary` |
+| D3 bare metal through the hook | `physical-provisioning/spec.md#requirement-bare-metal-delivery-enters-through-the-core-fulfillment-hook`; `physical-provisioning/architecture.md#bare-metal-storefront-pull-boundary` |
+| D4 window and future-start wait | `compute-delivery/spec.md#requirement-delivery-commits-the-agreement-window` and `#requirement-a-deal-that-starts-later-waits-for-its-start`; `compute-delivery/architecture.md#the-agreement-window-and-the-future-start-wait`; `vm-storefront-fulfillment/spec.md#requirement-a-vm-deals-lease-begins-at-its-reservation-commit` |
+| D5 live access and credential routes | `compute-delivery/spec.md#requirement-credentials-are-disclosed-only-through-a-live-admitted-read`; `compute-delivery/architecture.md#the-access-check-and-credential-capable-routes`; `vm-storefront-fulfillment/spec.md#requirement-a-vm-deal-records-only-how-to-reach-its-vm`; `marketplace-identity/spec.md#requirement-body-bound-authenticated-request-and-response-version`; `docs/development/ARCHITECTURE.md#fulfillment-status-and-results` and `#marketplace-identity` |
+| D6 placement key and hold adoption | `site-capacity/spec.md#requirement-reserve-replay-is-keyed-by-the-deals-placement`; `site-capacity/architecture.md#reservation-lifecycle`; `docs/development/ARCHITECTURE.md#capacity-reservation`; `compute-delivery/spec.md#requirement-a-live-acceptance-hold-is-adopted` and `#requirement-every-step-recovers-the-same-resource`; `compute-delivery/architecture.md#commit-and-hold-adoption` |
+| D7, D8 activation | `compute-delivery/spec.md#requirement-activation-precedes-billing-start-and-availability` and `#requirement-protected-steps-are-authorized-and-admitted`; `compute-delivery/architecture.md#activation-then-billing-then-availability`; `docs/development/ARCHITECTURE.md#capacity-reservation` (activation called by delivery); `vm-storefront-fulfillment/spec.md#requirement-a-step-after-physical-fulfillment-defers-a-vm-deal-never-fails-it` |
+| D9 billing-start evidence | `compute-delivery/spec.md#requirement-billing-start-uses-end-services-one-intent`; `deal-lifecycle/spec.md#requirement-billing-start-intent-and-evidence-have-one-owner` (wording) |
+| D10 Alkahest adapter | `deal-lifecycle/architecture.md#package-and-counterpart-boundaries`; `vm-storefront-fulfillment/spec.md#requirement-vm-settlement-stages-own-their-mechanisms-steps` |
+| D11 end hand-off and an end after availability | `compute-delivery/spec.md#requirement-an-undelivered-deal-is-handed-to-the-end-operation-with-classified-evidence` and `#requirement-availability-and-convergence-have-explicit-meanings`; `compute-delivery/architecture.md#an-end-after-availability` and `#the-end-hand-off` |
+| D12 the deltas | No permanent destination: merged by the archive |
+| D13 index rows | No permanent destination: planning state; `openspec/changes/README.md` row and Goal 8 graph updated |
+| D14 cadence | No permanent destination: the plan's, not current behaviour |
+| 53 F1 the settle wait's terminal `ended` | `compute-delivery/spec.md#requirement-a-deal-ended-before-delivery-settles-the-wait-as-ended`; `compute-delivery/architecture.md#domain-compositions` |
+| D15 lane qualification | `docs/development/TESTING.md#the-discipline-every-scenario-follows`, the VM and bare-metal lane entries and `#the-real-provisioning-lane` (written in section 8); `compute-delivery/architecture.md#current-limits` |
+| D16 implementation refinements | `compute-delivery/architecture.md#ports-and-drive`, `#the-delivery-order` and `#domain-compositions`; `site-capacity/architecture.md#reservation-lifecycle`; `deal-lifecycle/architecture.md#package-and-counterpart-boundaries`; `vm-storefront-fulfillment/architecture.md#evidence-and-delivery-ownership`; `physical-provisioning/architecture.md#bare-metal-storefront-pull-boundary`; versions and classification stay here and in the change index's unowned work |
+| Capability index | `openspec/specs/README.md#capabilities` and `#settlement-documentation-ownership` add `compute-delivery` |
+| Roadmap currency | `docs/development/ROADMAP.md#goal-8--sell-compute-by-the-period-until-either-party-stops`: the current state describes the one path, and the gap row is archived |
+| Campaign index currency | `openspec/changes/README.md` "Roadmap goal — Sell compute by the period until either party stops": this change's row; the graph is unchanged |

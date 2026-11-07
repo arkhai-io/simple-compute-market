@@ -3383,6 +3383,20 @@ When an `ssh` connection's protected private key cannot be decrypted with the co
 - **WHEN** system status is read while that host is enabled and an Ansible executor is real
 - **THEN** the `ansible` component is not ready, its reasons naming the host, and its key is reported as not existing, while every other enabled host's key is reported as it would be without it
 
+### Requirement: Bare-metal delivery enters through the core fulfillment hook
+
+Bare-metal payment settlement and the Alkahest ready continuation MUST start delivery by calling core's `fulfill_domain` with a `StorefrontFulfillmentContext`, never by calling the bare-metal fulfillment service directly. The registered bare-metal hook MUST build its service and the compute delivery path from the clients in the context's `ports` and the storefront's lifecycle in its `domain_input`, so every bare-metal delivery passes end-service admission and core's check that the result keeps the deal's negotiation, settlement reference and site.
+
+#### Scenario: A bare-metal payment deal settles
+
+- **WHEN** a bare-metal buyer's payment receipt verifies
+- **THEN** settlement calls `fulfill_domain`, the hook runs the delivery path with admission, and core validates the returned identities
+
+#### Scenario: The hook is called without the storefront's lifecycle
+
+- **WHEN** the bare-metal hook is invoked with no lifecycle in `domain_input`
+- **THEN** it refuses before any capacity or fulfillment call
+
 ## Evidence
 
 - Bare-metal obligation servicing resolved from the accepted Agreement: `domains/bare_metal/storefront/tests/test_obligation_servicing.py` and `test_app_composition.py`.

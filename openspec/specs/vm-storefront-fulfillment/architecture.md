@@ -13,20 +13,54 @@ version 1. Once verified, status/source/delivery cannot be replaced; changed
 Agreement, mechanism or established reference conflicts.
 
 `vm_delivery_records` separately owns immutable fulfillment context, selected-site
-and physical identities, phase checkpoints, expiring claims and private results.
-Before physical effects, the exact request/target is persisted in
-`vm.storefront.fulfillment-context` version 1. Foreground and periodic recovery
-coordinate through the same durable claim, not process-local locks. A payment
-creates no escrow or obligation; genuine Alkahest rows and servicing remain
-separate.
+and physical identities, phase checkpoints, the site's activation instant,
+expiring claims and connection details. Before physical effects, the exact
+request/target is persisted in `vm.storefront.fulfillment-context` version 1.
+Foreground and periodic recovery coordinate through the same durable claim, not
+process-local locks. A payment creates no escrow or obligation; genuine Alkahest
+rows and servicing remain separate.
+
+The row is the compute delivery path's progress port for VM
+([compute delivery](../compute-delivery/architecture.md)). VM's delivery-port
+module supplies the rest: the accepted deal from recorded verified evidence and the
+listing's binding, the claim with `deal_ref` naming listing and negotiation, the
+acceptance hold with the exact request it was placed under `<negotiation_id>:hold`,
+the fulfillment context, `vm.connection-details.v1` ready evidence, and the
+selected stage's continuation. Its site fulfillment adapter schedules before it
+begins, since provisioning accepts a fulfillment only for a scheduled reservation
+and VM's request names no resource. The step is read from what the row records —
+activation instant, then fulfillment identity, then the `dispatch` phase, then a
+reservation — so a row written before the path reads the same way; a phase VM
+never writes reaches the path as unreadable. The stored phase `ready` means the
+provider reported active; "activate" names only the site's transition.
 
 The planner reads verified normalized provision terms, lease timing, funding
 expiry and any stage-supplied lease bytes/condition anchor. It does not decode a
-receipt or choose behavior from a mechanism ID. Recovery resolves the exact
-accepted Agreement through the seller table, revalidates source evidence, then
-runs common physical convergence under the existing reservation/fulfillment
-identity. The selected continuation owns attestation, claim binding and failure
-policy. Private credentials are delivery state, never settlement evidence.
+receipt or choose behavior from a mechanism ID. The fulfillment hook, the
+periodic resume pass and the Alkahest servicing continuation each drive the path;
+recovery resolves the exact accepted Agreement through the seller table and
+revalidates source evidence first. The hook keeps driving a dispatched deal while
+provisioning settles, up to the configured provisioning timeout, after which the
+resume pass carries it. It records `ready` on convergence and `ended` on an end,
+emits the `provision` stage events (`reserved`, `job_submitted`, `fulfilled`,
+`failed`) once each as the records first show them, and runs the seller's failure
+policy once for an end the path itself recorded. The selected continuation owns
+attestation, claim binding and failure policy, and nothing VM-visible is written
+before availability.
+
+No credential is stored: not in the delivery record, an escrow row or core's
+`credentials` table. `settle` and `settle-status` read the tenant credential live
+through the path's access check over provisioning's result, answer without one
+when access is refused or provisioning cannot serve the result, and are declared
+credential-capable so their recorded outcomes hold no credential and an exact
+retry reads again. A database written before this shape upgrades in place by
+ordered startup migrations: `20261106_001_vm_delivery_activation` adds the
+activation column and renames the stored phase `activate` to `ready`, and
+`20261106_002_vm_credentials_cleared` clears stored credentials, the core
+`credentials` rows of listings no other offering mode binds, and the
+`tenant_credentials` member of every recorded replay body, leaving each record's
+status and completion. A deal already available before the upgrade is never
+activated retroactively.
 
 ## Delivery end and post-release history
 

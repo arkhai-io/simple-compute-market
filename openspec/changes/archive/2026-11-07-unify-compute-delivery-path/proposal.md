@@ -156,3 +156,12 @@ lane deal stages change. API credits is a regression consumer.
 - D15 lane qualification: `docs/development/TESTING.md` — the stage discipline's
   wait for an Agreement instant, the VM and bare-metal lane entries, and the
   real-provisioning lane's clock precondition.
+- D16 implementation refinements: `openspec/specs/compute-delivery/architecture.md`
+  "Ports and `drive`", "The delivery order" and "Domain compositions";
+  `openspec/specs/site-capacity/architecture.md` "Reservation lifecycle";
+  `openspec/specs/deal-lifecycle/architecture.md` "Package and counterpart
+  boundaries"; `openspec/specs/vm-storefront-fulfillment/architecture.md` "Evidence
+  and delivery ownership"; `openspec/specs/physical-provisioning/architecture.md`
+  "Bare-metal storefront pull boundary". Its versions and classification items have
+  no permanent destination: the first is release planning, and the second is unowned
+  work in `openspec/changes/README.md`.

@@ -65,8 +65,41 @@ Common begin, recovery/status, access/result and teardown load verified evidence
 through the accepted entry. Payment rechecks the mandate and trusted signed
 receipt. Alkahest requires an active journal (pending reclaim/collection and
 ready mechanism status) and rechecks chain evidence against the persisted
-proposal, amount/duration, selected chain and exact obligation index. Local
-materialization is adoption history, not current chain authority.
+proposal, amount/duration, selected chain and exact obligation index, on every
+drive of a deal. Local materialization is adoption history, not current chain
+authority.
+
+Delivery enters through core's `fulfill_domain` hook, as VM's does: payment
+settle and the Alkahest ready step build a `StorefrontFulfillmentContext`, and the
+registered hook builds the compute delivery path from the clients in `ports` and
+the storefront's lifecycle in `domain_input`, refusing before any call when the
+lifecycle is absent. There is therefore one registered entry, and it always admits
+and commits the Agreement's window, and core's identity check runs on every
+bare-metal delivery. No core type changed for this: `ports` and the opaque
+`domain_input` already carry what the hook needs. The hook drives under the deal's
+lock, drives the physical end after releasing it, and returns the lifecycle row as
+`domain_result` with a public result naming the outcome, its fulfilled, deferred
+or failed disposition, and whether the deal is available.
+
+`bare_metal_fulfillment_lifecycle` is the path's progress port for bare metal
+([compute delivery](../compute-delivery/architecture.md)), its step read from the
+activation instant, the fulfillment, a recorded `dispatch` state, then a
+reservation; its row is created only while the settlement record is verified, in
+the admission's transaction, so a seller refund that won the start refuses it. The
+domain port reserves the whole-machine claim with `escrow_uid` beside the
+`:settlement` placement key, so recovery replays by key rather than scanning the
+site's reservations, and schedules and records the assigned resource before
+building the materialization over the Agreement window, since the request names
+that resource. The lifecycle cycle drives waiting and pending deals. A status read
+drives a deal whose fulfillment is active and not yet available before answering,
+so the administrator's settle wait and a buyer's status read reach availability;
+the access read does not drive, reaching no payment authority, and goes through the
+path's access check. `access` and `status` are declared credential-capable.
+Migration `bare-metal-storefront-0016-delivery-activation` adds the activation
+column, marks a row an earlier storefront left with a saved materialization and no
+fulfillment as dispatched, so it is adopted rather than released, and removes
+`host`, `port` and `username` from every recorded replay body whose `method` is
+`ssh`.
 
 The scheduler's recorded resource kind, provider, and executor selection remain authoritative for begin, status, result, and teardown. The storefront never substitutes a process-global provisioner, buyer-supplied URL, or guessed adapter. It pulls normalized status and the versioned result envelope through the same recorded site client after restart; provisioning remains the authority for jobs, provider metadata, execution credentials, and teardown convergence.
 
