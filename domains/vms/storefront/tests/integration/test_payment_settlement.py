@@ -49,8 +49,6 @@ from market_storefront.middleware.seller_auth import listing_lifecycle_middlewar
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.deal_lifecycle import VmDealLifecycle
 from market_deal_servicing import create_lifecycle_router, PhysicalResult
-from market_deal_lifecycle_client import LifecycleClient
-from market_deal_lifecycle_contracts.models import CommitMessage
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -73,6 +71,8 @@ class Delivery:
     def __init__(self) -> None:
         self.starts: list[str] = []
         self.fail = False
+        # When set, the deal is available with its continuation pending.
+        self.available = False
         # When set, delivery pauses after starting until ``release`` is set.
         self.started: asyncio.Event | None = None
         self.release: asyncio.Event | None = None
@@ -106,7 +106,10 @@ class Delivery:
         return result | {
             "state": "fulfilled",
             "fulfillment_id": "vm-fulfillment-1",
-            "domain_result": {"connection_details": "controlled VM"},
+            "domain_result": {
+                "connection_details": "controlled VM",
+                "outcome": "available" if self.available else "converged",
+            },
         }
 
 
@@ -137,8 +140,15 @@ def _option(*, deposit: bool, authority: dict | None = None) -> SettlementOption
 
 async def _seed(
     db: SQLiteClient, stage: PaymentSellerStage, *, deposit: bool, authority: dict | None = None,
+    start: datetime | None = None,
 ):
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    """``start`` is the Agreement start, by default the acceptance instant; an
+    earlier start is also when the deal was accepted, which settles late."""
+    accepted = datetime.now(timezone.utc)
+    if start is not None and start < accepted:
+        accepted = start
+    now = accepted.isoformat().replace("+00:00", "Z")
+    start_utc = start.isoformat().replace("+00:00", "Z") if start is not None else now
     provision = make_vm_provision_terms(
         duration_seconds=3600, ssh_public_key="ssh-ed25519 test"
     ).model_dump(mode="json")
@@ -153,7 +163,7 @@ async def _seed(
         amount=100,
         asset="USD/2",
         duration_seconds=3600,
-        start_utc=now,
+        start_utc=start_utc,
         accepted_at=now,
         provision_terms=provision,
     )
@@ -177,6 +187,8 @@ async def _seed(
         listing_resource={
             "gpu_model": "H200",
             "gpu_count": 1,
+            "sla": 99.0,
+            "region": "test-region",
             "offering_mode": "vm",
             "pool_id": "pool-test",
             "resource_id": "resource-test",
@@ -210,7 +222,7 @@ async def _seed(
         agreed_duration_seconds=3600,
         agreement_bytes=raw,
         accepted_at=now,
-        agreed_start_utc=now,
+        agreed_start_utc=start_utc,
         settlement_data=data.to_wire(),
     )
     await db.update_negotiation_thread_terminal(
@@ -496,6 +508,18 @@ async def test_the_refund_failure_action_reverses_a_failed_payment_deal(make):
 
 
 @pytest.mark.asyncio
+async def test_an_available_deal_whose_continuation_is_pending_stays_open(make):
+    """Available with its continuation pending is fulfilled to the hook but not
+    finished: the delivery stays open for the resume pass to converge."""
+    h = await make()
+    h.delivery.available = True
+    h.serve()
+    await h.settle()
+    await h.delivered()
+    assert (await h.db.load_vm_delivery(negotiation_id=NEGOTIATION))["status"] == "provisioning"
+
+
+@pytest.mark.asyncio
 async def test_without_the_refund_action_a_failed_deal_keeps_its_payment(make):
     h = await make()
     h.delivery.fail = True
@@ -756,20 +780,3 @@ async def test_a_malformed_agreement_never_stops_reconciliation(make):
     await h.delivered()
     assert h.delivery.starts == [NEGOTIATION]
 
-
-@pytest.mark.asyncio
-async def test_commit_reaches_available_without_buyer_settlement_status_poll(make):
-    h = await make()
-    h.serve()
-    async with LifecycleClient(
-        "http://test", BUYER, TrustedIdentitySet(identities=(SELLER.identity,)),
-        transport=h.transport,
-    ) as buyer:
-        committed = await buyer.commit(CommitMessage(
-            negotiation_id=NEGOTIATION, commitment_ref=h.data.transaction_id,
-            operation_key="commit",
-        ))
-        assert committed.outcome.status == "accepted"
-        await h.delivered()
-        assert (await buyer.read(NEGOTIATION)).delivery.progress == "active"
-    assert h.delivery.starts == [NEGOTIATION]

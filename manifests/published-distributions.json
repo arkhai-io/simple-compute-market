@@ -182,6 +182,11 @@
       "dist": "arkhai-compute-provisioning-contracts"
     },
     {
+      "key": "compute-delivery",
+      "path": "domains/compute/delivery",
+      "dist": "arkhai-compute-delivery"
+    },
+    {
       "key": "compute-provisioning-client",
       "path": "provisioning/compute/client",
       "dist": "arkhai-compute-provisioning-client"

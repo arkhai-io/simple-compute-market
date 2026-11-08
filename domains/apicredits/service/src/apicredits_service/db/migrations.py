@@ -349,6 +349,36 @@ def _migrate_reservation_activated_at(engine: Engine) -> None:
         )
 
 
+def _migrate_reservation_placement_key(engine: Engine) -> None:
+    """Add ``capacity_reservations.placement_key`` and ``placement_request``.
+
+    This service hosts the whole site ledger as its quota ledger, so its table
+    takes every column the ledger maps, the placement key's unique index
+    included. Nothing is backfilled: no reserve carried a placement key before
+    the column existed, and this service's own quota grants reserve without
+    one, so every row records none.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    missing = [
+        (column, sql_type)
+        for column, sql_type in (("placement_key", "VARCHAR"), ("placement_request", "JSON"))
+        if not _column_exists(engine, "capacity_reservations", column)
+    ]
+    with engine.begin() as connection:
+        for column, sql_type in missing:
+            connection.execute(
+                text(f"ALTER TABLE capacity_reservations ADD COLUMN {column} {sql_type}")
+            )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "ix_capacity_reservations_placement_key "
+                "ON capacity_reservations (placement_key)"
+            )
+        )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260731_001_apicredits_schema_baseline",
@@ -377,5 +407,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261106_007_reservation_activated_at",
         _migrate_reservation_activated_at,
+    ),
+    Migration(
+        "20261106_008_reservation_placement_key",
+        _migrate_reservation_placement_key,
     ),
 )

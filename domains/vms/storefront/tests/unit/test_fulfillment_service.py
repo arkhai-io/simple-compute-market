@@ -1,276 +1,88 @@
+"""VM's reading of a fulfillment result, the relay its requests never name, and
+early lease termination at the reservation's own site."""
+
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
+import inspect
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from market_alkahest import RELEASE_MODELS
+from arkhai_vms import VmConnectionDetails
 from market_core import VersionedEnvelope
-from market_identity import Ed25519Signer
 
-import market_storefront.container as container
-from market_storefront.domain_runtime import (
-    build_vm_storefront_domain,
-    build_vm_storefront_registry,
-)
-from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront import delivery_ports
 from market_storefront.services import fulfillment_service
 from market_storefront.services.capacity_client import AggregateFulfillmentClient
-from market_storefront.settlement_stages import VmAlkahestSellerStage
-from market_storefront.utils.sqlite_client import SQLiteClient
-from tests.fake_site import (
-    TEST_MARKETPLACE_SIGNER,
-    FakeSite,
-    pump_events,
-    site_capacity,
-)
-from tests.fulfillment_fixtures import make_vm_lifecycle_fixture
-from tests.publication_app import recorded_registries
-
-_TEST_STOREFRONT_SIGNER = TEST_MARKETPLACE_SIGNER
-_TEST_SELLER_PRINCIPAL = _TEST_STOREFRONT_SIGNER.identity
-_TEST_BUYER_PRINCIPAL = Ed25519Signer(b"\x23" * 32).identity
+from tests.fulfillment_fixtures import vm_fulfillment_result
 
 
-@pytest.fixture(autouse=True)
-def _identity_wiring(monkeypatch):
-    monkeypatch.setattr(
-        container,
-        "resolved_marketplace_signer",
-        _TEST_STOREFRONT_SIGNER,
-    )
-
-
-@pytest.fixture
-def client(tmp_path):
-    return SQLiteClient(
-        db_path=str(tmp_path / "agent.db"),
-        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
-    )
-
-
-async def _seed_bound_listing(
-    client: SQLiteClient,
-    *,
-    listing_id: str,
-    gpu_count: int,
-) -> None:
-    await client.upsert_listing_with_binding(
-        binding=prepare_vm_listing_binding(
-            listing_id=listing_id,
-            candidate={
-                "capacity_backing": "backed",
-                "site_id": "default",
-                "pool_id": "pool-h200-1",
-                # The listing publishes this resource, so its binding names it:
-                # a stored key is read from the binding, not the published fields.
-                "resource_id": "pool-h200-1",
-                "listing_shape": {"gpu": {"count": gpu_count, "model": "H200"}},
-            },
-        ),
-        status="open",
-        created_at="2026-01-01T00:00:00",
-        updated_at="2026-01-01T00:00:00",
-        listing_resource={
-            "resource_id": "pool-h200-1",
-            "gpu_model": "H200",
-            "gpu_count": gpu_count,
-            "region": "California, US",
-            "sla": 99.0,
-            "offering_mode": "vm",
-        },
-        accepted_escrows=_compute_listing(gpu_count=gpu_count)["accepted_escrows"],
-        demands=[],
-        fulfillment_resource=None,
-        max_duration_seconds=3600,
-        storefront_url="http://seller",
-        seller_principal=_TEST_SELLER_PRINCIPAL,
-    )
-
-
-async def _seed_compute_listings(client: SQLiteClient, *, max_gpu_count: int) -> None:
-    for gpu_count in range(1, max_gpu_count + 1):
-        await _seed_bound_listing(
-            client,
-            listing_id=f"listing-{gpu_count}x",
-            gpu_count=gpu_count,
+class TestFulfillmentResultConnection:
+    def test_the_delivery_becomes_the_deals_connection_details(self):
+        envelope = vm_fulfillment_result(
+            provisioned_resource_id="res-1",
+            credentials=(
+                {"role": "root", "password": "root-pw", "key_type": None},
+                {"role": "tenant", "password": "tenant-pw", "key_type": "generated"},
+            ),
         )
 
+        result = fulfillment_service.fulfillment_result_connection(envelope)
 
-def _compute_listing(*, gpu_count: int = 1) -> dict:
-    return {
-        "listing_id": f"listing-{gpu_count}x",
-        "seller_principal": _TEST_SELLER_PRINCIPAL.model_dump(mode="json"),
-        "buyer_principal": _TEST_BUYER_PRINCIPAL.model_dump(mode="json"),
-        "listing_resource": {
-            "resource_id": "pool-h200-1",
-            "gpu_model": "H200",
-            "gpu_count": gpu_count,
-            "region": "California, US",
-            "sla": 99.0,
-            "offering_mode": "vm",
-        },
-        "accepted_escrows": [
-            {
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "11" * 20,
-                "literal_fields": {
-                    "token": "0x" + "22" * 20,
-                },
-                "rates": [
-                    {"field": "amount", "per": "hour", "value": "100"},
-                ],
-            }
-        ],
-    }
+        auth = result.pop("authentication")
+        assert VmConnectionDetails.model_validate(result) == VmConnectionDetails(
+            host="203.0.113.10",
+            port=2222,
+            user="tenant1",
+            ready_at="2030-01-01T00:00:01+00:00",
+            provisioned_resource_ids=("res-1",),
+        )
+        assert auth == {
+            "root": {"password": "root-pw", "key_type": None},
+            "tenant": {"password": "tenant-pw", "key_type": "generated"},
+        }
 
-
-@pytest.mark.asyncio
-async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
-    client,
-    monkeypatch,
-):
-    lifecycle = await make_vm_lifecycle_fixture(
-        Path(client.db_path),
-        site_id="default",
-        pool_id="pool-h200-1",
-        with_context=False,
-        context_payload={
-            "order": _compute_listing(),
-            "required_attributes": {"gpu_model": "H200", "gpu_count": 1},
-        },
-    )
-    fake = FakeSite(deliverable_modes={"vm"})
-    fake.add_resource(
-        "pool-h200-1",
-        1,
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "host-1",
-        },
-    )
-
-    async def controlled_provision(*args, on_job_submitted, **kwargs):
-        await on_job_submitted("physical-1")
-        return {"ssh": "ssh tenant@example"}
-
-    monkeypatch.setattr(
-        fulfillment_service,
-        "_do_provision",
-        controlled_provision,
-    )
-
-    alkahest = MagicMock()
-    alkahest.string_obligation.do_obligation = AsyncMock(
-        side_effect=RuntimeError("contract reverted")
-    )
-    alkahest.oracle.request_arbitration = AsyncMock()
-
-    async with site_capacity(
-        fake,
-        sqlite_client_factory=lambda: client,
-        project_pool_modes=True,
-    ):
-        result = await fulfillment_service.fulfill_compute_obligation(
-            sqlite_client=client,
-            evidence=lifecycle.evidence,
-            site_id="default",
+    def test_a_result_without_the_access_delivery_is_refused(self):
+        envelope = VersionedEnvelope(
+            kind="fulfillment.result.v1",
+            schema_version=1,
+            payload={"provisioned_resources": [], "domain_result": None},
         )
 
-    assert result["status"] == "fulfilled"
-    delivery = await client.load_vm_delivery(
-        negotiation_id=lifecycle.evidence.negotiation_id
-    )
-    with pytest.raises(RuntimeError, match="contract reverted"):
-        await VmAlkahestSellerStage(
-            None,
-            fulfils_through_capacity=True,
-            completes_outside_settlement=False,
-            release_models=RELEASE_MODELS,
-        ).continue_delivery(
-            evidence=lifecycle.evidence,
-            db=client,
-            delivery=delivery,
-            connection_json=result["connection_details"],
-            client=alkahest,
+        with pytest.raises(RuntimeError, match="unsupported delivery"):
+            fulfillment_service.fulfillment_result_connection(envelope)
+
+    def test_an_unknown_credential_role_is_not_kept(self):
+        envelope = vm_fulfillment_result(
+            credentials=({"role": "admin", "password": "x"},),
         )
-    alkahest.oracle.request_arbitration.assert_not_called()
 
-    # The VM exists and the lease was committed before the on-chain step
-    # failed — the ledger keeps the capacity held.
-    assert fake._available("pool-h200-1") == 0
-    states = {a["state"] for a in fake.reservations.values()}
-    assert states == {"leased"}
+        assert "authentication" not in fulfillment_service.fulfillment_result_connection(envelope)
 
 
-@pytest.mark.asyncio
-async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch):
-    lifecycle = await make_vm_lifecycle_fixture(
-        Path(client.db_path),
-        listing_id="listing-2x",
-        site_id="default",
-        pool_id="pool-h200-1",
-        with_context=False,
-        context_payload={
-            "order": _compute_listing(gpu_count=2),
-            "required_attributes": {"gpu_model": "H200", "gpu_count": 2},
-        },
-    )
-    for gpu_count in (1, 3, 4):
-        await _seed_bound_listing(
-            client, listing_id=f"listing-{gpu_count}x", gpu_count=gpu_count
-        )
-    fake = FakeSite(deliverable_modes={"vm"})
-    fake.add_resource(
-        "pool-h200-1",
-        4,
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "host-1",
-        },
-    )
+class TestTheStorefrontSelectsNoRelay:
+    """The storefront names no relay when it builds a fulfillment request.
 
-    async def controlled_provision(*args, on_job_submitted, **kwargs):
-        await on_job_submitted("physical-1")
-        return {"ssh": "ssh tenant@example"}
+    Which relay a host dials is recorded on the relay its pool references. A
+    storefront naming one per request would make a fleet-wide fact depend on a
+    caller's configuration, and would let two requests against one host
+    disagree about how that host is reached. The buyer's address and port come
+    back in the fulfillment result.
+    """
 
-    monkeypatch.setattr(
-        fulfillment_service,
-        "_do_provision",
-        controlled_provision,
-    )
+    def test_no_builder_remains_to_be_called(self):
+        assert not hasattr(fulfillment_service, "_connectivity_settings_from_storefront_config")
 
-    with recorded_registries():
-        async with site_capacity(
-            fake,
-            sqlite_client_factory=lambda: client,
-            project_pool_modes=True,
-        ) as aggregate:
-            result = await fulfillment_service.fulfill_compute_obligation(
-                sqlite_client=client,
-                evidence=lifecycle.evidence,
-                site_id="default",
+    def test_no_request_builder_reads_relay_settings(self):
+        """Asserted against the source rather than by driving it, because the
+        point is that no code path exists to reach — a behavioural test can
+        only show that the paths exercised did not."""
+        for module in (fulfillment_service, delivery_ports):
+            source = inspect.getsource(module)
+            body = "\n".join(
+                line for line in source.splitlines() if not line.lstrip().startswith("#")
             )
-            # The poller delivers deltas in production; pump them here.
-            await pump_events(aggregate, fake)
-
-    assert result["status"] == "fulfilled"
-    statuses = {
-        gpu_count: (await client.load_listing(listing_id=f"listing-{gpu_count}x"))[
-            "status"
-        ]
-        for gpu_count in range(1, 5)
-    }
-    assert statuses == {
-        1: "open",
-        2: "open",
-        3: "closed",
-        4: "closed",
-    }
+            for key in ("frp_server_addr", "frp_domain", "frp_dashboard_password"):
+                assert key not in body, f"{module.__name__} still reads {key}"
 
 
 @pytest.mark.asyncio
@@ -305,248 +117,3 @@ async def test_terminate_vm_lease_asks_only_the_reservations_site():
     ((site, reservation, termination),) = calls
     assert (site, reservation) == ("site-b", "reservation-1")
     assert termination.reason == "buyer requested early termination"
-
-
-@pytest.mark.asyncio
-async def test_do_provision_end_to_end_delivers_credentials_for_storage(
-    client,
-    monkeypatch,
-):
-    """Exercises the real _do_provision (schedule_resource -> begin_fulfillment
-    -> poll -> get_fulfillment_result) through fulfill_vm_obligation's
-    unmodified credential-storage code, with the fulfillment client mocked at
-    the network boundary but capacity reservation going through a real
-    FakeSite ledger. Confirms end to end -- real stored rows, not code
-    inspection -- that credentials the fulfillment result carries reach the
-    storefront's credential store."""
-
-    lifecycle = await make_vm_lifecycle_fixture(
-        Path(client.db_path),
-        escrow_uid="escrow-e2e-1",
-        negotiation_id="neg-e2e-1",
-        listing_id="listing-1",
-        site_id="default",
-        pool_id="pool-h200-1",
-        with_context=False,
-        context_payload={
-            "order": _compute_listing(),
-            "required_attributes": {"gpu_model": "H200", "gpu_count": 1},
-        },
-    )
-    fake = FakeSite(deliverable_modes={"vm"})
-    fake.add_resource(
-        "pool-h200-1",
-        1,
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "host-1",
-        },
-    )
-
-    fulfillment_client = SimpleNamespace(
-        schedule_resource=AsyncMock(
-            return_value=SimpleNamespace(settlement_resource_id="host-1")
-        ),
-        begin_fulfillment=AsyncMock(
-            return_value=SimpleNamespace(
-                fulfillment_id="fulfillment-e2e-1", state="dispatching"
-            )
-        ),
-        get_fulfillment_status=AsyncMock(
-            return_value=SimpleNamespace(state="active", failure_message=None)
-        ),
-        get_fulfillment_result=AsyncMock(
-            return_value=VersionedEnvelope(
-                kind="fulfillment.result.v1",
-                schema_version=1,
-                payload={
-                    "provisioned_resources": [
-                        {
-                            "provisioned_resource_id": "provisioned-vm-e2e-1",
-                            "status": "active",
-                        }
-                    ],
-                    "domain_result": {
-                        "kind": "compute.access-delivery",
-                        "schema_version": 1,
-                        "payload": {
-                            "endpoints": [
-                                {"protocol": "ssh", "host": "host-1", "port": 2222, "user": "tenant"}
-                            ],
-                            "credentials": [
-                                {"role": "root", "password": "root-pw", "key_type": None},
-                                {"role": "tenant", "password": "tenant-pw", "key_type": "generated"},
-                            ],
-                            "ready_at": "2030-01-01T00:00:01+00:00",
-                        },
-                    },
-                },
-            )
-        ),
-    )
-
-    monkeypatch.setattr(
-        fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
-    )
-    monkeypatch.setattr(
-        fulfillment_service.settings,
-        "provisioning",
-        SimpleNamespace(
-            timeout=5.0,
-            poll_interval=0.001,
-            service_url="http://provisioning",
-            frp_server_addr="",
-        ),
-        raising=False,
-    )
-
-    async with site_capacity(
-        fake,
-        sqlite_client_factory=lambda: client,
-        project_pool_modes=True,
-    ):
-        result = await fulfillment_service.fulfill_compute_obligation(
-            sqlite_client=client,
-            evidence=lifecycle.evidence,
-            site_id="default",
-        )
-
-    assert result["status"] == "fulfilled"
-    fulfillment_client.schedule_resource.assert_awaited_once()
-    fulfillment_client.begin_fulfillment.assert_awaited_once()
-    fulfillment_client.get_fulfillment_result.assert_awaited_once()
-
-    # Real rows via the unchanged downstream credential-storage code --
-    # verified here for real, not by field-name inspection alone.
-    stored = await client.get_credentials(listing_id="listing-1", granted_to="self")
-    roles = {row["role"]: row for row in stored}
-    assert set(roles) == {"root", "tenant"}
-    assert roles["root"]["password"] == "root-pw"
-    # A delivery carries no key path on a provisioner host, so none is stored.
-    assert roles["root"]["ssh_key_path_host"] is None
-    assert roles["tenant"]["password"] == "tenant-pw"
-    assert roles["tenant"]["key_type"] == "generated"
-
-    # The delivery row carries the durable fulfillment identity by the time
-    # this call returns, which is what restart convergence reads back to
-    # resume an in-progress fulfillment. This proves the identifiers
-    # round-trip; resumption itself is test_fulfillment_resume_runtime.py's.
-    escrow = await client.load_vm_delivery(negotiation_id="neg-e2e-1")
-    assert escrow["fulfillment_id"] == "fulfillment-e2e-1"
-    assert escrow["settlement_resource_id"] == "host-1"
-    assert escrow["capacity_reservation_id"]
-
-
-@pytest.mark.asyncio
-async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
-    """Duplicate-result coverage: fetching get_fulfillment_result
-    more than once for the same fulfillment must not mutate state or
-    double-store credentials -- store_credential's own INSERT OR IGNORE
-    already guarantees the storage half; this confirms _do_provision's
-    calling code doesn't do anything that would defeat that (e.g. calling
-    schedule/begin a second time)."""
-
-    lifecycle = await make_vm_lifecycle_fixture(
-        Path(client.db_path),
-        escrow_uid="escrow-dup-1",
-        negotiation_id="neg-dup-1",
-        listing_id="listing-1",
-        site_id="default",
-        pool_id="pool-h200-1",
-        with_context=False,
-        context_payload={
-            "order": _compute_listing(),
-            "required_attributes": {"gpu_model": "H200", "gpu_count": 1},
-        },
-    )
-    fake = FakeSite(deliverable_modes={"vm"})
-    fake.add_resource(
-        "pool-h200-1",
-        1,
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "host-1",
-        },
-    )
-
-    envelope = VersionedEnvelope(
-        kind="fulfillment.result.v1",
-        schema_version=1,
-        payload={
-            "provisioned_resources": [
-                {"provisioned_resource_id": "provisioned-vm-dup-1", "status": "active"}
-            ],
-            "domain_result": {
-                "kind": "compute.access-delivery",
-                "schema_version": 1,
-                "payload": {
-                    "endpoints": [
-                        {"protocol": "ssh", "host": "host-1", "port": 2222, "user": "tenant"}
-                    ],
-                    "credentials": [
-                        {"role": "tenant", "password": "tenant-pw", "key_type": None},
-                    ],
-                    "ready_at": "2030-01-01T00:00:01+00:00",
-                },
-            },
-        },
-    )
-    fulfillment_client = SimpleNamespace(
-        schedule_resource=AsyncMock(
-            return_value=SimpleNamespace(settlement_resource_id="host-1")
-        ),
-        begin_fulfillment=AsyncMock(
-            return_value=SimpleNamespace(
-                fulfillment_id="fulfillment-dup-1", state="dispatching"
-            )
-        ),
-        get_fulfillment_status=AsyncMock(
-            return_value=SimpleNamespace(state="active", failure_message=None)
-        ),
-        get_fulfillment_result=AsyncMock(return_value=envelope),
-    )
-
-    monkeypatch.setattr(
-        fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
-    )
-    monkeypatch.setattr(
-        fulfillment_service.settings,
-        "provisioning",
-        SimpleNamespace(
-            timeout=5.0, poll_interval=0.001, service_url="http://provisioning",
-        ),
-        raising=False,
-    )
-
-    async with site_capacity(
-        fake,
-        sqlite_client_factory=lambda: client,
-        project_pool_modes=True,
-    ):
-        first = await fulfillment_service.fulfill_compute_obligation(
-            sqlite_client=client,
-            evidence=lifecycle.evidence,
-            site_id="default",
-        )
-        # A second, independent get_fulfillment_result read for the same
-        # fulfillment (e.g. a caller re-checking status/result) must be
-        # side-effect-free.
-        escrow = await client.load_vm_delivery(negotiation_id="neg-dup-1")
-        second_envelope = await fulfillment_client.get_fulfillment_result(
-            "fulfillment-dup-1",
-            capacity_reservation_id=escrow["capacity_reservation_id"],
-        )
-
-    assert first["status"] == "fulfilled"
-    assert second_envelope.payload == envelope.payload
-
-    stored = await client.get_credentials(listing_id="listing-1", granted_to="self")
-    # Exactly one tenant credential row -- INSERT OR IGNORE plus the
-    # unique id per call means a genuinely repeated store_credential call
-    # with the same content would still only be exercised once here since
-    # fulfill_compute_obligation itself only stores once per call; this
-    # pins that fulfill_compute_obligation doesn't call store_credential
-    # more than once for a single fulfillment.
-    assert len([row for row in stored if row["role"] == "tenant"]) == 1

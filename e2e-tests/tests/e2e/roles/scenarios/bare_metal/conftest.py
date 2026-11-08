@@ -154,6 +154,9 @@ class BareMetalDealState(ComputeDealState):
     second_fulfillment_id: Optional[str] = None
     _second_deal_active: bool = False
     second_teardown: Optional[dict[str, Any]] = None
+    #: 12e saw the second deal's machine released once, so the deal after it
+    #: (13a) starts from a free machine.
+    _second_deal_released: bool = False
 
 
 @pytest.fixture(scope="module")

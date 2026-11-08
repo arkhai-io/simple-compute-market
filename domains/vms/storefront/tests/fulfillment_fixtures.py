@@ -270,7 +270,9 @@ def vm_delivery_evidence(
         evidence={
             "schema": "vm.settlement-evidence.v1",
             "agreement_sha256": "1" * 64,
-            "source": {"escrow_uid": settlement_ref, "obligation_ref": "obligation-1"},
+            "source": {
+                "escrow_uid": settlement_ref, "obligation_ref": "obligation-1", "chain_name": "anvil",
+            },
             "delivery": {
                 "kind": "vm.delivery-facts",
                 "schema_version": 1,

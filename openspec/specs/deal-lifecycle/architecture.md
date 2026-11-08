@@ -65,6 +65,19 @@ are recipient, oracle_gated or interruptible where the domain supports them.
 | `kit/deal-servicing` | Seller dispatch/read/list, observation cursors, end/admission journal, evidence/retention and respondent answers |
 | `kit/arkhai-payments` | Stateless once-only payment adapter, published resources/models/vectors and shared clock-injected fixture engine |
 | `kit/arkhai-mediation` | Stateless dispute adapter/client, claim framing/signing, published resources/models/vectors and contract fixtures |
+| `kit/alkahest` (`market_alkahest.payment_adapter`) | Once-only payment adapter for `alkahest.v1`: no financial action after the composition's commitment validator accepts the selected stage's evidence |
+
+Current Alkahest authorizes delivery through `AlkahestOnceAdapter`, which composes
+`OnceDeliveryPolicy` as `kit/arkhai-payments`' adapter does. It refuses evidence
+naming another deal or commitment before the injected validator runs, supports no
+payment command, so `submit_payment` refuses every one, makes billing start a
+no-op only with activation evidence, and answers a read as rejected naming
+`alkahest.v1`, so a lifecycle read of an Alkahest deal shows delivery with no
+payment account. Each compute storefront supplies its own validator, since its
+commitment differs: VM's is the escrow reference, bare metal's the Agreement
+digest. The adapter sits in the mechanism kit, not the compute delivery library,
+which knows no mechanism. A missing table entry still never implies allow, and an
+Alkahest deal's `delivery_end` filing stays unsupported.
 
 Mechanism and dispute kits depend on foundation/contracts, not either role's
 orchestration. A dispute kit names one interface, never a payment mechanism;

@@ -507,15 +507,15 @@ class BareMetalStorefrontRuntime:
         """Build settlement from the configured mechanisms and their resources.
 
         A stage that verifies and delivers in one call (payment settlement)
-        starts fulfillment itself once the receipt verifies, so the service
-        carries fulfillment's start when the site authorities are composed.
+        drives delivery itself once the receipt verifies, so the service
+        carries delivery's entry when the site authorities are composed.
         """
         composition = self.settlement_composition
         if composition is None:
             raise RuntimeError("no bare-metal settlement mechanism is configured")
         if self.capacity_client is None or self.fulfillment_client is None:
             return self._settlement_service()
-        return self._settlement_service(self.fulfillment_service().begin)
+        return self._settlement_service(self.fulfillment_service().deliver)
 
     def fulfillment_service(self) -> BareMetalFulfillmentService:
         """Build durable fulfillment over exact selected-site clients."""
@@ -527,6 +527,7 @@ class BareMetalStorefrontRuntime:
             fulfillment_client=self.fulfillment_client,
             read_verified_evidence=self._settlement_service().verified_evidence,
             lifecycle=self.lifecycle,
+            domain=self.domain,
         )
 
     def contact_settlement_config(self) -> ContactSettlementConfig | None:

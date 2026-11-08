@@ -120,6 +120,8 @@ _SITE_POOLS: list[dict] = []
 _PROJECTION_SITES: list[FakeProjectionSite] = []
 # The fixture's recorded site requests, for tests asserting no site call.
 _SITE_REQUESTS: list[list[str]] = []
+#: The body of every reserve the fake site received.
+_SITE_RESERVES: list[dict] = []
 # The fixture's application, for tests that also drive it as an administrator.
 _APPS: list[FastAPI] = []
 # Builds the fixture's negotiation runtime with other seller-round hooks.
@@ -363,11 +365,14 @@ async def client(db, monkeypatch):
 
     def _recording_handle(request):
         site_requests.append(f"{request.method} {request.url.path}")
+        if request.method == "POST" and request.url.path.endswith("/reservations"):
+            _SITE_RESERVES.append(json.loads(request.content or b"{}"))
         return original_handle(request)
 
     fake_site._handle = _recording_handle
     _SITE_REQUESTS[:] = []
     _SITE_REQUESTS.append(site_requests)
+    _SITE_RESERVES[:] = []
     capacity_runtime = capacity_runtime_over(fake_site, site_name="site-test")
 
     async def capacity_binding_for_listing(repository, listing_id):
@@ -969,6 +974,11 @@ class TestAdministrativeAcceptance:
         # The acceptance hold reserves at the listing's site, as it does after
         # a negotiated acceptance.
         assert any("reserv" in request for request in site_requests), site_requests
+        # It is placed under the deal's hold placement key, so delivery can
+        # replay it to learn whether the hold lapsed.
+        (reserve,) = _SITE_RESERVES[-1:]
+        assert reserve["deal_ref"]["placement_key"] == f"{negotiation_id}:hold"
+        assert reserve["deal_ref"]["negotiation_id"] == negotiation_id
 
 
 @pytest_asyncio.fixture

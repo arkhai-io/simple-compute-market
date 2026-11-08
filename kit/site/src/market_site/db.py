@@ -152,6 +152,18 @@ class CapacityReservation(Base):
     )
     deal_ref = Column(JSON, nullable=True)
     escrow_uid = Column(String, nullable=True, index=True)  # lifted from deal_ref
+    # ``deal_ref["placement_key"]`` as reserve recorded it: the deal and the
+    # purpose of the placement, under which an exact replay of the reserve
+    # returns this row in whatever state it has reached. Unique, because a
+    # replay must find one recorded reservation; null for a reserve without
+    # the key.
+    placement_key = Column(String, nullable=True, unique=True, index=True)
+    # The reserve request a placement key was admitted for — claim, offering
+    # mode and lease window as asked — against which a replay is compared.
+    # Kept apart from the row's own window, which commit and truncation move
+    # after admission, so a replay is judged against what was asked rather
+    # than what the lease has since become. Null with no placement key.
+    placement_request = Column(JSON, nullable=True)
     hold_expires_at = Column(String, nullable=True)  # TTL soft hold (two-phase reserve)
     offering_mode = Column(String, nullable=True)
     executor_target = Column(String, nullable=True)

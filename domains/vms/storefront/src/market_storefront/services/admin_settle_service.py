@@ -7,8 +7,7 @@ implement the evaluate→advance→observe pattern:
     evaluate (this module)        advance (POST /settle/{uid})
     ────────────────────────────  ───────────────────────────
     verify_escrow_dry_run         start_settlement_job → verify_escrow_against_plan
-    evaluate_settle_dry_run       start_settlement_job → _build_provisioning_job_spec
-                                                        → _do_provision
+    evaluate_settle_dry_run       start_settlement_job → the compute delivery path
 """
 
 from __future__ import annotations

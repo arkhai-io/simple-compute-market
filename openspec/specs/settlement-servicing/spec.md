@@ -613,7 +613,7 @@ An administrator's settle wait MUST resolve the reference it is given to a settl
 the same way in every storefront that binds it, whatever the settlement's mechanism: by
 the settlement evidence whose settlement reference it is, and otherwise by the
 settlement evidence of the negotiation it names. The settlement runtime kit MUST own
-that resolution and the wait's terminal states, `ready` and `failed`; a storefront MUST
+that resolution and the wait's terminal states, `ready`, `failed` and `ended`; a storefront MUST
 supply only its lookups of settlement evidence by settlement reference and by
 negotiation, and its delivery status for a resolved settlement. A reference that
 resolves to no settlement MUST be treated as a poll that found nothing terminal.
@@ -660,4 +660,4 @@ resolves to no settlement MUST be treated as a poll that found nothing terminal.
 - Alkahest mechanism dispatch and claim hooks:
   `kit/alkahest/tests/unit/test_claims.py` and `test_claim_hooks.py`.
 - Accepted-domain settlement/fulfillment carriers, exact-object dispatch, result codec routing, and mismatch rejection: `core/storefront/tests/unit/test_domain_lifecycle.py` and `domains/vms/storefront/tests/unit/test_settlement_composition.py`.
-- Selected-site restart and teardown routing: `domains/vms/storefront/tests/unit/test_fulfillment_resume_runtime.py`, `test_fulfillment_service.py`, and `test_lease_truncation.py`.
+- Selected-site restart and teardown routing: `domains/vms/storefront/tests/integration/test_fulfillment_resume_runtime.py`, `domains/vms/storefront/tests/unit/test_fulfillment_service.py`, and `test_lease_truncation.py`.

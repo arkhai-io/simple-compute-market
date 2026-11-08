@@ -33,7 +33,7 @@ def _restarted(runtime):
 
 
 async def test_a_restart_after_verification_delivers_once(tmp_path) -> None:
-    site = _Site("provisioning", "provisioning", "active")
+    site = _Site("dispatching", "dispatching", "active")
     chain = ChainClient(StringObligations(uid=ATTESTATION_UID))
     escrow = EscrowOnChain()
     runtime, _app_, obligation_ref = await _settled(
@@ -68,7 +68,7 @@ async def test_a_restart_after_verification_delivers_once(tmp_path) -> None:
 async def test_a_restart_after_a_recorded_publication_never_publishes_again(
     tmp_path,
 ) -> None:
-    site = _Site("provisioning", "active")
+    site = _Site("dispatching", "active")
     chain = ChainClient(StringObligations(uid="0x" + "99" * 32))
     runtime, _app_, obligation_ref = await _settled(
         tmp_path, site=site, chain=chain, escrow=EscrowOnChain()

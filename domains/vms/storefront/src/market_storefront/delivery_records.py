@@ -16,10 +16,6 @@ from market_deal_servicing.journal import create_schema, FinalRequest
 from market_identity import Identity
 
 
-class DeliveryEnded(ValueError):
-    """Delivery lost admission to a durable final request."""
-
-
 def register_delivery(conn, negotiation_id):
     """Register only verified commitment evidence, in its caller's transaction."""
     create_schema(conn)
@@ -72,16 +68,10 @@ def record_delivery_end(conn, negotiation_id, *, source_ref, cause, now):
     return end.view(negotiation_id)
 
 
-def admit_delivery(conn, negotiation_id, phase, *, available=False):
-    """Order admission and its protected delivery checkpoint in one write."""
+def admit_delivery(conn, negotiation_id, phase):
+    """Order admission and the delivery record it permits in one write."""
     register_delivery(conn, negotiation_id)
     end = EndSession(conn)
     record = end.read(negotiation_id)
-    now = int(time.time())
-    admission = (
-        end.available(negotiation_id, at=record.available_at or now,
-                      expected_revision=record.revision, now=now)
-        if available else end.admit(negotiation_id, phase, record.revision, now=now)
-    )
-    return admission.status == "admitted"
+    return end.admit(negotiation_id, phase, record.revision, now=int(time.time())).status == "admitted"
 

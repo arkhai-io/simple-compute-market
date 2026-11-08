@@ -5,7 +5,11 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from compute_provisioning_contracts import ACCESS_DELIVERY_KIND, ACCESS_DELIVERY_SCHEMA_VERSION
+from compute_provisioning_contracts import (
+    ACCESS_DELIVERY_KIND,
+    ACCESS_DELIVERY_SCHEMA_VERSION,
+    FulfillmentStatusResponse,
+)
 from compute_provisioning_contracts.lease_ends import (
     LEASE_ENDED_CALLBACK,
     LeaseEndedEvent,
@@ -43,21 +47,28 @@ def peer(h, signer=BUYER):
 
 
 class ReadyProvisioning(Provisioning):
-    """The external site completes the already dispatched physical grant."""
+    """The external site completes the already dispatched physical grant, once
+    ``state`` says so."""
 
-    def __init__(self):
+    def __init__(self, state: str = "active"):
         super().__init__()
         self.lease_reads = 0
+        self.state = state
 
     async def get_fulfillment_status(self, fulfillment_id, *, capacity_reservation_id):
         assert (fulfillment_id, capacity_reservation_id) == ("fulfillment-pay", "reservation-pay")
-        return SimpleNamespace(state="active", failure_reason=None, failure_message=None)
+        return FulfillmentStatusResponse(
+            fulfillment_id=fulfillment_id, capacity_reservation_id=capacity_reservation_id,
+            state=self.state,
+        )
 
     async def get_fulfillment_result(self, fulfillment_id, *, capacity_reservation_id):
         assert (fulfillment_id, capacity_reservation_id) == ("fulfillment-pay", "reservation-pay")
         return VersionedEnvelope(
             kind="fulfillment.result.v1", schema_version=1,
             payload={
+                "fulfillment_id": fulfillment_id,
+                "capacity_reservation_id": capacity_reservation_id,
                 "state": "active",
                 "domain_result": {
                     "kind": ACCESS_DELIVERY_KIND,
@@ -106,7 +117,7 @@ class DelayedResultProvisioning(ReadyProvisioning):
 @pytest.mark.asyncio
 async def test_servicing_adopts_ready_fulfillment_without_buyer_status_poll(harness):
     h = harness
-    provisioning = ReadyProvisioning()
+    provisioning = ReadyProvisioning(state="dispatching")
     object.__setattr__(h.runtime, "fulfillment_client", provisioning)
     h.serve()
     async with peer(h) as buyer:
@@ -116,6 +127,7 @@ async def test_servicing_adopts_ready_fulfillment_without_buyer_status_poll(harn
         ))
         assert committed.outcome.status == "accepted"
         assert (await buyer.read(h.negotiation_id)).delivery.progress == "unstarted"
+        provisioning.state = "active"
         await h.runtime.lifecycle.cycle()
         assert (await buyer.read(h.negotiation_id)).delivery.progress == "active"
         with transaction(h.runtime.db.db_path) as conn:
@@ -131,7 +143,7 @@ async def test_servicing_adopts_ready_fulfillment_without_buyer_status_poll(harn
 @pytest.mark.asyncio
 async def test_servicing_finishes_receipt_after_availability_was_recorded(harness):
     h = harness
-    provisioning = ReadyProvisioning()
+    provisioning = ReadyProvisioning(state="dispatching")
     db = InterruptedReceiptStore(h.runtime.db.db_path, domain=h.runtime.domain)
     object.__setattr__(h.runtime, "db", db)
     object.__setattr__(h.runtime, "fulfillment_client", provisioning)
@@ -141,6 +153,7 @@ async def test_servicing_finishes_receipt_after_availability_was_recorded(harnes
             negotiation_id=h.negotiation_id, commitment_ref=h.data.transaction_id,
             operation_key="commit",
         ))
+        provisioning.state = "active"
         await h.runtime.lifecycle.cycle()
         assert db.interrupted
         assert await db.load_bare_metal_result(negotiation_id=h.negotiation_id) is not None
@@ -158,7 +171,7 @@ async def test_servicing_finishes_receipt_after_availability_was_recorded(harnes
 @pytest.mark.asyncio
 async def test_servicing_never_adopts_readiness_after_buyer_end(harness):
     h = harness
-    provisioning = ReadyProvisioning()
+    provisioning = ReadyProvisioning(state="dispatching")
     object.__setattr__(h.runtime, "fulfillment_client", provisioning)
     h.serve()
     async with peer(h) as buyer:
@@ -167,6 +180,7 @@ async def test_servicing_never_adopts_readiness_after_buyer_end(harness):
             operation_key="commit",
         ))
         await buyer.end_delivery(h.negotiation_id, operation_key="end")
+        provisioning.state = "active"
         await h.runtime.lifecycle.cycle()
         assert (await buyer.read(h.negotiation_id)).delivery.progress == "tearing_down"
         with transaction(h.runtime.db.db_path) as conn:
@@ -177,7 +191,7 @@ async def test_servicing_never_adopts_readiness_after_buyer_end(harness):
 @pytest.mark.asyncio
 async def test_failed_readiness_observation_retries_without_starving_site_recovery(harness):
     h = harness
-    provisioning = DelayedResultProvisioning()
+    provisioning = DelayedResultProvisioning(state="dispatching")
     object.__setattr__(h.runtime, "fulfillment_client", provisioning)
     h.serve()
     async with peer(h) as buyer:
@@ -185,6 +199,7 @@ async def test_failed_readiness_observation_retries_without_starving_site_recove
             negotiation_id=h.negotiation_id, commitment_ref=h.data.transaction_id,
             operation_key="commit",
         ))
+        provisioning.state = "active"
         await h.runtime.lifecycle.cycle()
         assert provisioning.lease_reads == 1
         assert (await buyer.read(h.negotiation_id)).delivery.progress == "unstarted"

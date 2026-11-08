@@ -72,6 +72,7 @@ class TestRunMigrationsFreshBootstrap:
             ("20261005_005_reservation_release_requested_at",),
             ("20261028_006_retired_reservation_states",),
             ("20261106_007_reservation_activated_at",),
+            ("20261106_008_reservation_placement_key",),
         ]
 
     def test_a_reservation_table_from_before_release_timing_gains_the_column(self):
@@ -202,6 +203,75 @@ class TestTheActivationColumn:
         assert columns.count("activated_at_utc") == 1
 
 
+_PLACEMENT_MIGRATION_ID = "20261106_008_reservation_placement_key"
+
+
+def _database_before_placement_keys():
+    """A migrated database as it stood before reserve took a placement key,
+    holding leased, releasing and released reservations."""
+    engine = _sqlite_memory_engine()
+    run_migrations(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP INDEX ix_capacity_reservations_placement_key"))
+        connection.execute(
+            text("ALTER TABLE capacity_reservations DROP COLUMN placement_key")
+        )
+        connection.execute(
+            text("ALTER TABLE capacity_reservations DROP COLUMN placement_request")
+        )
+        connection.execute(
+            text("DELETE FROM schema_migrations WHERE id = :id"),
+            {"id": _PLACEMENT_MIGRATION_ID},
+        )
+        for row in _RESERVATIONS_BEFORE_ACTIVATION:
+            connection.execute(
+                text(
+                    f"INSERT INTO capacity_reservations ({_RESERVATION_COLUMNS}) "
+                    "VALUES (:id, :units, :state, :mode, :hold, :target, "
+                    ":start, :end, :requested, :released)"
+                ),
+                dict(zip(
+                    ("id", "units", "state", "mode", "hold", "target", "start",
+                     "end", "requested", "released"),
+                    row,
+                )),
+            )
+    return engine
+
+
+class TestThePlacementKey:
+    """The site ledger this service hosts maps a reserve's placement key, under
+    a unique index, on the row it shares with every quota grant."""
+
+    def test_existing_reservations_migrate_with_no_placement_key(self):
+        engine = _database_before_placement_keys()
+        expected = {row + (None, None) for row in _RESERVATIONS_BEFORE_ACTIVATION}
+
+        def rows() -> set[tuple]:
+            with engine.connect() as connection:
+                return {
+                    tuple(row)
+                    for row in connection.execute(text(
+                        f"SELECT {_RESERVATION_COLUMNS}, placement_key, "
+                        "placement_request FROM capacity_reservations"
+                    ))
+                }
+
+        run_migrations(engine)
+
+        assert rows() == expected
+        check_schema_version(engine)
+        indexes = {
+            index["name"]: index
+            for index in inspect(engine).get_indexes("capacity_reservations")
+        }
+        assert indexes["ix_capacity_reservations_placement_key"]["unique"]
+
+        run_migrations(engine)
+
+        assert rows() == expected
+
+
 class TestRunMigrationsIsIdempotent:
     def test_running_twice_does_not_error_or_duplicate_bookkeeping(self):
         engine = _sqlite_memory_engine()
@@ -212,7 +282,7 @@ class TestRunMigrationsIsIdempotent:
             count = connection.execute(
                 text("SELECT COUNT(*) FROM schema_migrations")
             ).scalar()
-        assert count == 7
+        assert count == 8
 
 
 class TestAdoptingAPreCreateAllOnlyDatabase:

@@ -55,6 +55,7 @@ import base64
 import logging
 import subprocess
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Optional, Protocol
 
 from market_arkhai_payments import (
@@ -67,7 +68,11 @@ from market_arkhai_payments import (
 from market_core.schemas import SettlementOption
 
 from tests.e2e.roles.helpers.compute_deal import assert_lease_watchdog_held
-from tests.e2e.roles.helpers.compute_deal_stages import ComputeDealDriver, ComputeDealState
+from tests.e2e.roles.helpers.compute_deal_stages import (
+    ComputeDealDriver,
+    ComputeDealState,
+    utc_instant,
+)
 from tests.e2e.roles.helpers.domain_deal import (
     assert_market_run_succeeded,
     ordered_events,
@@ -89,8 +94,9 @@ class PurchaseState(ComputeDealState):
 
     The purchase writes the canonical deal's ``negotiation_id`` and
     ``settlement_id`` (the payments transaction), and the handoff its shared
-    stages read: ``settlement_ref`` (the negotiation), ``fulfillment_id`` and
-    ``expected_host_id``.
+    stages read: ``settlement_ref`` (the negotiation), ``fulfillment_id``,
+    ``expected_host_id``, and the Agreement's window, ``agreement_start`` and
+    ``agreement_end``.
     """
 
     #: The payer account the run names, whose balance ``Purchase01`` read.
@@ -305,6 +311,12 @@ class Purchase04_PurchaseCorrelated:
         deal_state.fulfillment_id = fulfillment_id
         # Declared by the driver, never read from the lease 09c compares it with.
         deal_state.expected_host_id = deal_driver.declared_host_id
+        # The window the Agreement's exact bytes commit, which 09c holds the
+        # delivered lease to.
+        deal_state.agreement_start = utc_instant(agreement["start_utc"])
+        deal_state.agreement_end = deal_state.agreement_start + timedelta(
+            seconds=int(agreement["duration_seconds"])
+        )
         log.info("[p04] Run %s: Agreement %s, transaction %s, fulfillment %s; expected host %s",
                  run.run_id, negotiation_id, data.transaction_id, fulfillment_id,
                  deal_state.expected_host_id)

@@ -9,7 +9,11 @@ Bare metal's own stages are inserted in place:
 
   03a  Publication preview:  the dry run would publish the deal's machine
   03b  Publication step:     one pass publishes it
-  09a2 Publication closes:   the dry run then the step close the held machine's
+  08b1 Re-drive, dispatched: the recovery cycle adopts the dispatched
+                             fulfillment and reserves nothing more
+  09a1 Re-drive, ready:      the recovery cycle activates the lease on the
+                             deal's one reservation
+  09a2 Publication closes:  the dry run then the step close the held machine's
                              listing as unavailable
   09bb Evidence published:   one servicing step publishes the lease-ready
                              evidence's digest; the buyer resolves the evidence
@@ -19,10 +23,15 @@ Bare metal's own stages are inserted in place:
   12d  Teardown sent twice:  the buyer's repeated teardown is the same operation
   12e  Released once:        the site releases the machine once, and the
                              storefront records one release
+  13a  No capacity:          a third deal whose machine is taken before
+                             settlement ends as the seller's failure, with
+                             nothing reserved; a recovery step leaves it so
 
-Every transition is previewed where a preview exists, then advanced explicitly:
-the storefront's loops are held for the whole module, fulfillment convergence
-too, and the lease watchdog while a stage drives it. Wherever the site changes
+Every transition of the canonical deal is previewed where a preview exists,
+then advanced explicitly; the later deals, which repeat what the canonical deal
+previewed, are not previewed again. The storefront's loops are held for the
+whole module, fulfillment convergence too, and the lease watchdog while a stage
+drives it. Wherever the site changes
 -- the supply seeded, the machine leased, then released -- a stage steps the
 storefront's site-projection poller before publication, which reads what the
 poller holds.
@@ -74,6 +83,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage08c_EvaluateProvisioningJob,
     Stage09a_FulfillmentConvergesToActive,
     Stage09b_SettlementReadyAndCredentials,
+    Stage09c1_LateSettlementKeepsTheWindow,
     Stage09c2_ArmTeardownGate,
     Stage09c_LeaseRecorded,
     Stage10a_LeaseExpirySetup,
@@ -89,6 +99,10 @@ from tests.e2e.roles.scenarios.bare_metal.conftest import BareMetalDealState
 
 from tests.e2e.roles.scenarios.bare_metal.publication_stages import (
     BareMetalPublicationClosesListing, BareMetalEvidencePublished,
+)
+from tests.e2e.roles.scenarios.bare_metal.recovery_stages import (
+    BareMetalRecoveryActivatesTheReadyDelivery, BareMetalRecoveryBeforeReadiness,
+    BareMetalSettlementFindsNoCapacity,
 )
 
 log = logging.getLogger(__name__)
@@ -259,11 +273,19 @@ class TestStage08b_SettlementSubmittedAndJobQueued(Stage08b_SettlementSubmittedA
     pass
 
 
+class TestStage08b1_RecoveryBeforeReadiness(BareMetalRecoveryBeforeReadiness):
+    pass
+
+
 class TestStage08b2_ReleaseCreateGateAndDrain(Stage08b2_ReleaseCreateGateAndDrain):
     pass
 
 
 class TestStage09a_FulfillmentConvergesToActive(Stage09a_FulfillmentConvergesToActive):
+    pass
+
+
+class TestStage09a1_RecoveryActivatesTheReadyDelivery(BareMetalRecoveryActivatesTheReadyDelivery):
     pass
 
 
@@ -280,6 +302,10 @@ class TestStage09bb_EvidencePublishedForTheFulfilledEscrow(BareMetalEvidencePubl
 
 
 class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
+    pass
+
+
+class TestStage09c1_LateSettlementKeepsTheWindow(Stage09c1_LateSettlementKeepsTheWindow):
     pass
 
 
@@ -476,3 +502,12 @@ class TestStage12e_CapacityReleasedOnce:
         delivery = buyer_fulfillment.delivery(negotiation_id)["delivery"]
         assert delivery["progress"] == "released"
         assert delivery["site_reports"] == deal_state.second_teardown["site_reports"]
+        deal_state._second_deal_released = True
+
+
+# ===========================================================================
+# Phase 13 — a deal whose machine is taken before settlement
+# ===========================================================================
+
+class TestStage13a_SettlementFindsNoCapacity(BareMetalSettlementFindsNoCapacity):
+    pass

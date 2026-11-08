@@ -89,6 +89,110 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
     assert "bare_metal_operator_state" not in tables
 
 
+DELIVERY_ACTIVATION = "bare-metal-storefront-0016-delivery-activation"
+
+
+def test_a_fresh_database_records_delivery_activation(tmp_path) -> None:
+    path = tmp_path / "fresh.db"
+    SQLiteClient(str(path))
+    with sqlite3.connect(path) as conn:
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(bare_metal_fulfillment_lifecycle)")
+        }
+        recorded = {row[0] for row in conn.execute("SELECT id FROM schema_migrations")}
+    assert "activated_at_utc" in columns
+    assert DELIVERY_ACTIVATION in recorded
+
+
+def test_a_storefront_upgrading_with_recorded_access_responses_clears_their_access(
+    tmp_path,
+) -> None:
+    """A storefront starting on a database the migration has not seen: every
+    recorded body shaped as an access response loses its host, port and
+    username, keeping its status and completion; no other body changes, and
+    a second start changes nothing."""
+    path = tmp_path / "upgrade.db"
+    SQLiteClient(str(path))
+    bodies = {
+        "access": (
+            200,
+            '{"expires_at":null,"host":"203.0.113.9","method":"ssh",'
+            '"negotiation_id":"neg-1","port":2222,"username":"tenant"}',
+        ),
+        "other": (200, '{"host":"registry.example","status":"ok"}'),
+        "in-flight": (None, None),
+    }
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM schema_migrations WHERE id = ?", (DELIVERY_ACTIVATION,))
+        for request_id, (status, body) in bodies.items():
+            conn.execute(
+                "INSERT INTO auth_replay_reservations VALUES "
+                "('ed25519', 'buyer', ?, 'hash', ?, ?, NULL, NULL, 'now')",
+                (request_id, status, body),
+            )
+
+    def read(conn):
+        return (
+            dict(conn.execute(
+                "SELECT request_id, response_body FROM auth_replay_reservations"
+            ).fetchall()),
+            dict(conn.execute(
+                "SELECT request_id, response_status FROM auth_replay_reservations"
+            ).fetchall()),
+        )
+
+    SQLiteClient(str(path))
+    with sqlite3.connect(path) as conn:
+        first = read(conn)
+    SQLiteClient(str(path))
+    with sqlite3.connect(path) as conn:
+        second = read(conn)
+
+    recorded, statuses = first
+    assert recorded["access"] == '{"expires_at":null,"method":"ssh","negotiation_id":"neg-1"}'
+    assert recorded["other"] == bodies["other"][1]
+    assert recorded["in-flight"] is None
+    assert statuses == {"access": 200, "other": 200, "in-flight": None}
+    assert second == first
+
+
+def test_a_delivery_left_with_its_request_saved_is_marked_dispatched(tmp_path) -> None:
+    """A delivery whose fulfillment request was saved but whose fulfillment
+    was never recorded may have reached provisioning, so it is marked
+    dispatched; one with no saved request is not."""
+    (migration,) = (
+        migration for migration in BARE_METAL_STOREFRONT_MIGRATIONS
+        if migration.id == DELIVERY_ACTIVATION
+    )
+    with sqlite3.connect(tmp_path / "legacy.db") as conn:
+        conn.execute(
+            "CREATE TABLE bare_metal_fulfillment_lifecycle (negotiation_id TEXT PRIMARY KEY, "
+            "capacity_reservation_id TEXT, fulfillment_id TEXT, state TEXT NOT NULL)"
+        )
+        conn.execute(
+            "CREATE TABLE storefront_domain_artifacts (negotiation_id TEXT, artifact_slot TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO bare_metal_fulfillment_lifecycle VALUES (?, ?, ?, ?)",
+            [
+                ("neg-sent", "reservation-1", None, "scheduled"),
+                ("neg-unsent", "reservation-2", None, "scheduled"),
+                ("neg-accepted", "reservation-3", "fulfillment-3", "active"),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO storefront_domain_artifacts VALUES (?, 'materialization')",
+            [("neg-sent",), ("neg-accepted",)],
+        )
+        migration.apply(conn)
+        migration.apply(conn)
+        states = dict(conn.execute(
+            "SELECT negotiation_id, state FROM bare_metal_fulfillment_lifecycle"
+        ).fetchall())
+
+    assert states == {"neg-sent": "dispatch", "neg-unsent": "scheduled", "neg-accepted": "active"}
+
+
 def _tables_and_indexes(path) -> set[str]:
     conn = sqlite3.connect(path)
     try:

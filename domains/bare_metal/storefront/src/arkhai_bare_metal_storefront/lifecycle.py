@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import sqlite3
 import time
-from datetime import datetime, timezone
 
 from arkhai_compute.end_classification import (
     payment_actor,
@@ -16,12 +16,15 @@ from arkhai_compute.end_classification import (
 )
 from compute_provisioning_contracts.lease_ends import LeaseEndedEvent, SignedLeaseEndedReport, verify_lease_end
 
+from market_alkahest import ALKAHEST_MECHANISM_ID
+from market_alkahest.payment_adapter import AlkahestOnceAdapter
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.contract import INTERFACE
 from market_core.schemas import Agreement
 from market_deal_lifecycle.adapters import DeliveryEndIntent, DisputeAdapterTable, PaymentAdapterTable, PaymentSelector
 from market_deal_lifecycle.claims import DeliveryEndClaims
+from market_deal_lifecycle.delivery import DeliveryEvidence
 from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, ListDealsRequest, Pending, Rejected, SubmitResponse, Unknown
 from market_deal_servicing import (
     Classification, DealWatch, DeliveryIngress, EndService, EndSession,
@@ -33,7 +36,7 @@ from market_deal_servicing.evidence import EvidenceSession, in_transaction, tran
 from market_deal_servicing.journal import stable_ref
 from market_identity import Identity, canonical_json
 
-from .lifecycle_records import register_agreement
+from .lifecycle_records import commitment_ref, register_agreement
 from .models import BareMetalSettleRequest
 from .settlement_stages import SettlementRequestError
 
@@ -52,9 +55,14 @@ class BareMetalLifecycle:
         with transaction(self.path) as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS bare_metal_lifecycle_cursor (id INTEGER PRIMARY KEY CHECK (id=1), continuation TEXT)")
         self.end = EndService(self.path, self, clock=self.clock)
+        # An Alkahest deal authorizes delivery through its once-only adapter,
+        # since a mechanism with no adapter is never allowed.
         self.seller = SellerServicing(
             self.path,
-            payments=PaymentAdapterTable([(PaymentSelector("arkhai.payments.v1"), self.payment)]),
+            payments=PaymentAdapterTable([
+                (PaymentSelector("arkhai.payments.v1"), self.payment),
+                (PaymentSelector(ALKAHEST_MECHANISM_ID), self.alkahest_adapter),
+            ]),
             disputes=DisputeAdapterTable([(INTERFACE, self.dispute)]),
             credential_available=self.credential_available,
             watch_factory=self.watch, clock=self.clock,
@@ -102,6 +110,38 @@ class BareMetalLifecycle:
         raw, data = stage.accepted(self.agreement_bytes(binding.negotiation_id), data)
         return stage.payment_adapter(raw, data)
 
+    def commitment_ref(self, negotiation_id):
+        """The commitment the deal's servicing record is registered under."""
+        _, data = self.agreement(negotiation_id)
+        return commitment_ref(self.agreement_bytes(negotiation_id), data)
+
+    def alkahest_adapter(self, binding):
+        return AlkahestOnceAdapter(
+            negotiation_id=binding.negotiation_id,
+            commitment_ref=self.commitment_ref(binding.negotiation_id),
+            validate_commitment=self.alkahest_commitment_valid,
+        )
+
+    async def alkahest_commitment_valid(self, evidence: DeliveryEvidence) -> bool:
+        """Whether delivery evidence names the deal's verified Alkahest settlement.
+
+        The adapter has already bound the evidence to the Agreement's
+        commitment; the settlement record must be the verified Alkahest
+        settlement of that same Agreement, not merely carry a reference.
+        """
+        record = await self.runtime.db.load_bare_metal_settlement_record(
+            negotiation_id=evidence.negotiation_id,
+        )
+        if record is None:
+            return False
+        agreement_bytes = await asyncio.to_thread(self.agreement_bytes, evidence.negotiation_id)
+        return (
+            record["mechanism"] == ALKAHEST_MECHANISM_ID
+            and record["status"] == "settlement_verified"
+            and bool(record["settlement_ref"])
+            and record["agreement_sha256"] == hashlib.sha256(agreement_bytes).hexdigest()
+        )
+
     def credential_available(self, authority):
         composition = self.runtime.settlement_composition
         credential = composition.disputes.config.credential_for(authority) if composition else None
@@ -127,7 +167,14 @@ class BareMetalLifecycle:
         return MediationAdapter(binding, json.loads(self.agreement_bytes(binding.negotiation_id)), client, clock=self.clock)
 
     def watch(self, deal, payment, dispute):
-        account = payment.data.mandate.to.root if payment else ""
+        # Only an Arkhai payment carries a mandate naming the two accounts; an
+        # Alkahest deal's once-only adapter names none, and moves no money.
+        mandate = (
+            payment.data.mandate
+            if payment is not None and deal.payment.mechanism == "arkhai.payments.v1"
+            else None
+        )
+        account = mandate.to.root if mandate is not None else ""
         agreement, _ = self.agreement(deal.negotiation_id)
         buyer = Identity.model_validate(agreement.buyer)
 
@@ -138,8 +185,8 @@ class BareMetalLifecycle:
 
         def actor(value):
             return payment_actor(
-                value, payer_account=payment.data.mandate.from_.root if payment else None,
-                payee_account=account if payment else None, buyer=buyer,
+                value, payer_account=mandate.from_.root if mandate is not None else None,
+                payee_account=account if mandate is not None else None, buyer=buyer,
                 seller=self.runtime.seller_principal,
                 authority_account=deal.dispute.account if deal.dispute else None, authority=authority,
             )
@@ -151,32 +198,38 @@ class BareMetalLifecycle:
             observe_retention=seller_retention(self.path, deal.negotiation_id, clock=self.clock),
         )
 
-    def admit(self, negotiation_id, phase):
-        with transaction(self.path) as conn:
-            session = EndSession(conn)
-            record = session.read(negotiation_id)
-            result = session.admit(negotiation_id, phase, record.revision, now=self.clock())
-        if result.status != "admitted":
-            raise ValueError("delivery ended before " + phase.value)
+    async def delivery_available(self, negotiation_id):
+        """Whether the deal's delivery is recorded available."""
+        record = await in_transaction(self.path, lambda conn: EndSession(conn).read(negotiation_id))
+        return record.available_at is not None
 
-    def lease_window(self, negotiation_id):
-        with transaction(self.path) as conn:
-            record = EndSession(conn).read(negotiation_id)
-        return tuple(datetime.fromtimestamp(at, timezone.utc).isoformat() for at in (record.start_at, record.term_end))
+    async def ended_before_delivery(self, negotiation_id):
+        """Whether the deal's end has taken effect while it was never available.
 
-    def available(self, negotiation_id, at):
-        with transaction(self.path) as conn:
+        Delivery stops at an end in effect, so such a deal is never delivered
+        later. An end recorded for a later instant has not taken effect: the
+        deal may still be delivered before it.
+        """
+        def read(conn):
             session = EndSession(conn)
-            record = session.read(negotiation_id)
-            if record.available_at is not None:
-                return
-            result = session.available(negotiation_id, at=at, expected_revision=record.revision, now=self.clock())
-        if result.status != "admitted":
-            raise ValueError("delivery ended before disclosure")
+            try:
+                record = session.read(negotiation_id)
+            except KeyError:
+                return None, None
+            return record, session.selected_end(negotiation_id)
+
+        record, end = await in_transaction(self.path, read)
+        return (
+            record is not None
+            and record.available_at is None
+            and end is not None
+            and end.ended_at <= self.clock()
+        )
 
     async def apply_end(self, negotiation_id, *, terminate, at, operation_key):
         # Do not terminate a lease before its in-flight dispatch has been adopted.
-        # The end is already durable; begin's finally and the recovery loop retry it.
+        # The end is already durable; the fulfillment hook, once it releases the
+        # deal's lock, and the recovery loop retry it.
         if self.lock(negotiation_id).locked():
             return PhysicalResult(progress="end_recorded", done=False)
         return await self.runtime.fulfillment_service().apply_end(
@@ -241,10 +294,18 @@ class BareMetalLifecycle:
         )
 
     async def recover_delivery(self, deal):
+        """Drive a started delivery that has not finished, through the fulfillment hook.
+
+        A deal waiting for its Agreement start, one whose fulfillment is still
+        settling, and one available whose result is not yet recorded are each
+        driven again; the path rechecks admission, so an end recorded meanwhile
+        stops it. A delivery not yet started is started by its settlement: the
+        payment reconciliation loop or the servicing worker.
+        """
         row = await self.runtime.db.load_bare_metal_fulfillment_lifecycle(
             negotiation_id=deal.negotiation_id,
         )
-        if row is None or not row.get("fulfillment_id"):
+        if row is None or row.get("state") == "released":
             return
         record = await in_transaction(
             self.path, lambda conn: EndSession(conn).read(deal.negotiation_id),
@@ -260,9 +321,7 @@ class BareMetalLifecycle:
             )
             if result is not None and receipt is not None:
                 return
-        # Availability and its private result can commit separately. Recovery
-        # completes either missing checkpoint without changing the first instant.
-        await self.runtime.fulfillment_service().status(
+        await self.runtime.fulfillment_service().deliver(
             negotiation_id=deal.negotiation_id, buyer_principal=deal.buyer,
         )
 

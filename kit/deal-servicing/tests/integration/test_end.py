@@ -113,6 +113,17 @@ async def test_billing_intent_precedes_io_and_same_key_recovers_unknown(rig):
     assert refused.result.outcome.status == "rejected"
 
 
+async def test_billing_start_without_activation_evidence_is_refused_before_any_authority_call(rig):
+    adapter = AsyncMock()
+    refused = await rig["end"].begin_billing(
+        "start", DeliveryEvidence(negotiation_id="deal", commitment_ref="commitment"), adapter=adapter,
+    )
+    assert refused.result.outcome.status == "rejected"
+    adapter.start_billing.assert_not_called()
+    with transaction(rig["path"]) as conn:
+        assert [item for item in EndSession(conn).intents("deal") if item.kind == "billing"] == []
+
+
 def test_deadline_failure_and_pending_correction_are_atomic(rig):
     with transaction(rig["path"]) as conn:
         session = EndSession(conn)

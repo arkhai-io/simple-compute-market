@@ -30,6 +30,7 @@ class BareMetalFulfillmentTransport:
         operation: str,
         *,
         method: str = "GET",
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         return signed_storefront_json(
             self.seller_url.rstrip("/")
@@ -42,13 +43,17 @@ class BareMetalFulfillmentTransport:
             resource=negotiation_id,
             timeout=self.timeout,
             resolve_response_principals=self.resolve_seller_principals,
+            request_id=request_id,
         )
 
-    def status(self, negotiation_id: str) -> dict[str, Any]:
+    def status(self, negotiation_id: str, *, request_id: str | None = None) -> dict[str, Any]:
+        """The deal's delivery status; ``request_id`` repeats an earlier read
+        exactly, which the storefront answers by reading again."""
         return self._request(
             negotiation_id,
             "status",
             "bare_metal_fulfillment_status",
+            request_id=request_id,
         )
 
     def result(self, negotiation_id: str) -> dict[str, Any]:
@@ -58,11 +63,15 @@ class BareMetalFulfillmentTransport:
             "bare_metal_fulfillment_result",
         )
 
-    def access(self, negotiation_id: str) -> dict[str, Any]:
+    def access(self, negotiation_id: str, *, request_id: str | None = None) -> dict[str, Any]:
+        """The deal's live access; ``request_id`` repeats an earlier read
+        exactly, which the storefront answers by reading again, so an ended
+        deal's exact retry is refused rather than replayed."""
         return self._request(
             negotiation_id,
             "access",
             "bare_metal_fulfillment_access",
+            request_id=request_id,
         )
 
     def teardown(self, negotiation_id: str) -> dict[str, Any]:

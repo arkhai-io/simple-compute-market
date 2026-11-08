@@ -22,7 +22,10 @@ from core_storefront.sqlite_migrations import (  # noqa: F401 — re-exported
     apply_schema_migrations,
 )
 
-from market_storefront.payment_repository import add_vm_settlement_records
+from market_storefront.payment_repository import (
+    add_vm_delivery_activation,
+    add_vm_settlement_records,
+)
 from market_storefront.utils.config import chain_address_books
 
 logger = logging.getLogger(__name__)
@@ -356,6 +359,56 @@ def _remove_fulfillment_request_fields(
         )
 
 
+def _clear_vm_credentials(conn: sqlite3.Connection) -> None:
+    """Remove every stored copy of a VM tenant's credentials.
+
+    A VM's credentials are read live from provisioning's fulfillment result
+    and never stored, so the copies an earlier storefront kept are removed:
+    the delivery records' and escrows' ``tenant_credentials``, and the rows of
+    core's ``credentials`` table for every listing not bound to another
+    offering mode, a combined storefront's other domains included. Core's replay
+    table records no route, so the ``tenant_credentials`` member is removed
+    from every recorded response body that has one, whatever route wrote it; a
+    stripped body is still a recorded body, so each record keeps its status and
+    remains a completed outcome. A rerun changes nothing.
+    """
+    for table in ("vm_delivery_records", "escrows"):
+        if _table_exists(conn, table) and _column_exists(conn, table, "tenant_credentials"):
+            conn.execute(
+                f"UPDATE {table} SET tenant_credentials = NULL WHERE tenant_credentials IS NOT NULL"
+            )
+    if _table_exists(conn, "credentials"):
+        if _table_exists(conn, "storefront_listing_bindings"):
+            conn.execute(
+                "DELETE FROM credentials WHERE listing_id NOT IN ("
+                "SELECT listing_id FROM storefront_listing_bindings WHERE offering_mode != 'vm')"
+            )
+        else:
+            conn.execute("DELETE FROM credentials")
+    if not _table_exists(conn, "auth_replay_reservations"):
+        return
+    rows = conn.execute(
+        "SELECT principal_scheme, principal_identifier, request_id, response_body "
+        "FROM auth_replay_reservations WHERE response_body IS NOT NULL"
+    ).fetchall()
+    for scheme, identifier, request_id, raw in rows:
+        try:
+            body = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(body, dict) or "tenant_credentials" not in body:
+            continue
+        stripped = {key: value for key, value in body.items() if key != "tenant_credentials"}
+        conn.execute(
+            "UPDATE auth_replay_reservations SET response_body = ? "
+            "WHERE principal_scheme = ? AND principal_identifier = ? AND request_id = ?",
+            (
+                json.dumps(stripped, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                scheme, identifier, request_id,
+            ),
+        )
+
+
 VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_003_derived_compute_listing_pool_ids",
@@ -378,4 +431,6 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
         "20261027_001_fulfillment_context_carries_no_connectivity",
         _migrate_fulfillment_context_carries_no_connectivity,
     ),
+    Migration("20261106_001_vm_delivery_activation", add_vm_delivery_activation),
+    Migration("20261106_002_vm_credentials_cleared", _clear_vm_credentials),
 )
