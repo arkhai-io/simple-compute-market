@@ -1,8 +1,9 @@
-"""The dispute coverage the payment scenarios state and expect.
+"""The delivery allowance and dispute coverage payment scenarios state and expect.
 
 PAYMENTS.DISPUTE_WINDOW_SECONDS names it; a run naming none keeps the default
 every lane states. Whatever it is, the settlement a VM listing states carries
-it, and each purchase driver's option check expects it. Every value below is a
+it, and each purchase driver's option check expects it. VM delivery allowance
+also follows its named setting. Every value below is a
 development fixture, never used on any network.
 """
 
@@ -26,6 +27,7 @@ from tests.e2e.roles.scenarios.vms.composed_listing import (
     payments_settlement,
 )
 from tests.e2e.roles.scenarios.vms.real_purchase_driver import RealVmPurchaseDriver
+from tests.e2e.roles.scenarios.vms import test_vm_payment_deal as hosted_deal
 
 Failed = pytest.fail.Exception
 
@@ -125,6 +127,76 @@ def test_the_vm_purchase_refuses_an_option_stating_another_coverage(configure) -
     configure(DISPUTE_WINDOW_SECONDS=SHORT)
     with pytest.raises(AssertionError):
         _vm_driver().check_payments_option(_option_for(stated["mechanism_input"]))
+
+
+@pytest.mark.parametrize("value", [900, "900", " 900 "])
+def test_the_vm_listing_and_purchase_use_the_configured_delivery_allowance(
+    configure, value,
+) -> None:
+    configure(VM_DELIVERY_DEADLINE_SECONDS=value, DISPUTE_WINDOW_SECONDS=960)
+    settlement = payments_settlement(seller_account=SELLER_ACCOUNT, dispute_window="P7D")
+    clause = ArkhaiPaymentsPublicationInput.model_validate(settlement["mechanism_input"])
+    assert clause.delivery_deadline_seconds == 900
+    _vm_driver().check_payments_option(_option_for(settlement["mechanism_input"]))
+
+
+@pytest.mark.parametrize("value", [True, False, 0, -1, 900.0, "P15M", "-1", "9e2"])
+def test_the_vm_listing_refuses_an_invalid_delivery_allowance(configure, value) -> None:
+    configure(VM_DELIVERY_DEADLINE_SECONDS=value)
+    with pytest.raises(Failed, match="PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS"):
+        payments_settlement(seller_account=SELLER_ACCOUNT, dispute_window="P7D")
+
+
+def test_the_vm_purchase_refuses_an_option_with_another_delivery_allowance(configure) -> None:
+    configure(VM_DELIVERY_DEADLINE_SECONDS=900, DISPUTE_WINDOW_SECONDS=960)
+    option = _option_for({"window": "P7D", "dispute_window_seconds": 960,
+                          "delivery_deadline_seconds": 300})
+    with pytest.raises(AssertionError):
+        _vm_driver().check_payments_option(option)
+
+
+def test_the_vm_listing_refuses_coverage_shorter_than_its_delivery_allowance(configure) -> None:
+    configure(VM_DELIVERY_DEADLINE_SECONDS=900, DISPUTE_WINDOW_SECONDS=SHORT)
+    with pytest.raises(Failed, match="covering the 900-second delivery deadline"):
+        payments_settlement(seller_account=SELLER_ACCOUNT, dispute_window="P7D")
+
+
+def test_the_hosted_vm_deal_publishes_the_same_configured_delivery_allowance(configure) -> None:
+    configure(VM_DELIVERY_DEADLINE_SECONDS=900, DISPUTE_WINDOW_SECONDS=960,
+              SELLER_ACCOUNT=SELLER_ACCOUNT)
+
+    class Published(Exception):
+        pass
+
+    def publish(**request):
+        (settlement,) = request["settlements"]
+        clause = ArkhaiPaymentsPublicationInput.model_validate(settlement["mechanism_input"])
+        assert clause.delivery_deadline_seconds == 900
+        assert clause.dispute_window_seconds == 960
+        raise Published
+
+    with pytest.raises(Published):
+        hosted_deal.test_hosted_commit_delivers_after_a_verified_receipt(
+            payments_config=None, hosted={}, deal_driver=SimpleNamespace(seed_supply=lambda: None),
+            deal_state=None, storefront_seller_client=SimpleNamespace(create_listing=publish),
+            storefront_client=None, storefront_admin_client=None, registry_client=None,
+            provisioning_client=None, provisioning_test_client=None, site_capacity=None,
+        )
+
+
+@pytest.mark.parametrize(("values", "expected"), [
+    ({}, 300), ({"VM_DELIVERY_DEADLINE_SECONDS": 900}, 900),
+    ({"VM_DELIVERY_DEADLINE_SECONDS": 60}, 300),
+])
+def test_the_vm_buyer_waits_at_least_its_configured_delivery_allowance(
+    configure, values, expected,
+) -> None:
+    configure(**values)
+    driver = _vm_driver()
+    # An inert development marker, never an SSH key used on a network.
+    driver.buyer_public_key = "development-public-key"
+    arguments = driver.buy_arguments("development-listing", "development-option")
+    assert arguments[arguments.index("--settlement-timeout") + 1] == str(expected)
 
 
 def test_the_bare_metal_lane_pool_override_states_the_runs_coverage(

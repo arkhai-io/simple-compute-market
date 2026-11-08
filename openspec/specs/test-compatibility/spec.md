@@ -950,6 +950,27 @@ naming the listing and its options, changing nothing.
 - **THEN** the module refuses before any deal, naming the listings and changing
   none of them; closed history does not permit replacement creation
 
+### Requirement: VM payment scenarios declare their configured delivery allowance
+
+VM payment scenario listings and purchase option checks MUST use
+`PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS`, defaulting to 300 seconds. A named value
+MUST be a positive integer or decimal integer string; malformed values MUST fail
+before publication. The CLI wait MUST be at least that allowance. Configured
+dispute coverage MUST cover it, with authority minimum coverage still validated
+by the service. Accepted Agreement deadlines and late-delivery checks MUST remain
+unchanged by the setting.
+
+#### Scenario: A run declares a longer setup allowance
+
+- **WHEN** the run names a delivery allowance and sufficient dispute coverage
+- **THEN** publication states that allowance, the purchase requires it, and the CLI
+  waits at least that long without changing an existing Agreement
+
+#### Scenario: Delivery allowance is invalid or differs from an existing option
+
+- **WHEN** the setting is malformed, nonpositive, or differs from the option
+- **THEN** publication or the purchase's option check fails before payment
+
 ### Requirement: The real-provisioning target names diagnostics and admission inputs
 
 Target version 2 MUST accept an optional `management_unit` on a VM host, a systemd

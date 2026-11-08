@@ -900,6 +900,15 @@ the stack their purchases populated. The payments target is the runner's
 `PAYMENTS` section, with `LANE_OWNED` unset so an unready target is a blocked skip. Without
 either target they report a blocked skip before any hold or write.
 
+VM payments listings take their declared delivery allowance from
+`PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS`, a positive integer number of seconds
+(or a decimal integer string), defaulting to 300. Listing composition and the
+purchase's option check use the same value; the buyer CLI waits at least that
+long. Set the allowance before publishing an offer, with
+`PAYMENTS.DISPUTE_WINDOW_SECONDS` covering it plus the authority's minimum filing
+window. Existing immutable terms must match the run's inputs. This does not
+extend an accepted Agreement, move a clock, or accept late delivery.
+
 - `e2e_vm_qualification` (observation 2) buys two CPU-only guests through
   `market buy`, keeps an SSH heartbeat on the first across the second's create
   and teardown, reads the host's diagnostics before, during, and after through

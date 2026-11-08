@@ -25,6 +25,7 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from market_alkahest.plans import ALKAHEST_MECHANISM
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 
@@ -41,9 +42,21 @@ DEAL_MECHANISMS = (ALKAHEST_MECHANISM, ARKHAI_PAYMENTS_MECHANISM)
 #: The most listings one read of the storefront's listings asks for: the
 #: largest page the storefront serves, which refuses a larger limit.
 _LISTING_PAGE = 200
-#: The delivery latency the seller allows for, which the dispute coverage
-#: (``dispute_window_seconds``) covers.
+#: The default delivery latency, covered by the run's dispute coverage.
 DELIVERY_DEADLINE_SECONDS = 300
+
+
+def delivery_deadline_seconds() -> int:
+    """The VM run's declared delivery allowance, a positive whole-second input."""
+    value = payment_setting("VM_DELIVERY_DEADLINE_SECONDS", DELIVERY_DEADLINE_SECONDS)
+    if type(value) is int and value > 0:
+        return value
+    if isinstance(value, str) and value.strip().isdecimal() and int(value.strip()) > 0:
+        return int(value.strip())
+    pytest.fail(
+        "PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS must be a positive integer number "
+        f"of seconds, not {value!r}"
+    )
 
 
 def payments_settlement(
@@ -52,14 +65,15 @@ def payments_settlement(
     """A VM listing's Arkhai payments settlement: ``hourly_rate`` USD an hour,
     paid to ``seller_account``, under the seller's dispute window, with the
     run's dispute coverage."""
+    deadline = delivery_deadline_seconds()
     return {
         "mechanism": ARKHAI_PAYMENTS_MECHANISM, "asset": "USD/6", "rate": hourly_rate,
         "per": "hour",
         "mechanism_input": {
             "payee_account": seller_account, "asset": "USD/6", "window": dispute_window,
-            "delivery_deadline_seconds": DELIVERY_DEADLINE_SECONDS,
+            "delivery_deadline_seconds": deadline,
             "dispute_window_seconds": dispute_window_seconds(
-                delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+                delivery_deadline_seconds=deadline,
             ),
         },
     }
