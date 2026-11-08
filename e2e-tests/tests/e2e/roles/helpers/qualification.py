@@ -284,8 +284,9 @@ def registration_faults(
 ) -> list[str]:
     """How reapplying ``name``'s registration and a publication cycle changed it.
 
-    Nothing may be duplicated or dropped: one host row, one declaration, one
-    listing, each as it was, the listing's identity, state and pause intact.
+    Nothing may be duplicated or dropped: one host row, one declaration, and
+    all existing listings, including closed history, with each identity, state
+    and pause intact.
     Every port quarantined before stays quarantined until its grant expires,
     with no new owner, and its lease record unchanged: the same owner, grant
     expiry and release time. Matching the lease by identity alone would let
@@ -297,10 +298,14 @@ def registration_faults(
     claim that a live tenancy survives.
     """
     faults = []
-    for kind, rows in (("host", after.hosts), ("capacity declaration", after.declarations),
-                       ("listing", after.listings)):
-        if len(rows) != 1:
-            faults.append(f"{name}: {len(rows)} {kind}s after reapplying, where one was: {rows}")
+    for kind, rows, expected in (
+        ("host", after.hosts, 1), ("capacity declaration", after.declarations, 1),
+        ("listing", after.listings, max(1, len(before.listings))),
+    ):
+        if len(rows) != expected:
+            faults.append(
+                f"{name}: {len(rows)} {kind}s after reapplying, expected {expected}: {rows}"
+            )
     for kind, was, now_is in (("hosts", before.hosts, after.hosts),
                               ("capacity declarations", before.declarations, after.declarations),
                               ("listings", before.listings, after.listings)):

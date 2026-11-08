@@ -896,6 +896,9 @@ cannot end. A purchase the module ended itself is left as it is.
 - **THEN** existing listings are adopted with identities, states and pauses intact, no
   duplicate host, pool, resource, allocator or listing appears, unexpired relay
   quarantine is retained, and the consumed-UID history is unchanged
+- **AND** the listing comparison preserves the entire existing history, including
+  closed listings; adding, dropping, replacing, reopening or changing the pause of
+  any historical listing fails the observation
 
 #### Scenario: A qualification stage fails after the payment is approved
 

@@ -916,7 +916,9 @@ either target they report a blocked skip before any hold or write.
   since the service's state guards keep that site's convergence and watchdog
   from restoring anything a faulty reapply removed. Relay-port reconciliation
   runs ungated on both sites, so it compares each quarantined relay lease's whole
-  record, release time included.
+  record, release time included. The listing baseline includes closed history:
+  every identity, state and pause must remain exactly as before, with no added
+  or removed listing, rather than requiring that history contain only one row.
 
 A module failing after the buyer approved a payment refunds it as the seller,
 unless the module had begun ending that purchase, ends a delivered guest or host
