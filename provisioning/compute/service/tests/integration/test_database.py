@@ -510,6 +510,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20261102_001_lease_end_reports",
         "20261106_001_reservation_activated_at",
         "20261106_002_reservation_placement_key",
+        "20261108_001_ssh_connections_version_2",
     }
 
 

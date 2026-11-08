@@ -63,6 +63,106 @@ caller that builds a `ConnectionSubmission`.
       and application integration tests prove.
       Owed by validation: none.
 
+**Section 1 notes — stopped 2026-11-08 for a return to design; no task checked.**
+
+What 1.1 found. Only the `hosts` row holds a connection (`connection_kind`,
+`connection_version`, `connection_public`, `connection_protected`; written in
+`compute_provisioning/hosts/db.py`). No job record, envelope, or parameter carries one:
+the job engine reads its host at dispatch (`compute_provisioning/jobs/engine.py:400`,
+`HostLookup`, which `HostAuthority.lookup` serves from the `hosts` row through
+`_execution_host`, `hosts/service.py:166`). `ansible_jobs.params`, `result`,
+`execution_handle`, the `credentials` envelopes, and the fulfillment aggregate's
+prepared operations carry no connection, and `20261027_001_vm_fulfillment_request_carries_no_connectivity`
+removed the last copy from fulfillment requests before the floor. So D15a's "jobs
+captured before an operator resubmitted the host keep the version-1 copy" does not hold:
+a job not yet finished at the upgrade reads the rewritten host when it is dispatched.
+The delta's "on hosts and on jobs not yet finished" and the scenario "the hosts and both
+jobs hold `ssh` version 2 connections" describe copies that do not exist.
+
+What blocks 1.4 — the design's premise is wrong. A release that failed on a version-1
+connection cannot be recovered by retry-release after the migration, or after an operator
+resubmits the host, because a fulfillment's teardown is exactly one job: its contract
+identity is `<reservation>:teardown` (`compute_provisioning/job_fulfillment.py:182-195`,
+"one fulfillment's create, or its teardown, is one job"), and the engine answers a repeated
+identity with the existing job whatever its status (`jobs/engine.py:117-119`, `_repeat`).
+A version-1 host makes the teardown job fail terminally before any playbook (the codec's
+`parse` raises in `inventory_target`, which the engine records as a permanent
+`Internal error`, `jobs/engine.py:497-505`), the aggregate goes `teardown_failed` and the
+lease `release_failed`. Retry-release then requeues the aggregate
+(`teardown_failed → teardown_dispatch_pending`, `fulfillment_convergence.py:237-256`),
+convergence dispatches the teardown again, the dispatch adopts the same failed job, and the
+aggregate returns to `teardown_failed`. The migration cannot change that outcome: the
+stuck reservations the upgrade found are stuck on a failed job's identity, not on a stored
+connection. Evidence: `provisioning/compute/service/tests/integration/test_ssh_connection_version_recovery.py`
+reproduces it through the typed clients — the migration rewrites the host to version 2
+(`get_host` reads version 2), retry-release answers, and the next convergence cycle
+submits no new teardown job (`assert 0 == 1` on the retried job), with the aggregate still
+`teardown_failed`. TESTING.md already says as much for bare metal: "normal same-job retry
+is distinct from terminal failed-job recovery or force-release".
+
+The decision the design must make, with the options found:
+
+- (a) Let retry-release re-run a teardown whose job failed terminally — give a retried
+  teardown a new job identity (an attempt carried on the aggregate's teardown metadata) or
+  let the engine requeue a terminally failed job when its identity is submitted again.
+  This changes the "one teardown is one job" invariant of `physical-provisioning` and the
+  fulfillment contract for every failure, not only this one, and wants its own design.
+- (b) Narrow D15a to what the migration does: it rewrites every host's version-1
+  connection so no job dispatched after the upgrade fails on one; a reservation already
+  `release_failed` before the upgrade is recovered by force-release once the operator has
+  checked the host, which the operator handbook's upgrade procedure states. Drop task 1.4
+  and the scenario "A release that failed on a version-1 connection is retried after
+  migration", correct the requirement's "on hosts and on jobs not yet finished" to the
+  hosts alone, and record the general re-run of a terminally failed teardown as a gap
+  owned by the fulfillment area (`AGENTS.md`, "Deferred work").
+- (c) Re-run only a teardown that failed before its executor ran anything (refused at
+  dispatch, as a version-1 host's is), classifying that failure as not executed so a
+  retried teardown may submit a new job. Narrower than (a), but still a change to the
+  job identity rule and to failure classification.
+
+Recommendation: (b). The migration still keeps every unfinished job from failing; the
+force-release it leaves is bounded to reservations that failed before the upgrade, which
+the rejected "handbook text alone" alternative was not; and re-running a failed teardown
+is a fulfillment-wide rule this change has no design for.
+
+What was done, uncommitted until this return's work-in-progress commit:
+
+- 1.2 — migration `20261108_001_ssh_connections_version_2` in
+  `compute_provisioning_service/db/migrations.py`, after the chain's last entry: in one
+  transaction it validates every `ssh` version-1 host's stored public fields and protected
+  values through the version-2 codec (`SshConnectionCodec().validate`, no key, no
+  decryption), fails with `SchemaDriftError` naming every refused host and rewriting
+  nothing, else sets each to version 2 leaving `connection_public` and
+  `connection_protected` byte for byte. It reads only the database. Library integration
+  tests in `tests/integration/test_ssh_connection_version_migration.py` (protected-key and
+  key-file hosts with a queued create and a queued teardown naming them: identical rows but
+  the version, jobs unchanged, each job's host parsed at version 2; a quoted port refused
+  naming the host with nothing rewritten and the migration unrecorded; a host naming no key
+  refused; a rerun changing nothing) pass. `test_database.py`'s full-chain ID set gains the
+  new ID.
+- 1.3 — `ConnectionSubmission.version` is required (`compute_provisioning_contracts/hosts.py`);
+  the contracts distribution is 0.14.0 and the provisioning service, which relies on the
+  refusal, requires `>=0.14.0` (service 0.24.1). No production caller relied on the
+  default: host definitions parsing, the INI import (`inventory.py` through
+  `ssh_connection`), the typed factory, and the clients all state the version. Tests that
+  relied on it now state it: `provisioning/compute/tests/integration/test_host_authority.py`,
+  `provisioning/compute/tests/unit/test_host_route_service.py`,
+  `provisioning/compute/contracts/tests/unit/test_contracts.py`, and
+  `e2e-tests/tests/unit/test_real_vm_lane.py` (where the stated version 2 leaves the field
+  under test the only difference). Contract unit test: an unversioned connection in
+  `HostCreate` and `HostUpdate` is refused as missing `("connection", "version")`.
+  Application integration (`test_hosts_api.py::TestConnectionVersions`): an unversioned
+  registration, written by hand as a rejection-path test since the typed client refuses to
+  build it, answers 422 and stores nothing; versions 1 and 3 are refused naming version 2
+  (existing test). `make lock` refreshed every lock the contracts bump reaches.
+- 1.4 — the test above, failing, as the evidence for the return.
+- Not run: `scripts/change-workflow run pre-commit`, the fresh-context check, and section 2,
+  which this return ends before it starts.
+
+Suites at the stop: `make -C provisioning/compute/service test` — unit passed,
+integration 603 passed and 1 failed (the 1.4 test); `make -C provisioning/compute/contracts test`
+— 156 passed; `make -C provisioning/compute test` — 531 passed.
+
 ## 2. Storefronts retire registry listings they do not hold open
 
 Delivers D15b and `storefront-publication`'s added "A storefront retires registry

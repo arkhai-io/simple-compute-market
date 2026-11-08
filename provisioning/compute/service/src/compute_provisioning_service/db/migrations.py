@@ -32,7 +32,13 @@ from market_resource_pools_contracts.hints import (
 from market_site.db import Base as SiteBase
 from market_site.db import CapacityBucket
 
+from compute_provisioning.hosts import ConnectionEnvelope, ProtectedValue
 from compute_provisioning.relays.db import PoolRelay, RelayRetiredGrantKey
+from compute_provisioning_ansible.connection import (
+    SSH_CONNECTION_KIND,
+    SSH_CONNECTION_VERSION,
+    SshConnectionCodec,
+)
 from compute_provisioning_service.db.models import (
     DEFAULT_POOL_ID,
     LeaseEndReportOutbox,
@@ -3640,6 +3646,80 @@ def _migrate_reservation_placement_key(engine: Engine) -> None:
         )
 
 
+def _migrate_ssh_connections_to_version_2(engine: Engine) -> None:
+    """Rewrite every host's ``ssh`` connection stored at version 1 to version 2.
+
+    The connection envelope migration stored every existing host at version 1,
+    which no codec serves, so such a host runs no work and a teardown against
+    it fails. Version 2 is version 1 with one optional field, ``public_port``,
+    which falls back to the connection's port when absent, so the mapping is
+    exact: the version changes and the public fields and protected values stay
+    byte for byte as stored. Each connection's public fields are first checked
+    by the version-2 codec, which neither encrypts nor decrypts; if it refuses
+    any, the migration fails naming every refused host and rewrites none.
+
+    Only the host row holds a connection: a job names its host and reads the
+    host's connection when it is dispatched, so an unfinished job runs against
+    the rewritten one.
+    """
+    if not _table_exists(engine, "hosts"):
+        return
+    codec = SshConnectionCodec()
+    with engine.begin() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT host_id, connection_public, connection_protected FROM hosts "
+                "WHERE connection_kind = :kind AND connection_version = 1 "
+                "ORDER BY host_id"
+            ),
+            {"kind": SSH_CONNECTION_KIND},
+        ).mappings().all()
+        refused: list[str] = []
+        for row in rows:
+            try:
+                public = _json_mapping(
+                    row["connection_public"], label=f"hosts {row['host_id']} connection_public"
+                )
+                protected = _json_mapping(
+                    row["connection_protected"],
+                    label=f"hosts {row['host_id']} connection_protected",
+                )
+                codec.validate(
+                    ConnectionEnvelope(
+                        kind=SSH_CONNECTION_KIND,
+                        version=SSH_CONNECTION_VERSION,
+                        public=public,
+                        protected={
+                            name: ProtectedValue.from_stored(value)
+                            for name, value in protected.items()
+                        },
+                    )
+                )
+            except (SchemaDriftError, ValueError, KeyError, TypeError) as exc:
+                refused.append(f"host {row['host_id']!r}: {exc}")
+        if refused:
+            raise SchemaDriftError(
+                f"{len(refused)} ssh connection(s) stored at version 1 are not valid at "
+                f"version {SSH_CONNECTION_VERSION}, so none was rewritten; submit each "
+                "host again at version 2, then rerun the migration:\n  "
+                + "\n  ".join(refused)
+            )
+        for row in rows:
+            connection.execute(
+                text(
+                    "UPDATE hosts SET connection_version = :version "
+                    "WHERE host_id = :host_id"
+                ),
+                {"version": SSH_CONNECTION_VERSION, "host_id": row["host_id"]},
+            )
+    if rows:
+        logger.info(
+            "[MIGRATION] Rewrote %d ssh connection(s) from version 1 to version %d",
+            len(rows),
+            SSH_CONNECTION_VERSION,
+        )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -3783,5 +3863,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261106_002_reservation_placement_key",
         _migrate_reservation_placement_key,
+    ),
+    Migration(
+        "20261108_001_ssh_connections_version_2",
+        _migrate_ssh_connections_to_version_2,
     ),
 )
