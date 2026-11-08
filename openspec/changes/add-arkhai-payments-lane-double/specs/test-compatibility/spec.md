@@ -7,8 +7,13 @@ Every lane MUST run a mediation double, recommended by the lane's registries, th
 #### Scenario: A case is filed with no rule installed
 
 - **WHEN** a party files a case and no rule matches it
-- **THEN** the double accepts the filing, sends `extend` for each part to the payments double as the authority's own account, and reports each part `held` with its reference or `not_held` with the payments refusal's reason
-- **AND** the case stays open and unruled
+- **THEN** the double accepts the filing, sends `extend` for each part to the payments double as the authority's own account, and reports each part `held` with its reference, or, when payments refuses it as nothing held, `not_held` with the reason the transaction's part shows: `paid_out`, `reversed` or `nothing_held`
+- **AND** the case stays open and unruled, unless every part is `not_held`, when the contract's automatic dismissal closes it with nothing held
+
+#### Scenario: Protection cannot be established
+
+- **WHEN** the payments double refuses an extend for any reason but nothing held, or cannot be reached
+- **THEN** the filing is answered `error` with `protection_incomplete`, no part is reported `not_held`, and a retry under the same key completes the filing once payments answers
 
 #### Scenario: A programmed ruling is applied
 
@@ -37,7 +42,7 @@ Every lane MUST run a mediation double, recommended by the lane's registries, th
 
 ### Requirement: Lane double controls are typed deterministic steps
 
-Both doubles MUST offer controls through one typed contract and client, shared with the end-to-end harness: when→then rules with refusals and transport faults, the mediation double's filing overrides, rulings, effects gate, operator decisions, closes and case listing, the payments double's funding and receipt-signer rotation, and rule listings. Controls MUST be lane-private, authenticated by a fixture token, and each MUST act only when the scenario advances it.
+Both doubles MUST offer controls through one typed contract and client, shared with the end-to-end harness: when→then rules with refusals and transport faults, the mediation double's filing overrides, rulings, effects gate, operator decisions, closes and case listing, the payments double's funding and receipt-signer rotation, and rule listings. Controls MUST be lane-private, authenticated by a fixture token, and each MUST act only when the scenario advances it. Transport faults MUST apply only to the contract's API routes, never to the control routes. Every rule MUST state its `match`. A control MUST refuse an unknown or malformed target with a typed code and install nothing. Each control the VM controls module does not exercise — funding, signer rotation, refusal with a published code, the filing-answer override, close without ruling and the rule listing — MUST be proven by its double's suite through the typed client over HTTP.
 
 #### Scenario: A response is lost after commit
 
@@ -47,7 +52,28 @@ Both doubles MUST offer controls through one typed contract and client, shared w
 #### Scenario: A double is unavailable
 
 - **WHEN** an unavailable rule is installed on a double
-- **THEN** every connection to it closes unanswered and its callers see a transport error until the rule is removed
+- **THEN** every API request's response is abandoned and its callers see a transport error, never an HTTP error status
+- **AND** the control routes still answer, and removing the rule restores the API
+
+#### Scenario: A rule states no scope
+
+- **WHEN** a scenario installs a rule without `match`
+- **THEN** the double refuses it as an invalid request and installs nothing
+
+#### Scenario: A finaliser removes rules
+
+- **WHEN** a scenario deletes a rule that has matched or completed, and then deletes a rule that does not exist
+- **THEN** the first is removed from the listing, and the second is reported not found
+
+#### Scenario: A call is refused with a published code
+
+- **WHEN** the payments double's suite installs a refusal rule and calls the matching route through the payments kit's client
+- **THEN** the client receives the rule's published status and code, and the rule listing counts the match
+
+#### Scenario: An account is funded
+
+- **WHEN** the payments double's suite funds an account through the typed client
+- **THEN** the account's balance read through the payments kit's client shows the funding
 
 #### Scenario: A scenario leaves a rule behind
 
@@ -56,12 +82,22 @@ Both doubles MUST offer controls through one typed contract and client, shared w
 
 ### Requirement: Each lane double reads a perceived clock the scenario advances
 
-Each double MUST evaluate time from a perceived clock, wall time plus an offset that only a control moves, and only forward; one harness helper MUST advance both doubles together, and each double's status MUST report its perceived now. Due authority state MUST become visible at the next read, with no background work.
+Each double MUST evaluate time from a perceived clock, wall time plus an offset that only a control moves: forward by an advance, or back to a zero offset by a reset. One harness helper MUST advance both doubles together, and its fixture's finaliser MUST reset both whatever the module's outcome; each double's status MUST report its perceived now. A lane's clock MUST live only in that lane's own doubles. Due authority state MUST become visible at the next read, with no background work.
 
 #### Scenario: A once part's hold is passed
 
 - **WHEN** a scenario advances both doubles' clocks past a once part's release instant
-- **THEN** the next read shows the part paid out, and a case filed afterwards reports that part `not_held`
+- **THEN** the next read shows the part paid out, and a case filed afterwards reports that part `not_held` with `paid_out` and is dismissed with nothing held
+
+#### Scenario: A module that advanced the clocks ends
+
+- **WHEN** a module that advanced the doubles' clocks ends, whether it passed or failed
+- **THEN** both doubles report wall time as their perceived now before the next module starts
+
+#### Scenario: Lanes run side by side
+
+- **WHEN** two lanes run at once, in separate Compose projects or separate Helm validation namespaces, and one advances its doubles' clocks
+- **THEN** the other lane's doubles still report wall time
 
 ### Requirement: A lane-owned mediation target fails rather than skips
 
@@ -72,9 +108,9 @@ Each lane's runner MUST read its mediation target, CA bundle path, the buyer's m
 - **WHEN** a lane's mediation target is marked its own and does not report itself ready
 - **THEN** setup fails naming it, before any scenario stage
 
-### Requirement: A controls scenario proves each control kind in the VM lane
+### Requirement: A controls scenario proves the lane's dispute wiring in the VM lane
 
-The VM lane MUST run a module of once-only deals that proves, end to end through the storefront's dispute servicing, a programmed ruling with a delivery end, an operator decision without one, a lost filing response, an unavailable mediation double, payments failing between ruling effects, and a clock advance past a hold, with the clock advance last.
+The VM lane MUST run a module of once-only deals that proves, end to end through the storefront's dispute servicing, exactly six journeys: a programmed ruling with a delivery end, an operator decision without one, a lost filing response, an unavailable mediation double, payments failing between ruling effects, and a clock advance past a hold, with the clock advance last in the module.
 
 #### Scenario: A programmed ruling ends delivery
 

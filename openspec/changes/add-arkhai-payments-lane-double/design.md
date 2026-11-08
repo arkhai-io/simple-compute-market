@@ -56,13 +56,17 @@ Facts the decisions rest on:
   perceived clock.
 - The payments double claiming the rate and hold surface its engine serves.
 - The VM payment scenario's case stages and the bare-metal filing running against
-  the mediation double, and one VM-lane module proving each control kind once.
+  the mediation double, and one VM-lane module proving the lane's dispute wiring
+  through six named journeys, every other control proven by its double's suite.
+- The mediation double in the local Helm release beside the payments double, as a
+  subchart of the umbrella chart.
 
 **Non-goals:** a rules engine reproducing the dispute authority's or the payments
 service's decisions; contract modes; a production guard on fixture identities;
 storefront- or site-side clock control; rate scenarios in lanes (convergence owns
-them once spot derives rate parts); a mediation double in the local Helm release;
-live, hosted-ledger or adjudication evidence.
+them once spot derives rate parts); payment scenarios in Helm validation
+(`helm-e2e-pipeline-parity`); moving the lane collaborators out of the umbrella chart
+(`separate-lane-infrastructure-chart`); live, hosted-ledger or adjudication evidence.
 
 ## Decisions
 
@@ -77,11 +81,24 @@ decision logic.
 vendored contract, idempotency and conflict answers, the closed-case refusal, either
 party appending evidence with only `mandate.to` appending concurrence, the signed
 per-agreement record with its sequence and cursors, the respondent listing,
-per-part `extend` at the payments double as the authority's own account (a part
-payments refuses to extend reports `not_held` from that refusal), and executing a
-ruling's effect list as payment events with stable effect keys and the case
-reference, resuming after a payments failure without applying an effect twice, then
-lifting only that case's extensions.
+per-part `extend` at the payments double as the authority's own account, the
+contract's automatic dismissal of a case whose every part is `not_held` at filing
+(`all_parts_definitively_not_held_at_filing`, closed with `dismissal_reason:
+nothing_held`), and executing a ruling's effect list as payment events with stable
+effect keys and the case reference, resuming after a payments failure without
+applying an effect twice, then lifting only that case's extensions.
+
+**Extension results (15 F3).** The contract's `NotHeldPart.reason` is one of
+`paid_out`, `reversed` and `nothing_held`, and its `MediationFailure` carries
+`protection_incomplete`, mediation's own error, retried under the original key. So
+only payments' nothing-held refusal, `hold_not_extendable`, reports a part
+`not_held`, with the reason the transaction's part shows — `paid_out`, `reversed` or
+`nothing_held` — which the double reads as the authority's account. Every other
+refusal (`caller_not_authorized`, `transaction_not_found`, `invalid_event`,
+`ledger_unavailable` and the rest) and every transport failure answers the filing
+`error` with `protection_incomplete`, which SCM's adapter reads as pending; a retry
+under the same key completes it. A payments outage or a misconfigured authority
+account therefore never tells a filer its money is not held.
 
 **Programmed:** whether a case is ruled, the ruling's basis, delivery end and
 per-part effects with their amounts, filing-answer overrides (`pending`, `error`, a
@@ -91,8 +108,8 @@ open case takes the same shape, matched by case.
 The double verifies no concurrence signature, Agreement digest or mechanical guard:
 SCM's verification is proven in the kits against the producer's vectors. With no
 matching rule, mechanics proceed (a filing is accepted, each part's extension is
-attempted, appends are recorded) and nothing is ever ruled, consistent with silence
-never ruling. A payee-filed or concurred case therefore rules only when a rule says
+attempted, appends are recorded, a case with nothing held is dismissed) and nothing
+is ever ruled, consistent with silence never ruling. A payee-filed or concurred case therefore rules only when a rule says
 so; the double's README and specification state that deviation.
 
 A lane result proves SCM's filing, answering, observation, end service and display of
@@ -116,6 +133,22 @@ Due authority state — a notice stop taking effect, funding exhaustion at
 funded-through, a payout after the dispute window — becomes visible at the next read,
 with no background work and no barrier.
 
+**The clock's lifetime (15 F2).** A lane keeps its doubles for every module it runs,
+so an advance would otherwise outlive the module that made it, and later modules
+would approve deals whose records are dated ahead of their storefronts. The clock
+helper is therefore a fixture whose finaliser resets both doubles to wall time,
+whatever the module's outcome, through a reset control. Reset is the one backward
+move, and only to a zero offset; advances stay forward-only. Records the module left
+dated ahead stay readable, because the payments engine evaluates a transaction at the
+later of its clock and the transaction's own instant, and only that module's deals
+carry them. Within a module, a stage that advances the clock still runs after the
+stages that need storefront work against unadvanced records (D6).
+
+**Independent clocks.** A lane's perceived clock lives only in its own doubles'
+processes, never in a shared service or on the host. Each pipeline lane runs its own
+doubles in its own Compose project, and each Helm validation namespace its own
+release of them (D11), so lanes running side by side never share an offset.
+
 Decisions a storefront or site makes from an authority record and its own clock — the
 funding timer, ending or truncating at a stop's effective time, the lease end — are
 not driven in lanes by this change. A lane-wide perceived clock covering storefronts,
@@ -130,6 +163,12 @@ sites and the buyer half is a new change, opened after this one.
 - **Back-dating payment records.** Signed receipts keep the original approval instant,
   and a shifted `start` can precede the Agreement start that SCM checks.
 - **No lane clock.** Authority timing would be proven only below end-to-end.
+- **Ordering clock-advancing modules after every other module of the lane run**
+  (15 F2). It leaves the advance in place for the rest of the run and makes a lane's
+  result depend on module order; a reset bounds the advance to its module.
+- **Restarting the doubles after a clock-advancing module** (15 F2). The runner has
+  no Compose access, and a restart drops the payments state earlier modules' deals
+  still refer to.
 
 ### D3. One contract per double and two evidence classes
 
@@ -155,9 +194,10 @@ then, against that revision's real shape.
 | Control | Double | Callers |
 |---|---|---|
 | Clock advance (D2) | both, one helper | convergence rows 0, 6, 7, 13; D6 |
+| Clock reset to wall time (D2) | both, one helper | the clock fixture's finaliser |
 | Refuse a matching call with a published status and code | both | convergence rows 1, 3; the doubles' suites |
 | Drop the response after commit | both | convergence rows 1, 3; D6 |
-| Unavailable: every connection closed unanswered while installed | both | convergence row 1; D6 |
+| Unavailable: every API request's response abandoned while installed | both | convergence row 1; D6 |
 | Fund an account | payments | convergence row 6 |
 | Rotate the receipt signer to a second fixture key | payments | convergence row 11 |
 | Filing-answer override | mediation | convergence rows 1, 3, 13 |
@@ -180,11 +220,43 @@ POST /test/rules        (mediation double)
  "ruling": {"basis": "payee_filed", "delivery_end": true, "close": true, "effects": []}}
 ```
 
-**Transport faults live in the doubles.** One ASGI middleware closes connections
-unanswered while *unavailable* is installed, and lets a matching request commit before
-abandoning its response for *drop after commit*. SCM's clients see each as a transport
-error, as they would an unreachable host or a lost response. The mediation double's
-calls to payments meet the payments double's middleware too.
+**Transport faults live in the doubles.** One ASGI middleware abandons every API
+request's response while *unavailable* is installed, and lets a matching request
+commit before abandoning its response for *drop after commit*. SCM's clients see each
+as a transport error, as they would an unreachable host or a lost response. The
+mediation double's calls to payments meet the payments double's middleware too.
+
+**How a response is abandoned (15 F1).** The doubles run under uvicorn, which answers
+`500` when an application raises before starting a response, and closes the
+connection only when the response has started. So the middleware starts the response
+and then abandons it; the server closes the connection, and httpx raises a
+`RemoteProtocolError`, which both kit clients count as a transport error. A plain
+refusal would not do: SCM's mediation adapter reads a 5xx as pending and a transport
+error as unknown, so a 500 would prove the wrong branch.
+
+**Control routes are never faulted (15 F1).** The middleware applies only to the
+contract's API routes. The authenticated control routes keep answering while a fault
+is installed, so a finaliser can always remove the rule that caused it, and removing
+*unavailable* restores the API. SCM never calls a control route, so the exemption
+changes nothing SCM sees.
+
+**Control semantics (15 F4).** Every control error has one body, `{"code",
+"message"}`, in the controls package's models, and the client raises one typed error
+carrying the code.
+
+| Case | Answer |
+|---|---|
+| A rule without `match` | `422 invalid_request`; nothing is installed. A rule states its scope |
+| `match: {}` | accepted: every call of its double, stated explicitly. *Unavailable* takes no `match`; it covers every API route |
+| Installing an existing `rule_id` | `409 rule_exists`; a silent replace would hide a leaked rule |
+| Deleting or resuming an unknown `rule_id` | `404 rule_not_found` |
+| Deleting a rule that has matched or completed | `204`, removed: deleting is cleanup, whatever the rule's state |
+| Resuming a rule not waiting at its gate | `409 rule_not_waiting` |
+| A malformed ruling or effect | `422 invalid_request`, validated by the typed model and against the vendored contract's ruling and effect shapes; nothing is installed |
+| An empty effect list | valid: a ruling that moves no money |
+| Deciding or closing an unknown case; funding an unknown account | `404 case_not_found`; `404 account_not_found` |
+| Deciding or closing a closed case | `409 case_closed`, the refusal the API gives an append |
+| Listing cases for a transaction with none | `200`, an empty list: a listing, not a lookup |
 
 **Where the contract lives.** `tools/lane-double-controls` (import
 `lane_double_controls`) holds the rule, fault, clock, funding, rotation and ruling
@@ -212,6 +284,11 @@ verifier tests prove those refusals at the lowest level that can.
 - **WireMock or MockServer as fault proxies.** TLS terminated in the stub, and no
   proven way to forward a request and then drop its response.
 - **Run identifiers and explicit target sets.** Lanes are already isolated stacks.
+- **Controls on a second, private listener** (15 F1). It models an outage at the TCP
+  level, which no SCM client can tell from an abandoned response, at the cost of a
+  second port in every lane.
+- **Deferring the operations whose semantics were open** (15 F4). Each has a caller in
+  this change, D6's module or its finalisers.
 
 ### D5. No production guard on fixture identities
 
@@ -237,7 +314,9 @@ authority it chose.
   by real extensions, nothing rules, and the seller's refund reverses the held money.
 - The bare-metal buyer's teardown filing reaches the mediation double; the scenario
   asserts a filed case held per part, not a ruling.
-- One VM-lane controls module, on once-only deals, proves each control kind once:
+- One VM-lane controls module, on once-only deals, proves the lane's dispute wiring
+  — the CA, the storefront's dispute adapter and the control client together —
+  through six journeys:
   1. a programmed ruling with a delivery end and a reverse, its effect visible at the
      payments double and the storefront ending delivery after observing it;
   2. an operator decision with a partial reverse and no delivery end, the deal
@@ -248,17 +327,27 @@ authority it chose.
   5. payments unavailable between two programmed effects, the ruling incompletely
      applied and then completed with no duplicate effect;
   6. a clock advance past a once part's hold, the payout visible and a later case
-     reporting `not_held`. It runs last, so no stage runs storefront work against
-     records dated ahead of the storefront.
-- The doubles' own suites drive the kits' real clients over HTTP.
+     reporting `not_held` and dismissed with nothing held (D1). It runs last in the
+     module, so no stage runs storefront work against records dated ahead of the
+     storefront; the clock fixture resets both doubles when the module ends (D2).
+- The doubles' own suites drive the kits' real clients over HTTP, and prove through
+  the typed client every control the module does not exercise: funding, signer
+  rotation, refusal with a published code, the filing-answer override, close without
+  ruling and the rule listing (15 F5). Those controls' first lane use is
+  convergence's (rows 6, 11, 1, 3 and 13), over the client path the six journeys
+  already prove.
 
-Planning may trim the module's stages. Convergence keeps every rate row.
+The six journeys are the module's boundary: changing them amends the delta.
+Convergence keeps every rate row.
 
 **Rejected:**
 
 - **Only the existing scenarios.** The controls' first lane use would be convergence's,
   which would debug this change's wiring.
 - **Every new scenario left to convergence.** The same defect.
+- **A VM stage for every control** (15 F5). Funding, rotation and the override
+  exercise the doubles' own behaviour, which their suites prove at a lower level, at
+  a much greater scenario cost.
 
 ### D7. Project, fixtures and TLS
 
@@ -336,14 +425,48 @@ earliest pending stop, per-part `end`, funding exhaustion at funded-through,
 `afterStop` holds, partial `reverse` before and after a stop, and `extend` and `lift`
 with their published refusals. No lane rate scenario is added.
 
-### D11. The local Helm release
+### D11. The local Helm release (15 F2, 15 F6)
 
-No mediation double or control surface is added: the release serves no payment
-scenario. Its registry recommends the lane's mediation identity, which nothing answers
-in the cluster, so servicing keeps reporting deals running. Bob's copied dispute
-credential carries `ca_bundle_path`, harmless there.
+The umbrella chart's subchart pattern is extended: a `mediation-lane-double` subchart
+runs beside `payments-lane-double`, enabled only by `local-values.yaml`, with its
+Service named `mediation-double`, the name its lane-CA leaf is issued for, so a
+validation namespace runs one, as it runs one payments double. The release's registry
+recommends its identity. The `payments-ca-bundle` ConfigMap already holds the lane
+CA, which now also issues the mediation leaf, so no second mount is added; the
+ConfigMap keeps its name.
 
-**Rejected:** a mediation subchart, with no scenario to use it.
+Bob's dispute credential is copied from his Compose secret overlay, whose
+`ca_bundle_path` names the Compose mount, a file that does not exist in the cluster;
+the storefront would fail building its mediation client at the first servicing of a
+payment deal. The chart cannot derive it as it derives
+`[Settlement.arkhai_payments].ca_bundle_path`, because the credential lives in a
+runtime Secret the chart never renders. So `topology-secrets.sh`, which writes that
+Secret, rewrites the copied credential's `ca_bundle_path` to the chart's CA file, and
+a test holds the rewritten value to `storefront.caBundleFile`. The `deployment-state`
+delta modifies "Payment credentials stay with their owning process" and "The local
+release rehearses a deployment's payments interface" accordingly.
+
+No scenario runs against the release's doubles in this change: payment scenarios in
+Helm validation belong to `helm-e2e-pipeline-parity`. Moving the lane collaborators —
+Anvil, the address book, Mailpit and both doubles — out of the operator's umbrella
+chart into a lane-infrastructure chart of their own is the better end state and
+belongs to `separate-lane-infrastructure-chart`, which takes this subchart with the
+rest.
+
+**Rejected:**
+
+- **No mediation subchart, the identity unanswered in the cluster.** The copied
+  credential still breaks client construction, and the release keeps one lane
+  collaborator fewer than the lanes run.
+- **Keeping the `.invalid` authority in the release** (the review's suggestion under
+  15 F6). It contradicts D7's retirement of that identity and the subchart above.
+- **A separate lane-infrastructure chart in this change** (15 F2). The better end
+  state, but its move touches every target and tool that treats a namespace as one
+  release (`helm/Makefile`, `scripts/validate_slice.py`, the capacity figure, the
+  render tests), work unrelated to mediation.
+- **Mounting the lane CA at the chart's path in every Compose stack** (15 F6), so one
+  path is right verbatim in both. It changes every lane's mounts and TOML paths for
+  one copied key.
 
 ### D12. Scope removed from the earlier design
 
@@ -369,7 +492,8 @@ Two rounds:
      deal-lifecycle and mediation kits and the four lifecycle compositions.
 2. **Lane wiring, one session.** The overlay, fixtures, registries, the runner's
    `MEDIATION` section and helper, buyer configuration, the VM case and refund stages,
-   the bare-metal filing and the controls module.
+   the bare-metal filing and the controls module, and D11's subchart, release values
+   and `topology-secrets.sh` rewrite.
 
 The doubles are reviewed before any lane uses them, so a wiring defect cannot hide a
 double's.
@@ -390,6 +514,11 @@ double's.
   with the authority's signed record; its D2 detects payments and mediation-API
   divergence in lanes, mediation-ruling divergence only live; its D4's real-UTC
   doubles and its proposed-provenance recommendation follow D2 and D3.
+- **`separate-lane-infrastructure-chart`:** opened by this change's design review
+  (15 F2); moves the mediation subchart D11 adds, with the payments double and
+  `dev-env`, into a lane-infrastructure chart.
+- **`helm-e2e-pipeline-parity`:** owns running the payment scenarios, and so the
+  doubles' controls, in Helm validation.
 - **The lane-wide perceived clock:** a new change after this one; until it exists,
   this change's closeout records it as an unowned Goal 8 gap naming convergence rows 6
   and 7.

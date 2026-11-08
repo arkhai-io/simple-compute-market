@@ -24,21 +24,25 @@ surface. Convergence's rate matrix and spot's rotation row have no lane to run i
   when→then rules with refusals, filing-answer overrides, rulings and a gate before
   effects; operator decisions and closes; case and rule listings; funding and receipt
   signer rotation at payments; transport faults (unavailable, drop after commit) as
-  shared middleware in the doubles; and a perceived clock each double reads, advanced
-  by the scenario. The package holds the models, route declarations, typed client and
-  middleware; the doubles and the e2e harness import it. Every control is a
-  deterministic step.
+  shared middleware in the doubles, never faulting the control routes; and a
+  perceived clock each double reads, advanced by the scenario and reset to wall time
+  when the module ends. The package holds the models, route declarations, typed
+  client and middleware; the doubles and the e2e harness import it. Every control is
+  a deterministic step with specified results and refusals.
 - **The payments double claims its rate and hold surface**, proven by its own suite
   through the kit's real client over HTTP.
 - **Lane wiring:** the mediation double in all three lanes, the lanes' registries
   recommending it in place of the `.invalid` authority, a lane-owned `MEDIATION` runner
   target that fails setup rather than skips, the buyer's mediation credential, and one
   lane CA issuing both doubles' certificates.
+- **The local Helm release** runs the mediation double as a subchart beside the
+  payments double, and the copied dispute credential names the chart's CA mount.
 - **Mediation trust through configuration:** `[[DisputeCredential]]` gains an optional
   `ca_bundle_path`, which the mediation client uses as its verification context.
 - **Scenarios:** the VM case and refund stages and the bare-metal filing run against
-  the mediation double, and one VM-lane module on once-only deals proves each control
-  kind once.
+  the mediation double, and one VM-lane module on once-only deals proves the lane's
+  dispute wiring through six named journeys; the doubles' suites prove every other
+  control.
 - **Evidence:** lane runs are labelled *lane doubles*, with the doubles' installed
   contract hashes; only a hosted target yields live evidence.
 
@@ -51,6 +55,9 @@ surface. Convergence's rate matrix and spot's rotation row have no lane to run i
   controls scenario, and lane-double evidence.
 - `settlement-configuration`: a dispute credential may name the CA bundle its
   mediation client trusts.
+- `deployment-state`: the local release runs the mediation double's subchart, which
+  release values never enable, and its copied dispute credential names the chart's
+  CA file.
 
 ### New Capabilities
 
@@ -67,13 +74,17 @@ None. The doubles are test collaborators, not production authorities.
   changes").
 - A lane-wide perceived clock covering storefronts, sites and the buyer half is a new
   change, opened after this one.
+- `separate-lane-infrastructure-chart` moves the lane collaborators, this change's
+  mediation subchart among them, out of the umbrella chart; `helm-e2e-pipeline-parity`
+  owns running the payment scenarios in Helm validation.
 
 ## Non-Goals
 
 A rules engine reproducing either authority's decisions; contract modes or a proposed
 evidence class; a production guard on fixture identities; storefront- or site-side
-clock control; rate scenarios in lanes; a mediation double in the local Helm release;
-corruption, delay or race faults; live, hosted-ledger or adjudication evidence.
+clock control; rate scenarios in lanes; payment scenarios in Helm validation; a
+separate lane-infrastructure chart; corruption, delay or race faults; live,
+hosted-ledger or adjudication evidence.
 
 ## Impact
 
@@ -89,14 +100,16 @@ corruption, delay or race faults; live, hosted-ledger or adjudication evidence.
   runner profiles, Bob's secret overlay and the buyer configuration writer change.
 - `e2e-tests`: the mediation helper and settings, the VM case stages and bare-metal
   filing assertions, a controls module, and a dependency on the controls package.
-- `helm`: the local release's registry recommendation and copied dispute credential;
-  no new subchart.
+- `helm`: a `mediation-lane-double` subchart enabled by `local-values.yaml`, the
+  local release's registry recommendation, and `topology-secrets.sh` rewriting the
+  copied dispute credential's `ca_bundle_path` to the chart's CA mount.
 - No database migration and no wire change.
 
 ## Permanent documentation impact
 
 - [x] `docs/development/ARCHITECTURE.md`
-- [x] Existing subsystem specification: `test-compatibility`, `settlement-configuration`
+- [x] Existing subsystem specification: `test-compatibility`, `settlement-configuration`,
+  `deployment-state`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -127,8 +140,11 @@ corruption, delay or race faults; live, hosted-ledger or adjudication evidence.
   "Private Service Dependencies"; `e2e-tests/README.md`.
 - D10: `openspec/specs/test-compatibility/spec.md` (delta);
   `tools/payments-lane-double/README.md`.
-- D11: `docs/development/TESTING.md`, "Private Service Dependencies", which states the
-  local release runs no mediation double.
+- D11: `openspec/specs/deployment-state/spec.md` (delta);
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, the local release's payments
+  paragraph and `make helm-topology-secrets`, which state the mediation subchart and
+  the rewritten CA path; `docs/development/TESTING.md`, "Private Service
+  Dependencies".
 - D12: no permanent destination — it removes scope from this change's earlier design.
 - D13: no permanent destination — an implementation cadence, recorded in the change's
   history.
