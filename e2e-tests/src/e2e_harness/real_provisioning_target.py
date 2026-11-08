@@ -88,6 +88,7 @@ class _Host(_Section):
 
 class VmHost(_Host):
     domain: Literal["vm"]
+    resource_id: _Text | None = None
     listing_shape: Capacity
     #: The operator's management client on the host, a systemd service whose
     #: name this repository cannot know, for host diagnostics to report beside

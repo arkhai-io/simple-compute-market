@@ -75,6 +75,12 @@ def test_bare_metal_registration_identifier_is_nonempty_text(field, value):
         load_real_provisioning_target(_with(lambda s: s["hosts"][1].update({field: value})))
 
 
+@pytest.mark.parametrize("value", ["", 7, True])
+def test_vm_resource_identifier_is_nonempty_text(value):
+    with pytest.raises(TargetInvalid, match="resource_id"):
+        load_real_provisioning_target(_with(lambda s: s["hosts"][0].update(resource_id=value)))
+
+
 @pytest.mark.parametrize("section", [None, [], "target"])
 def test_nonmapping_is_invalid_not_missing(section):
     with pytest.raises(TargetInvalid, match=f"{SECTION} is .*not a mapping"):

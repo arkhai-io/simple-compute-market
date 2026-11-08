@@ -39,11 +39,12 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage09b_SettlementReadyAndCredentials,
 )
 from tests.e2e.roles.scenarios.vms.composed_listing import (
-    ALKAHEST_SETTLEMENT, create_or_adopt_listing, listing_mechanisms,
+    ALKAHEST_SETTLEMENT, create_or_adopt_listing, listing_mechanisms, real_target_resource,
 )
 from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor, register_e2e_host, register_e2e_pool,
 )
+from tests.e2e.roles.scenarios.vms.real_purchase_driver import RealVmPurchaseDriver
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
     REAL_POOL_ID,
     REAL_RESOURCE_ID,
@@ -555,12 +556,12 @@ def _listing_for(
     )
 
 
-def _driver(*, storefront_admin_client=None) -> RealVmComputeDealDriver:
+def _driver(*, storefront_admin_client=None, target=TARGET) -> RealVmComputeDealDriver:
     return RealVmComputeDealDriver(
         provisioning_client=None, storefront_client=None,
         storefront_admin_client=storefront_admin_client, storefront_service_client=None,
         site_capacity_admin_client=None, site_capacity=None, site_id="site",
-        vm_operator_client=None, target=TARGET, buyer_public_key="k",
+        vm_operator_client=None, target=target, buyer_public_key="k",
         listing_shape={}, jobs=JobWatch(None),
     )
 
@@ -573,6 +574,16 @@ def test_the_re_reservation_claims_the_resource_and_the_sold_capacity_as_dimensi
         listing_id="listing-1",
         escrow_uid="0xescrow",
     )
+
+
+def test_selected_vm_resource_is_shared_by_listing_and_capacity_checks():
+    target = VmHost.model_validate({**TARGET.model_dump(), "resource_id": "example-cpu-resource"})
+    admin = MagicMock()
+    driver = _driver(storefront_admin_client=admin, target=target)
+    assert real_target_resource(target)["resource_id"] == "example-cpu-resource"
+    driver.reserve_released_capacity(admin, listing_id="listing-1", escrow_uid="escrow-1")
+    assert driver.reserved_resource_id == "example-cpu-resource"
+    assert admin.admin_reserve_capacity.call_args.kwargs["required_attributes"]["resource_id"] == "example-cpu-resource"
 
 
 @pytest.mark.parametrize(
@@ -1122,3 +1133,29 @@ def test_pool_registration_sends_and_reconciles_relay_config_through_typed_clien
     )
     assert host.host_id == HOST and transport.row["provider_config"] == relay
     assert site.register_resource.await_args.kwargs["capacity"] == CAPACITY
+
+
+@pytest.mark.parametrize("resource_id", [None, "example-cpu-resource"])
+@pytest.mark.parametrize("listing_ids", [[], ["selected"], ["other"], ["selected", "other"]])
+def test_real_purchase_refuses_ambiguous_discovery_before_payment(resource_id, listing_ids):
+    target = TARGET.model_copy(update={"resource_id": resource_id})
+    registry = MagicMock()
+    registry.list_listings.return_value.listings = [SimpleNamespace(id=value) for value in listing_ids]
+    listing = SimpleNamespace(id="selected", listing_resource=real_target_resource(target))
+    registry.get_listing.return_value = listing
+    driver = RealVmPurchaseDriver(
+        provisioning_client=None, storefront_client=None,
+        storefront_admin_client=None, storefront_service_client=None,
+        site_capacity_admin_client=None, site_capacity=None, site_id="site",
+        vm_operator_client=None, target=target, buyer_public_key="k",
+        listing_shape={}, jobs=JobWatch(None), purchase_registry=registry,
+        seller_account="seller", dispute_window="P7D",
+    )
+    if listing_ids == ["selected"]:
+        assert driver.discover("selected") is listing
+        assert driver.second_purchase("other-key").reserved_resource_id == (resource_id or REAL_RESOURCE_ID)
+    else:
+        with pytest.raises(AssertionError, match="ambiguous"):
+            driver.discover("selected")
+        registry.get_listing.assert_not_called()
+    registry.list_listings.assert_called_once_with(region="e2e-real-host", limit=2)

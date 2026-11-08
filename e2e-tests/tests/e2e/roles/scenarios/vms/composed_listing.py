@@ -104,7 +104,7 @@ def real_target_resource(target: VmHost) -> dict[str, Any]:
     return {
         "offering_mode": "vm",
         "interruptible": True,
-        "resource_id": REAL_RESOURCE_ID,
+        "resource_id": target.resource_id or REAL_RESOURCE_ID,
         **target.listing_shape.model_dump(),
         "sla": 90.0,
         "region": REAL_REGION,

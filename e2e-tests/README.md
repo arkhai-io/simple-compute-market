@@ -425,6 +425,11 @@ virtualization; it needs no GPU.
    fits twice within capacity. Direct access states `public_host`; relay access
    states only `relay_id`. Bare-metal hosts additionally state `physical_host_id`
    and their verified `ssh_host_public_key`, and have no VM listing shape.
+   A VM target may state `resource_id` to select its scenario declaration;
+   otherwise it uses `compute-e2e-real-001`. Listing adoption, registration,
+   purchase checks, capacity reuse and reapply use that same identifier.
+   Its CLI discovers by region, so the real purchase refuses before payment
+   unless that query selects its listing alone. Keep unrelated listings paused.
    A bare-metal target may also state `pool_id` and `resource_id` to reconcile
    its existing pool and declaration. Omitted, the scenarios use
    `bare-metal-e2e-real-pool` and `bare-metal-e2e-real-001`. These identifiers
