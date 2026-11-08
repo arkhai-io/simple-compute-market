@@ -108,7 +108,7 @@ jobs:
             kit-resource-pools-contracts: ['kit/resource-pools-contracts/**', '.github/workflows/publish-pypi.yml']
             kit-resource-pools-client: ['kit/resource-pools-client/**', '.github/workflows/publish-pypi.yml']
             kit-storefront: ['kit/storefront/**', '.github/workflows/publish-pypi.yml']
-            compute: ['domains/compute/**', '.github/workflows/publish-pypi.yml']
+            compute: ['domains/compute/pyproject.toml', 'domains/compute/src/**', 'domains/compute/tests/**', '.github/workflows/publish-pypi.yml']
             bare-metal: ['domains/bare_metal/pyproject.toml', 'domains/bare_metal/src/**', 'domains/bare_metal/tests/**', '.github/workflows/publish-pypi.yml']
             bare-metal-storefront: ['domains/bare_metal/storefront/**', '.github/workflows/publish-pypi.yml']
             bare-metal-buyer: ['domains/bare_metal/buyer/**', '.github/workflows/publish-pypi.yml']
@@ -122,6 +122,7 @@ jobs:
             vms-provisioning-adapter: ['domains/vms/provisioning/adapter/**', '.github/workflows/publish-pypi.yml']
             compute-provisioning: ['provisioning/compute/pyproject.toml', 'provisioning/compute/README.md', 'provisioning/compute/src/**', 'provisioning/compute/tests/**', '.github/workflows/publish-pypi.yml']
             compute-provisioning-contracts: ['provisioning/compute/contracts/**', '.github/workflows/publish-pypi.yml']
+            compute-delivery: ['domains/compute/delivery/**', '.github/workflows/publish-pypi.yml']
             compute-provisioning-client: ['provisioning/compute/client/**', '.github/workflows/publish-pypi.yml']
             compute-provisioning-ansible: ['provisioning/compute/ansible/**', '.github/workflows/publish-pypi.yml']
             compute-provisioning-service: ['provisioning/compute/service/**', '.github/workflows/publish-pypi.yml']
@@ -190,6 +191,7 @@ jobs:
             {"key": "vms-provisioning-adapter", "path": "domains/vms/provisioning/adapter", "dist": "arkhai-vms-provisioning-adapter"},
             {"key": "compute-provisioning",   "path": "provisioning/compute",             "dist": "arkhai-compute-provisioning"},
             {"key": "compute-provisioning-contracts", "path": "provisioning/compute/contracts", "dist": "arkhai-compute-provisioning-contracts"},
+            {"key": "compute-delivery",       "path": "domains/compute/delivery",         "dist": "arkhai-compute-delivery"},
             {"key": "compute-provisioning-client", "path": "provisioning/compute/client", "dist": "arkhai-compute-provisioning-client"},
             {"key": "compute-provisioning-ansible", "path": "provisioning/compute/ansible", "dist": "arkhai-compute-provisioning-ansible"},
             {"key": "compute-provisioning-service", "path": "provisioning/compute/service", "dist": "arkhai-compute-provisioning-service"},

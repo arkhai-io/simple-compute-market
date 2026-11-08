@@ -164,8 +164,8 @@ async def test_the_wait_reports_the_delivery_status_of_the_settlement_it_resolve
         assert waited["fulfillment_id"] == "f-1"
 
 
-@pytest.mark.parametrize("terminal", ["ready", "failed"])
-async def test_ready_and_failed_end_the_wait(terminal) -> None:
+@pytest.mark.parametrize("terminal", ["ready", "failed", "ended"])
+async def test_terminal_delivery_ends_the_wait(terminal) -> None:
     clock = Clock()
     service = _service(
         delivery_status=_ticking(clock, [{"status": "provisioning"}, {"status": terminal}]),
@@ -179,7 +179,7 @@ async def test_ready_and_failed_end_the_wait(terminal) -> None:
     assert waited["elapsed_ms"] == 2000
 
 
-@pytest.mark.parametrize("status", ["provisioning", "verified", "refunded", "ended"])
+@pytest.mark.parametrize("status", ["provisioning", "verified", "refunded"])
 async def test_another_status_polls_to_the_deadline(status) -> None:
     clock = Clock()
     service = _service(delivery_status=_ticking(clock, [{"status": status}]), clock=clock)

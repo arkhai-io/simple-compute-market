@@ -18,6 +18,7 @@ An architecture companion does not replace a normative requirement. When explana
 | Buyer orchestration | [Spec](buyer-orchestration/spec.md) | [Architecture](buyer-orchestration/architecture.md) |
 | Change workflow | [Spec](change-workflow/spec.md) | [README](change-workflow/README.md), [index](change-workflow/index.md) |
 | CLI query language | [Spec](cli-query-language/spec.md) | [Architecture](cli-query-language/architecture.md) |
+| Compute delivery | [Spec](compute-delivery/spec.md) | [Architecture](compute-delivery/architecture.md) |
 | Compute provisioning contract | [Spec](compute-provisioning-contract/spec.md) | — |
 | Contact-exchange settlement | [Spec](contact-exchange-settlement/spec.md) | — |
 | Deal lifecycle | [Spec](deal-lifecycle/spec.md) | [Architecture](deal-lifecycle/architecture.md) |
@@ -52,6 +53,7 @@ An architecture companion does not replace a normative requirement. When explana
 | Mandate derivation, transaction identity, signed receipts/snapshots, retry, and refund authority | [Settlement servicing](settlement-servicing/spec.md) and [architecture](settlement-servicing/architecture.md) |
 | Negotiate → settle → provision composition and external payments authority | [Market composition](market-composition/spec.md) and [repository architecture](../../docs/development/ARCHITECTURE.md) |
 | Receipt-gated selected-site execution and idempotent credit issuance | [Physical provisioning](physical-provisioning/spec.md) and [API credits](api-credits/spec.md) |
+| Compute delivery order after verified settlement: Agreement window, authorization, activation before billing start, the undelivered hand-off and live credential reads | [Compute delivery](compute-delivery/spec.md) and [architecture](compute-delivery/architecture.md) |
 | Package/deployment ownership and scoped validation evidence | [Deployment](deployment-state/spec.md) and [testing](test-compatibility/spec.md) |
 
 ## Reading order

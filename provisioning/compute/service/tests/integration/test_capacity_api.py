@@ -285,6 +285,88 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
 
 
 @pytest.mark.asyncio
+async def test_a_placement_key_replays_through_the_canonical_client(
+    capacity: CapacityApi,
+):
+    """A reserve repeated under its placement key answers with the reservation
+    the first call recorded and admits nothing; one asking for another window
+    is refused as a conflict, with nothing written."""
+    await capacity.register_hosts("kvm1")
+    await capacity.register(
+        "site-placement-1", pool_id="default", total_units=4, host_id="kvm1",
+        attributes={},
+    )
+    request = {
+        "claim": {"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
+        "deal_ref": {"placement_key": "neg-4c1e:settlement"},
+        "lease_start_utc": "2099-01-01T00:00:00Z",
+        "lease_duration_seconds": 3600,
+    }
+    first = await capacity.site.reserve(**request)
+    _, version = await capacity.events()
+
+    replay = await capacity.site.reserve(**request)
+
+    assert replay["capacity_reservation_id"] == first["capacity_reservation_id"]
+    assert replay["state"] == "reserved"
+    assert (await capacity.events())[1] == version
+
+    with pytest.raises(SiteCapacityClientError) as refused:
+        await capacity.site.reserve(
+            **{**request, "lease_start_utc": "2099-01-01T00:30:00Z"}
+        )
+
+    assert refused.value.status_code == 409
+    assert (await capacity.events())[1] == version
+    assert len(await capacity.site.list_reservations()) == 1
+    recorded = await capacity.site.get_reservation(first["capacity_reservation_id"])
+    assert recorded["lease_start_utc"] == "2099-01-01T00:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_a_reserve_naming_another_offering_mode_for_its_escrow_is_a_conflict(
+    capacity: CapacityApi,
+):
+    """A repeat reserve for an escrow whose held reservation was admitted for
+    another offering mode is refused as a conflict, not a server error."""
+    await capacity.register_hosts("kvm1")
+    await capacity.register(
+        "site-escrow-mode-1", pool_id="default", total_units=4, host_id="kvm1",
+        attributes={},
+    )
+    await capacity.reserve(
+        {"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
+        {"escrow_uid": "escrow-mode-1"},
+    )
+
+    with pytest.raises(SiteCapacityClientError) as refused:
+        await capacity.reserve(
+            {"offering_mode": "bare_metal", "gpu_count": 1, "host_id": "kvm1"},
+            {"escrow_uid": "escrow-mode-1"},
+        )
+
+    assert refused.value.status_code == 409
+    assert len(await capacity.site.list_reservations()) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_placement_key_that_is_not_a_string_is_refused_as_invalid(
+    capacity: CapacityApi,
+):
+    await capacity.register(
+        "site-placement-2", pool_id="default", total_units=4, host_id="kvm1",
+        attributes={},
+    )
+
+    with pytest.raises(SiteCapacityClientError) as refused:
+        await capacity.reserve(
+            {"offering_mode": "vm", "gpu_count": 1}, {"placement_key": 7}
+        )
+
+    assert refused.value.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_no_capacity_is_a_null_answer_not_an_error(capacity: CapacityApi):
     assert await capacity.reserve({"offering_mode": "vm", "gpu_count": 1}, {}) is None
     assert await capacity.release(capacity_reservation_id="missing") is None

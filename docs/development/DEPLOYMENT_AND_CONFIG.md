@@ -1325,6 +1325,33 @@ the same way: override status reads the projection the storefront holds, and the
 migration that created the table (`bare-metal-storefront-0011`) has left the
 chain.
 
+The compute delivery path's columns arrive by additive migrations, so an
+existing database upgrades in place and in-flight deals continue on their rows.
+Both services hosting the site ledger add the unique reservation placement key
+and its recorded request (`20261106_002_reservation_placement_key` in compute
+provisioning, `20261106_008_reservation_placement_key` in API credits), with no
+backfill, since no earlier reserve carried a key. The VM storefront adds
+`vm_delivery_records.activated_at_utc` and renames the stored phase `activate`
+to `ready` (`20261106_001_vm_delivery_activation`); the bare-metal storefront
+adds `bare_metal_fulfillment_lifecycle.activated_at_utc` and marks a delivery
+left with its request saved but no fulfillment as dispatched
+(`bare-metal-storefront-0016-delivery-activation`). A deal available before the
+upgrade is never activated retroactively; its null activation means only that
+none is recorded.
+
+The same storefront migrations clear stored access material. Core's
+`auth_replay_reservations` records no route, so each storefront clears its
+access shape from every recorded body: VM removes the `tenant_credentials`
+member, and bare metal removes `host`, `port` and `username` from a body whose
+`method` is `ssh`; no other route's body has those fields. A stripped body is
+still a recorded body, so the record stays completed and an exact retry still
+resolves to its operation. VM also clears `tenant_credentials` from its delivery
+records and escrows and deletes core `credentials` rows for listings no other
+offering mode binds (`20261106_002_vm_credentials_cleared`). The live credential
+read ships with the clearing, so no running deal is left unreadable. A bare-metal
+database whose core replay table does not exist yet is left to core's own
+migration.
+
 Upgrading a VM storefront past storefront-held inventory is fail-forward:
 there is no supported downgrade, because the release that drops local
 inventory also stops creating and migrating its tables. The retained tables

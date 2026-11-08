@@ -210,10 +210,10 @@ def settlement_admin_routes(
             return {"status": "ready", "fulfillment_state": state}
         if state in _FAILED_STATES:
             return {"status": "failed", "fulfillment_state": state}
-        # Before a fulfillment decides, the settlement record's own status is
-        # the report: accepted, verified and refund statuses keep the wait
-        # polling, and failed evidence ends it, as a settlement never to be
-        # delivered.
+        if await runtime.lifecycle.ended_before_delivery(negotiation_id):
+            # A deal ended before delivery has no fulfillment to wait for.
+            return {"status": "ended", "fulfillment_state": state}
+        # Before a fulfillment decides, report the settlement evidence itself.
         return {"status": evidence.status, "fulfillment_state": state}
 
     timing: dict[str, Any] = {}

@@ -310,6 +310,36 @@ async def test_wait_resolves_a_payments_deal_by_its_negotiation_and_its_transact
     assert await runtime.db.load_escrow(escrow_uid=transaction_id) is None
     assert len(deal.capacity.reserve_calls) == len(provisioning.begin_calls) == 1
 
+async def test_wait_answers_a_deal_ended_before_delivery_at_once(tmp_path) -> None:
+    """A settlement placement that finds no capacity ends the deal before
+    anything is dispatched. The wait answers that end at once, rather than
+    polling to its timeout for a fulfillment that will never exist."""
+
+    class NoCapacity(_CapacityClient):
+        async def reserve(self, **request):
+            self.reserve_calls.append(request)
+            return None
+
+    provisioning = _ProvisioningClient()
+    runtime, negotiation_id, _capacity = await _runtime(tmp_path, provisioning=provisioning)
+    capacity = NoCapacity()
+    runtime = replace(runtime, capacity_client=capacity)
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            await admin.admin_pause_lifecycle_loops()
+            async with _buyer(app) as buyer:
+                await buyer.settle_evm(
+                    ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+                )
+            # A deadline shorter than one poll: the wait reads the status once,
+            # so only an answer already terminal is ready.
+            ended = await admin.wait_for_settlement(ESCROW_UID, timeout=0.1)
+
+    assert ended.ready is True and ended.status == "ended"
+    assert len(capacity.reserve_calls) == 1
+    assert provisioning.begin_calls == []
+
 
 async def test_wait_answers_a_delivery_conflict_as_the_fulfillment_reads_do(
     tmp_path,

@@ -313,7 +313,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - Reservation supersede (`resize_reservation`) and unconditional settlement-abandonment hook invocation across TTL lapse, release, and resize: `kit/site/tests/integration/test_ledger.py`.
 - One release-handle name: the ledger payload and model in `kit/site/tests/integration/test_ledger.py`; the published and updatable VM lease handle in `provisioning/compute/service/tests/integration/test_leases_api.py`, the published bare-metal lease handle in `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, and the lease models in `provisioning/compute/service/tests/unit/test_lease_models.py`; the upgrade, including the mirror-only backfill and the refusal on disagreement, in `provisioning/compute/service/tests/integration/test_reservation_release_mirror_migration.py`; and the deployed VM release path through teardown in `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`.
 - Listing identity normalization and validation: `domains/vms/storefront/tests/unit/test_listing_model_capacity_identity.py`.
-- Claim identity precedence and fail-closed construction: `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, `domains/vms/storefront/tests/unit/test_vm_fulfillment_planner.py`, and `domains/vms/storefront/tests/unit/test_fulfill_vm_obligation_error_handling.py`.
+- Claim identity precedence and fail-closed construction: `domains/vms/storefront/tests/integration/test_vm_delivery_path.py`, `domains/vms/storefront/tests/unit/test_vm_fulfillment_planner.py`, and `domains/compute/delivery/tests/integration/test_drive_entry.py`.
 - Listing publication and legacy-invalid remediation: `domains/vms/storefront/tests/integration/test_listings_api.py`.
 - Per-site/family projection load-state reporting, including partial multi-site failure isolation, never-loaded retry, and `fetched_at` tracking: `core/storefront/tests/unit/test_site_projections.py`, `kit/capacity-publication/tests/unit/test_site_projection_state.py`, and `domains/vms/storefront/tests/unit/services/test_system_service.py`. A genuinely-loaded-empty site is distinguished from a never-loaded one, at both the producer and consumer level, rather than the empty case silently falling back to a different source: `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`. A projected resource's own `available` field is used even when a separately-sourced fallback value is present: `domains/vms/storefront/tests/unit/test_reconciler.py`.
 - Resource-pool projection metadata: allowlisting/redaction, deep-copy isolation, digest advancement, and old-shape preservation: `kit/site/tests/unit/test_projections.py` and `kit/site/tests/unit/test_projection_router.py`. Composition (`ResourcePool`/`AnsiblePoolConfig` -> allowlisted metadata): `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`; the provider/mechanism gate on a pool's views: `provisioning/compute/service/tests/unit/services/test_vm_inventory_views.py`. VM size defaults reachable through the real pool admin API end to end (`ProvisioningClient.create_pool` -> `AnsiblePoolConfigHandler` -> DB -> read-back): `provisioning/compute/service/tests/integration/test_pools_api.py`. The same defaults surfacing through the real projection consumer (`SiteCapacityClient.resource_pool_projection()` over the real in-process app): `provisioning/compute/service/tests/integration/test_capacity_api.py`. Schema migration column addition and idempotency: `provisioning/compute/service/tests/integration/test_database.py`. A declaration's GPU model reaching the projected resource's `attributes`, omitted rather than null when the declaration does not declare one, including when only the host record holds one: `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py` and `provisioning/compute/service/tests/integration/test_capacity_api.py`.
@@ -1197,3 +1197,22 @@ An activation request MUST name only the reservation, by its `capacity_reservati
 
 - **WHEN** a storefront activates a lease through the site's capacity API
 - **THEN** the request carries the reservation identity and nothing else, and the recorded instant is the site's clock at the transition
+
+### Requirement: Reserve replay is keyed by the deal's placement
+
+A reserve MAY carry `deal_ref.placement_key`, naming the deal and the purpose of the placement as `<negotiation_id>:<placement>`. The site MUST treat it as an idempotency key beside `escrow_uid`: an exact replay under a recorded key MUST return the recorded reservation in its current state, held, committed or released, and MUST NOT admit new capacity; a replay under the key that changes the claim, pool, site, offering mode or lease window MUST be refused with nothing written. A reserve without the key MUST behave as before.
+
+#### Scenario: A lost reserve acknowledgement is replayed
+
+- **WHEN** a storefront repeats a reserve under `neg-4c1e:settlement` after the first answer was lost
+- **THEN** the site returns the reservation the first call created, and admits nothing new
+
+#### Scenario: A replay changes the request
+
+- **WHEN** a reserve under a recorded placement key asks for a different lease window
+- **THEN** the site refuses it and writes nothing
+
+#### Scenario: A lapsed hold is replaced by another placement
+
+- **WHEN** the reservation recorded under `neg-4c1e:hold` has expired and a reserve under `neg-4c1e:settlement` arrives
+- **THEN** the site admits the settlement placement as a new reservation, and a replay under `neg-4c1e:hold` still returns the expired one

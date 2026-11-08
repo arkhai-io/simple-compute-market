@@ -1,50 +1,49 @@
-"""Durable selected-site fulfillment lifecycle for bare-metal agreements."""
+"""Durable selected-site fulfillment lifecycle for bare-metal agreements.
+
+Delivery runs through the compute family's delivery path, entered only through
+core's fulfillment hook: ``fulfill_bare_metal`` builds the path from the
+caller's ports and the storefront's lifecycle, and ``deliver`` is how every
+bare-metal caller reaches it. See openspec/specs/physical-provisioning/spec.md,
+"Bare-metal delivery enters through the core fulfillment hook".
+"""
 
 from __future__ import annotations
 
-import asyncio
+import logging
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from arkhai_bare_metal import (
-    BareMetalMaterialization,
-    BareMetalReceipt,
-    BareMetalResult,
+from arkhai_bare_metal import BareMetalResult
+from compute_delivery import AccessRefused, OutcomeKind
+from compute_provisioning_contracts import AccessDelivery, AccessEndpoint
+from core_storefront import (
+    StorefrontFulfillmentContext,
+    StorefrontFulfillmentLifecycle,
+    StorefrontFulfillmentPorts,
+    fulfill_domain,
 )
-from compute_provisioning_contracts import (
-    ACCESS_DELIVERY_KIND,
-    ACCESS_DELIVERY_SCHEMA_VERSION,
-    AccessDelivery,
-    AccessEndpoint,
-    FulfillmentRequestBody,
-    FulfillmentScheduleRequest,
-)
-from core_storefront import StorefrontFulfillmentContext
-from core_storefront.domain_registry import StorefrontDomainBindingError
 from market_capacity_publication import (
     CapacityBindingError,
     CapacityEffects,
     PublicationBinding,
 )
-from market_core import VersionedEnvelope
+from market_core import MarketDomainContract, SettlementEvidence
 from market_identity import Identity
-from market_deal_lifecycle.delivery import DeliveryPhase
 from market_deal_servicing import PhysicalResult
 from market_resource_pools_contracts.backing import CapacityNotAdmittedError
-from market_core import SettlementEvidence
 from .settlement_evidence import EvidencePayload
 from .settlement_stages import SettlementRequestError
 
 from .access_delivery import active_access_delivery, ssh_endpoint
-from .claims import ClaimAttributesMissing, whole_machine_claim
-from .lease_window import committed_lease_window
+from .delivery_ports import DISPATCH_STATE, BareMetalDeliveryRefused, bare_metal_delivery_path
 from .listing_binding import bare_metal_listing_binding
 
 if TYPE_CHECKING:
     from .sqlite_client import SQLiteClient
 
+logger = logging.getLogger(__name__)
 
 # The lifecycle state recorded once teardown has asked the site to end the lease.
 TERMINATING = "terminating"
@@ -77,14 +76,8 @@ class BareMetalFulfillmentService:
     capacity_client: Any
     fulfillment_client: Any
     read_verified_evidence: Callable[..., Awaitable[SettlementEvidence]]
-    lifecycle: Any = None
-
-    async def _admit(self, negotiation_id: str, phase: DeliveryPhase) -> None:
-        if self.lifecycle is not None:
-            try:
-                await asyncio.to_thread(self.lifecycle.admit, negotiation_id, phase)
-            except ValueError as exc:
-                raise BareMetalFulfillmentError(str(exc)) from exc
+    lifecycle: Any
+    domain: MarketDomainContract
 
     async def _effect(
         self,
@@ -183,246 +176,39 @@ class BareMetalFulfillmentService:
             )
         return evidence, delivery.terms
 
-    async def _recover_reservation(
-        self,
-        *,
-        site_id: str,
-        negotiation_id: str,
-        settlement_ref: str,
-    ) -> dict[str, Any] | None:
-        site_client = self.capacity_client.site(site_id)
-        reservations = await site_client.list_reservations()
-        matching = [
-            reservation
-            for reservation in reservations
-            if reservation.get("deal_ref")
-            == {
-                "negotiation_id": negotiation_id,
-                "escrow_uid": settlement_ref,
-            }
-        ]
-        if len(matching) > 1:
-            raise BareMetalFulfillmentError(
-                "multiple capacity reservations match one bare-metal agreement"
-            )
-        if not matching:
-            return None
-        reservation = matching[0]
-        reservation_id = str(reservation.get("capacity_reservation_id") or "")
-        if not reservation_id:
-            raise BareMetalFulfillmentError(
-                "recovered capacity reservation has no identity"
-            )
-        self.capacity_client.reservation_sites[reservation_id] = site_id
-        return {**reservation, "site": site_id}
+    async def deliver(
+        self, *, negotiation_id: str, buyer_principal: Identity
+    ) -> StorefrontFulfillmentLifecycle:
+        """Drive the deal's delivery through core's fulfillment hook.
 
-    async def begin(self, *, negotiation_id: str, settlement_ref: str | None = None, buyer_principal: Identity) -> dict[str, Any]:
-        if self.lifecycle is None:
-            return await self._begin(negotiation_id=negotiation_id, settlement_ref=settlement_ref, buyer_principal=buyer_principal)
-        try:
-            async with self.lifecycle.lock(negotiation_id):
-                return await self._begin(negotiation_id=negotiation_id, settlement_ref=settlement_ref, buyer_principal=buyer_principal)
-        finally:
-            await self.lifecycle.end.drive_physical(negotiation_id)
-
-    async def _begin(
-        self,
-        *,
-        negotiation_id: str,
-        settlement_ref: str | None = None,
-        buyer_principal: Identity,
-    ) -> dict[str, Any]:
+        Every drive may take a protected step, so the settlement is first
+        revalidated against its authority as currently active, through the
+        accepted entry's recovery gate (openspec/specs/physical-provisioning/
+        spec.md, "Bare-metal evidence is independent of escrow rows"); the hook
+        receives that evidence, the storefront's clients as ports, and its
+        lifecycle as the domain input.
+        """
         context = await self._owned_context(
-            negotiation_id=negotiation_id,
-            buyer_principal=buyer_principal,
+            negotiation_id=negotiation_id, buyer_principal=buyer_principal
         )
-        evidence, terms = await self._verified_evidence(
+        evidence, _ = await self._verified_evidence(
             negotiation_id=negotiation_id,
             buyer_principal=buyer_principal,
             context=context,
         )
-        if settlement_ref is not None and settlement_ref != evidence.settlement_ref:
-            raise BareMetalFulfillmentError(
-                "requested settlement reference conflicts with verified evidence"
-            )
-        settlement_ref = evidence.settlement_ref
-
-        await self._admit(negotiation_id, DeliveryPhase.RESERVE)
-        # Starting delivery is ordered against refund intent in one
-        # transaction, so a refund recorded first stops delivery here.
-        lifecycle = await self.db.ensure_bare_metal_fulfillment_lifecycle(
-            negotiation_id=negotiation_id,
-            settlement_ref=settlement_ref,
-            site_id=str(context["site_id"]),
-            physical_resource_id=str(context["physical_resource_id"]),
-        )
-        if lifecycle is None:
-            raise BareMetalFulfillmentError(
-                "the settlement was refunded; delivery cannot start"
-            )
-        if lifecycle.get("fulfillment_id"):
-            return lifecycle
-
-        reservation_id = lifecycle.get("capacity_reservation_id")
-        if reservation_id is None:
-            recovered = await self._recover_reservation(
-                site_id=str(context["site_id"]),
-                negotiation_id=negotiation_id,
-                settlement_ref=settlement_ref,
-            )
-            try:
-                claim = whole_machine_claim(context)
-            except ClaimAttributesMissing as exc:
-                raise BareMetalFulfillmentError(str(exc)) from exc
-            claim["resource_id"] = str(context["physical_resource_id"])
-            reserved = recovered or await self._effect(
-                lambda effects, binding: effects.reserve(
-                    binding,
-                    claim=claim,
-                    deal_ref={
-                        "negotiation_id": negotiation_id,
-                        "escrow_uid": settlement_ref,
-                    },
-                    lease_duration_seconds=terms.duration_seconds,
+        return await fulfill_domain(
+            self.domain,
+            StorefrontFulfillmentContext(
+                thread_binding=await self.db.load_thread_binding(negotiation_id=negotiation_id),
+                settlement_evidence=evidence,
+                buyer_principal=buyer_principal,
+                ports=StorefrontFulfillmentPorts(
+                    repository=self.db,
+                    capacity_client=self.capacity_client,
+                    fulfillment_client=self.fulfillment_client,
                 ),
-                context,
-            )
-            if reserved is None:
-                raise BareMetalFulfillmentError(
-                    "selected bare-metal capacity is no longer available"
-                )
-            if reserved.get("site") != context["site_id"]:
-                raise BareMetalFulfillmentError(
-                    "capacity reservation returned a conflicting site binding"
-                )
-            reservation_id = str(reserved.get("capacity_reservation_id") or "")
-            if not reservation_id:
-                raise BareMetalFulfillmentError(
-                    "capacity reservation response has no identity"
-                )
-            lifecycle = await self.db.update_bare_metal_fulfillment_lifecycle(
-                negotiation_id=negotiation_id,
-                state="reserved",
-                capacity_reservation_id=reservation_id,
-            )
-
-        settlement_resource_id = lifecycle.get("settlement_resource_id")
-        if settlement_resource_id is None:
-            scheduled = await self.fulfillment_client.schedule_resource(
-                FulfillmentScheduleRequest(
-                    capacity_reservation_id=str(reservation_id),
-                    market="bare_metal",
-                    requirements={"resource_kind": "compute.bare-metal"},
-                    resource_id=str(context["physical_resource_id"]),
-                )
-            )
-            if (
-                scheduled.resource_kind != "compute.bare-metal"
-                or scheduled.provider != "bare_metal.ansible"
-                or (
-                    context.get("pool_id") is not None
-                    and scheduled.pool_id != context["pool_id"]
-                )
-            ):
-                raise BareMetalFulfillmentError(
-                    "selected bare-metal resource resolved to an unexpected executor"
-                )
-            # The scheduled resource's own identity: the host its declaration
-            # names, and the machine among its top-level attributes. A
-            # resource naming no host, or another host or machine, is not the
-            # one the terms sold.
-            if (
-                scheduled.host_id is None
-                or scheduled.host_id != terms.host_id
-                or scheduled.attributes.get("physical_host_id") != terms.physical_host_id
-            ):
-                raise BareMetalFulfillmentError(
-                    "scheduled resource conflicts with accepted bare-metal terms"
-                )
-            settlement_resource_id = scheduled.settlement_resource_id
-            lifecycle = await self.db.update_bare_metal_fulfillment_lifecycle(
-                negotiation_id=negotiation_id,
-                state="scheduled",
-                settlement_resource_id=settlement_resource_id,
-            )
-
-        # The lease begins at commit, and its window is the one commit
-        # returns. Committed until the fulfillment begins: the first commit
-        # records the window and the deal's escrow, and a repeat returns the
-        # window unchanged.
-        await self._admit(negotiation_id, DeliveryPhase.COMMIT)
-        lease_start = datetime.now(timezone.utc)
-        requested_start, requested_end = (
-            await asyncio.to_thread(self.lifecycle.lease_window, negotiation_id) if self.lifecycle is not None
-            else (lease_start.isoformat(), (lease_start + timedelta(seconds=terms.duration_seconds)).isoformat())
-        )
-        committed_window = committed_lease_window(
-            await self._effect(
-                lambda effects, binding: effects.commit(
-                    binding,
-                    resource_id=None,
-                    capacity_reservation_id=str(reservation_id),
-                    lease_start_utc=requested_start,
-                    lease_end_utc=requested_end,
-                    idempotency_ref=settlement_ref,
-                    deal_ref={"escrow_uid": settlement_ref},
-                ),
-                context,
-            )
-        )
-        materialization = await self.db.load_bare_metal_materialization(
-            negotiation_id=negotiation_id
-        )
-        # A saved materialization keeps its window: it is the fulfillment
-        # request, which a retry must repeat exactly.
-        lease_start_utc, lease_end_utc = (
-            (materialization.lease_start_utc, materialization.lease_end_utc)
-            if materialization is not None
-            else committed_window
-        )
-        expected_materialization = BareMetalMaterialization(
-            escrow_uid=settlement_ref,
-            host_id=terms.host_id,
-            physical_host_id=terms.physical_host_id,
-            lease_start_utc=lease_start_utc,
-            lease_end_utc=lease_end_utc,
-            access_method=terms.access_method,
-            ssh_public_key=terms.ssh_public_key,
-            access_ref=terms.access_ref,
-            listing_ref=terms.listing_ref,
-            settlement_ref={
-                "settlement_resource_id": settlement_resource_id,
-            },
-        )
-        if materialization is None:
-            materialization = expected_materialization
-            await self.db.save_bare_metal_materialization(
-                negotiation_id=negotiation_id,
-                materialization=materialization,
-            )
-        elif materialization != expected_materialization:
-            raise BareMetalFulfillmentError(
-                "recorded materialization conflicts with accepted bare-metal terms"
-            )
-        await self._admit(negotiation_id, DeliveryPhase.DISPATCH)
-        accepted = await self.fulfillment_client.begin_fulfillment(
-            FulfillmentRequestBody(
-                capacity_reservation_id=str(reservation_id),
-                market="bare_metal",
-                fulfillment_request=VersionedEnvelope(
-                    kind="bare_metal.v2",
-                    schema_version=1,
-                    payload=materialization.model_dump(
-                        mode="json",
-                        exclude_none=True,
-                    ),
-                ),
-            )
-        )
-        return await self.db.update_bare_metal_fulfillment_lifecycle(
-            negotiation_id=negotiation_id,
-            state=str(accepted.state),
-            fulfillment_id=accepted.fulfillment_id,
+                domain_input={"lifecycle": self.lifecycle},
+            ),
         )
 
     async def _active_delivery(
@@ -441,38 +227,23 @@ class BareMetalFulfillmentService:
         except ValueError as exc:
             raise BareMetalFulfillmentError(str(exc)) from exc
 
-    async def _record_result(
-        self, *, negotiation_id: str, result: BareMetalResult
-    ) -> None:
-        """Record the delivered result, which is written once.
-
-        A site that later reports another delivery does not replace it: the
-        recorded result stands, and the read is refused as a delivery
-        conflict. The store refuses any other mismatch with the same error,
-        so the conflict is named only once the recorded result is shown to
-        differ.
-        """
-        try:
-            await self.db.save_bare_metal_result(
-                negotiation_id=negotiation_id, result=result
-            )
-        except StorefrontDomainBindingError:
-            recorded = await self.db.load_bare_metal_result(
-                negotiation_id=negotiation_id
-            )
-            if recorded is None or recorded == result:
-                raise
-            raise BareMetalFulfillmentError(
-                "the site reports a delivery other than the recorded result",
-                error="delivery_conflict",
-            ) from None
-
     async def status(
         self,
         *,
         negotiation_id: str,
         buyer_principal: Identity,
+        drive: bool = True,
     ) -> dict[str, Any]:
+        """The deal's delivery as provisioning reports it now, to its buyer.
+
+        It refreshes the recorded fulfillment state from provisioning. Once the
+        fulfillment is active and the deal not yet available, it drives the
+        deal through the fulfillment hook, unless ``drive`` is false, so the
+        delivery path records activation, billing start and availability before
+        the answer; the path alone records them, and a deal no one reads
+        reaches them through its workers. A drive the settlement gate refuses
+        leaves the read answering as provisioning reports.
+        """
         context = await self._owned_context(
             negotiation_id=negotiation_id,
             buyer_principal=buyer_principal,
@@ -526,50 +297,56 @@ class BareMetalFulfillmentService:
             state=str(remote.state),
             failure_reason=remote.failure_reason or remote.failure_message,
         )
-
         if remote.state == "active":
-            await self._admit(negotiation_id, DeliveryPhase.DISCLOSE)
-            delivery, endpoint = await self._active_delivery(
+            if drive and not await self.lifecycle.delivery_available(negotiation_id):
+                try:
+                    await self.deliver(
+                        negotiation_id=negotiation_id, buyer_principal=buyer_principal
+                    )
+                except BareMetalFulfillmentError as exc:
+                    logger.info("[DELIVERY] %s was not driven on its status read: %s",
+                                negotiation_id, exc.detail)
+                lifecycle = await self.db.load_bare_metal_fulfillment_lifecycle(
+                    negotiation_id=negotiation_id
+                )
+            await self._refuse_conflicting_delivery(
+                negotiation_id=negotiation_id,
                 capacity_reservation_id=str(reservation_id),
                 fulfillment_id=str(fulfillment_id),
             )
-            materialization = await self.db.load_bare_metal_materialization(
-                negotiation_id=negotiation_id
-            )
-            if materialization is None:
-                raise BareMetalFulfillmentError(
-                    "bare-metal materialization is missing during recovery"
-                )
-            # The stored result names no endpoint: where to connect is served
-            # live by ``access`` while the lease is active.
-            if self.lifecycle is not None:
-                await asyncio.to_thread(self.lifecycle.available, negotiation_id, self.lifecycle.clock())
-            await self._record_result(
-                negotiation_id=negotiation_id,
-                result=BareMetalResult(
-                    access_method=materialization.access_method,
-                    ssh_user=str(endpoint.user),
-                    ready_at=delivery.ready_at,
-                    lease_end_utc=materialization.lease_end_utc,
-                ),
-            )
-            await self.db.save_bare_metal_receipt(
-                negotiation_id=negotiation_id,
-                receipt=BareMetalReceipt(
-                    escrow_uid=materialization.escrow_uid,
-                    host_id=materialization.host_id,
-                    physical_host_id=materialization.physical_host_id,
-                    lease_start_utc=materialization.lease_start_utc,
-                    lease_end_utc=materialization.lease_end_utc,
-                    status="ready",
-                    access_ref={"fulfillment_id": str(fulfillment_id)},
-                    result_ref={
-                        "kind": ACCESS_DELIVERY_KIND,
-                        "schema_version": ACCESS_DELIVERY_SCHEMA_VERSION,
-                    },
-                ),
-            )
         return lifecycle
+
+    async def _refuse_conflicting_delivery(
+        self, *, negotiation_id: str, capacity_reservation_id: str, fulfillment_id: str
+    ) -> None:
+        """Refuse a read when the site reports a delivery other than the recorded result.
+
+        The result is written once, when delivery becomes available; a later
+        report of another delivery leaves it standing and is named as a
+        conflict. See openspec/specs/storefront-publication/spec.md, "A
+        bare-metal delivery that conflicts with its recorded result is refused".
+        """
+        recorded = await self.db.load_bare_metal_result(negotiation_id=negotiation_id)
+        materialization = await self.db.load_bare_metal_materialization(
+            negotiation_id=negotiation_id
+        )
+        if recorded is None or materialization is None:
+            return
+        delivery, endpoint = await self._active_delivery(
+            capacity_reservation_id=capacity_reservation_id,
+            fulfillment_id=fulfillment_id,
+        )
+        reported = BareMetalResult(
+            access_method=materialization.access_method,
+            ssh_user=str(endpoint.user),
+            ready_at=delivery.ready_at,
+            lease_end_utc=materialization.lease_end_utc,
+        )
+        if reported != recorded:
+            raise BareMetalFulfillmentError(
+                "the site reports a delivery other than the recorded result",
+                error="delivery_conflict",
+            )
 
     async def access(
         self,
@@ -577,30 +354,47 @@ class BareMetalFulfillmentService:
         negotiation_id: str,
         buyer_principal: Identity,
     ) -> dict[str, Any]:
-        """Return transient SSH coordinates only to the accepted buyer."""
+        """Return transient SSH coordinates only to the accepted buyer.
+
+        The coordinates are read live through the delivery path's access check:
+        only while the deal is available, started and admitted, and discarded
+        if an end is admitted while they are read; that check refuses an end
+        with 410. The read drives nothing, so it reaches no payment authority.
+        """
 
         lifecycle = await self.status(
             negotiation_id=negotiation_id,
             buyer_principal=buyer_principal,
+            drive=False,
         )
         if lifecycle["state"] != "active":
             raise BareMetalFulfillmentError(
                 "bare-metal access is unavailable outside an active lease"
             )
-        reservation_id = lifecycle.get("capacity_reservation_id")
-        fulfillment_id = lifecycle.get("fulfillment_id")
-        if not reservation_id or not fulfillment_id:
-            raise BareMetalFulfillmentError(
-                "bare-metal fulfillment has no active access identity"
-            )
-        _, endpoint = await self._active_delivery(
-            capacity_reservation_id=str(reservation_id),
-            fulfillment_id=str(fulfillment_id),
+        path = bare_metal_delivery_path(
+            self.lifecycle,
+            db=self.db,
+            capacity_client=self.capacity_client,
+            fulfillment_client=self.fulfillment_client,
         )
+
+        async def fetch(fulfillment_id: str, capacity_reservation_id: str) -> AccessEndpoint:
+            _, endpoint = await self._active_delivery(
+                capacity_reservation_id=capacity_reservation_id,
+                fulfillment_id=fulfillment_id,
+            )
+            return endpoint
+
+        try:
+            endpoint = await path.read_access(negotiation_id, fetch)
+        except AccessRefused as exc:
+            raise BareMetalFulfillmentError(
+                f"bare-metal access is refused: {exc.detail}",
+                status_code=410 if exc.reason == "ended" else 409,
+            ) from exc
         materialization = await self.db.load_bare_metal_materialization(
             negotiation_id=negotiation_id
         )
-        await self._admit(negotiation_id, DeliveryPhase.DISCLOSE)
         return {
             "negotiation_id": negotiation_id,
             "method": "ssh",
@@ -628,8 +422,11 @@ class BareMetalFulfillmentService:
                 lease_end_utc=datetime.fromtimestamp(at, timezone.utc).isoformat(),
             ), context)
             return PhysicalResult(progress="end_recorded", done=True)
-        materialization = await self.db.load_bare_metal_materialization(negotiation_id=negotiation_id)
-        if materialization is None:
+        # The delivery path records the dispatch before fulfillment begins, so a
+        # reservation with neither a dispatch nor a fulfillment recorded has had
+        # nothing dispatched against it and is released; anything dispatched is
+        # adopted and ended through the lease.
+        if row.get("fulfillment_id") is None and row.get("state") != DISPATCH_STATE:
             await self._effect(lambda effects, binding: effects.release(
                 binding, capacity_reservation_id=reservation, failure_reason=operation_key,
             ), context)
@@ -647,21 +444,13 @@ class BareMetalFulfillmentService:
         capacity_reservation_id: str,
         reason: str,
     ) -> dict[str, Any]:
-        """Ask the reservation's site to end its lease, and record that it is ending.
+        """Record the deal's end through end service, which ends the lease at its site.
 
         The site converges teardown through the lease's fulfillment and releases
-        the capacity once; terminating a lease already ending returns it as it is.
+        the capacity once; ending a lease already ending leaves it as it is.
         """
-        if self.lifecycle is not None:
-            await self.lifecycle.local_end(negotiation_id, cause=reason)
-            return await self.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
-        await self.fulfillment_client.terminate_lease(
-            capacity_reservation_id, reason=reason
-        )
-        return await self.db.update_bare_metal_fulfillment_lifecycle(
-            negotiation_id=negotiation_id,
-            state=TERMINATING,
-        )
+        await self.lifecycle.local_end(negotiation_id, cause=reason)
+        return await self.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
 
     async def converge_teardown(
         self,
@@ -679,32 +468,63 @@ async def fulfill_bare_metal(
     *,
     context: StorefrontFulfillmentContext,
 ) -> dict[str, Any]:
-    """Invoke durable bare-metal fulfillment through caller-owned ports."""
-    recorded_binding = await context.ports.repository.load_thread_binding(
-        negotiation_id=context.negotiation_id,
+    """Drive one bare-metal deal's delivery through the compute delivery path.
+
+    The registered hook: it builds the path from the caller's clients in
+    ``ports`` and the storefront's lifecycle in ``domain_input``, so every
+    delivery passes end-service admission, and refuses before any capacity or
+    fulfillment call without that lifecycle. The deal's lock serializes its
+    drives; its physical end, which waits while the lock is held, is driven
+    once the drive has released it. The bare-metal row is returned, with the
+    path's outcome, the hook's disposition of it (fulfilled, deferred or
+    failed), and whether the deal is available as the public result.
+    """
+    lifecycle = (
+        context.domain_input.get("lifecycle")
+        if isinstance(context.domain_input, Mapping)
+        else None
     )
+    if lifecycle is None:
+        raise BareMetalFulfillmentError(
+            "bare-metal fulfillment requires the storefront's lifecycle"
+        )
+    db = context.ports.repository
+    negotiation_id = context.negotiation_id
+    recorded_binding = await db.load_thread_binding(negotiation_id=negotiation_id)
     if recorded_binding != context.thread_binding:
         raise BareMetalFulfillmentError(
             "fulfillment context conflicts with the durable negotiation binding"
         )
-    reader = (
-        context.domain_input.get("read_verified_evidence")
-        if isinstance(context.domain_input, Mapping)
-        else None
-    )
-    if not callable(reader):
-        raise BareMetalFulfillmentError(
-            "bare-metal fulfillment requires the caller-owned settlement boundary"
-        )
-    service = BareMetalFulfillmentService(
-        db=context.ports.repository,
+    path = bare_metal_delivery_path(
+        lifecycle,
+        db=db,
         capacity_client=context.ports.capacity_client,
         fulfillment_client=context.ports.fulfillment_client,
-        read_verified_evidence=reader,
     )
-    lifecycle = await service.begin(
-        negotiation_id=context.negotiation_id,
-        settlement_ref=context.settlement_ref,
-        buyer_principal=context.buyer_principal,
-    )
-    return lifecycle
+    try:
+        async with lifecycle.lock(negotiation_id):
+            outcome = await path.drive(negotiation_id)
+    except (CapacityNotAdmittedError, CapacityBindingError, BareMetalDeliveryRefused) as exc:
+        raise BareMetalFulfillmentError(str(exc)) from exc
+    finally:
+        await lifecycle.end.drive_physical(negotiation_id)
+    if outcome.kind is OutcomeKind.REPAIR_REQUIRED:
+        logger.warning(
+            "[DELIVERY] %s needs repair (%s): %s [%s]",
+            negotiation_id, outcome.reason.value if outcome.reason else None,
+            outcome.detail, outcome.evidence_ref,
+        )
+    row = await db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
+    if row is None:
+        raise BareMetalFulfillmentError(
+            outcome.detail or "bare-metal delivery has not started"
+        )
+    return {
+        **row,
+        "domain_result": dict(row),
+        "public_result": {
+            "outcome": outcome.kind.value,
+            "disposition": outcome.hook_disposition,
+            "available": await lifecycle.delivery_available(negotiation_id),
+        },
+    }

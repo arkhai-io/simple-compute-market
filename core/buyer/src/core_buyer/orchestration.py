@@ -314,8 +314,14 @@ def signed_storefront_json(
     timeout: float,
     resolve_response_principals: Callable[[], TrustedIdentitySet],
     capture: EnvelopeCapture | None = None,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
-    """Call one signed storefront route and verify its signed JSON response."""
+    """Call one signed storefront route and verify its signed JSON response.
+
+    Each call mints a fresh request identity unless ``request_id`` names one;
+    repeating an identity sends the exact retry the storefront's replay
+    protection recognises.
+    """
 
     return _signed_json(
         url,
@@ -326,6 +332,7 @@ def signed_storefront_json(
         operation=operation,
         resource=resource,
         timeout=timeout,
+        request_id=request_id,
         resolve_response_principals=resolve_response_principals,
         capture=capture,
     )

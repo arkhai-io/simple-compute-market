@@ -331,7 +331,12 @@ async def _end_failed_delivery(db, ctx, capacity):
         end.admit(negotiation_id, record.phase, record.revision, now=now)
         record = end.read(negotiation_id)
         ref = "fulfillment-failure:" + (ctx.provider_job_id or ctx.capacity_reservation_id or negotiation_id)
-        prior = next((request for request in end.requests(negotiation_id) if request.source_ref == ref), None)
+        # The compute delivery path records the failure it observes with its
+        # classification and filing; that end is the failure's, not another.
+        prior = next((
+            request for request in end.requests(negotiation_id)
+            if request.source_ref == ref or request.source == "delivery"
+        ), None)
         if prior is None:
             selected = end.selected_end(negotiation_id)
             controlling = classification_for(end, negotiation_id, selected.source_ref) if selected else None

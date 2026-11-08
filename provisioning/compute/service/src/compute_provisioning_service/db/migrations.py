@@ -3621,6 +3621,25 @@ def _migrate_reservation_activated_at(engine: Engine) -> None:
     )
 
 
+def _migrate_reservation_placement_key(engine: Engine) -> None:
+    """Add ``capacity_reservations.placement_key`` and ``placement_request``.
+
+    A reserve's placement key is looked up on every keyed reserve, so it gets
+    a unique index rather than a scan of ``deal_ref``. Nothing is backfilled:
+    no reserve carried a placement key before the column existed, so every
+    existing row records none, and is found only as it was before.
+    """
+    _add_column_if_missing(engine, "capacity_reservations", "placement_key", "VARCHAR")
+    _add_column_if_missing(engine, "capacity_reservations", "placement_request", "JSON")
+    if _table_exists(engine, "capacity_reservations"):
+        _create_index_if_missing(
+            engine,
+            "ix_capacity_reservations_placement_key",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_capacity_reservations_placement_key "
+            "ON capacity_reservations (placement_key)",
+        )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -3760,5 +3779,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261106_001_reservation_activated_at",
         _migrate_reservation_activated_at,
+    ),
+    Migration(
+        "20261106_002_reservation_placement_key",
+        _migrate_reservation_placement_key,
     ),
 )

@@ -55,6 +55,7 @@ import base64
 import logging
 import subprocess
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Optional, Protocol
 
 from market_arkhai_payments import (
@@ -67,7 +68,11 @@ from market_arkhai_payments import (
 from market_core.schemas import SettlementOption
 
 from tests.e2e.roles.helpers.compute_deal import assert_lease_watchdog_held
-from tests.e2e.roles.helpers.compute_deal_stages import ComputeDealDriver, ComputeDealState
+from tests.e2e.roles.helpers.compute_deal_stages import (
+    ComputeDealDriver,
+    ComputeDealState,
+    utc_instant,
+)
 from tests.e2e.roles.helpers.domain_deal import (
     assert_market_run_succeeded,
     ordered_events,
@@ -301,6 +306,14 @@ class Purchase04_PurchaseCorrelated:
         # payments deal by, and what its hold names.
         deal_state.settlement_ref = negotiation_id
         deal_state.agreement = agreement
+        deal_state.agreement_start = utc_instant(agreement["start_utc"])
+        deal_state.agreement_end = deal_state.agreement_start + timedelta(
+            seconds=int(agreement["duration_seconds"])
+        )
+        # Approval is recorded before the buyer submits its commitment. The
+        # shared lease checks use this lower bound on settlement, independent
+        # of the lease they compare it with.
+        deal_state._settled_at = utc_instant(approved["ts"])
         deal_state.payment_settlement = data
         deal_state.fulfillment_id = fulfillment_id
         # Declared by the driver, never read from the lease 09c compares it with.

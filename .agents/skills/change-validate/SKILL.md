@@ -223,7 +223,10 @@ repository's end-to-end pipeline — run while everything else does:
    passed. The `ci` part's collect judges its run against `dev`'s (step 3). Run
    each as written, with no shell redirect of its output: a redirect is a write
    no rule admits unattended, and the harness keeps a background command's output
-   in a file, which is what the wait below reads.
+   in a file, which is what the wait below reads. Give each background collect
+   the harness's longest `timeout`, 7200000 ms: this repository's pipeline runs
+   longer than the default ten minutes, which stops the collect before the run
+   ends.
 
 Every `run validation` ends with the engine's closing line, whatever its commands
 printed: `[change-workflow] validation <part>[ <workflow>] <phase> at <commit>:

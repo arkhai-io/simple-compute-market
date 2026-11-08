@@ -18,14 +18,17 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from tests.e2e.roles.helpers.compute_deal_stages import (
+    MAX_CLOCK_WAIT,
     ComputeDealState,
     Stage08b_SettlementSubmittedAndJobQueued,
+    wait_until,
 )
 from tests.unit.stage_sources import (
     StateUse,
@@ -121,10 +124,21 @@ PURCHASE_LANES = (
     ),
 )
 ALL_LANES = (*LANES, *REAL_LANES, *PURCHASE_LANES)
-BARE_METAL_STAGES = classes(tree(ROLES / "scenarios" / "bare_metal" / "publication_stages.py"))
 PURCHASE_TREE = tree(ROLES / "helpers" / "buyer_purchase_stages.py")
 PURCHASE_STAGES = [node for node in classes(PURCHASE_TREE) if is_stage(node)]
 PURCHASE_FIELDS = fields(class_named(PURCHASE_TREE, "PurchaseState"))
+#: Domain-own stages defined outside a scenario module, which a scenario
+#: subclasses with an empty body; read from their own source.
+DOMAIN_STAGES = [
+    stage
+    for module in (
+        ROLES / "scenarios" / "bare_metal" / "publication_stages.py",
+        ROLES / "scenarios" / "bare_metal" / "recovery_stages.py",
+        ROLES / "scenarios" / "vms" / "lifecycle_deal.py",
+        ROLES / "scenarios" / "vms" / "delivery_timing_deal.py",
+    )
+    for stage in classes(tree(module))
+]
 
 #: The real lane's run order: every shared stage, by its name here, with the
 #: lane's own stages, by their declared names, where they replace a mock lane's
@@ -193,7 +207,7 @@ MOCK_LANE_STAGES = [node for node in STAGES if MOCK_LANE_MARKER in base_names(no
 SHARED_STAGES = [node for node in STAGES if MOCK_LANE_MARKER not in base_names(node)]
 SHARED_NAMES = [node.name for node in SHARED_STAGES]
 #: Every stage body a lane may declare by subclassing it.
-DECLARABLE = [*STAGES, *BARE_METAL_STAGES, *PURCHASE_STAGES]
+DECLARABLE = [*STAGES, *DOMAIN_STAGES, *PURCHASE_STAGES]
 COMPUTE_FIELDS = fields(class_named(STAGES_TREE, "ComputeDealState"))
 DOMAIN_DEAL_FIELDS = fields(class_named(tree(DOMAIN_DEAL), "DomainDealState"))
 STAGES_USE = state_use(STAGES, state=STATE)
@@ -214,10 +228,16 @@ HANDOFF = (
     "teardown_fulfillment_id",
     "_teardown_job_completed",
     "settlement_ref",
+    "agreement_start",
+    "agreement_end",
+    "_settled_at",
 )
 #: Each handoff a stage compares with the deal's lease, by that stage: its
 #: writer must not have read it from the lease, or the comparison cannot fail.
-COMPARED_WITH_THE_LEASE = {"expected_host_id": "Stage09c_LeaseRecorded"}
+COMPARED_WITH_THE_LEASE = {
+    field: "Stage09c_LeaseRecorded"
+    for field in ("expected_host_id", "agreement_start", "agreement_end", "_settled_at")
+}
 #: What a stage reads the deal's lease through, in its own source: the driver's
 #: lease view, the view a stage recorded, the provisioning service's lease read,
 #: and the lease writes that return the lease. Matched as attribute names, so a
@@ -239,7 +259,7 @@ MOCK_GATES = _members("MockGates")
 def _lane_own_stages(lane: Lane) -> list[ast.ClassDef]:
     shared = set(STAGE_NAMES) | {node.name for node in PURCHASE_STAGES}
     return [
-        body for _name, body in running_stages(lane.scenario, BARE_METAL_STAGES)
+        body for _name, body in running_stages(lane.scenario, DOMAIN_STAGES)
         if not set(base_names(body)) & shared
     ]
 
@@ -559,6 +579,9 @@ class TestStage08z_Settled:
         deal_state.settlement_status = "ready"
         deal_state.fulfillment_id = "fulfillment"
         deal_state._create_job_completed = True
+        deal_state.agreement_start = "agreed-start"
+        deal_state.agreement_end = "agreed-end"
+        deal_state._settled_at = "submitted"
 
 
 class TestStage08y_ExpectedHost:
@@ -606,3 +629,45 @@ def test_real_bare_metal_orders_physical_effects_and_observations():
                "TestStage11a3_ReclaimJobSucceeded", "TestStage11b_TeardownCompletion",
                "TestStage11c_DeliveredAccessEnded"]
     assert [names.index(name) for name in ordered] == sorted(names.index(name) for name in ordered)
+
+
+class _Clock:
+    """A wall clock a sleep advances, by less than it was asked to when told to."""
+
+    def __init__(self, start: datetime, *, shortfall: timedelta = timedelta(0)):
+        self.at, self.shortfall, self.sleeps = start, shortfall, []
+
+    def now(self) -> datetime:
+        return self.at
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.at += timedelta(seconds=seconds) - self.shortfall
+        self.shortfall = timedelta(0)
+
+
+def test_waiting_for_an_instant_repeats_a_sleep_that_returned_early():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    clock = _Clock(start, shortfall=timedelta(milliseconds=2))
+
+    reached = wait_until(start + timedelta(seconds=3), now=clock.now, sleep=clock.sleep)
+
+    assert reached >= start + timedelta(seconds=3)
+    assert len(clock.sleeps) == 2 and clock.sleeps[1] == pytest.approx(0.002)
+
+
+def test_an_instant_already_past_is_not_waited_for():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    clock = _Clock(start)
+
+    assert wait_until(start - timedelta(seconds=1), now=clock.now, sleep=clock.sleep) == start
+    assert clock.sleeps == []
+
+
+def test_an_instant_beyond_the_bound_is_refused_without_waiting():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    clock = _Clock(start)
+
+    with pytest.raises(AssertionError, match="refusing to wait"):
+        wait_until(start + MAX_CLOCK_WAIT + timedelta(seconds=1), now=clock.now, sleep=clock.sleep)
+    assert clock.sleeps == []

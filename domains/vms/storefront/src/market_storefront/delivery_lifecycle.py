@@ -45,9 +45,10 @@ class VmPhysicalEnd:
 
     async def apply_end(self, negotiation_id, *, terminate, at, operation_key):
         capacity, binding, reservation = await self.reservation(negotiation_id)
+        # The delivery record's status is left to the delivery path's next
+        # drive, which records the end once nothing is left for it to do: an
+        # available deal's continuation still runs after an end.
         delivery = await self.db.load_vm_delivery(negotiation_id=negotiation_id)
-        if terminate and delivery is not None:
-            await self.db.update_vm_delivery(negotiation_id=negotiation_id, status="ended")
         if reservation is None and not terminate:
             return PhysicalResult(progress="end_recorded", done=False)
         if reservation is None:

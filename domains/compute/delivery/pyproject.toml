@@ -1,0 +1,49 @@
+[project]
+name = "arkhai-compute-delivery"
+version = "0.1.0"
+license = "MIT"
+description = "The compute family's delivery order: one path from an accepted deal to available compute, behind domain ports."
+requires-python = ">=3.12,<3.14"
+# The family's delivery library composes the neutral lifecycle kits, the guarded
+# capacity boundary and the provisioning family's wire contracts. It never
+# depends on a storefront: each storefront supplies its ports when composed.
+dependencies = [
+    # VersionedEnvelope, the fulfillment result the path reads.
+    "arkhai-core>=0.5.0",
+    # Delivery phases, evidence and the payment-adapter protocol.
+    "arkhai-kit-deal-lifecycle>=0.2.0",
+    "arkhai-kit-deal-lifecycle-contracts>=0.1.0",
+    # End service, admission, the end journal and seller evidence.
+    "arkhai-kit-deal-servicing>=0.1.0",
+    # CapacityEffects and the listing's durable capacity binding.
+    "arkhai-kit-capacity-publication>=0.11.0",
+    # The site's refusal and unauthenticated-answer errors the path classifies.
+    "arkhai-kit-site-client>=0.13.0",
+    # Fulfillment request, acceptance, status and lease wire models.
+    "arkhai-compute-provisioning-contracts>=0.13.0",
+    # Canonical JSON for the evidence bodies the end hand-off retains.
+    "arkhai-kit-identity==0.4.0",
+    "pydantic>=2.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/compute_delivery"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4,<9",
+    "pytest-asyncio>=0.25,<1",
+    # The once-only adapters the path is proven against: Alkahest's, and the
+    # hosted payments adapter over the kit's fake payments service.
+    "arkhai-kit-alkahest>=0.11.0",
+    "arkhai-kit-arkhai-payments>=0.6.0",
+]

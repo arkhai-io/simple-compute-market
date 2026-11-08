@@ -28,7 +28,7 @@ from market_core import SettlementEvidence
 MAX_WAIT_SECONDS = 120.0
 
 #: The delivery statuses that end a wait: delivered, or never to be.
-TERMINAL_SETTLEMENT_STATUSES = frozenset({"ready", "failed"})
+TERMINAL_SETTLEMENT_STATUSES = frozenset({"ready", "failed", "ended"})
 
 
 class SettlementAdminRouteError(RuntimeError):

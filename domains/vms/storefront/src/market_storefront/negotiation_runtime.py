@@ -725,6 +725,7 @@ async def _place_capacity_hold(
     if ttl <= 0:
         return
     binding = acceptance.binding
+    placement: dict[str, Any] = {}
 
     async def reserve() -> _HoldAttempt:
         claim = compute_capacity_claim_from_order(dict(acceptance.listing_record))
@@ -734,13 +735,26 @@ async def _place_capacity_hold(
                 repository, acceptance.listing_id, site_projections
             ),
         )
+        # The hold is placed under its own placement key and recorded with the
+        # exact request, so delivery can replay it to learn whether a hold
+        # whose commit is refused has lapsed or is still live.
+        placement.update(
+            claim=dict(claim),
+            deal_ref={
+                "listing_id": acceptance.listing_id,
+                "negotiation_id": acceptance.negotiation_id,
+            },
+            ttl_seconds=capped_ttl,
+            lease_start_utc=acceptance.agreement.start_utc,
+            lease_duration_seconds=acceptance.agreement.duration_seconds,
+        )
         return _HoldAttempt(
             await capacity_runtime.reserve(
                 binding,
                 claim=claim,
                 deal_ref={
-                    "listing_id": acceptance.listing_id,
-                    "negotiation_id": acceptance.negotiation_id,
+                    **placement["deal_ref"],
+                    "placement_key": f"{acceptance.negotiation_id}:hold",
                 },
                 ttl_seconds=capped_ttl,
                 lease_start_utc=acceptance.agreement.start_utc,
@@ -783,7 +797,7 @@ async def _place_capacity_hold(
         negotiation_id=acceptance.negotiation_id,
         listing_id=acceptance.listing_id,
         capacity_reservation_id=str(held["capacity_reservation_id"]),
-        payload=held,
+        payload={**held, "placement": placement},
         expires_at=held.get("hold_expires_at"),
     )
     stage_event(

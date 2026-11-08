@@ -1,23 +1,23 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../.python-version 2>/dev/null),$(error ../.python-version not found))
 
-.PHONY: test dist dist-compute dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
+.PHONY: test dist dist-compute dist-compute-delivery dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
 	dist-bare-metal-storefront dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer test-provisioning-iac test-provisioning-adapter test-storefront \
-	test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
+	test-bare-metal test-compute test-compute-delivery test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
 
 DIST_DIR ?= $(abspath ../.dist)
 
 
-dist: dist-compute dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
+dist: dist-compute dist-compute-delivery dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
 	dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer ## Build every domains-scoped wheel
 
-test: test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-provisioning-adapter test-provisioning-iac
+test: test-storefront test-bare-metal test-compute test-compute-delivery test-vms-domain test-vms-buyer test-apicredits test-provisioning-adapter test-provisioning-iac
 
 # ---------------------------------------------------------------------------
 # Dist -- leaf wheel-build recipes for domains/-scoped packages, mirroring
@@ -36,6 +36,13 @@ dist-compute: ## Build arkhai-compute wheel into .dist/
 	cd compute && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_compute-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-compute produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+# The compute family's delivery library: the delivery order behind domain ports.
+dist-compute-delivery: ## Build arkhai-compute-delivery wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd compute/delivery && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute_delivery-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-compute-delivery produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-vms: dist-compute ## Build arkhai-vms wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -162,6 +169,9 @@ test-bare-metal: test-bare-metal-iac ## Bare-metal domain, storefront, buyer, an
 
 test-compute: ## Compute-family vocabulary package tests
 	cd compute && $(MAKE) test
+
+test-compute-delivery: ## Compute-family delivery library tests
+	cd compute/delivery && $(MAKE) test
 
 test-vms-domain: ## VM market-domain package tests
 	cd vms/domain && $(MAKE) test

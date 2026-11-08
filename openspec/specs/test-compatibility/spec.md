@@ -197,8 +197,9 @@ scenario whose lease ends another way, such as by the buyer's teardown, runs its
 ending stage, which ends in the state teardown completion starts from. A shared stage
 from fulfillment onwards MUST read each input it checks from state an earlier stage
 wrote independently of the lease under check: the expected host from the Alkahest
-settlement preview or from the driver's declared host, and the teardown's fulfillment
-from whichever ending ran.
+settlement preview or from the driver's declared host, the Agreement window from
+accepted terms, a pre-commit settlement bound from the submitting stage or the buyer
+run's payment approval, and the teardown's fulfillment from whichever ending ran.
 
 A shared stage MUST NOT depend on the mock profile. Holding a provisioning job before
 its result, releasing it, and evaluating a mock rule are mock gates: they are stages of

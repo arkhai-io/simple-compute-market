@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from fastapi import Request
@@ -15,6 +17,29 @@ from market_storefront_kit import get_storefront_container
 
 from .runtime import BareMetalStorefrontRuntime
 from core_storefront.auth import AuthenticatedPrincipal, signed_response_headers
+
+#: The buyer routes whose answer can carry access material, by operation, each
+#: with the response members that hold it. Such a route's outcome is recorded
+#: without those members, and an exact retry runs the route again, which reads
+#: afresh under current admission and is refused after an end, rather than
+#: replaying a recorded body. The status route carries no member of its own,
+#: but it reports whether access is live, so its retry reads again too.
+#: Request reservation, first-use skew, changed-request refusal and response
+#: signing are as for every route. See
+#: openspec/specs/marketplace-identity/spec.md, "Body-bound authenticated
+#: request and response version".
+CREDENTIAL_CAPABLE_ROUTES: Mapping[str, frozenset[str]] = MappingProxyType({
+    "bare_metal_fulfillment_access": frozenset({"host", "port", "username"}),
+    "bare_metal_fulfillment_status": frozenset(),
+})
+
+
+def without_access_material(operation: str, body: Any) -> Any:
+    """``body`` as a credential-capable route's outcome is recorded: without its access material."""
+    members = CREDENTIAL_CAPABLE_ROUTES.get(operation)
+    if not members or not isinstance(body, dict):
+        return body
+    return {key: value for key, value in body.items() if key not in members}
 
 
 @dataclass(frozen=True)
@@ -64,7 +89,13 @@ def bind_response_auth(
         operation=operation,
         resource=resource,
     )
-    if authenticated.exact_retry and authenticated.recorded_outcome is not None:
+    # A credential-capable route resolves its own exact retry by running again;
+    # every other route replays its recorded outcome.
+    if (
+        authenticated.exact_retry
+        and authenticated.recorded_outcome is not None
+        and operation not in CREDENTIAL_CAPABLE_ROUTES
+    ):
         status, body = authenticated.recorded_outcome
         raise _RecordedOutcome(status, body)
 
@@ -127,7 +158,7 @@ async def authenticate_response(request: Request, call_next):
                 authenticated.reservation,
                 attempt_token=authenticated.attempt_token,
                 status=response.status_code,
-                body=body,
+                body=without_access_material(context.operation, body),
             )
     headers = dict(response.headers)
     headers.update(

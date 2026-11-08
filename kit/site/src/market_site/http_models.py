@@ -80,7 +80,11 @@ class ReserveRequest(BaseModel):
         description=(
             "Opaque storefront bookkeeping keys (listing_id, escrow_uid, "
             "owner callback), recorded on the reservation so deal-scoped "
-            "events route back to the owning storefront."
+            "events route back to the owning storefront. A placement_key, "
+            "'<negotiation_id>:<placement>', makes the reserve replayable: "
+            "a repeat under the same key returns the reservation it "
+            "recorded, in its current state, and one asking for a "
+            "different claim or lease window is refused."
         ),
     )
     ttl_seconds: Optional[float] = Field(
