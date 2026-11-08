@@ -32,8 +32,12 @@ Each stateful service — compute provisioning, the VM storefront, the bare-meta
 - **THEN** startup fails without mutating the schema, naming the migration command and each pending migration ID
 
 #### Scenario: Application sees a database ahead of its chain
-- **WHEN** the application process starts against a database recording a migration its chain does not list, such as after an image rollback over a migrated database
-- **THEN** startup fails without mutating the schema, naming each unknown migration ID, and recovery is restoring the pre-upgrade backup or rolling forward
+- **WHEN** the application process starts against a database recording a migration its chain does not list, such as after an image rollback over a migrated database, whether or not it also lacks migrations its chain lists
+- **THEN** startup fails without mutating the schema, reporting the database ahead and naming each unknown migration ID and each pending one, and recovery is restoring the pre-upgrade backup or rolling forward
+
+#### Scenario: The migration command meets an unknown migration
+- **WHEN** a service's migration command runs against a database recording a migration its chain does not list
+- **THEN** it applies nothing, changes nothing, and exits unsuccessfully reporting the database ahead with its unknown and pending migration IDs
 
 #### Scenario: Application finds no database
 - **WHEN** the application process starts and its database file does not exist or records no migrations
@@ -112,17 +116,22 @@ Every stateful service MUST expose a packaged migration command named for its se
 
 ### Requirement: A chain begins at its supported baseline
 
-Each in-house chain MUST begin with baseline migrations, one for each package that owns tables in the database, whose bodies are fixed DDL reproducing the schema the marketplace v0.3.0 release builds; the registry's chain MUST begin with one Alembic baseline revision reproducing its v0.3.0 schema. The migration command MUST adopt a database that records every migration the v0.3.0 chain recorded by replacing those records with the baseline's in one transaction, without running the baselines, and MUST refuse any other non-empty database as unsupported. A defect in data a supported database carries MUST be repaired by an ordinary migration after the baseline, so that an adopted database is one the release can serve.
+Each in-house chain MUST begin with baseline migrations, one for each package whose tables its database's startup builds, whose bodies are fixed DDL. The baselines of compute provisioning, the VM storefront, and the bare-metal storefront MUST reproduce the schema the marketplace v0.3.0 release builds at startup; the registry's chain MUST begin with one Alembic baseline revision reproducing its v0.3.0 schema; the baselines of the API-credit storefront and the API-credit service reproduce their schema as of their baseline. For compute provisioning, the VM storefront, the bare-metal storefront, and the registry, the migration command MUST adopt a database that records every migration the v0.3.0 chain recorded by replacing those records with the baseline's in one transaction, without running the baselines; every service MUST refuse any other non-empty database as unsupported. A defect in data or schema a supported database carries MUST be repaired by an ordinary migration after the baseline, so that an adopted database is one the release can serve. The tables and indexes the v0.3.0 release created outside its chain — when a store opened, or after the chain in the storefront's constructor — MUST be created by one such migration, which alone among migrations tolerates objects that already exist, since a v0.3.0 database may or may not hold them.
 
 #### Scenario: A fresh database is migrated
 
 - **WHEN** a service's migration command runs against an empty database
-- **THEN** the baselines and every later migration run, producing the same schema the v0.3.0 release builds followed by the later migrations
+- **THEN** the baselines and every later migration run, producing the baseline schema followed by the later migrations
 
 #### Scenario: A v0.3.0 database is adopted
 
-- **WHEN** the migration command runs against a database that recorded every migration of the v0.3.0 chain
+- **WHEN** the migration command of compute provisioning, the VM storefront, the bare-metal storefront, or the registry runs against a database that recorded every migration of the v0.3.0 chain
 - **THEN** it records the baselines as applied without running them, removes the v0.3.0 records, and applies the migrations after the baseline
+
+#### Scenario: A v0.3.0 storefront database never opened a store's tables
+
+- **WHEN** a VM storefront database that recorded every migration of the v0.3.0 chain lacks the deal-servicing tables because no deal was ever delivered, and its migration command runs
+- **THEN** it adopts the database, and the migration after the baseline creates the missing tables and indexes, leaving those that exist unchanged
 
 #### Scenario: A database older than v0.3.0 is refused
 

@@ -4,7 +4,7 @@
 
 This requirement governs VM, API-credit, and bare-metal publication, beside the convergence of the listings a storefront records.
 
-Every publication pass MUST list, at each configured registry it can reach, the open listings published under the storefront's own publisher principal for the offering modes it serves, and MUST close at that registry each one the storefront does not hold open locally, whether it is closed locally or unknown to the storefront. Listings of an offering mode the storefront does not serve MUST be left as they are. A registry it cannot reach MUST be skipped and swept by a later pass. A preview pass MUST report each such close without making it.
+Every publication pass MUST list, at each configured registry it can reach, the open listings published under the storefront's own publisher principal for the offering modes it serves, and MUST close at that registry each one the storefront does not hold open locally, whether it is closed locally or unknown to the storefront. Listings of an offering mode the storefront does not serve MUST be left as they are. The pass MUST read every page of a registry's listings before closing any listing there, and MUST treat a registry it cannot reach, or whose read fails on any page, as unreachable: it closes nothing there and a later pass sweeps it. A listing the storefront holds open locally, including one held while its site's projection is unavailable, MUST NOT be closed. A preview pass MUST report each such close without making it.
 
 #### Scenario: A registry holds an open listing the storefront has no record of
 
@@ -30,3 +30,18 @@ Every publication pass MUST list, at each configured registry it can reach, the 
 
 - **WHEN** a configured registry cannot be reached during a publication pass
 - **THEN** the pass sweeps the other registries and that registry is swept by a later pass
+
+#### Scenario: A registry holds more open listings than one page
+
+- **WHEN** a registry holds more open listings under the storefront's principal than one page of its listing query returns
+- **THEN** the pass reads every page before closing, and closes each listing on any page that the storefront does not hold open
+
+#### Scenario: A registry's listing read fails partway through
+
+- **WHEN** a registry answers the first page of the sweep's listing read and fails on a later one
+- **THEN** the pass closes nothing at that registry, and a later pass sweeps it
+
+#### Scenario: A listing is held open during a site outage
+
+- **WHEN** the storefront holds a listing open while its site's projection is unavailable, and a registry holds that listing open
+- **THEN** the sweep leaves it open at that registry
