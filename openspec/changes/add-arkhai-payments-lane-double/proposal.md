@@ -1,125 +1,136 @@
-# In-lane payment and dispute authority doubles
+# In-lane mediation double and controls for both doubles
 
 ## Why
 
-The end-to-end lanes have no default payments target, so their payment scenarios
-skip. The payments kit's in-process fake supplies a receipt and a placeholder
-snapshot proof, not a service that can exercise authority records, transport
-failures, rate stops, or case holds. A buyer's protection must rest on its own stop,
-held money and kept signed bytes, including when the storefront fails or misbehaves.
-Those paths need independently controllable payment and dispute authorities in the
-lane, not a cooperative storefront masquerading as an authority.
+Every lane runs a payments double, but no lane runs a dispute authority. The lanes'
+registries recommend a fixture authority at a `.invalid` origin that nothing can
+answer, so the VM payment scenario's case and refund stages skip and the bare-metal
+buyer's delivery-end filing reaches nobody. Nothing in a public run exercises filing,
+holds through `extend` and `lift`, rulings and their effects, or the failures a down
+or misbehaving authority causes, and the payments double claims only its once-only
+surface. Convergence's rate matrix and spot's rotation row have no lane to run in.
 
 ## What Changes
 
-- Own both runnable HTTP boundary doubles: `arkhai.payments.v1` and
-  `arkhai.mediation.v1`, in one lane-only tooling image with separate services,
-  identities, records and availability controls. The payment fake and HTTP wrapper
-  share one clock-injected payments fixture engine in the payments kit; no kit
-  depends on tooling. Production adapters, installed contract resources, contract
-  vendoring and signing/verification primitives remain in their owning kits.
-- Preserve two explicit contract modes, `published` and `proposed`. Published mode
-  implements the exact vendored publication; proposed mode implements a pinned,
-  labelled candidate where that publication lacks the target revision. The payments
-  target is per-part authorities, payee-only rate start, pending stops with notice,
-  term/exhaustion stops, `{afterStop: dispute_window}` holds and `extend`/`lift`.
-  Seller stop entries exist only for entitlements, such as spot notice; on-demand
-  non-preemption is remedy-enforced through the penalty and a case over held money, not by the mandate. There
-  is no seller restitution entry, implicit favourable stop, notice waiver, payer
-  early release, multi-entry spot dependency, backdated stop or released-funds refund.
-- Add the dispute authority's file, append and read/watch boundary with signed
-  per-agreement records. It verifies the case's exact Agreement against the mandate
-  hash without requiring an attachment and extends holds. delivery_end(at) is a
-  journaled seller-half dispute filing, never seller stop/reverse calls. Its sole
-  mechanical rule is the foundation's standard self-penalty
-  (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), applied as stated there.
-  delivery_end remains a person's triage case with payer notice/treatment; signed
-  acknowledgements never trigger a mechanical buyer ruling. Only the authority
-  applies dispute effects and nets agreement-wide prior remedies. Filings never
-  future-date; pre-start failures journal immediately and file at Agreement start.
-  End_delivery has no at and only supplies signed storefront receipt evidence. The
-  storefront cannot stop buyer billing; buyer half stops first, journals/retries
-  under the same key during outages, and billing runs until that stop lands.
-- Keep mid-scenario control routes through a tooling-owned typed client: exhaustion,
-  snapshot sequence/provenance faults, delay/drop/refusal, independent outages,
-  signing-identity rotation/re-anchoring, payer funding, labelled livemode-corruption
-  faults and triage/effect retry. Lane services use wall time
-  and due-work barriers; isolated tooling tests use injectable deterministic time.
-- Use explicit lane-only HTTPS origins, a public development CA and fixture bearer
-  auth; keep published clients' production transport/auth checks intact. Production
-  composition refuses lane settings and identities. Add the double's own timer,
-  triage/operator-ruling, retry and isolation suites as required work, not deferred approval.
-- Wire lane-scoped targets, accounts, credentials and authority advertisements into
-  the existing VM, bare-metal and API-credit lanes. Existing bare-metal and credits
-  payment scenarios stop skipping; later compute lifecycle scenarios reuse the same
-  services. Port the existing bare-metal scenario to commit, buyer-half re-drive,
-  seller reverse and end_delivery with retained cleanup; required lane readiness
-  failures fail setup rather than skip. API-credit dispute servicing is not added.
-- Attribute each run as qualification against the published contract, qualification
-  against a proposed contract, or live evidence. Neither double can produce live
-  evidence. Normal payment records never use `livemode: true`; a labelled corruption
-  control may inject such a frame only to exercise client refusal.
+- **A mediation double** (`tools/mediation-lane-double`) beside the payments double in
+  every lane. It reproduces the dispute authority's API mechanics — authentication,
+  idempotency, signed per-agreement records and cursors, the respondent listing, the
+  closed-case refusal, extensions at the payments double as its own account, and
+  execution of a ruling's effects with stable keys and resume — and takes every
+  decision as a scenario-programmed answer, as mock provisioning takes a job's
+  outcome. With no rule, nothing is ruled. It duplicates none of the authority's
+  decision logic.
+- **Controls for both doubles** in a shared package (`tools/lane-double-controls`):
+  when→then rules with refusals, filing-answer overrides, rulings and a gate before
+  effects; operator decisions and closes; case and rule listings; funding and receipt
+  signer rotation at payments; transport faults (unavailable, drop after commit) as
+  shared middleware in the doubles; and a perceived clock each double reads, advanced
+  by the scenario. The package holds the models, route declarations, typed client and
+  middleware; the doubles and the e2e harness import it. Every control is a
+  deterministic step.
+- **The payments double claims its rate and hold surface**, proven by its own suite
+  through the kit's real client over HTTP.
+- **Lane wiring:** the mediation double in all three lanes, the lanes' registries
+  recommending it in place of the `.invalid` authority, a lane-owned `MEDIATION` runner
+  target that fails setup rather than skips, the buyer's mediation credential, and one
+  lane CA issuing both doubles' certificates.
+- **Mediation trust through configuration:** `[[DisputeCredential]]` gains an optional
+  `ca_bundle_path`, which the mediation client uses as its verification context.
+- **Scenarios:** the VM case and refund stages and the bare-metal filing run against
+  the mediation double, and one VM-lane module on once-only deals proves each control
+  kind once.
+- **Evidence:** lane runs are labelled *lane doubles*, with the doubles' installed
+  contract hashes; only a hosted target yields live evidence.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `test-compatibility`: runnable boundary doubles, authority separation, controls,
-  contract provenance, lane readiness and evidence attribution.
+- `test-compatibility`: the mediation double, the doubles' controls and perceived
+  clock, the payments double's claimed surface, the lane-owned mediation target, the
+  controls scenario, and lane-double evidence.
+- `settlement-configuration`: a dispute credential may name the CA bundle its
+  mediation client trusts.
 
 ### New Capabilities
 
-None. These are test collaborators, not new production authorities.
+None. The doubles are test collaborators, not production authorities.
 
 ## Dependencies and Related Changes
 
-- `agreed-evidence-and-early-termination` owns the lifecycle interfaces, payment and
-  dispute adapters, evidence stores, contract vendoring, and shared signed-frame
-  primitives. Its schema/model work gates this change's corresponding published
-  mode, not design. A pinned draft permits proposed-only qualification until then.
-- This change alone owns the executable payment and mediation doubles and their
-  controls. Foundation 8.1 supplies the shared payments fixture engine and both kits
-  supply installed provenance/resource seams. Kits keep in-process fakes for unit and
-  library-integration tests; they never depend on the tool. Its own tests exercise
-  real clients, while lanes consume the runnable services. Foundation section 12
-  does not build another executable double. Design D7 gives the section-level gates.
-- `spot-deals-through-arkhai-payments` consumes both doubles for compute lane
-  scenarios, retaining kit contract fakes for rate-part client integration; it owns production rate arithmetic and adapters.
-- `activate-per-period-compute-servicing` compares the doubles with the vendored
-  publication and qualifies the ready hosted deployment before claiming live
-  servicing. Producer snapshot/start/reversal vectors also gate published
-  qualification; until available, affected scenarios report proposed qualification.
-  Hosted deployment is not a gate on building or using lane doubles.
+- `agreed-evidence-and-early-termination` (archived) supplies the lifecycle, the
+  mediation kit and both vendored contracts; `add-mvp-payments-lane-double` (archived)
+  supplies the payments double and its lane wiring, which this change extends.
+- `converge-ongoing-compute-leases`, `spot-deals-through-arkhai-payments` and
+  `activate-per-period-compute-servicing` consume the doubles and controls; the
+  restatements their designs owe are listed in this change's design ("Effects on other
+  changes").
+- A lane-wide perceived clock covering storefronts, sites and the buyer half is a new
+  change, opened after this one.
 
 ## Non-Goals
 
-Production payment/dispute services, production derivation or cryptographic
-verification changes (the lane-only configuration refusal guard is in scope),
-new production payment primitives, bonds before the contract supports them, any
-mechanical mediation rulings before the managed metering gateway, and live provider or ledger
-qualification. Seller site deadlines and churn/pricing policy are not protocol
-requirements and are not simulated as authority guarantees.
+A rules engine reproducing either authority's decisions; contract modes or a proposed
+evidence class; a production guard on fixture identities; storefront- or site-side
+clock control; rate scenarios in lanes; a mediation double in the local Helm release;
+corruption, delay or race faults; live, hosted-ledger or adjudication evidence.
 
 ## Impact
 
-A new tooling distribution and image under `tools/authority-lane-doubles`, a shared
-lane overlay, root and e2e build/run targets, lane payment/dispute profiles and public
-development identities, and existing payment scenario setup/reporting. The kits
-remain independently scoped; only test tooling composes both interfaces.
+- New `tools/mediation-lane-double` and `tools/lane-double-controls` projects and the
+  `arkhai:mediation-lane-double` image; the lane CA generator moves into the controls
+  project.
+- `tools/payments-lane-double`: the controls, perceived clock and middleware, a token
+  for the dispute authority's account, and suite coverage of the rate and hold surface.
+- `kit/deal-lifecycle` and `kit/arkhai-mediation`: `DisputeCredential.ca_bundle_path`
+  and the client's CA argument; the VM and bare-metal storefronts' and buyers'
+  lifecycle compositions pass it.
+- Compose: `compose.payments-double.yml` runs the mediation double; lane registry and
+  runner profiles, Bob's secret overlay and the buyer configuration writer change.
+- `e2e-tests`: the mediation helper and settings, the VM case stages and bare-metal
+  filing assertions, a controls module, and a dependency on the controls package.
+- `helm`: the local release's registry recommendation and copied dispute credential;
+  no new subchart.
+- No database migration and no wire change.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md` (no new production layer or authority)
-- [x] Existing subsystem specification: `test-compatibility`
+- [x] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification: `test-compatibility`, `settlement-configuration`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
 ### Knowledge to promote
 
-- Double ownership, contracts, controls and evidence boundaries:
-  `openspec/specs/test-compatibility/spec.md` and its architecture companion.
-- How to run, configure and interpret lane qualification:
-  `docs/development/TESTING.md`, "Payment Receipts in Tests" and "Private Service
-  Dependencies", plus `e2e-tests/README.md`.
-- Build and lock conventions are followed, not changed. The external authority
-  contract itself remains documented by the foundation change, not by a test double.
+- D1: `openspec/specs/test-compatibility/spec.md` (delta) and `architecture.md`, a
+  section on the in-lane mediation double beside "The in-lane payments double";
+  `tools/mediation-lane-double/README.md`; the programmed-decision principle in
+  `docs/development/ARCHITECTURE.md`, "Testing strategy", and
+  `docs/development/TESTING.md`, "Private Service Dependencies".
+- D2: `openspec/specs/test-compatibility/spec.md` (delta); the perceived-clock rule in
+  `docs/development/TESTING.md`, "The discipline every scenario follows", and
+  `docs/development/ARCHITECTURE.md`, "Testing strategy"; the lane-wide clock as an
+  unowned gap in `docs/development/ROADMAP.md`.
+- D3: `openspec/specs/test-compatibility/spec.md` (delta);
+  `openspec/specs/test-compatibility/architecture.md`, "Payment evidence ownership".
+- D4: `openspec/specs/test-compatibility/spec.md` (delta);
+  `tools/lane-double-controls/README.md`; `tools/README.md`, "Lane collaborators";
+  `docs/development/TESTING.md`, "Private Service Dependencies".
+- D5: `openspec/specs/test-compatibility/architecture.md`; `docs/development/ROADMAP.md`,
+  the hosted dispute-authority row.
+- D6: `openspec/specs/test-compatibility/spec.md` (delta); `e2e-tests/README.md`.
+- D7: `tools/mediation-lane-double/README.md`; `tools/lane-double-controls/README.md`;
+  `tools/README.md`, "Lane collaborators"; `dev-env/identities/README.md`.
+- D8: `openspec/specs/settlement-configuration/spec.md` (delta);
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`; `kit/arkhai-mediation/README.md`.
+- D9: `openspec/specs/test-compatibility/spec.md` (delta); `docs/development/TESTING.md`,
+  "Private Service Dependencies"; `e2e-tests/README.md`.
+- D10: `openspec/specs/test-compatibility/spec.md` (delta);
+  `tools/payments-lane-double/README.md`.
+- D11: `docs/development/TESTING.md`, "Private Service Dependencies", which states the
+  local release runs no mediation double.
+- D12: no permanent destination — it removes scope from this change's earlier design.
+- D13: no permanent destination — an implementation cadence, recorded in the change's
+  history.
+- Roadmap: Goal 8's row for this change and convergence's row restated, and this
+  change's closeout recorded: `docs/development/ROADMAP.md`.
