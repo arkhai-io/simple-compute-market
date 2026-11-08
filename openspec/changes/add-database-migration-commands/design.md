@@ -44,6 +44,8 @@ Deleted with the sweep: core's unversioned bootstrap, every pre-floor migration 
 
 Planning must confirm that no schema change since the floor reached a database through the unversioned path (`_ensure_domain_tables`, `create_all`); any that did becomes a migration after the baseline, or a v0.3.0 database would adopt without it. The same audit covers the window before the floor: a bootstrap change made after the last migration ID the v0.3.0 chain added, with no ID of its own, would leave a database recording every floor ID without it — a column missing from a table that exists, which the store-open migration's `IF NOT EXISTS` cannot repair — and any such change also becomes a migration after the baseline.
 
+Planning ran that audit at `7091c186c` and found nothing to add. Since the floor, the one commit changing schema code (`7091c186c`) adds only versioned migrations: VM's `20261106_001`/`_002`, bare metal's `-0016-`, provisioning's `20261106_002_reservation_placement_key`, the API-credit service's `20261106_008`, and `kit/site`'s placement-key columns, which those migrations add to existing databases. Before the floor, all three storefront chains last gained an ID in `3c0edcc40` (2026-10-28, settlement-runtime and contact-exchange migrations every storefront composes), and the only schema code changed after it, in `38a5fec12`, creates new tables at store open — deal-servicing's and bare metal's lifecycle cursor — which the store-open migration covers; provisioning last gained an ID in `9623f99e9` (2026-11-06), and the one later commit to its schema files, `5839fb201`, changes job parameters, which are stored as JSON, not schema. The registry has no unversioned path beyond its blank-database bootstrap. An implementer who finds otherwise adds the migration and records it in the section's notes.
+
 Rejected for 13 F4: an adoption-time structural comparison with the floor fixture that creates absent store-open tables and refuses any other difference (inspection machinery and a declared store-open set for what a recorded repair migration does through D3's own rule); making the store-open baselines idempotent and running them at adoption (misses the constructor's indexes); refusing any database whose schema differs from the floor (strands every quiet storefront that never delivered a deal).
 
 The floor is a one-time decision for v0.3.0. Whether a later release becomes a new floor is weighed each time an official release is promoted (D16's RELEASING.md step).
@@ -77,6 +79,8 @@ Provisioning moves onto the kit engine with atomic recording (D2), loses its `cr
 ### D9 — DDL outside a chain moves into the baselines
 
 `kit/deal-servicing`'s tables, VM's delivery records, and bare metal's lifecycle cursor are created by the store-open migration after the baseline (D3), and the `create_schema` calls at store open are removed. A test asserts that opening every store leaves the schema unchanged, which catches the next one.
+
+The refusal checks the storefront constructor runs after its chain go the same way as the rest of its DDL. Bare metal's check that `bare_metal_settlement_records.evidence_json` and `bare_metal_fulfillment_lifecycle.settlement_ref` exist is removed: its baseline creates those columns, and the exact-set check refuses any database that did not run it. API credits' refusal of a listing with no durable binding concerns data, not schema, and stays as a startup refusal, run after the check passes.
 
 ### D10 — The API-credit service seeds its `default` pool at startup
 
