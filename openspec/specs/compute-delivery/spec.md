@@ -140,6 +140,14 @@ An end due after availability MUST NOT stop the continuation, which settles serv
 - **WHEN** a deal's ready evidence, activation, billing start and disclose authorization complete
 - **THEN** `available` is recorded although the buyer has made no request
 
+#### Scenario: Provisioning is active while activation is unavailable
+
+- **WHEN** provisioning reports an active fulfillment but the site has not
+  acknowledged activation
+- **THEN** the settlement wait remains unready, and reports ready only after a later
+  delivery drive durably completes activation, billing start and disclose authorization
+- **AND** recovery retains the same reservation and fulfillment
+
 #### Scenario: Evidence publication is pending
 
 - **WHEN** a deal is available but publishing its Alkahest evidence failed
