@@ -425,6 +425,11 @@ virtualization; it needs no GPU.
    fits twice within capacity. Direct access states `public_host`; relay access
    states only `relay_id`. Bare-metal hosts additionally state `physical_host_id`
    and their verified `ssh_host_public_key`, and have no VM listing shape.
+   A bare-metal target may also state `pool_id` and `resource_id` to reconcile
+   its existing pool and declaration. Omitted, the scenarios use
+   `bare-metal-e2e-real-pool` and `bare-metal-e2e-real-001`. These identifiers
+   apply to the real deal, purchase, cleanup qualification and reapply alike;
+   a different declaration for that host or physical machine is still refused.
    The lane reads a relay before any mutation and requires it enabled, with
    a configured token and active grant key; it never creates the relay. The
    target carries no private key or relay credential. Version 1 is refused

@@ -528,6 +528,20 @@ SSH host public key. A relay named by a host is resolved in the provisioning ser
 that host's scenario runs against. The section MUST NOT carry the private key the
 provisioning service reaches hosts with, nor any relay token or key.
 
+A bare-metal target MAY name its existing pool and capacity declaration through
+`pool_id` and `resource_id`. When stated, the real deal, purchase, cleanup
+qualification and reapply scenarios MUST reconcile those identifiers. Omitted,
+they MUST retain their default scenario identifiers. Selecting an existing
+declaration MUST NOT bypass refusal of another declaration for the same host or
+physical machine.
+
+#### Scenario: Qualification adopts a registered bare-metal declaration
+
+- **WHEN** the target names the pool and resource already declared for its machine
+- **THEN** registration reconciles that resource rather than creating another
+  declaration, and reapply reports the selected resource
+- **AND** a different declaration for the same host or physical machine is refused
+
 #### Scenario: A field is misspelled
 
 - **WHEN** the target section names a field the model does not define, or omits one it

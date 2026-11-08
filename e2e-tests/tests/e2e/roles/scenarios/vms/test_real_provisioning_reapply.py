@@ -384,7 +384,8 @@ class TestStage01_RegistrationsBefore:
             bare_metal_provisioning_client, bare_metal_site_reads, bare_metal_storefront_admin,
             real_bare_metal_target,
         )
-        for domain, resource in (("vm", VM_RESOURCE_ID), ("bare_metal", BARE_METAL_RESOURCE_ID)):
+        bare_metal_resource = real_bare_metal_target.resource_id or BARE_METAL_RESOURCE_ID
+        for domain, resource in (("vm", VM_RESOURCE_ID), ("bare_metal", bare_metal_resource)):
             if not before[domain].listings:
                 pytest.skip(f"no listing on the {domain} target's resource {resource} yet; run "
                             "e2e_vm_qualification and e2e_bare_metal_qualification first")
@@ -417,7 +418,7 @@ class TestStage03_RegistrationsReapplied:
         reapply_state._registrations_reapplied = True
         log.info("[03] Registrations reapplied: VM host %s (resource %s), bare-metal host %s "
                  "(resource %s)", vm_driver.target.host_id, VM_RESOURCE_ID,
-                 bare_metal_driver.target.host_id, BARE_METAL_RESOURCE_ID)
+                 bare_metal_driver.target.host_id, bare_metal_driver.reserved_resource_id)
 
 
 class TestStage04_PublicationCycleStepped:
