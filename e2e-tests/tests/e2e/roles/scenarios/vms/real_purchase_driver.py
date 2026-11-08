@@ -25,6 +25,7 @@ from storefront_client import StorefrontClientError
 
 from tests.e2e.roles.helpers.ssh_access import SshEndpoint
 from tests.e2e.roles.scenarios.vms.purchase_driver import VmPurchaseParts
+from tests.e2e.roles.scenarios.vms.host_registry import refresh_storefront_projections
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
     REAL_REGION,
     RealVmComputeDealDriver,
@@ -72,6 +73,7 @@ class RealVmPurchaseDriver(VmPurchaseParts, RealVmComputeDealDriver):
         return f'region="{REAL_REGION}"'
 
     def discover(self, listing_id: str) -> Any:
+        refresh_storefront_projections(self.storefront_admin_client)
         # The CLI discovers by region, which must select this resource alone
         # before it can approve a payment. Resource identifiers are not part
         # of the registry's query vocabulary.

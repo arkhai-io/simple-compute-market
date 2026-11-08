@@ -428,6 +428,8 @@ virtualization; it needs no GPU.
    A VM target may state `resource_id` to select its scenario declaration;
    otherwise it uses `compute-e2e-real-001`. Listing adoption, registration,
    purchase checks, capacity reuse and reapply use that same identifier.
+   Each real VM purchase explicitly refreshes its site projections before
+   discovery, including when the scenario holds background lifecycle loops.
    Its CLI discovers by region, so the real purchase refuses before payment
    unless that query selects its listing alone. Keep unrelated listings paused.
    A bare-metal target may also state `pool_id` and `resource_id` to reconcile

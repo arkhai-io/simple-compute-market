@@ -531,7 +531,10 @@ provisioning service reaches hosts with, nor any relay token or key.
 A VM target MAY name its capacity declaration through `resource_id`. The real
 VM deal, purchase, qualification and reapply scenarios MUST use that identifier
 for registration, listing adoption and capacity checks. Omitted, it MUST retain
-`compute-e2e-real-001`. Before a real purchase approves payment, its region query
+`compute-e2e-real-001`. Each real VM purchase MUST refresh its site projections
+before discovery, including with background lifecycle loops held, so host
+diagnostics do not age out its source confirmation. Before a real purchase
+approves payment, its region query
 MUST select its intended listing alone; an empty, different or ambiguous result
 MUST refuse the purchase. Selecting a declaration MUST NOT bypass the site's
 single-declaration-per-host invariant.

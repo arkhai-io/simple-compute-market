@@ -1143,9 +1143,11 @@ def test_real_purchase_refuses_ambiguous_discovery_before_payment(resource_id, l
     registry.list_listings.return_value.listings = [SimpleNamespace(id=value) for value in listing_ids]
     listing = SimpleNamespace(id="selected", listing_resource=real_target_resource(target))
     registry.get_listing.return_value = listing
+    admin = MagicMock()
+    admin.admin_refresh_site_projections.return_value = {"sites": {"site": {"resource_pool": {"state": "loaded"}}}}
     driver = RealVmPurchaseDriver(
         provisioning_client=None, storefront_client=None,
-        storefront_admin_client=None, storefront_service_client=None,
+        storefront_admin_client=admin, storefront_service_client=None,
         site_capacity_admin_client=None, site_capacity=None, site_id="site",
         vm_operator_client=None, target=target, buyer_public_key="k",
         listing_shape={}, jobs=JobWatch(None), purchase_registry=registry,
@@ -1159,3 +1161,22 @@ def test_real_purchase_refuses_ambiguous_discovery_before_payment(resource_id, l
             driver.discover("selected")
         registry.get_listing.assert_not_called()
     registry.list_listings.assert_called_once_with(region="e2e-real-host", limit=2)
+
+
+def test_real_purchase_refuses_unconfirmed_projection_before_registry_discovery():
+    admin, registry = MagicMock(), MagicMock()
+    admin.admin_refresh_site_projections.return_value = {
+        "sites": {"site": {"resource_pool": {"state": "unavailable"}}},
+    }
+    driver = RealVmPurchaseDriver(
+        provisioning_client=None, storefront_client=None,
+        storefront_admin_client=admin, storefront_service_client=None,
+        site_capacity_admin_client=None, site_capacity=None, site_id="site",
+        vm_operator_client=None, target=TARGET, buyer_public_key="k",
+        listing_shape={}, jobs=JobWatch(None), purchase_registry=registry,
+        seller_account="seller", dispute_window="P7D",
+    )
+    with pytest.raises(AssertionError, match="site projections did not confirm"):
+        driver.discover("selected")
+    registry.list_listings.assert_not_called()
+    registry.get_listing.assert_not_called()
