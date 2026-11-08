@@ -20,6 +20,7 @@ import ast
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -28,6 +29,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     MAX_CLOCK_WAIT,
     ComputeDealState,
     Stage08b_SettlementSubmittedAndJobQueued,
+    Stage09c_LeaseRecorded,
     wait_until,
 )
 from tests.unit.stage_sources import (
@@ -124,9 +126,6 @@ PURCHASE_LANES = (
     ),
 )
 ALL_LANES = (*LANES, *REAL_LANES, *PURCHASE_LANES)
-PURCHASE_TREE = tree(ROLES / "helpers" / "buyer_purchase_stages.py")
-PURCHASE_STAGES = [node for node in classes(PURCHASE_TREE) if is_stage(node)]
-PURCHASE_FIELDS = fields(class_named(PURCHASE_TREE, "PurchaseState"))
 #: Domain-own stages defined outside a scenario module, which a scenario
 #: subclasses with an empty body; read from their own source.
 DOMAIN_STAGES = [
@@ -139,6 +138,9 @@ DOMAIN_STAGES = [
     )
     for stage in classes(tree(module))
 ]
+PURCHASE_TREE = tree(ROLES / "helpers" / "buyer_purchase_stages.py")
+PURCHASE_STAGES = [node for node in classes(PURCHASE_TREE) if is_stage(node)]
+PURCHASE_FIELDS = fields(class_named(PURCHASE_TREE, "PurchaseState"))
 
 #: The real lane's run order: every shared stage, by its name here, with the
 #: lane's own stages, by their declared names, where they replace a mock lane's
@@ -174,6 +176,7 @@ REAL_LANE_ORDER = [
     "TestStage09a2_CapacityEventCycle",
     "Stage09b_SettlementReadyAndCredentials",
     "Stage09c_LeaseRecorded",
+    "Stage09c1_LateSettlementKeepsTheWindow",
     "TestStage09c3_LeaseNamesTheCreateJob",
     # The access checks.
     "TestStage09d_BuyerReachesTheNegotiatedShape",
@@ -225,19 +228,15 @@ HANDOFF = (
     "fulfillment_id",
     "_create_job_completed",
     "expected_host_id",
+    "agreement_start",
+    "agreement_end",
     "teardown_fulfillment_id",
     "_teardown_job_completed",
     "settlement_ref",
-    "agreement_start",
-    "agreement_end",
-    "_settled_at",
 )
 #: Each handoff a stage compares with the deal's lease, by that stage: its
 #: writer must not have read it from the lease, or the comparison cannot fail.
-COMPARED_WITH_THE_LEASE = {
-    field: "Stage09c_LeaseRecorded"
-    for field in ("expected_host_id", "agreement_start", "agreement_end", "_settled_at")
-}
+COMPARED_WITH_THE_LEASE = {"expected_host_id": "Stage09c_LeaseRecorded"}
 #: What a stage reads the deal's lease through, in its own source: the driver's
 #: lease view, the view a stage recorded, the provisioning service's lease read,
 #: and the lease writes that return the lease. Matched as attribute names, so a
@@ -579,9 +578,8 @@ class TestStage08z_Settled:
         deal_state.settlement_status = "ready"
         deal_state.fulfillment_id = "fulfillment"
         deal_state._create_job_completed = True
-        deal_state.agreement_start = "agreed-start"
-        deal_state.agreement_end = "agreed-end"
-        deal_state._settled_at = "submitted"
+        deal_state.agreement_start = "start"
+        deal_state.agreement_end = "end"
 
 
 class TestStage08y_ExpectedHost:
@@ -671,3 +669,27 @@ def test_an_instant_beyond_the_bound_is_refused_without_waiting():
     with pytest.raises(AssertionError, match="refusing to wait"):
         wait_until(start + MAX_CLOCK_WAIT + timedelta(seconds=1), now=clock.now, sleep=clock.sleep)
     assert clock.sleeps == []
+
+
+@pytest.mark.parametrize("activation_offset", [-2.0, -0.5, 0.0, 60.0, 3601.0])
+def test_shared_lease_activation_is_within_the_independent_agreement_window(activation_offset):
+    start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    end = start + timedelta(hours=1)
+    lease = {
+        "id": "lease", "negotiation_id": "negotiation", "host_id": "example-host",
+        "create_job_id": "create-job", "status": "active",
+        "lease_start_utc": start.isoformat(), "lease_end_utc": end.isoformat(),
+        "activated_at_utc": (start + timedelta(seconds=activation_offset)).isoformat(),
+    }
+    view = SimpleNamespace(deal_field="negotiation_id", deal_value="negotiation",
+                           refresh=lambda: lease, is_ledger=True)
+    driver = SimpleNamespace(lease_view=lambda state: view, reserved_resource_id="example-resource")
+    state = ComputeDealState(domain_identity="vms.compute", negotiation_id="negotiation", settlement_ref="negotiation",
+                             settlement_status="ready", fulfillment_id="fulfillment",
+                             expected_host_id="example-host", agreement_start=start, agreement_end=end)
+    if activation_offset < -1 or activation_offset >= 3600:
+        with pytest.raises(AssertionError):
+            Stage09c_LeaseRecorded().test_09c_provisioning_lease_recorded(driver, state)
+    else:
+        Stage09c_LeaseRecorded().test_09c_provisioning_lease_recorded(driver, state)
+        assert state.deal_lease is view

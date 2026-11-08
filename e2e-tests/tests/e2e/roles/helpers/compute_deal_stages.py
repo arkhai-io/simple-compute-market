@@ -44,10 +44,12 @@ deal's state. Those naming the deal's settlement read its settlement reference,
 ``settlement_ref``, which an earlier stage writes once the reference exists (the
 escrow, at 07), and each input they check comes from state an earlier stage
 wrote independently of the lease under check: the expected host from 08a's
-settlement preview, the teardown's fulfillment from the ending that ran. So a
-compute deal settled another way runs the same bodies, supplying those inputs
-from its own earlier stages, as a buyer purchase through the shipped buyer does
-(``buyer_purchase_stages.py``). What those stages ask of the driver — the
+settlement preview, the Agreement's window from the accepted negotiation (06b),
+the teardown's fulfillment from the ending that ran. So a compute deal settled
+another way runs the same bodies, supplying those inputs from its own earlier
+stages, as a buyer purchase through the shipped buyer does
+(``buyer_purchase_stages.py``). 09c1 alone needs the instant a deliberately late
+settlement was submitted (08b), so only a lane settling that way runs it. What those stages ask of the driver — the
 delivery and the lease view — is the driver's, and an Alkahest lane's driver may
 read its escrow there.
 """
@@ -267,7 +269,8 @@ class ComputeDealState(DomainDealState):
     negotiation_terminal_state: Optional[str] = None
     agreed_amount: Optional[int] = None
     #: The Agreement's window as the seller's negotiation records it: its start,
-    #: and its start plus the agreed duration. Read at 06b; 09c holds the
+    #: and its start plus the agreed duration. Read at 06b, or from a buyer
+    #: purchase's Agreement (``buyer_purchase_stages.py``); 09c holds the
     #: committed lease to it.
     agreement_start: Optional[datetime] = None
     agreement_end: Optional[datetime] = None
@@ -275,6 +278,9 @@ class ComputeDealState(DomainDealState):
     #: The Alkahest escrow. Of the stages here, only those settling through it
     #: (07a to 08b) read it; an Alkahest lane's own stages and driver may too.
     real_escrow_uid: Optional[str] = None
+    #: The instant 08b submitted settlement, read just before the call, which
+    #: 09c1 holds the lease's start and activation to.
+    _settled_at: Optional[datetime] = None
     #: The reference the deal settled under, which the stages from 09a on
     #: wait on, log, and name the re-reservation after: the escrow, written
     #: beside ``real_escrow_uid`` at 07, or a buyer purchase's negotiation
@@ -285,10 +291,6 @@ class ComputeDealState(DomainDealState):
     #: 07a arms the create gate only then, so a deal that will not settle
     #: leaves no rule armed.
     _settlement_imminent: bool = False
-
-    #: A lower bound on commitment submission: immediately before 08b calls,
-    #: or the buyer run's payment approval recorded before its commitment.
-    _settled_at: Optional[datetime] = None
     #: A mock lane's create rule is armed, so its create job will be held.
     provisioning_gate_armed: bool = False
     #: The host the deal's lease must name, never read from the lease 09c
@@ -1265,9 +1267,9 @@ class Stage08b_SettlementSubmittedAndJobQueued:
         The deal settles late, after its Agreement start, which is its
         acceptance: settlement waits until the start is ``LATE_SETTLEMENT``
         behind, since the dev chain funds an escrow within a second of
-        acceptance and a lease window is kept to the second. 09c then checks
-        that delivery committed the Agreement's window rather than one starting
-        when settlement arrived.
+        acceptance and a lease window is kept to the second. 09c and 09c1 then
+        check that delivery committed the Agreement's window rather than one
+        starting when settlement arrived.
         """
         require_state(
             deal_state, "negotiation_id", "real_escrow_uid", "_settle_preflight_passed",
@@ -1430,11 +1432,12 @@ class Stage09c_LeaseRecorded:
         find the delivered resource.
 
         The lease is the delivered one: its window is the Agreement's, start
-        and end, although settlement came after the start (08b), and the site
-        recorded its activation, which delivery makes after the fulfillment is
-        ready and before billing starts or the deal is available. The deal is
-        ready by now (09b), so an activation it did not record would be a
-        delivery that skipped the site.
+        and end, however the deal settled, and the site recorded its
+        activation inside that window, which delivery makes after the
+        fulfillment is ready and before billing starts or the deal is
+        available. The deal is ready by now (09b), so an activation it did not
+        record would be a delivery that skipped the site. Where settlement came
+        deliberately after the start, 09c1 checks the window against it.
         """
         require_state(
             deal_state,
@@ -1442,11 +1445,9 @@ class Stage09c_LeaseRecorded:
             "settlement_ref",
             "settlement_status",
             "fulfillment_id",
-            "expected_host_id",
-
             "agreement_start",
             "agreement_end",
-            "_settled_at",
+            "expected_host_id",
         )
 
         lease_view = deal_driver.lease_view(deal_state)
@@ -1477,20 +1478,16 @@ class Stage09c_LeaseRecorded:
         )
         assert abs(lease_end - deal_state.agreement_end) < WINDOW_TOLERANCE, (
             f"the lease ends at {lease_end.isoformat()}, not at the Agreement end "
-            f"{deal_state.agreement_end.isoformat()}: late settlement must "
-            f"shorten service, never move the end: {lease}"
-        )
-        assert lease_start < deal_state._settled_at, (
-            f"the lease starts at {lease_start.isoformat()}, after settlement at "
-            f"{deal_state._settled_at.isoformat()}: {lease}"
+            f"{deal_state.agreement_end.isoformat()}: settlement must never "
+            f"move the end: {lease}"
         )
         assert lease.get("activated_at_utc"), (
             f"the site recorded no activation for a delivered lease: {lease}"
         )
         activated = utc_instant(lease["activated_at_utc"])
-        assert activated + WINDOW_TOLERANCE >= deal_state._settled_at, (
-            f"the lease was activated at {activated.isoformat()}, before settlement "
-            f"at {deal_state._settled_at.isoformat()}: {lease}"
+        assert activated + WINDOW_TOLERANCE >= deal_state.agreement_start, (
+            f"the lease was activated at {activated.isoformat()}, before its "
+            f"Agreement start {deal_state.agreement_start.isoformat()}: {lease}"
         )
         assert activated < lease_end, (
             f"the lease was activated at {activated.isoformat()}, not inside its "
@@ -1512,6 +1509,37 @@ class Stage09c_LeaseRecorded:
             lease.get("status"),
             "ledger" if lease_view.is_ledger else "legacy",
         )
+
+
+class Stage09c1_LateSettlementKeepsTheWindow:
+    def test_09c1_late_settlement_keeps_the_agreement_window(
+        self, deal_state: ComputeDealState
+    ):
+        """A deal settled after its Agreement start is delivered from that start.
+
+        08b settles ``LATE_SETTLEMENT`` after the start, so the lease 09c
+        matched to the Agreement's window starts before settlement: late
+        settlement shortens service and never moves the window. The site
+        activated it after settlement, since delivery follows the fulfillment
+        settlement began. Only a lane that settles at a recorded instant after
+        the start runs this.
+        """
+        require_state(deal_state, "deal_lease", "_settled_at")
+
+        lease = deal_state.deal_lease.refresh()
+        lease_start = utc_instant(lease.get("lease_start_utc"))
+        assert lease_start < deal_state._settled_at, (
+            f"the lease starts at {lease_start.isoformat()}, after settlement at "
+            f"{deal_state._settled_at.isoformat()}: {lease}"
+        )
+        activated = utc_instant(lease.get("activated_at_utc"))
+        assert activated + WINDOW_TOLERANCE >= deal_state._settled_at, (
+            f"the lease was activated at {activated.isoformat()}, before settlement "
+            f"at {deal_state._settled_at.isoformat()}: {lease}"
+        )
+        log.info("[09c1] Lease %s starts %s, before settlement at %s; activated %s",
+                 deal_state.lease_id, lease_start.isoformat(),
+                 deal_state._settled_at.isoformat(), activated.isoformat())
 
 
 # ===========================================================================

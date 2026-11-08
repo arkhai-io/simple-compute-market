@@ -195,7 +195,9 @@ def settlement_admin_routes(
                 ) from exc
         state = str((lifecycle or {}).get("state") or "")
         if await runtime.lifecycle.ended_before_delivery(negotiation_id):
-            # A deal ended before delivery has no fulfillment to wait for.
+            # A deal ended before it was delivered, a settlement placement
+            # that found no capacity among them, has no fulfillment state to
+            # reach; its end is the settlement's outcome.
             return {"status": "ended", "fulfillment_state": state}
         # Physical readiness does not establish activation, billing start or
         # disclosure authorization; those must be durably available too.
@@ -217,7 +219,10 @@ def settlement_admin_routes(
             return {"status": "ready", "fulfillment_state": state}
         if state in _FAILED_STATES:
             return {"status": "failed", "fulfillment_state": state}
-        # Before a fulfillment decides, report the settlement evidence itself.
+        # Before a fulfillment decides, the settlement record's own status is
+        # the report: accepted, verified and refund statuses keep the wait
+        # polling, and failed evidence ends it, as a settlement never to be
+        # delivered.
         return {"status": evidence.status, "fulfillment_state": state}
 
     timing: dict[str, Any] = {}

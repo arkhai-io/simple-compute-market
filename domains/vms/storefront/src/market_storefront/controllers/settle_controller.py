@@ -313,7 +313,7 @@ class AdminSettleController:
         description=(
             "Blocks server-side until the delivery of the settlement *escrow_uid* "
             "names — by its settlement reference, else by its negotiation — reaches "
-            "``ready`` or ``failed``, or until *timeout* seconds elapse. "
+            "``ready``, ``failed`` or ``ended``, or until *timeout* seconds elapse. "
             "Returns immediately if the delivery is already terminal."
         ),
     )

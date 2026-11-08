@@ -165,7 +165,7 @@ async def test_the_wait_reports_the_delivery_status_of_the_settlement_it_resolve
 
 
 @pytest.mark.parametrize("terminal", ["ready", "failed", "ended"])
-async def test_terminal_delivery_ends_the_wait(terminal) -> None:
+async def test_ready_failed_and_ended_end_the_wait(terminal) -> None:
     clock = Clock()
     service = _service(
         delivery_status=_ticking(clock, [{"status": "provisioning"}, {"status": terminal}]),

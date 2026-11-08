@@ -27,7 +27,8 @@ from market_core import SettlementEvidence
 #: Longest a wait may block, whatever the caller asks for.
 MAX_WAIT_SECONDS = 120.0
 
-#: The delivery statuses that end a wait: delivered, or never to be.
+#: The delivery statuses that end a wait: delivered, or never to be — failed,
+#: or ended before it was delivered.
 TERMINAL_SETTLEMENT_STATUSES = frozenset({"ready", "failed", "ended"})
 
 

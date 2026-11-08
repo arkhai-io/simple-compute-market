@@ -94,8 +94,9 @@ class PurchaseState(ComputeDealState):
 
     The purchase writes the canonical deal's ``negotiation_id`` and
     ``settlement_id`` (the payments transaction), and the handoff its shared
-    stages read: ``settlement_ref`` (the negotiation), ``fulfillment_id`` and
-    ``expected_host_id``.
+    stages read: ``settlement_ref`` (the negotiation), ``fulfillment_id``,
+    ``expected_host_id``, and the Agreement's window, ``agreement_start`` and
+    ``agreement_end``.
     """
 
     #: The payer account the run names, whose balance ``Purchase01`` read.
@@ -306,18 +307,16 @@ class Purchase04_PurchaseCorrelated:
         # payments deal by, and what its hold names.
         deal_state.settlement_ref = negotiation_id
         deal_state.agreement = agreement
-        deal_state.agreement_start = utc_instant(agreement["start_utc"])
-        deal_state.agreement_end = deal_state.agreement_start + timedelta(
-            seconds=int(agreement["duration_seconds"])
-        )
-        # Approval is recorded before the buyer submits its commitment. The
-        # shared lease checks use this lower bound on settlement, independent
-        # of the lease they compare it with.
-        deal_state._settled_at = utc_instant(approved["ts"])
         deal_state.payment_settlement = data
         deal_state.fulfillment_id = fulfillment_id
         # Declared by the driver, never read from the lease 09c compares it with.
         deal_state.expected_host_id = deal_driver.declared_host_id
+        # The window the Agreement's exact bytes commit, which 09c holds the
+        # delivered lease to.
+        deal_state.agreement_start = utc_instant(agreement["start_utc"])
+        deal_state.agreement_end = deal_state.agreement_start + timedelta(
+            seconds=int(agreement["duration_seconds"])
+        )
         log.info("[p04] Run %s: Agreement %s, transaction %s, fulfillment %s; expected host %s",
                  run.run_id, negotiation_id, data.transaction_id, fulfillment_id,
                  deal_state.expected_host_id)

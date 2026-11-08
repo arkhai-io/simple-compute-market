@@ -198,8 +198,11 @@ ending stage, which ends in the state teardown completion starts from. A shared 
 from fulfillment onwards MUST read each input it checks from state an earlier stage
 wrote independently of the lease under check: the expected host from the Alkahest
 settlement preview or from the driver's declared host, the Agreement window from
-accepted terms, a pre-commit settlement bound from the submitting stage or the buyer
-run's payment approval, and the teardown's fulfillment from whichever ending ran.
+accepted terms, and the teardown's fulfillment from whichever ending ran. The
+late-settlement-only stage additionally checks the submitting stage's recorded
+settlement instant; paid purchases do not supply that input. Every shared lease
+check MUST compare activation against both ends of the independently supplied
+Agreement window, allowing its documented clock tolerance at the start.
 
 A shared stage MUST NOT depend on the mock profile. Holding a provisioning job before
 its result, releasing it, and evaluating a mock rule are mock gates: they are stages of

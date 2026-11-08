@@ -573,10 +573,10 @@ project of its own:
   discovery, withdrawal, and reinstatement at the registry. Its mock-provisioned
   deal runs the canonical compute deal for one whole host, stage for stage with
   VM's, stepping the storefront's `delivery-recovery` cycle after dispatch and
-  readiness; then a second deal on the freed host whose buyer teardown, sent
-  twice, returns one operation and releases capacity once; then a third whose
-  capacity is taken before settlement, which ends as seller failure without
-  a reservation. Its separate
+  after readiness, as a restart would; then a second deal on the freed host
+  whose buyer teardown, sent twice, returns one operation and releases capacity
+  once; then a third whose machine is taken before settlement, which ends as
+  the seller's failure with nothing reserved. Its separate
   `e2e_bare_metal_payment_deal` scenario is the lane's
   [buyer purchase](#the-canonical-compute-deal): a wallet-free profiled buyer
   buys one fixed-term USD/6 purchase through `market bare-metal buy` on the
