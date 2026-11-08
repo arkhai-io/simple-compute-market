@@ -933,6 +933,20 @@ naming the listing and its options, changing nothing.
 - **WHEN** a module finds the resource's listing offering no option of its mechanism
 - **THEN** it fails naming the listing and its options before any deal
 
+#### Scenario: Closed listing history accompanies an open target listing
+
+- **WHEN** the target resource has closed historical listings and exactly one open
+  listing of the required shape offering the module's mechanism
+- **THEN** the module adopts that open listing, preserves the closed history, and
+  creates or reopens no listing
+
+#### Scenario: No unique open target listing exists
+
+- **WHEN** the resource has only closed listings, multiple open listings, or a
+  listing with an unknown status
+- **THEN** the module refuses before any deal, naming the listings and changing
+  none of them; closed history does not permit replacement creation
+
 ### Requirement: The real-provisioning target names diagnostics and admission inputs
 
 Target version 2 MUST accept an optional `management_unit` on a VM host, a systemd

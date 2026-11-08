@@ -2,9 +2,9 @@
 
 The lane's registration of its host, the jobs it finds and waits for, the VM
 list it reads the guest's absence from, its checks of the service's execution,
-the delivered access, and the settlement preview; the resource's one listing,
-created offering every ready mechanism or adopted by a module of either
-mechanism, and the re-reservation's claim; and the lease view's reading of a
+the delivered access, and the settlement preview; the resource's sole open listing,
+created offering every ready mechanism or adopted with closed history retained,
+and the re-reservation's claim; and the lease view's reading of a
 GPU-less declaration. The scenario module is imported by name, never its
 stage classes, so pytest does not collect them here.
 """
@@ -661,14 +661,33 @@ def test_a_listing_already_paused_is_adopted_without_another_pause():
     assert storefront.paused == []
 
 
+@pytest.mark.parametrize("mechanism", BOTH)
+@pytest.mark.parametrize("closed_first", [True, False])
+def test_the_only_open_listing_is_adopted_without_changing_closed_history(
+    mechanism, closed_first,
+):
+    closed = _listing("historical", status="closed", disk_gb=100)
+    current = _listing("current")
+    rows = (closed, current) if closed_first else (current, closed)
+    storefront = FakeStorefront(*rows)
+
+    adopted, was_adopted = _listing_for(storefront, mechanism)
+
+    assert was_adopted and adopted is current
+    assert storefront.paused == ["current"] and storefront.created == []
+    assert storefront.listings["historical"] is closed
+    assert (closed.status, closed.paused) == ("closed", False)
+
+
 @pytest.mark.parametrize(
     "listings",
     [
         (_listing("listing-1", status="closed"),),
         (_listing("listing-1"), _listing("listing-2", paused=True)),
         (_listing("listing-1", disk_gb=100),),
+        (_listing("listing-1", status="unknown"), _listing("listing-2")),
     ],
-    ids=["closed", "two", "another shape"],
+    ids=["closed", "two", "another shape", "unknown status"],
 )
 def test_a_listing_this_run_cannot_adopt_fails_naming_the_listings_and_the_capacity(listings):
     storefront = FakeStorefront(*listings)
