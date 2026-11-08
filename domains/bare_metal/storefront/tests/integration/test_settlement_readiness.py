@@ -1,6 +1,7 @@
 """Settlement readiness follows durable delivery, beyond physical provisioning."""
 
 from dataclasses import replace
+from sys import float_info
 
 from held_loops import held_loop_controller
 from market_arkhai_payments.fixtures import build_signed_receipt
@@ -36,7 +37,12 @@ async def test_wait_retries_failed_activation_before_reporting_a_paid_deal_ready
         ):
             await admin.admin_pause_lifecycle_loops()
             await buyer.settle_agreement(deal.negotiation_id)
-            pending = await admin.wait_for_settlement(deal.negotiation_id, timeout=0.1)
+            # The API requires a positive timeout. Adding the smallest normal
+            # float to its monotonic clock leaves a deadline of now, so this
+            # exercises one read without spending a polling interval.
+            pending = await admin.wait_for_settlement(
+                deal.negotiation_id, timeout=float_info.min
+            )
             row = await runtime.db.load_bare_metal_fulfillment_lifecycle(
                 negotiation_id=deal.negotiation_id
             )
