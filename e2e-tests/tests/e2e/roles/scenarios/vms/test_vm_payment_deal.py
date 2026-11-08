@@ -30,6 +30,7 @@ from tests.e2e.roles.helpers.mediation import configured_mediation
 from tests.e2e.roles.helpers.payments import (
     buyer_payments_client,
     configured_payments,
+    dispute_window_seconds,
     payment_setting,
 )
 from tests.e2e.roles.scenarios.vms.conftest import (
@@ -136,7 +137,8 @@ def test_hosted_commit_delivers_after_a_verified_receipt(
             "mechanism_input": {
                 "payee_account": str(payment_setting("SELLER_ACCOUNT")), "asset": "USD/6",
                 "window": str(payment_setting("DISPUTE_WINDOW", "P7D")),
-                "delivery_deadline_seconds": 300, "dispute_window_seconds": 1296000,
+                "delivery_deadline_seconds": 300,
+                "dispute_window_seconds": dispute_window_seconds(delivery_deadline_seconds=300),
             },
         }],
     ).listing_id

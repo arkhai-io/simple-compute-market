@@ -176,3 +176,19 @@
   debug:
     msg: "{{ vm_check_json }}"
   when: vm_action == "check" and check_data is defined
+
+# Host Diagnostics JSON Output
+- name: Create JSON formatted output for host diagnostics
+  set_fact:
+    host_diagnostics_json: "{{ host_diagnostics_data | to_nice_json }}"
+  when: vm_action == "diagnose" and host_diagnostics_data is defined
+
+- name: Output host diagnostics data as parsable JSON
+  debug:
+    var: host_diagnostics_data
+  when: vm_action == "diagnose" and host_diagnostics_data is defined
+
+- name: Output host diagnostics JSON string for external parsing
+  debug:
+    msg: "{{ host_diagnostics_json }}"
+  when: vm_action == "diagnose" and host_diagnostics_json is defined

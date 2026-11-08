@@ -27,6 +27,13 @@ VM_PROVISIONING_ROUTES = (
         "path_resource": "host",
     },
     {
+        "method": "GET",
+        "path": r"/api/v1/hosts/(?P<host>[^/]+)/diagnostics",
+        "operation": "provisioning_host_diagnostics",
+        "roles": ("admin",),
+        "path_resource": "host",
+    },
+    {
         "method": "POST",
         "path": r"/api/v1/hosts/(?P<host>[^/]+)/vms/?",
         "operation": "provisioning_vm_create",

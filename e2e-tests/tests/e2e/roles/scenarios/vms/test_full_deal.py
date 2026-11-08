@@ -156,6 +156,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage08c_EvaluateProvisioningJob,
     Stage09a_FulfillmentConvergesToActive,
     Stage09b_SettlementReadyAndCredentials,
+    Stage09c1_LateSettlementKeepsTheWindow,
     Stage09c2_ArmTeardownGate,
     Stage09c_LeaseRecorded,
     Stage10a_LeaseExpirySetup,
@@ -574,6 +575,10 @@ class TestStage09bb_ClaimSubmittedForTheFulfilledEscrow:
 
 
 class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
+    pass
+
+
+class TestStage09c1_LateSettlementKeepsTheWindow(Stage09c1_LateSettlementKeepsTheWindow):
     pass
 
 

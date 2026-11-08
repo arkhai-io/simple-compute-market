@@ -32,6 +32,28 @@ VM_CLEANUP = ("ensure_storefront_resumed", "reap_buyer_settle_subprocess", "rele
 #: The real-provisioning VM module, and its cleanup in place of the lane's.
 REAL_VM_MODULE = SCENARIOS / "vms" / "test_real_provisioning_deal.py"
 REAL_VM_CLEANUP = ("ensure_storefront_resumed", "recover_failed_run")
+#: Every VM module against the real-provisioning target, and the cleanup each
+#: takes in place of the lane's.
+REAL_VM_MODULES = {
+    REAL_VM_MODULE: REAL_VM_CLEANUP,
+    SCENARIOS / "vms" / "test_vm_qualification.py": (
+        "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "purchase_cleanup",
+    ),
+    SCENARIOS / "vms" / "test_real_provisioning_reapply.py": ("ensure_storefront_resumed",),
+}
+#: The qualification modules, and the fixtures that check their targets and
+#: their services' executions, which each sets up before any hold.
+QUALIFICATION_GATES = {
+    SCENARIOS / "vms" / "test_vm_qualification.py": (
+        "payments_config", "real_vm_target", "real_vm_execution",
+    ),
+    SCENARIOS / "bare_metal" / "test_bare_metal_qualification.py": (
+        "payments_config", "real_bare_metal_target", "real_bare_metal_execution",
+    ),
+    SCENARIOS / "vms" / "test_real_provisioning_reapply.py": (
+        "payments_config", "real_vm_target", "real_bare_metal_target", "real_executions",
+    ),
+}
 
 _FIXTURE_LINE = re.compile(r"^\s+(SETUP|TEARDOWN)\s+M (\S+)(?: \(fixtures used: (.*)\))?$")
 _TEST_LINE = re.compile(r"^\s{8}(\S+\.py)::")
@@ -166,7 +188,7 @@ def test_holds_are_released_after_the_modules_other_cleanup(path, plans, finalis
 
 @pytest.mark.parametrize(
     "path",
-    sorted(path for path in (SCENARIOS / "vms").glob("test_*.py") if path != REAL_VM_MODULE),
+    sorted(path for path in (SCENARIOS / "vms").glob("test_*.py") if path not in REAL_VM_MODULES),
     ids=lambda path: path.name,
 )
 def test_every_vm_module_still_runs_the_lane_cleanup(path, plans):
@@ -174,13 +196,28 @@ def test_every_vm_module_still_runs_the_lane_cleanup(path, plans):
     assert set(VM_CLEANUP) <= set_up, (path.name, sorted(set(VM_CLEANUP) - set_up))
 
 
-def test_the_real_vm_module_recovers_its_own_guest_and_releases_nothing_fleet_wide(plans):
-    """The real-provisioning module tears down only its own deal's guest. A
+@pytest.mark.parametrize("path", sorted(REAL_VM_MODULES), ids=lambda path: path.name)
+def test_a_real_vm_module_cleans_up_its_own_and_releases_nothing_fleet_wide(path, plans):
+    """A real-provisioning module tears down only its own deals' guests. A
     fleet-wide release would return the host's capacity to the market while a
     failed run's guest may still run on it."""
-    set_up = {name for name, _ in plans[str(REAL_VM_MODULE.relative_to(PROJECT))]["setup"]}
-    assert set(REAL_VM_CLEANUP) <= set_up, sorted(set(REAL_VM_CLEANUP) - set_up)
+    set_up = {name for name, _ in plans[str(path.relative_to(PROJECT))]["setup"]}
+    cleanup = REAL_VM_MODULES[path]
+    assert set(cleanup) <= set_up, sorted(set(cleanup) - set_up)
     assert "release_reserved_resources" not in set_up
+
+
+@pytest.mark.parametrize("path", sorted(QUALIFICATION_GATES), ids=lambda path: path.name)
+def test_a_qualification_module_checks_both_targets_before_any_hold(path, plans):
+    """A hold pauses a shared service when it is set up, so a qualification
+    module writes nothing to the stack only if its payments target, its
+    real-provisioning target and its services' executions are checked first:
+    without a target, the first of them is a blocked skip."""
+    order = [name for name, _ in plans[str(path.relative_to(PROJECT))]["setup"]]
+    holds = [order.index(name) for name in order if name in HOLD_FIXTURE_NAMES]
+    assert holds, order
+    gates = [order.index(name) for name in QUALIFICATION_GATES[path]]
+    assert gates == sorted(gates) and max(gates) < min(holds), order
 
 
 def test_the_real_vm_module_checks_its_target_and_execution_before_any_hold(plans):

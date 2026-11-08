@@ -83,6 +83,9 @@ class SQLiteClient(CoreSQLiteClient):
     async def load_settlement_evidence(self, *, negotiation_id: str) -> SettlementEvidence | None:
         return await asyncio.to_thread(SettlementRepository(self.db_path).get, negotiation_id)
 
+    async def load_settlement_evidence_by_ref(self, *, settlement_ref: str) -> SettlementEvidence | None:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).get_by_reference, settlement_ref)
+
     async def load_issuance_progress(self, *, reference: str) -> dict[str, Any] | None:
         return await asyncio.to_thread(SettlementRepository(self.db_path).progress, reference)
 

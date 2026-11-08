@@ -59,8 +59,10 @@ ACTIVE_PROFILES=staging,staging-secrets
 
 ### Shared payment-scenario configuration
 
-The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`
-and `e2e_vm_payment_deal` — read the `PAYMENTS` section (environment prefix
+The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`,
+`e2e_vm_payment_deal` and `e2e_vm_payment_purchase`, and the qualification modules
+`e2e_vm_qualification`, `e2e_bare_metal_qualification` and
+`e2e_real_provisioning_reapply` — read the `PAYMENTS` section (environment prefix
 `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
 names the payments target; leave it blank and the scenario reports `blocked` and
 skips. With it set, supply the other four: SERVICE_IDENTITY (public Ed25519
@@ -89,6 +91,20 @@ lane's RUNNER_PROFILES. The lane's settings mark the target LANE_OWNED, so an
 unready one fails the scenario naming it rather than skipping; LANE_OWNED with no
 SERVICE_URL fails too. `config-docker.yml` carries no `PAYMENTS` section, so a run
 selecting the `docker` profile alone has no payments target.
+
+DISPUTE_WINDOW_SECONDS is the dispute coverage, in whole seconds, of every compute
+payments option the harness states — a VM listing's payments settlement, the
+bare-metal lane's pool override — and the coverage its purchase checks expect of
+those options. It defaults to 1296000 (15 days), which covers the 14-day minimum
+filing window of the Arkhai mediation contract's default authority description
+(`kit/arkhai-mediation`) plus the 300-second delivery deadline; no lane profile
+sets it. A run against a dispute authority advertising a
+shorter minimum may name a shorter coverage, no less than the delivery deadline plus
+that minimum: 360 for a 60-second minimum. A value that is not an integer, or is less
+than the delivery deadline, fails the scenario naming the setting; the storefront
+refuses one below the authority's minimum. It is separate from DISPUTE_WINDOW, the
+payment's own `window` input. A listing created under one coverage keeps it, so a
+later run naming another fails the purchase's option check against that listing.
 
 FEE_BPS defaults to 250. LIVEMODE, DEVELOPMENT_AUTH and LANE_OWNED default to
 false and must be `true` or `false`; generated buyer tables explicitly pin the
@@ -262,6 +278,18 @@ origin it checks as `PAYMENTS.MEDIATION_URL`, apart from the scenario's
 MEDIATION.SERVICE_URL, so an external run sets both. Without a configured payment
 target all four stages report blocked skips; no Alkahest fallback is used.
 
+### VM buyer purchase
+
+`e2e_vm_payment_purchase` runs in the VM lane. The lane's buyer, configured with
+no wallet and Arkhai payments as its only settlement, buys one hour of a VM
+through `market buy`, which selects the scenario's listing by discovery and
+polls its settlement until delivery while the scenario steps it. The scenario
+runs the shared buyer-purchase stages, checks the transaction against its
+Agreement and the payer's balance drop against its debit, and ends the lease by
+back-dating it and stepping one lease-watchdog cycle. The listing names its own
+resource, host, pool and GPU model, and its payment stays held in the double
+until the lane ends.
+
 ### Real bare-metal provisioning
 
 `e2e_bare_metal_real_provisioning` runs the canonical complete deal against a
@@ -294,6 +322,50 @@ Use the [operator runbook](../docs/development/VALIDATION_RUNBOOK.md#28-prepare-
 to prove deployed grant admission before either real lane. Container admission
 proof and native installer component tests have different scopes; neither
 substitutes for a completed real purchase, SSH access and reclaim observation.
+
+### Real-provisioning qualification
+
+Three modules make the [runbook's owed observations](../docs/development/VALIDATION_RUNBOOK.md#observations-the-qualification-owes)
+2, 4, 5 and 6: `e2e_vm_qualification` (observation 2) and
+`e2e_bare_metal_qualification` (observations 4 and 5) as external-topology
+extensions of the lanes' buyer purchases, and `e2e_real_provisioning_reapply`
+(observation 6) as a follow-up that makes no deal, on the stack their purchases
+populated.
+Each is in no lane and needs both the `real-provisioning-target` profile and a
+configured `PAYMENTS` target (with `LANE_OWNED` unset, so an unready target is a
+blocked skip); without either it is a blocked skip before any hold or write.
+The payer is funded by the deployment, never by a module, and is assumed
+dedicated to the run. The VM host's listing, which the VM module creates unless
+an earlier module did, states `PAYMENTS.DISPUTE_WINDOW_SECONDS` as its payments
+option's dispute coverage, so a target whose dispute authority advertises a short
+minimum filing window can be bought under a short hold; the bare-metal machine's
+listing states the coverage its storefront's own configuration gives. Run each
+through `test-module`, observation 6 after the other two on the same stack:
+
+```bash
+make test-module MODULE=e2e_vm_qualification ACTIVE_PROFILES=local,real-provisioning-target
+make test-module MODULE=e2e_bare_metal_qualification ACTIVE_PROFILES=local,real-provisioning-target
+make test-module MODULE=e2e_real_provisioning_reapply ACTIVE_PROFILES=local,real-provisioning-target
+```
+
+- `e2e_vm_qualification` (observation 2): two CPU-only guests bought through
+  `market buy` on the target's VM host, the first guest's heartbeat across the
+  second's create and teardown, host diagnostics before, during and after, and
+  both leases ended by back-dating and a stepped watchdog cycle.
+- `e2e_bare_metal_qualification` (observations 4 and 5): the normal cycle,
+  then a successor whose reclaim refuses a planted foreign descendant until
+  fixture-only repair, each ended by `market bare-metal teardown`. Without the
+  bare-metal host's `cleanup_qualification` its working-data stages and the
+  refusal cycle skip, and both observations are unproven.
+- `e2e_real_provisioning_reapply` (observation 6): both hosts' registrations
+  reapplied and a publication cycle stepped, nothing duplicated or changed. It
+  needs the `BARE_METAL_LANE` settings beside the VM lane's.
+
+Each module logs every observation's outcome at its end: made, failed, or
+unproven naming what a skipped stage lacked, such as the target's
+`management_unit` or relay `admission_log`. A failure after the buyer approved a
+payment refunds it as the seller and ends the delivered guest or host through
+its lease, and names by negotiation and transaction whatever it cannot.
 
 The installed buyer scenario `e2e_bare_metal_deal` keeps its separate
 `BARE_METAL` configuration and operator-supplied buyer key and known-hosts file.
@@ -384,8 +456,8 @@ prove tunnel coexistence and require no GPU.
 
 The bare-metal lane includes marker `e2e_bare_metal_payment_deal`, which runs
 against the lane's payments double: `make test-e2e-bare-metal` runs it with the
-rest of the lane. To rerun its three ordered calls against the lane's running
-stack, select the lane's runner profiles:
+rest of the lane. To rerun it against the lane's running stack, select the
+lane's runner profiles:
 
 ```sh
 make test-buyer-machine \
@@ -403,24 +475,32 @@ must resolve to the lane's pinned seller scheme; the purchase buyer is a separat
 wallet-free Ed25519 profile. A run with no payments target configured reports a
 named blocked payments prerequisite, not success.
 
-The fixture declares a distinct backed whole host and publishes only a USD
-1.00/hour option for a one-hour term. The registry recommends the lane's pinned
-dispute authority, which the option names but which never answers, since no
-stage files a case; the option includes a 300-second delivery deadline,
-a 15-day dispute window and an unbounded case hold. The dispute window covers
-the delivery deadline plus the authority's minimum filing window; the payment
-`window=P7D` is a separate input.
+The scenario runs the shared buyer-purchase stages
+(`tests/e2e/roles/helpers/buyer_purchase_stages.py`) and the canonical compute
+deal's stages from fulfillment onwards, inserting its own. Its supply stage
+declares a distinct backed whole host and its publication stage publishes only a
+USD 1.00/hour option for a one-hour term. The registry recommends the lane's
+pinned dispute authority, which the option names but which never answers; the
+buyer's teardown files a delivery-end case with it, whose `Unknown` outcome the
+scenario neither fails on nor reads as evidence. The option includes a
+300-second delivery deadline, a 15-day dispute window (PAYMENTS.DISPUTE_WINDOW_SECONDS's
+default) and an unbounded case hold. The dispute window covers the delivery deadline
+plus the authority's minimum filing window; the payment `window=P7D` is a separate input.
 
 The installed `market bare-metal buy` emits
 `run_started → negotiation_completed(status=agreed) → payment_approved →
 run_ended(status=agreed)`. It commits through `BuyerLifecycle` after approval.
-Delivery reads use that purchase's signer and fulfillment transport. Re-drive
-recovers the original run's retained profile and repeats canonical lifecycle
-`commit`, keeping both transaction and fulfillment unchanged; there is no
-bare-metal settle command. Seller refund reverses the held once payment;
-idempotent canonical buyer surrender and convergence establish mock reclaim
-and proven site capacity release separately. Unless the refund stage completed the deal's
-teardown, the module's cleanup finds the purchase in the buyer's run log; when
+The scenario checks the transaction against its Agreement and receipt and the
+payer's balance drop against its debit, then reads readiness through the
+storefront's settle wait on the negotiation. Delivery reads use that purchase's
+signer and fulfillment transport. Re-drive recovers the original run's retained
+profile and repeats canonical lifecycle `commit`, keeping both transaction and
+fulfillment unchanged; there is no bare-metal settle command. The buyer's
+`market bare-metal teardown` then ends delivery and starts mock reclaim, after
+which the seller's refund reverses the still-held once payment, and the site's
+capacity release is proven separately. Unless the last stage recorded the deal
+ended, the module's cleanup first opens any mock gate still closed, then finds
+the purchase in the buyer's run log; when
 the log records the payment approved, it refunds the payment (a repeat refund
 returns the same result), then reads the purchase's fulfillment and releases a
 host it finds. A host it cannot read or tear down — a delivery that stopped, or

@@ -26,6 +26,7 @@ from market_identity import Identity
 from market_settlement_runtime import (
     SettlementAdminRouteError,
     SettlementAdminRouteService,
+    SettlementLookup,
 )
 from market_storefront_kit import LifecycleRouteError, refuse_introduction_settle
 from storefront_client.settlement_routes import SETTLE_STATUS
@@ -245,16 +246,24 @@ class AdminSettleController:
             except ValueError as exc:
                 raise LookupError(str(exc)) from exc
 
-        async def settle_status(escrow_uid: str):
-            return await db.load_vm_settlement_job(reference=escrow_uid)
+        async def by_reference(settlement_ref: str):
+            return await db.load_vm_settlement_evidence_by_ref(
+                settlement_ref=settlement_ref
+            )
+
+        async def by_negotiation(negotiation_id: str):
+            return await db.load_vm_settlement_evidence(negotiation_id=negotiation_id)
+
+        async def delivery_status(evidence):
+            return await db.load_vm_delivery_status(evidence=evidence)
 
         self._routes = SettlementAdminRouteService(
             verify=verify,
             preview_fulfillment=preview,
-            settle_status=settle_status,
-            # `ended` is the delivery outcome recorded when the deal ended
-            # before it was delivered; nothing later moves it.
-            is_terminal=lambda status: status.get("status") in {"ready", "failed", "ended"},
+            settlements=SettlementLookup(
+                by_reference=by_reference, by_negotiation=by_negotiation
+            ),
+            delivery_status=delivery_status,
         )
 
     async def _routed(self, call):
@@ -302,9 +311,10 @@ class AdminSettleController:
         response_model=SettleWaitResponse,
         summary="Long-poll until settlement reaches a terminal state (admin)",
         description=(
-            "Blocks server-side until the settlement job for *escrow_uid* reaches "
-            "``ready`` or ``failed``, or until *timeout* seconds elapse. "
-            "Returns immediately if the job is already terminal."
+            "Blocks server-side until the delivery of the settlement *escrow_uid* "
+            "names — by its settlement reference, else by its negotiation — reaches "
+            "``ready``, ``failed`` or ``ended``, or until *timeout* seconds elapse. "
+            "Returns immediately if the delivery is already terminal."
         ),
     )
     async def wait_for_settlement(

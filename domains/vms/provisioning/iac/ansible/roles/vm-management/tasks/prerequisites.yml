@@ -58,6 +58,8 @@
     - vm_image_type == "scratch"
   tags: always
 
+# Host diagnostics read libvirtd's unit before anything starts it, so they
+# report it as they find it.
 - name: Ensure libvirtd is running
   service:
     name: libvirtd
@@ -65,6 +67,7 @@
     enabled: yes
   become: yes
   delegate_to: "{{ target_host }}"
+  when: vm_action != "diagnose"
   tags: always
 
 - name: Use tenant-aware VM management

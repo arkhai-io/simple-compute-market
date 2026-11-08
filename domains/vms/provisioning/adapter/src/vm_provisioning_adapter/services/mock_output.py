@@ -13,17 +13,22 @@ the job names one, as every marketplace create does, else a key generated on
 the host. It reports a forwarded port and no relay: a relay's address is filled
 in only when a job runs and is not among its stored parameters, so a
 relay-backed case states its output in a rule.
+
+A host diagnostics job prints a host with no guest whose units have each run
+once since boot, the management unit among them when the job names one.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import uuid
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from compute_provisioning_ansible import MockPlaybook
+from vm_provisioning_operator.models import LIBVIRTD_UNIT, RELAY_CLIENT_UNIT
 
 from vm_provisioning_adapter.codec import VM_RESULT_FACTS, vm_job_params
 
@@ -31,6 +36,11 @@ from vm_provisioning_adapter.codec import VM_RESULT_FACTS, vm_job_params
 MOCK_FORWARDED_PORT = "2222"
 #: The guest's internal address a mocked create reports.
 MOCK_GUEST_ADDRESS = "192.168.122.2"
+#: The boot ID a mocked host diagnostics job reports.
+MOCK_BOOT_ID = "00000000-0000-4000-8000-000000000000"
+# Each mocked unit's invocation ID is derived from its host and name in this
+# namespace, so it is the same on every read.
+_MOCK_INVOCATIONS = uuid.UUID("5f1d0c1e-8a52-4e7b-9a43-2b8d6f0e7c11")
 
 
 def vm_mock_output(playbook: MockPlaybook) -> str:
@@ -42,6 +52,8 @@ def vm_mock_output(playbook: MockPlaybook) -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     if params.vm_action == "create":
         fact = _create_fact(guest, tenant_host, timestamp, provided_key=params.ssh_pubkey)
+    elif params.vm_action == "diagnose":
+        fact = _diagnostics_fact(playbook.limit, timestamp, management_unit=params.management_unit)
     else:
         fact = {
             "action": params.vm_action,
@@ -122,6 +134,40 @@ def _create_fact(
     }
 
 
+def _diagnostics_fact(
+    host_id: str, timestamp: str, *, management_unit: str | None
+) -> dict[str, Any]:
+    """A host whose units have each run once since its boot, with no guest.
+
+    Every value but the timestamp is fixed for a unit or the host, so two
+    reads of one host report the same generations, as an undisturbed host's
+    would.
+    """
+    units = [LIBVIRTD_UNIT, RELAY_CLIENT_UNIT] + ([management_unit] if management_unit else [])
+    return {
+        "action": "diagnose",
+        "host": host_id,
+        "timestamp": timestamp,
+        "status": "success",
+        "boot_id": MOCK_BOOT_ID,
+        "uptime_seconds": 3600.0,
+        "kernel": "6.8.0-mock",
+        "running_guests": 0,
+        "management_unit": management_unit,
+        "units": {
+            unit: {
+                "active_state": "active",
+                "invocation_id": uuid.uuid5(_MOCK_INVOCATIONS, f"{host_id}/{unit}").hex,
+                "main_pid": 1000 + index,
+                "restart_count": 0,
+                "active_enter_timestamp": "Thu 2026-01-01 00:00:00 UTC",
+                "result": "success",
+            }
+            for index, unit in enumerate(units)
+        },
+    }
+
+
 def shipped_output(host_id: str, fact_name: str, fact: Mapping[str, Any]) -> str:
     """A run printing ``fact`` as the VM role does under the packaged
     configuration's YAML result format.
@@ -180,6 +226,7 @@ def _scalar(value: Any) -> str:
 
 
 __all__ = [
+    "MOCK_BOOT_ID",
     "MOCK_FORWARDED_PORT",
     "MOCK_GUEST_ADDRESS",
     "shipped_output",

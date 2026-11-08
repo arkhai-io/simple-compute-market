@@ -11,12 +11,16 @@ body differs between lanes is not shared.
 
 The stages from fulfillment onwards — convergence to active, settlement readiness, the
 lease record, the lease's ending and teardown completion — MUST be keyed on the deal's
-settlement reference, which the driver supplies, rather than on an Alkahest escrow, so
+settlement reference, which an earlier stage writes, rather than on an Alkahest escrow, so
 the buyer purchase settled through `arkhai.payments.v1` runs the same definitions. How a
 lease ends is not shared across endings: the lease-watchdog expiry and the teardown
 dispatch it starts are shared by every scenario whose lease ends by expiry, and a
 scenario whose lease ends another way, such as by the buyer's teardown, runs its own
-ending stage, which ends in the state teardown completion starts from.
+ending stage, which ends in the state teardown completion starts from. A shared stage
+from fulfillment onwards MUST read each input it checks from state an earlier stage
+wrote independently of the lease under check: the expected host from the Alkahest
+settlement preview or from the driver's declared host, and the teardown's fulfillment
+from whichever ending ran.
 
 A shared stage MUST NOT depend on the mock profile. Holding a provisioning job before
 its result, releasing it, and evaluating a mock rule are mock gates: they are stages of
@@ -65,6 +69,9 @@ at the gate, and its gate-free part stays shared.
   shared expiry stages when the lease ends by expiry, as the VM purchase's does, and a
   stage of its own when it ends by the buyer's teardown, as the bare-metal purchase's
   does
+- **AND** the lease record's host is checked against its driver's declared host, and
+  teardown completion advances the fulfillment its ending reported, so each shared
+  stage's body is the Alkahest set's
 
 #### Scenario: A deal outside the canonical deal
 
@@ -77,6 +84,47 @@ at the gate, and its gate-free part stays shared.
 
 - **WHEN** a compute domain would need its own negotiation stage
 - **THEN** the difference is resolved in its storefront composition, not in the stage
+
+### Requirement: A configured bare-metal payment purchase is qualified end to end
+
+With a ready payments target configured, the bare-metal lane MUST qualify one fixed-term whole-host purchase settled through `arkhai.payments.v1`: discovery, negotiation, payment approval, receipt-gated mock delivery, re-drive of the original run's settlement, the buyer's physical teardown through `market bare-metal teardown`, and seller refund, with the teardown and the refund as separate operations. Its discovery, purchase, correlation, delivery and teardown steps MUST be the shared buyer-purchase stages, and its re-drive and refund its own inserted stages. In the bare-metal lane the target is the lane's payments double, whose result is never hosted-ledger evidence. Mock access is evidence of composition, never of real SSH access or revocation. The scenario MUST leave no payment hold, allocated host, mock rule, or held loop behind, whether it passes or fails, except a payment it cannot refund, which it MUST report by its negotiation and transaction together with any host its seller may still deliver for it, and a host whose fulfillment it cannot read or tear down, which it MUST report as a failed cleanup step. Without a configured target, or with an unready external one, it MUST report a named blocked prerequisite; an unready lane-owned target MUST fail setup by name. It MUST never fall back to Alkahest or count an unrun purchase as qualification.
+
+#### Scenario: Bare-metal payment purchase is qualified
+
+- **WHEN** the bare-metal payment scenario runs with a ready configured payments target
+- **THEN** the shared purchase stages discover a distinct backed whole-host listing, negotiate
+  and approve one hourly payment option with a wallet-free profiled Ed25519 buyer,
+  and observe receipt-gated durable mock delivery
+- **AND** recovery reads the original run and resolves its retained signer, repeats the
+  canonical lifecycle commit for the same negotiation, and requires the original
+  transaction, fulfillment identity, and durable result
+- **AND** the buyer requests physical teardown through `market bare-metal teardown`,
+  converging mock reclaim, then the pinned seller separately refunds the payment, still
+  held, before selected-site capacity release is confirmed
+
+#### Scenario: A stage fails after the payment is approved
+
+- **WHEN** a stage of the bare-metal payment scenario fails after the buyer approved the payment
+- **THEN** the scenario's cleanup refunds the deal's payment if it is not already refunded,
+  then reads the deal's fulfillment and tears down a host it finds not yet torn down,
+  reading the deal's identifiers from the original run when the purchase command failed
+- **AND** a host delivered while the refund was being requested is found and torn down,
+  and one whose fulfillment cannot be read or torn down is reported as a failed step
+- **AND** a refund the seller refuses because the payment is not yet verified, or the
+  payments service or storefront is unavailable, is retried for a bounded time, and a
+  refund that still fails fails the scenario naming the negotiation and transaction
+- **AND** a failed cleanup step is reported without preventing the later ones, and the
+  held loops are resumed whatever an earlier step did
+
+#### Scenario: No payments target is configured
+
+- **WHEN** the bare-metal payment scenario runs with no payments target configured, or an unready external one
+- **THEN** it reports a named blocked prerequisite and makes no purchase
+
+#### Scenario: The lane's own payments target is unready
+
+- **WHEN** the bare-metal lane's payments double is not ready
+- **THEN** lane setup fails naming it, before any purchase
 
 ## ADDED Requirements
 
@@ -108,7 +156,10 @@ pays through the shipped buyer CLI (`market buy`, `market bare-metal buy`) in
 provisioning, and ends: the VM lease through back-dating and a stepped lease-watchdog
 cycle, the bare-metal lease through the buyer's `market bare-metal teardown`. The
 purchase stages MUST be defined once and shared by every scenario that buys this way,
-and each stage MUST log the identifiers it reads.
+and each stage MUST log the identifiers it reads. The bare-metal lane's purchase is its
+qualified payment purchase, which runs the shared stages and inserts its own; the VM
+lane's purchase lists a resource of its own on a registered host, since a listing's
+binding to its resource outlives the listing.
 
 #### Scenario: A VM lane purchase completes
 
@@ -122,6 +173,13 @@ and each stage MUST log the identifiers it reads.
 - **WHEN** the bare-metal lane runs its buyer purchase and the buyer runs
   `market bare-metal teardown`
 - **THEN** the reclaim runs and the whole host's capacity is restored
+
+#### Scenario: The bare-metal purchase's steps change
+
+- **WHEN** a discovery, purchase, correlation, delivery or buyer-teardown step of the
+  bare-metal lane's purchase changes
+- **THEN** it changes in the shared stage, and the observation 4 and 5 module runs the
+  changed stage without an edit of its own
 
 #### Scenario: A purchase is checked against its payment records
 
@@ -154,6 +212,12 @@ never wait out the wall clock for a state it can step to.
 - Observation 6 MUST reapply both hosts' canonical registrations and run a publication
   cycle, reading the consumed-UID history through the working-data operator route before
   and after.
+
+A module whose stage fails after the buyer approved a payment MUST, in its cleanup, refund
+that payment if it is not refunded, unless the module had begun ending the purchase
+itself, and MUST end a delivered guest or host through its lease's own lifecycle; it MUST
+report by negotiation and transaction any payment it cannot refund and any delivery it
+cannot end. A purchase the module ended itself is left as it is.
 
 #### Scenario: The first session survives the second guest
 
@@ -196,19 +260,30 @@ never wait out the wall clock for a state it can step to.
   duplicate host, pool, resource, allocator or listing appears, unexpired relay
   quarantine is retained, and the consumed-UID history is unchanged
 
+#### Scenario: A qualification stage fails after the payment is approved
+
+- **WHEN** a stage of a qualification module fails after the buyer approved a purchase's
+  payment, before the module ended that purchase
+- **THEN** the module's cleanup refunds the payment as the seller, retrying while its
+  receipt may still verify, unless the module had begun ending the purchase, then ends
+  any guest or host delivered for it through its lease's expiry or reclaim
+- **AND** a refund that stays refused, or a delivery that cannot be read or ended, fails
+  the cleanup naming the purchase's negotiation and transaction
+
 #### Scenario: No target is configured
 
 - **WHEN** the real-provisioning target or the payments target is absent
 - **THEN** each qualification module reports a blocked skip and writes nothing to the
   stack
 
-### Requirement: A real resource's listing offers every composed mechanism
+### Requirement: A real resource's listing offers every composed deal mechanism
 
 On a real-provisioning target, the listing on the target's resource MUST offer a
-settlement option for each mechanism the storefront composes and reports ready, created
-or adopted through one shared helper. A module adopting the listing MUST require it to
-offer that module's own mechanism and otherwise MUST fail naming the listing and its
-options, changing nothing.
+settlement option for each deal mechanism the storefront composes and reports ready,
+Alkahest and Arkhai payments, created or adopted through one shared helper; contact
+exchange settles no deal and is stated on no compute listing. A module adopting the
+listing MUST require it to offer that module's own mechanism and otherwise MUST fail
+naming the listing and its options, changing nothing.
 
 #### Scenario: An Alkahest module and a qualification module share a stack
 
@@ -223,9 +298,10 @@ options, changing nothing.
 
 ### Requirement: The real-provisioning target names diagnostics and admission inputs
 
-Target version 2 MUST accept an optional `management_unit` on a VM host, a systemd unit
-name, and an optional `admission_log` on relay access, an absolute harness-local path.
-An invalid unit name or a relative path MUST be refused naming the field.
+Target version 2 MUST accept an optional `management_unit` on a VM host, a systemd
+service unit name, and an optional `admission_log` on relay access, an absolute
+harness-local path. An invalid unit name or a relative path MUST be refused naming the
+field.
 
 #### Scenario: A relative admission log path
 

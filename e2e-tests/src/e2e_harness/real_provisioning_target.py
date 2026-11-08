@@ -16,6 +16,8 @@ from pydantic import (
     field_validator, model_validator,
 )
 
+from vm_provisioning_operator import check_service_unit_name
+
 from e2e_harness.ssh_host_key import canonical_host_public_key
 
 SECTION = "REAL_PROVISIONING_TARGET"
@@ -24,6 +26,13 @@ PROFILE_FILE = f"config-{PROFILE}.yml"
 SUPPORTED_VERSIONS = (2,)
 _Count = Annotated[int, Field(strict=True, gt=0)]
 _Text = Annotated[str, Field(strict=True, min_length=1)]
+
+
+def _harness_local_path(value: str, field: str) -> str:
+    """A path on the harness's own machine: absolute, with no ``..`` component."""
+    if not value.startswith("/") or ".." in value.split("/"):
+        raise ValueError(f"{field} must be an absolute harness-local path")
+    return value
 
 
 class _Section(BaseModel):
@@ -55,6 +64,16 @@ class DirectAccess(_Section):
 class RelayAccess(_Section):
     mode: Literal["relay"]
     relay_id: _Text
+    #: A file of the relay's admission plugin decision lines
+    #: (``tools/frp-grant-admission/README.md#the-log``) that the deployment
+    #: keeps current on the harness's machine. Without it, a qualification
+    #: stage checking a lease's admission skips, naming this field.
+    admission_log: _Text | None = None
+
+    @field_validator("admission_log")
+    @classmethod
+    def absolute_admission_log(cls, value: str | None) -> str | None:
+        return value if value is None else _harness_local_path(value, "admission_log")
 
 
 Access = Annotated[DirectAccess | RelayAccess, Field(discriminator="mode")]
@@ -70,6 +89,15 @@ class _Host(_Section):
 class VmHost(_Host):
     domain: Literal["vm"]
     listing_shape: Capacity
+    #: The operator's management client on the host, a systemd service whose
+    #: name this repository cannot know, for host diagnostics to report beside
+    #: the host's own units. Optional.
+    management_unit: _Text | None = None
+
+    @field_validator("management_unit")
+    @classmethod
+    def service_unit_name(cls, value: str | None) -> str | None:
+        return value if value is None else check_service_unit_name(value)
 
     @field_validator("listing_shape")
     @classmethod
@@ -93,9 +121,7 @@ class CleanupOperator(_Section):
     @field_validator("key_path")
     @classmethod
     def absolute_key_path(cls, value: str) -> str:
-        if not value.startswith("/") or ".." in value.split("/"):
-            raise ValueError("key_path must be an absolute harness-local path")
-        return value
+        return _harness_local_path(value, "key_path")
 
 
 class CleanupQualification(_Section):

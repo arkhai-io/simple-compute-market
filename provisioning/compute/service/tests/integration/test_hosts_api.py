@@ -9,6 +9,7 @@ Coverage:
   - INI import upserts correctly and returns the seeded list
   - enable/disable lifecycle transitions are persisted
   - connectivity endpoint delegates to AnsibleService with DB-rendered inventory
+  - VM's host diagnostics job runs under the mock profile and reads back typed
   - The family client's host methods match the API contract end-to-end
 
 What is NOT covered here (unit test jurisdiction):
@@ -22,16 +23,20 @@ rather than its layout.
 """
 
 from __future__ import annotations
+import asyncio
 import shlex
 from types import SimpleNamespace
 
 from compute_provisioning.hosts import ConnectionEnvelope, ProtectedValue
 from compute_provisioning.hosts.db import Host
-from compute_provisioning_ansible import SshConnectionCodec, ssh_connection
+from compute_provisioning_ansible import MockAnsibleRunner, SshConnectionCodec, ssh_connection
 from compute_provisioning_ansible.runner import AnsibleRunner
-from vm_provisioning_operator.models import CreateVmRequest
+from vm_provisioning_adapter.services.mock_output import vm_mock_output
+from vm_provisioning_operator.models import CreateVmRequest, HostDiagnostics
+from vm_provisioning_operator.routes import vm_route
 
 from compute_provisioning_client import ComputeProvisioningError, ComputeProvisioningJobError
+from pydantic import ValidationError
 import pytest
 from sqlalchemy import text
 
@@ -410,6 +415,92 @@ class TestConnectivity:
         with pytest.raises(ComputeProvisioningError) as exc_info:
             await client.family.check_connectivity("ghost")
         assert exc_info.value.status_code == 404
+
+
+class TestHostDiagnostics:
+    """A host diagnostics job submitted through VM's typed client, run by the
+    mock profile's default output, and read back through the typed parse."""
+
+    @pytest.fixture
+    def fake_ansible(self):
+        return MockAnsibleRunner(default_output=vm_mock_output)
+
+    @staticmethod
+    async def _job_count(client) -> int:
+        return (await client.family.list_jobs(limit=100)).total
+
+    @staticmethod
+    async def _finished(client, queue, job_id: str):
+        await asyncio.wait_for(queue.wait_until_idle(), timeout=5)
+        return await client.family.get_job(job_id)
+
+    async def test_a_diagnosis_naming_a_management_unit_succeeds_with_a_fact_the_parse_reads(
+        self, client_and_queue,
+    ):
+        client, queue = client_and_queue
+        await _register(client)
+
+        submit = await client.vm.diagnose_host("kvm1", management_unit="operator-agent.service")
+        final = await self._finished(client, queue, submit.job_id)
+
+        assert final.status == "succeeded"
+        assert final.params["management_unit"] == "operator-agent.service"
+        diagnostics = HostDiagnostics.from_job_result(final.result)
+        assert diagnostics.host == "kvm1"
+        assert diagnostics.management is not None
+        assert diagnostics.management.active_state == "active"
+        assert diagnostics.libvirtd.restart_count == 0
+
+    async def test_a_diagnosis_naming_no_unit_reports_the_host_units(self, client_and_queue):
+        client, queue = client_and_queue
+        await _register(client)
+
+        submit = await client.vm.diagnose_host("kvm1")
+        final = await self._finished(client, queue, submit.job_id)
+
+        diagnostics = HostDiagnostics.from_job_result(final.result)
+        assert diagnostics.management is None
+        assert set(diagnostics.units) == {"libvirtd.service", "frpc-buyers.service"}
+
+    async def test_the_typed_client_refuses_an_invalid_unit_before_sending(self, client_and_queue):
+        client, _ = client_and_queue
+        await _register(client)
+        before = await self._job_count(client)
+
+        with pytest.raises(ValidationError):
+            await client.vm.diagnose_host("kvm1", management_unit="../agent.service")
+
+        assert await self._job_count(client) == before
+
+    async def test_the_route_refuses_an_invalid_unit_and_queues_no_job(self, client_and_queue):
+        """Rejection-path test: the typed client refuses to build this request,
+        so its path and query are written here by hand and signed through the
+        family transport under the route's declaration. It asserts the status
+        and the stored jobs only."""
+        client, _ = client_and_queue
+        await _register(client)
+        before = await self._job_count(client)
+
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.family.authenticated_request(
+                "GET",
+                "/api/v1/hosts/kvm1/diagnostics",
+                query={"management_unit": "../agent.service"},
+                route=vm_route("provisioning_host_diagnostics"),
+            )
+
+        assert refused.value.status_code == 422
+        assert await self._job_count(client) == before
+
+    async def test_an_unknown_host_is_not_found_and_no_job_is_queued(self, client_and_queue):
+        client, _ = client_and_queue
+        before = await self._job_count(client)
+
+        with pytest.raises(ComputeProvisioningError) as missing:
+            await client.vm.diagnose_host("ghost")
+
+        assert missing.value.status_code == 404
+        assert await self._job_count(client) == before
 
 
 class TestSshPort:

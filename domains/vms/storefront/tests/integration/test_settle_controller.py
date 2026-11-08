@@ -1,9 +1,10 @@
 """Integration tests for AdminSettleController.
 
-Tests for POST /api/v1/admin/settle/{escrow_uid}/verify
-and  POST /api/v1/admin/settle/{escrow_uid}/evaluate.
+Tests for POST /api/v1/admin/settle/{escrow_uid}/verify,
+POST /api/v1/admin/settle/{escrow_uid}/evaluate,
+and GET /api/v1/admin/settle/{reference}/wait.
 
-Both endpoints are dry-run (no DB writes). The verify endpoint reads the
+The first two endpoints are dry-run (no DB writes). The verify endpoint reads the
 escrow through the storefront's Alkahest client, the boundary to the chain,
 which these tests replace with one answering as the SDK decodes an ERC-20
 escrow on the development chain. The evaluate endpoint only needs SQLite
@@ -14,6 +15,7 @@ real SQLiteClient (tmp_path), real AdminSettleController wired via container.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
 from typing import AsyncIterator
@@ -36,6 +38,7 @@ from market_core.schemas import (
     derive_settlement_option_id,
 )
 from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
+from market_settlement_runtime import TERMINAL_SETTLEMENT_STATUSES
 
 import market_storefront.container as _container
 from market_storefront.controllers.settle_controller import admin_settle_router
@@ -50,6 +53,7 @@ from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.utils import config as storefront_config
 from tests._settings_overrides import settings_overrides
 from tests.fake_site import FakeSite, site_capacity
+from tests.fulfillment_fixtures import seed_delivery_admission, vm_delivery_evidence
 
 _TEST_SELLER_PRINCIPAL = Identity(
     scheme="eip191",
@@ -468,3 +472,105 @@ class TestEvaluateSettle:
         )
         assert result.get("host_id") == "host-match"
         assert "vm_target" not in result  # provisioning names the guest
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/admin/settle/{reference}/wait
+# ---------------------------------------------------------------------------
+
+
+async def _delivering(db: SQLiteClient, evidence) -> None:
+    """A settlement whose delivery has started: verified evidence, the committed
+    lifecycle boundary, and a delivery record still provisioning."""
+    await db.save_vm_settlement_evidence(evidence)
+    seed_delivery_admission(
+        db,
+        negotiation_id=evidence.negotiation_id,
+        commitment_ref=evidence.settlement_ref,
+    )
+    assert await db.insert_vm_delivery(negotiation_id=evidence.negotiation_id)
+
+
+def _payments_evidence(negotiation_id: str, transaction_id: str):
+    alkahest = vm_delivery_evidence(
+        negotiation_id=negotiation_id, settlement_ref=transaction_id
+    )
+    return replace(
+        alkahest,
+        mechanism="arkhai.payments.v1",
+        evidence={**alkahest.evidence, "source": {"transaction_id": transaction_id}},
+    )
+
+
+class TestSettleWait:
+    """GET /api/v1/admin/settle/{reference}/wait — resolved by the settlement
+    reference, else by the negotiation, whatever the mechanism.
+
+    Each wait here finds its delivery terminal on the first poll, so none waits
+    out a deadline; that a status other than ``ready`` or ``failed`` keeps a wait
+    polling is the kit's, proven in its own tests with an injected clock, and
+    which status a deal without delivery reports is read below from the
+    delivery status the wait reads."""
+
+    async def test_a_payments_deal_is_waited_on_by_its_negotiation_and_its_transaction(
+        self, admin_client
+    ):
+        c, db = admin_client
+        await _delivering(db, _payments_evidence("neg-paid", "txn-paid"))
+        evidence = await db.load_vm_settlement_evidence(negotiation_id="neg-paid")
+        provisioning = await db.load_vm_delivery_status(evidence=evidence)
+        await db.update_vm_delivery(
+            negotiation_id="neg-paid", status="ready", provisioning_job_id="job-paid"
+        )
+
+        ready = [
+            await c.wait_for_settlement(reference, timeout=5)
+            for reference in ("neg-paid", "txn-paid")
+        ]
+
+        assert provisioning["status"] == "provisioning"
+        assert provisioning["status"] not in TERMINAL_SETTLEMENT_STATUSES
+        for waited in ready:
+            assert (waited.ready, waited.status) == (True, "ready")
+            assert waited.provisioning_job_id == "job-paid"
+
+    async def test_an_alkahest_deal_is_waited_on_by_its_escrow(self, admin_client):
+        """The escrow resolves through the evidence recording it, with no
+        escrow row standing in for it."""
+        c, db = admin_client
+        await _delivering(
+            db, vm_delivery_evidence(negotiation_id="neg-escrow", settlement_ref="0xescrow")
+        )
+        await db.update_vm_delivery(
+            negotiation_id="neg-escrow", status="failed", reason="host lost"
+        )
+
+        waited = await c.wait_for_settlement("0xescrow", timeout=5)
+
+        assert (waited.ready, waited.status) == (True, "failed")
+        assert await db.load_escrow(escrow_uid="0xescrow") is None
+
+
+async def test_a_deal_without_delivery_reports_its_evidence_status_to_the_wait(db):
+    """The delivery status the settle wait reads, against the repository's real
+    database: a deal refunded before delivery, or verified with no delivery
+    started, has no delivery record and reports its evidence's own status,
+    which is not terminal."""
+    await db.save_vm_settlement_evidence(_payments_evidence("neg-verified", "txn-verified"))
+    await db.save_vm_settlement_evidence(_payments_evidence("neg-refunded", "txn-refunded"))
+    seed_delivery_admission(db, negotiation_id="neg-refunded", commitment_ref="txn-refunded")
+    await db.record_vm_refund_intent(negotiation_id="neg-refunded")
+    await db.complete_vm_refund(negotiation_id="neg-refunded")
+
+    reported = {
+        reference: await db.load_vm_delivery_status(
+            evidence=await db.load_vm_settlement_evidence_by_ref(settlement_ref=reference)
+        )
+        for reference in ("txn-verified", "txn-refunded")
+    }
+
+    assert reported == {
+        "txn-verified": {"negotiation_id": "neg-verified", "status": "verified"},
+        "txn-refunded": {"negotiation_id": "neg-refunded", "status": "refunded"},
+    }
+    assert not {r["status"] for r in reported.values()} & TERMINAL_SETTLEMENT_STATUSES

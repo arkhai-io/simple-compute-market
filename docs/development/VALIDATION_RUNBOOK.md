@@ -1085,6 +1085,46 @@ proof of successful revocation. Its relay port may remain quarantined after
 capacity is released. An absent target skips before mutation; skipped stages
 are not qualification evidence.
 
+### Run the qualification scenarios on a candidate
+
+Three modules make section 29's observations 2, 4, 5 and 6:
+`e2e_vm_qualification` (observation 2) and `e2e_bare_metal_qualification`
+(observations 4 and 5) buy through the shipped buyer in Arkhai payments, and
+`e2e_real_provisioning_reapply` (observation 6) makes no deal, reapplying
+registrations on the stack the other two's purchases populated. Run them on the
+candidate section 29 freezes, against a stack deployed from it.
+
+Before them, the deployment supplies what they cannot:
+
+- each storefront's payments access, through the storefront charts' `caBundle`
+  option and the payments `api_key` in its secret overlay;
+- a payments target in the runner's `PAYMENTS` section, with the buyer's token in a
+  secret profile and `LANE_OWNED` unset, so an unready target is a blocked skip
+  ([shared payment-scenario configuration](../../e2e-tests/README.md#shared-payment-scenario-configuration));
+- a funded payer account dedicated to the run, since the scenarios check the
+  payer's balance drop against their own debits and fund nothing;
+- a pinned dispute authority identity whose account is real at the payments
+  target; nothing needs to answer at its origin;
+- in the target, optionally, the VM host's `management_unit` and each relay
+  access's `admission_log` (section 24's file; the committed example shows both).
+
+Then run each storefront chart's `helm test`, whose payments-check pod runs
+`check-payments` from the storefront's own image, mounts and secret overlay. A
+failed check is a cause outside the scenarios: fix the deployment, and run no
+module until it passes. Then run the modules, observation 6 after the other two
+on the same stack:
+
+```bash
+make -C e2e-tests test-module MODULE=e2e_vm_qualification ACTIVE_PROFILES=local,real-provisioning-target
+make -C e2e-tests test-module MODULE=e2e_bare_metal_qualification ACTIVE_PROFILES=local,real-provisioning-target
+make -C e2e-tests test-module MODULE=e2e_real_provisioning_reapply ACTIVE_PROFILES=local,real-provisioning-target
+```
+
+Each module logs every observation's outcome after its last stage — made,
+failed, or unproven naming what a skipped stage lacked — and the identifiers each
+stage read. Keep the logs in restricted storage, and report each observation's
+outcome as a sanitized summary.
+
 ## 26. Restore And Cleanup
 
 The scenario leaves its pool, host, capacity declaration, and listing in place,
@@ -1487,13 +1527,15 @@ Do not equate an accepted receipt with successful delivery or a payment hold wit
 
 One ordinary purchase does not qualify real provisioning. Each observation below is owed. A failed observation is recorded as failed; a skipped or unavailable one is recorded as unproven. Neither is inferred from another observation, and its owning check stays open. Mock, native-component, helper, and historical results never stand in for a missing hardware observation.
 
-Before the first destructive cycle, freeze the source candidate and have it independently reviewed and fully validated; bind each cycle to that candidate and its unchanged configuration. The negative admission checks of observation 1 precede any real tenant. Keep the offers closed to general buyers until a paid purchase as described above, with checked GPU work, has passed for each GPU offer, and observations 2, 4, and 5 have passed.
+Observations 2, 4, 5 and 6 are made first by the qualification scenarios (section 25, "Run the qualification scenarios on a candidate"); the procedure above remains an accepted method beside them. A scenario's outcome is per observation: made when every stage the observation requires passed, failed when one failed, and unproven when none failed and one skipped naming a prerequisite, which the outcome names. A module that passes with a skipped stage has not made every observation it covers. Sort a failed or unproven outcome by its cause: one caused by the scenario itself is a defect in the scenario, one caused by product behaviour is recorded failed and handed to a change that owns it, and one caused by topology is recorded unproven, naming the missing input.
+
+Before the first destructive cycle, freeze the source candidate and have it independently reviewed and fully validated; bind each cycle to that candidate and its unchanged configuration. Source is any path that enters a wheel, an image, a chart, or the e2e image, so a documentation-only commit after the run does not change the candidate; any other change makes a new candidate, on which every observation is made again. The negative admission checks of observation 1 precede any real tenant. Keep the offers closed to general buyers until every observation below, 1 to 6, has passed on the candidate, and a paid purchase as described above, with checked GPU work, has passed for each GPU offer. Observation 3 is made only on the controlled direct-access path it names; a deployment without an operator-routable test path records it unproven, and the offers stay closed until it is made. Passing some of the observations opens nothing.
 
 1. **Negative relay admission.** On each buyer relay, before the first paid tenant and after each plugin configuration change, run section 28's admission probe without a grant, then repeat it with a grant whose signature does not verify, a grant for a different port than the one requested, and a grant for a port outside the issuer's range. Expect the plugin's reason codes `grant_missing`, `signature_invalid`, `port_mismatch`, and `port_outside_range` respectively ([reason codes](../../tools/frp-grant-admission/README.md#reason-codes)), each as a registration refusal with the matching plugin `refuse` log entry, no proxy installed, and no connection reaching the backend. Request only ports frps itself allows, so the refusal comes from the plugin rather than from frps. A valid grant's admission is proven by the paid journey, not by this probe.
-2. **Two concurrent VM deals.** Buy two CPU-only VMs through `market buy`, each with its own TEST payment. Keep an SSH heartbeat open on the first guest while the second is created and torn down, and apply section 25's criteria: no observed heartbeat gap over five seconds, both delivered shapes match their agreements, an unrelated key is refused, and each guest is removed and its access ended at teardown. In addition, let both leases expire naturally rather than tearing them down early. Check authenticated management connectivity and the management and libvirtd generations before, during, and after those operations; a restart or lost connection fails the observation. Deals driven through the typed operator clients instead of the buyer exercise the physical path but do not make this observation.
+2. **Two concurrent VM deals.** Buy two CPU-only VMs through `market buy`, each with its own TEST payment. Keep an SSH heartbeat open on the first guest while the second is created and torn down, and apply section 25's criteria: no observed heartbeat gap over five seconds, both delivered shapes match their agreements, an unrelated key is refused, and each guest is removed and its access ended at teardown. In addition, end both leases through the lease watchdog's expiry path, never through an early teardown or a buyer end; moving a lease's agreed end into the past and stepping one watchdog cycle with the watchdog held runs the same service code as waiting out its term. Check authenticated management connectivity before, during, and after those operations, and read the management and libvirtd generations then through the VM operator's host diagnostics job (`diagnose_host`): the management unit keeps one invocation, stays active and adds no restarts, and libvirtd adds no restarts, reports no failed result, and keeps one invocation while the first guest runs, since it is socket-activated and may exit when idle. A restart or lost connection fails the observation. Deals driven through the typed operator clients instead of the buyer exercise the physical path but do not make this observation.
 3. **Direct access.** Repeat the two-VM cycle over direct access, over an operator-routable test path, only in a controlled pool drained as section 27's steps 5 and 6 require and with no unreleased relay lease for the pool (`GET /api/v1/relays/{relay_id}/leases`). Host management stays unexposed, and a pool that retains an active reservation or relay holding is not rebound. Record the result as controlled-path evidence, distinct from external relay acceptance.
-4. **Bare-metal normal cycle.** Buy a bare-metal GPU rental through the buyer and check the pinned relay endpoint, the nonroot tenant, GPU work, and wrong-key refusal. Through the bounded working-data probe, seed tenant activity (a shell, a process, a scheduled job) and working data (home, scratch, path, System V and POSIX IPC objects) beside operator sentinels. After ordinary reclaim, the covered activity, account, private group, data, and IPC are absent, the sentinels are unchanged, fresh access is denied, and capacity is restored.
-5. **Bare-metal refusal and retry.** In a successor rental, confirm a fresh UID and key and no access to the predecessor's data. Plant one nonce-scoped descendant owned by another UID inside a tenant-owned directory that cleanup selects; a foreign entry at the top of a shared root is preserved rather than refused, so it proves nothing here. Ordinary reclaim must refuse it: the cleanup job is queued for retry, not terminal, with an error recorded, a retry count of at least one and within its maximum, and a next retry time set; its log names the foreign descendant; the lease stays `releasing` and its capacity is not advertised as available; and an actionable operator notification is emitted, recorded with where it was observed. Repair only that fixture before retries are exhausted; the same job then completes, the final inventory is clean, and the sentinels are unchanged. A forced release, a manual retry, or a reset of the consumed-UID history does not satisfy this observation, and a terminal failure stays a failure with audited recovery.
+4. **Bare-metal normal cycle.** Buy a bare-metal rental through the buyer and check the pinned relay endpoint, the nonroot tenant, and wrong-key refusal. GPU work is not part of this observation: it is owed by the paid purchase with checked GPU work required for each GPU offer above. Through the bounded working-data probe, seed tenant activity (a shell, a process, a scheduled job) and working data (home, scratch, path, System V and POSIX IPC objects) beside operator sentinels. After ordinary reclaim, the covered activity, account, private group, data, and IPC are absent, the sentinels are unchanged, fresh access is denied, and capacity is restored.
+5. **Bare-metal refusal and retry.** In a successor rental, confirm a fresh UID and key and no access to the predecessor's data. Plant one nonce-scoped descendant owned by another UID inside a tenant-owned directory that cleanup selects; a foreign entry at the top of a shared root is preserved rather than refused, so it proves nothing here. Ordinary reclaim must refuse it: the cleanup job is queued for retry, not terminal, with an error recorded, a retry count of at least one and within its maximum, and a next retry time set; its log names the foreign descendant; the lease stays `releasing` and its capacity is not advertised as available; and the actionable operator notification — the reclaim job's recorded error and scheduled retry — is read through the operator's typed job API, which is where it is observed. No notification is pushed to an operator. Repair only that fixture before retries are exhausted; the same job then completes, the final inventory is clean, and the sentinels are unchanged. A forced release, a manual retry, or a reset of the consumed-UID history does not satisfy this observation, and a terminal failure stays a failure with audited recovery.
 6. **Repeat registration and adoption.** Reapply the canonical VM and bare-metal registrations and run another publication cycle on the same stack. As in section 25's second run, existing listings are adopted with their identities, states, and pauses intact; no duplicate allocator, host, pool, resource, or listing appears; unexpired relay quarantine is retained; and the consumed-UID history is unchanged.
 
 For each observation, correlate the buyer run, Agreement and receipt, reservation, provisioning jobs, and grant identifiers in restricted evidence. Relay port reuse follows grant expiry and quarantine while compute capacity follows verified teardown, so do not require an immediate port reuse.

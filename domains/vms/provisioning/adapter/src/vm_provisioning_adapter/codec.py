@@ -92,6 +92,7 @@ VM_RESULT_FACTS: Mapping[str, str] = {
     "reset_password": "vm_password_reset_data",
     "vm_remove": "vm_remove_data",
     "check": "check_data",
+    "diagnose": "host_diagnostics_data",
 }
 
 #: The ``action`` each VM action's fact names, as its role prints it. The shared
@@ -111,7 +112,16 @@ VM_FACT_ACTIONS: Mapping[str, str] = {
     "reset_password": "reset_password",
     "vm_remove": "vm_remove",
     "check": "check",
+    "diagnose": "diagnose",
 }
+
+#: A host diagnostics fact's fields, which its result reports as printed: the
+#: operator client's ``HostDiagnostics`` reads them, and refuses a result
+#: lacking one. A zero guest count and an absent management unit are values,
+#: so each is copied whenever the fact has it.
+VM_DIAGNOSTICS_FIELDS = (
+    "boot_id", "uptime_seconds", "kernel", "running_guests", "management_unit", "units",
+)
 
 # The roles a playbook's ``authentication`` fact may carry, in the order their
 # credentials are reported.
@@ -201,6 +211,7 @@ def vm_job_params(stored: Mapping[str, Any], *, host_id: str | None = None) -> V
         gcs_bucket_url=stored.get("gcs_bucket_url"),
         gcs_image_path=stored.get("gcs_image_path"),
         escrow_uid=stored.get("escrow_uid"),
+        management_unit=stored.get("management_unit"),
         max_retries=stored.get("max_retries"),
         playbook_path=stored.get("playbook_path"),
         provider_extra_vars=stored.get("provider_extra_vars") or {},
@@ -353,7 +364,9 @@ class VmAnsibleCodec:
             variables[RELAY_GRANT_VARIABLE] = params.relay_grant
         if params.vm_remote_port:
             variables["vm_remote_port"] = params.vm_remote_port
-        for name in ("golden_image_name", "gcs_bucket_url", "gcs_image_path", "escrow_uid"):
+        for name in (
+            "golden_image_name", "gcs_bucket_url", "gcs_image_path", "escrow_uid", "management_unit",
+        ):
             if getattr(params, name):
                 variables[name] = getattr(params, name)
         variables.update(self._root_credentials(params))
@@ -529,6 +542,10 @@ def build_result_payload(result: VmPlaybookOutput) -> dict:
         if ar.get(key):
             payload[key] = ar[key]
 
+    for key in VM_DIAGNOSTICS_FIELDS:
+        if key in ar:
+            payload[key] = ar[key]
+
     if ar.get("vms"):
         payload["vms"] = ar["vms"]
         payload["vm_count"] = ar.get("vm_count")
@@ -684,6 +701,7 @@ __all__ = [
     "VM_NON_RETRYABLE_FAILURES",
     "VM_RESULT_FACTS",
     "VM_CREATE_DETAIL",
+    "VM_DIAGNOSTICS_FIELDS",
     "VM_FACT_ACTIONS",
     "VM_SECRET_FIELDS",
     "VmAnsibleCodec",

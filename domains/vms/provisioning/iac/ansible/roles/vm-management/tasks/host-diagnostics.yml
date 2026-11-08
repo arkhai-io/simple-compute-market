@@ -1,0 +1,24 @@
+---
+# VM Management - Host Diagnostics
+# Reads the host's boot, uptime, kernel and running guest count, and the
+# generation of libvirtd, the buyers' relay client and an optional management
+# unit, changing no service or configuration (files/host_diagnostics.sh says what
+# its guest count may start). The management unit arrives as the job's `management_unit` parameter,
+# already checked against systemd's service unit-name syntax by the service; it is
+# quoted here all the same, as any argument is.
+
+- name: Read the host's diagnostics
+  script: >-
+    host_diagnostics.sh
+    {{ management_unit | quote if management_unit | default('', true) | length > 0 else '' }}
+  args:
+    executable: /bin/bash
+  register: host_diagnostics_read
+  changed_when: false
+  delegate_to: "{{ target_host }}"
+
+- name: Create JSON data structure for host diagnostics
+  set_fact:
+    host_diagnostics_data: >-
+      {{ host_diagnostics_read.stdout | from_json
+         | combine({'action': 'diagnose', 'host': target_host, 'status': 'success'}) }}

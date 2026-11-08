@@ -28,7 +28,7 @@ import unittest
 
 # The modules that run a shipped task through ansible-playbook. Each skips
 # without a supported Ansible and its callback; here a skip is a failure.
-NATIVE = ["test_vm_relay_roles.py"]
+NATIVE = ["test_vm_relay_roles.py", "test_host_diagnostics.py"]
 
 suite = unittest.TestSuite(
     unittest.defaultTestLoader.discover("tests", pattern=name, top_level_dir="tests")

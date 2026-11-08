@@ -25,7 +25,8 @@ stages:
 
   00e1 The service executes VM jobs for real (in place of the mock lanes' 00e)
   00f2 The registered host is the target's, connection and all
-  02b  Create the GPU-less listing paused, or adopt the one an earlier run left
+  02b  Create the GPU-less listing paused, offering every ready mechanism, or
+       adopt the one an earlier run left, which must offer Alkahest
   03b  Resume it into publication at the registry
   08a2 The settlement preview chose the target host, so 08b may settle
   08b3 The create job ran on the target host and succeeded; its guest recorded
@@ -55,11 +56,7 @@ import time
 from datetime import datetime, timezone
 
 import pytest
-from market_alkahest.alkahest import (
-    get_alkahest_network,
-    resolve_alkahest_address_config,
-)
-from market_alkahest.dev_chain import anvil_address_book_path
+from market_alkahest.plans import ALKAHEST_MECHANISM
 
 from e2e_harness.real_provisioning_target import TargetNotConfigured, load_real_provisioning_target
 from e2e_harness.settings import settings
@@ -71,7 +68,6 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     E2E_LEASE_EXPIRY_BACKDATE,
     alkahest_opening,
     DURATION_HOURS,
-    LISTED_HOURLY_RATE,
     Stage00_LifecycleHeld,
     Stage00a_StorefrontHealth,
     Stage00b_RegistryReachable,
@@ -91,6 +87,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage08b_SettlementSubmittedAndJobQueued,
     Stage09a_FulfillmentConvergesToActive,
     Stage09b_SettlementReadyAndCredentials,
+    Stage09c1_LateSettlementKeepsTheWindow,
     Stage09c_LeaseRecorded,
     Stage10a_LeaseExpirySetup,
     Stage10b_LeaseCycleBeginsTeardown,
@@ -103,13 +100,18 @@ from tests.e2e.roles.helpers.compute_deal import (
 from tests.e2e.roles.helpers.escrow import create_buyer_escrow
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.ssh_access import memory_within_tolerance, ssh_session
+from tests.e2e.roles.scenarios.vms.composed_listing import (
+    create_or_adopt_listing,
+    listing_mechanisms,
+    listing_settlements,
+    real_target_resource,
+)
 from tests.e2e.roles.scenarios.vms.conftest import (
     capacity_site_id,
     capacity_source_for,
     step_listing_reconciliation,
 )
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
-    REAL_REGION,
     REAL_RESOURCE_ID,
     JobWatch,
     RealVmComputeDealDriver,
@@ -135,22 +137,6 @@ pytestmark = [
     ),
     pytest.mark.e2e_vm_real_provisioning,
 ]
-
-# The canonical deal's token, at the asking rate every lane's listing advertises.
-DEMAND_RESOURCE = {"token": DEAL_TOKEN, "amount": LISTED_HOURLY_RATE}
-# Resolved from the dev chain's address book, as a real seller's `market
-# publish` resolves it; the deal settles on the escrow the listing advertises.
-_ALKAHEST_CFG = resolve_alkahest_address_config(
-    get_alkahest_network("anvil"),
-    config_path=str(anvil_address_book_path()),
-)
-ACCEPTED_ESCROWS = [{
-    "chain_name": "anvil",
-    "escrow_address": str(_ALKAHEST_CFG.erc20_addresses.escrow_obligation_default).lower(),
-    "literal_fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
-    "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
-}]
-
 
 # ---------------------------------------------------------------------------
 # The target, and what the module writes nothing before
@@ -210,14 +196,7 @@ def buyer_key(ssh):
 @pytest.fixture(scope="module")
 def offer_resource(real_vm_target) -> dict:
     """The target's explicit guest listing shape, and no GPU."""
-    return {
-        "offering_mode": "vm",
-        "interruptible": True,
-        "resource_id": REAL_RESOURCE_ID,
-        **real_vm_target.listing_shape.model_dump(),
-        "sla": 90.0,
-        "region": REAL_REGION,
-    }
+    return real_target_resource(real_vm_target)
 
 
 @pytest.fixture(scope="module")
@@ -347,34 +326,31 @@ class TestStage02b_ListingCreated:
         self, deal_driver: RealVmComputeDealDriver, storefront_seller_client,
         storefront_admin_client, offer_resource, deal_state: RealVmDealState,
     ):
-        """Create the listing for everything the host sells, paused, or adopt
-        the one an earlier run against this stack left.
+        """Create the resource's listing paused, offering every mechanism the
+        storefront reports ready, or adopt the one another run against this
+        stack left (``composed_listing.py``).
 
         Its capacity source states the GPU-less shape the pool states, derived
         from the same resource, so the storefront finds the listing's shape and
-        its source's in agreement. That source backs one listing for good, so a
-        rerun takes over the open listing on it, paused, and fails naming the
-        listings where there is not exactly one open listing of the target's
-        shape.
+        its source's in agreement. That source backs one listing for good, so
+        an earlier run, or a module dealing on the resource by another
+        mechanism, leaves the listing this run adopts: the only one on the
+        resource, open, of the target's shape, offering Alkahest. Any other
+        fails naming the listings and their options.
         """
         require_state(deal_state, "_registry_reachable", "_target_host_confirmed")
-        adopted = deal_driver.listing_for_run()
-        if adopted is not None:
-            deal_state.seller_listing_id = adopted.listing_id
-            log.info("[02b] Listing %s, an earlier run's, adopted paused", adopted.listing_id)
-            return
-        resp = storefront_seller_client.create_listing(
-            listing_resource=offer_resource,
-            capacity_source=capacity_source_for(offer_resource),
-            accepted_escrows=ACCEPTED_ESCROWS,
+        listing, adopted = create_or_adopt_listing(
+            storefront_admin_client=storefront_admin_client,
+            storefront_seller_client=storefront_seller_client,
+            resource=offer_resource,
+            shape=deal_driver.target.listing_shape.model_dump(),
+            mechanism=ALKAHEST_MECHANISM,
+            settlements=listing_settlements(),
             max_duration_seconds=DURATION_HOURS * 3600,
-            paused=True,
         )
-        assert resp.listing_id, f"listing creation returned no id: {resp}"
-        listing = storefront_admin_client.get_listing(resp.listing_id)
-        assert (listing.status, listing.paused) == ("open", True), listing
-        deal_state.seller_listing_id = resp.listing_id
-        log.info("[02b] Listing %s created paused", resp.listing_id)
+        deal_state.seller_listing_id = listing.listing_id
+        log.info("[02b] Listing %s %s paused, offering %s", listing.listing_id,
+                 "adopted" if adopted else "created", list(listing_mechanisms(listing)))
 
 
 class TestStage03b_ListingPublished:
@@ -440,7 +416,7 @@ class TestStage08a2_SettlementPreviewChoseTheTarget:
         submits settlement only once this passes.
         """
         require_state(deal_state, "_evaluate_settle_passed")
-        chosen = deal_state._evaluate_settle_host_id
+        chosen = deal_state.expected_host_id
         assert chosen == real_vm_target.host_id, (
             f"the settlement preview chose host {chosen!r}, not the target "
             f"{real_vm_target.host_id!r}; settlement is not submitted"
@@ -500,6 +476,10 @@ class TestStage09b_SettlementReadyAndCredentials(Stage09b_SettlementReadyAndCred
 
 
 class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
+    pass
+
+
+class TestStage09c1_LateSettlementKeepsTheWindow(Stage09c1_LateSettlementKeepsTheWindow):
     pass
 
 

@@ -304,6 +304,15 @@ def storefront_loops_held(bare_metal_storefront_admin):
 
 
 @pytest.fixture(scope="module")
+def bare_metal_storefront_loops_held(bare_metal_storefront_admin):
+    """The bare-metal storefront's lifecycle loops, held for a module outside
+    this lane's directory that also holds another storefront's under the
+    lane's usual name."""
+    with compute_deal.storefront_loops_held(bare_metal_storefront_admin) as held:
+        yield held
+
+
+@pytest.fixture(scope="module")
 def fulfillment_convergence_held(provisioning_client):
     """The site's fulfillment convergence, held for the module; a module that
     needs a transition advances it itself."""

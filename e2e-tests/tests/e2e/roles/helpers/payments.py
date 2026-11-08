@@ -60,6 +60,42 @@ def payment_flag(name: str) -> bool:
     pytest.fail(f"PAYMENTS.{name} must be true or false, not {value!r}")
 
 
+#: The compute dispute coverage a payments option the harness states carries
+#: when the run names none: the fourteen-day minimum filing window of the
+#: Arkhai mediation contract's default authority description, plus a day
+#: covering the delivery deadline.
+DEFAULT_DISPUTE_WINDOW_SECONDS = 15 * 86400
+
+
+def dispute_window_seconds(*, delivery_deadline_seconds: int) -> int:
+    """PAYMENTS.DISPUTE_WINDOW_SECONDS: the dispute coverage, in whole seconds,
+    that every compute payments option the harness states carries, and that it
+    expects of an option on a listing it created.
+
+    The market refuses compute terms whose coverage is less than the delivery
+    deadline plus the dispute authority's advertised minimum filing window, so
+    a run against an authority advertising a shorter minimum may name a
+    shorter coverage. The harness cannot read that minimum, so a value fails
+    here only when it is not an integer or does not cover
+    ``delivery_deadline_seconds``; the authority's minimum is checked where
+    the option is published.
+    """
+    value = payment_setting("DISPUTE_WINDOW_SECONDS", DEFAULT_DISPUTE_WINDOW_SECONDS)
+    seconds = None
+    # A bool is an int to Python, but no number of seconds.
+    if type(value) is int:
+        seconds = value
+    elif isinstance(value, str) and value.strip().isdecimal():
+        seconds = int(value.strip())
+    if seconds is None or seconds < delivery_deadline_seconds:
+        pytest.fail(
+            "PAYMENTS.DISPUTE_WINDOW_SECONDS must be an integer number of seconds "
+            f"covering the {delivery_deadline_seconds}-second delivery deadline, "
+            f"not {value!r}"
+        )
+    return seconds
+
+
 def target_ready(
     url: str,
     *,

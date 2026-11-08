@@ -30,6 +30,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage08b_SettlementSubmittedAndJobQueued,
     Stage09a_FulfillmentConvergesToActive,
     Stage09b_SettlementReadyAndCredentials,
+    Stage09c1_LateSettlementKeepsTheWindow,
     Stage09c_LeaseRecorded,
     Stage10a_LeaseExpirySetup,
     Stage10b_LeaseCycleBeginsTeardown,
@@ -270,7 +271,7 @@ class TestStage08a_EvaluateSettle(Stage08a_EvaluateSettle):
 class TestStage08a2_SettlementPreviewChoseTheTarget:
     def test_08a2_preview_selected_target(self, deal_driver, deal_state):
         require_state(deal_state, "_evaluate_settle_passed")
-        assert deal_state._evaluate_settle_host_id == deal_driver.target.host_id, (
+        assert deal_state.expected_host_id == deal_driver.target.host_id, (
             "settlement preview selected another host; settlement is not submitted"
         )
         deal_driver.assert_management_connected()
@@ -306,6 +307,10 @@ class TestStage09bb_EvidencePublishedForTheFulfilledEscrow(BareMetalEvidencePubl
 
 
 class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
+    pass
+
+
+class TestStage09c1_LateSettlementKeepsTheWindow(Stage09c1_LateSettlementKeepsTheWindow):
     pass
 
 

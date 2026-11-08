@@ -1,7 +1,7 @@
 """Typed VM methods over the compute provisioning client's transport.
 
 The family client names no domain's routes. VM's operations and its host
-capacity check are VM's, so these clients
+capacity check and diagnostics are VM's, so these clients
 wrap any transport offering ``authenticated_request`` -- the family's async or
 sync client -- and name each route's declaration from ``routes``, the same
 declarations the provisioning service assembles into the table its request
@@ -17,7 +17,7 @@ from typing import Any, Optional, Protocol
 
 from compute_provisioning_contracts import JobSubmitResponse
 
-from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
+from vm_provisioning_operator.models import CreateVmRequest, HostDiagnosticsRequest, VmActionRequest
 from vm_provisioning_operator.routes import vm_route
 
 
@@ -85,6 +85,19 @@ def _check_capacity(host: str) -> _Call:
     return _Call("provisioning_host_capacity", "GET", f"/api/v1/hosts/{host}/capacity", parse=_submitted)
 
 
+def _diagnose_host(host: str, management_unit: Optional[str]) -> _Call:
+    # The request model refuses a unit that is not a systemd service unit name,
+    # so an invalid one raises here and is never sent.
+    query = HostDiagnosticsRequest(management_unit=management_unit).model_dump(exclude_none=True)
+    return _Call(
+        "provisioning_host_diagnostics",
+        "GET",
+        f"/api/v1/hosts/{host}/diagnostics",
+        query=query,
+        parse=_submitted,
+    )
+
+
 class VmOperatorClient:
     """VM's provisioning routes over an async signing transport."""
 
@@ -129,6 +142,15 @@ class VmOperatorClient:
     async def check_capacity(self, host: str) -> JobSubmitResponse:
         return await self._run(_check_capacity(host))
 
+    async def diagnose_host(self, host_id: str, management_unit: Optional[str] = None) -> JobSubmitResponse:
+        """Submit a host diagnostics job; ``HostDiagnostics.from_job_result``
+        reads the succeeded job's result. The client does not wait on the job.
+
+        Raises ``pydantic.ValidationError`` before sending for a
+        ``management_unit`` that is not a systemd service unit name.
+        """
+        return await self._run(_diagnose_host(host_id, management_unit))
+
 
 class SyncVmOperatorClient:
     """VM's provisioning routes over a sync signing transport."""
@@ -171,6 +193,10 @@ class SyncVmOperatorClient:
 
     def check_capacity(self, host: str) -> JobSubmitResponse:
         return self._run(_check_capacity(host))
+
+    def diagnose_host(self, host_id: str, management_unit: Optional[str] = None) -> JobSubmitResponse:
+        """See ``VmOperatorClient.diagnose_host``."""
+        return self._run(_diagnose_host(host_id, management_unit))
 
 
 __all__ = ["SyncVmOperatorClient", "VmOperatorClient"]
