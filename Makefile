@@ -17,7 +17,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
 .PHONY: test-lane-double-controls dist-lane-double-controls test-payments-lane-double test-mediation-lane-double build-tools
-.PHONY: dist-arkhai-core-registry
+.PHONY: dist-arkhai-core-registry dist-release-set
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
@@ -37,10 +37,19 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
 # The wheel set a publishing path builds; publishing workflows call this name.
+# It is the release set alone: the release workflow tars .dist as the
+# marketplace wheelhouse, which carries no lane doubles' control contract, since
+# no operator installs it.
 dist-release: ## Build the wheel set for a publishing path.
-	$(MAKE) dist
+	$(MAKE) dist-release-set
 
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client dist-lane-double-controls
+# Every internal wheel but the lane doubles' control contract.
+dist-release-set:dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client
+
+# The release set and the lane doubles' control contract, which the e2e runner
+# image and both lane doubles' images install from .dist, and their locks resolve
+# from it.
+dist: dist-release-set dist-lane-double-controls
 
 dist-ci: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client dist-lane-double-controls ## Build repository-owned Python wheels without fetching separately released artifacts.
 

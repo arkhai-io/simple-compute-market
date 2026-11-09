@@ -1521,14 +1521,34 @@ checks its mediation configuration from its own container".
 Delivers a release wheel set without the distribution only tests depend on (D20).
 Files: the root `Makefile`, `scripts/tests/`.
 
-- [ ] 9.1 Root `Makefile`: a target building the release set, whose prerequisites are
+- [x] 9.1 Root `Makefile`: a target building the release set, whose prerequisites are
       every current prerequisite of `dist` but `dist-lane-double-controls`; `dist`
       builds that target and `dist-lane-double-controls`, so the lanes, CI and
       validation, whose images install the controls wheel from `.dist`, build what
       they build today; `dist-release` builds the release set alone. `dist-ci` and
       `.github/workflows/release.yml` are unchanged: the workflow already runs
       `make dist-clean` before `make dist-release`. (D20)
-- [ ] 9.2 Verification.
+      Done: `dist-release-set` (phony) holds `dist`'s former prerequisites less
+      `dist-lane-double-controls`; `dist` is `dist-release-set
+      dist-lane-double-controls`; `dist-release` keeps its recursive form, now
+      `$(MAKE) dist-release-set`. Comments above each say which set it is and
+      why. No document under `docs/` names `dist-release` or the wheelhouse
+      archive yet, so nothing permanent became false; 10.9's D20 writes
+      `RELEASING.md`.
+      Found, for the owner: the release set still builds
+      `arkhai-apicredits-sample-app` (`dist-domains` → `domains/Makefile`'s
+      `dist-apicredits-sample-app`), the demo API the end-to-end harness drives,
+      which `RELEASING.md` already leaves unpublished. D20's title and its
+      principle for promotion ("the release wheelhouse carries no distribution
+      only tests depend on") therefore say more than this section delivers,
+      which is the controls wheel alone, as 9.1 prescribes. The Makefile's
+      comments name only the controls contract. Either 10.9 promotes D20 as
+      stated for the controls wheel, or the sample app leaves the release set
+      too, which the design has not decided (the API-credit lane's sample-app
+      image installs its wheel from `.dist`, so `dist` would keep it, as it
+      keeps the controls wheel). Recorded for the round's triage; nothing here
+      decides it.
+- [x] 9.2 Verification.
       Unit (`make test-release-tooling`): a case in
       `scripts/tests/test_change_build_and_helm_targets.py`, reading `make -n` as
       that file does, holds that `dist-release` builds no `lane-double-controls`
@@ -1538,6 +1558,34 @@ Files: the root `Makefile`, `scripts/tests/`.
       part runs the release workflow.
       Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — the
       release-tooling suite passes with the new case.
+      Evidence: unit, `make test-release-tooling` — 2698 passed, among them
+      `scripts/tests/test_init_targets.py::test_the_release_set_builds_every_wheel_dist_does_but_the_lane_controls`.
+      Correction to the planned file: the case is in `test_init_targets.py`, not
+      `test_change_build_and_helm_targets.py`, because that module's `_built`
+      already reads a wheel target through `make -n -w` (recursive makes run
+      under `-n`, their wheel commands printed, not run) and resolves each
+      `uv build` or `make build` to its project directory. The case compares
+      those sets: `dist` builds exactly one project the release set does not,
+      `tools/lane-double-controls`; the release set is within `dist`'s and
+      holds `kit/identity` and `core`; `dist-ci` still builds the controls
+      wheel. The test was not run against the former `dist-release` (`$(MAKE)
+      dist`), under which the two sets would be equal.
+      `scripts/change-workflow run pre-commit`, run last over the finished
+      section: `after-functional-change`, `pre-commit-functional` (`make
+      check-packaging`, which builds `dist`, then every suite) and `pre-commit`
+      (the index, tasks, skills and strict OpenSpec checks, then
+      `check-repository`, comment hygiene included) all passed, exit 0.
+      Handoff: the fresh-context check found the sample-app gap recorded under
+      9.1, and that `BUILD_AND_PACKAGING.md`'s "The wheelhouse" describes `make
+      dist` while `RELEASING.md`, D20's destination, covers PyPI publishing;
+      10.9 weighs which document states the release set, by `openspec/README.md`'s
+      placement table (build and packaging conventions in
+      `BUILD_AND_PACKAGING.md`).
+      End-to-end scenarios covering the section once deployed: none; the lanes
+      build `dist`, unchanged in what it builds.
+      Owed by validation: confirmed — `tests.yml`, job `test ·
+      test-deployment-packaging`. The release workflow itself is not run by
+      any validation part.
 
 ## 10. Closeout
 
