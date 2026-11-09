@@ -8,10 +8,10 @@ Six services own SQLite state, and only compute provisioning separates migration
 - A new foundation kit holds one in-house migration engine, used by every in-house service and every kit that owns tables, applying each migration and its record in one transaction; the registry keeps Alembic behind the same command, check result, and refusal message.
 - A clean sweep: each chain begins at baselines of fixed DDL — for compute provisioning, both compute storefronts, and the registry, reproducing the schema the v0.3.0 release builds at startup; v0.3.0 databases of compute provisioning, both compute storefronts, and the registry are adopted, and older ones are refused as unsupported; the API-credit services are swept without an adoption path. The storefronts' unversioned bootstrap, every pre-v0.3.0 migration, the registry's eighteen revisions (squashed into one baseline revision), the frozen tables, and `market-storefront migrate-storefront-domains` are removed.
 - No schema change outside a migration chain: kits' and domains' table creation at store open, and the storefront's index creation after its chain, move into one migration after the baseline, which creates on an adopted v0.3.0 database whatever v0.3.0 had not yet created; the API-credit service's `default` pool is seeded at startup instead of by migration.
-- A migration after the baseline rewrites compute provisioning's stored `ssh` version-1 connections, on hosts and unfinished jobs, to version 2; the host contract's connection `version` becomes required.
+- A migration after the baseline rewrites every compute provisioning host's stored `ssh` version-1 connection to version 2, so no job dispatched after the upgrade fails on one; the host contract's connection `version` becomes required. A reservation whose teardown already failed on a version-1 host is recovered by the operator's manual teardown and force-release, as the operator handbook's upgrade procedure states.
 - Each storefront's publication pass closes, at each registry, open listings under its own principal and offering modes that it does not hold open.
 - Permanent documents use *role* for an actor and *service* for a stateful process, throughout.
-- Breaking for operators: pre-v0.3.0 databases and every existing API-credit database must start fresh; an image rolled back over a migrated database is refused; a host submission must state its connection version.
+- Breaking for operators: pre-v0.3.0 databases and every existing API-credit database must start fresh; an image rolled back over a migrated database is refused; a host submission must state its connection version; a lease left `release_failed` on a version-1 host before the upgrade needs a manual teardown before force-release.
 
 ## Capabilities
 
@@ -23,7 +23,7 @@ None.
 
 - `deployment-state`: every stateful service migrates through its packaged command before startup, checks the exact set of its chain without DDL, begins its chain at the v0.3.0 baseline, records each migration atomically, and changes no schema outside its chain; a chart's only init container is the service's own migration; the legacy storefront domain migration is removed.
 - `storefront-publication`: a storefront retires registry listings it does not hold open.
-- `physical-provisioning`: stored `ssh` version-1 connections are rewritten to version 2 by migration, and a connection submission must state its version.
+- `physical-provisioning`: hosts' stored `ssh` version-1 connections are rewritten to version 2 by migration, and a connection submission must state its version.
 
 ## Dependencies and Related Changes
 
@@ -69,5 +69,5 @@ Touches every stateful service's database construction, migration modules and st
 - D12: no permanent destination — it records how the requirements change, which the archived specifications then state.
 - D13: no permanent destination — effects on other changes are recorded in those changes and the change index at closeout.
 - D14 — the check mode: `openspec/specs/deployment-state/spec.md` (archive); `docs/operator-handbook.md`, the upgrade procedure.
-- D15 — `ssh` connection repair and required version: `openspec/specs/physical-provisioning/spec.md` (archive) and `openspec/specs/physical-provisioning/architecture.md`, "The host registry owns the connection"; registry-listing retirement: `openspec/specs/storefront-publication/spec.md` (archive) and `openspec/specs/storefront-publication/architecture.md`; option-ID policy at upgrade: `docs/operator-handbook.md`.
+- D15 — `ssh` connection repair and required version: `openspec/specs/physical-provisioning/spec.md` (archive) and `openspec/specs/physical-provisioning/architecture.md`, "The host registry owns the connection"; recovering a lease left `release_failed` on a version-1 host by manual teardown and force-release: `docs/operator-handbook.md`, the upgrade procedure; re-running a teardown that failed before its executor ran, unowned: `docs/development/ROADMAP.md`, Goal 1's open gaps; registry-listing retirement: `openspec/specs/storefront-publication/spec.md` (archive) and `openspec/specs/storefront-publication/architecture.md`; option-ID policy at upgrade: `docs/operator-handbook.md`.
 - D16 — role and service: `docs/development/ARCHITECTURE.md`, "Terms"; the permanent documents' uses made consistent; the mechanism's guidance in `docs/development/DEPLOYMENT_AND_CONFIG.md` and the release-time floor decision in `docs/development/RELEASING.md`.

@@ -78,8 +78,9 @@ connection's version, as opaque material it neither reads nor decrypts. A stored
 connection MUST NOT be rewritten to another version except by a submission that states
 that version or by a recorded migration whose mapping from the stored version is exact;
 no reader upgrades a stored connection. The provisioning migration chain MUST rewrite
-every `ssh` connection stored at version 1, on hosts and on jobs not yet finished, to
-version 2 with the same public fields and protected values.
+every host's `ssh` connection stored at version 1 to version 2 with the same public
+fields and protected values; a job holds no copy of a connection, reading its host's
+when it is dispatched.
 
 #### Scenario: A compute domain needs another connection kind
 
@@ -129,20 +130,13 @@ version 2 with the same public fields and protected values.
 #### Scenario: A provisioning database holding version-1 connections is migrated
 
 - **WHEN** the provisioning migration command runs against a database with hosts stored
-  at `ssh` version 1 and a queued create job and a pending teardown job that captured
-  those connections
-- **THEN** the hosts and both jobs hold `ssh` version 2 connections with the same public
-  fields and protected values, and the teardown and the create run against them
+  at `ssh` version 1 and a queued create job and a queued teardown job naming those hosts
+- **THEN** the hosts are stored at `ssh` version 2 with the same public fields and
+  protected values, the jobs are unchanged, and the create and the teardown run against
+  version-2 connections when they are dispatched
 
 #### Scenario: A version-1 connection's fields are not valid at version 2
 
-- **WHEN** the provisioning migration finds a stored `ssh` version 1 connection whose
-  public fields the version-2 codec refuses
-- **THEN** the migration fails naming the host or job, and nothing is rewritten
-
-#### Scenario: A release that failed on a version-1 connection is retried after migration
-
-- **WHEN** a reservation left `release_failed` because its teardown job held a version-1
-  connection is retried after the migration
-- **THEN** the teardown runs against the version-2 connection and the reservation
-  releases without a force-release
+- **WHEN** the provisioning migration finds a host's stored `ssh` version 1 connection
+  whose public fields the version-2 codec refuses
+- **THEN** the migration fails naming the host, and nothing is rewritten
