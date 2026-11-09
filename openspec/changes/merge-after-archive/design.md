@@ -177,8 +177,10 @@ guard reads only that result, never a ref, so a later fetch — after the pull r
 opens, by anyone — cannot make the same exit name a merge, and the computation stays
 off the network and needs no commit object (11 F1). A later archive cleanup run's exit
 is not guarded. An archive cleanup line with no `landing` — every one written before
-this engine, and one for a change whose last merge recorded no branch and which has no
-clone — is read as checked, so a change archived before this engine stays at `done`.
+this engine, and one for a change for which the engine resolves no source (D10) — is
+read as checked, so a change archived before this engine stays at `done`; the log's
+writer refuses a new finished cleanup line without `landing` whenever a source
+resolves, so a fetch that failed cannot pass for a check (26 F1).
 After the pull request opens, the merge after the archive starts only by the owner's
 direction to `{"step": "late-merge"}`, recorded by the orchestrating session on their
 word.
@@ -316,25 +318,36 @@ whether or not anything was merged (11 F1, 11 F2, 18 F4). `remote` is named as t
 checkout the run ran in names it — `origin`, a clone's `workspace` for a branch only
 the owner's workspace holds, as the merge skill chooses it — or `.` for a branch the
 checkout holds itself, Git's own name for a local upstream. The engine enforces it in
-code: the outcome check refuses a merge's `finished` outcome without a well-formed
-`landing`, and the log's writer refuses a finished merge's line whose `remote` is
-neither one of the checkout's remotes nor `.`, or whose recorded commit `HEAD` does
-not contain, which proves the merge brought it in. A merge's `question`, `stopped`, or
+code: the outcome check refuses a malformed `landing`, and the log's writer, which
+reads the log, refuses a finished merge's line without one — but for the repair below
+of a merge logged before the field — or whose `remote` is neither one of the
+checkout's remotes nor `.`, or whose recorded commit `HEAD` does not contain, which
+proves the merge brought it in. A merge's `question`, `stopped`, or
 `returned` outcome need not carry it (18 F1): at a conflict the merge leaves in
 progress for the owner the fetched commit is in `MERGE_HEAD`, not in `HEAD`, and a stop
 before the fetch has none, yet every outcome of a run is logged (CW-1a4d). A repair
 run, after a failed validation of the merged `HEAD`, fetches nothing; its finished
 outcome carries the `landing` of the merge it repairs, read from the log, so the last
-finished merge's record stays the branch the merge brought in. For archive cleanup's
-line the writer records whether the run's commit contains the fetched commit, the
-result D5's guard reads.
+finished merge's record stays the branch the merge brought in. A repair may finish
+without `landing` only when no finished merge in the log recorded one — a merge logged
+before the field, whose validation failed once this engine was installed — and the
+writer, reading the log, refuses any other finished merge without it (26 F3); cleanup
+then resolves its source as for an older log, below. For archive cleanup's line the
+writer records whether the run's commit contains the fetched commit, the result D5's
+guard reads.
 
 Archive cleanup takes its source from the engine, never from a merge's prose: the last
 finished merge's `landing.remote` and `landing.branch`, else the clone marker's `base`
 from the remote the merge skill would choose; with neither — only an older log's merge
 of a change worked in place, written before the field existed — it fetches nothing,
 records no `landing`, and says so, and D5's guard reads the run as checked rather than
-stalling a change whose merge the older engine accepted. Cleanup runs in the checkout
+stalling a change whose merge the older engine accepted. Whenever a source resolves,
+the log's writer refuses a finished cleanup line without a well-formed `landing`, on
+every cleanup run, reruns included; it resolves the source as cleanup does, so it
+checks only the line it writes and needs no record of which engine wrote the lines
+before it (26 F1). A fetch that fails ends cleanup `stopped`, naming the fetch, never
+`finished` as a failed validation cleanup does, so the computation names cleanup again
+and the rerun fetches. Cleanup runs in the checkout
 the merge it reads ran in — a clone is removed only after `done`, and a change with a
 clone is computed in its clone (D5) — so the recorded remote is fetched as it stands,
 with no translation between a clone's and the workspace's remote names; if it is not
@@ -344,8 +357,14 @@ one of cleanup's remotes, cleanup asks the owner rather than guessing.
 <branch>` given, else the last finished merge's `landing.branch`, else the clone
 marker's `base`, and refuses with none, naming `FROM`. The recorded branch comes before
 the marker, so a merge given another branch than the clone's is followed by merges of
-that branch, the merge before closeout's repair and any second merge included. It
-takes the branch name alone, never the recorded remote — the one place a record is
+that branch, the merge before closeout's repair and any second merge included. The
+persistence is deliberate (26 F2): the pre-closeout route repeats the merge after a
+review of it, to find the branch merged, and under the one-run override CW-s3ju stated
+that repeat would bring in the clone's branch unless the orchestrating session passed
+`FROM` again from memory. CW-s3ju is modified to match — the last finished merge's
+recorded branch stands in for the clone's for a merge given none, and an argument
+overrides both — and `change-orchestrate` passes `FROM` only when the owner names
+another branch. It takes the branch name alone, never the recorded remote — the one place a record is
 read in another checkout, a merge after the archive in the workspace once the clone
 is gone — and that merge chooses its remote afresh where it runs and records it. An
 older log with neither record is merged only on the owner's direction, since D5's guard
@@ -355,7 +374,10 @@ The field is an addition to the outcome every step shares. Its reading is compat
 a line without it keeps its meaning. Its writing is not (18 F5): a merge skill that
 does not record it can no longer record a finished merge, and an engine that predates
 it refuses an outcome carrying it under the schema's closed properties; in this
-repository the schema, the skills, and the engine change in one commit.
+repository the schema, the skills, and the engine change in one commit. `start
+merge`'s default is incompatible too (26 F2): a merge given no branch after one given
+another brings in that other branch, not the clone's; its caller, the orchestrating
+session, changes with it.
 
 Rejected:
 
@@ -373,6 +395,22 @@ Rejected:
 - **`next` returning the branch for the orchestrating session to pass as `FROM`**
   (18 F3). It changes `next`'s output and its caller for what `start` can resolve
   itself.
+- **The one-run override kept for a new merge before closeout, the recorded branch
+  used only for a repair and a merge after the archive** (26 F2). It keeps CW-s3ju as
+  written, but the default would depend on the route, and the pre-closeout merge
+  repeated after its review would bring in the clone's branch whenever the
+  orchestrating session forgot the `FROM` it was given.
+- **Cleanup's `landing` required on its first run only** (26 F1). Narrower, but the
+  writer would have to tell the first run from a rerun, and a rerun, which pushes
+  anyway, loses nothing by fetching.
+- **An explicit "unchecked" result routed to the owner** (26 F1). Cleanup would still
+  finish on a failed fetch, an outcome state is added, and the owner settles what a
+  rerun settles by itself.
+- **A repair of a merge logged before the field rebuilding its record** from the
+  merged commit's second parent (26 F3). The remote cannot be recovered, and a merge
+  that merged nothing left no merge commit.
+- **An owner-directed recovery merge to establish the record** (26 F3). It would bring
+  commits unrelated to the failed validation into a repair.
 
 - **Cleanup always fetches the clone's recorded landing branch** (11 F2). Simpler, but
   a merge given `FROM` another branch would be checked against the wrong one, and a

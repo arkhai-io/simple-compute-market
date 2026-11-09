@@ -85,17 +85,21 @@ None.
   is the caller, and changes with it.
 - `start merge`, and so `make merge`, accepts an archived change: compatible, a
   refusal lifted. Given no `FROM`, it brings in the branch the last finished merge
-  recorded before the one the change's clone recorded, and refuses only with neither:
-  compatible for a change with no recorded merge, and a changed default for a merge
-  repeated after one given another branch (D10).
+  recorded before the one the change's clone recorded, and refuses only with neither
+  (D10, CW-s3ju modified): compatible for a change with no recorded merge; for a merge
+  repeated after one given another branch, which now brings in that branch rather than
+  the clone's, incompatible, counted minor while the major version is 0 (CW-c2tw). The
+  orchestrating session is the caller, and changes with it, passing `FROM` only when
+  the owner names another branch.
 - Archive cleanup's exit to `done` gains a guard on its first run: a behaviour of the
   graph's table, reading only the log line, so a line written before this engine reads
   as checked.
 - The step outcome (`.agents/change-outcome.schema.json`) gains an optional `landing`
-  object, `{"remote", "branch", "commit"}`, required by the outcome check on a merge's
-  `finished` outcome and checked by the log's writer against the checkout's remotes and
-  `HEAD`; archive cleanup's log line gains the writer's record of the containment
-  (D10). Reading it is compatible: every existing line keeps its meaning without the
+  object, `{"remote", "branch", "commit"}`, its form checked by the outcome check; the
+  log's writer requires it on a merge's `finished` outcome — but a repair of a merge
+  logged before the field — and on a finished archive cleanup line whenever a source
+  resolves, checks it against the checkout's remotes and `HEAD`, and records on
+  cleanup's line the containment (D10). Reading it is compatible: every existing line keeps its meaning without the
   field. Writing it is incompatible, counted minor while the major version is 0
   (CW-c2tw): a merge skill that does not record `landing` can no longer record a
   finished merge, and an engine that predates the field refuses an outcome carrying
@@ -166,7 +170,8 @@ None.
 - D8 — no return crosses the archive: `spec.md` (CW-xo82) and `README.md` ("The
   archive is the boundary no direction crosses").
 - D10 — the merges and archive cleanup record the landing branch they fetched:
-  `spec.md` (CW-5vkd) and `index.md`, `README.md` (the outcome and the log), and
+  `spec.md` (CW-5vkd, CW-s3ju) and `index.md`, `README.md` (the outcome and the log,
+  and "The merge before closeout"'s paragraph on which branch a change lands on), and
   `docs/agents/change-workflow.md` (the merge's outcome and `make merge`'s branch).
 - D9: no permanent destination — the implementation cadence is this change's
   history.
