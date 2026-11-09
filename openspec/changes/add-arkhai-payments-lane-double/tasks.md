@@ -2,8 +2,12 @@
 
 Replanned against the reviewed design (design reviews 15 and 26 and their triage). The
 earlier draft predated the design's reverification and no task of it was checked; it
-is replaced whole. Decisions are `design.md`'s D1–D13; requirements are the deltas
-under `specs/`. New paths below are planned deliverables. The tools under `tools/`
+is replaced whole. Amended against design review 62 and its triage, after section 6
+returned to design: task 4.9 adds the filing's Agreement-binding check (62 F1);
+section 6 is replanned as six controls scenarios (D14–D19, D21); section 9, the
+release wheelhouse (D20), is new; and closeout, formerly section 9, is section 10, so
+a completed task's note naming 9.x means 10.x. Decisions are `design.md`'s D1–D21;
+requirements are the deltas under `specs/`. New paths below are planned deliverables. The tools under `tools/`
 are outside the package architecture check (`docs/development/ARCHITECTURE.toml`,
 `skip`); the kit and domain edits of sections 3 and 7 are inside it.
 
@@ -157,8 +161,8 @@ deterministic steps".
       check, for three paths the plan cites that sections 4 and 6 create
       (`tools/mediation-lane-double/README.md`,
       `e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`,
-      `e2e-tests/tests/e2e/roles/scenarios/vms/test_vm_dispute_controls.py`), cited
-      since planning.
+      and section 6's then-planned single VM controls module, since replanned as
+      six modules), cited since planning.
       End-to-end scenarios covering the section once deployed: none; the lanes first
       run the package in section 5.
       Handoff: a fault is observable only through a real server — httpx's
@@ -684,8 +688,8 @@ perceived clock the scenario advances".
       … passed, exit 0"; "pre-commit-functional … passed, exit 0" (`make
       check-packaging` and `make test`); "pre-commit … failed, exit 2" only on the
       documentation citations check, for the two section 6 files 1.6 names
-      (`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`,
-      `…/vms/test_vm_dispute_controls.py`); the index, tasks, skills and strict
+      (`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py` and the then-planned
+      single VM controls module); the index, tasks, skills and strict
       OpenSpec checks passed. No image was built in this session: `make -n
       build-tools` is what the test reads, and the fix commit's Helm validation runs
       `build-dev`. The fresh-context check found two stale references (the app
@@ -695,6 +699,34 @@ perceived clock the scenario advances".
       repository root": all fixed. Declined: renaming `build-tools` to name only the
       lane doubles, since the owner chose the name; `tools/README.md` says what it
       builds.
+- [ ] 4.9 The filing's Agreement-binding admission check (D1 "Real mechanics", D4
+      "Mediation shapes"; 62 F1): in `tools/mediation-lane-double/src/mediation_lane_double/service.py`'s
+      `file`, after the `filer_not_party` check and before the Agreement's readers are
+      recorded, a case reference is reserved or any part is extended, refuse a filing
+      whose Agreement's JCS SHA-256 (`canonical_json`, as the double already hashes it)
+      differs from the `deal` of the transaction's signed payment receipt, answering
+      the contract's `rejected` filing with reason `agreement_hash_mismatch`,
+      remembered under its key as `filer_not_party` is. The receipt is the one
+      `_parties_of` already reads; its cached parties gain the `deal`. Correct
+      `tools/mediation-lane-double/README.md`, "Deviation from its producer", which
+      lists "Agreement digest" among what the double does not verify: it verifies the
+      Agreement's binding to its payment, and no concurrence signature or mechanical
+      guard. Requirement: "Lanes run a mediation double that answers from programmed
+      rules", scenario "A filing's Agreement is not the payment's".
+- [ ] 4.10 Verification of 4.9.
+      Library integration (`tools/mediation-lane-double/tests/integration/test_mechanics.py`,
+      through the mediation kit's real client over HTTP against the payments double's
+      engine): a filing whose Agreement differs from the receipt's `deal` by one field
+      is answered `rejected`, `agreement_hash_mismatch`; payments records no `extend`;
+      the case listing for the transaction is empty; a reader of that Agreement's
+      record is refused as unknown; a retry under the same key returns the same
+      refusal; an honest filing for the same transaction is then accepted. Run
+      `make test-mediation-lane-double`.
+      End-to-end: every lane filing is honest, so the check passes in
+      `e2e_vm_payment_deal`, `e2e_bare_metal_payment_deal` and section 6's scenarios,
+      none of which a refusal would leave passing.
+      Owed by validation: `tests.yml`, job `test · test-mediation-lane-double` — the
+      double's suite passes with the new case.
 
 ## 5. Lane wiring and the existing payment scenarios
 
@@ -826,7 +858,7 @@ each compute lane against the lane doubles".
       Application integration: `domains/vms/storefront/tests/integration/test_servicing_unreachable_authority.py`
       keeps its own unreachable-authority fixture and still passes.
       End-to-end: `e2e_vm_payment_deal` and `e2e_vm_payment_purchase` in
-      `make -C e2e-tests test-e2e-vms`, `e2e_bare_metal_payment_deal` in
+      `make -C e2e-tests test-e2e-vm`, `e2e_bare_metal_payment_deal` in
       `test-e2e-bare-metal`, `e2e_credits_payment_deal` in `test-e2e-apicredits`; none
       skips for want of a mediation target.
       Owed by validation: `tests.yml`, job `test · test-e2e-unit` — the harness unit
@@ -870,133 +902,152 @@ each compute lane against the lane doubles".
       `e2e-tests` now depends on the controls wheel, which `make dist` builds into
       the release wheelhouse as well; this section changes nothing there.
 
-## 6. The VM controls module
+## 6. The VM controls scenarios
 
-Delivers one VM-lane module of once-only deals proving the lane's dispute wiring through
-D6's six journeys, with the clock fixture resetting both doubles (D2, D6). Requirements:
-"A controls scenario proves the lane's dispute wiring in the VM lane", "Each lane double
-reads a perceived clock the scenario advances", "Lane double controls are typed
-deterministic steps".
+Replanned against the reviewed design (design review 62): the single module of six
+ordered journeys this section first planned, of which nothing was implemented, is
+replaced by six scenarios, each a module of its own on its own once-only deal. The
+design-input notes the section carried when it returned to design are now D14–D21.
 
-- [ ] 6.1 Harness helpers in `e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`: a rule
-      fixture whose finaliser deletes its rules and asserts none waits, and a clock
-      fixture advancing both doubles together whose finaliser resets both whatever the
-      module's outcome. (D2, D4)
-- [ ] 6.2 Module `e2e-tests/tests/e2e/roles/scenarios/vms/test_vm_dispute_controls.py`,
-      marker `e2e_vm_dispute_controls` registered in `e2e-tests/pyproject.toml` and added
-      to `e2e-tests/Makefile`'s `E2E_MODULE`, holding the storefront's loops and
-      advancing each transition, in this order: (1) a programmed ruling with a delivery
-      end and a reverse, the reverse visible at the payments double and the storefront
-      ending delivery after observing it; (2) an operator decision with a partial reverse
-      and no delivery end, the deal running; (3) a lost filing response, the dispute
-      adapter adopting the one case; (4) mediation unavailable, servicing reporting the
-      authority unreachable while the deal runs; (5) payments unavailable between two
-      programmed effects, the ruling incompletely applied and then completed with no
-      duplicate effect; (6) a clock advance past a once part's hold, the payout visible
-      and a later case reported `not_held` with `paid_out` and dismissed. (D6)
-- [ ] 6.3 Verification.
-      Unit: `e2e-tests/tests/unit` cases for the fixtures' finalisers (rules deleted,
-      clock reset after a failure).
-      End-to-end: `e2e_vm_dispute_controls` in `make -C e2e-tests test-e2e-vms`; after
-      it, both doubles report wall time, and the lane's later modules pass.
-      Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes.
+Delivers the lane-double rule and clock fixtures, the buyer's filing through the
+mediation kit's dispute adapter, the shared stages of the six scenarios, and the six
+modules (D2, D4, D6, D14–D19, D21). Requirements: "Controls scenarios prove the lane's
+dispute wiring in the VM lane", "Each lane double reads a perceived clock the scenario
+advances" (scenarios "A once part's hold is passed", "A module that advanced the
+clocks ends"), "Lane double controls are typed deterministic steps".
 
-Notes before 6.1: nothing of the section is implemented. Section 6 returns to
-design, on the owner's direction, with the questions below; the owner's rulings
-so far:
-- "The e2e scenario should have specific stages for each side effect in the
-  system", each initiated by the scenario. Who causes each side effect in
-  journeys 1 and 2 is for the design session to set out; the recap below is
-  what it starts from.
-- Journey 5 needs expanding before the owner rules on it (below).
-- "Neither the e2e tests nor dependencies only they have are required to be in
-  marketplace-wheelhouse for official releases." This settles section 1's open
-  item: the controls wheel, which only `e2e-tests` and the lane doubles depend
-  on, need not ship in the release wheelhouse, though `make dist`, which
-  `dist-release` runs, builds it there today. Whether to take it out is for the
-  design or plan to decide.
+Every stage advances one side effect and acts through the services' typed clients
+(the storefront admin client, `LifecycleClient`, the payments kit's `PaymentsClient`),
+the doubles' `ControlClient`, or the mediation kit's `MediationAdapter`, never a raw
+HTTP call (D14). No stage steps the storefront's servicing while a ruling waits at its
+gate (D15). Each module holds the loops it depends on through the fixtures
+`test_vm_payment_deal.py` uses and records lane-double evidence (`lane_doubles_evidence`).
 
-What SCM can file. SCM files only delivery-end cases, and both ways end delivery
-as they file: the VM storefront's operator end tears delivery down at once
-(`test_vm_payment_deal.py` reads `tearing_down` straight after it), and the
-buyer's `market end` files after a surrender the storefront acknowledges
-(`kit/deal-lifecycle-buyer/src/market_deal_lifecycle_buyer/ending.py`). No SCM
-command files a case on a running deal. The storefront answers a case another
-party filed as respondent (`kit/deal-servicing/src/market_deal_servicing/respondent.py`),
-and records a ruling's `delivery_end` effect as an end with cause `ruling`
-(`watch.py`).
-
-Journey 1, a programmed ruling with a delivery end and a reverse. Side effects,
-in order:
-1. A once deal committed and delivering (the VM payment scenario's commit stages).
-2. A mediation rule installed for the deal's transaction: a ruling with
-   `delivery_end`, one `reverse` effect and `close` (control, the scenario).
-3. A case filed while delivery runs. Delivery must still be active here, so
-   neither of SCM's ways of filing fits; the scenario would file as the buyer
-   through the mediation kit's buyer-side adapter, SCM's buyer half used directly.
-4. The double applies the ruling. A rule acts on the filing request itself, so
-   the ruled entry, the reverse at payments, the delivery end, the lift and the
-   closed entry all happen inside step 3. To give the ruling a stage of its own,
-   either the rule's `pause_before_effects` holds it at the gate and a resume
-   (control) applies it, or there is no rule and an operator decision (control)
-   rules the open case.
-5. The storefront's servicing step answers the case as respondent (an append).
-6. A servicing step observes the ruling's delivery end and records the end,
-   cause `ruling`; teardown follows through the canonical deal's stages.
-Observations: the reverse in the payments snapshot; the storefront's delivery
-`end_recorded` or `tearing_down` only after step 6.
-
-Journey 2, an operator decision with a partial reverse and no delivery end:
-1. A delivering once deal.
-2. A case filed with no rule while delivery runs (as in journey 1, step 3): each
-   part held by the double's extension.
-3. A servicing step answers it as respondent.
-4. An operator decision (control) rules a partial `reverse`, no delivery end,
-   with `close`: the reverse lands and the case's extensions are lifted.
-5. A servicing step observes the ruling; delivery stays `active`.
-
-Journey 5, payments failing between two programmed effects. The goal: one ruling
-with two `reverse` effects on the deal's part (say 100 and 200), the first applied
-at payments and the second not, the ruling recorded as incompletely applied
-(ruled entry, effects `prepared`, case `applying`), then completed with exactly
-one reverse per effect. The difficulty: a payments rule matches `route`,
-`account`, `event` and `transaction`, which the two reverses share, so any
-payments rule takes the first reverse; and *unavailable* covers every API route
-and cannot be scoped (26 F2), so installing it before the decision fails the
-first effect, not the second. Setting: a delivering deal, a case filed with no
-rule and answered as respondent, as journey 2's steps 1–3, then:
-- (A) Existing controls. A payments drop-after-commit rule on the authority's
-  `reverse` for the transaction; the operator decision sends effect 1, payments
-  commits it and its answer is lost, so the double stops with the case `applying`
-  (its record shows effect 1 `prepared`, though payments holds it). Delete the
-  rule and install payments *unavailable*; repeating the decision fails at
-  effect 1's resend, and the case stays `applying`, with effect 1 at payments and
-  effect 2 not. Remove *unavailable*; repeating the decision resends effect 1,
-  which payments answers with its stored event (no second reverse), then applies
-  effect 2, lifts and closes. Each control is its own stage, and a servicing
-  step may read the incomplete ruling between them. The failure that first
-  stops the ruling is a lost answer to effect 1, not payments down after it.
-- (B) A payments match property, such as the event's `amount` or the request
-  id, so a refusal or drop rule takes effect 2 alone: effect 1 commits, effect 2
-  is refused, the case waits `applying`; deleting the rule and repeating the
-  decision completes it. The failure falls between the effects as the delta's
-  double scenario words it, but it amends D4's control shapes, the controls
-  package and the payments double's classifier, and it is a refusal or a drop,
-  not *unavailable*.
-- (C) A mediation gate after the nth effect, such as a ruling's
-  `pause_after_effects: 1`: effect 1 applies and the ruling holds; the scenario
-  installs payments *unavailable* and resumes (effect 2 fails, the case stays
-  `applying`), removes it and resumes again (complete). It is the closest to D6's
-  "payments unavailable between two programmed effects", but it amends D4's
-  ruling shape and the mediation double.
-
-Journeys 3, 4 and 6 need nothing new: a mediation drop rule on the storefront's
-filing, its retry adopting the one case; mediation *unavailable* while servicing
-steps a running deal with a case, reported unreachable; a clock advance past the
-once part's hold, the payout read from payments, then a later filing reported
-`not_held` (`paid_out`) and dismissed, with no storefront step after the advance.
-Journeys 3 and 6's filer is open in the same way as 1 and 2's (operator end or
-the scenario as buyer).
+- [ ] 6.1 Fixtures in `e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`, re-exported
+      by `tests/e2e/roles/conftest.py` as `lane_doubles_evidence` is (D2, D4, "Scope and
+      access"):
+      - `lane_double_rules`, module-scoped: installs a rule on either double through
+        `ControlClient.install_rule` and remembers it; its finaliser, whatever the
+        module's outcome, deletes every rule it installed on both doubles and then
+        asserts from `rules()` that none of them still had a case waiting at its gate,
+        naming any that did.
+      - `lane_double_clock`, module-scoped: `advance(seconds)` advances both doubles
+        together through `advance_clock` and returns both perceived nows; its
+        finaliser, whatever the module's outcome, resets both through `reset_clock`
+        and fails naming a double that does not then report a zero offset.
+- [ ] 6.2 The buyer's filing, in `e2e-tests/tests/e2e/roles/helpers/mediation.py` (D14):
+      a helper filing a delivery-end claim (`{kind: delivery_end, ended_at,
+      delivered: true, cause: payer}`) as the buyer on a deal it names by negotiation
+      id, transaction and accepted Agreement. It builds a `MediationClient` for the
+      Agreement's dispute authority with a `MediationCredential` bound to the target's
+      identity and its `buyer_api_key`, and the target's `ca_bundle_path`; a
+      `MediationAdapter` over the Agreement's dispute binding; and submits a `dispute`
+      command with the adapter's `build_request`, under `OperationKeys` whose store is
+      the buyer kit's `FileEvidenceStore` over a directory of the module's own, as the
+      buyer's lifecycle supplies one. It returns the adapter's lifecycle outcome, whose
+      filing answer carries the case reference and each part's hold. Declare
+      `arkhai-kit-arkhai-mediation` in `e2e-tests/pyproject.toml` (the harness now
+      imports it directly) and relock (`make lock PROJECTS=e2e-tests`).
+- [ ] 6.3 Shared stages (D17, D21):
+      - `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`: one executor host,
+        pool and resource id for each of the six scenarios, as every VM scenario has
+        its own.
+      - The hosted once-only commit — listing in `arkhai.payments.v1`, negotiation,
+        approval, commit, delivery to `active` and the snapshot's held part — moves
+        out of `test_vm_payment_deal.py`'s first stage into
+        `e2e-tests/tests/e2e/roles/scenarios/vms/payment_deal.py`, parameterized by
+        the scenario's host, pool and resource, so its body is defined once
+        (`docs/development/TESTING.md`, "Every stage the compute domains run
+        identically comes from one definition"); `test_vm_payment_deal.py` calls it,
+        its other stages unchanged. It records the negotiation id, transaction,
+        accepted Agreement and fulfillment for later stages.
+      - `e2e-tests/tests/e2e/roles/scenarios/vms/dispute/` (`__init__.py`,
+        `stages.py`): a storefront servicing step (`advance_storefront(...,
+        "settlement-servicing")`), the storefront's lifecycle read, the payments
+        snapshot read, the case listing, and the ending of a deal still delivering
+        when its scenario's own stages end: the lease-expiry stages `test_vm_payment_purchase.py`
+        runs (`Stage10a_LeaseExpirySetup` through `Stage11b_TeardownCompletion`,
+        `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`), followed by the
+        case listing showing no case beyond the scenario's own (D17: a stage that
+        files nothing). Should the storefront file a case for that end, the
+        implementation stops and reports it, since the design settled none other.
+- [ ] 6.4 `dispute/test_ruled_delivery_end.py` (D15): commit; install through
+      `lane_double_rules` a mediation rule matching `{"operation": "file",
+      "transaction": <the deal's>}` with a ruling (a `RulingBasis` for a payer-filed
+      claim, `delivery_end: true`, one `reverse` on part 0 of a stated amount,
+      `close: true`) and `pause_before_effects: true`; the buyer files (6.2) — the
+      filing accepted with part 0 held and an extension reference, the case
+      `applying`, the rule listing one waiting, nothing reversed in the snapshot;
+      resume the rule — the snapshot reversing exactly the stated amount once, the
+      case `closed`; a servicing step — the lifecycle read showing the ruled entry
+      with its delivery end, the end recorded with cause `ruling` and delivery
+      `tearing_down`; then the teardown to the capacity's release, as the VM payment
+      scenario's `Stage12c_CapacityReleasedOnce` proves it. No servicing step runs
+      between the filing and the resume.
+- [ ] 6.5 `dispute/test_operator_discount.py` (D6, D17): commit; the buyer files
+      with no rule — each part held; a servicing step — the storefront's answer on
+      the record (an `appended` entry by the seller, a contest, since no surrender
+      matches); decide through `ControlClient.decide` a partial `reverse` with no
+      delivery end and `close: true` — the snapshot reversing that amount, the
+      extension lifted, the case `closed`; a servicing step — delivery `active`, no
+      end recorded; the deal's ending (6.3).
+- [ ] 6.6 `dispute/test_lost_filing_answer.py` (D18): commit; install a mediation rule
+      `{"operation": "file", "transaction": <the deal's>}` with
+      `drop_response_after_commit`; the operator end (`admin_interrupt_deal`) — the
+      filing's outcome unknown, the end recorded, delivery `tearing_down`, the rule's
+      match counted; delete the rule; the operator end repeated — or, where the
+      storefront's servicing retries the filing itself, a servicing step — the adapter
+      adopting the one case, the outcome accepted with its case reference; a servicing
+      step — the lifecycle read and the case listing each showing exactly one case;
+      the teardown to the capacity's release.
+- [ ] 6.7 `dispute/test_mediation_unavailable.py` (D18): commit; the buyer files with
+      no rule; a servicing step answering it; install mediation *unavailable* (`match:
+      {}`); a servicing step — the lifecycle read's authority outcome not accepted, as
+      the adapter reports an unreachable authority, delivery `active`; delete the rule;
+      a servicing step — the authority read accepted again with the case; the deal's
+      ending (6.3).
+- [ ] 6.8 `dispute/test_payments_hold_a_ruling.py` (D16): commit; the buyer files with
+      no rule; a servicing step answering it; install a payments rule `{"route":
+      "events", "account": <the authority's account>, "event": "reverse",
+      "transaction": <the deal's>}` with `drop_response_after_commit`; decide two
+      `reverse` effects on part 0 with `close: true` — the case `applying`, the
+      snapshot reversing the first amount only; a servicing step — the lifecycle read
+      showing the ruled entry with both effects unapplied and no closed entry; delete
+      the rule; install payments *unavailable*; the decision repeated — the case still
+      `applying`; a servicing step — delivery `active`, the case not closed; delete
+      *unavailable*; the decision repeated — the case `closed`, the snapshot reversing
+      both amounts, each exactly once (two `reverse` events, one per effect id); a
+      servicing step — the case closed in the lifecycle read; the deal's ending (6.3).
+- [ ] 6.9 `dispute/test_hold_passed.py` (D18; "A once part's hold is passed"): commit;
+      the deal's ending (6.3), before any clock moves; advance both doubles through
+      `lane_double_clock` past the part's release instant read from its signed
+      snapshot — the snapshot showing the part paid out; the buyer files — the answer
+      reporting part 0 `not_held` with reason `paid_out`, and the case listing it
+      `closed`, dismissed with nothing held. No storefront step follows the advance;
+      the fixture resets both clocks when the module ends.
+- [ ] 6.10 Markers, one per module as every VM scenario has its own:
+      `e2e_vm_dispute_ruled_end`, `e2e_vm_dispute_discount`,
+      `e2e_vm_dispute_lost_filing`, `e2e_vm_dispute_mediation_unavailable`,
+      `e2e_vm_dispute_payments_hold`, `e2e_vm_dispute_hold_passed`, registered with
+      their descriptions in `e2e-tests/pyproject.toml` and added to
+      `e2e-tests/Makefile`'s `E2E_MODULE`. No order among them is needed (D21).
+- [ ] 6.11 Verification.
+      Unit (`make test-e2e-unit`): `e2e-tests/tests/unit/test_lane_doubles_fixtures.py`
+      — the rule fixture deletes every rule it installed on both doubles after a
+      failing module and names one left waiting; the clock fixture advances both
+      doubles together and resets both after a failing module, failing on a double
+      that keeps an offset; each over `ControlClient` on a mock transport.
+      `e2e-tests/tests/unit/test_mediation_helper.py` — the buyer's filing sends the
+      contract's `Filing` with the delivery-end claim, the buyer's bearer token and
+      the Agreement, under an idempotency key the adapter derives, and maps an
+      accepted answer and a transport failure to the adapter's outcomes, over a mock
+      transport. The stage-set and marker checks the harness unit suite already runs
+      pass with the six modules.
+      End-to-end: the six markers and `e2e_vm_payment_deal` (its commit now the shared
+      stage) in `make -C e2e-tests test-e2e-vm`; after the hold-passed module, both
+      doubles report a zero offset, and the lane's later modules pass.
+      Owed by validation: `tests.yml`, job `test · test-e2e-unit` — the harness unit
+      suite passes with the fixtures' and the buyer filing's cases.
 
 ## 7. The storefront's mediation check
 
@@ -1070,43 +1121,76 @@ checks its mediation configuration from its own container".
       Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — the chart
       render and release-topology suites pass.
 
-## 9. Closeout
+## 9. The release wheelhouse
+
+Delivers a release wheel set without the distribution only tests depend on (D20).
+Files: the root `Makefile`, `scripts/tests/`.
+
+- [ ] 9.1 Root `Makefile`: a target building the release set, whose prerequisites are
+      every current prerequisite of `dist` but `dist-lane-double-controls`; `dist`
+      builds that target and `dist-lane-double-controls`, so the lanes, CI and
+      validation, whose images install the controls wheel from `.dist`, build what
+      they build today; `dist-release` builds the release set alone. `dist-ci` and
+      `.github/workflows/release.yml` are unchanged: the workflow already runs
+      `make dist-clean` before `make dist-release`. (D20)
+- [ ] 9.2 Verification.
+      Unit (`make test-release-tooling`): a case in
+      `scripts/tests/test_change_build_and_helm_targets.py`, reading `make -n` as
+      that file does, holds that `dist-release` builds no `lane-double-controls`
+      wheel and builds every other wheel `dist` builds, and that `dist` and `dist-ci`
+      still build it. Then `make check-packaging`.
+      End-to-end: none; the lanes build `dist`, which is unchanged, and no validation
+      part runs the release workflow.
+      Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — the
+      release-tooling suite passes with the new case.
+
+## 10. Closeout
 
 Closeout changes documentation only; a part needing a code edit returns the change to
 implementation. In the order of `openspec/README.md#plan-closeout-requirements`:
 
-- [ ] 9.1 Comment hygiene: run `make check-comment-hygiene`; any finding, or a comment
+- [ ] 10.1 Comment hygiene: run `make check-comment-hygiene`; any finding, or a comment
       this change added that still needs rewriting, returns the change to implementation.
-- [ ] 9.2 Import placement: check the imports sections 1–8 added; one that should move
+- [ ] 10.2 Import placement: check the imports sections 1–9 added; one that should move
       to module level returns the change to implementation.
-- [ ] 9.3 Documentation compliance: re-check D1–D13 against `openspec/README.md`'s
+- [ ] 10.3 Documentation compliance: re-check D1–D21 against `openspec/README.md`'s
       placement rules — the doubles' behaviour in `test-compatibility`, configuration in
-      `settlement-configuration` and `deployment-state`, tooling in `tools/`, and no
-      future state in permanent documents (the lane-wide clock belongs to the roadmap).
-- [ ] 9.4 Narrative compression: shorten completed task notes to final behaviour,
+      `settlement-configuration` and `deployment-state`, tooling in `tools/`, the
+      controls scenarios in `e2e-tests/README.md`, the release wheelhouse in
+      `docs/development/RELEASING.md`, and no future state in permanent documents (the
+      lane-wide clock, the buyer filing command and the meaning of a prepared delivery
+      end belong to the roadmap).
+- [ ] 10.4 Narrative compression: shorten completed task notes to final behaviour,
       validation evidence, deferred work and destinations; move any rationale not already
       in `design.md` there first.
-- [ ] 9.5 Roadmap currency, `docs/development/ROADMAP.md` Goal 8: the current-state
-      paragraph says the case stages run against the mediation double; this change's gap
-      row closes; convergence's row drops revised-case netting and records that its
-      rate rows add `stop` and `penalty` execution to the mediation double before
-      ruling with them (40 F2); the hosted
-      dispute-authority row records D5 (no guard, inert by construction); a new unowned
-      gap records the lane-wide perceived clock for storefronts, sites and the buyer half,
-      naming convergence rows 6 and 7. Record it in the promotion record.
-- [ ] 9.6 Campaign index currency, `openspec/changes/README.md`: this row's status and
+- [ ] 10.5 Roadmap currency, `docs/development/ROADMAP.md` Goal 8: the current-state
+      paragraph says the case stages and six controls scenarios run against the
+      mediation double; this change's gap row closes; convergence's row drops
+      revised-case netting and records that its rate rows add `stop` and `penalty`
+      execution to the mediation double before ruling with them (40 F2), and that a
+      row using the gate steps no storefront servicing while its ruling waits (D15);
+      the hosted dispute-authority row records D5 (no guard, inert by construction);
+      three new unowned entries: the lane-wide perceived clock for storefronts, sites
+      and the buyer half, naming convergence rows 6 and 7; a buyer command filing a
+      dispute case on a running deal, which the controls scenarios would then use
+      (D14); and what a `prepared` delivery end means to SCM, whose watch records an
+      end from one whatever its state (D15), beside the hosted dispute-authority row.
+      Record them in the promotion record.
+- [ ] 10.6 Campaign index currency, `openspec/changes/README.md`: this row's status and
       notes; the Goal 8 dependency graph is unchanged. Record the dispositions and run
       `make check-change-index`.
-- [ ] 9.7 Packaging: `make check-packaging`, then
+- [ ] 10.7 Packaging: `make check-packaging`, then
       `make check-architecture-change CHANGE=add-arkhai-payments-lane-double`; resolve
       every failure; this change owns no architecture exception.
-- [ ] 9.8 End-to-end pipeline: record the pipeline run, its result, and the scenarios
+- [ ] 10.8 End-to-end pipeline: record the pipeline run, its result, and the scenarios
       exercising this change — `e2e_vm_payment_deal`, `e2e_vm_payment_purchase`,
-      `e2e_vm_dispute_controls`, `e2e_bare_metal_payment_deal`,
-      `e2e_credits_payment_deal` — and Helm validation's `-mediation-check` pod; a run
-      blocked for a reason outside this change is recorded as a blocker with its owner,
-      its gated validations unrun.
-- [ ] 9.9 Promotion, and the design-promotion record:
+      `e2e_vm_dispute_ruled_end`, `e2e_vm_dispute_discount`,
+      `e2e_vm_dispute_lost_filing`, `e2e_vm_dispute_mediation_unavailable`,
+      `e2e_vm_dispute_payments_hold`, `e2e_vm_dispute_hold_passed`,
+      `e2e_bare_metal_payment_deal`, `e2e_credits_payment_deal` — and Helm
+      validation's `-mediation-check` pod; a run blocked for a reason outside this
+      change is recorded as a blocker with its owner, its gated validations unrun.
+- [ ] 10.9 Promotion, and the design-promotion record:
       - D1: `openspec/specs/test-compatibility/architecture.md`, a new "The in-lane
         mediation double" section after "The in-lane payments double";
         `docs/development/ARCHITECTURE.md`, "Testing strategy", and
@@ -1116,7 +1200,7 @@ implementation. In the order of `openspec/README.md#plan-closeout-requirements`:
       - D2: `docs/development/TESTING.md`, "The discipline every scenario follows",
         replacing its statement that no control moves the clock with the perceived-clock
         rule as current state, and `docs/development/ARCHITECTURE.md`, "Testing
-        strategy"; the roadmap gap of 9.5.
+        strategy"; the roadmap gap of 10.5.
       - D3: `openspec/specs/test-compatibility/architecture.md`, "Payment evidence
         ownership".
       - D4: `tools/README.md`, "Lane collaborators" (the controls package the
@@ -1124,9 +1208,10 @@ implementation. In the order of `openspec/README.md#plan-closeout-requirements`:
         `tools/lane-double-controls/README.md` (section 1); `docs/development/TESTING.md`,
         "Private Service Dependencies".
       - D5: `openspec/specs/test-compatibility/architecture.md`, "The in-lane mediation
-        double"; the roadmap row of 9.5.
-      - D6: `e2e-tests/README.md`, "End-to-end lanes" (the controls module and its
-        marker).
+        double"; the roadmap row of 10.5.
+      - D6: `e2e-tests/README.md`, a new "VM dispute controls" section after "VM buyer
+        purchase" (the six controls scenarios, each on its own deal, and their
+        markers), and the lane's list under "End-to-end lanes".
       - D7: `tools/README.md`, "Lane collaborators"; `dev-env/identities/README.md`'s
         table (the mediation fixture tokens, the retired `.invalid` authority).
       - D8: `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Dispute authority
@@ -1151,16 +1236,33 @@ implementation. In the order of `openspec/README.md#plan-closeout-requirements`:
         `docs/operator-handbook.md`, "Payments access"; `docs/development/VALIDATION_RUNBOOK.md`,
         where it describes `check-payments`.
       - D12, D13: no permanent destination.
+      - D14: `e2e-tests/README.md`, "VM dispute controls" (the harness files as the
+        buyer through the mediation kit's dispute adapter, and why no SCM command
+        does); the roadmap entry of 10.5.
+      - D15: `openspec/specs/test-compatibility/architecture.md`, "The in-lane
+        mediation double" (the gate holds a delivery end only in the double's record,
+        and no stage steps servicing while a ruling waits there);
+        `tools/mediation-lane-double/README.md`, "What a rule decides", and
+        `tools/lane-double-controls/README.md`, "The controls", beside the gate; the
+        roadmap entry of 10.5.
+      - D16, D18: `e2e-tests/README.md`, "VM dispute controls".
+      - D17, D19: the `test-compatibility` delta, by the archive in 10.11.
+      - D20: `docs/development/RELEASING.md`, its introduction, beside the packages
+        that are not published: the release workflow's `marketplace-wheelhouse.tar.gz`
+        is what `make dist-release` builds, which carries no distribution only tests
+        depend on, while `make dist` adds `lane-double-controls` for the lanes and CI.
+      - D21: `e2e-tests/README.md`, "VM dispute controls" (one module per scenario,
+        and why no order among them is needed).
       - The three deltas (`test-compatibility`, `settlement-configuration`,
-        `deployment-state`) are written to `openspec/specs/` by the archive in 9.11;
+        `deployment-state`) are written to `openspec/specs/` by the archive in 10.11;
         none of the three capabilities has an `index.md`, and `openspec/specs/README.md`
         needs no entry, since no capability or companion is added.
-- [ ] 9.10 Documentation citations: `make check-doc-citations CHANGE=add-arkhai-payments-lane-double`,
+- [ ] 10.10 Documentation citations: `make check-doc-citations CHANGE=add-arkhai-payments-lane-double`,
       resolving every match, then
       `scripts/change-workflow openspec validate add-arkhai-payments-lane-double --strict`.
-- [ ] 9.11 Archival: `scripts/change-workflow openspec archive add-arkhai-payments-lane-double -y`,
+- [ ] 10.11 Archival: `scripts/change-workflow openspec archive add-arkhai-payments-lane-double -y`,
       merging the three deltas, and link the index row to the archived directory.
 
 ## Design promotion record
 
-Filled in at closeout (9.9), naming each decision's permanent location.
+Filled in at closeout (10.9), naming each decision's permanent location.

@@ -150,7 +150,8 @@ hosted-ledger or adjudication evidence.
   `docs/development/TESTING.md`, "Private Service Dependencies".
 - D5: `openspec/specs/test-compatibility/architecture.md`; `docs/development/ROADMAP.md`,
   the hosted dispute-authority row.
-- D6: `openspec/specs/test-compatibility/spec.md` (delta); `e2e-tests/README.md`.
+- D6: `openspec/specs/test-compatibility/spec.md` (delta); `e2e-tests/README.md`, a
+  new "VM dispute controls" section and the VM lane's list under "End-to-end lanes".
 - D7: `tools/mediation-lane-double/README.md`; `tools/lane-double-controls/README.md`;
   `tools/README.md`, "Lane collaborators"; `dev-env/identities/README.md`.
 - D8: `openspec/specs/settlement-configuration/spec.md` (delta);
@@ -169,23 +170,28 @@ hosted-ledger or adjudication evidence.
 - D12: no permanent destination — it removes scope from this change's earlier design.
 - D13: no permanent destination — an implementation cadence, recorded in the change's
   history.
-- D14: `openspec/specs/test-compatibility/spec.md` (delta); `e2e-tests/README.md`, how
-  the controls scenarios file as the buyer; the buyer command filing on a running deal
-  as an unowned gap in `docs/development/ROADMAP.md`, Goal 8.
-- D15: `openspec/specs/test-compatibility/spec.md` (delta) and `architecture.md`, the
-  gate holding the delivery end only in the double's record;
-  `tools/mediation-lane-double/README.md` and `tools/lane-double-controls/README.md`,
-  beside the gate; what a `prepared` delivery end means to SCM as an unowned question
-  in `docs/development/ROADMAP.md`.
-- D16: `openspec/specs/test-compatibility/spec.md` (delta); `e2e-tests/README.md`.
+- D14: `openspec/specs/test-compatibility/spec.md` (delta); `e2e-tests/README.md`,
+  "VM dispute controls", how the controls scenarios file as the buyer; the buyer
+  command filing on a running deal as an unowned gap in `docs/development/ROADMAP.md`,
+  Goal 8.
+- D15: `openspec/specs/test-compatibility/spec.md` (delta) and `architecture.md`, "The
+  in-lane mediation double", the gate holding the delivery end only in the double's
+  record; `tools/mediation-lane-double/README.md`, "What a rule decides", and
+  `tools/lane-double-controls/README.md`, "The controls", beside the gate; what a
+  `prepared` delivery end means to SCM as an unowned question in
+  `docs/development/ROADMAP.md`, Goal 8, beside the hosted dispute-authority row.
+- D16: `openspec/specs/test-compatibility/spec.md` (delta); `e2e-tests/README.md`,
+  "VM dispute controls".
 - D17: `openspec/specs/test-compatibility/spec.md` (delta), each scenario on its own
   deal.
-- D18: `openspec/specs/test-compatibility/spec.md` (delta); `e2e-tests/README.md`.
+- D18: `openspec/specs/test-compatibility/spec.md` (delta); `e2e-tests/README.md`,
+  "VM dispute controls".
 - D19: `openspec/specs/test-compatibility/spec.md` (delta).
-- D20: `docs/development/RELEASING.md`, the release wheelhouse carrying no
-  distribution only tests depend on and `dist-release`'s set.
-- D21: `e2e-tests/README.md`, the controls scenarios' package and modules;
-  `openspec/specs/test-compatibility/spec.md` (delta).
+- D20: `docs/development/RELEASING.md`, its introduction beside the packages that are
+  not published: the release wheelhouse carrying no distribution only tests depend
+  on, and `dist-release`'s set.
+- D21: `e2e-tests/README.md`, "VM dispute controls", the controls scenarios' package
+  and modules; `openspec/specs/test-compatibility/spec.md` (delta).
 - Roadmap: Goal 8's row for this change and convergence's row restated, this
   change's closeout recorded, and D14's and D15's unowned entries:
   `docs/development/ROADMAP.md`.
