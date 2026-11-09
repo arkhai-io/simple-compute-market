@@ -81,6 +81,12 @@ RETURN = "a return"
 OUT_OF_ORDER = "sections out of the plan's order"
 
 
+# A node named for no step of its own, by the step that runs it: its result names
+# that step, so a caller runs the step's target and the step's own route check reads
+# the result as naming it; the node is in the result's reason.
+_RUN_BY = {"late-merge": "merge"}
+
+
 @dataclass(frozen=True)
 class Node:
     """A step, with the kind of review it is or triages where it has one."""
@@ -96,7 +102,10 @@ class Node:
 
     def result(self, reason: str, **extra: Any) -> Result:
         """The computation's result naming this node's step: a review with its kind,
-        a triage with the kind of review it triages."""
+        a triage with the kind of review it triages, the merge after the archive as
+        the merge step, its reason naming the node."""
+        if (step := _RUN_BY.get(self.step)) is not None:
+            return {"step": step, "reason": f"{self.label}: {reason}", **extra}
         kind = {"kind": self.kind} if self.kind else {}
         return {"step": self.step, **kind, "reason": reason, **extra}
 

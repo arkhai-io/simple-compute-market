@@ -264,7 +264,9 @@ def test_archive_cleanups_exit_to_done_waits_for_the_landing_branch(moved: bool)
 
     assert (exit_.target, guard.remedy) == (graph.DONE, graph.LATE_MERGE)
     if moved:
-        assert found["step"] == "late-merge" and "seq 9 fetched main" in found["reason"]
+        # The merge step runs the node, which the reason names.
+        assert found["step"] == "merge" and found["reason"].startswith("late-merge: ")
+        assert "seq 9 fetched main" in found["reason"]
     else:
         assert found is None
 

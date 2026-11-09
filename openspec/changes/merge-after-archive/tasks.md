@@ -318,13 +318,27 @@ Implements D1's run rule, D5, and the delta requirements CW-j7wp, CW-m4qe (the r
 rule), CW-5vkd (the guard's reading), and CW-9tzd. Touches
 `scripts/change_workflow/next_step.py` and `log.py` (`ran`, `unused_direction`).
 
-- [ ] 3.1 Read a `merge` run logged after an `archive-cleanup` run as a run of
+- [x] 3.1 Read a `merge` run logged after an `archive-cleanup` run as a run of
   `late-merge`, in `next_step._run_node` and in `log.ran`, so routing, a direction's
   use, and `merge_waiting` see the right node (D1, CW-m4qe). Verify: unit tests in
   `scripts/tests/test_change_next_step.py` and `test_change_workflow_log.py` show a
   merge run before archive cleanup routed on `merge`'s exits and one after it on
   `late-merge`'s, and a `late-merge` direction spent by the merge run after it.
-- [ ] 3.2 Answer `done` for an archived change from the route, in this order (D5,
+  Done: `log.after_cleanup(entry, entries)` (any archive cleanup line logged before
+  the run); `log.ran` gains the log's lines as a third argument, passed by every
+  caller (`route_of`, `unused_direction`, `in_progress`, and `convert`'s proposal), and
+  `next_step._run_node` the log, both required, so no caller reads every merge as the
+  merge before closeout by leaving it out. `merge_waiting` compares the step name,
+  which both nodes share, so it needed no edit. Unit:
+  `test_change_workflow_log.py::test_a_merge_run_is_the_merge_after_the_archive_once_archive_cleanup_ran`,
+  and in `test_change_next_step.py`
+  `test_a_merge_run_before_archive_cleanup_and_one_after_are_different_nodes` (the
+  route's source node; the exits each is routed on are the 3.4 tests') and
+  `test_a_direction_to_the_merge_after_the_archive_is_spent_by_the_merge_after_it`
+  (a question does not spend it) pass. `ran`'s use through `in_progress` and
+  `convert`'s proposal is exercised only by their existing tests, with no merge
+  after the archive in them.
+- [x] 3.2 Answer `done` for an archived change from the route, in this order (D5,
   CW-j7wp; 11 F3, 18 F2): a newer log and an undeclared line refused first; then a
   change with a live clone named to its clone, or, in that clone, computed there;
   otherwise `done` when the route ends at archive cleanup's exit to `done`, or the
@@ -337,14 +351,36 @@ rule), CW-5vkd (the guard's reading), and CW-9tzd. Touches
   workspace", "An archived change without a clone, another branch checked out", "A
   merge after the archive directed without the branch", and "An archived change whose
   row was pruned".
-- [ ] 3.3 Supply the reading cleanup's exit guard declares (2.2), over the run's line
+  Done: `Computation.run` refuses a newer log and an undeclared line, then, for an
+  archived change, `locate_clone` (the clone half of `locate`, split from its branch
+  half, `locate_branch`) and `archived_done`, before `locate_branch`; the row is read
+  only after, an archived change with no row and a step to run naming the owner. The
+  shortcuts in `run` and `route` are gone; `route` reads an `archived` row as the
+  closeout phase, so a merge's question after the archive waits in `pending`.
+  `archived_done` answers `done` when the route is archive cleanup's exit to `done`
+  with its guard met, or when the change has no log at all; an archived change whose
+  log is of an older format goes on to the conversion's owner result, as any change
+  does. An archived change whose clone was left unfinished is still named to `make
+  change-clone`, as `locate` names any change's. Unit: the five scenarios by name,
+  `test_an_archived_change_with_no_log_is_done`,
+  `test_an_archived_changes_undeclared_line_is_refused_before_done` (the first step
+  of the order), `test_a_merge_after_the_archive_directed_in_the_clone_is_computed_there`,
+  and the existing next-step suite pass.
+- [x] 3.3 Supply the reading cleanup's exit guard declares (2.2), over the run's line
   alone, and name `late-merge` in a result as the step to run, `{"step": "merge", …}`,
   the node in its reason (D5, CW-5vkd). Verify: unit tests in
   `scripts/tests/test_change_next_step.py` mapping "The landing branch moved during
   closeout", "The landing branch moves after the pull request opened", "The landing
   branch moved after a merge after the archive", "A change archived before the record
   existed", and CW-9tzd's "Archive cleanup finishes".
-- [ ] 3.4 Route the loop end to end (D3, D4, D6; CW-x9tb, CW-r2hu, CW-tnp6): a merge
+  Done: the reading was supplied in section 2 (see 2.2). `graph.Node.result` names the
+  merge step for `late-merge` (`_RUN_BY`), its reason prefixed `late-merge: `, so a
+  guard's remedy, a failed validation's, and a direction all name it so. Unit: the
+  five scenarios by name in `test_change_next_step.py`, and the graph test's moved
+  case, now asserting `{"step": "merge"}`, pass. "Moves after the pull request
+  opened" is shown by the computation reading no ref at all: nothing but the line
+  is an input, so no fetch can be simulated against it.
+- [x] 3.4 Route the loop end to end (D3, D4, D6; CW-x9tb, CW-r2hu, CW-tnp6): a merge
   after the archive naming `review:merge` or archive cleanup, each through its
   validation guard; a failed validation naming `late-merge` carrying the exit, an
   inconclusive one the owner; `triage:merge` advancing to archive cleanup through a
@@ -354,12 +390,31 @@ rule), CW-5vkd (the guard's reading), and CW-9tzd. Touches
   the change index conflicted", "The owner waives only the validation of a merge that
   named its review", "A merge review's triage commits a code fix", and "A validation of
   HEAD merged after the archive fails".
-- [ ] 3.5 Verification: `pytest -q scripts/tests/test_change_next_step.py
+  Done: no code beyond 3.1–3.3; the table routes it. Unit, in
+  `test_change_next_step.py`: the six scenarios by name (the last for both exits, with
+  its inconclusive case), `test_a_merge_reviews_triage_names_another_merge_review`, and
+  `test_the_owner_directs_implementation_of_an_archived_change_while_the_merge_asks`,
+  which shows the computation's half of CW-xo82's scenario section 2 left open, pass.
+  "Only the change index conflicted" shows the computation naming archive cleanup;
+  that the orchestrating session asks nothing is the skills' (section 4).
+- [x] 3.5 Verification: `pytest -q scripts/tests/test_change_next_step.py
   scripts/tests/test_change_workflow_log.py scripts/tests/test_change_workflow_graph.py
   scripts/tests/test_change_clone.py scripts/tests/test_change_workflow_cli_steps.py`
   (unit, and library integration where a real clone is used) passes;
   `scripts/change-workflow run pre-commit merge-after-archive` passes. End-to-end:
   none; no scenario exercises the workflow tooling.
+  Done: the named suites with `test_change_workflow_convert.py`,
+  `test_change_workflow_cli.py`, and `test_change_workflow_common.py` pass (868 with
+  the routing tests and the fresh-context check's fixes); `make check-history-wording`,
+  `make check-local-imports`, and `make check-comment-hygiene` pass.
+  `scripts/change-workflow run pre-commit merge-after-archive` passed on the finished
+  section (`after-functional-change`, `pre-commit-functional` with `make test` and the
+  packaging check, `pre-commit` with the repository's checks); an earlier run that
+  overlapped the fresh-context check's fixes is not counted. End-to-end: none,
+  confirmed. Owed by validation: none. Handoff: `graph._RUN_BY` names the step that
+  runs `late-merge` beside the table's `runs="merge"`, kept by hand — a node named for
+  no step of its own is rare enough that deriving it was not worth a rule telling it
+  from the round, whose result names `round`, not `implement`.
 
 ## 4. The skills carry the merge after the archive (D3, D4, D6, D7, D8)
 

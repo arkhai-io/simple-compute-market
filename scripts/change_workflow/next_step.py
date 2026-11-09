@@ -34,7 +34,12 @@ log, and whether a round view is open, and prints one JSON object:
   the graph does not declare; for a waiting run, its `seq` — a question
   or a stop is resumed by it; for a guard on an exit no step can satisfy, the exit
   as `target`;
-- `{"step": "done", …}` for an archived change, or once archive cleanup names it;
+- `{"step": "done", …}` for an archived change while its route ends at archive
+  cleanup's exit to `done`, or while it has no log: a direction or exit logged
+  after that exit is followed, as to the merge after the archive, whose result
+  names the merge step (`graph.LATE_MERGE`). An archived change with a live clone
+  is named to its clone first, and `done` is answered before the branch checked
+  out is read;
 - `{"step": "unclassified", "reason": …, "read": …}` when no rule applies, with
   what it read, for the orchestrating session to work out.
 
@@ -80,7 +85,8 @@ lines rather than JSON.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-4rqr, CW-tel3, CW-m70n,
 CW-l866, CW-0wna, CW-8tdv, CW-nkys, CW-izj1, CW-tnp6, CW-4c3e, CW-zcx8, CW-sd34,
-CW-9fbu, CW-x7jd, CW-qj77, CW-v6nj, CW-p7xk, CW-4x66, CW-8npg, and CW-9tzd.
+CW-9fbu, CW-x7jd, CW-qj77, CW-v6nj, CW-p7xk, CW-4x66, CW-8npg, CW-9tzd, CW-m4qe,
+CW-5vkd, and CW-j7wp.
 """
 
 from __future__ import annotations
@@ -100,13 +106,14 @@ from .clone import RUNNING as BOOTSTRAP_RUNNING
 from .clone import Bootstrap, bootstrap_state, clone_of, default_branch, workspace_of
 from .common import FORMAT, ORCHESTRATOR, StepError, repository_root
 from .find import ChangeNotFound, change_directory, is_archived
-from .graph import (CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE, IMPLEMENTATION_REVIEW,
-                    IMPLEMENTATION_TRIAGE, MERGE, PHASES, ROUND, ROUND_JOIN, ROUND_VIEW, STEPS,
-                    VALIDATE, Join, Node, Standing, TargetError, entry_refusal, node_of)
+from .graph import (ARCHIVE_CLEANUP, CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE,
+                    IMPLEMENTATION_REVIEW, IMPLEMENTATION_TRIAGE, LATE_MERGE, MERGE, PHASES,
+                    ROUND, ROUND_JOIN, ROUND_VIEW, STEPS, VALIDATE, Join, Node, Standing,
+                    TargetError, entry_refusal, node_of)
 from .graph import owner as _owner
 from .index import INDEX, Row, index_rows
-from .log import (CONTAINED, LOG, NewerFormat, branch_decisions, log_path, older, ran,
-                  read_log, refuse_newer, standing, undeclared)
+from .log import (CONTAINED, LOG, NewerFormat, after_cleanup, branch_decisions, log_path,
+                  older, ran, read_log, refuse_newer, standing, undeclared)
 from .records import (RECORD as _RECORD_FILE, ChangedSince, changed_since, exempting, is_record,
                       latest_validation, validation_problem, validation_result)
 from .round_view import RoundError, View, open_view
@@ -418,15 +425,18 @@ def _triage_phase(entry: Mapping[str, Any], before: Sequence[dict[str, Any]]) ->
     return None
 
 
-def _run_node(entry: Mapping[str, Any]) -> Node | None:
-    """The node a step's run is a run of: a review by its kind, a triage by the kind
-    of the latest review its outcome names; None for a run that names no kind."""
+def _run_node(entry: Mapping[str, Any], log: Sequence[Entry]) -> Node | None:
+    """The node a step's run, a line of `log`, is a run of: a review by its kind, a
+    triage by the kind of the latest review its outcome names, a merge by whether an
+    archive cleanup run is logged before it; None for a run that names no kind."""
     step = entry.get("step")
     if step == "review":
         node = Node(step, entry.get("kind"))
     elif step == "triage":
         reviews = _triaged_reviews(entry)
         node = Node(step, reviews[-1][1]) if reviews else Node(step)
+    elif step == MERGE.step:
+        node = LATE_MERGE if after_cleanup(dict(entry), log) else MERGE
     else:
         node = next((d.node for d in graph.TABLE if d.runs == step and not d.node.kind),
                     Node(str(step)))
@@ -525,7 +535,7 @@ def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
         if step not in STEPS:
             continue
         if route is not None and route.how == DIRECTED and route.node is not None \
-                and graph.NODES[route.node].runs and not ran(route.node, entry):
+                and graph.NODES[route.node].runs and not ran(route.node, entry, log):
             # A direction stands until a run of its node; a node no run is logged
             # for, as the round's reading, gives way to the next run of any step.
             continue
@@ -535,7 +545,7 @@ def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
             if entry.get("outcome") == "finished":
                 route = Route(NO_EXIT, entry)
             continue
-        source = _run_node(entry)
+        source = _run_node(entry, log)
         if source is None:
             route = Route(NO_EXIT, entry)
         elif source == VALIDATE:
@@ -637,15 +647,24 @@ class Computation:
             refuse_newer(f"{state.change}'s workflow log", state.log)
         except StepError as exc:
             return self.unclassified(str(exc))
-        if is_archived(self.root, state.directory) and (
-                state.row is None or state.row.status == "archived"):
-            return {"step": "done", "reason": "archived" if state.row else
-                    "archived, and its index row pruned"}
         # Before a branch decision is read: no line is routed on past one this
         # engine cannot read.
         if unknown := self.undeclared():
             return unknown
-        if located := self.locate():
+        archived = is_archived(self.root, state.directory)
+        if archived:
+            # A change with a live clone is computed there, where its log is current
+            # and the owner's direction is written; otherwise `done` is answered from
+            # the route before the branch checked out is read, since an archived
+            # change without a clone has landed and its branch is rarely checked out.
+            if in_clone := self.locate_clone():
+                return in_clone
+            if done := self.archived_done():
+                return done
+            located = None if state.workspace is not None else self.locate_branch()
+        else:
+            located = self.locate()
+        if located:
             return located
         if state.view is not None:
             # While a view is open the branch sits at the round's base, so nothing
@@ -655,6 +674,10 @@ class Computation:
                 "the round as the next NN-implementation-owner.md, then run "
                 "`make round-done`", round_view=state.view.change)
         if state.row is None:
+            if archived:
+                return _owner(f"{state.change} is archived and its route names a step to run, "
+                              f"but {INDEX} has no row for it: the owner restores the row as "
+                              "archive cleanup left it, or settles the route")
             return self.unclassified(f"{INDEX} has no row for {state.change}")
         if unconverted := self.unconverted():
             return unconverted
@@ -763,6 +786,16 @@ class Computation:
         its clone. In a clone, the workspace's view of the change is read through
         the clone's `workspace` remote.
         """
+        if (found := self.locate_clone()) is not None or self.state.workspace is not None:
+            return found
+        return self.locate_branch()
+
+    def locate_clone(self) -> Result | None:
+        """`locate`'s reading of clones: the change's clone, when the change is
+        worked in one and this checkout is not it; the owner, in a clone of another
+        change. None otherwise — in the change's own clone, with `state.workspace`
+        set to the workspace it was made from, and in a checkout the change has no
+        clone of."""
         state = self.state
         view = state.view
         if view is not None and view.clone and view.change == state.change:
@@ -788,6 +821,15 @@ class Computation:
                 return self.clone_step(f"{clone} was left unfinished",
                                        {"CHANGE": state.change})
             return self.in_clone(clone, "it is worked in its own clone")
+        return None
+
+    def locate_branch(self) -> Result | None:
+        """`locate`'s reading of the branch checked out, in a checkout the change has
+        no clone of: None when it is the change's branch, or one the owner's decision
+        says it is worked on; otherwise the owner, for a change whose records are
+        here, or the clone to create."""
+        state = self.state
+        view = state.view
         branch = self._branch(self.root)
         if branch and (branch == default_branch(state.change)
                        or branch_decisions(state.log, branch, state.change)):
@@ -806,6 +848,29 @@ class Computation:
         return self.clone_step(
             f"{state.change}'s branch is checked out neither here nor in a clone of its own",
             {"CHANGE": state.change, "BRANCH": default_branch(state.change)})
+
+    def archived_done(self) -> Result | None:
+        """`done` for an archived change while its route ends at archive cleanup's
+        exit to `done`, that exit's guard met, or while it has no log, as for a change
+        archived before the log existed; None when the route names a step to run, as
+        after the owner's direction to the merge after the archive, or archive
+        cleanup's first exit finding the landing branch moved. The row is not read: a
+        pruned row changes nothing while the change is done."""
+        state = self.state
+        done = {"step": DONE.step, "reason": "archived" if state.row else
+                "archived, and its index row pruned"}
+        if not state.log:
+            return done
+        route = route_of(state.log, self._join)
+        if route is None or route.how != EXIT or route.source != ARCHIVE_CLEANUP:
+            return None
+        try:
+            if node_of(route.target or {}) != DONE:
+                return None
+        except TargetError:
+            return None
+        (exit_,) = graph.exits(ARCHIVE_CLEANUP, target=DONE)
+        return None if self.guarded(exit_, route.target or {}, {"run": route.line}) else done
 
     def in_clone(self, clone: Path, why: str) -> Result:
         return {"step": "in-clone", "clone": str(clone),
@@ -853,13 +918,13 @@ class Computation:
     def route(self) -> Result:
         state = self.state
         status = state.row.status if state.row else ""
-        if status == "archived":
-            return {"step": "done", "reason": "archived"}
         if status == "deferred":
             return _owner(f"deferred: {state.notes}")
         if status.startswith("blocked in"):
             return _owner(f"{status}: {state.notes}")
-        phase = _phase(status)
+        # An archived change routed past `done` — the merge after the archive, its
+        # review, archive cleanup again — is in closeout's steps.
+        phase = "closeout" if status == "archived" else _phase(status)
         if phase is None:
             return self.unclassified(f"status {status!r} names no phase")
         if waiting := self.dependencies(phase):
@@ -1022,7 +1087,8 @@ class Computation:
         `line`: a session of it may be open, or may have ended without recording."""
         runs = graph.NODES[node].runs
         if runs is None or node == ROUND or any(
-                entry["seq"] > line["seq"] and ran(node, entry) for entry in self.state.log):
+                entry["seq"] > line["seq"] and ran(node, entry, self.state.log)
+                for entry in self.state.log):
             return ""
         return ("; no run of it is logged since: if no session of it is open, an interactive "
                 "one ended without recording — resume it, or record its outcome with "

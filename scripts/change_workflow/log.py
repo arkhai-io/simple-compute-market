@@ -64,8 +64,8 @@ from typing import IO, Any, Callable, Collection, Mapping, Sequence
 from .common import CHANGES, FORMAT, ORCHESTRATOR, Clock, Entry, StepError, utc_now
 from .find import (ARCHIVE, ChangeNotFound, change_directory, change_name, find_records,
                    landing_branch)
-from .graph import (NODES, ROUND, STEPS, Node, Standing, TargetError, entry_refusal, node_of,
-                    review_phase, section_ids)
+from .graph import (LATE_MERGE, NODES, ROUND, STEPS, Node, Standing, TargetError,
+                    entry_refusal, node_of, review_phase, section_ids)
 from .index import index_rows
 from .outcome import outcome_problems, triage_outcome_problems
 from .records import (NUMBERED, git_contains, git_remotes, has_records, latest_validation,
@@ -792,14 +792,26 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
     return line
 
 
-def ran(node: Node, entry: Entry) -> bool:
-    """Whether `entry` is a run of `node`: a review of its kind; a triage naming a
-    review of its kind among the records it triaged; for the round, the line
-    recording it starting, or an implementation session."""
+def after_cleanup(entry: Entry, entries: Sequence[Entry]) -> bool:
+    """Whether an archive cleanup run is logged before `entry` among `entries`: a
+    merge run so logged is the merge after the archive, since nothing returns an
+    archived change to the phase of the merge before closeout."""
+    return any(other.get("step") == CLEANUP and other["seq"] < entry["seq"]
+               for other in entries)
+
+
+def ran(node: Node, entry: Entry, entries: Sequence[Entry]) -> bool:
+    """Whether `entry`, a line of the log whose lines are `entries`, is a run of
+    `node`: a review of its kind; a triage naming a review of its kind among the
+    records it triaged; for the round, the line recording it starting, or an
+    implementation session; for the merge before closeout or after the archive, a
+    merge run before or after an archive cleanup run (`after_cleanup`)."""
     if node == ROUND and entry.get("outcome") == "round":
         return True
     if entry.get("step") != NODES[node].runs:
         return False
+    if NODES[node].runs == MERGE:
+        return (node == LATE_MERGE) == after_cleanup(entry, entries)
     if node.step == "review":
         return entry.get("kind") == node.kind
     if node.step == "triage":
@@ -825,7 +837,7 @@ def unused_direction(entries: Sequence[Entry]) -> Entry | None:
         node = node_of(direction_["next"])
     except TargetError:
         return None
-    return None if any(entry["seq"] > direction_["seq"] and ran(node, entry)
+    return None if any(entry["seq"] > direction_["seq"] and ran(node, entry, entries)
                        and entry.get("outcome") in ("finished", "returned", "round")
                        for entry in entries) else direction_
 

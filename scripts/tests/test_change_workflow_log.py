@@ -18,7 +18,7 @@ from change_workflow.common import FORMAT, StepError
 from change_workflow.log import (Checkout, LogError, NewerFormat, append_entry,
                                  branch_decisions, git_checkout, landing_source, last_entries,
                                  newer, note_orchestrator, note_round, numbered, older,
-                                 open_log, read_log, record_interactive, record_outcome,
+                                 open_log, ran, read_log, record_interactive, record_outcome,
                                  replace_log, revisit_direction, standing, undeclared,
                                  unused_direction)
 from change_workflow.outcome import triaged_problems
@@ -1017,6 +1017,19 @@ def test_a_direction_to_a_triage_is_used_by_a_triage_of_its_kind(tmp_path: Path)
                                    "next": {"step": "plan"}, "triaged": ["13-design"]},
                    session="s", commit=COMMIT)
     assert unused_direction(read_log(log)) is None
+
+
+def test_a_merge_run_is_the_merge_after_the_archive_once_archive_cleanup_ran(
+        tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    record_outcome(log, "merge", VALID["question"], session="s", commit=COMMIT)
+    record_outcome(log, "archive-cleanup", VALID["question"], session="s", commit=COMMIT)
+    record_outcome(log, "merge", VALID["question"], session="s", commit=COMMIT)
+    entries = read_log(log)
+    before, after = entries[0], entries[2]
+
+    assert ran(graph.MERGE, before, entries) and not ran(graph.LATE_MERGE, before, entries)
+    assert ran(graph.LATE_MERGE, after, entries) and not ran(graph.MERGE, after, entries)
 
 
 def test_a_direction_to_any_other_step_is_used_by_its_run_taking_an_exit(
