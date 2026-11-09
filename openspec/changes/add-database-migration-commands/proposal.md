@@ -23,7 +23,9 @@ None.
 
 - `deployment-state`: every stateful service migrates through its packaged command before startup, checks the exact set of its chain without DDL, begins its chain at the v0.3.0 baseline, records each migration atomically, and changes no schema outside its chain; a chart's only init container is the service's own migration; the legacy storefront domain migration is removed.
 - `storefront-publication`: a storefront retires registry listings it does not hold open.
-- `physical-provisioning`: hosts' stored `ssh` version-1 connections are rewritten to version 2 by migration, and a connection submission must state its version.
+- `physical-provisioning`: hosts' stored `ssh` version-1 connections are rewritten to version 2 by migration, and a connection submission must state its version; the requirements for the host-identity and active-fulfillment migrations, part of the v0.3.0 floor, are removed.
+- `fulfillment`: the requirement for the legacy-lease cutover, part of the v0.3.0 floor, is removed, and the kit's dependency boundary admits the migration kit.
+- `site-capacity`: the requirement for converting reservations in retired states — part of compute provisioning's v0.3.0 floor, and of the API-credit service's chain, which no longer migrates an existing database — is removed, and "Capacity schema separation" is restated without its pre-floor migration scenario.
 
 ## Dependencies and Related Changes
 

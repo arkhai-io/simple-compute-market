@@ -164,7 +164,10 @@ class TestListPublisherListings:
         maker_signer,
     ):
         """A publisher's open listings, read a page at a time, are every open
-        listing of that publisher once: none closed, none of another publisher."""
+        listing of that publisher once: none closed, none of another publisher.
+        Each carries its resource's offering mode, by which a storefront's sweep
+        tells its own listings from another storefront's under a shared principal
+        and leaves a listing stating none open."""
         created = iter(range(100))
 
         def add(listing_id, publisher, status):
@@ -195,6 +198,9 @@ class TestListPublisherListings:
                 maker_signer.identity, status="open", limit=2, offset=offset
             )
             pages.append([str(item.id) for item in page.listings])
+            assert [item.listing_resource.get("offering_mode") for item in page.listings] == [
+                "vm"
+            ] * len(page.listings)
             if len(page.listings) < 2:
                 break
             offset += len(page.listings)

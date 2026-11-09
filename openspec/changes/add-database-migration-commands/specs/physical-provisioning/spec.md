@@ -140,3 +140,17 @@ when it is dispatched.
 - **WHEN** the provisioning migration finds a host's stored `ssh` version 1 connection
   whose public fields the version-2 codec refuses
 - **THEN** the migration fails naming the host, and nothing is rewritten
+
+## REMOVED Requirements
+
+### Requirement: Existing host identities migrate without loss
+
+**Reason**: The migration it governs (`20260921_001_host_identity`) is part of compute provisioning's v0.3.0 floor: every database the chain adopts has already run it, and the chain refuses any older database as unsupported, so no supported database reaches it and its body is deleted with the pre-floor history.
+
+**Migration**: An operator holding a provisioning database from before the marketplace v0.3.0 release starts the service from a fresh database.
+
+### Requirement: Active fulfillment migration
+
+**Reason**: The migrations that placed existing hosts in a resource pool and backfilled fulfillment records for active VM reservations (among them `20260713_002_resource_pools_and_hosts_pool_id` and `20260724_001_legacy_vm_leases_to_fulfillment`) are part of compute provisioning's v0.3.0 floor: every database the chain adopts has already run them, and the chain refuses any older database as unsupported, so their bodies are deleted with the pre-floor history.
+
+**Migration**: An operator holding a provisioning database from before the marketplace v0.3.0 release starts the service from a fresh database.

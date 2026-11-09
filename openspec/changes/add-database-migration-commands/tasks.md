@@ -273,6 +273,11 @@ storefront supplies), and the three storefronts' publication wiring
       whether that composition answers 2.3's "against a real registry"; the
       cross-service close itself is a system-level observation no lane makes,
       since no lane plants an orphaned listing.
+      The round's triage (32 F2) took that composition as answering 2.3's
+      "against a real registry", once the
+      registry's paging test also asserts the one wire fact the sweep keys on and
+      no other test carried: each listing read through the typed client states its
+      resource's `offering_mode` (see the section's notes).
 
       VM (`test_publication_loop.py`, the storefront app through its typed
       client's lifecycle controls, the cross-registry client doubled):
@@ -373,6 +378,36 @@ Known limit, for the triage. A registry listing whose resource states no
 share, nothing says whose it is. Listings published before the offering mode was
 written into the resource would be such listings; the upgrade defect D15b fixes was a
 bare-metal listing, which states its mode.
+
+Round 1 triage fix (32 F2). The sweep closes only listings whose
+`listing_resource.offering_mode` it serves, and never one stating none, so a registry
+list response that dropped or renamed that field would make it close nothing while every
+test passed. The registry's paging test
+(`core/registry/tests/integration/test_listings.py::TestListPublisherListings::test_open_listings_page_by_offset_to_the_end`)
+now asserts each listing read through the typed client carries
+`listing_resource["offering_mode"] == "vm"`. Library integration of the registry
+through its typed client: `make -C core/registry test` — unit 139 passed, integration
+129 passed; with the planted resource emptied, the test failed on that assertion, and the
+fixture was restored. The triage declined, as disproportionate, a system scenario that
+plants an orphan and observes a storefront close it, and an in-process test booting the
+registry app beside the cross-registry client, which would make a core or storefront
+package depend on a deployed service.
+
+Checks over the round's triage fixes (32 F1's deltas and notes, recorded in section 4's
+notes, and this one): `scripts/change-workflow openspec validate
+add-database-migration-commands --strict` — valid; `scripts/change-workflow run pre-commit
+add-database-migration-commands` — "after-functional-change … passed, exit 0",
+"pre-commit-functional … passed, exit 0" (`make check-packaging` and every suite), and
+"pre-commit … passed, exit 0". Fresh-context check: fixed — the restated `site-capacity`
+scenario said a reservation names its site, which `capacity_reservations` does not store,
+now stated by the records the schema keeps; 11.9 lacked `site-capacity/architecture.md`'s
+retired-state paragraph, now named; D12 and the proposal called the API-credit service's
+retired-state conversion a floor migration, now distinguished, and 8.1 names the removal
+its deletion makes true; 2.3's pending note had been replaced, now restored with the
+outcome after it. Declined — the "Active fulfillment migration" Reason cites
+`20260713_002`, which by the floor no longer placed hosts in a pool; the Reason says
+"among them" of the migrations that did so historically, and every ID it names is a
+floor ID.
 
 Handoff. The sweep reads every registry each pass: a VM or bare-metal publication
 cycle, and an API-credit capacity reconciliation, which runs per capacity event — the
@@ -744,7 +779,12 @@ Left for review and closeout, outside this section's plan:
   row's counts are stale.
 - The triage should place each of these: REMOVED or MODIFIED deltas, Evidence and
   architecture corrections, and the proposal's capability list, most likely as
-  amendments to 11.9 and 11.10.
+  amendments to 11.9 and 11.10. Placed by the round's triage (32 F1): REMOVED and
+  MODIFIED deltas in new `specs/fulfillment/` and `specs/site-capacity/` and in
+  `specs/physical-provisioning/` (`site-capacity`'s "Capacity schema separation"
+  restated under a new name, since a MODIFIED requirement cannot drop a scenario),
+  the two capabilities added to the proposal and to D12, the Evidence and architecture
+  corrections named in 11.9, and the citation row's recount in 11.6.
 - TESTING.md defines library integration for kit libraries; this section, like section
   1, names a service's migration tests with no application "library integration" (a
   real component against real storage, no application). 11.9's planned "Migration
@@ -914,6 +954,10 @@ Touches `domains/apicredits/service` (`db/database.py`, `db/migrations.py`,
       fresh, rerun, an existing database refused, behind, ahead, absent, the pool
       seeded at startup and never by the migration, and the startup refusal of an
       invalid pool declaration. (D3, D5, D6, D10, D14)
+      The pre-floor chain's deletion takes `20261028_006_retired_reservation_states`
+      and `tests/integration/test_retired_reservation_states_migration.py` with it,
+      which the `site-capacity` REMOVED delta for "A stored reservation in a retired
+      state is converted at upgrade" relies on (32 F1).
 - [ ] 8.2 Run the command before the application: the image's command and
       `domains/apicredits/compose.yml`'s `credits-service` become
       `sh -c "apicredits-service-migrate && exec <the service's uvicorn command>"`, and
@@ -1074,7 +1118,11 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `openspec/changes/migrate-registry-to-postgres/proposal.md` to drop "Repair
       Alembic so blank … databases reach the complete current registry schema" and "Add
       a packaged registry migration command and read-only runtime schema guard", stating
-      that both landed here. Run `make check-change-index`.
+      that both landed here. Recount the unowned row on anchor-form spec citations
+      that omit the `requirement-` prefix: section 4 deleted
+      `vm_provisioning_adapter/legacy_backfill.py` and `market_fulfillment/backfill.py`,
+      so its count of thirteen and its list of files are stale (32 F1). Run
+      `make check-change-index`.
 - [ ] 11.7 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports (a failure needing a code or lock change returns the change to
       implementation), then `make check-architecture-change CHANGE=add-database-migration-commands`.
@@ -1134,14 +1182,36 @@ Per `openspec/README.md#plan-closeout-requirements`.
         `openspec/specs/storefront-publication/spec.md`'s "Evidence", which the
         archive does not write, gains the sweep's tests section 2 names (added
         2026-11-09 by section 2).
+      - The specifications whose pre-floor migrations section 4 deleted (32 F1): the
+        "Evidence" lists, which the archive does not write, lose or correct every
+        line citing a test section 4 deleted or moved — `fulfillment/spec.md`'s three
+        legacy-backfill lines; `physical-provisioning/spec.md`'s, among them
+        `tests/unit/services/test_definition_document_restart_safety.py`, now under
+        `tests/integration/`; `site-capacity/spec.md`'s offering-mode backfill and
+        reservation release-mirror lines; `resource-pool-management/spec.md`'s,
+        including its citation of `test_database.py` for a legacy host backfill that
+        file no longer tests; and `deployment-state/spec.md`'s
+        `test_job_envelope_migration.py`. `openspec/specs/fulfillment/architecture.md`'s
+        "Atomic legacy-lease cutover" is removed, and
+        `openspec/specs/physical-provisioning/architecture.md`'s paragraph on the
+        service's database modules no longer names VM's legacy lease conversion or a
+        history recording how VM's tables evolved, the chain now beginning at
+        baselines; `openspec/specs/site-capacity/architecture.md`'s paragraph saying a
+        retired-state row is converted by each ledger-holding service's chain
+        (`20261028_001` and the API-credit service's `20261028_006`) is removed or
+        restated, no supported database holding such a row. The requirements themselves are this change's deltas: REMOVED in
+        `fulfillment`, `physical-provisioning`, and `site-capacity`, `site-capacity`'s
+        "Capacity schema separation" restated as "A capacity reservation is stored
+        apart from its host, pool, and assignment", and `fulfillment`'s "Dependency
+        boundary" MODIFIED to admit the migration kit.
       - The vocabulary sweep (D16): every permanent document's use of *role* for a
         service becomes *service*; a requirement whose name or text changes is carried
         as a delta in this change's `specs/` before 11.10, and
         `openspec/specs/README.md` is updated where a capability's description uses the
         word.
-      - The `deployment-state`, `storefront-publication`, and `physical-provisioning`
-        `spec.md` files are written by the archive in 11.11; the record names them. None
-        of these capabilities has an `index.md`.
+      - The `deployment-state`, `storefront-publication`, `physical-provisioning`,
+        `fulfillment`, and `site-capacity` `spec.md` files are written by the archive in
+        11.11; the record names them. None of these capabilities has an `index.md`.
 - [ ] 11.10 **Documentation citations.** Run
       `make check-doc-citations CHANGE=add-database-migration-commands` and resolve every
       match, then `scripts/change-workflow openspec validate add-database-migration-commands --strict`.
