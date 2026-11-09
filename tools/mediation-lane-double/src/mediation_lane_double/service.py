@@ -11,9 +11,11 @@ resumed after a payments failure without applying an effect twice.
 
 Every decision the authority would make is a scenario's: whether a case is ruled,
 its basis, delivery end and effects, a filing's answer, and a gate before effects.
-With no matching rule nothing is ever ruled. The double verifies no concurrence
-signature, Agreement digest or mechanical guard; the kits prove the marketplace's
-own verification against the producer's vectors.
+With no matching rule nothing is ever ruled. A filing is admitted as the
+authority admits one: its filer is a party, and its Agreement is the one the
+payment's signed receipt commits to. The double verifies no concurrence signature
+or mechanical guard; the kits prove the marketplace's own verification against
+the producer's vectors.
 
 All state is in this process's memory, behind one lock; a restart loses it, since
 a run lives only as long as its lane.
@@ -84,6 +86,8 @@ class _Parties:
     payer: str
     payee: str
     parts: int
+    #: The receipt's deal commitment: the JCS SHA-256 of the Agreement it paid.
+    deal: str
 
 
 @dataclass
@@ -138,7 +142,7 @@ class MediationDouble:
         self._order: list[str] = []
         self._records: dict[str, list[dict[str, Any]]] = {}
         # The two parties of every Agreement a party has filed for: who may read
-        # its record. An Agreement is known from its first filing.
+        # its record. An Agreement is known from its first admitted filing.
         self._readers: dict[str, frozenset[str]] = {}
         self._parties: dict[str, _Parties] = {}
         self._replays: dict[tuple[str, str, str], tuple[bytes, dict[str, Any]]] = {}
@@ -185,6 +189,13 @@ class MediationDouble:
                     "status": "rejected", "reason": "filer_not_party",
                     "message": "the filer is neither party to the transaction"})
             agreement = hashlib.sha256(canonical_json(filing["agreement"])).hexdigest()
+            if agreement != parties.deal:
+                # The authority's admission rule: a case binds the Agreement the
+                # payment committed to, so a filing naming another Agreement makes
+                # it known to no reader and reserves no case.
+                return self._remember(actor, idempotency_key, "/cases", filing, {
+                    "status": "rejected", "reason": "agreement_hash_mismatch",
+                    "message": "the Agreement is not the one the payment's receipt commits to"})
             # The Agreement's first filing names who may read its record.
             self._readers.setdefault(agreement, frozenset({parties.payer, parties.payee}))
             filer = "payer" if actor == parties.payer else "payee"
@@ -586,7 +597,7 @@ class MediationDouble:
         if known is None:
             receipt = self._snapshot(transaction)["receipt"]["receipt"]
             known = _Parties(payer=receipt["from"], payee=receipt["to"],
-                             parts=len(receipt["parts"]))
+                             parts=len(receipt["parts"]), deal=receipt["deal"])
             with self._cache_lock:
                 self._parties[transaction] = known
         return known

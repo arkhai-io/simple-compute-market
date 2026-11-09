@@ -183,9 +183,10 @@ class Failing:
         return self.peer.submit_event(transaction, event, request_id=request_id)
 
 
-def filing(transaction: str, *, cause: str = "payee", delivered: bool = False) -> Filing:
+def filing(transaction: str, *, cause: str = "payee", delivered: bool = False,
+           agreement: Mapping[str, Any] = AGREEMENT) -> Filing:
     return Filing.model_validate({
-        "transaction": transaction, "agreement": AGREEMENT,
+        "transaction": transaction, "agreement": dict(agreement),
         "request": {"kind": "delivery_end", "ended_at": T0, "delivered": delivered,
                     "cause": cause},
         "claim": "delivery ended", "items": [],

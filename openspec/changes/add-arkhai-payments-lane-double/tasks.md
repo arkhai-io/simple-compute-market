@@ -487,7 +487,9 @@ perceived clock the scenario advances".
       `protection_incomplete` makes it known with an empty page. Parties come from
       the transaction's signed receipt (`from`, `to`), read as the authority. The
       only filing refusal is `filer_not_party`; no digest or authority-listing check
-      (D1). Records are signed with the fixture key over `records.record_message`,
+      (D1). Correction (4.9, after design review 62): the filing also refuses an
+      Agreement whose hash is not the receipt's `deal`, `agreement_hash_mismatch`;
+      still no authority-listing check. Records are signed with the fixture key over `records.record_message`,
       which validates each entry against `RecordEntry`.
 - [x] 4.4 Filing protection through the payments kit's client as the authority's
       account: `extend` per part; only `hold_not_extendable` reports `not_held`, its
@@ -699,7 +701,7 @@ perceived clock the scenario advances".
       repository root": all fixed. Declined: renaming `build-tools` to name only the
       lane doubles, since the owner chose the name; `tools/README.md` says what it
       builds.
-- [ ] 4.9 The filing's Agreement-binding admission check (D1 "Real mechanics", D4
+- [x] 4.9 The filing's Agreement-binding admission check (D1 "Real mechanics", D4
       "Mediation shapes"; 62 F1): in `tools/mediation-lane-double/src/mediation_lane_double/service.py`'s
       `file`, after the `filer_not_party` check and before the Agreement's readers are
       recorded, a case reference is reserved or any part is extended, refuse a filing
@@ -713,7 +715,16 @@ perceived clock the scenario advances".
       Agreement's binding to its payment, and no concurrence signature or mechanical
       guard. Requirement: "Lanes run a mediation double that answers from programmed
       rules", scenario "A filing's Agreement is not the payment's".
-- [ ] 4.10 Verification of 4.9.
+      Done. `_Parties` carries the receipt's `deal`, read with the parties and
+      cached with them. The check runs after `filer_not_party` and before the
+      readers, the rule book, the reservation and any extend, so a refused filing
+      makes the Agreement known to no reader and no rule is consulted for it (the
+      code's order; no test installs a rule for it); its answer is remembered
+      under its key. The module docstring of `service.py` and the README's "What it
+      serves" (`POST /cases`, and `GET /record`'s "first filing the double
+      admits") and "Deviation from its producer" now say the binding is checked
+      and only the concurrence signature and guard are not.
+- [x] 4.10 Verification of 4.9.
       Library integration (`tools/mediation-lane-double/tests/integration/test_mechanics.py`,
       through the mediation kit's real client over HTTP against the payments double's
       engine): a filing whose Agreement differs from the receipt's `deal` by one field
@@ -727,6 +738,39 @@ perceived clock the scenario advances".
       none of which a refusal would leave passing.
       Owed by validation: `tests.yml`, job `test · test-mediation-lane-double` — the
       double's suite passes with the new case.
+      Evidence: `make test-mediation-lane-double` — 73 passed. Application
+      integration (the double's app in process through the kit's typed client;
+      the plan, and section 4's earlier notes, call this suite library
+      integration, which `TESTING.md` reserves for a component against its
+      storage with no application),
+      `test_mechanics.py::test_a_filing_whose_agreement_is_not_the_payments_is_rejected_before_any_effect`:
+      correction to the planned seam — like the rest of the suite, the kit's real
+      `MediationClient` reaches the app in process over an ASGI transport, and the
+      payments peer is the payments kit's `FakePaymentsClient` over the shared
+      `PaymentsAuthority` engine, not the payments double over HTTP (no suite here
+      crosses HTTP to it; the lanes are the first). A filing whose Agreement's
+      `price` differs is `rejected`, `agreement_hash_mismatch`; the engine's
+      snapshot holds no `extend`; `ControlClient.cases` lists none; the buyer's
+      record read of that Agreement is `404 invalid_request`; the same key returns
+      the same refusal; an honest filing under another key is accepted, its part
+      held, its case reference the process's first (the refusal reserved none),
+      the one case listed. `support.filing` gained an `agreement` keyword.
+      End-to-end scenarios covering the section once deployed: `e2e_vm_payment_deal`
+      (the storefront's operator-end filing) and `e2e_bare_metal_payment_deal` (the
+      buyer's teardown filing), each passing the check with an honest Agreement;
+      section 6's markers join them once that section adds them. No scenario files
+      a mismatched Agreement.
+      `scripts/change-workflow run pre-commit`: `after-functional-change` and
+      `pre-commit-functional` passed (`make check-packaging` and every suite);
+      `pre-commit`'s index, tasks, skills and strict OpenSpec checks passed, and
+      `check-repository` failed only on the citations check, for the two section 6
+      paths not yet created (`e2e-tests/tests/e2e/roles/scenarios/vms/payment_deal.py`,
+      `e2e-tests/tests/unit/test_lane_doubles_fixtures.py`). The fresh-context
+      check's fixes (this note's level, 4.3's correction, the README's "first
+      filing the double admits", the case-reference assertion) came after that run;
+      the double's suite (73 passed) and `make check-comment-hygiene` were rerun.
+      Handoff: the check sits where the double already reads the receipt, so a
+      lane filing pays no extra payments read.
 
 ## 5. Lane wiring and the existing payment scenarios
 

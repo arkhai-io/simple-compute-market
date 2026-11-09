@@ -173,6 +173,40 @@ def test_a_filer_who_is_no_party_is_refused() -> None:
     assert (answer["status"], answer["reason"]) == ("rejected", "filer_not_party")
 
 
+def test_a_filing_whose_agreement_is_not_the_payments_is_rejected_before_any_effect() -> None:
+    lane = Lane()
+    transaction = lane.approve()
+    # One field differs from the Agreement whose hash the receipt's `deal` commits to.
+    other = {**AGREEMENT, "price": "1001"}
+
+    refused = _answer(lane, "seller", transaction, key="mismatched", agreement=other)
+    again = _answer(lane, "seller", transaction, key="mismatched", agreement=other)
+
+    assert (refused["status"], refused["reason"]) == ("rejected", "agreement_hash_mismatch")
+    assert again == refused
+    assert lane.events(transaction, "extend") == []
+    assert lane.controls().cases(transaction).cases == []
+
+    async def read_other() -> dict:
+        async with lane.client("buyer") as client:
+            return wire(await client.read_record(
+                ReadAfter.model_validate({"agreement": agreement_hash(other), "after": 0}),
+                transaction=transaction))
+
+    with pytest.raises(MediationAPIError) as unknown:
+        run(read_other())
+    assert (unknown.value.status, unknown.value.code) == (404, "invalid_request")
+
+    honest = _answer(lane, "seller", transaction, key="honest")
+
+    assert honest["status"] == "accepted"
+    assert [part["status"] for part in honest["case"]["parts"]] == ["held"]
+    # Case references count from one in each process: the refused filing reserved none.
+    assert honest["case"]["case_ref"].endswith("-1")
+    assert [case.case_ref for case in lane.controls().cases(transaction).cases] == [
+        honest["case"]["case_ref"]]
+
+
 def test_a_case_with_nothing_held_is_dismissed() -> None:
     lane = Lane()
     transaction = lane.approve()

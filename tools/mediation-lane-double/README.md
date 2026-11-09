@@ -15,8 +15,11 @@ vendored contract:
 
 - `POST /cases` files a case under an `Idempotency-Key`. The double reads the
   transaction's signed snapshot from the payments double as the authority's own
-  account, refuses a filer who is neither party (`filer_not_party`), and sends
-  `extend` for each part. A part payments extends is reported `held` with its
+  account, refuses a filer who is neither party (`filer_not_party`) and an
+  Agreement whose JCS SHA-256 is not the receipt's `deal`
+  (`agreement_hash_mismatch`), each a `rejected` filing that reserves no case,
+  extends nothing and makes the Agreement known to no reader, and sends `extend`
+  for each part. A part payments extends is reported `held` with its
   extension's event sequence. Only payments' nothing-held refusal,
   `hold_not_extendable`, reports a part `not_held`, its reason read from the part's
   signed amounts: `paid_out` when any money was released, otherwise `reversed` when
@@ -28,7 +31,7 @@ vendored contract:
   payee (`mandate.to`); a closed case refuses an append.
 - `GET /cases/{case_ref}` answers a party with the case.
 - `GET /record` pages the signed per-Agreement record after a cursor. An Agreement
-  is known from its first filing, so a party reading one with no case gets an
+  is known from its first filing the double admits, so a party reading one with no case gets an
   empty page; an unknown Agreement and a reader who is no party get the same
   `404 invalid_request`.
 - `GET /respondent` lists the open cases a party did not file and has not
@@ -99,9 +102,11 @@ rule or repeating the ruling completes the application.
 With no matching rule nothing is ever ruled: a case is filed, its parts are
 protected, appends are recorded, and a case with nothing held is dismissed. A
 `delivery_end` claim that a payee files, or concurs in, which the authority would
-rule mechanically, is ruled only when a rule says so. The double verifies no
-concurrence signature, Agreement digest or mechanical guard; the mediation kit
-proves the marketplace's own verification against the producer's vectors. A rule
+rule mechanically, is ruled only when a rule says so. The double verifies the
+filed Agreement's binding to its payment, the authority's admission rule, but no
+concurrence signature or mechanical guard, which are the marketplace's
+verification and the authority's decision logic; the mediation kit proves the
+marketplace's own verification against the producer's vectors. A rule
 may program only `reverse` effects, and a rule naming another is refused at
 install. A `stop` and a `penalty` act on rate parts — a stop schedules or applies a
 part's stop under its partial-period rule, and a penalty reverses earned amounts
