@@ -45,9 +45,16 @@ surface. Convergence's rate matrix and spot's rotation row have no lane to run i
 - **Mediation trust through configuration:** `[[DisputeCredential]]` gains an optional
   `ca_bundle_path`, which the mediation client uses as its verification context.
 - **Scenarios:** the VM case and refund stages and the bare-metal filing run against
-  the mediation double, and one VM-lane module on once-only deals proves the lane's
-  dispute wiring through six named journeys; the doubles' suites prove every other
-  control.
+  the mediation double, and six VM-lane controls scenarios, each a module on its own
+  once-only deal, prove the lane's dispute wiring: a ruled delivery end, an operator
+  discount, a lost filing answer, mediation unavailable, payments holding a ruling,
+  and a hold passed. Where a scenario needs a case on a running deal, the harness
+  files as the buyer through the mediation kit's dispute adapter; every stage acts
+  through a typed client, the doubles' control client or that adapter. The doubles'
+  suites prove every other control.
+- **The release wheelhouse** carries no distribution only tests depend on:
+  `dist-release` builds the release set without the controls wheel, which `dist`
+  still builds for the lanes.
 - **Evidence:** lane runs are labelled *lane doubles*, with the doubles' installed
   contract hashes; only a hosted target yields live evidence.
 
@@ -57,7 +64,7 @@ surface. Convergence's rate matrix and spot's rotation row have no lane to run i
 
 - `test-compatibility`: the mediation double, the doubles' controls and perceived
   clock, the payments double's claimed surface, the lane-owned mediation target, the
-  controls scenario, and lane-double evidence.
+  controls scenarios, and lane-double evidence.
 - `settlement-configuration`: a dispute credential may name the CA bundle its
   mediation client trusts.
 - `deployment-state`: the local release runs the mediation double's subchart, which
@@ -104,7 +111,10 @@ hosted-ledger or adjudication evidence.
 - Compose: `compose.payments-double.yml` runs the mediation double; lane registry and
   runner profiles, Bob's secret overlay and the buyer configuration writer change.
 - `e2e-tests`: the mediation helper and settings, the VM case stages and bare-metal
-  filing assertions, a controls module, and a dependency on the controls package.
+  filing assertions, six controls scenario modules and their helpers, and
+  dependencies on the controls package and the mediation kit.
+- Root `Makefile`: `dist-release` builds the release wheel set without
+  `dist-lane-double-controls`, held by a release-tooling test.
 - `helm`: a `mediation-lane-double` subchart enabled by `local-values.yaml`, the
   local release's registry recommendation, `topology-secrets.sh` rewriting the
   copied dispute credential's `ca_bundle_path` to the chart's CA mount, and the
@@ -159,5 +169,23 @@ hosted-ledger or adjudication evidence.
 - D12: no permanent destination — it removes scope from this change's earlier design.
 - D13: no permanent destination — an implementation cadence, recorded in the change's
   history.
-- Roadmap: Goal 8's row for this change and convergence's row restated, and this
-  change's closeout recorded: `docs/development/ROADMAP.md`.
+- D14: `openspec/specs/test-compatibility/spec.md` (delta); `e2e-tests/README.md`, how
+  the controls scenarios file as the buyer; the buyer command filing on a running deal
+  as an unowned gap in `docs/development/ROADMAP.md`, Goal 8.
+- D15: `openspec/specs/test-compatibility/spec.md` (delta) and `architecture.md`, the
+  gate holding the delivery end only in the double's record;
+  `tools/mediation-lane-double/README.md` and `tools/lane-double-controls/README.md`,
+  beside the gate; what a `prepared` delivery end means to SCM as an unowned question
+  in `docs/development/ROADMAP.md`.
+- D16: `openspec/specs/test-compatibility/spec.md` (delta); `e2e-tests/README.md`.
+- D17: `openspec/specs/test-compatibility/spec.md` (delta), each scenario on its own
+  deal.
+- D18: `openspec/specs/test-compatibility/spec.md` (delta); `e2e-tests/README.md`.
+- D19: `openspec/specs/test-compatibility/spec.md` (delta).
+- D20: `docs/development/RELEASING.md`, the release wheelhouse carrying no
+  distribution only tests depend on and `dist-release`'s set.
+- D21: `e2e-tests/README.md`, the controls scenarios' package and modules;
+  `openspec/specs/test-compatibility/spec.md` (delta).
+- Roadmap: Goal 8's row for this change and convergence's row restated, this
+  change's closeout recorded, and D14's and D15's unowned entries:
+  `docs/development/ROADMAP.md`.

@@ -20,6 +20,11 @@ Every lane MUST run a mediation double, recommended by the lane's registries, th
 - **WHEN** a rule supplies a ruling's basis, delivery end and per-part effects for a matching case
 - **THEN** the double records the ruling in the signed per-agreement record, applies each effect at the payments double with a stable effect key and the case reference, and then lifts only that case's extensions
 
+#### Scenario: A ruling waits at its gate
+
+- **WHEN** a rule's ruling with a delivery end and a reverse is held at its gate
+- **THEN** the double records the ruled entry with the delivery end and the reverse `prepared`, sends nothing to payments, and applies both, lifts the case's extensions and closes the case only once the rule is resumed
+
 #### Scenario: Payments fails between two effects
 
 - **WHEN** the payments double refuses or drops a ruling's second effect after the first committed
@@ -47,7 +52,7 @@ Every lane MUST run a mediation double, recommended by the lane's registries, th
 
 ### Requirement: Lane double controls are typed deterministic steps
 
-Both doubles MUST offer controls through one typed contract and client, shared with the end-to-end harness: when→then rules with refusals and transport faults, the mediation double's filing overrides, rulings, effects gate, operator decisions, closes and case listing, the payments double's funding and receipt-signer rotation, and rule listings. Controls MUST be lane-private, authenticated by a fixture token, and each MUST act only when the scenario advances it. Transport faults MUST apply only to the contract's API routes, never to the control routes. Every rule MUST state its `match`, and an unavailable rule MUST state `match: {}` and covers every contract API route. A control MUST refuse an unknown or malformed target with a typed code and install nothing. Each control the VM controls module does not exercise — funding, signer rotation, refusal with a published code, the filing-answer override, close without ruling and the rule listing — MUST be proven by its double's suite through the typed client over HTTP.
+Both doubles MUST offer controls through one typed contract and client, shared with the end-to-end harness: when→then rules with refusals and transport faults, the mediation double's filing overrides, rulings, effects gate, operator decisions, closes and case listing, the payments double's funding and receipt-signer rotation, and rule listings. Controls MUST be lane-private, authenticated by a fixture token, and each MUST act only when the scenario advances it. Transport faults MUST apply only to the contract's API routes, never to the control routes. Every rule MUST state its `match`, and an unavailable rule MUST state `match: {}` and covers every contract API route. A control MUST refuse an unknown or malformed target with a typed code and install nothing. Each control the VM controls scenarios do not exercise — funding, signer rotation, refusal with a published code, the filing-answer override, close without ruling and the rule listing — MUST be proven by its double's suite through the typed client over HTTP.
 
 #### Scenario: A response is lost after commit
 
@@ -97,7 +102,7 @@ Each double MUST evaluate time from a perceived clock, wall time plus an offset 
 #### Scenario: A once part's hold is passed
 
 - **WHEN** a scenario advances both doubles' clocks past a once part's release instant
-- **THEN** the next read shows the part paid out, and a case filed afterwards reports that part `not_held` with `paid_out` and is dismissed with nothing held
+- **THEN** the next read shows the part paid out, and a case the buyer files afterwards reports that part `not_held` with `paid_out` and is dismissed with nothing held, with no storefront step after the advance
 
 #### Scenario: A module that advanced the clocks ends
 
@@ -118,24 +123,34 @@ Each lane's runner MUST read its mediation target, CA bundle path, the buyer's m
 - **WHEN** a lane's mediation target is marked its own and does not report itself ready
 - **THEN** setup fails naming it, before any scenario stage
 
-### Requirement: A controls scenario proves the lane's dispute wiring in the VM lane
+### Requirement: Controls scenarios prove the lane's dispute wiring in the VM lane
 
-The VM lane MUST run a module of once-only deals that proves, end to end through the storefront's dispute servicing, exactly six journeys: a programmed ruling with a delivery end, an operator decision without one, a lost filing response, an unavailable mediation double, payments failing between ruling effects, and a clock advance past a hold, with the clock advance last in the module.
+The VM lane MUST run exactly six controls scenarios, each a module of its own on its own once-only deal, that prove, end to end through the storefront's dispute servicing: a programmed ruling with a delivery end, an operator decision without one, a lost filing response, an unavailable mediation double, payments losing an effect's answer and then unavailable while a ruling is applied, and a clock advance past a hold. Each stage MUST advance one side effect through the services' typed clients, the doubles' control client, or the mediation kit's dispute adapter, never a raw HTTP call; where a scenario needs a case on a delivering deal, the harness MUST file it as the buyer through that adapter. A stage MUST NOT step the storefront's servicing while a ruling waits at its gate.
 
 #### Scenario: A programmed ruling ends delivery
 
-- **WHEN** a rule rules a filed case with a delivery end and a reverse effect
-- **THEN** the payments double shows the reverse and the storefront ends delivery after observing the ruling
+- **WHEN** the buyer files on a delivering deal, a gated rule's ruling with a delivery end and a reverse is resumed, and the storefront then steps its servicing
+- **THEN** the payments double shows the reverse, and the storefront records the end with cause `ruling` and begins teardown
 
 #### Scenario: An operator discount leaves the deal running
 
-- **WHEN** an operator decision reverses part of the held money with no delivery end
-- **THEN** the reverse lands and the deal keeps running
+- **WHEN** the buyer files on a delivering deal, the storefront answers the case, and an operator decision reverses part of the held money with no delivery end
+- **THEN** the reverse lands, the case's extensions are lifted, and delivery stays active
 
 #### Scenario: A filing response is lost
 
-- **WHEN** the response to the storefront's filing is dropped after commit
+- **WHEN** the response to the storefront's filing is dropped after commit and the storefront files again
 - **THEN** the dispute adapter adopts the one filed case and no second case exists
+
+#### Scenario: Mediation is unavailable while a deal runs
+
+- **WHEN** mediation is unavailable while the storefront steps the servicing of a delivering deal with a case on record
+- **THEN** it reports the authority unreachable and delivery stays active, and once the outage is removed its next step reads the authority again
+
+#### Scenario: Payments holds a ruling before it completes
+
+- **WHEN** payments loses its answer to the first of two reverses an operator decision rules, and is then unavailable while the decision is repeated
+- **THEN** the storefront shows the ruling unapplied and the case not closed, and once payments answers, repeating the decision completes the ruling with exactly one reverse per effect
 
 ### Requirement: The in-lane payments double mirrors the service and proves its engine's surface
 

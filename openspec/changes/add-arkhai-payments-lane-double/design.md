@@ -57,8 +57,9 @@ Facts the decisions rest on:
   perceived clock.
 - The payments double claiming the rate and hold surface its engine serves.
 - The VM payment scenario's case stages and the bare-metal filing running against
-  the mediation double, and one VM-lane module proving the lane's dispute wiring
-  through six named journeys, every other control proven by its double's suite.
+  the mediation double, and six VM-lane controls scenarios, each on its own deal,
+  proving the lane's dispute wiring, every other control proven by its double's suite.
+- The release wheelhouse carrying no distribution only tests depend on.
 - The mediation double in the local Helm release beside the payments double, as a
   subchart of the umbrella chart, with a Helm test checking the VM storefront's
   mediation configuration from its own container.
@@ -153,8 +154,9 @@ whatever the module's outcome, through a reset control. Reset is the one backwar
 move, and only to a zero offset; advances stay forward-only. Records the module left
 dated ahead stay readable, because the payments engine evaluates a transaction at the
 later of its clock and the transaction's own instant, and only that module's deals
-carry them. Within a module, a stage that advances the clock still runs after the
-stages that need storefront work against unadvanced records (D6).
+carry them. The scenario that advances the clock is a module of its own (D21), so
+the reset bounds its advance whatever order the lane runs modules in, and within it
+no storefront step follows the advance (D18).
 
 **Independent clocks.** A lane's perceived clock lives only in its own doubles'
 processes, never in a shared service or on the host. Each pipeline lane runs its own
@@ -323,7 +325,10 @@ operator's decision, continues it too, whether or not its rule is still installe
 and another ruling there is `422 invalid_request`; closing a case applying a ruling
 is refused, `409 case_applying` (40 F1): no caller needs a way out of a ruling
 payments keeps refusing, which is a scenario's error, and the case holds only its
-own deal's money. The gate holds a ruling's delivery end with its other effects. A rule whose action a
+own deal's money. The gate holds a ruling's delivery end with its other effects in
+the double's record, where the ruled entry records it `prepared`; SCM's watch records
+an end from a delivery-end effect whatever its state, so a scenario steps no
+storefront servicing while a ruling waits at its gate (D15). A rule whose action a
 call's operation cannot take is passed over for that call, neither counted nor
 hiding a later rule. A rule that could never act is refused at install, `422 invalid_request`:
 a filing answer on any operation but `file`, a ruling on any but `file` or
@@ -397,30 +402,31 @@ authority it chose.
   by real extensions, nothing rules, and the seller's refund reverses the held money.
 - The bare-metal buyer's teardown filing reaches the mediation double; the scenario
   asserts a filed case held per part, not a ruling.
-- One VM-lane controls module, on once-only deals, proves the lane's dispute wiring
-  — the CA, the storefront's dispute adapter and the control client together —
-  through six journeys:
+- Six VM-lane controls scenarios, each a module of its own on its own once-only deal
+  (D17, D21), prove the lane's dispute wiring — the CA, the storefront's dispute
+  adapter and the control client together:
   1. a programmed ruling with a delivery end and a reverse, its effect visible at the
-     payments double and the storefront ending delivery after observing it;
+     payments double and the storefront ending delivery after observing it (D15);
   2. an operator decision with a partial reverse and no delivery end, the deal
      running on;
-  3. a lost filing response, the dispute adapter adopting the one case;
+  3. a lost filing response, the dispute adapter adopting the one case (D18);
   4. mediation unavailable, servicing reporting the authority unreachable while the
-     deal runs;
-  5. payments unavailable between two programmed effects, the ruling incompletely
-     applied and then completed with no duplicate effect;
+     deal runs (D18);
+  5. payments losing its answer to the first of two programmed effects and then
+     unavailable while the ruling is repeated, the ruling incompletely applied and
+     then completed with no duplicate effect (D16);
   6. a clock advance past a once part's hold, the payout visible and a later case
-     reporting `not_held` and dismissed with nothing held (D1). It runs last in the
-     module, so no stage runs storefront work against records dated ahead of the
-     storefront; the clock fixture resets both doubles when the module ends (D2).
+     reporting `not_held` and dismissed with nothing held (D1, D18); no storefront
+     step follows the advance, and the clock fixture resets both doubles when the
+     module ends (D2).
 - The doubles' own suites drive the kits' real clients over HTTP, and prove through
-  the typed client every control the module does not exercise: funding, signer
+  the typed client every control the scenarios do not exercise: funding, signer
   rotation, refusal with a published code, the filing-answer override, close without
   ruling and the rule listing (15 F5). Those controls' first lane use is
-  convergence's (rows 6, 11, 1, 3 and 13), over the client path the six journeys
+  convergence's (rows 6, 11, 1, 3 and 13), over the client path the six scenarios
   already prove.
 
-The six journeys are the module's boundary: changing them amends the delta.
+The six scenarios are the change's boundary: changing them amends the delta (D19).
 Convergence keeps every rate row.
 
 **Rejected:**
@@ -491,7 +497,7 @@ talks to an authority; lanes take the authority from the registry and have no
   buyer's `[[DisputeCredential]]`. Tests hold every restated value to its fixture.
 - Bob's storefront dispute credential carries the mediation double's seller token and
   `ca_bundle_path`.
-- In the Compose lanes, the controls module and the VM case stages prove the
+- In the Compose lanes, the controls scenarios and the VM case stages prove the
   storefront's mediation access; the lanes run no `check-mediation`. Its caller is the
   local release's Helm test (D11).
 
@@ -598,14 +604,209 @@ Two rounds:
    - `tools/mediation-lane-double` (mechanics, rules and rulings, effect application,
      gate, clock, case listing) with its suite, and D8's `ca_bundle_path` across the
      deal-lifecycle and mediation kits and the four lifecycle compositions.
-2. **Lane wiring, one session.** The overlay, fixtures, registries, the runner's
-   `MEDIATION` section and helper, buyer configuration, the VM case and refund stages,
-   the bare-metal filing and the controls module, and D11's subchart, release values,
-   `topology-secrets.sh` rewrite, `check-mediation` with its Helm test and its step in
-   `validate_slice.py`.
+2. **Lane wiring, the controls scenarios and the local release, three sessions.**
+   - The overlay, fixtures, registries, the runner's `MEDIATION` section and helper,
+     buyer configuration, the VM case and refund stages and the bare-metal filing.
+   - The six controls scenarios and their helpers (D6, D14–D19, D21).
+   - D11's subchart, release values, `topology-secrets.sh` rewrite, `check-mediation`
+     with its Helm test and its step in `validate_slice.py`, and D20's release
+     wheelhouse split.
+
+   One review covers the round.
 
 The doubles are reviewed before any lane uses them, so a wiring defect cannot hide a
-double's.
+double's. The scenarios and the local release are independent slices of about equal
+weight, each a session of its own, under the round's one review.
+
+### D14. The buyer files through SCM's dispute adapter
+
+SCM files only `delivery_end` claims, and both of its ways of filing end delivery as
+they file: the storefront's operator end records the end and tears delivery down with
+the filing, and the buyer's `market end` files after a surrender the storefront
+acknowledges. No SCM command files a case on a running deal, and the storefront's part
+in a case another party files is to answer it as respondent and observe its ruling.
+
+So where a scenario needs a case on a delivering deal, the harness files as the buyer:
+a delivery-end claim (`{kind: delivery_end, ended_at, delivered: true, cause: payer}`,
+the shape the buyer's `market end` sends) through the mediation kit's
+`MediationAdapter` over its typed `MediationClient`, with the buyer's token and the
+lane CA from the runner's `mediation` section and an operation store for the adapter's
+single-writer check, as `BuyerLifecycle.submit` supplies one. The storefront meets
+what a real buyer's filing gives it: no matching surrender, so it answers with a
+contest. `e2e-tests` declares `arkhai-kit-mediation`, which it then imports.
+
+Each stage acts through the services' typed clients, the doubles' control client, or
+the dispute adapter, never a raw HTTP call. No buyer command files a case on a running
+deal; the roadmap records that as an unowned gap, which these scenarios would then
+use.
+
+**Rejected:**
+
+- **An `effects` request through `effects_request`.** It would let several cases
+  share a deal, but no SCM product files one, so the scenarios would prove a kit path
+  only the harness uses.
+- **The raw `MediationClient` with a hand-built filing.** It skips SCM's request
+  validation, adoption and filed-record read, proving less of SCM.
+- **A new buyer filing command in this change.** A buyer feature with its own design,
+  whose only caller would be this test.
+- **SCM's existing filers alone.** Delivery would end before any ruling, so a ruled
+  end could never be what ends delivery, and a discount on a running deal could not
+  be shown.
+
+### D15. A programmed ruling is staged by its gate
+
+A ruling rule acts inside the request it matches (D4), so the ruled-end scenario
+installs its ruling rule on the buyer's filing with `pause_before_effects`, and orders
+its stages: file (the case filed, its part held, the ruled entry recording the
+delivery end and the reverse `prepared`), resume (the reverse at payments, the lift,
+the closed entry), then a storefront servicing step (the end recorded with cause
+`ruling`, teardown begun). Every side effect has its own stage, and the rule, its
+match on the deal and the gate are used in a lane before convergence relies on them.
+
+The storefront's watch records an end from a delivery-end effect without reading its
+`applied` state, and one servicing cycle runs respondent discovery, then the watch,
+then the physical end. So the gate holds the delivery end only in the double's
+record: no stage steps the storefront's servicing while a ruling waits at its gate.
+Neither the double nor SCM changes. What a `prepared` delivery end means is the
+producer's to say; the roadmap records it as an unowned question.
+
+The storefront does not answer this scenario's case, which is closed before its
+servicing step; the discount and mediation-unavailable scenarios, where no rule acts,
+prove the respondent's answer.
+
+**Rejected:**
+
+- **A ruling rule on the storefront's answer.** One servicing step would answer,
+  trigger the gated ruling and record the end from its prepared entry in the same
+  cycle.
+- **An operator decision instead of a rule.** The rule and its gate would first run
+  in a lane in convergence.
+- **A second gate before the ruling is recorded.** A new rule field whose only caller
+  is this scenario; the existing gate's ruled-but-unapplied state is what convergence
+  plans to observe.
+- **The double recording the delivery end applied under the gate.** It guesses at the
+  producer's semantics.
+- **SCM's watch waiting for `applied`.** A behaviour change on an unsettled question,
+  which would be a change of its own.
+
+### D16. Payments holds a ruling twice before it completes
+
+The payments double's rules cannot tell a ruling's two reverses on one part apart,
+and *unavailable* cannot be scoped (D4, 26 F2), so no control stops a ruling exactly
+between its effects; the double's suite proves that case in-process. The lane
+scenario proves what only the lane can: the storefront observing an incompletely
+applied ruling, and an effect resent across the two doubles' processes without a
+duplicate. Its stages, after a delivering deal, the buyer's filing with no rule and the
+storefront's answer:
+
+1. a payments drop-after-commit rule on the authority's `reverse` for the deal;
+2. an operator decision with two reverses on part 0 and `close`: payments commits the
+   first, its answer is lost, the second is never sent, the case is `applying`;
+3. a servicing step, the storefront showing the ruling unapplied and the case open;
+4. the rule deleted, then payments *unavailable* installed;
+5. the decision repeated, failing at the first effect's resend, the case still
+   `applying`, and a servicing step;
+6. the outage removed;
+7. the decision repeated: the first effect's resend answered from payments' stored
+   event, the second applied, the extension lifted, the case closed; and a servicing
+   step showing it closed.
+
+The payments snapshot shows the first amount reversed after step 2 and both after
+step 7, exactly once each.
+
+**Rejected:**
+
+- **Stopping at the lost answer, without the outage.** It omits a payments outage
+  holding a ruling in the lane.
+- **A payments match property on the event's amount or request id.** It amends the
+  controls contract and the payments classifier, still cannot scope an outage, and
+  never resends the first effect.
+- **A mediation gate after the nth effect.** A new ruling field whose only caller is
+  this scenario, and the first effect is never resent.
+- **Leaving the case to the double's suite.** The storefront's display of an
+  incomplete ruling would first run in convergence.
+
+### D17. One deal per scenario
+
+Each of the six controls scenarios commits its own once-only deal. The operator
+decision of the discount scenario closes its case. A deal that a buyer filed on
+cannot take a second, different delivery-end filing, so a deal still delivering when
+its scenario ends is ended by a stage that files nothing, which the plan establishes.
+
+**Rejected:**
+
+- **Sharing deals among scenarios.** Four deals would serve six scenarios only by
+  leaving the discount scenario's case open for a later ruling, coupling the
+  scenarios' state.
+
+### D18. The lost-filing, mediation-unavailable and hold-passed scenarios
+
+- **Lost filing.** The filer is the storefront's operator end. Stages: a delivering
+  deal; a mediation drop-after-commit rule on the deal's filing; the operator end,
+  which records the end, starts teardown and files, its answer lost; the rule deleted;
+  the operator end repeated, the adapter reading the record and adopting the one case,
+  or the storefront's own servicing retry where SCM retries the filing itself; a
+  servicing step, the lifecycle read and the case listing each showing one case.
+- **Mediation unavailable.** A delivering deal; the buyer's filing with no rule; a
+  servicing step answering it; mediation *unavailable*; a servicing step reporting the
+  authority unreachable with delivery active; the outage removed; a servicing step
+  reading the authority again. The case comes first because the storefront's read of
+  a record the authority does not yet know is refused even when nothing is wrong.
+- **Hold passed.** A delivering deal; both doubles' clocks advanced past the once
+  part's release instant; the payments snapshot showing the payout; the buyer's
+  filing answered with the part `not_held`, reason `paid_out`, and the case dismissed
+  with nothing held. No storefront step follows the advance, so only the harness
+  files.
+
+**Rejected:**
+
+- **The lost-filing scenario through the buyer's `market end`.** Its retry is the
+  buyer's same-key replay, not the storefront adapter's adoption.
+
+### D19. The delta states the six scenarios
+
+The six scenarios are the change's boundary, so the `test-compatibility` delta's
+requirement "Controls scenarios prove the lane's dispute wiring in the VM lane" names
+them, each on its own deal, how its stages act, and the rule that no stage steps the
+storefront's servicing while a ruling waits at its gate, with a WHEN/THEN scenario for
+the ruled end, the discount, the lost filing, mediation unavailable and payments
+holding a ruling; the hold passed stays in the clock requirement.
+
+### D20. The release wheelhouse carries no distribution only tests depend on
+
+`lane-double-controls` serves only `e2e-tests` and the lane doubles. `dist` keeps
+building it, since the e2e runner image and both doubles' images install from `.dist`,
+but `dist-release`, which the release workflow tars as `marketplace-wheelhouse`,
+builds the release set without it: the root `Makefile` gains a target for the release
+set, which both `dist` and `dist-release` build, and only `dist` adds the controls
+wheel. A release-tooling test holds that `dist-release` excludes it and `dist`
+includes it.
+
+**Rejected:**
+
+- **Leaving the wheel in the release.** An official release would ship a wheel no
+  operator installs.
+- **Deriving the release set from the architecture declaration.** Durable for every
+  future test-only package, but it changes how every wheel is assembled, packaging
+  work unrelated to mediation.
+- **Deferring with a roadmap gap.** The change that added the wheel to the release
+  can take it out in a few lines.
+
+### D21. Each controls scenario is a module of its own
+
+The six are scenarios in both of the repository's senses: an end-to-end scenario's
+deterministic run of stages, which by precedent is a module (`test_vm_payment_deal.py`,
+`test_vm_payment_purchase.py`), and a WHEN/THEN scenario of the delta. So each is a
+module of its own under one package of the VM scenarios, sharing helpers for
+committing a deal, the buyer's filing and a servicing step. The clock fixture resets
+both doubles at each module's end (D2), so the clock scenario's advance is bounded by
+construction and no order among the six is needed. The plan names the modules'
+markers and their `E2E_MODULE` entries.
+
+**Rejected:**
+
+- **One module of six test sequences.** It keeps the clock advance's ordering
+  constraint, and "scenario" would name both the module and its parts.
 
 ## Effects on other changes
 
@@ -618,7 +819,9 @@ double's.
   clock change; the "proposed" class goes (D3). The mediation double executes only
   `reverse` effects (D4, "Mediation shapes"; 40 F2), so the rows whose programmed
   rulings carry a `stop` or a `penalty` first add that effect's execution to the
-  double, with its suite's proof.
+  double, with its suite's proof. A row using the gate steps no storefront servicing
+  while its ruling waits there, since the storefront ends delivery on a `prepared`
+  delivery end (D15).
 - **`spot-deals-through-arkhai-payments`:** D8 cites the typed control contract of D4
   and the two classes of D3.
 - **`activate-per-period-compute-servicing`:** rule-programming stages are lane-only
@@ -636,7 +839,8 @@ double's.
   and 7.
 - **Roadmap:** Goal 8's row for this change drops the published/proposed classes;
   convergence's drops revised-case netting; the hosted dispute-authority row records
-  D5.
+  D5; two unowned entries are added: a buyer command filing a dispute case on a
+  running deal (D14), and what a `prepared` delivery end means to SCM (D15).
 
 ## Principles stated for promotion
 
@@ -650,6 +854,8 @@ double's.
    lane doubles have one: `docs/development/TESTING.md`, "The discipline every
    scenario follows", replacing its statement that no control moves the clock, and
    `docs/development/ARCHITECTURE.md`, "Testing strategy".
+3. The release wheelhouse carries no distribution only tests depend on:
+   `docs/development/RELEASING.md` (D20).
 
 ## Open Questions
 
