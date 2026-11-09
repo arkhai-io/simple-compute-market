@@ -268,6 +268,7 @@ carrying the code.
 | An empty effect list | valid: a ruling that moves no money |
 | Deciding or closing an unknown case; funding an unknown account | `404 case_not_found`; `404 account_not_found` |
 | Deciding or closing a closed case | `409 case_closed`, the refusal the API gives an append |
+| Closing a case applying a ruling (40 F1) | `409 case_applying`; nothing is lifted. The contract's closed entry follows every effect's application and the case's lift, and has no state for an abandoned effect, so the double never shows SCM a final record whose money did not move |
 | Listing cases for a transaction with none | `200`, an empty list: a listing, not a lookup |
 
 **Where the contract lives.** `tools/lane-double-controls` (import
@@ -291,7 +292,10 @@ code}` with a `MediationFailure` code, or `{status: rejected, reason}` with a
 or shown to a double's classifier: an orchestrator's liveness probe must not
 restart a double during an outage. The middleware decides nothing itself: each
 double's classifier matches a request against its rules and counts the match in
-the listing, since only the double knows its accounts and rules. A control call
+the listing, since only the double knows its accounts and rules. The middleware
+runs the classifier on a worker thread (40 F3): the mediation classifier may read
+a transaction's parties from payments, and the control and health routes keep
+answering while it waits. A control call
 without the double's control token is `401 authentication_required`. The client
 raises an error status whose body is not a control error with the client-side
 code `unexpected_response`, which no double sends.
@@ -302,18 +306,23 @@ filing alone and is not remembered under its key, so a retry once the rule is
 gone files for real, a `pending` answer's case reference being the one that
 filing then takes. A refusal rule's code is one of the contract's
 `MediationFailure` codes. A ruling's effects are applied only when each is a
-per-part `reverse`; a `penalty` or an `award` needs arithmetic over the parts, and a
-`stop` depends on the part's stop authority and payments' clock, which no once-only
-lane exercises, so each is refused at install, `422 invalid_request`, as is a match
-value no call can have. A ruling with `close`
+per-part `reverse` (40 F2). A `stop` and a `penalty` act on rate parts — a stop
+schedules or applies a part's stop under its partial-period rule against payments'
+clock, a penalty reverses earned amounts still held across parts in mandate order —
+and no lane in this change runs a rate part, so neither is applied untested; an
+`award` is unexecutable on `arkhai.payments.v1`, as the contract states. Each is
+refused at install, `422 invalid_request`, as is a match value no call can have.
+Executing `stop` and `penalty` is convergence's, before its rate rows rule with
+them ("Effects on other changes"). A ruling with `close`
 lifts the case's own extensions and records the closed entry; without it, a
 second ruled entry attests the effects applied and the case stays open. A case
 waits on its rule while held at the gate or stopped part-way by payments, and
 resuming the rule continues it; repeating the ruling a case is applying, as an
 operator's decision, continues it too, whether or not its rule is still installed,
 and another ruling there is `422 invalid_request`; closing a case applying a ruling
-records the ruling as far as it was applied, so no refusal holds a case open. The
-gate holds a ruling's delivery end with its other effects. A rule whose action a
+is refused, `409 case_applying` (40 F1): no caller needs a way out of a ruling
+payments keeps refusing, which is a scenario's error, and the case holds only its
+own deal's money. The gate holds a ruling's delivery end with its other effects. A rule whose action a
 call's operation cannot take is passed over for that call, neither counted nor
 hiding a later rule. A rule that could never act is refused at install, `422 invalid_request`:
 a filing answer on any operation but `file`, a ruling on any but `file` or
@@ -605,7 +614,10 @@ double's.
   handling rather than arithmetic; row 4's races and measured windows move to
   integration level; row 11's refused anchors and livemode changes are proven at kit
   and application level; rows 6 and 7's storefront-side timing waits on the lane-wide
-  clock change; the "proposed" class goes (D3).
+  clock change; the "proposed" class goes (D3). The mediation double executes only
+  `reverse` effects (D4, "Mediation shapes"; 40 F2), so the rows whose programmed
+  rulings carry a `stop` or a `penalty` first add that effect's execution to the
+  double, with its suite's proof.
 - **`spot-deals-through-arkhai-payments`:** D8 cites the typed control contract of D4
   and the two classes of D3.
 - **`activate-per-period-compute-servicing`:** rule-programming stages are lane-only

@@ -16,7 +16,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
-.PHONY: test-lane-double-controls dist-lane-double-controls test-payments-lane-double build-payments-lane-double test-mediation-lane-double build-mediation-lane-double
+.PHONY: test-lane-double-controls dist-lane-double-controls test-payments-lane-double test-mediation-lane-double build-tools
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
 .PHONY: run-e2e run-ci fetch-e2e-logs
@@ -261,8 +261,7 @@ build-dev: ## Build everything `build` does, the dev chain image, the test image
 	$(MAKE) build
 	$(MAKE) build-dev-env
 	$(MAKE) build-test-image
-	$(MAKE) build-payments-lane-double
-	$(MAKE) build-mediation-lane-double
+	$(MAKE) build-tools
 
 # One end-to-end lane's images: the wheels, the dev chain with its baked state,
 # the test image (which installs `market` from the wheels, so no lane needs
@@ -277,13 +276,13 @@ build-e2e-base:
 	$(MAKE) build-test-image
 
 build-e2e-vm: build-e2e-base ## Build the VM end-to-end lane's images
-	$(MAKE) -j4 build-registry build-storefront build-provisioning build-payments-lane-double
+	$(MAKE) -j4 build-registry build-storefront build-provisioning build-tools
 
 build-e2e-bare-metal: build-e2e-base ## Build the bare-metal end-to-end lane's images
-	$(MAKE) -j4 build-registry build-provisioning build-bare-metal-storefront build-payments-lane-double
+	$(MAKE) -j4 build-registry build-provisioning build-bare-metal-storefront build-tools
 
 build-e2e-apicredits: build-e2e-base ## Build the API-credit end-to-end lane's images
-	$(MAKE) -j5 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-payments-lane-double
+	$(MAKE) -j5 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-tools
 
 # The native Ansible gate's image: only the provisioning image and the wheels it
 # installs, since the gate composes no stack, so no dev chain and no test image.
@@ -394,20 +393,10 @@ build-frp-grant-admission: ## Build the frps admission plugin's image
 build-test-image:
 	cd e2e-tests && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
-# The lanes' payments double, built from the repository root so its Dockerfile can
-# copy the wheelhouse its lock resolves from. Lanes and the local release run it;
-# it is never pushed.
-build-payments-lane-double: ## Build the payments double's image
-	docker build --ulimit nofile=65536:65536 \
-		-f tools/payments-lane-double/Dockerfile \
-		-t arkhai:payments-lane-double$(IMAGE_SUFFIX) .
-
-# The lanes' mediation double, built from the repository root as the payments
-# double is. Lanes and the local release run it; it is never pushed.
-build-mediation-lane-double: ## Build the mediation double's image
-	docker build --ulimit nofile=65536:65536 \
-		-f tools/mediation-lane-double/Dockerfile \
-		-t arkhai:mediation-lane-double$(IMAGE_SUFFIX) .
+# The lane doubles' images, which lanes and the local release run and nothing
+# pushes; each is built by its own target in tools/Makefile.
+build-tools: ## Build the lane doubles' images
+	cd tools && $(MAKE) build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.

@@ -16,10 +16,12 @@ surface. Convergence's rate matrix and spot's rotation row have no lane to run i
   every lane. It reproduces the dispute authority's API mechanics — authentication,
   idempotency, signed per-agreement records and cursors, the respondent listing, the
   closed-case refusal, extensions at the payments double as its own account, and
-  execution of a ruling's effects with stable keys and resume — and takes every
-  decision as a scenario-programmed answer, as mock provisioning takes a job's
-  outcome. With no rule, nothing is ruled. It duplicates none of the authority's
-  decision logic.
+  execution of a ruling's `reverse` effects with stable keys and resume, its delivery
+  end recorded — and takes every decision as a scenario-programmed answer, as mock
+  provisioning takes a job's outcome. With no rule, nothing is ruled. It duplicates
+  none of the authority's decision logic. It refuses a ruling's `stop` and `penalty`
+  effects, which act on rate parts no lane in this change runs, and `award`, which
+  the contract makes unexecutable on `arkhai.payments.v1`.
 - **Controls for both doubles** in a shared package (`tools/lane-double-controls`):
   when→then rules with refusals, filing-answer overrides, rulings and a gate before
   effects; operator decisions and closes; case and rule listings; funding and receipt

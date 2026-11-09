@@ -88,9 +88,11 @@ the same shape. Repeating the ruling a case is applying continues it, past its g
 or from where payments stopped it, whether or not its rule is still installed;
 another ruling there is `422 invalid_request`. `POST /test/cases/{case_ref}/close`
 closes an open case without a ruling once its extensions are lifted, answering
-`502 payments_unavailable` when payments does not lift them; a case applying a
-ruling payments keeps refusing is closed the same way, its ruling recorded as far
-as it was applied, so no refusal holds a case open for good.
+`502 payments_unavailable` when payments does not lift them. A case applying a
+ruling is refused, `409 case_applying`, and keeps its extensions: the contract's
+closed entry is final only once every effect is applied and the case's
+extensions are lifted, and it has no state for an abandoned effect. Resuming the
+rule or repeating the ruling completes the application.
 
 ## Deviation from its producer
 
@@ -100,14 +102,17 @@ protected, appends are recorded, and a case with nothing held is dismissed. A
 rule mechanically, is ruled only when a rule says so. The double verifies no
 concurrence signature, Agreement digest or mechanical guard; the mediation kit
 proves the marketplace's own verification against the producer's vectors. A rule
-may program only `reverse` effects: a `penalty` or an `award` needs arithmetic over
-the parts, which is the authority's decision logic, and a `stop`'s partial period
-and time depend on the part's stop authority and on payments' own clock, which no
-once-only lane exercises; a rule naming one is refused at install.
+may program only `reverse` effects, and a rule naming another is refused at
+install. A `stop` and a `penalty` act on rate parts — a stop schedules or applies a
+part's stop under its partial-period rule, and a penalty reverses earned amounts
+still held, across parts in mandate order — and no lane running this double runs a
+rate part, so neither is applied untested; an `award` is not executable on
+`arkhai.payments.v1`, as the contract states.
 To know which party files before the app runs, so that a rule naming the filer can
 drop a filing's response, the fault classifier reads an unseen transaction's
-parties from payments on the event loop, the double's one call to payments off its
-thread pool.
+parties from payments. The transport-fault middleware runs the classifier on a
+worker thread, so the control and health routes keep answering while that read
+waits.
 
 ## What its results establish
 
@@ -139,7 +144,8 @@ control token.
 
 ## Running it
 
-The image (`make build-mediation-lane-double` at the repository root) carries the
+The image (`make build-mediation-lane-double` in `tools/`, or the root's
+`make build-tools`) carries the
 fixture, the lane CA and its `mediation-double` leaf, and the leaf key its build
 generates, and reaches the payments double at `https://payments-double:8443` under
 the lane CA. Outside the image, `MEDIATION_LANE_DOUBLE_FIXTURES`,

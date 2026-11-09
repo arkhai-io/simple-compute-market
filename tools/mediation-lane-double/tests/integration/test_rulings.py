@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from lane_double_controls import Rule, Ruling
+from lane_double_controls import ControlError, Rule, Ruling
 from market_arkhai_mediation.contract import wire
 from market_arkhai_mediation.models import ReadAfter
 from market_arkhai_payments.canonical import agreement_hash
@@ -75,7 +75,7 @@ def test_a_programmed_ruling_is_recorded_applied_and_its_extensions_lifted() -> 
     assert (view.matched, view.waiting) == (1, 0)
 
 
-def test_a_case_whose_effect_payments_keeps_refusing_can_still_be_closed() -> None:
+def test_a_case_whose_ruling_is_not_yet_applied_is_not_closed() -> None:
     lane = Lane()
     transaction = lane.approve(amount="1000")
     controls = lane.controls()
@@ -83,16 +83,20 @@ def test_a_case_whose_effect_payments_keeps_refusing_can_still_be_closed() -> No
     controls.install_rule(Rule.model_validate(RULE | {"ruling": _ruling(
         {"kind": "reverse", "part": 0, "amount": "5000"})}))
     case_ref = _file(lane, transaction)["case"]["case_ref"]
+    extensions = lane.part(transaction)["extensions"]
+    assert extensions
+
+    with pytest.raises(ControlError) as refused:
+        controls.close_case(case_ref)
+
+    assert (refused.value.status, refused.value.code) == (409, "case_applying")
     assert controls.cases(transaction).cases[0].state == "applying"
-
-    closed = controls.close_case(case_ref)
-
-    assert closed.state == "closed"
-    assert controls.rules().rules[0].waiting == 0
+    assert controls.rules().rules[0].waiting == 1
     last = _record(lane, transaction)[-1]
-    assert (last["kind"], last["reason"]) == ("closed", "ruled")
+    assert last["kind"] == "ruled"
     assert [item["state"] for item in last["outcome"]] == ["applied", "prepared"]
-    assert lane.part(transaction)["extensions"] == []
+    assert lane.part(transaction)["extensions"] == extensions
+    assert lane.events(transaction, "lift") == []
 
 
 def test_a_ruling_held_at_its_gate_applies_only_once_resumed() -> None:

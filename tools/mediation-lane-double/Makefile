@@ -5,7 +5,7 @@ DIST_DIR ?= ../../.dist
 
 .PHONY: build init reinit test test-unit
 
-build: ## Build the double's wheel into dist/; its image builds from the repository root (make build-mediation-lane-double there)
+build: ## Build the double's wheel into dist/; its image is built by tools/Makefile (make build-mediation-lane-double there)
 	uv build --wheel --out-dir dist
 
 init: reinit ## Create or update the environment

@@ -351,24 +351,22 @@ class MediationDouble:
     def close_case(self, case_ref: str) -> CaseView:
         """Close an open case without a ruling, once its extensions are lifted.
 
-        A case applying a ruling payments keeps refusing is closed the same way,
-        its ruling recorded as far as it was applied, so no refusal can hold a
-        case open for good.
+        A case applying a ruling is refused and keeps its extensions: the
+        contract's closed entry is final only after every effect is applied and
+        the case's extensions are lifted, and it has no state for an abandoned
+        effect. Resuming the rule or repeating the ruling completes its application.
         """
 
         with self._lock:
             case = self._open_case(case_ref)
+            if case.state == "applying":
+                raise ControlError(409, "case_applying",
+                                   f"case {case_ref} is applying a ruling not yet applied")
             if not self._lift(case):
                 raise ControlError(502, "payments_unavailable",
                                    f"payments did not lift case {case_ref}'s extensions")
-            if case.state == "applying":
-                assert case.ruling is not None
-                self.rules.set_waiting(case.rule_id, case.case_ref, False)
-                self._record(case, self.authority.account, "closed", reason="ruled",
-                             basis=case.ruling.basis, outcome=deepcopy(case.outcome))
-            else:
-                self._record(case, self.authority.account, "closed", reason="dismissed",
-                             basis="operator", outcome=[])
+            self._record(case, self.authority.account, "closed", reason="dismissed",
+                         basis="operator", outcome=[])
             case.state = "closed"
             return case.view()
 
@@ -617,10 +615,10 @@ class MediationDouble:
             body = {}
         if operation == "file" and isinstance(body.get("request"), dict):
             # Which party files is the transaction's, not the request's. The
-            # classifier runs on the event loop before the app, so the parties of
-            # a transaction the double has not yet read are read here, the one
-            # call to payments made off the thread pool, and never under the
-            # service's lock. An unreadable transaction leaves the filer unmatched.
+            # classifier runs before the app, on the middleware's worker thread,
+            # so the parties of a transaction the double has not yet read are
+            # read here, never under the service's lock. An unreadable
+            # transaction leaves the filer unmatched.
             transaction = str(body.get("transaction", ""))
             filer = ""
             try:

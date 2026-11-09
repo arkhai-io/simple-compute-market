@@ -24,11 +24,11 @@ from market_arkhai_mediation.contract import schema
 
 # The refusal codes the authority publishes, which a refusal rule answers with.
 _PUBLISHED_CODES = frozenset(schema()["$defs"]["MediationFailure"]["properties"]["code"]["enum"])
-# The effects the double applies, each to one part as one payment event. A penalty
-# or an award would need arithmetic over the parts, which is the authority's
-# decision logic, not a mechanic the double reproduces; a stop's partial period and
-# time depend on the part's stop authority and payments' own now, which no
-# once-only lane exercises, so a stop is refused rather than applied untested.
+# The effects the double applies, each to one part as one payment event. A stop and
+# a penalty act on rate parts (a stop's partial period and time against payments'
+# own now; a penalty's reverse of earned amounts still held, across parts in
+# mandate order), which no lane running the double has, so each is refused rather
+# than applied untested; the contract makes an award unexecutable on payments v1.
 _APPLIED_EFFECTS = frozenset({"reverse"})
 # What each match property may equal; any other value could never match.
 _MATCH_VALUES = {

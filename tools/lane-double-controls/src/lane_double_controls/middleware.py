@@ -17,11 +17,16 @@ and a transport error as unknown, so a 5xx would prove the wrong branch.
 Control routes and the health route are never faulted, and are never shown to the
 classifier. A finaliser must always be able to remove the rule that caused a
 fault, an orchestrator's liveness probe must not restart a double under an
-outage, and no client under test calls either.
+outage, and no client under test calls either. For the same reason the
+classifier runs on a worker thread, never on the event loop: a classifier may
+read a collaborator to learn what a request matches, and the control and health
+routes must keep answering while that read waits. A classifier is therefore
+called from several threads at once and guards its own state.
 """
 
 from __future__ import annotations
 
+import asyncio
 import enum
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import dataclass
@@ -71,8 +76,9 @@ class TransportFaultMiddleware:
         body = await _read_body(receive)
         headers = {name.decode("latin-1").lower(): value.decode("latin-1")
                    for name, value in scope.get("headers", [])}
-        fault = self.classify(FaultRequest(method=scope["method"], path=scope["path"],
-                                           headers=headers, body=body))
+        fault = await asyncio.to_thread(
+            self.classify,
+            FaultRequest(method=scope["method"], path=scope["path"], headers=headers, body=body))
         replay = _replay(body, receive)
         if fault is None:
             await self.app(scope, replay, send)

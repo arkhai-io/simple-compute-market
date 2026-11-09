@@ -9,6 +9,7 @@ httpx, as a transport error and never as an HTTP status.
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Iterator
 from typing import Any
 
@@ -124,6 +125,36 @@ def test_drop_after_commit_runs_the_request_once_and_loses_its_response(
     retried = client.post("/transactions", content=b'{"mandate":1}')
 
     assert retried.json()["committed"] == 2
+
+
+def test_control_and_health_routes_answer_while_a_classification_waits(
+        ledger: _Ledger) -> None:
+    # A classifier may wait on a collaborator; the server must keep answering
+    # the routes the classifier never sees meanwhile.
+    entered, release = threading.Event(), threading.Event()
+
+    def classify(request: FaultRequest) -> Fault | None:
+        entered.set()
+        release.wait(timeout=10.0)
+        return None
+
+    with serving(TransportFaultMiddleware(ledger.app, classify)) as base_url:
+        with httpx.Client(base_url=base_url, trust_env=False, timeout=10.0) as waiting, \
+                httpx.Client(base_url=base_url, trust_env=False, timeout=2.0) as prompt:
+            answers: list[int] = []
+            caller = threading.Thread(
+                target=lambda: answers.append(waiting.post("/cases", content=b"{}").status_code))
+            caller.start()
+            try:
+                assert entered.wait(timeout=10.0)
+                assert prompt.get("/test/status").status_code == 201
+                assert prompt.get("/health").status_code == 201
+                assert answers == []
+            finally:
+                release.set()
+                caller.join(timeout=10.0)
+
+    assert answers == [201]
 
 
 def test_a_fault_is_a_transport_error_to_the_kit_clients_definition(

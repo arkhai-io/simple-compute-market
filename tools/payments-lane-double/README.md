@@ -199,6 +199,7 @@ copied there under those names.
   abandons a response. From the repository root,
   `make test-payments-lane-double` runs it, as part of `make test` and the Tests
   workflow's matrix.
-- `make build-payments-lane-double`, from the repository root, builds the image
-  from the repository wheelhouse and this project's committed lock;
-  `make build-dev` and each lane's `build-e2e-*` target build it.
+- `make build-payments-lane-double` in `tools/` builds the image from the
+  repository wheelhouse and this project's committed lock; the root's
+  `make build-tools`, part of `make build-dev` and each lane's `build-e2e-*`
+  target, builds it.

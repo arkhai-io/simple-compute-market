@@ -515,14 +515,15 @@ perceived clock the scenario advances".
       under request id `mediation:<case_ref>:<ruling>:effect:<n>`, and a lift
       `mediation:<case_ref>:lift:<part>` with the part's `extension_ref` (an
       `extension_closed` lift counts as done), following the producer's traces. Only
-      `reverse` effects are applied; a `stop` is refused at install with `penalty`
-      and `award`, since its partial period and time depend on the part's stop
-      authority and payments' clock, which no once-only lane exercises (README,
-      "Deviation"); convergence's rate rows will need it. Rule
+      `reverse` effects are applied; `stop` and `penalty` are refused at install,
+      since both act on rate parts no lane in this change runs, and `award`, which
+      the contract makes unexecutable on payments v1 (README, "Deviation"; the
+      delta states it, 40 F2); convergence's rate rows will need `stop` and
+      `penalty` executed first (design, "Effects on other changes"). Rule
       matching on `filer` before the app runs needs the transaction's parties, so
-      the classifier reads an unseen transaction's receipt itself, on the event loop
-      and outside the service's lock, and only while a rule matches on `filer`
-      (commented in `service._properties`). A refusal rule acts on every operation,
+      the classifier reads an unseen transaction's receipt itself, on the
+      middleware's worker thread and outside the service's lock, and only while a
+      rule matches on `filer` (commented in `service._properties`). A refusal rule acts on every operation,
       reads included, for a call past authentication, validation and the party and
       case checks; a rule whose action an operation cannot take is passed over for
       it; a rule that could never act, a match value no call has included, is
@@ -530,9 +531,9 @@ perceived clock the scenario advances".
       classification, the middleware sees no `filer` while the service later reads
       it, so the two layers can take different first rules for that one call. A ruling stopped
       part-way stays recorded as its ruled entry left it, effects `prepared`, with
-      no further entry until it completes or the case is closed: that is the
-      delta's "recorded as incompletely applied". Closing an applying case is the
-      way out of a ruling payments keeps refusing. A case's `filed_at` is its signed
+      no further entry until it completes: that is the
+      delta's "recorded as incompletely applied". Closing an applying case is
+      refused, `409 case_applying`, lifting nothing. A case's `filed_at` is its signed
       filed entry's time, which the kit's adapter compares with the respondent
       listing's.
 - [x] 4.6 Controls and clock: the shared middleware on the API routes; `/test/` routes
@@ -588,8 +589,8 @@ perceived clock the scenario advances".
       at all (a rejection-path call, its status alone asserted). The second check's
       fixes added: a ruling's second effect refused (`ledger_unavailable`),
       unreachable, or lost after commit, each resumed with one reverse per effect; a
-      case whose effect payments keeps refusing closed with its ruling recorded as
-      far as applied; the gate recording the delivery end `prepared`; the `error`
+      case whose effect payments keeps refusing (since round 1's triage, 40 F1, its
+      close refused `case_applying`, nothing lifted); the gate recording the delivery end `prepared`; the `error`
       and `rejected` filing answers; an append's exact retry and conflict. The third
       check's fixes added unit cases for the pass-over and for match values no call
       has. Payments
@@ -651,6 +652,49 @@ perceived clock the scenario advances".
       6.2 must settle how a lane stops a ruling after its first effect before
       writing that journey; it may need a payments match property, which is a
       design question, not a scenario detail.
+      Round 1's triage fixes (reviews 40 and 41, against `1eb2cc4aa`):
+      - 40 F1: closing a case applying a ruling is refused, `409 case_applying`
+        (a new `ControlCode`), lifting nothing, since the contract's closed entry
+        follows every effect's application and has no state for an abandoned
+        effect; the delta gains "Closing a case still applying its ruling is
+        refused", and design D4's table and "Mediation shapes", both READMEs and
+        `test_rulings.py` follow.
+      - 40 F2: the delta and proposal claim executing `reverse` effects and
+        recording the delivery end; `stop` and `penalty`, which act on rate parts,
+        and `award`, unexecutable on payments v1, are refused at install, now with
+        that true reason in `rules.py`, the README and "Mediation shapes"; a unit
+        case per refused kind. Convergence executes `stop` and `penalty` before its
+        rate rows rule with them (design, "Effects on other changes"; 9.5).
+      - 40 F3: the shared transport-fault middleware runs the classifier on a
+        worker thread (`asyncio.to_thread`), so the control and health routes
+        answer while the mediation classifier reads a transaction's parties.
+      - 41 O1 (outside the plan, the owner's note): the lane doubles' image
+        targets moved from the root `Makefile` into a new `tools/Makefile`, its
+        `build` running both; the root's `build-tools` replaces them in
+        `build-dev` and the three `build-e2e-*` targets; the READMEs, Dockerfile
+        headers and subproject help texts name the new place, and
+        `test_change_build_and_helm_targets.py` holds `build-tools` to both tags
+        with and without `IMAGE_SUFFIX`.
+      Evidence: `make test-lane-double-controls` (unit and library integration,
+      `check-tls` and `mypy --strict` included) 120 passed, among them a loopback
+      test that `/test/status` and `/health` answer while a classification is held;
+      `make test-mediation-lane-double` (unit and library integration) 70 passed;
+      `make test-payments-lane-double` 85 passed; `make test-release-tooling`
+      2686 passed. `scripts/change-workflow run pre-commit`: "after-functional-change
+      … passed, exit 0"; "pre-commit-functional … passed, exit 0" (`make
+      check-packaging` and `make test`); "pre-commit … failed, exit 2" only on the
+      documentation citations check, for the two section 6 files 1.6 names
+      (`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`,
+      `…/vms/test_vm_dispute_controls.py`); the index, tasks, skills and strict
+      OpenSpec checks passed. No image was built in this session: `make -n
+      build-tools` is what the test reads, and the fix commit's Helm validation runs
+      `build-dev`. The fresh-context check found two stale references (the app
+      docstring's "event loop" exception; 4.5's "or the case is closed"), the
+      controls README missing the classifier's threading contract, a spec scenario
+      title reading as a successful close, and `tools/README.md`'s "built from the
+      repository root": all fixed. Declined: renaming `build-tools` to name only the
+      lane doubles, since the owner chose the name; `tools/README.md` says what it
+      builds.
 
 ## 5. Lane wiring and the existing payment scenarios
 
@@ -665,6 +709,9 @@ each compute lane against the lane doubles".
 - [ ] 5.1 `compose.payments-double.yml` adds service `mediation-double`
       (`arkhai:mediation-lane-double`, no host port, healthcheck trusting the lane CA
       alone); the root `Makefile`'s lane build targets build its image. (D9)
+      Note: since round 1's triage (41 O1) the lane targets call `build-tools`,
+      which builds both doubles' images through `tools/Makefile`, so the image half
+      of this task is done.
 - [ ] 5.2 The payments double's `fixtures/accounts.toml` gives `…00d1` a token, which the
       mediation double's fixture restates; retire
       `tools/payments-lane-double/fixtures/dispute-authority.toml` and its tests;
@@ -828,7 +875,9 @@ implementation. In the order of `openspec/README.md#plan-closeout-requirements`:
       in `design.md` there first.
 - [ ] 9.5 Roadmap currency, `docs/development/ROADMAP.md` Goal 8: the current-state
       paragraph says the case stages run against the mediation double; this change's gap
-      row closes; convergence's row drops revised-case netting; the hosted
+      row closes; convergence's row drops revised-case netting and records that its
+      rate rows add `stop` and `penalty` execution to the mediation double before
+      ruling with them (40 F2); the hosted
       dispute-authority row records D5 (no guard, inert by construction); a new unowned
       gap records the lane-wide perceived clock for storefronts, sites and the buyer half,
       naming convergence rows 6 and 7. Record it in the promotion record.

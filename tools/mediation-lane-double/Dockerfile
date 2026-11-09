@@ -1,6 +1,7 @@
 ARG PYTHON_VERSION=3.13
 
-# Built from the repository root: make build-mediation-lane-double.
+# Built with the repository root as its context: make build-mediation-lane-double
+# in tools/.
 
 # Stage 1: install the committed lock, unchanged, and the double itself.
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder

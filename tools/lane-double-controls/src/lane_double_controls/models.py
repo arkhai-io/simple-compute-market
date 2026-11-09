@@ -49,6 +49,9 @@ ControlCode = Literal[
     "rule_not_waiting",
     "case_not_found",
     "case_closed",
+    # Closing a mediation case whose ruling is not yet fully applied: the
+    # contract's closed entry follows every effect's application.
+    "case_applying",
     "account_not_found",
     # A control that must reach payments and could not, such as closing a
     # mediation case whose extensions payments did not lift.

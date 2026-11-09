@@ -2,10 +2,11 @@
 
 The routes are thin: each authenticates its caller, hands the request's parts to
 ``MediationDouble``, and answers its body or its refusal. A call to payments may
-wait on the network, so the service runs in Starlette's thread pool rather than
-on the event loop; the one exception is the fault classifier's read of a filed
-transaction's parties, made before the app runs. Beside the API the double serves the lane doubles' control
-routes under ``/test/``, authenticated by the fixture control token. The
+wait on the network, so the service runs in Starlette's thread pool, and the
+transport-fault middleware runs the classifier, whose filing match may read a
+transaction's parties, on a worker thread: nothing waits on payments on the event
+loop. Beside the API the double serves the lane doubles' control routes under
+``/test/``, authenticated by the fixture control token. The
 transport-fault middleware wraps the whole app and leaves the control and health
 routes alone.
 """

@@ -87,6 +87,22 @@ def test_install_refuses_an_existing_id_and_what_the_double_cannot_do() -> None:
     assert [view.rule.rule_id for view in book.listing().rules] == ["a"]
 
 
+@pytest.mark.parametrize("effect", [
+    {"kind": "stop", "part": 0, "at": 1_800_000_000, "partialPeriod": "prorated"},
+    {"kind": "penalty", "amount": "10"},
+    {"kind": "award", "part": 0, "amount": "1"},
+], ids=["stop", "penalty", "award"])
+def test_a_ruling_with_an_effect_other_than_reverse_is_refused(effect: dict) -> None:
+    book = RuleBook()
+
+    with pytest.raises(ControlError) as refused:
+        book.install(_rule("a", {}, ruling={"basis": "operator", "delivery_end": False,
+                                            "close": True, "effects": [effect]}))
+
+    assert (refused.value.status, refused.value.code) == (422, "invalid_request")
+    assert book.listing().rules == []
+
+
 def test_deleting_and_resuming_refuse_an_unknown_rule_and_resuming_one_not_waiting() -> None:
     book = RuleBook()
     book.install(_rule("a", {}))

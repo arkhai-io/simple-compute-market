@@ -2,7 +2,7 @@
 
 ### Requirement: Lanes run a mediation double that answers from programmed rules
 
-Every lane MUST run a mediation double, recommended by the lane's registries, that reproduces the dispute authority's API mechanics — authentication, idempotency, signed per-agreement records and cursors, the respondent listing, the closed-case refusal, extensions at the payments double and execution of a ruling's effects — and takes every ruling from a scenario-programmed rule. It MUST NOT compute a ruling, and with no matching rule it MUST rule nothing.
+Every lane MUST run a mediation double, recommended by the lane's registries, that reproduces the dispute authority's API mechanics — authentication, idempotency, signed per-agreement records and cursors, the respondent listing, the closed-case refusal, extensions at the payments double, execution of a ruling's per-part `reverse` effects and the record of its delivery end — and takes every ruling from a scenario-programmed rule. It MUST NOT compute a ruling, and with no matching rule it MUST rule nothing. It MUST refuse at install, and install nothing for, a rule whose ruling carries a `stop` or `penalty` effect, which act on rate parts no lane running the double has, or an `award`, which the contract makes unexecutable on `arkhai.payments.v1`.
 
 #### Scenario: A case is filed with no rule installed
 
@@ -24,6 +24,11 @@ Every lane MUST run a mediation double, recommended by the lane's registries, th
 
 - **WHEN** the payments double refuses or drops a ruling's second effect after the first committed
 - **THEN** the ruling is recorded as incompletely applied, and resuming applies the remaining effect without applying the first twice
+
+#### Scenario: Closing a case still applying its ruling is refused
+
+- **WHEN** a scenario closes a case whose ruling has an effect payments has not applied
+- **THEN** the double refuses the close, lifts nothing, and the case stays applying with its effect prepared
 
 #### Scenario: Appends follow the contract
 

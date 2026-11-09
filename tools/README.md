@@ -172,6 +172,12 @@ component it may import internal kits — it wraps their engines rather than
 restating them — and unlike a developer tool it is not invoked through
 `scripts/`. Nothing imports it, and it ships only as a development image.
 
+Each lane double's image has its own target in `tools/Makefile`, built with the
+repository root as its context so its Dockerfile can copy the wheelhouse. The
+root's `make build-tools` builds every lane double's image (the standalone
+components' images are `make build`'s); it is part of `make build-dev` and each
+lane's `build-e2e-*` target, and nothing pushes the images.
+
 ### `payments-lane-double/`
 
 An HTTPS double of the Arkhai Payments service, mirroring its API over the
@@ -183,9 +189,8 @@ establish and what they do not.
 - `make test` (in its directory) runs its unit and library-integration suites.
 - From the repository root, `make test-payments-lane-double` runs its
   `make test` and is part of `make test` and the Tests workflow's matrix.
-- `make build-payments-lane-double`, part of `make build-dev` and each lane's
-  `build-e2e-*` target, builds `arkhai:payments-lane-double`; it is never
-  pushed.
+- `make build-payments-lane-double` in `tools/`, part of the root's
+  `make build-tools`, builds `arkhai:payments-lane-double`.
 
 ## Adding More Tools
 

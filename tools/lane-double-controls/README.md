@@ -64,6 +64,7 @@ wire as `ControlError`:
 | deciding or closing an unknown case; funding an unknown account | `404 case_not_found`; `404 account_not_found` |
 | deciding or closing a closed case | `409 case_closed` |
 | deciding a case that is applying another ruling | `422 invalid_request` |
+| closing a case applying a ruling, before every effect is applied | `409 case_applying`; nothing is lifted |
 | closing a case whose extensions payments does not lift | `502 payments_unavailable` |
 
 Deleting a rule that has matched is cleanup and answers `204`; listing a
@@ -86,7 +87,9 @@ and abandons it, so uvicorn closes the connection and the caller's httpx raises
 to completion first. Control routes are never faulted, so a finaliser can always
 remove the rule that caused a fault, and neither is `/health`, so an
 orchestrator's liveness probe never restarts a double during an outage; neither
-reaches the classifier.
+reaches the classifier. The classifier runs on a worker thread, so those routes
+keep answering while it waits on a collaborator; it may be called from several
+threads at once and guards its own state.
 
 ## TLS
 
