@@ -27,70 +27,44 @@ archived deltas are already merged into `openspec/specs`.
 
 ## What Changes
 
-- An optional merge after the archive: on the owner's direction, a merge of the
-  landing branch into an archived change's branch, with the same mechanics as the
+- A merge after the archive (`late-merge`): a node of the graph whose run is the
+  `merge` step, with the same skill, mechanics, permissions, and Make target as the
   merge before closeout — fetch, resolve every conflict, reconcile the change's code
-  with what the landing branch renamed or removed, run the checks, conclude, push.
-- A review and triage loop over that merge's resolutions, so a resolution is read by
-  a reviewer before the pull request merges.
-- The merged `HEAD` validated before the loop ends, a failed validation sending the
-  change back to the merge for repair, as before closeout.
-- The loop repeats as often as the landing branch moves: it ends only when a merge
-  finds nothing new to bring in, and the owner may start it again whenever the pull
-  request conflicts again.
-- The next-step computation follows this loop for an archived change instead of
-  answering `done` unconditionally, and `done` is reached again when the loop ends.
+  with what the landing branch changed, run the checks, conclude, push. It is entered
+  once archive cleanup has run, by the owner's direction through the orchestrating
+  session, or by archive cleanup's first exit (below) (design D1).
+- A new review kind, `merge`, with its own triage, reading each resolution against
+  both parents, the specifications and indexes both changes promoted into, and the
+  change's code and scenarios against what the landing branch changed (D2).
+- The merge judges, on written criteria, whether its resolutions need that review,
+  and the orchestrating session follows its exit without asking the owner (D3).
+- The merged `HEAD` validated before the review or archive cleanup, a failed
+  validation sending the change back to the merge for repair, as before closeout
+  (D6).
+- The merge review's triage advances to archive cleanup, which, run on an archived
+  row, cleans up what validation left, commits what that wrote, pushes, copies the
+  history, and exits to `done`. The owner directs another merge after the archive
+  when the landing branch moves again (D4).
+- Archive cleanup fetches the landing branch, and its first exit to `done`, before the
+  pull request opens, is guarded by that branch having gained nothing `HEAD` lacks,
+  its remedy the merge after the archive (D5).
+- The next-step computation reads the route for an archived change, answering `done`
+  only while the route ends there, and computes a change with a clone in its clone
+  first (D5).
 - The archive stays a boundary nothing crosses backwards: no step after it returns
   the change to design, planning, or implementation, and the change's row stays
-  `archived`.
-
-## Open questions for design
-
-Each with the proposer's recommendation.
-
-1. **One node, or a kind of merge.** The graph keys a node by its step and kind.
-   The late merge could be a new step, or a second kind of `merge`, the existing
-   one becoming the merge before closeout. *Recommendation:* a kinded `merge` node,
-   reusing the `change-merge` skill with a section for the archived case. The
-   mechanics are the same; the entry guard (archived), the resolution rules for the
-   archived change's own documents, and the exits differ.
-2. **Is the review always run, or judged.** The merge before closeout judges whether
-   its resolutions merit another review, and the owner confirms one. After the
-   archive no closeout review follows to catch a mistake. *Recommendation:* the
-   merge judges, as before closeout, but a conflict resolved in code, tests,
-   configuration, or a permanent document or specification always merits the
-   review; only a merge whose conflicts were the index, locks, and version bumps
-   may skip it, with the owner's confirmation.
-3. **Which review kind.** The closeout review reads the archive and the promoted
-   documents; the late merge's review should read what the merge did: each
-   resolution against both parents (`git show --remerge-diff`) and each
-   reconciliation commit. *Recommendation:* a new review kind for the late merge,
-   with its own triage, whose advancing exit returns to the merge, which advances
-   only when the landing branch has gained nothing since — the same pattern as the
-   review of the merge before closeout.
-4. **How the loop ends.** Archive cleanup's last act copies the change's records
-   into the owner's workspace; a late merge adds records in the clone after that
-   copy, and may make its pull-request drafts stale. *Recommendation:* the loop's
-   last step runs the history copy again (it is safe to repeat) and exits to
-   `done`; archive cleanup is not re-entered, since its release of dependents and
-   its row edit are already done.
-5. **Starting it.** The loop is optional. *Recommendation:* the owner's direction
-   starts it (`make merge CHANGE=<change>` on an archived change, `FROM` as today),
-   and the computation never names it by itself; `done` stays the answer for an
-   archived change with no late merge in progress.
-6. **Validation waiver.** *Recommendation:* as before closeout: the merged `HEAD`
-   is validated, inert paths exempt, unless the owner waives it.
+  `archived`; a dependent row the landing branch brings is released, and the pull
+  request's drafts are appended to, never redrafted (D7, D8).
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `change-workflow`: the graph (a merge node entered after the archive, its review
-  kind and triage), the archive guard (CW-xo82), the terminal node (CW-9tzd), the
-  next-step computation's answer for an archived change, the merge's requirements
-  (CW-hdxi, CW-a6ow, CW-tnp6), and the history copy (CW-hak6).
-- `market-change-workflow`: only if this repository's step table or make fragment
-  needs a new entry for the review kind.
+- `change-workflow`: the graph (the `late-merge` node, the `merge` review kind and its
+  triage, the guard on archive cleanup's first exit), the archive guard (CW-xo82), the
+  terminal node (CW-9tzd), the merges' validation (CW-tnp6), and new requirements for
+  the merge after the archive, its review, archive cleanup's rerun, and the
+  computation's answer for an archived change.
 
 ### New Capabilities
 
@@ -98,10 +72,19 @@ None.
 
 ### Public interfaces
 
-The step graph gains a node and a review kind, and `done` is no longer final for
-an archived change. A step outcome naming the new target is new vocabulary; every
-existing outcome and log line keeps its meaning, so the change is compatible for
-records already written.
+- The graph's vocabulary gains the node `late-merge`, the review kind `merge`, and the
+  triage of that kind: compatible, since a reader that does not know them names them
+  and routes on nothing (CW-9fbu).
+- `next`'s output for an archived change may name a step — the merge, the merge
+  review or its triage, a validation, archive cleanup — or the change's clone, where it
+  always named `done`: incompatible for a caller that treated an archived change as
+  done, counted minor while the major version is 0 (CW-c2tw). The orchestrating session
+  is the caller, and changes with it.
+- `start merge`, and so `make merge`, accepts an archived change: compatible, a
+  refusal lifted.
+- Archive cleanup's exit to `done` gains a guard on its first run: a behaviour of the
+  graph's table, recorded in every log as it is today.
+- Every existing outcome and log line keeps its meaning.
 
 ## Non-Goals
 
@@ -109,17 +92,19 @@ records already written.
 - Do not reopen an archived change's design, plan, or implementation, or move its
   row off `archived`.
 - Do not change the merge before closeout, beyond what sharing its skill and
-  requirements with the late merge requires.
-- Do not make the computation detect a conflicting pull request by itself.
+  requirements with the merge after the archive requires.
+- Do not detect, after the pull request opens, that the landing branch has moved:
+  nothing runs after `done`, and the owner directs the merge then.
 
 ## Impact
 
-- `scripts/change_workflow/graph.py` (node, exits, entry guards),
-  `scripts/change_workflow/next_step.py` (the archived-change shortcut),
-  `scripts/change_workflow/review.py` and the step table for the new review kind,
-  and their tests.
-- `.agents/skills/change-merge`, `change-review`, `change-triage`, and
-  `change-orchestrate`.
+- `scripts/change_workflow/graph.py` (the node, the review kind and its triage, their
+  exits, guards, and entry guards, and the guard on archive cleanup's exit),
+  `scripts/change_workflow/next_step.py` (the run rule, the route for an archived
+  change, locating first), `scripts/change_workflow/review.py` (the merge kind's
+  archive check), and their tests.
+- `.agents/skills/change-merge`, `change-review`, `change-triage`,
+  `change-archive-cleanup`, and `change-orchestrate`.
 - The `change-workflow` specification, its `index.md`, `README.md`, and graph
   diagram, and `docs/agents/change-workflow.md`.
 
@@ -139,4 +124,26 @@ records already written.
 
 ### Knowledge to promote
 
-To be determined at design completion.
+- D1 — the merge after the archive as a node running the merge step: `change-workflow`
+  `spec.md` (CW-m4qe) and `index.md`; the companion `README.md` ("The merge before
+  closeout" and the archive boundary) and its graph diagram;
+  `docs/agents/change-workflow.md` (the skills table and directing a change).
+- D2 — the `merge` review kind and its triage: `spec.md` (CW-r2hu, CW-xo82),
+  `index.md`, `README.md`, the graph diagram, and `docs/agents/change-workflow.md`.
+- D3 — the merge judges its review, followed without the owner's confirmation:
+  `spec.md` (CW-x9tb) and `README.md`, with the principle that a step's judgement of
+  its exit is followed unless the exit needs a waiver.
+- D4 — the triage advances to archive cleanup's rerun, which ends at `done`:
+  `spec.md` (CW-r2hu, CW-p8fy, CW-9tzd), `README.md` ("History lives in the owner's
+  workspace"), and `docs/agents/change-workflow.md`.
+- D5 — archive cleanup's first exit detects an advanced landing branch, the owner
+  directs otherwise, and the computation answers `done` from the route: `spec.md`
+  (CW-5vkd, CW-j7wp, CW-9tzd) and `README.md`, with the principle that detection runs
+  by itself only where nothing it moves is under the owner's review.
+- D6 — the merged `HEAD` validated: `spec.md` (CW-tnp6) and `README.md`.
+- D7 — the archived change's files resolved so it stays archived: `spec.md`
+  (CW-g3zn) and `docs/agents/change-workflow.md`.
+- D8 — no return crosses the archive: `spec.md` (CW-xo82) and `README.md` ("The
+  archive is the boundary no direction crosses").
+- D9: no permanent destination — the implementation cadence is this change's
+  history.
