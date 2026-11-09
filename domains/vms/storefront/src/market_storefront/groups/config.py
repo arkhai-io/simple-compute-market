@@ -202,55 +202,17 @@ def config_migrate(
         "--backup",
         help="Create the required same-directory backup in write mode.",
     ),
-    legacy_contribution: str | None = typer.Option(
-        None,
-        "--legacy-contribution",
-        help="Exact installed contribution owning the legacy storefront database.",
-    ),
-    legacy_offering_mode: str | None = typer.Option(
-        None,
-        "--legacy-offering-mode",
-        help="Exact pool offering mode asserted for every legacy row.",
-    ),
-    legacy_domain: str | None = typer.Option(
-        None,
-        "--legacy-domain",
-        help="Exact market domain identity asserted for every legacy row.",
-    ),
-    legacy_contract_version: str | None = typer.Option(
-        None,
-        "--legacy-contract-version",
-        help="Exact major.minor market-domain contract version.",
-    ),
 ) -> None:
-    """Migrate settlement/publication config or one legacy storefront database."""
+    """Migrate the settlement or publication configuration."""
 
-    supported = {"settlement", "publication", "storefront-domains"}
+    supported = {"settlement", "publication"}
     if scope not in supported:
         typer.secho(
-            "Supported scopes: settlement, publication, storefront-domains.",
+            "Supported scopes: settlement, publication.",
             err=True,
             fg=typer.colors.RED,
         )
         raise typer.Exit(2)
-    legacy_values = (
-        legacy_contribution,
-        legacy_offering_mode,
-        legacy_domain,
-        legacy_contract_version,
-    )
-    if scope != "storefront-domains" and any(
-        value is not None for value in legacy_values
-    ):
-        raise typer.BadParameter(
-            "--legacy-* assertions apply only to --scope storefront-domains"
-        )
-    if scope == "storefront-domains" and any(value is None for value in legacy_values):
-        raise typer.BadParameter(
-            "--scope storefront-domains requires --legacy-contribution, "
-            "--legacy-offering-mode, --legacy-domain, and "
-            "--legacy-contract-version"
-        )
     try:
         if scope == "settlement":
             result = migrate_settlement_config(
@@ -264,7 +226,7 @@ def config_migrate(
                 installed=_installed_settlement_mechanisms(),
             )
             lines = format_migration_result(result)
-        elif scope == "publication":
+        else:
             result = migrate_publication_config(
                 storefront_config_file(),
                 check=check,
@@ -273,40 +235,6 @@ def config_migrate(
                 validator=_validate_settlement_candidate,
             )
             lines = format_publication_migration_result(result)
-        else:
-            from market_core import ContractVersion, DomainIdentity
-
-            from market_storefront.domain_migration import (
-                LegacyStorefrontSelection,
-                StorefrontDomainMigrationError,
-                migrate_storefront_domains,
-            )
-            from market_storefront.utils.config import settings
-
-            try:
-                major_text, minor_text = str(legacy_contract_version).split(".", 1)
-                version = ContractVersion(int(major_text), int(minor_text))
-            except (TypeError, ValueError) as exc:
-                raise typer.BadParameter(
-                    "--legacy-contract-version must be major.minor"
-                ) from exc
-            try:
-                result = migrate_storefront_domains(
-                    str(settings.db_path),
-                    selection=LegacyStorefrontSelection(
-                        contribution_id=str(legacy_contribution),
-                        offering_mode=str(legacy_offering_mode),
-                        domain_identity=DomainIdentity(str(legacy_domain)),
-                        contract_version=version,
-                    ),
-                    check=check,
-                    write=write,
-                    backup=backup,
-                )
-            except StorefrontDomainMigrationError as exc:
-                typer.secho(str(exc), err=True, fg=typer.colors.RED)
-                raise typer.Exit(1) from exc
-            lines = result.redacted_lines()
     except SettlementMigrationError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(1) from exc

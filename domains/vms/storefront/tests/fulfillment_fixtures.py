@@ -32,6 +32,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 BUYER_PRINCIPAL = Ed25519Signer(b"\x61" * 32).identity
@@ -83,6 +84,7 @@ async def make_vm_lifecycle_fixture(
     """Persist the exact VM listing, thread, site, and escrow authority."""
 
     domain = build_vm_storefront_domain()
+    migrate_storefront_database(db_path)
     db = SQLiteClient(
         db_path=str(db_path),
         registry=build_vm_storefront_registry(domain),

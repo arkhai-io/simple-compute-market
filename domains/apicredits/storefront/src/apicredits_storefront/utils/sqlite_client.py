@@ -15,15 +15,11 @@ from datetime import datetime
 from typing import Any
 
 from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
-from core_storefront.sqlite_migrations import MigrationLike
-from market_identity import Identity
-from market_settlement_runtime import settlement_migrations
 
 from apicredits_storefront.settlement_repository import SettlementRepository
 from market_core import SettlementEvidence
 
 from .config import settings
-from .migrations import APICREDITS_MIGRATIONS
 
 
 class SQLiteClient(CoreSQLiteClient):
@@ -34,48 +30,6 @@ class SQLiteClient(CoreSQLiteClient):
         "obligation_ref",
         "obligation_index",
     )
-
-    def _domain_migrations(self) -> tuple[MigrationLike, ...]:
-        return (*settlement_migrations(), *APICREDITS_MIGRATIONS)
-
-    def _ensure_domain_tables(self, cur: sqlite3.Cursor) -> None:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS credit_deal_terms (
-              negotiation_id TEXT PRIMARY KEY,
-              quantity INTEGER NOT NULL,
-              key_mode TEXT NOT NULL DEFAULT 'new',
-              key_id TEXT,
-              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-            )
-            """
-        )
-
-    def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
-        for table, columns in {
-            "api_credit_settlement_evidence": {"negotiation_id", "mechanism", "agreement_digest", "settlement_ref", "status", "evidence"},
-            "api_credit_issuance_progress": {"negotiation_id", "public_ref", "status", "fulfillment_uid", "public_result", "credentials_ref", "delivery_started_at"},
-        }.items():
-            actual = {str(row[1]) for row in cur.execute(f"PRAGMA table_info({table})")}
-            if not columns <= actual:
-                raise RuntimeError("incompatible API-credit settlement schema; explicitly reset the database")
-        # Every capacity effect, reconciliation, and recheck reads a listing's
-        # durable binding, and a listing created before bindings were recorded
-        # has none to read. There is no record to derive one from, so such a
-        # database is refused rather than adopted.
-        unbound = cur.execute(
-            """
-            SELECT l.listing_id FROM listings l
-            LEFT JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
-            WHERE b.listing_id IS NULL
-            ORDER BY l.listing_id LIMIT 1
-            """
-        ).fetchone()
-        if unbound is not None:
-            raise RuntimeError(
-                f"API-credit listing {unbound[0]!r} has no durable listing binding; "
-                "this storefront requires a fresh database"
-            )
 
     async def save_settlement_evidence(self, evidence: SettlementEvidence) -> SettlementEvidence:
         return await asyncio.to_thread(SettlementRepository(self.db_path).store, evidence)
@@ -225,22 +179,36 @@ class SQLiteClient(CoreSQLiteClient):
 _sqlite_client: SQLiteClient | None = None
 
 
-def get_sqlite_client(
-    *,
-    local_listing_principal: Identity | None = None,
-    expected_legacy_sellers: tuple[str, ...] | None = None,
-) -> SQLiteClient:
-    global _sqlite_client
-    if _sqlite_client is None and (
-        local_listing_principal is None or expected_legacy_sellers is None
-    ):
+def refuse_unbound_listings(db_path: str) -> None:
+    """Refuse a database holding a listing with no durable binding.
+
+    Every capacity effect, reconciliation, and recheck reads a listing's
+    durable binding, and a listing created before bindings were recorded has
+    none to read. There is no record to derive one from, so such a database is
+    refused rather than served. The refusal concerns data, not schema, so it
+    runs at startup on a migrated database.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        unbound = conn.execute(
+            """
+            SELECT l.listing_id FROM listings l
+            LEFT JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
+            WHERE b.listing_id IS NULL
+            ORDER BY l.listing_id LIMIT 1
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+    if unbound is not None:
         raise RuntimeError(
-            "initial SQLite composition requires local listing migration context",
+            f"API-credit listing {unbound[0]!r} has no durable listing binding; "
+            "this storefront requires a fresh database"
         )
+
+
+def get_sqlite_client() -> SQLiteClient:
+    global _sqlite_client
     if _sqlite_client is None:
-        _sqlite_client = SQLiteClient(
-            db_path=settings.db_path,
-            local_listing_principal=local_listing_principal,
-            expected_legacy_sellers=expected_legacy_sellers,
-        )
+        _sqlite_client = SQLiteClient(db_path=settings.db_path)
     return _sqlite_client

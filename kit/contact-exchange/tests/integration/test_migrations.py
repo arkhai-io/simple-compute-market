@@ -7,8 +7,6 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from market_contact_exchange import (
-    CONTACT_EXCHANGE_MIGRATIONS,
-    CONTACT_EXCHANGE_SELLER_DISPATCH_CLAIMS_MIGRATION_ID,
     IntroductionPayloadsDeletedError,
     IntroductionRecord,
     claim_seller_dispatch,
@@ -18,6 +16,7 @@ from market_contact_exchange import (
     load_introduction,
     select_expired_introductions,
 )
+from market_contact_exchange.migrations import BASELINE
 
 _DELETED_AT = datetime(2026, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -33,8 +32,8 @@ _RECORD = IntroductionRecord(
 @pytest.fixture
 def conn(tmp_path) -> sqlite3.Connection:
     connection = sqlite3.connect(str(tmp_path / "introductions.db"))
-    for migration in CONTACT_EXCHANGE_MIGRATIONS:
-        migration.apply(connection)
+    BASELINE.apply(connection)
+    connection.commit()
     return connection
 
 
@@ -43,8 +42,6 @@ def test_round_trip_survives_a_reconnect(conn, tmp_path) -> None:
     conn.commit()
     conn.close()
     reopened = sqlite3.connect(str(tmp_path / "introductions.db"))
-    for migration in CONTACT_EXCHANGE_MIGRATIONS:
-        migration.apply(reopened)
     assert load_introduction(reopened, _RECORD.obligation_ref) == _RECORD
 
 
@@ -153,39 +150,12 @@ def test_a_fresh_database_holds_an_empty_seller_dispatch_claim_table(conn) -> No
     assert _seller_dispatch_claims(conn) == []
 
 
-def test_a_rerun_keeps_every_claim_and_every_introduction(conn) -> None:
+def test_a_claim_is_won_once(conn) -> None:
     insert_introduction(conn, _RECORD)
     assert claim_seller_dispatch(conn, _RECORD.obligation_ref) is True
     conn.commit()
-    for migration in CONTACT_EXCHANGE_MIGRATIONS:
-        migration.apply(conn)
-    conn.commit()
     assert _seller_dispatch_claims(conn) == [(_RECORD.obligation_ref,)]
-    assert load_introduction(conn, _RECORD.obligation_ref) == _RECORD
     assert claim_seller_dispatch(conn, _RECORD.obligation_ref) is False
-
-
-def test_a_database_holding_introductions_gains_an_empty_claim_table(tmp_path) -> None:
-    """Earlier migrations applied and an introduction revealed, then the claim
-    migration: the introduction is unclaimed, and its first claim wins."""
-    connection = sqlite3.connect(str(tmp_path / "earlier.db"))
-    try:
-        earlier = [
-            migration
-            for migration in CONTACT_EXCHANGE_MIGRATIONS
-            if migration.id != CONTACT_EXCHANGE_SELLER_DISPATCH_CLAIMS_MIGRATION_ID
-        ]
-        for migration in earlier:
-            migration.apply(connection)
-        insert_introduction(connection, _RECORD)
-        connection.commit()
-        for migration in CONTACT_EXCHANGE_MIGRATIONS:
-            migration.apply(connection)
-        assert _seller_dispatch_claims(connection) == []
-        assert load_introduction(connection, _RECORD.obligation_ref) == _RECORD
-        assert claim_seller_dispatch(connection, _RECORD.obligation_ref) is True
-    finally:
-        connection.close()
 
 
 def test_timestamps_render_in_the_column_text_form() -> None:

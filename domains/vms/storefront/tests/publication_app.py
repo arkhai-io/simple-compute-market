@@ -87,6 +87,7 @@ from market_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
 from market_storefront.utils import config as storefront_config
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import replaced_setting, settings_overrides
 from tests.fake_site import (
@@ -659,6 +660,9 @@ async def publication_app(
             )
         )
         registry = storefront_config.storefront_domain_registry()
+        # A second app over the same path finds the database migrated and
+        # applies nothing.
+        migrate_storefront_database(tmp_path / "storefront.db")
         db = SQLiteClient(db_path=str(tmp_path / "storefront.db"), registry=registry)
         composition = SettlementCompositionDouble(
             mechanism_fulfillment
@@ -771,7 +775,7 @@ async def publication_app(
             routers = (negotiate_router,)
         contact_exchange = None
         if contacts is not None:
-            repository = SettlementSQLiteRepository(db.db_path, apply_migrations=False)
+            repository = SettlementSQLiteRepository(db.db_path)
             composition.repository = repository
             composition.runtime = SettlementRuntime(
                 repository, {CONTACT_MECHANISM: ContactExchangeClient()}

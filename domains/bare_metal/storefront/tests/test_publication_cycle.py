@@ -59,6 +59,7 @@ from registry_client.models import ListingSummary
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.listing_source_check import build_listing_source_check
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.pool_overrides import compile_publication_clauses
 from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.publication_composition import (
@@ -386,7 +387,9 @@ def actions(report: dict[str, Any], action: str) -> list[dict[str, Any]]:
 
 @pytest.fixture
 def db(tmp_path) -> SQLiteClient:
-    return SQLiteClient(str(tmp_path / "storefront.db"))
+    path = tmp_path / "storefront.db"
+    migrate_storefront_database(path)
+    return SQLiteClient(str(path))
 
 
 # -- pool declarations -----------------------------------------------------
@@ -959,6 +962,7 @@ class FailingWrites(SQLiteClient):
 
 
 async def test_a_new_listing_whose_local_write_fails_reaches_no_registry(tmp_path):
+    migrate_storefront_database(tmp_path / "storefront.db")
     db = FailingWrites(str(tmp_path / "storefront.db"))
     storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
 

@@ -12,6 +12,7 @@ from market_storefront_kit import TradingPause
 
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.negotiation import default_seller_round_hook
 from arkhai_bare_metal_storefront.negotiation_runtime import (
     build_bare_metal_negotiation_runtime,
@@ -76,6 +77,7 @@ async def _listing(db: SQLiteClient) -> None:
 
 
 async def test_an_accepted_escrow_is_planned_from_verifications_inputs(tmp_path) -> None:
+    migrate_storefront_database(tmp_path / "storefront.db")
     db = SQLiteClient(str(tmp_path / "storefront.db"), domain=get_market_domain_contract())
     await _listing(db)
     calls: list[dict[str, Any]] = []

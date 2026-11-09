@@ -15,12 +15,12 @@ from core_storefront.identity_lifecycle import (
     rotate_identity,
 )
 from core_storefront.models.system_models import IdentityRetirementRequest
-from core_storefront.sqlite_client import SQLiteClient
+from core_database import core_database
 
 
 def test_administrator_can_rotate_and_retire_service_peer_identity(tmp_path) -> None:
     db_path = str(tmp_path / "lifecycle.db")
-    SQLiteClient(db_path)
+    core_database(db_path)
     authority = StorefrontIdentityAuthority(db_path, max_overlap_seconds=60)
     administrator = Ed25519Signer(bytes(range(32)))
     current = Ed25519Signer(bytes(range(1, 33)))
@@ -90,7 +90,7 @@ def test_administrator_can_rotate_and_retire_service_peer_identity(tmp_path) -> 
 
 def test_retirement_requires_the_matching_rotation_nonce(tmp_path) -> None:
     db_path = str(tmp_path / "retirement-nonce.db")
-    SQLiteClient(db_path)
+    core_database(db_path)
     authority = StorefrontIdentityAuthority(db_path)
     current = Ed25519Signer(b"\x31" * 32)
     replacement = Ed25519Signer(b"\x32" * 32)

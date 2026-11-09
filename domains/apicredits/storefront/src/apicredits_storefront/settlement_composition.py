@@ -333,9 +333,7 @@ def build_api_credit_settlement_composition(
         role="seller",
     )
     require_coherent_release_model(settlement_config)
-    repository = SettlementSQLiteRepository(
-        sqlite_client.db_path, apply_migrations=False
-    )
+    repository = SettlementSQLiteRepository(sqlite_client.db_path)
     seller_wallet_address = storefront_config.seller_wallet_address()
     seller_wallet_key = str(storefront_config.settings.get("wallet.private_key", "") or "")
     disputes = RegistryDisputePolicy.from_document(storefront_config.settings.as_dict())

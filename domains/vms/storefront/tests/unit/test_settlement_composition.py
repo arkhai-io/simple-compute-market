@@ -37,6 +37,7 @@ from market_storefront.settlement_composition import (
     serialize_settlement_job,
 )
 from market_storefront.settlement_stages import vm_seller_stages
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import replaced_setting
 from tests.fulfillment_fixtures import vm_delivery_evidence, seed_delivery_admission
@@ -235,11 +236,16 @@ def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSett
     )
 
 
+def _client(db_path, registry) -> SQLiteClient:
+    migrate_storefront_database(db_path)
+    return SQLiteClient(db_path=str(db_path), registry=registry)
+
+
 @pytest.fixture
 def db(tmp_path):
-    return SQLiteClient(
-        db_path=str(tmp_path / "vm-settlement.db"),
-        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    return _client(
+        tmp_path / "vm-settlement.db",
+        build_vm_storefront_registry(build_vm_storefront_domain()),
     )
 
 
@@ -285,10 +291,7 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
             domain.settlement, seller_stages=vm_seller_stages(build_plan)
         ),
     )
-    db = SQLiteClient(
-        db_path=str(tmp_path / "injected-plan.db"),
-        registry=build_vm_storefront_registry(domain),
-    )
+    db = _client(tmp_path / "injected-plan.db", build_vm_storefront_registry(domain))
     thread_binding = await _persist_accepted_negotiation(
         db,
         negotiation_id="neg-1",
@@ -488,9 +491,8 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
         domain,
         fulfillment=replace(domain.fulfillment, fulfill=fulfill),
     )
-    db = SQLiteClient(
-        db_path=str(tmp_path / "injected-fulfillment.db"),
-        registry=build_vm_storefront_registry(domain),
+    db = _client(
+        tmp_path / "injected-fulfillment.db", build_vm_storefront_registry(domain)
     )
     await _persist_accepted_negotiation(
         db, negotiation_id="neg-1", listing_id="listing-1", proposal=None
@@ -562,10 +564,7 @@ async def test_a_release_model_the_domain_cannot_deliver_refuses_composition(tmp
         }
     )
     domain = replace(base, settlement=replace(base.settlement, seller_stages=restricted))
-    db = SQLiteClient(
-        db_path=str(tmp_path / "vm-settlement.db"),
-        registry=build_vm_storefront_registry(domain),
-    )
+    db = _client(tmp_path / "vm-settlement.db", build_vm_storefront_registry(domain))
     settlement = {
         "schema_version": 1,
         "priority": ["alkahest.v1"],
@@ -636,9 +635,8 @@ async def test_a_deferred_fulfillment_leaves_the_escrow_open_for_the_resume_pass
         domain,
         fulfillment=replace(domain.fulfillment, fulfill=AsyncMock(return_value=deferred)),
     )
-    db = SQLiteClient(
-        db_path=str(tmp_path / "deferred-fulfillment.db"),
-        registry=build_vm_storefront_registry(domain),
+    db = _client(
+        tmp_path / "deferred-fulfillment.db", build_vm_storefront_registry(domain)
     )
     await _persist_accepted_negotiation(
         db, negotiation_id="neg-1", listing_id="listing-1", proposal=None
@@ -674,9 +672,8 @@ async def test_an_available_deal_whose_claim_is_pending_is_deferred_not_fulfille
         domain,
         fulfillment=replace(domain.fulfillment, fulfill=AsyncMock(return_value=available)),
     )
-    db = SQLiteClient(
-        db_path=str(tmp_path / "available-fulfillment.db"),
-        registry=build_vm_storefront_registry(domain),
+    db = _client(
+        tmp_path / "available-fulfillment.db", build_vm_storefront_registry(domain)
     )
     await _persist_accepted_negotiation(
         db, negotiation_id="neg-1", listing_id="listing-1", proposal=None

@@ -13,13 +13,11 @@ from market_deal_lifecycle.delivery import DeliveryPhase
 from market_deal_lifecycle.terms import decode_terms
 from market_deal_servicing import DeliveryRecord, EndSession, SellerDeal, SellerSession
 from market_deal_servicing.journal import FinalRequest
-from market_deal_servicing.schema import create_schema
 from market_identity import Identity
 
 
 def register_delivery(conn, negotiation_id):
     """Register only verified commitment evidence, in its caller's transaction."""
-    create_schema(conn)
     if conn.execute("SELECT 1 FROM servicing_delivery WHERE negotiation_id=?", (negotiation_id,)).fetchone():
         return
     row = conn.execute(

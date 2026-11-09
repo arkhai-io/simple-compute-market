@@ -1,6 +1,5 @@
 """Conflicting VM settlement retries preserve authority and report HTTP 409."""
 
-import sqlite3
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -11,7 +10,8 @@ from fastapi import HTTPException
 import market_storefront.container as container
 from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.middleware import buyer_auth
-from market_storefront.payment_repository import VmSettlementRepository, add_vm_settlement_records
+from market_storefront.payment_repository import VmSettlementRepository
+from market_storefront.utils.migrations import migrate_storefront_database
 from tests.fulfillment_fixtures import vm_delivery_evidence
 from tests.unit.test_settlement_start_authority import _body, _controller, _request, _thread, _SELLER
 
@@ -20,8 +20,7 @@ from tests.unit.test_settlement_start_authority import _body, _controller, _requ
 async def test_second_escrow_for_accepted_negotiation_returns_conflict(tmp_path, monkeypatch):
     repository = VmSettlementRepository()
     repository.db_path = str(tmp_path / "settlement.db")
-    with sqlite3.connect(repository.db_path) as conn:
-        add_vm_settlement_records(conn)
+    migrate_storefront_database(repository.db_path)
     first = vm_delivery_evidence(negotiation_id="neg-1", settlement_ref="escrow-1")
     await repository.save_vm_settlement_evidence(first)
 

@@ -6,6 +6,7 @@ import sqlite3
 
 import pytest
 
+from core_database import core_database
 from core_storefront.sqlite_client import SQLiteClient
 
 
@@ -28,7 +29,7 @@ def _insert(db_path: str, listing_id: str, *, status: str, paused: int = 0) -> N
 
 @pytest.mark.asyncio
 async def test_every_open_listing_is_held_paused_or_not_and_no_closed_one(tmp_path):
-    db_path = str(tmp_path / "storefront.db")
+    db_path = core_database(tmp_path / "storefront.db")
     client = SQLiteClient(db_path)
     _insert(db_path, "open-1", status="open")
     _insert(db_path, "open-paused", status="open", paused=1)
@@ -39,6 +40,6 @@ async def test_every_open_listing_is_held_paused_or_not_and_no_closed_one(tmp_pa
 
 @pytest.mark.asyncio
 async def test_a_storefront_with_no_listing_holds_none(tmp_path):
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = SQLiteClient(core_database(tmp_path / "storefront.db"))
 
     assert await client.open_listing_ids() == frozenset()

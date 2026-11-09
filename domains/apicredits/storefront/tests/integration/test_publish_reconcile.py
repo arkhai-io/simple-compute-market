@@ -25,6 +25,8 @@ from apicredits_storefront.services.publication_service import (
     close_token_listings_after_capacity_change,
 )
 from apicredits_storefront.utils import sqlite_client as sqlite_module
+from apicredits_storefront.utils.migrations import migrate_storefront_database
+from apicredits_storefront.utils.sqlite_client import refuse_unbound_listings
 from market_site_client import SiteCapacityClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime import MechanismReadiness, ReadinessBlocker
@@ -157,6 +159,7 @@ class _SettlementComposition:
 async def db(tmp_path):
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
+    migrate_storefront_database(tmp_path / "publish.db")
     return SQLiteClient(db_path=str(tmp_path / "publish.db"))
 
 
@@ -647,6 +650,8 @@ async def test_a_database_with_an_unbound_listing_is_refused(tmp_path):
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
     path = str(tmp_path / "unbound.db")
+    migrate_storefront_database(path)
+    refuse_unbound_listings(path)
     db = SQLiteClient(db_path=path)
     await db.upsert_listing(
         listing_id="L-old",
@@ -668,7 +673,7 @@ async def test_a_database_with_an_unbound_listing_is_refused(tmp_path):
     )
 
     with pytest.raises(RuntimeError, match="L-old.*fresh database"):
-        SQLiteClient(db_path=path)
+        refuse_unbound_listings(path)
 
 
 class _PaymentComposition(_SettlementComposition):

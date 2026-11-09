@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
+from settlement_tables import settlement_database
 
 from market_settlement_runtime import (
     FULFILLMENT_REFERENCE_KEY,
@@ -35,7 +36,7 @@ class Clock:
 
 
 async def _adopted(tmp_path, *, agreement_ref: str = "agreement-one", clock=None):
-    repository = SettlementSQLiteRepository(str(tmp_path / "journal.db"))
+    repository = SettlementSQLiteRepository(settlement_database(tmp_path / "journal.db"))
     runtime = SettlementRuntime(
         repository,
         {"test.v1": PollingClient()},
@@ -329,7 +330,7 @@ class FreshStateClient(PollingClient):
 async def test_a_parked_fulfillments_reason_survives_a_later_status_poll(
     tmp_path,
 ) -> None:
-    repository = SettlementSQLiteRepository(str(tmp_path / "journal.db"))
+    repository = SettlementSQLiteRepository(settlement_database(tmp_path / "journal.db"))
     runtime = SettlementRuntime(repository, {"test.v1": FreshStateClient()})
     record = (
         await runtime.register_plan(

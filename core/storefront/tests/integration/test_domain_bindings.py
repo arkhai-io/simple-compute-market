@@ -1,3 +1,13 @@
+"""Durable listing and negotiation domain bindings on a migrated database.
+
+Library integration: core's client over a real SQLite file its baseline built
+(``tests/core_database.py``). The bindings are immutable once written, a
+listing names how its capacity is backed, and a close names who closed it;
+the client refuses a disagreeing write, and the baseline's triggers refuse one
+made in SQL directly.
+"""
+
+import asyncio
 import base64
 import json
 import re
@@ -6,6 +16,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from core_database import core_database
 
 from market_core import DomainIdentity
 from market_identity import Identity, IdentityScheme
@@ -19,11 +30,7 @@ from core_storefront.domain_registry import (
     StorefrontThreadBinding,
     build_storefront_derivation_key,
 )
-from core_storefront.sqlite_client import SQLiteClient
-from core_storefront.sqlite_migrations import (
-    LegacyMigrationInputs,
-    _backfill_accepted_escrows,
-)
+from core_storefront.sqlite_client import SQLiteClient, write_listing_update
 
 # The unit suite owns the test contract; this suite reuses it rather than a copy.
 from unit.test_domain_registry import _registration
@@ -32,6 +39,10 @@ from unit.test_domain_registry import _registration
 def _principal(byte: int) -> Identity:
     identifier = base64.urlsafe_b64encode(bytes([byte]) * 32).rstrip(b"=").decode()
     return Identity(scheme=IdentityScheme.ED25519, identifier=identifier)
+
+
+def _client(tmp_path) -> SQLiteClient:
+    return SQLiteClient(core_database(tmp_path / "storefront.db"))
 
 
 def _listing_binding(
@@ -81,11 +92,15 @@ async def _persist_listing(client, binding, *, status="open"):
     )
 
 
+def _run(coro):
+    return asyncio.run(coro)
+
+
 @pytest.mark.asyncio
 async def test_listing_binding_identical_replay_is_idempotent_and_conflict_rolls_back(
     tmp_path,
 ):
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = _client(tmp_path)
     binding = _listing_binding()
     await _persist_listing(client, binding)
     await _persist_listing(client, binding, status="paused")
@@ -108,8 +123,8 @@ async def test_listing_binding_identical_replay_is_idempotent_and_conflict_rolls
         ),
         source_envelope=json.loads(binding.source_envelope_json),
         last_reconciled_at=binding.last_reconciled_at,
-            capacity_backing=binding.capacity_backing,
-        )
+        capacity_backing=binding.capacity_backing,
+    )
     with pytest.raises(StorefrontDomainBindingError, match="different immutable"):
         await _persist_listing(client, changed, status="open")
     assert (await client.load_listing(listing_id=binding.listing_id))["status"] == "paused"
@@ -117,7 +132,7 @@ async def test_listing_binding_identical_replay_is_idempotent_and_conflict_rolls
 
 @pytest.mark.asyncio
 async def test_public_mode_disagreement_fails_before_listing_or_binding_write(tmp_path):
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = _client(tmp_path)
     binding = _listing_binding()
 
     with pytest.raises(StorefrontDomainBindingError, match="offering_mode"):
@@ -137,7 +152,7 @@ async def test_public_mode_disagreement_fails_before_listing_or_binding_write(tm
 
 @pytest.mark.asyncio
 async def test_opening_copies_binding_message_and_artifact_in_one_transaction(tmp_path):
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = _client(tmp_path)
     listing_binding = _listing_binding()
     await _persist_listing(client, listing_binding)
     thread_binding = StorefrontThreadBinding(
@@ -221,7 +236,7 @@ async def test_opening_copies_binding_message_and_artifact_in_one_transaction(tm
 
 @pytest.mark.asyncio
 async def test_thread_and_artifact_cross_swaps_fail_before_mutation(tmp_path):
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = _client(tmp_path)
     binding = _listing_binding()
     await _persist_listing(client, binding)
     other = StorefrontThreadBinding(
@@ -259,11 +274,9 @@ async def test_thread_and_artifact_cross_swaps_fail_before_mutation(tmp_path):
 
 
 def test_direct_sql_binding_mutation_is_rejected(tmp_path):
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = _client(tmp_path)
     binding = _listing_binding()
-    import asyncio
-
-    asyncio.run(_persist_listing(client, binding))
+    _run(_persist_listing(client, binding))
     with (
         sqlite3.connect(client.db_path) as conn,
         pytest.raises(sqlite3.IntegrityError, match="immutable"),
@@ -275,45 +288,8 @@ def test_direct_sql_binding_mutation_is_rejected(tmp_path):
         )
 
 
-def test_legacy_synthesizers_are_explicit_per_database():
-    first = sqlite3.connect(":memory:")
-    second = sqlite3.connect(":memory:")
-    for conn in (first, second):
-        conn.execute(
-            "CREATE TABLE listings (listing_id TEXT PRIMARY KEY, "
-            "demand_resource TEXT, accepted_escrows TEXT)"
-        )
-        conn.execute("INSERT INTO listings VALUES ('listing', '{}', NULL)")
-
-    _backfill_accepted_escrows(
-        first,
-        LegacyMigrationInputs(
-            accepted_escrows_synthesizer=lambda _value: [{"rail": "first"}]
-        ),
-    )
-    _backfill_accepted_escrows(
-        second,
-        LegacyMigrationInputs(
-            accepted_escrows_synthesizer=lambda _value: [{"rail": "second"}]
-        ),
-    )
-
-    assert json.loads(first.execute(
-        "SELECT accepted_escrows FROM listings"
-    ).fetchone()[0]) == [{"rail": "first"}]
-    assert json.loads(second.execute(
-        "SELECT accepted_escrows FROM listings"
-    ).fetchone()[0]) == [{"rail": "second"}]
-
-
-def _run(coro):
-    import asyncio
-
-    return asyncio.run(coro)
-
-
 def test_binding_backing_cannot_change_after_binding(tmp_path):
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = _client(tmp_path)
     binding = _listing_binding()
     _run(_persist_listing(client, binding))
     with sqlite3.connect(client.db_path) as conn, pytest.raises(
@@ -327,7 +303,7 @@ def test_binding_backing_cannot_change_after_binding(tmp_path):
 
 
 def test_binding_insert_naming_no_backing_is_refused(tmp_path):
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = _client(tmp_path)
     binding = _listing_binding()
     _run(_persist_listing(client, binding))
     with sqlite3.connect(client.db_path) as conn:
@@ -361,7 +337,7 @@ def test_binding_model_refuses_an_unknown_backing():
 
 
 def test_second_bind_with_opposite_backing_is_refused(tmp_path):
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = _client(tmp_path)
     binding = _listing_binding()
     _run(_persist_listing(client, binding))
     opposite = StorefrontListingBinding.from_source_envelope(
@@ -380,7 +356,7 @@ def test_second_bind_with_opposite_backing_is_refused(tmp_path):
 
 
 def test_direct_sql_close_without_reason_is_refused(tmp_path):
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = _client(tmp_path)
     binding = _listing_binding()
     _run(_persist_listing(client, binding))
     with sqlite3.connect(client.db_path) as conn:
@@ -401,68 +377,10 @@ def test_direct_sql_close_without_reason_is_refused(tmp_path):
             )
 
 
-def test_upgrade_backfills_backing_and_closure_reason_idempotently(tmp_path):
-    """A database whose rows predate both columns migrates to explicit values.
-
-    The rows are written with the current schema and then returned to their
-    pre-migration state — both values unset, the new triggers and migration
-    records removed — which is what a database written before this schema looks
-    like once its columns exist.
-    """
-    from core_storefront.sqlite_migrations import apply_schema_migrations
-
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
-    open_binding = _listing_binding()
-    closed_binding = _listing_binding(listing_id="listing-b", slice_=2)
-    _run(_persist_listing(client, open_binding))
-    _run(_persist_listing(client, closed_binding))
-    new_ids = (
-        "20260923_001_listing_binding_capacity_backing",
-        "20260923_002_listing_binding_capacity_backing_required",
-        "20260923_003_listing_closed_by",
-    )
-    with sqlite3.connect(client.db_path) as conn:
-        for trigger in (
-            "storefront_listing_binding_immutable",
-            "storefront_listing_binding_backing_required",
-            "listing_closed_by_consistent_insert",
-            "listing_closed_by_consistent_update",
-        ):
-            conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
-        conn.execute("UPDATE storefront_listing_bindings SET capacity_backing=NULL")
-        conn.execute(
-            "UPDATE listings SET status='closed', closed_by=NULL WHERE listing_id=?",
-            (closed_binding.listing_id,),
-        )
-        conn.executemany(
-            "DELETE FROM schema_migrations WHERE id=?", [(i,) for i in new_ids]
-        )
-
-    for _ in range(2):
-        with sqlite3.connect(client.db_path) as conn:
-            apply_schema_migrations(conn)
-
-    with sqlite3.connect(client.db_path) as conn:
-        assert {
-            row[0]
-            for row in conn.execute(
-                "SELECT capacity_backing FROM storefront_listing_bindings"
-            )
-        } == {"backed"}
-        assert dict(conn.execute("SELECT listing_id, closed_by FROM listings")) == {
-            open_binding.listing_id: None,
-            closed_binding.listing_id: "reconciliation",
-        }
-        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
-            conn.execute(
-                "UPDATE storefront_listing_bindings SET capacity_backing='unbacked'"
-            )
-
-
 def test_the_database_check_admits_exactly_the_registered_backing_labels(tmp_path):
     # The column check is a backstop beneath the binding's validation through
     # the backing registry; the two value sets must not drift.
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    client = _client(tmp_path)
     with sqlite3.connect(client.db_path) as conn:
         (ddl,) = conn.execute(
             "SELECT sql FROM sqlite_master WHERE name='storefront_listing_bindings'"
@@ -477,3 +395,28 @@ def test_the_database_check_admits_exactly_the_registered_backing_labels(tmp_pat
 def test_a_binding_with_an_unregistered_backing_is_refused():
     with pytest.raises(StorefrontDomainRegistryError, match="capacity_backing"):
         _listing_binding(backing="sometimes")
+
+
+_STRUCTURE = {"gpu": [{"asset": "usd", "rate": "2", "per": "hour"}]}
+
+
+def test_a_listing_update_writes_clears_and_otherwise_keeps_its_rate_structure(tmp_path):
+    client = _client(tmp_path)
+    binding = _listing_binding()
+    _run(_persist_listing(client, binding))
+
+    def stored(conn):
+        return conn.execute(
+            "SELECT rate_structure FROM listings WHERE listing_id = ?", (binding.listing_id,)
+        ).fetchone()[0]
+
+    with sqlite3.connect(client.db_path) as conn:
+        assert stored(conn) is None
+        write_listing_update(conn, listing_id=binding.listing_id, rate_structure=_STRUCTURE)
+        assert json.loads(stored(conn)) == _STRUCTURE
+
+        write_listing_update(conn, listing_id=binding.listing_id, max_duration_seconds=60)
+        assert json.loads(stored(conn)) == _STRUCTURE
+
+        write_listing_update(conn, listing_id=binding.listing_id, rate_structure=None)
+        assert stored(conn) is None

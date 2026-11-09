@@ -1,6 +1,6 @@
 """Shared cases for the VM reconciler's unit and integration tests.
 
-Helpers, constants, and the minimal SQLite schema fixture both levels use.
+Helpers, constants, and the migrated SQLite database fixture both levels use.
 The database-backed derivation tests live in
 ``tests/integration/test_reconciler_derivation.py``; pure transformation
 tests in ``tests/unit/test_reconciler.py``.
@@ -15,13 +15,7 @@ from core_storefront.domain_registry import (
     StorefrontListingBinding,
     build_storefront_derivation_key,
 )
-from core_storefront.sqlite_migrations import (
-    migrate_listing_binding_capacity_backing,
-    migrate_listing_binding_capacity_backing_required,
-    migrate_listing_closed_by,
-    migrate_storefront_domain_bindings_schema,
-)
-from market_identity import Identity
+from market_identity import Ed25519Signer
 from market_site.projections import resource_pool_projection
 from arkhai_vms_listings.pricing_resolution import GpuPricingFields
 from arkhai_vms_listings.reconciler import (
@@ -49,6 +43,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.services.shape_feasibility import SiteShapeFeasibility
+from market_storefront.utils.migrations import migrate_storefront_database
 
 # Every derivation judges shapes with the storefront's real feasibility, built
 # on the site's own predicate, unless a test injects its own.
@@ -130,6 +125,11 @@ assert _VM_REGISTRY.resolve(_VM_BINDING) is _VM_DOMAIN
 _REGION = "us-east"
 
 
+#: The seller every seeded listing names; a development key, never used on a
+#: public network.
+_SELLER_PRINCIPAL = Ed25519Signer(b"\x5c" * 32).identity
+
+
 def _vm_pool(pool: dict) -> dict:
     """Return a projection row with the exact VM deliverable declaration.
 
@@ -200,38 +200,7 @@ def _term(row: dict, field: str):
 @pytest.fixture
 def db_path(tmp_path) -> str:
     path = str(tmp_path / "reconciler_test.db")
-    conn = sqlite3.connect(path)
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(
-            """
-            CREATE TABLE listings (
-              listing_id TEXT PRIMARY KEY,
-              status TEXT NOT NULL,
-              listing_resource TEXT,
-              accepted_escrows TEXT,
-              demands TEXT,
-              max_duration_seconds INTEGER,
-              seller TEXT,
-              paused INTEGER,
-              updated_at TEXT
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE negotiation_threads (
-              negotiation_id TEXT PRIMARY KEY
-            )
-            """
-        )
-        migrate_storefront_domain_bindings_schema(conn)
-        migrate_listing_binding_capacity_backing(conn)
-        migrate_listing_binding_capacity_backing_required(conn)
-        migrate_listing_closed_by(conn)
-        conn.commit()
-    finally:
-        conn.close()
+    migrate_storefront_database(path)
     return path
 
 
@@ -328,12 +297,18 @@ def _seed_listing(
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
-            "INSERT INTO listings(listing_id, status, listing_resource, closed_by) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO listings(listing_id, status, created_at, updated_at, "
+            "listing_resource, seller_scheme, seller_identifier, storefront_url, "
+            "closed_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 listing_id,
                 status,
+                "2026-08-15T00:00:00Z",
+                "2026-08-15T00:00:00Z",
                 json.dumps(listing_resource),
+                _SELLER_PRINCIPAL.scheme.value,
+                _SELLER_PRINCIPAL.identifier,
+                "http://seller.test",
                 closed_by
                 if closed_by is not None or status != "closed"
                 else "reconciliation",

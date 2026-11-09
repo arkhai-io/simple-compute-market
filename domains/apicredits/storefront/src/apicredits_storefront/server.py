@@ -72,7 +72,6 @@ from apicredits_storefront.settlement_composition import (
 )
 from apicredits_storefront.utils.config import (
     AGENT_ID,
-    BASE_URL_OVERRIDE,
     CHAINS,
     chain_address_books,
     resolve_admin_identities,
@@ -81,7 +80,11 @@ from apicredits_storefront.utils.config import (
     settings,
     settlement_config_mapping,
 )
-from apicredits_storefront.utils.sqlite_client import get_sqlite_client
+from apicredits_storefront.utils.migrations import migrate_storefront_database
+from apicredits_storefront.utils.sqlite_client import (
+    get_sqlite_client,
+    refuse_unbound_listings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -220,10 +223,13 @@ def _build_api_credit_services(
             constructor=seams.alkahest_client_constructor,
             json_rpc=seams.alkahest_json_rpc,
         )
-    sqlite_client = get_sqlite_client(
-        local_listing_principal=marketplace_signer.identity,
-        expected_legacy_sellers=(BASE_URL_OVERRIDE,),
-    )
+    # The storefront's chain is applied before anything opens the database,
+    # since constructing the client or opening a store issues no DDL; on a
+    # migrated database it applies nothing. The unbound-listing refusal reads
+    # data, so it runs on the migrated database.
+    migrate_storefront_database(settings.db_path)
+    refuse_unbound_listings(settings.db_path)
+    sqlite_client = get_sqlite_client()
     set_stage_event_db_path(sqlite_client.db_path)
     failure_policy = build_api_credit_failure_policy()
     settlement_composition = build_api_credit_settlement_composition(

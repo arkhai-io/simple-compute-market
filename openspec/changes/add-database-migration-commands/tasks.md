@@ -1057,7 +1057,7 @@ migration is transactional". Touches `domains/vms/storefront`
 `lifecycle_records.py`, `runtime.py`), and `domains/apicredits/storefront`
 (`utils/sqlite_client.py`, `utils/migrations.py`).
 
-- [ ] 7.1 Declare each composition's `Chain`: core's baseline, each composed kit's
+- [x] 7.1 Declare each composition's `Chain`: core's baseline, each composed kit's
       baseline, the domain's baseline (VM's settlement and delivery records; bare
       metal's tables and lifecycle cursor; API credits' `credit_deal_terms` and
       settlement and issuance tables), the store-open migration composed from section
@@ -1080,18 +1080,79 @@ migration is transactional". Touches `domains/vms/storefront`
       migration; a failing domain migration leaves startup refused, naming it. (D3, D9;
       `deployment-state` "A v0.3.0 storefront database never opened a store's
       tables", "An API-credit database is refused", "Domain migration fails")
-- [ ] 7.2 Add the store-open test to each storefront: on a database its chain migrated,
+      Each storefront's migrations module (`market_storefront.utils.migrations`,
+      `arkhai_bare_metal_storefront.migrations`, `apicredits_storefront.utils.migrations`)
+      holds its domain `BASELINE` (`v0_3_0_baseline_<domain>_storefront`, the floor's
+      DDL with each `ALTER`-added column written in place; VM's and API credits' add
+      `escrows.obligation_ref`/`obligation_index` and their two indexes), `CHAIN`,
+      `FLOOR_IDS` (VM 29, bare metal 37; API credits none), `MIGRATION_COMMAND`, and
+      `migrate_storefront_database(path)`, the function section 9's command calls.
+      Later migrations: VM `20261106_001_vm_delivery_activation`,
+      `20261106_002_vm_credentials_cleared`, `20261109_001_vm_store_open_tables`,
+      `20261109_002_vm_frozen_inventory_dropped`; bare metal `-0016-delivery-activation`,
+      `-0017-store-open-tables` (deal servicing's schema and `bare_metal_lifecycle_cursor`),
+      `-0018-drop-accepted-site-generations`. The post-floor bodies lost their
+      table-existence guards, since every table they touch exists once the baselines
+      ran. API credits has no store-open migration: it composes no deal servicing and
+      adopts no database. The pre-floor bodies, the hooks, bare metal's required-column
+      check and the store-open `create_schema` calls are deleted; VM's
+      `add_vm_settlement_records`/`add_vm_delivery_activation` left `payment_repository`
+      (the latter's body is now the chain's). API credits' unbound-listing refusal is
+      `refuse_unbound_listings(db_path)`, run by the server composition after the
+      migration. Differs from the plan: until section 9 adds the startup check and the
+      commands, each composition applies its chain itself before it opens the
+      database — VM's `_build_vm_services`, bare metal's `build_runtime_from_configuration`,
+      the API-credit server's service composition — so the storefronts keep starting on
+      a fresh database (the lanes) in between; section 9 replaces each call with the
+      check (see the notes). Library integration (`tests/integration/test_migration_chain.py`
+      per storefront, real SQLite files through the engine, no application): the
+      baselines alone give the floor fixture's `schema.json` exactly (API credits: its
+      release fixture); the chain's floor IDs are the fixture's; a fresh database and an
+      adopted floor database (built from `ddl.sql` by `tests/floor_database.py`) give
+      one snapshot and one ledger, the adoption applying exactly the later migrations
+      and keeping rows; a rerun changes no byte; a floor database without the
+      store-open tables gains them, and present ones are left as they are (VM: deal
+      servicing's tables keep their columns and indexes; bare metal: its cursor keeps
+      its row); the frozen tables are dropped; a
+      database missing a floor ID is refused as unsupported naming it and the command,
+      bytes unchanged; an API-credit release database and tables without a ledger are
+      refused unchanged; a failing appended migration is named by `MigrationFailed`,
+      leaves no trace, and `check` reports it pending; the post-floor migrations'
+      rewrites (VM phase and credentials, bare metal's dispatch marking and access
+      stripping) — passed (VM 12, bare metal 11, API credits 5). "Startup refused,
+      naming it" is shown at the engine's `check`, the call section 9's startup makes;
+      no startup check exists before section 9.
+- [x] 7.2 Add the store-open test to each storefront: on a database its chain migrated,
       constructing the client, starting the application's composition, and opening
       every store it composes leaves `schema_snapshot` unchanged. Verify it fails when
       a `CREATE TABLE IF NOT EXISTS` is reintroduced at a store's open, and passes
       otherwise. (D5, D9; `deployment-state` "A storefront opens its stores on a
       migrated database")
-- [ ] 7.3 Remove `market-storefront migrate-storefront-domains`,
+      `tests/integration/test_store_open.py` per storefront, application integration:
+      the real app and lifespan composed from configuration over a database the chain
+      migrated — VM on `test_degraded_startup`'s configuration and seams, then a stepped
+      publication cycle through the typed admin client; API credits on
+      `test_alkahest_release_conditions`' fixture, whose startup tasks are replaced;
+      bare metal on `test_app_composition`'s `_started_app`, the production app over a
+      runtime built from the configuration files with its site transport replaced and
+      its loops held — each reading its health through the typed client, and the
+      `schema_snapshot` before and after are equal — passed, one test each. Mutation: with a
+      `CREATE TABLE IF NOT EXISTS` added to `VmDealLifecycle`'s constructor, the VM test
+      failed on the snapshot, and passed once it was removed; the mutation was run
+      for VM alone. The API-credit fixture replaces the startup tasks (the credits
+      preflight and the timer loops), so a store only a loop's step opens is not
+      exercised there; VM's runs a publication cycle, and bare metal's holds its loops.
+- [x] 7.3 Remove `market-storefront migrate-storefront-domains`,
       `market_storefront.domain_migration`, and
       `domains/vms/storefront/tests/unit/test_domain_migration.py`. Verify with
       `market-storefront --help` listing no such command and the VM storefront suite
       passing. (D3; REMOVED "Legacy storefront domain migration is transactional")
-- [ ] 7.4 **Verification.** Run `make -C domains/vms/storefront test`,
+      The command was `market-storefront config migrate --scope storefront-domains`
+      with its four `--legacy-*` options, not a top-level `migrate-storefront-domains`:
+      the scope and options are removed from `groups/config.py`, which now offers
+      `settlement` and `publication` alone, and `domain_migration.py` and its test are
+      deleted (`git rm`). The VM storefront suite passed (7.4); no CLI help was run.
+- [x] 7.4 **Verification.** Run `make -C domains/vms/storefront test`,
       `make -C domains/bare_metal/storefront test`,
       `make -C domains/apicredits/storefront test`, `make -C core/storefront test`,
       `make check-packaging`, and
@@ -1102,7 +1163,25 @@ migration is transactional". Touches `domains/vms/storefront`
       tables, so the pipeline is evidence that the chains build a working schema;
       adoption is proven by the library integration tests, and no scenario is owed.
       Owed by validation: none.
-- [ ] 7.5 Added 2026-11-09 from 6.2 on the owner's direction, and done with 7.1 in
+      Final run, `scripts/change-workflow run pre-commit add-database-migration-commands`
+      over the final tree (only these notes changed after it) — `after-functional-change` (`make lock`),
+      `pre-commit-functional` (`make check-packaging` and `make test`, every suite) and
+      `pre-commit` (the index, tasks, skills, strict validation, and the repository's
+      eight checks) all "passed, exit 0". From its suites: VM storefront unit 1137
+      passed and 1 skipped, integration 550; bare-metal storefront 596; API-credit
+      storefront 262; core storefront 222; settlement runtime 182; contact exchange
+      141; pool overrides 82; capacity publication 135; deal servicing 70; compute
+      delivery 126; API-credit domain 41. `make check-architecture` passed. The first
+      run failed only on the local-imports check (nine migrate imports the test sweep
+      placed inside functions, moved to module level).
+      End-to-end, corrected: `e2e_deal`, `e2e_vm_payment_deal`, `e2e_bare_metal_mock_deal`,
+      `e2e_bare_metal_payment_deal`, and `e2e_credits_deal` start each storefront on a
+      fresh database its composition migrates through its chain; the VM and bare-metal
+      lanes deliver deals through the store-open migration's deal-servicing tables, and
+      the API-credit lane, whose chain has no store-open migration, through its
+      baseline's tables. The pipeline has not run on this section: this is what a
+      passing run would show. Owed by validation: none, confirmed.
+- [x] 7.5 Added 2026-11-09 from 6.2 on the owner's direction, and done with 7.1 in
       one commit, since it switches all three storefronts at once. Delete what 6.2
       lists: `_ensure_tables_sync`'s unversioned bootstrap, the core chain's pre-floor
       migration bodies (`core_storefront/sqlite_migrations.py`), the two-pass
@@ -1125,6 +1204,112 @@ migration is transactional". Touches `domains/vms/storefront`
       core's migrations, judged one by one). Verify with every storefront suite,
       core's, and the kits', and with a test that constructing each storefront's
       client on a migrated database changes no schema. (D2, D3, D4, D9)
+      Deleted: `_ensure_tables_sync` and the domain hooks from `core_storefront/sqlite_client.py`,
+      whose constructor now takes only `db_path` (the principal and legacy-seller
+      arguments existed for the deleted principal migration);
+      `core_storefront/sqlite_migrations.py` whole; `SettlementSQLiteRepository`'s runner,
+      its `apply_migrations`/`extra_migrations` arguments, `settlement_migrations`,
+      `SettlementMigration`, the legacy-claim conversion and the four
+      `SETTLEMENT_*_MIGRATION_ID` exports; `CONTACT_EXCHANGE_MIGRATIONS` and its IDs (the
+      trigger and claim-table rationale moved beside the baseline's DDL);
+      `pool_override_migrations`, `PoolOverrideMigration` and their IDs. These are
+      removals from public API in distributions this change already bumped (settlement
+      runtime 0.8.0, contact exchange 0.5.0, pool overrides 0.3.0, core storefront
+      0.18.0), so no further bump. Tests: a test that builds a client or store on a
+      fresh file migrates it first — `migrate_storefront_database` in each storefront,
+      core's `tests/core_database.py` (a chain of core's baseline alone) in core, the
+      settlement runtime's `tests/settlement_tables.py` and each kit's `BASELINE` in
+      the kits (both suites gain `tests` on their pytest path for the helper).
+      Deleted, judged test by test, as having a deleted migration or legacy converter
+      for subject: core's `test_listing_resource_migration.py` and
+      `test_identity_migrations.py` whole; of core's `test_domain_binding_migrations.py`
+      and `test_rate_structure_column.py`, which the plan named whole, only the
+      migration tests — their live tests (binding immutability and conflicts, the
+      baseline's `capacity_backing` and `closed_by` triggers, the backing labels, the
+      rate-structure write) are kept in a new `tests/integration/test_domain_bindings.py`
+      on a migrated database; the settlement runtime's six migration tests
+      (`test_sqlite_repository.py` keeps its four live tests, plus one that a
+      repository issues no DDL); contact exchange's two migration-rerun tests (one
+      replaced by a claim-once test); pool overrides' rerun test (renamed to the key it
+      still asserts). VM: `test_accepted_escrows_synthesis.py` (its live round-trip
+      test moved to `test_publication_clause_persistence.py`),
+      `test_fulfillment_context_migration.py`, `test_connection_details_migration.py`,
+      `test_compute_allocations_freeze.py`, `test_inventory_freeze.py`; inside kept
+      modules, the old `test_migrations.py`'s bootstrap, backfill, activation and
+      credentials tests (the chain test covers the last two), two legacy-conversion
+      tests in `test_negotiation_thread.py`, and the bindings-migration idempotency
+      test in `test_reconciler_derivation.py`. Bare metal: `test_migrations.py` (its
+      one live test, the selected-site table's constraints and trigger, moved to
+      `test_site_clients.py`); `test_escrow_identity_backfill.py` is kept, its
+      backfill running at startup. API credits: none. Moved to `tests/integration/`,
+      since each opens a real database: core's `test_identity_authority.py` and
+      `test_identity_lifecycle.py`, the settlement runtime's `test_jobs_and_policy.py`,
+      and VM's rewritten `unit/test_migrations.py` as
+      `integration/test_restart_persistence.py`. Results are 7.4's.
+      The constructing-a-client-changes-no-schema test is 7.2's `test_store_open.py`,
+      which constructs each client as its composition does.
+
+**Section 7 notes — completed 2026-11-09.**
+
+Handoff for section 9. Each composition calls its storefront's
+`migrate_storefront_database` before it opens the database — `server._build_vm_services`,
+`runtime.build_runtime_from_configuration`, and the API-credit server's composition
+(which then calls `refuse_unbound_listings`) — so a storefront still starts on a fresh
+database with no deployment step. Section 9 replaces each call with the startup check
+(`market_schema_migrations.check_sqlite_file(CHAIN, path)`, refusing any result but
+compatible with `refusal_message`, before anything constructs a client), adds the three
+console scripts over `migrate_storefront_database` with `--check`, and moves the
+migration into the init container and the Compose command. Every storefront test that
+starts an app through those compositions then needs its database migrated first, as the
+tests that construct a client directly already do; the store-open tests already migrate
+before starting. API credits' `refuse_unbound_listings` stays a startup refusal after the
+check (D9).
+
+Seams and surprises. `executescript` cannot replay a fixture's `ddl.sql` as stored:
+SQLite records `CREATE TABLE sqlite_sequence(name,seq)` for an `AUTOINCREMENT` key and
+refuses to create it by name, so `tests/floor_database.py` (VM, bare metal) strips that
+line. A trigger's text is compared after whitespace normalisation, so a baseline may
+reflow a floor trigger but not change a token. Bare metal's floor fulfillment-lifecycle
+columns added by `ALTER` are written in place in its baseline, matching column order.
+The VM storefront's tests are a package (`from tests.floor_database import ...`); the
+bare-metal suite imports helpers by bare module name. Core's client constructor lost its
+principal and legacy-seller arguments with the principal migration, which reached every
+construction; the VM and API-credit `get_sqlite_client` no longer resolve the signer.
+Running suites while another session reinstalls the same package's `.venv` (each
+`test` target's `reinit`) gives spurious import errors; the shared `.dist` wheels are
+rebuilt only by `make lock`/`make dist`.
+
+D3's sentence on "the domain indexes the constructor creates after it" names nothing
+the floor builds (section 6's notes), so no store-open migration creates an index beyond
+deal servicing's own; closeout's documentation compliance corrects D3.
+
+Left for review and closeout, outside this section's plan (as section 4's were):
+- Permanent requirements still require the storefront principal migration this section
+  deleted with core's pre-floor chain: `storefront-publication/spec.md` "Storefront
+  identity state migrates atomically" (~535), and the requirements at
+  `negotiation-protocol/spec.md` ~153 and `deployment-state/spec.md` ~226 that describe
+  it. No delta of the change covers them; they want REMOVED or MODIFIED deltas, and
+  the proposal's capability list and D12 would gain `negotiation-protocol`.
+- Evidence lines cite deleted modules: `deployment-state/spec.md` ~1250
+  (`test_domain_migration.py`, whose requirement the REMOVED delta covers);
+  `negotiation-protocol/spec.md` ~461 and `storefront-publication/spec.md` ~3247, ~3250
+  (`core/storefront/tests/unit/test_identity_migrations.py`); `storefront-publication/spec.md`
+  ~3278 (`test_domain_binding_migrations.py`, whose live tests are now
+  `test_domain_bindings.py`); `settlement-servicing/spec.md` ~651
+  (`core_storefront/sqlite_migrations.py`).
+- `docs/development/TESTING.md` ~1167–1168 and ~1182–1183 describe VM's transactional
+  legacy domain migration tests, and ~1221–1225 the storefront identity-migration
+  tests; 11.9's "Migration Tests" section is the natural place to replace them.
+- The triage should place each, most likely as deltas and as 11.9 and 11.10 amendments.
+
+Declined from the fresh-context check: moving the VM storefront's other unit modules
+that open a real database (e.g. `test_publications.py`, `test_negotiation_thread.py`,
+`test_settlement_composition.py`) to `integration/` — TESTING.md's move-when-touched
+rule is written for library packages, those modules opened real databases before this
+section, and the touch here is one migrate call each; the rewritten
+`test_migrations.py` did move. The `MIGRATION_COMMAND` names refer to console scripts
+section 9 registers: a refusal raised by the in-process migration in between names a
+command that does not exist yet, within one round.
 
 ## 8. The API-credit service on the engine
 

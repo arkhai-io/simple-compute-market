@@ -20,7 +20,7 @@ build-backend = "hatchling.build"
 packages = ["src/market_settlement_runtime"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 testpaths = ["tests/unit", "tests/integration"]
 asyncio_mode = "auto"
 

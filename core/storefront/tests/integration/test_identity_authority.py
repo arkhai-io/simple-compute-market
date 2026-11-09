@@ -11,12 +11,12 @@ from core_storefront.identity_authority import (
     StorefrontIdentityAuthority,
     coordinate_rotation,
 )
-from core_storefront.sqlite_client import SQLiteClient
+from core_database import core_database
 
 
 def test_two_proof_rotation_bounds_overlap_and_retires_old_identity(tmp_path) -> None:
     db_path = str(tmp_path / "authority.db")
-    SQLiteClient(db_path)
+    core_database(db_path)
     authority = StorefrontIdentityAuthority(db_path, max_overlap_seconds=60)
     current = Ed25519Signer(bytes(range(32)))
     replacement = Ed25519Signer(bytes(range(1, 33)))
@@ -104,7 +104,7 @@ def test_service_peer_registration_remains_idempotent_during_rotation_overlap(
     tmp_path,
 ) -> None:
     db_path = str(tmp_path / "service-peer.db")
-    SQLiteClient(db_path)
+    core_database(db_path)
     authority = StorefrontIdentityAuthority(db_path, max_overlap_seconds=60)
     current = Ed25519Signer(b"\x21" * 32)
     replacement = Ed25519Signer(b"\x22" * 32)
@@ -168,7 +168,7 @@ def test_service_peer_registration_remains_idempotent_during_rotation_overlap(
 
 def test_rotation_blocks_stale_and_competing_keys_until_retirement(tmp_path) -> None:
     db_path = str(tmp_path / "serialized-rotation.db")
-    SQLiteClient(db_path)
+    core_database(db_path)
     authority = StorefrontIdentityAuthority(db_path, max_overlap_seconds=60)
     current = Ed25519Signer(b"\x31" * 32)
     replacement = Ed25519Signer(b"\x32" * 32)

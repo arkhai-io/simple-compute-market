@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
@@ -129,6 +130,7 @@ async def _poll_sites(app) -> None:
 
 def _runtime(path: str) -> BareMetalStorefrontRuntime:
     domain = get_market_domain_contract()
+    migrate_storefront_database(path)
     return BareMetalStorefrontRuntime(
         db=SQLiteClient(path, domain=domain),
         domain=domain,
@@ -1379,6 +1381,7 @@ def _contact_runtime(path: str, site: SourceSite) -> BareMetalStorefrontRuntime:
     """A storefront settling by introduction alone, with a contact for its one
     site; the address is a reserved example domain, never a real mailbox."""
     domain = get_market_domain_contract()
+    migrate_storefront_database(path)
     return BareMetalStorefrontRuntime(
         db=SQLiteClient(path, domain=domain),
         domain=domain,

@@ -23,6 +23,7 @@ from market_identity import Eip191Signer, TrustedIdentitySet
 from settlement_compositions import alkahest_composition
 from arkhai_bare_metal_storefront.alkahest_lifecycle import BareMetalAlkahestLifecycle
 from arkhai_bare_metal_storefront.settlement_stages import DeclinedServicing
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal_storefront.contribution import (
@@ -188,6 +189,7 @@ def test_installed_contribution_exposes_complete_bare_metal_contract() -> None:
 
 def _direct_runtime(tmp_path, **overrides):
     domain = get_market_domain_contract()
+    migrate_storefront_database(tmp_path / "storefront.db")
     values = dict(
         db=SQLiteClient(str(tmp_path / "storefront.db"), domain=domain),
         domain=domain,

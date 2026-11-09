@@ -33,6 +33,7 @@ dependencies = [
     "arkhai-kit-resource-pools>=0.7.0",
     "arkhai-kit-arkhai-payments==0.6.2",
     "arkhai-kit-settlement-runtime>=0.8.0",
+    "arkhai-kit-schema-migrations>=0.1.0",
     "arkhai-kit-storefront==0.10.0",
     "dynaconf>=3.0.0",
     "fastapi~=0.115.8",
@@ -71,8 +72,6 @@ dev = [
     "sqlalchemy>=2.0",
     # Validates documents against the generated Helm values schema.
     "jsonschema>=4.0",
-    # The schema snapshot the floor-fixture comparison reads. Test-only.
-    "arkhai-kit-schema-migrations>=0.1.0",
 ]
 
 [tool.uv]

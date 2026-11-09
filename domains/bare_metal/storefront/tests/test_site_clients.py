@@ -25,14 +25,13 @@ from market_identity import (
 )
 from market_site_client import SiteCapacityAuthenticationError
 
-from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.site_clients import (
     DurableReservationSiteMap,
     SelectedSiteFulfillmentClient,
     build_trusted_site_clients,
     parse_site_bindings,
 )
-from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from signed_sites import SignedSite, SignedSites
 from site_trust import peer_id, seeded_sites
 
@@ -61,7 +60,7 @@ def _peers(*site_ids: str) -> dict:
 
 def _database(tmp_path) -> str:
     db_path = str(tmp_path / "storefront.db")
-    SQLiteClient(db_path, domain=get_market_domain_contract())
+    migrate_storefront_database(db_path)
     return db_path
 
 
@@ -368,6 +367,45 @@ def test_reservation_site_binding_is_immutable(tmp_path) -> None:
     assert DurableReservationSiteMap(db_path, by_site, trust) == {
         "reservation-1": "site-a"
     }
+
+
+def test_the_schema_pins_each_reservation_to_its_sites_peer(tmp_path) -> None:
+    """The selected-site table records the site's service peer beside the
+    audit principal, and its trigger keeps every recorded column unchanged."""
+    conn = sqlite3.connect(_database(tmp_path))
+    try:
+        columns = {
+            str(row[1]): bool(row[3])
+            for row in conn.execute("PRAGMA table_info(bare_metal_selected_site_bindings)")
+        }
+        assert {
+            "site_id": True,
+            "service_peer": True,
+            "authority_scheme": True,
+            "authority_identifier": True,
+        }.items() <= columns.items()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO bare_metal_selected_site_bindings("
+                "capacity_reservation_id, site_id, service_peer, "
+                "authority_scheme, authority_identifier) VALUES (?, ?, ?, ?, ?)",
+                ("reservation-0", "site-a", " ", "eip191", "0x1"),
+            )
+        conn.execute(
+            "INSERT INTO bare_metal_selected_site_bindings("
+            "capacity_reservation_id, site_id, service_peer, "
+            "authority_scheme, authority_identifier) VALUES (?, ?, ?, ?, ?)",
+            ("reservation-1", "site-a", "site-a-peer", "eip191", "0x1"),
+        )
+        for column, value in (("service_peer", "another-peer"), ("authority_identifier", "0x2")):
+            with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+                conn.execute(
+                    f"UPDATE bare_metal_selected_site_bindings SET {column} = ? "
+                    "WHERE capacity_reservation_id = 'reservation-1'",
+                    (value,),
+                )
+    finally:
+        conn.close()
 
 
 async def test_each_sites_clients_verify_against_its_peers_active_principals(

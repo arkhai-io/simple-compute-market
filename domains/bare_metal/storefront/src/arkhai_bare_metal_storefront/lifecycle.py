@@ -30,7 +30,7 @@ from market_deal_servicing import (
     Classification, DealWatch, DeliveryIngress, EndService, EndSession,
     FinalRequest, LifecycleRouteBinding, LifecycleRouteServices, RespondentPoller,
     PhysicalResult, SellerDeal, SellerServicing, SellerSession, SQLiteEvidenceStore, VerifiedSiteEnd,
-    seller_retention, create_schema,
+    seller_retention,
 )
 from market_deal_servicing.evidence import EvidenceSession, in_transaction, transaction
 from market_deal_servicing.journal import stable_ref
@@ -52,11 +52,6 @@ class BareMetalLifecycle:
         self.evidence = SQLiteEvidenceStore(self.path)
         self.locks: dict[str, asyncio.Lock] = {}
         self.clients = {}
-        with transaction(self.path) as conn:
-            # Deal servicing's sessions issue no DDL, so the store creates the
-            # tables they read before any read or poll reaches them.
-            create_schema(conn)
-            conn.execute("CREATE TABLE IF NOT EXISTS bare_metal_lifecycle_cursor (id INTEGER PRIMARY KEY CHECK (id=1), continuation TEXT)")
         self.end = EndService(self.path, self, clock=self.clock)
         # An Alkahest deal authorizes delivery through its once-only adapter,
         # since a mechanism with no adapter is never allowed.

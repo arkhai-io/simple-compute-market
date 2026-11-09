@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from market_identity import Identity, IdentityScheme
+from settlement_tables import settlement_database
 
 from market_settlement_runtime import (
     FailurePolicy,
@@ -41,7 +42,7 @@ def obligation(*, payer: str = "buyer") -> dict:
 async def test_existing_job_still_registers_and_adopts_exact_seller_funded_obligation(
     tmp_path,
 ) -> None:
-    repository = SettlementSQLiteRepository(str(tmp_path / "jobs.db"))
+    repository = SettlementSQLiteRepository(settlement_database(tmp_path / "jobs.db"))
     runtime = SettlementRuntime(repository, {})
     prepared = PreparedSettlement(
         agreement_ref="agreement",
@@ -86,7 +87,7 @@ async def test_existing_job_still_registers_and_adopts_exact_seller_funded_oblig
 
 
 async def test_new_job_binds_then_persists_and_wakes(tmp_path) -> None:
-    repository = SettlementSQLiteRepository(str(tmp_path / "new-job.db"))
+    repository = SettlementSQLiteRepository(settlement_database(tmp_path / "new-job.db"))
     runtime = SettlementRuntime(repository, {})
     prepared = PreparedSettlement(
         agreement_ref="agreement",
@@ -149,7 +150,7 @@ async def test_a_deferred_job_is_persisted_without_binding_or_waking(tmp_path) -
     """Work remains that the domain's own convergence finishes: the outcome is
     persisted so the domain can leave the deal open, no fulfillment is bound,
     and servicing is not woken."""
-    repository = SettlementSQLiteRepository(str(tmp_path / "deferred-job.db"))
+    repository = SettlementSQLiteRepository(settlement_database(tmp_path / "deferred-job.db"))
     runtime = SettlementRuntime(repository, {})
     prepared = PreparedSettlement(
         agreement_ref="agreement",
