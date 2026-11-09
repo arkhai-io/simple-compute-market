@@ -241,7 +241,7 @@ def test_a_failed_push_exits_1_whatever_git_returned(
 
 # `start`: the make targets' entry logic.
 
-@pytest.mark.parametrize("step", ["design", "plan", "implement", "merge"])
+@pytest.mark.parametrize("step", ["design", "plan", "implement"])
 def test_start_refuses_an_archived_change_for_a_step_taking_an_active_one(
         tmp_path: Path, capsys: pytest.CaptureFixture[str], step: str) -> None:
     root = _repository(tmp_path / "workspace")
@@ -268,6 +268,20 @@ def test_start_takes_an_archived_change_for_a_step_that_may_follow_the_archive(
 
     assert cli.main(["start", step, CHANGE], root=root, launch=launched) == 0
     assert launched.commands[0][-1] == f"/change-{step} {CHANGE}"
+
+
+def test_start_takes_an_archived_change_for_the_merge_after_the_archive(
+        tmp_path: Path) -> None:
+    """One node of the merge step, the merge after the archive, enters an archived
+    change, so `start` takes it; the merge's route check refuses a run the
+    computation does not name."""
+    root = _repository(tmp_path / "workspace")
+    _archive(root)
+    launched = Launched()
+
+    assert cli.main(["start", "merge", CHANGE, "--arguments", "from dev"], root=root,
+                    launch=launched) == 0
+    assert launched.commands[0][-1] == f"/change-merge {CHANGE} from dev"
 
 
 def test_start_takes_only_an_archived_change_for_archive_cleanup(

@@ -61,10 +61,12 @@ from datetime import timezone
 from pathlib import Path
 from typing import IO, Any, Callable, Collection, Mapping, Sequence
 
-from .common import FORMAT, ORCHESTRATOR, Clock, Entry, StepError, utc_now
-from .find import ARCHIVE, ChangeNotFound, change_directory, find_records, landing_branch
+from .common import CHANGES, FORMAT, ORCHESTRATOR, Clock, Entry, StepError, utc_now
+from .find import (ARCHIVE, ChangeNotFound, change_directory, change_name, find_records,
+                   landing_branch)
 from .graph import (NODES, ROUND, STEPS, Node, Standing, TargetError, entry_refusal, node_of,
                     review_phase, section_ids)
+from .index import index_rows
 from .outcome import outcome_problems, triage_outcome_problems
 from .records import (NUMBERED, git_contains, git_remotes, has_records, latest_validation,
                       next_number, validation_result)
@@ -568,9 +570,19 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
                                else after, **({"commit": commit} if commit else {})}, clock)
 
 
+def _row_archived(directory: Path) -> bool:
+    """Whether the change index of the repository holding the change `directory` has
+    a row for it saying `archived`."""
+    archived = directory.parent.as_posix().endswith(ARCHIVE.as_posix())
+    root = directory.parents[len(ARCHIVE.parts) if archived else len(CHANGES.parts)]
+    name = change_name(directory)
+    return any(row.name == name and row.status == "archived" for row in index_rows(root))
+
+
 def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
     """What the entry guards read of the change whose log is at `path`: whether its
-    directory is under the archive, and the kinds of review awaiting triage.
+    directory is under the archive, the kinds of review awaiting triage, whether an
+    archive cleanup run has finished, and whether its index row says `archived`.
 
     A review — a numbered record of a review kind, `-external` included — awaits
     triage until a triage's finished or returned outcome, or a conversion line,
@@ -610,7 +622,10 @@ def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
                                                             for number in validations):
         awaiting.add(latest[1])
     return Standing(archived=directory.parent.as_posix().endswith(ARCHIVE.as_posix()),
-                    awaiting=frozenset(awaiting))
+                    awaiting=frozenset(awaiting),
+                    cleaned_up=any(entry.get("step") == CLEANUP
+                                   and entry.get("outcome") == "finished" for entry in entries),
+                    row_archived=_row_archived(directory))
 
 
 def direction(next_step: str, kind: str | None = None,

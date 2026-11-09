@@ -185,7 +185,7 @@ requirements CW-m4qe (entry), CW-r2hu (graph), CW-xo82, CW-tnp6, and CW-9tzd. To
 `scripts/change_workflow/graph.py`, `log.py` (`standing`), `review.py`, and
 `openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio` and `.svg`.
 
-- [ ] 2.1 Declare in `graph.py` (D1, D2, D4, D6, D8): `late-merge`, `runs="merge"`,
+- [x] 2.1 Declare in `graph.py` (D1, D2, D4, D6, D8): `late-merge`, `runs="merge"`,
   phase closeout, entry guards the archive, that archive cleanup has run, and that the
   change's index row says `archived`, its exits archive cleanup — guarded by the merged
   `HEAD` validated, inert paths exempt — and `review:merge` — guarded by the merged
@@ -198,14 +198,51 @@ requirements CW-m4qe (entry), CW-r2hu (graph), CW-xo82, CW-tnp6, and CW-9tzd. To
   `scripts/tests/test_change_workflow_graph.py` show each node's exits, guards, and
   entry guards; `KINDS` holds `merge`; `STEPS` gains no step; `cli.ACTIVE_ONLY` no
   longer holds `merge`; `node_of({"step": "late-merge"})` is the node.
-- [ ] 2.2 Declare the guard on archive cleanup's exit to `done` (D5, CW-5vkd): it holds
+  Done: `graph.LATE_MERGE`, `MERGE_REVIEW`, `MERGE_TRIAGE`; guards
+  `LATE_MERGE_VALIDATED` (inert exempt) and `LATE_MERGE_REVIEW_VALIDATED` (records
+  exempt), each `failed=LATE_MERGE`; the triage reuses `DOCUMENTED_FIX_VALIDATED`; the
+  entry guards `CLEANED_UP` and `ROW_ARCHIVED` read the two new `Standing` fields
+  (2.3). The review exit is labelled "a review". Unit: `test_change_workflow_graph.py`
+  (`test_the_merge_after_the_archive_runs_the_merge_step_once_cleanup_has_run`,
+  `test_the_merge_review_and_its_triage_follow_the_archive_and_return_nowhere`,
+  `test_the_merge_after_the_archive_adds_no_step`,
+  `test_the_merge_after_the_archive_is_entered_once_cleaned_up_with_its_row` ×4)
+  passes. `start merge` now takes an archived change
+  (`test_change_workflow_cli.py::test_start_takes_an_archived_change_for_the_merge_after_the_archive`;
+  the merge dropped from the archived-refusal parameters). Consequences the table
+  carries by itself: `phase_steps("closeout")` gains `merge`, `review_phase("merge")`
+  is closeout, and `next_step._STEP_PHASE["merge"]` is None, since the merge now runs
+  in two phases, so a status set back by hand is never compared with a merge line —
+  as with a review or a triage (`test_change_workflow_common.py` updated, the comment
+  in `next_step` says so). The validation node's exits to archive cleanup keep the
+  closeout triage's guard only: `_remedying` keeps the first exit per target and
+  label, as for every target several nodes exit to.
+- [x] 2.2 Declare the guard on archive cleanup's exit to `done` (D5, CW-5vkd): it holds
   for any archive cleanup run but the first in the log, for a first run whose line
   records no `landing`, and for one whose recorded containment is true; otherwise its
   remedy is `late-merge`. It reads a new `Readings` method over the run's line alone,
   which section 3 supplies. Verify: unit tests in
   `scripts/tests/test_change_workflow_graph.py`, with fake readings, show the guard met
   and unmet in each of those cases, naming `late-merge` and carrying `done`.
-- [ ] 2.3 Extend `Standing`, and `log.standing`, with whether an archive cleanup run has
+  Done: `graph.LANDING_CONTAINED` on archive cleanup's exit, its check reading
+  `Readings.landing_moved(run)`. Correction to the plan: the reading,
+  `next_step.Computation.landing_moved`, is supplied in this section, not section 3,
+  since without it every routing test whose route reaches archive cleanup's exit fails
+  at this commit. It holds the cases on the line alone: the first archive cleanup run
+  to *finish* (a stopped run, as on a failed fetch, took no exit, so the rerun that
+  finishes is the first), its line carrying `landing` and `landing_contained` false.
+  Unit: `test_change_workflow_graph.py::test_archive_cleanups_exit_to_done_waits_for_the_landing_branch`
+  (fake readings, met and unmet; the guard's remedy is `late-merge`; carrying `done` is
+  the computation's `guarded`, tested in 3.3), and
+  `test_change_next_step.py::test_the_landing_moved_only_on_the_first_cleanups_recorded_result`
+  (moved, contained, no landing, a later run; lines written by the real writer with an
+  injected checkout), `test_a_cleanup_finishing_after_a_stopped_fetch_is_the_first_to_take_its_exit`,
+  and `test_a_cleanup_line_without_its_recorded_containment_reads_as_checked` pass. The
+  guard's result names the node, `{"step": "late-merge"}`; naming the merge step for
+  it is 3.3's. Outside the plan: `_fix_validated`'s reason said the triage "records
+  another round", wrong once the guard sits on `triage:merge`'s advance too; it now
+  says the triage records a fix committed since its review read `HEAD`.
+- [x] 2.3 Extend `Standing`, and `log.standing`, with whether an archive cleanup run has
   finished and whether the change's index row says `archived`, so the log's writer
   refuses a direction the new entry guards refuse (D1, 18 F2). Verify: unit tests in
   `scripts/tests/test_change_workflow_log.py` map the delta scenarios "A merge after the
@@ -213,22 +250,64 @@ requirements CW-m4qe (entry), CW-r2hu (graph), CW-xo82, CW-tnp6, and CW-9tzd. To
   for a change whose row was pruned", "A merge review is directed for a change not
   archived", and "The owner directs implementation of an archived change"; directing
   `done` is still refused.
-- [ ] 2.4 Make the review command refuse a review of a kind whose node needs the archive
+  Done: `Standing.cleaned_up` (a finished archive cleanup line in the log) and
+  `Standing.row_archived` (`log._row_archived`, reading the index of the repository
+  holding the change's directory, the change's name from `find.change_name`), both
+  defaulting to False. Unit: `test_change_workflow_log.py`
+  (`test_the_standing_reads_cleanup_and_the_archived_row`,
+  `test_a_merge_after_the_archive_is_directed_once_cleanup_has_run`, and the four
+  scenarios by name, the last with `round` and `done`) passes. Of "The owner directs
+  implementation of an archived change" only the writer's refusal is shown here, by
+  `round`'s existing archive guard; that the merge's question then still waits on the
+  owner is the computation's, read in section 3.
+- [x] 2.4 Make the review command refuse a review of a kind whose node needs the archive
   — `closeout` and `merge` — for a change not archived, reading the entry guard from the
   table rather than naming the kinds (D2, CW-xo82). Verify: a unit test in
   `scripts/tests/test_change_workflow_review.py` shows `merge` refused for an active
   change and accepted for an archived one; the existing closeout case still passes.
-- [ ] 2.5 Draw the new nodes, exits, guards, and entry guards in
+  Done: `review.run_review` refuses a kind whose `review:<kind>` node carries
+  `graph.ARCHIVED`. Unit (the reviewer injected):
+  `test_a_merge_review_of_an_active_change_is_refused`,
+  `test_a_merge_review_of_an_archived_change_is_recorded_in_the_archive`, and the
+  closeout case pass.
+- [x] 2.5 Draw the new nodes, exits, guards, and entry guards in
   `openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio`, and export
   its `.svg` with the source embedded (CW-66kx). Verify: `scripts/change-workflow check
   graph` succeeds; `test_the_documented_diagram_draws_the_table` and
   `test_the_export_embeds_the_diagram_it_draws` pass.
-- [ ] 2.6 Verification: `pytest -q scripts/tests/test_change_workflow_graph.py
+  Done: three boxes beside the closeout column (`review_merge`, `triage_merge`,
+  `late_merge`), seven edges, `G14`–`G16` in the legend, and `G14` on archive
+  cleanup's exit to `done`. The export's visible part is hand-written SVG, as the
+  existing export is, and its embedded source carries the same edits, geometry and
+  label offsets included (the tests compare only boxes, edges, and labels; the
+  geometry was compared by reading).
+  `scripts/change-workflow check graph` is not allowed in an implementation step's
+  rules, so the comparison ran through its tests, which call the same `diagram.drift`:
+  `test_the_documented_diagram_draws_the_table`,
+  `test_the_export_embeds_the_diagram_it_draws`,
+  `test_make_change_graph_reports_that_the_diagram_draws_the_table`, and
+  `test_change_workflow_command.py::test_the_command_compares_this_checkouts_graph_diagram`
+  (which runs `scripts/change-workflow check graph` itself) pass. The visible SVG was
+  not rendered in this session; its coordinates follow the existing export's.
+- [x] 2.6 Verification: `pytest -q scripts/tests/test_change_workflow_graph.py
   scripts/tests/test_change_workflow_log.py scripts/tests/test_change_workflow_review.py
   scripts/tests/test_change_workflow_cli.py scripts/tests/test_change_workflow_convert.py`
   (unit) passes; `scripts/change-workflow check graph` succeeds; `scripts/change-workflow
   run pre-commit merge-after-archive` passes. End-to-end: none; no scenario exercises
   the workflow tooling.
+  Done: the named suites with `test_change_workflow_common.py`,
+  `test_change_workflow_command.py`, `test_change_next_step.py`, `test_find_change.py`,
+  and `test_change_workflow_cli_steps.py` (882 passed) pass; `make check-history-wording`
+  and `make check-local-imports` pass. `scripts/change-workflow run pre-commit
+  merge-after-archive` passed on the section's work (`after-functional-change`,
+  `pre-commit-functional` with `make test` and the packaging check, `pre-commit` with
+  the repository's checks); the fresh-context check's fixes after it — comments, the
+  fix guard's reason, four label offsets, two reading tests, these notes — were
+  checked again by the graph, next-step, command, and CLI suites (486 passed).
+  End-to-end: none, confirmed. Owed by validation: none.
+  Handoff: section 1's commit was made on its own, but its guarded push refused the
+  worktree holding this section's edits, so both commits are pushed together with this
+  one.
 
 ## 3. The computation routes an archived change (D1, D5)
 

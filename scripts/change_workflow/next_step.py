@@ -105,8 +105,8 @@ from .graph import (CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE, IMPLEMENTATION_REVI
                     VALIDATE, Join, Node, Standing, TargetError, entry_refusal, node_of)
 from .graph import owner as _owner
 from .index import INDEX, Row, index_rows
-from .log import (LOG, NewerFormat, branch_decisions, log_path, older, ran, read_log,
-                  refuse_newer, standing, undeclared)
+from .log import (CONTAINED, LOG, NewerFormat, branch_decisions, log_path, older, ran,
+                  read_log, refuse_newer, standing, undeclared)
 from .records import (RECORD as _RECORD_FILE, ChangedSince, changed_since, exempting, is_record,
                       latest_validation, validation_problem, validation_result)
 from .round_view import RoundError, View, open_view
@@ -122,7 +122,8 @@ _TASK = re.compile(r"^\s*- \[(?P<done>[ xX])\] "
                    r"(?P<number>(?P<section>[0-9]+[A-Za-z]?)\.[0-9]+\b)?")
 # Where a log line's step sits among the phases, for comparing with the status: the
 # earliest phase of the one node that runs it. A review or a triage runs in a node
-# of each kind, across phases, so it has no one phase and is never compared.
+# of each kind, across phases, and the merge in a node before closeout and one after
+# the archive, so each has no one phase and is never compared.
 _STEP_PHASE = {step: (runs[0].phases[0] if len(runs) == 1 else None)
                for step in STEPS
                for runs in ([d for d in graph.TABLE if d.runs == step],)}
@@ -1428,6 +1429,19 @@ class Computation:
         return any(e.get("outcome") == ORCHESTRATOR and e.get("by") == "owner"
                    and e.get("resolves") == run.get("seq")
                    and isinstance(e.get("next"), Mapping) for e in self.state.log)
+
+    def landing_moved(self, run: Mapping[str, Any]) -> bool:
+        """Whether archive cleanup's `run` is the first of its runs to finish, and its
+        line records a landing commit the log's writer found its commit does not
+        contain. Only the line is read, never a ref: a later run's exit, a line with
+        no landing, and one written before the writer recorded containment all read
+        as checked. A run that stopped, as on a failed fetch, took no exit, so the
+        rerun that finishes is still the first."""
+        first = next((entry for entry in self.state.log
+                      if entry.get("step") == graph.ARCHIVE_CLEANUP.step
+                      and entry.get("outcome") == "finished"), None)
+        return (first is not None and first.get("seq") == run.get("seq")
+                and isinstance(run.get("landing"), Mapping) and run.get(CONTAINED) is False)
 
     def validated(self, why: str, exempt: str = graph.RECORDS,
                   failed: Node | None = None) -> Result | None:

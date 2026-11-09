@@ -19,7 +19,8 @@ from change_workflow.log import (Checkout, LogError, NewerFormat, append_entry,
                                  branch_decisions, git_checkout, landing_source, last_entries,
                                  newer, note_orchestrator, note_round, numbered, older,
                                  open_log, read_log, record_interactive, record_outcome,
-                                 replace_log, revisit_direction, undeclared, unused_direction)
+                                 replace_log, revisit_direction, standing, undeclared,
+                                 unused_direction)
 from change_workflow.outcome import triaged_problems
 from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, clock, descriptors_of,
                                       log_file)
@@ -351,6 +352,92 @@ def test_a_change_not_archived_is_directed_to_an_earlier_phase(
     log = log_file(tmp_path)
 
     assert note_orchestrator(log, "d", "r", by="owner", **fields)["next"] == target
+
+
+# After the archive: the merge after it, its review, and the boundary no direction
+# crosses.
+
+def _archived_change(tmp_path: Path, row: str | None = "archived") -> Path:
+    """An archived change's log, with the change index listing it with `row` as its
+    status, or not at all."""
+    directory = tmp_path / "openspec/changes/archive" / f"2026-10-20-{CHANGE}"
+    directory.mkdir(parents=True)
+    rows = (f"| [`{CHANGE}`](archive/2026-10-20-{CHANGE}/) | {row} | — | n | x |\n"
+            if row else "")
+    (tmp_path / "openspec/changes/README.md").write_text(
+        "| Change | Status | Depends on | Notes | Acceptance boundary |\n"
+        "|---|---|---|---|---|\n" + rows, "utf-8")
+    return directory / "reviews" / "workflow.jsonl"
+
+
+def _cleaned(log: Path) -> None:
+    record_outcome(log, "archive-cleanup", {"outcome": "finished", "message": "Cleaned up.",
+                                            "next": {"step": "done"}},
+                   session="s", commit=COMMIT, checkout=_checkout())
+
+
+def test_the_standing_reads_cleanup_and_the_archived_row(tmp_path: Path) -> None:
+    log = _archived_change(tmp_path)
+
+    assert (standing(log).cleaned_up, standing(log).row_archived) == (False, True)
+    _cleaned(log)
+    assert standing(log).cleaned_up
+    assert not standing(_archived_change(tmp_path / "pruned", row=None)).row_archived
+    assert not standing(_archived_change(tmp_path / "closing", row="in closeout")).row_archived
+
+
+def test_a_merge_after_the_archive_is_directed_once_cleanup_has_run(tmp_path: Path) -> None:
+    log = _archived_change(tmp_path)
+    _cleaned(log)
+
+    line = note_orchestrator(log, "merge again", "the pull request conflicts", by="owner",
+                             next_step="late-merge")
+
+    assert line["next"] == {"step": "late-merge"}
+
+
+def test_a_merge_after_the_archive_is_directed_before_archive_cleanup(tmp_path: Path) -> None:
+    """CW-m4qe, "A merge after the archive is directed before archive cleanup"."""
+    log = _archived_change(tmp_path, row="in closeout")
+    (log.parent).mkdir(parents=True)
+    (log.parent / "05-closeout.md").write_text("A review.\n", "utf-8")
+
+    with pytest.raises(StepError, match=r"entry guard \(archive cleanup has run\)"):
+        note_orchestrator(log, "merge again", "r", by="owner", next_step="late-merge")
+
+
+def test_a_merge_after_the_archive_is_directed_for_a_change_whose_row_was_pruned(
+        tmp_path: Path) -> None:
+    """CW-m4qe, "A merge after the archive is directed for a change whose row was
+    pruned"."""
+    log = _archived_change(tmp_path, row=None)
+    _cleaned(log)
+
+    with pytest.raises(StepError, match=r"entry guard \(the change's index row says "
+                                        r"archived\)"):
+        note_orchestrator(log, "merge again", "r", by="owner", next_step="late-merge")
+
+
+def test_a_merge_review_is_directed_for_a_change_not_archived(tmp_path: Path) -> None:
+    """CW-r2hu, "A merge review is directed for a change not archived"."""
+    with pytest.raises(StepError, match=r"review:merge's entry guard \(the change is "
+                                        r"archived\)"):
+        note_orchestrator(log_file(tmp_path), "review it", "r", by="owner",
+                          next_step="review", kind="merge")
+
+
+@pytest.mark.parametrize("fields", [{"next_step": "round"}, {"next_step": "done"}],
+                         ids=["round", "done"])
+def test_the_owner_directs_implementation_of_an_archived_change(tmp_path: Path,
+                                                               fields: dict) -> None:
+    """CW-xo82, "The owner directs implementation of an archived change": refused,
+    naming the entry guard, as directing done is."""
+    log = _archived_change(tmp_path)
+    _cleaned(log)
+    record_outcome(log, "merge", VALID["question"], session="s", commit=COMMIT)
+
+    with pytest.raises(StepError, match="entry guard"):
+        note_orchestrator(log, "implement it", "r", by="owner", **fields)
 
 
 @pytest.mark.parametrize("fields", [

@@ -44,7 +44,7 @@ from . import config
 from .common import Clock, Entry, StepError, repository_root, utc_now
 from .cost import review_cost
 from .find import ChangeNotFound, change_directory, is_archived, landing_branch
-from .graph import KINDS
+from .graph import ARCHIVED, KINDS, NODES, Node
 from .harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner, claude_command,
                       codex_command, missing_program, resume_command, run_claude, run_codex,
                       unreachable)
@@ -373,10 +373,11 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
         directory = change_directory(root, change)
     except ChangeNotFound as exc:
         raise ReviewError(str(exc)) from exc
-    # The closeout review reads the specifications as the archive merged them;
-    # before the archive there is only the delta to read.
-    if kind == "closeout" and not is_archived(root, directory):
-        raise ReviewError(f"{change} is not archived; a closeout review reads the archived "
+    # A review whose node needs the archive — the closeout review, which reads the
+    # specifications as the archive merged them, and the review of a merge after the
+    # archive — is refused before it; the table's entry guard says which.
+    if ARCHIVED in NODES[Node("review", kind)].entry and not is_archived(root, directory):
+        raise ReviewError(f"{change} is not archived; a {kind} review reads the archived "
                           "change, so finish closeout, which archives it, first")
     reviews = directory / "reviews"
     try:

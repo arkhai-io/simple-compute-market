@@ -16,8 +16,8 @@ from change_workflow import next_step as nxt
 from change_workflow import round_view as rounds
 from change_workflow.common import FORMAT, StepError
 from change_workflow.find import change_directory
-from change_workflow.log import (append_entry, log_path, note_orchestrator, note_round,
-                                 read_log, record_outcome, unused_direction)
+from change_workflow.log import (Checkout, append_entry, log_path, note_orchestrator,
+                                 note_round, read_log, record_outcome, unused_direction)
 from change_workflow_fixtures import ACCEPTING, LANDED, configured
 
 CHANGE = "shape-bounds"
@@ -1079,6 +1079,60 @@ def test_archive_cleanup_that_names_done_finishes_the_change(tmp_path: Path) -> 
     _log(root, "archive-cleanup", _done(_to("done")))
 
     assert _next(root) == {"step": "done", "reason": "archived"}
+
+
+def _cleaned_up(root: Path, *, contained: bool, landing: bool = True) -> dict:
+    """An archive cleanup run naming done, its line recording a landing the log's
+    writer found its commit does, or does not, contain; or no landing."""
+    checkout = Checkout(remotes=lambda: {"origin"}, contains=lambda *_: contained,
+                        base=lambda: None)
+    outcome = _done(_to("done"), **({"landing": LANDED} if landing else {}))
+    return record_outcome(log_path(root, CHANGE), "archive-cleanup", outcome, session="s",
+                          commit=HEAD, checkout=checkout)
+
+
+@pytest.mark.parametrize("first,later,moved", [
+    ({"contained": False}, None, True),
+    ({"contained": True}, None, False),
+    ({"contained": False, "landing": False}, None, False),
+    ({"contained": True}, {"contained": False}, False),
+], ids=["moved", "contained", "no landing", "a later run"])
+def test_the_landing_moved_only_on_the_first_cleanups_recorded_result(
+        tmp_path: Path, first: dict, later: dict | None, moved: bool) -> None:
+    """The reading archive cleanup's first exit is guarded by: only the first finished
+    run's line, and only its recorded containment."""
+    root = _repository(tmp_path, "in closeout", archived=True)
+    run = _cleaned_up(root, **first)
+    if later is not None:
+        run = _cleaned_up(root, **later)
+    computation = nxt.Computation(root, CHANGE, head=lambda _: HEAD, **HERE)
+    computation.read()
+
+    assert computation.landing_moved(run) is moved
+
+
+def test_a_cleanup_finishing_after_a_stopped_fetch_is_the_first_to_take_its_exit(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    _log(root, "archive-cleanup", {"outcome": "stopped", "message": "The fetch failed.",
+                                   "reason": "git fetch origin main failed", "denials": []})
+    run = _cleaned_up(root, contained=False)
+    computation = nxt.Computation(root, CHANGE, head=lambda _: HEAD, **HERE)
+    computation.read()
+
+    assert computation.landing_moved(run)
+
+
+def test_a_cleanup_line_without_its_recorded_containment_reads_as_checked(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    run = append_entry(log_path(root, CHANGE), {
+        "step": "archive-cleanup", "session": "s", "commit": HEAD,
+        **_done(_to("done"), landing=LANDED)})
+    computation = nxt.Computation(root, CHANGE, head=lambda _: HEAD, **HERE)
+    computation.read()
+
+    assert not computation.landing_moved(run)
 
 
 def test_a_steps_exit_whose_target_cannot_be_entered_goes_to_the_owner(
