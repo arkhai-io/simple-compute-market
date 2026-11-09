@@ -58,6 +58,9 @@ services:
   # quota ledger. Admin-gated (X-Admin-Key); no chain dependency.
   credits-service:
     image: arkhai:apicredits-service
+    # The migration command runs before the application, which refuses a
+    # database it has not migrated.
+    command: ["sh", "-c", "apicredits-service-migrate && exec uvicorn apicredits_service.main:app --host 0.0.0.0 --port 8082"]
     ports:
       - "8092:8082"
     environment:

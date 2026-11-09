@@ -172,12 +172,13 @@ signed = [
 
 [[package]]
 name = "arkhai-apicredits-service"
-version = "0.7.0"
+version = "0.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-resource-pools-contracts" },
+    { name = "arkhai-kit-schema-migrations", extra = ["sqlalchemy"] },
     { name = "arkhai-kit-site" },
     { name = "dynaconf" },
     { name = "fastapi" },
@@ -199,9 +200,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
-    { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.10.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },
-    { name = "arkhai-kit-site", specifier = ">=0.12.0" },
+    { name = "arkhai-kit-schema-migrations", extras = ["sqlalchemy"], specifier = ">=0.1.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.14.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "pydantic", specifier = ">=2.7" },
@@ -389,6 +391,11 @@ version = "0.1.0"
 source = { registry = "../../../.dist" }
 wheels = [
     { path = "arkhai_kit_schema_migrations-0.1.0-py3-none-any.whl" },
+]
+
+[package.optional-dependencies]
+sqlalchemy = [
+    { name = "sqlalchemy" },
 ]
 
 [[package]]

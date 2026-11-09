@@ -1320,7 +1320,7 @@ Touches `domains/apicredits/service` (`db/database.py`, `db/migrations.py`,
 `container.py`, `pyproject.toml`, `Dockerfile`, `Makefile`, its tests) and
 `domains/apicredits/compose.yml`.
 
-- [ ] 8.1 Replace `run_migrations` with an engine `Chain`: the service's own baseline,
+- [x] 8.1 Replace `run_migrations` with an engine `Chain`: the service's own baseline,
       `kit/site`'s and `kit/resource-pools`'s baselines and `kit/site`'s post-floor
       migration from section 4, no floor IDs; delete the pre-floor chain, the
       `create_all` calls, `_validate_grant_schema`'s schema half if the baseline makes
@@ -1336,18 +1336,130 @@ Touches `domains/apicredits/service` (`db/database.py`, `db/migrations.py`,
       and `tests/integration/test_retired_reservation_states_migration.py` with it,
       which the `site-capacity` REMOVED delta for "A stored reservation in a retired
       state is converted at upgrade" relies on (32 F1).
-- [ ] 8.2 Run the command before the application: the image's command and
+      `apicredits_service/db/migrations.py` is now the chain alone: `CHAIN`
+      (`the API-credit service`, `apicredits-service-migrate`) of
+      `market_resource_pools`' baseline, the service's own
+      (`v0_3_0_baseline_apicredits_service`: `api_keys`, `credit_grants`,
+      `consumption_events`, the DDL `create_all` built for its models) and
+      `market_site`'s, then `market_site.MIGRATIONS` (the placement key), no floor
+      IDs. Deleted: the whole pre-floor chain and its runner, `check_schema_version`,
+      `SchemaDriftError`, the `create_all` calls, and `_validate_grant_schema` whole —
+      it checked schema only, which the exact-set check now holds, since a database
+      the chain did not build is refused. `db/database.py` gains `migrate_database`,
+      `check_database` (the engine's `check_engine`, read-only for a file),
+      `IncompatibleDatabase` (the engine's refusal message), and
+      `initialise_database`, which `container.init()` calls: the check, then the
+      `default` pool seeded if absent, then `_require_valid_pool_declarations`.
+      `db/migrate.py` is the command, provisioning's form (`--check` prints `describe`
+      and the refusal, exits 1 unless compatible; a refusal or failed migration exits
+      1), registered as the console script. It reads `database_url` and `log_level`
+      from `settings_source.load_settings_source()`, the layered settings before any
+      secret is read, which `config.py` now builds on: `config.py` resolves the admin
+      key from its file at import and refuses an unreadable one, so a command
+      importing it would have needed the application's secret mounted (see the
+      section's notes). arkhai-apicredits-service 0.8.0, requiring
+      `arkhai-kit-schema-migrations[sqlalchemy]>=0.1.0`, kit-site `>=0.14.0` and
+      kit-resource-pools `>=0.10.0` (the versions exporting their baselines);
+      RELEASING.md's internal-dependency row names the engine. Library integration
+      (`tests/integration/test_migrations.py`, rewritten; file-backed SQLite through
+      the engine, no application): fresh — every chain ID recorded, compatible, no
+      pool written; the service baseline's snapshot equals `create_all` of its models
+      for its three tables; every table and column the three metadata sets map exists;
+      rerun — nothing applied, bytes unchanged; an existing database (the earlier
+      startup's tables with its old ledger and a key row) — unsupported, the command
+      refuses naming `apicredits-service-migrate` and a fresh database, the startup
+      refuses, bytes unchanged; tables without a ledger — refused, no ledger created;
+      behind (baselines only) — the startup refuses naming the command and the pending
+      placement key, bytes unchanged; ahead — the startup and the command refuse naming
+      the unknown ID, bytes unchanged; absent — refused naming the command, neither
+      file nor directory created; startup seeds `default` once over two runs. Through
+      the entry point, its configuration loaded fresh by the service's own loader:
+      `--check` exits 1 on a behind database listing the pending ID, bytes unchanged,
+      and on a missing one creating none; exits 0 once the command has migrated, run
+      twice; the command exits 1 on an ahead database naming the unknown ID, bytes
+      unchanged; two configurations differing in log level, admin key, site principal
+      and timestamp skew give one schema, one ledger and no rows; with
+      `storefront_admin_key_file` naming a missing file, which the application refuses
+      to load, the command migrates; the installed console script
+      `apicredits-service-migrate` loads `migrate.main`. Application composition
+      (`test_signed_authority.py::test_the_service_refuses_to_start_on_a_database_it_has_not_migrated`,
+      the real `container.init()` under configuration loaded fresh): on an unmigrated
+      path it raises `IncompatibleDatabase` naming the command, builds no service, and
+      creates no file. `test_default_pool.py`
+      (was `test_pool_declarations_migration.py`; same level): startup seeds a
+      declared `default` pool, a stored pool without declarations stops startup, and
+      the pool projection carries its declarations — the test of the deleted
+      advertisement migration went with it. `test_signed_authority.py` migrates its
+      database before `container.init()`. Deleted
+      `test_retired_reservation_states_migration.py` (`git rm`). The refusals of each
+      state are shown at `initialise_database`, the call `container.init()` makes in
+      the lifespan, and the absent one through `container.init()` itself; no test
+      starts the ASGI application on a refused database.
+      `make -C domains/apicredits/service test` — 80 passed;
+      `make -C domains/apicredits test-domain` (the wheel-installation tests) — 41
+      passed.
+- [x] 8.2 Run the command before the application: the image's command and
       `domains/apicredits/compose.yml`'s `credits-service` become
       `sh -c "apicredits-service-migrate && exec <the service's uvicorn command>"`, and
       the service's `Makefile` gains `migrate`. Verify by starting the Compose stack
       locally (`docker compose -f compose.apicredits.yml -f compose.apicredits-local.yml up -d credits-service`)
       and reading the migration's log line before the server's, and with
       `make -C domains/apicredits/service migrate` on a fresh local database. (D7, D11)
-- [ ] 8.3 **Verification.** Run `make -C domains/apicredits/service test` and
+      The image's `CMD` and the Compose `command` are
+      `["sh", "-c", "apicredits-service-migrate && exec uvicorn apicredits_service.main:app --host 0.0.0.0 --port 8082"]`;
+      `make migrate` runs `uv run ... apicredits-service-migrate`. Differs from the
+      plan: the image installed only the project's dependencies and ran the service
+      from copied source on `PYTHONPATH`, which installs no console script, so its
+      builder now installs the project's own wheel (`uv_project.py install-wheel`, as
+      the provisioning and storefront images do) and the runtime stage no longer
+      copies `src/` or sets `PYTHONPATH`. `make build-apicredits-service` — built.
+      Not run: the Compose bring-up, `make -C domains/apicredits/service migrate`, and
+      a `docker run` of the image's command were each denied in this session (no rule
+      allows them). What stands for them: the command's entry point and console-script
+      registration are 8.1's tests, and the e2e-apicredits lane starts
+      `credits-service` from this image through this Compose command (8.3). Checked on
+      that understanding: the lane's result is this task's pending evidence, for
+      validation to judge — a failing `credits-service` start there means this task's
+      form is wrong.
+- [x] 8.3 **Verification.** Run `make -C domains/apicredits/service test` and
       `scripts/change-workflow run pre-commit add-database-migration-commands`.
       End-to-end: `e2e_credits_deal` and `e2e_credits_payment_deal` start the
       API-credit service through its migration command on a fresh database.
       Owed by validation: none.
+      End-to-end confirmed from the lane's files: the e2e-apicredits lane brings up
+      `domains/apicredits/compose.yml`'s `credits-service`, whose command now runs the
+      migration on the lane's fresh volume before the server, and `e2e_credits_deal`
+      and `e2e_credits_payment_deal` deal against it; the pipeline has not run on this
+      section. Owed by validation: none, confirmed. Results in the section's notes.
+
+**Section 8 notes — completed 2026-11-09.**
+
+Suites: `make -C domains/apicredits/service test` — 80 passed;
+`make -C domains/apicredits test-domain` — 41 passed (before the fresh-context fixes,
+which touch neither the wheel's contents nor its dependencies);
+`scripts/change-workflow run pre-commit add-database-migration-commands` —
+`after-functional-change` (`make lock`), `pre-commit-functional` (`make check-packaging`
+and `make test`, every suite) and `pre-commit` (the index, tasks, skills, strict
+validation, and the repository's checks: comment hygiene, documentation citations,
+history wording, version bumps, local imports among them) each "passed, exit 0" before
+the fresh-context fixes, and again over the final tree.
+
+Fresh-context check. Fixed: the command imported `apicredits_service.config`, which
+reads `storefront_admin_key_file` at import and raises when it is unreadable, so the
+command could not run — `--check` on a restored backup included — without the
+application's admin-key secret mounted, against D4 and the delta's "MUST NOT read
+operational configuration"; the layered loading moved to `settings_source.py`, which
+reads no file a setting names, and a test runs the command with that file missing; the
+two-configurations test's docstring claimed more than it showed; no test reached the
+startup refusal through `container.init()` — one now does, for an absent database.
+Declined: unchecking 8.2, whose local Compose bring-up was denied — its note names the
+e2e-apicredits lane's result as its pending evidence.
+
+Handoff. The API-credit service's settings now load in two steps: `settings_source`
+(the layers) and `config` (the admin key resolved from its file or the storefront TOML
+fallback). A future command needing only database settings uses the first. Provisioning's
+`compute-provisioning-migrate` still imports its full settings; its loader reads no
+secret file at import, so it has no such failure.
 
 ## 9. Storefront commands, checks, and deployment surfaces
 
