@@ -45,9 +45,10 @@ archived deltas are already merged into `openspec/specs`.
   row, cleans up what validation left, commits what that wrote, pushes, copies the
   history, and exits to `done`. The owner directs another merge after the archive
   when the landing branch moves again (D4).
-- Each merge, and archive cleanup, records in its outcome the landing branch and commit
-  it fetched, which the engine checks (D10). Archive cleanup fetches the branch the
-  last merge recorded, and its first exit to `done`, before the pull request opens, is
+- Each finished merge, and archive cleanup, records in its outcome the remote, landing
+  branch, and commit it fetched, which the engine checks (D10). A merge started without
+  a branch brings in the one the last merge recorded. Archive cleanup fetches the
+  source the last finished merge recorded, and its first exit to `done`, before the pull request opens, is
   guarded in the engine by whether the run's commit contains the fetched commit, as
   the log's writer recorded it, its remedy the merge after the archive (D5).
 - The next-step computation reads the route for an archived change, answering `done`
@@ -83,16 +84,22 @@ None.
   done, counted minor while the major version is 0 (CW-c2tw). The orchestrating session
   is the caller, and changes with it.
 - `start merge`, and so `make merge`, accepts an archived change: compatible, a
-  refusal lifted.
+  refusal lifted. Given no `FROM`, it brings in the branch the last finished merge
+  recorded before the one the change's clone recorded, and refuses only with neither:
+  compatible for a change with no recorded merge, and a changed default for a merge
+  repeated after one given another branch (D10).
 - Archive cleanup's exit to `done` gains a guard on its first run: a behaviour of the
   graph's table, reading only the log line, so a line written before this engine reads
   as checked.
 - The step outcome (`.agents/change-outcome.schema.json`) gains an optional `landing`
-  object, `{"branch", "commit"}`, required by the outcome check on a merge's outcome
-  and checked by the log's writer against `HEAD`; archive cleanup's log line gains the
-  writer's record of the containment: compatible for every existing line, which keeps
-  its meaning without the field; a merge recorded without it is refused from this
-  engine on (D10).
+  object, `{"remote", "branch", "commit"}`, required by the outcome check on a merge's
+  `finished` outcome and checked by the log's writer against the checkout's remotes and
+  `HEAD`; archive cleanup's log line gains the writer's record of the containment
+  (D10). Reading it is compatible: every existing line keeps its meaning without the
+  field. Writing it is incompatible, counted minor while the major version is 0
+  (CW-c2tw): a merge skill that does not record `landing` can no longer record a
+  finished merge, and an engine that predates the field refuses an outcome carrying
+  it. In this repository the schema, the skills, and the engine change in one commit.
 - Every existing outcome and log line keeps its meaning.
 
 ## Non-Goals
@@ -114,7 +121,8 @@ None.
   change, the order of locating), `scripts/change_workflow/review.py` (the merge kind's
   archive check), `.agents/change-outcome.schema.json`,
   `scripts/change_workflow/outcome.py` and `log.py` (the `landing` record, its check,
-  and the containment recorded on cleanup's line), and their tests.
+  and the containment recorded on cleanup's line), `scripts/change_workflow/cli.py`
+  (`start merge`'s branch), and their tests.
 - `.agents/skills/change-merge`, `change-review`, `change-triage`,
   `change-archive-cleanup`, and `change-orchestrate`.
 - The `change-workflow` specification, its `index.md`, `README.md`, and graph
@@ -159,6 +167,6 @@ None.
   archive is the boundary no direction crosses").
 - D10 — the merges and archive cleanup record the landing branch they fetched:
   `spec.md` (CW-5vkd) and `index.md`, `README.md` (the outcome and the log), and
-  `docs/agents/change-workflow.md` (the merge's outcome).
+  `docs/agents/change-workflow.md` (the merge's outcome and `make merge`'s branch).
 - D9: no permanent destination — the implementation cadence is this change's
   history.
