@@ -95,6 +95,15 @@ give it a startup probe, so that a slow start is not judged by its liveness prob
 
 ## ADDED Requirements
 
+### Requirement: Identity cutover is coordinated and fails closed
+
+Versioned buyer run logs MUST have an explicit migration path. Authorities MUST reject old schema, old signature versions, drift, ambiguous principals, or partially migrated state; production cutover MUST quiesce authenticated mutations until all required authorities and clients report the new identity capability.
+
+#### Scenario: One authority remains on the old signature contract
+
+- **WHEN** deployment readiness detects a registry, storefront, service peer that lacks the pinned identity version
+- **THEN** the affected workflow remains unavailable rather than downgrading or submitting a legacy proof
+
 ### Requirement: One migration mechanism serves every stateful service
 
 Every stateful service MUST expose a packaged migration command named for its service command with a `-migrate` suffix, such as `market-storefront-migrate`, that applies its chain, and a `--check` mode that reports the startup check's result and the pending or unknown migration IDs, changes nothing, and exits successfully only for a compatible database. A deployment MUST run the command before the application: a chart as an init container from the application's image with the application's configuration and data volume, and Compose as the command followed by the application in one container. The in-house services MUST apply their chains through one shared migration engine; the registry MUST keep Alembic behind the same command, check result, and refusal message.
@@ -177,3 +186,9 @@ A concrete storefront composition MUST declare its chain from the shared core st
 **Reason**: Its only input is a storefront database from before the marketplace v0.3.0 release, which the migration baseline refuses as unsupported; the `migrate-storefront-domains` command that implemented it is removed.
 
 **Migration**: An operator holding such a database starts the storefront from a fresh database.
+
+### Requirement: Identity migrations are coordinated and fail closed
+
+**Reason**: Its rule that each owning service migrates its identity-bearing rows through its own chain, and its only other scenario, "Migration encounters conflicting owners", govern the conversion of address-only rows to canonical principals, which is part of every service's v0.3.0 floor: each database a migration command adopts has already run it, and every service refuses an older database as unsupported, so the conversions are deleted with the pre-floor chains. Its remaining text is kept unchanged as "Identity cutover is coordinated and fails closed", with its signature-contract scenario, since a MODIFIED requirement cannot drop a scenario.
+
+**Migration**: An operator holding a database from before the marketplace v0.3.0 release starts that service from a fresh database; the cutover's rule is unchanged under the new requirement's name.

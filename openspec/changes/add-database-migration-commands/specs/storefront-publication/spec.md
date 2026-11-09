@@ -45,3 +45,11 @@ Every publication pass MUST list, at each configured registry it can reach, the 
 
 - **WHEN** the storefront holds a listing open while its site's projection is unavailable, and a registry holds that listing open
 - **THEN** the sweep leaves it open at that registry
+
+## REMOVED Requirements
+
+### Requirement: Storefront identity state migrates atomically
+
+**Reason**: The conversion it governs, of address-only identity rows to canonical principals, is part of every storefront's v0.3.0 floor: each database a storefront's migration command adopts has already run it, and the command refuses any older database as unsupported, so the conversion is deleted with core storefront's pre-floor chain.
+
+**Migration**: An operator holding a storefront database from before the marketplace v0.3.0 release starts the storefront from a fresh database.

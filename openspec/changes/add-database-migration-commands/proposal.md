@@ -21,8 +21,9 @@ None.
 
 ### Modified Capabilities
 
-- `deployment-state`: every stateful service migrates through its packaged command before startup, checks the exact set of its chain without DDL, begins its chain at the v0.3.0 baseline, records each migration atomically, and changes no schema outside its chain; a chart's only init container is the service's own migration; the legacy storefront domain migration is removed.
-- `storefront-publication`: a storefront retires registry listings it does not hold open.
+- `deployment-state`: every stateful service migrates through its packaged command before startup, checks the exact set of its chain without DDL, begins its chain at the v0.3.0 baseline, records each migration atomically, and changes no schema outside its chain; a chart's only init container is the service's own migration; the legacy storefront domain migration is removed; "Identity migrations are coordinated and fail closed" is restated as "Identity cutover is coordinated and fails closed", without its rule that each service migrates address-only identity rows, a conversion part of the v0.3.0 floor.
+- `storefront-publication`: a storefront retires registry listings it does not hold open; the requirement for the storefront identity conversion, part of the v0.3.0 floor, is removed.
+- `negotiation-protocol`: the requirement for the negotiation identity conversion, part of the storefronts' v0.3.0 floor, is removed, and its recovery rule is kept as "Negotiation recovery is deterministic".
 - `physical-provisioning`: hosts' stored `ssh` version-1 connections are rewritten to version 2 by migration, and a connection submission must state its version; the requirements for the host-identity and active-fulfillment migrations, part of the v0.3.0 floor, are removed.
 - `fulfillment`: the requirement for the legacy-lease cutover, part of the v0.3.0 floor, is removed, and the kit's dependency boundary admits the migration kit.
 - `registry-discovery`: the requirement for the legacy publisher-identity migration, part of the registry's v0.3.0 floor, is removed, and "Stable publisher-chosen listing identity" no longer requires that migration to preserve identifiers.

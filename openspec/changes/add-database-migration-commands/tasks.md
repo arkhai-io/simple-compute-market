@@ -1306,6 +1306,19 @@ Left for review and closeout, outside this section's plan (as section 4's were):
   tests; 11.9's "Migration Tests" section is the natural place to replace them.
 - The triage should place each, most likely as deltas and as 11.9 and 11.10 amendments.
 
+Placed by the pre-closeout triage (56 F1): `specs/storefront-publication/spec.md` REMOVES
+"Storefront identity state migrates atomically"; `specs/negotiation-protocol/spec.md`
+(new) REMOVES "Negotiation identity migration and recovery are deterministic" and ADDS
+its recovery rule as "Negotiation recovery is deterministic"; `specs/deployment-state/spec.md`
+REMOVES "Identity migrations are coordinated and fail closed" and ADDS it as "Identity
+cutover is coordinated and fails closed", without the rule that each service migrates
+identity rows or its conflicting-owners scenario (a MODIFIED block cannot drop a
+scenario, as `site-capacity`'s restatement found); `proposal.md`
+lists `negotiation-protocol`, D12 names all three, and 11.9 assigns the Evidence lines,
+`storefront-publication/architecture.md`'s conversion paragraph, and the TESTING.md
+passages above. `add-persistent-buyer-profiles` MODIFIES the removed `deployment-state`
+requirement; 11.10 reconciles the two by which archives first.
+
 Declined from the fresh-context check: moving the VM storefront's other unit modules
 that open a real database (e.g. `test_publications.py`, `test_negotiation_thread.py`,
 `test_settlement_composition.py`) to `integration/` — TESTING.md's move-when-touched
@@ -2214,13 +2227,39 @@ Per `openspec/README.md#plan-closeout-requirements`.
         migration" is removed. The requirements are this change's `registry-discovery`
         delta: "Publisher identity migration preserves ownership" REMOVED and "Stable
         publisher-chosen listing identity" MODIFIED.
+      - The storefront specifications whose pre-floor identity conversion section 7
+        deleted (56 F1): the "Evidence" lists, which the archive does not write —
+        `storefront-publication/spec.md`'s canonical-principals line drops
+        `core/storefront/tests/unit/test_identity_migrations.py`, its "Transactional
+        storefront principal migration" line is removed, and its multi-domain listing
+        bindings line cites `core/storefront/tests/integration/test_domain_bindings.py`
+        for `test_domain_binding_migrations.py`; `negotiation-protocol/spec.md`'s
+        "Transactional principal migration and fail-closed recovery ownership" line
+        becomes recovery ownership alone, citing
+        `core/buyer/tests/unit/test_identity_recovery.py`; `deployment-state/spec.md`'s
+        line citing `domains/vms/storefront/tests/unit/test_domain_migration.py` is
+        removed with its REMOVED requirement; `settlement-servicing/spec.md`'s citation
+        drops `sqlite_migrations`. `openspec/specs/storefront-publication/architecture.md`'s
+        paragraph on the one-transaction identity conversion is removed.
+        `docs/development/TESTING.md`'s VM storefront bullet loses "transactional legacy
+        migration" and the paragraph after the list its sentence on migration tests
+        comparing source bytes; "Marketplace Identity Verification"'s migration bullet
+        keeps explicit buyer run-log migration and startup/readiness rejection of drift
+        or mixed signature versions, without populated legacy service state. The
+        requirements are this change's deltas: `storefront-publication`'s "Storefront
+        identity state migrates atomically" REMOVED; `negotiation-protocol`'s
+        "Negotiation identity migration and recovery are deterministic" REMOVED and
+        "Negotiation recovery is deterministic" ADDED; `deployment-state`'s "Identity
+        migrations are coordinated and fail closed" REMOVED and "Identity cutover is
+        coordinated and fails closed" ADDED.
       - The vocabulary sweep (D16): every permanent document's use of *role* for a
         service becomes *service*; a requirement whose name or text changes is carried
         as a delta in this change's `specs/` before 11.10, and
         `openspec/specs/README.md` is updated where a capability's description uses the
         word.
       - The `deployment-state`, `storefront-publication`, `physical-provisioning`,
-        `fulfillment`, `site-capacity`, and `registry-discovery` `spec.md` files are
+        `fulfillment`, `site-capacity`, `registry-discovery`, and
+        `negotiation-protocol` `spec.md` files are
         written by the archive in 11.11; the record names them. None of these
         capabilities has an `index.md`.
 - [ ] 11.10 **Documentation citations.** Run
@@ -2229,7 +2268,15 @@ Per `openspec/README.md#plan-closeout-requirements`.
       Before archiving, check whether `multi-domain-storefront-composition` has archived:
       if it has, extend this change's REMOVED delta to its "Storefront domain-binding
       migration is transactional and explicit"; if not, record in its row that its delta
-      must drop that requirement.
+      must drop that requirement. Likewise check whether `add-persistent-buyer-profiles`
+      has archived, since its delta MODIFIES `deployment-state`'s "Identity migrations
+      are coordinated and fail closed", which this change removes and restates (56 F1):
+      if it has, this change's "Identity cutover is coordinated and fails closed"
+      carries its archived text without the rule that each service migrates its
+      identity-bearing rows and without "Migration encounters conflicting owners",
+      keeping its buyer profile store migration and buyer scenarios; if not, record in
+      its row that its delta must modify "Identity cutover is coordinated and fails
+      closed" instead, without that rule or that scenario.
 - [ ] 11.11 **Archival.** Last, once every other part is checked:
       `scripts/change-workflow openspec archive add-database-migration-commands -y`
       merges the deltas into `openspec/specs/` and moves the change under
