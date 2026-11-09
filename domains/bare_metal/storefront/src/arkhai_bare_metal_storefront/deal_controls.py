@@ -167,7 +167,9 @@ def settlement_admin_routes(
         lifecycle = await runtime.db.load_bare_metal_fulfillment_lifecycle(
             negotiation_id=negotiation_id
         )
-        previous_state = str((lifecycle or {}).get("state") or "")
+        previously_available = lifecycle is not None and await runtime.lifecycle.delivery_available(
+            negotiation_id
+        )
         if lifecycle is not None and lifecycle.get("fulfillment_id"):
             # The site's convergence can advance while servicing is held; a
             # cached dispatch state cannot establish whether delivery is ready.
@@ -192,7 +194,14 @@ def settlement_admin_routes(
                     else {"error": exc.error, "reason": exc.detail},
                 ) from exc
         state = str((lifecycle or {}).get("state") or "")
-        if state in _READY_STATES:
+        if await runtime.lifecycle.ended_before_delivery(negotiation_id):
+            # A deal ended before it was delivered, a settlement placement
+            # that found no capacity among them, has no fulfillment state to
+            # reach; its end is the settlement's outcome.
+            return {"status": "ended", "fulfillment_state": state}
+        # Physical readiness does not establish activation, billing start or
+        # disclosure authorization; those must be durably available too.
+        if state in _READY_STATES and await runtime.lifecycle.delivery_available(negotiation_id):
             # Delivery removes the reason servicing deferred an adopted
             # obligation. Only a mechanism the settlement runtime services
             # adopts one, and its evidence's source names it; an Arkhai
@@ -201,7 +210,7 @@ def settlement_admin_routes(
                 "obligation_ref"
             )
             if (
-                previous_state not in _READY_STATES
+                not previously_available
                 and obligation_ref
                 and runtime.settlement_worker is not None
             ):
@@ -210,11 +219,6 @@ def settlement_admin_routes(
             return {"status": "ready", "fulfillment_state": state}
         if state in _FAILED_STATES:
             return {"status": "failed", "fulfillment_state": state}
-        if await runtime.lifecycle.ended_before_delivery(negotiation_id):
-            # A deal ended before it was delivered, a settlement placement
-            # that found no capacity among them, has no fulfillment state to
-            # reach; its end is the settlement's outcome.
-            return {"status": "ended", "fulfillment_state": state}
         # Before a fulfillment decides, the settlement record's own status is
         # the report: accepted, verified and refund statuses keep the wait
         # polling, and failed evidence ends it, as a settlement never to be

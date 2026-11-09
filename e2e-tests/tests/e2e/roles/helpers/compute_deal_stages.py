@@ -1485,6 +1485,10 @@ class Stage09c_LeaseRecorded:
             f"the site recorded no activation for a delivered lease: {lease}"
         )
         activated = utc_instant(lease["activated_at_utc"])
+        assert activated + WINDOW_TOLERANCE >= deal_state.agreement_start, (
+            f"the lease was activated at {activated.isoformat()}, before its "
+            f"Agreement start {deal_state.agreement_start.isoformat()}: {lease}"
+        )
         assert activated < lease_end, (
             f"the lease was activated at {activated.isoformat()}, not inside its "
             f"window ending {lease_end.isoformat()}: {lease}"

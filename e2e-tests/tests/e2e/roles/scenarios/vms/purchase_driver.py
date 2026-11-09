@@ -35,14 +35,14 @@ from tests.e2e.roles.scenarios.vms.compute_deal_driver import (
     VmComputeDealDriver,
 )
 from tests.e2e.roles.scenarios.vms.composed_listing import (
-    DELIVERY_DEADLINE_SECONDS,
+    delivery_deadline_seconds,
     payments_settlement,
 )
 
 #: The listed price of an hour of the purchase's VM, in USD/6 base units:
 #: ``payments_settlement``'s rate of 1.00 USD an hour.
 HOURLY_GROSS = 1_000_000
-#: How long ``market buy`` waits for delivery, from its approval.
+#: The minimum wait; a longer declared VM delivery allowance takes precedence.
 SETTLEMENT_TIMEOUT_SECONDS = 300
 #: How often it reads its settlement meanwhile.
 SETTLEMENT_POLL_SECONDS = 1.0
@@ -116,11 +116,12 @@ class VmPurchaseParts:
         ``HOURLY_GROSS``, with the seller's dispute window and the run's
         dispute coverage, which the listing's settlement stated."""
         assert option.settlement_params["window"] == self.dispute_window, option
+        deadline = delivery_deadline_seconds()
         adjudication = option.lifecycle["adjudication"]
         assert adjudication["dispute_window_seconds"] == dispute_window_seconds(
-            delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+            delivery_deadline_seconds=deadline,
         ), option
-        assert option.lifecycle["delivery_deadline_seconds"] == DELIVERY_DEADLINE_SECONDS
+        assert option.lifecycle["delivery_deadline_seconds"] == deadline
         assert option.price_asset == "USD/6", option
         assert option.price_rates[0].per == "hour", option
         assert compute_rate_total(option.price_rates[0], 3600) == HOURLY_GROSS, option
@@ -141,7 +142,7 @@ class VmPurchaseParts:
             "--duration-hours", str(DURATION_HOURS),
             "--max-matches", "1",
             "--poll-interval", str(SETTLEMENT_POLL_SECONDS),
-            "--settlement-timeout", str(SETTLEMENT_TIMEOUT_SECONDS),
+            "--settlement-timeout", str(max(SETTLEMENT_TIMEOUT_SECONDS, delivery_deadline_seconds())),
             "--ssh-public-key", self.buyer_config["ssh_public_key"],
             "--yes",
         ]

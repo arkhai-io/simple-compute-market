@@ -83,7 +83,7 @@ class Authority:
         return SimpleNamespace(host=host_id, reachable=True)
 
 
-def driver():
+def driver(target=TARGET):
     authority = Authority()
     admin = MagicMock()
     admin.admin_run_lifecycle_cycle.return_value = {"sites": {"site": {"resource_pool": {"state": "loaded"}}}}
@@ -94,7 +94,7 @@ def driver():
         site_capacity_admin=SimpleNamespace(register_resource=AsyncMock(return_value={})),
         provisioning_client=authority, storefront_admin_client=admin, fulfillment=MagicMock(),
         site_capacity=site, buyer_config={"ssh_public_key": "public-test-reference"}, site_id="site",
-        target=TARGET, jobs=JobWatch(authority),
+        target=target, jobs=JobWatch(authority),
     )
 
 
@@ -137,6 +137,30 @@ def test_another_declaration_for_the_host_requires_operator_reconciliation():
         instance.seed_supply()
     assert instance.provisioning_client.operations == []
     instance.site_capacity_admin.register_resource.assert_not_awaited()
+
+
+def test_registration_adopts_configured_resource_and_pool_without_a_second_declaration():
+    target = BareMetalHost.model_validate({
+        **TARGET.model_dump(), "pool_id": "example-owned-pool",
+        "resource_id": "example-owned-resource",
+    })
+    instance = driver(target)
+    instance.site_capacity.snapshot.return_value = [{
+        "resource_id": target.resource_id, "host_id": target.host_id,
+        "attributes": {"physical_host_id": target.physical_host_id},
+    }]
+    instance.seed_supply()
+    assert instance.provisioning_client.pool["id"] == target.pool_id
+    assert instance.provisioning_client.host.pool_id == target.pool_id
+    registration = instance.site_capacity_admin.register_resource.await_args
+    assert registration.args == (target.resource_id,)
+    assert registration.kwargs["pool_id"] == target.pool_id
+    assert registration.kwargs["host_id"] == target.host_id
+    instance.site_capacity.snapshot.return_value.append({
+        "resource_id": "example-other-resource", "host_id": target.host_id,
+    })
+    with pytest.raises(AssertionError, match="another capacity declaration"):
+        instance.seed_supply()
 
 
 def test_pool_authentication_failure_is_not_treated_as_missing():

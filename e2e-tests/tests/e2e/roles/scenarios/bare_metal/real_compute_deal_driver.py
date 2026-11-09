@@ -75,6 +75,10 @@ class RealBareMetalComputeDealDriver(BareMetalDealDriverBase, RealComputeObserva
     reserved_resource_id: str = REAL_RESOURCE_ID
     dispatch_bound: float = 60
 
+    def __post_init__(self) -> None:
+        self.pool_id = self.target.pool_id or self.pool_id
+        self.reserved_resource_id = self.target.resource_id or self.reserved_resource_id
+
     @property
     def physical_host_id(self) -> str:
         return self.target.physical_host_id

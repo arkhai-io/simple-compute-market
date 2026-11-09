@@ -20,7 +20,10 @@ from typing import Any
 
 import httpx
 import pytest
-from market_arkhai_payments import ArkhaiPaymentsConfig, PaymentsClient, payments_client_for_owner
+from market_arkhai_payments import (
+    ArkhaiPaymentsConfig, ArkhaiPaymentsConfigurationError, PaymentsClient,
+    payments_client_for_owner, resolve_payments_api_key,
+)
 from market_identity import Identity, IdentityScheme
 
 from e2e_harness.settings import settings
@@ -158,6 +161,11 @@ def configured_payments(
     )
     if not config.development_auth and not config.api_key_env:
         pytest.fail("PAYMENTS.API_KEY_ENV is required without DEVELOPMENT_AUTH")
+    if not config.development_auth:
+        try:
+            resolve_payments_api_key(config, environment=buyer_payments_environment(config))
+        except ArkhaiPaymentsConfigurationError:
+            pytest.fail("PAYMENTS.BUYER_API_KEY is missing or unusable", pytrace=False)
     if ready is None:
         ready = partial(target_ready, ca_bundle=config.ca_bundle_path)
     if not ready(url):
