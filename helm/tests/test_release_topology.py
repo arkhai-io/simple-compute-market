@@ -60,6 +60,9 @@ RELEASE_TWO_VALUES = (*RELEASE_ONE_VALUES, OVERLAY)
 DOUBLE = UMBRELLA.parent / "tools" / "payments-lane-double"
 # The lane CA, which the controls project generates for both lane doubles.
 LANE_CA = UMBRELLA.parent / "tools" / "lane-double-controls" / "tls" / "lane-ca.pem"
+# The mediation lane double's committed fixture, whose identity the release's
+# registry recommends.
+MEDIATION_AUTHORITY = UMBRELLA.parent / "tools" / "mediation-lane-double" / "fixtures" / "authority.toml"
 _LANE_ENV_SPEC = importlib.util.spec_from_file_location("lane_env", DOUBLE / "scripts" / "lane_env.py")
 assert _LANE_ENV_SPEC is not None and _LANE_ENV_SPEC.loader is not None
 lane_env = importlib.util.module_from_spec(_LANE_ENV_SPEC)
@@ -627,15 +630,29 @@ def _fixture(name: str) -> dict:
         return tomllib.load(handle)
 
 
+def _recommended_mediation_double() -> dict:
+    """The mediation double's identity, params and advertisement, as a registry
+    recommends it, from its committed fixture."""
+    with MEDIATION_AUTHORITY.open("rb") as handle:
+        authority = tomllib.load(handle)
+    return {key: authority[key] for key in
+            ("interface", "origin", "account", "record_key", "params", "advertisement")}
+
+
 def _lane_runner_payments() -> dict:
-    """The lanes' shared runner profile's `payments` mapping. The file is one
-    flat mapping of JSON scalars, quoted strings, numbers and booleans, read
-    here line by line because this suite has no YAML parser."""
+    """The lanes' shared runner profile's `payments` mapping. Each top-level
+    section is one flat mapping of JSON scalars, quoted strings, numbers and
+    booleans, read here line by line because this suite has no YAML parser."""
     path = UMBRELLA.parent / "e2e-tests" / "config" / "config-payments-lane.yml"
     values = {}
+    section = None
     for line in path.read_text(encoding="utf-8").splitlines():
+        heading = re.fullmatch(r"([a-z_]+):", line)
+        if heading:
+            section = heading[1]
+            continue
         match = re.fullmatch(r"  ([a-z_]+): (.+)", line)
-        if match:
+        if match and section == "payments":
             values[match[1]] = json.loads(match[2])
     return values
 
@@ -671,11 +688,11 @@ def _recommended_dispute_authorities(manifest: str) -> list:
 def test_the_local_payments_values_are_the_payments_doubles_committed_fixtures() -> None:
     """Each payments value the two releases state restates the double's
     fixtures: the receipt identity and fee both storefronts pin, the seller
-    account both payments checks read, the dispute authority the registry
-    recommends, and the e2e-tests chart's PAYMENTS settings, which are the ones
-    a Compose lane's runner receives. No storefront uses development
-    authentication."""
-    accounts, authority = _fixture("accounts.toml"), _fixture("dispute-authority.toml")
+    account both payments checks read, and the e2e-tests chart's PAYMENTS
+    settings, which are the ones a Compose lane's runner receives. The registry
+    recommends the mediation double, restating its fixture. No storefront uses
+    development authentication."""
+    accounts = _fixture("accounts.toml")
     release_one, release_two = _release_one(), _release_two()
     seller = accounts["accounts"]["seller"]["account"]
 
@@ -696,7 +713,7 @@ def test_the_local_payments_values_are_the_payments_doubles_committed_fixtures()
         assert f'- "{seller}"' in {line.strip() for line in _source(manifest, check).splitlines()}
         assert "development_auth" not in manifest
 
-    assert _recommended_dispute_authorities(release_one) == [authority]
+    assert _recommended_dispute_authorities(release_one) == [_recommended_mediation_double()]
 
     # The release's runner profile states the lanes' public payments settings, as
     # the lanes' committed runner profile does, which test_lane_env.py holds to
@@ -851,7 +868,7 @@ def test_each_registry_renders_its_settings_as_a_profile_and_sets_only_the_resol
         deployment = _source(manifest, f"charts/{chart}/templates/deployment.yaml")
         name = f"{RELEASE_ONE}-{chart}"
 
-        # Release 1's registry alone recommends the pinned dispute authority.
+        # Release 1's registry alone recommends the mediation double.
         recommends = {"REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"} if chart == "registry" else set()
         assert set(profile) == _REGISTRY_SETTINGS | recommends, sorted(profile)
         assert {key: profile[key] for key in own} == own
@@ -1014,7 +1031,7 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
     profile = _registry_profile(manifest)
 
     assert settings["registry_descriptor_display_name"] == awkward
-    assert settings["registry_descriptor_recommended_dispute_authorities"] == [_fixture("dispute-authority.toml")]
+    assert settings["registry_descriptor_recommended_dispute_authorities"] == [_recommended_mediation_double()]
     for setting, line in (
         ("registry_authority_id", "REGISTRY_AUTHORITY_ID"),
         ("registry_authority_scheme", "REGISTRY_AUTHORITY_SCHEME"),

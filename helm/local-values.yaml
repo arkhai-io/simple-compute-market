@@ -116,17 +116,18 @@ provisioning:
 registry:
   persistence:
     retainOnUninstall: false
-  # The payments lane double's pinned dispute authority
-  # (tools/payments-lane-double/fixtures/dispute-authority.toml), which sellers
-  # and buyers take from the registry's recommendations. Nobody can act as it:
-  # its origin is under .invalid, which never resolves, its record key has no
-  # usable private half, and its account has no token at the double.
+  # The mediation lane double's identity, params and advertisement
+  # (tools/mediation-lane-double/fixtures/authority.toml), which sellers and
+  # buyers take from the registry's recommendations, as the Compose lanes'
+  # registries recommend it. Public development values: its origin is a service
+  # name that resolves only where a lane or a release runs the double, and its
+  # record key derives from a committed seed.
   descriptor:
     recommendedDisputeAuthorities:
       - interface: arkhai.mediation.v1
-        origin: https://dispute.invalid
+        origin: https://mediation-double:8443
         account: 00000000-0000-4000-8000-0000000000d1
-        record_key: "ed25519:lMg0OhYvDsBJf2G3MtLHgbPX3spRLUCV20o7HY7AFOI"
+        record_key: "ed25519:2b8hSHSKhcidparY7gsPwtEF_TnUGkx5ZTY1TwrikAw"
         params: {}
         advertisement:
           mechanisms: [arkhai.payments.v1]

@@ -230,12 +230,14 @@ def test_a_malformed_body_is_an_invalid_request(lane: Lane) -> None:
     assert ApiError.model_validate(answer.json()).error.value == "invalid_request"
 
 
-def test_the_dispute_authoritys_account_cannot_authenticate(lane: Lane) -> None:
+def test_the_dispute_authoritys_token_authenticates_as_its_account(lane: Lane) -> None:
+    # The mediation double acts as this account, extending, reversing and lifting
+    # under the token the fixture gives it.
     authority = lane.account("dispute_authority")
 
-    assert lane.directory.role("dispute_authority").token is None
-    assert refusal(lane.token_client(authority).get_balance, authority) == (
-        401, "authentication_required")
+    assert lane.client("dispute_authority").get_balance(authority).held == []
+    assert refusal(lane.client("dispute_authority").get_balance, lane.account("buyer")) == (
+        403, "caller_not_authorized")
 
 
 def _mandate_read(lane: Lane, token: str, transaction: str) -> httpx.Response:

@@ -102,7 +102,7 @@ service_url = "https://payments-double:8443"
 service_identity = { scheme = "ed25519", identifier = "kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo" }
 fee_bps = 250
 livemode = false
-ca_bundle_path = "/run/payments-lane-double/lane-ca.pem"
+ca_bundle_path = "/run/lane-doubles/lane-ca.pem"
 
 # Seller-side delivery of each revealed buyer contact. Mailpit receives it in
 # this lane; scenarios read it back through Mailpit's API.

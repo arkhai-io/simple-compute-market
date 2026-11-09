@@ -706,22 +706,55 @@ fails rather than skips", "The in-lane payments double mirrors the service and p
 engine's surface", "A compute buyer purchase settled through Arkhai payments runs in
 each compute lane against the lane doubles".
 
-- [ ] 5.1 `compose.payments-double.yml` adds service `mediation-double`
+- [x] 5.1 `compose.payments-double.yml` adds service `mediation-double`
       (`arkhai:mediation-lane-double`, no host port, healthcheck trusting the lane CA
       alone); the root `Makefile`'s lane build targets build its image. (D9)
       Note: since round 1's triage (41 O1) the lane targets call `build-tools`,
       which builds both doubles' images through `tools/Makefile`, so the image half
       of this task is done.
-- [ ] 5.2 The payments double's `fixtures/accounts.toml` gives `…00d1` a token, which the
-      mediation double's fixture restates; retire
-      `tools/payments-lane-double/fixtures/dispute-authority.toml` and its tests;
+      Done. The service starts once `payments-double` is healthy, since it extends
+      there as the authority; Bob's storefront, the one lane storefront holding a
+      dispute credential, waits for it too (`compose.vms-lane.yml`). Beyond the
+      plan: the lane CA's mount target moved from `/run/payments-lane-double/` to
+      `/run/lane-doubles/lane-ca.pem` (section 1 left the path to this section; D8's
+      example names it), in the three lane overlays, the three lane storefront
+      configurations, `e2e-tests/Makefile`'s runner mount, the runner profile and the
+      tests naming it (`test_domain_stack_configuration.py`, the payments double's
+      `test_lane_env.py`); `kit/arkhai-payments/tests/test_settlement_config.py`
+      keeps the old string, an arbitrary path value there. `scripts/tests/
+      test_bare_metal_compose.py`'s service set gains the double.
+- [x] 5.2 The payments double's `fixtures/accounts.toml` gives `…00d1` a token, which the
+      mediation double's fixture restates; retire the payments double's
+      `fixtures/dispute-authority.toml` and its tests;
       `dev-env/registry/config-payments-lane.env` recommends the mediation double's
       identity. Update `core/registry/tests/unit/test_config_profiles.py` and the stack
       value tests that held the `.invalid` identity. (D5, D7, D9)
-- [ ] 5.3 `dev-env/identities/bob.storefront.secrets.toml`'s `[[DisputeCredential]]`
+      Done. The fixture's removal reached beyond the plan's list: the payments
+      double's Dockerfile `COPY`, its conftest helper, its README's fixtures list,
+      its now-unused dev dependency on `arkhai-kit-deal-lifecycle` (relocked), and
+      its suite's "cannot authenticate" case, now the authority's token
+      authenticating as its account alone. The Helm release read the retired file
+      too, so 8.2's recommendation half is done here: `helm/local-values.yaml`'s
+      registry recommends the mediation double's identity, held by
+      `helm/tests/test_release_topology.py` (two cases) to
+      `tools/mediation-lane-double/fixtures/authority.toml`'s `interface`, `origin`,
+      `account`, `record_key`, `params` and `advertisement`;
+      `scripts/tests/test_change_build_and_helm_targets.py` holds Bob's copied
+      credential's four identity keys to the same fixture. The topology test's runner
+      profile parser now reads only the `payments` section, since the profile gained
+      a `mediation` one with keys of the same names. The payments token's
+      restatement is held in `scripts/tests/test_committed_stack_values.py`, which
+      reads both doubles' fixtures, so neither double's suite reads the other's
+      project. `dev-env/identities/README.md`'s restated-value tables follow (9.9's
+      D7 entry for that table is so far done).
+- [x] 5.3 `dev-env/identities/bob.storefront.secrets.toml`'s `[[DisputeCredential]]`
       carries the mediation double's seller token and `ca_bundle_path`, and the lane
       overlays mount the CA where that path names. (D8, D9)
-- [ ] 5.4 Runner: `e2e-tests/config/config-payments-lane.yml` gains `mediation` —
+      Done: bound to the double's identity, `api_key` its seller token,
+      `ca_bundle_path = "/run/lane-doubles/lane-ca.pem"`, which `compose.vms-lane.yml`
+      binds. The Helm release copies the credential with that Compose path until
+      8.2 rewrites it; no payment deal runs in Helm meanwhile.
+- [x] 5.4 Runner: `e2e-tests/config/config-payments-lane.yml` gains `mediation` —
       `service_url`, `lane_owned: true`, `ca_bundle_path`, `buyer_api_key`,
       `api_key_env`, `control_token`; `e2e-tests/tests/e2e/roles/helpers/mediation.py`
       fails setup by name on an unready lane-owned target and keeps the blocked skip for
@@ -731,15 +764,60 @@ each compute lane against the lane doubles".
       writing it into no runner environment. Declare `lane-double-controls` in
       `e2e-tests/pyproject.toml` and relock. Tests hold every restated value to its
       fixture. (D9)
-- [ ] 5.5 Lane-double evidence: a payment scenario records the label *lane doubles* and
+      Done. Beyond the listed keys: `mediation.account` and `mediation.record_key`,
+      since a dispute credential is bound to the authority's whole identity, and
+      `payments.control_token`, which 5.5's evidence and section 6 read. The helper
+      offers `mediation_if_configured()` (None when the run names no target and
+      claims none) and `configured_mediation()` (that, or the blocked skip);
+      `API_KEY_ENV`, `ACCOUNT` and `RECORD_KEY` are required once a target is named,
+      `CONTROL_TOKEN` once it is lane-owned. Readiness is the payments helper's
+      `target_ready`, generalised to either target. Both purchase drivers
+      (`vms/purchase_driver.py`, `bare_metal/purchase_driver.py`) write the
+      credential and hand the token when the run names a target, so a qualification
+      run naming none still buys. The restated values are held by the mediation
+      double's new `tests/unit/test_lane_profile.py` (and its leaf covering the
+      origin) and, for `payments.control_token`, the payments double's
+      `test_lane_env.py`; `scripts/tests/test_lane_compose.py` holds both sections'
+      CA path to the runner's mount. `e2e-tests` is not published, so no version
+      bump; beyond the plan it now declares the deal-lifecycle, deal-lifecycle-buyer
+      and deal-lifecycle-contracts kits it imports (the last was already imported
+      undeclared). The helper is unit-tested (`test_mediation_helper.py`, the buyer's
+      own `dispute_config` reading the written credential); the purchase drivers'
+      use of it was not run end to end in this session. Like its sibling
+      `test_payments_helper.py`, that test replaces the helper module's
+      `settings`, which `TESTING.md`'s mocking convention discourages: a settings
+      seam for both helpers is a refactor of its own, left as it is.
+- [x] 5.5 Lane-double evidence: a payment scenario records the label *lane doubles* and
       both doubles' installed contract hashes, read from their status through the typed
       client. (D3)
-- [ ] 5.6 Scenarios: `e2e-tests/tests/e2e/roles/scenarios/vms/test_vm_payment_deal.py`'s
+      Done in `e2e-tests/tests/e2e/roles/helpers/lane_doubles.py` (created here;
+      section 6 adds its rule and clock fixtures): a module fixture
+      `lane_doubles_evidence`, re-exported by `tests/e2e/roles/conftest.py`, which
+      reads both doubles' `status()` through `ControlClient` when both targets are
+      lane-owned and logs the label and both hash maps, the run's record in the
+      lane's log (no lane run writes a JUnit report, so a pytest property would
+      reach nothing); otherwise it reads and logs nothing. The four payment
+      scenarios (`e2e_vm_payment_deal`, `e2e_vm_payment_purchase`,
+      `e2e_bare_metal_payment_deal`, `e2e_credits_payment_deal`) use it, so each
+      also fails setup by name on an unready lane-owned mediation target. Unit
+      (`tests/unit/test_lane_doubles_evidence.py`): the status read through the
+      typed client over a mock transport, the logged record, and nothing read for
+      each run whose targets are not both lane-owned. Not run end to end in this
+      session.
+- [x] 5.6 Scenarios: `e2e-tests/tests/e2e/roles/scenarios/vms/test_vm_payment_deal.py`'s
       operator-end case and refund stages run against the mediation double — the
       seller's filing accepted and held per part with no rule, the refund reversing the
       held money; the bare-metal buyer's teardown filing
       (`e2e-tests/tests/e2e/roles/helpers/buyer_purchase_stages.py`) asserts a case
       filed and held per part, not a ruling. (D6)
+      Done. The operator-end stage asserts the filing answer's parts each `held`
+      with an extension reference, no `ruled` event, and the storefront's lifecycle
+      read listing exactly one open extension per snapshot part, each bound to the
+      case; the
+      refund stage is unchanged. `Purchase10` parses the teardown's printed
+      `EndDeliveryProgress` and asserts its case `accepted` with every part held,
+      only where the run names a mediation target. The `e2e_vm_payment_deal`
+      marker's text follows. Not run end to end in this session.
 - [ ] 5.7 Verification.
       Unit: `e2e-tests/tests/unit/test_mediation_helper.py` (lane-owned failure,
       external blocked skip, missing settings), the buyer configuration writer's
@@ -753,6 +831,44 @@ each compute lane against the lane doubles".
       skips for want of a mediation target.
       Owed by validation: `tests.yml`, job `test · test-e2e-unit` — the harness unit
       suite passes.
+      Evidence: unit, `make test-e2e-unit` — 802 passed, 1 skipped:
+      `test_mediation_helper.py` (blank target blocked, lane-owned without a URL
+      failed, each missing setting failed by name, the control token required of a
+      lane-owned target, unready lane-owned failed and external blocked by name, a
+      non-boolean flag refused, the written credential read by the buyer's
+      `dispute_config` as bound to the authority with the CA bundle, its token
+      resolved from the handed environment), `test_lane_doubles_evidence.py`, and
+      `test_domain_stack_configuration.py` at the moved CA path. Release tooling,
+      `make test-release-tooling` (unit; renders the stacks with Docker Compose) —
+      2690 passed: `test_lane_compose.py` (the mediation double in each lane, no
+      host port, after the payments double, its probe trusting the lane CA; none in
+      the full stack; both runner sections' CA path at the runner's mount),
+      `test_committed_stack_values.py` (the lane registry profile against the
+      mediation fixture, the authority's payments token against it, Bob's
+      credential against its identity and seller token with its CA path where the
+      VM lane binds the lane CA), `test_change_build_and_helm_targets.py`,
+      `test_bare_metal_compose.py`. Doubles' suites (unit and library integration):
+      `make test-payments-lane-double` 84 passed, `make test-mediation-lane-double`
+      72 passed (`test_lane_profile.py` among them). `make -C helm test-render`
+      (render and release-topology units): passed. `make -C core/registry
+      test-unit`: 139 passed. The application integration line (the VM storefront's
+      `test_servicing_unreachable_authority.py`, its own `.invalid` fixture) ran in
+      the pre-commit run's every-suite hook, which passed. The end-to-end scenarios
+      were not run in this session; validation's pipeline is their evidence.
+      End-to-end scenarios covering the section once deployed: `e2e_vm_payment_deal`
+      (case and refund stages against the mediation double, lane-double evidence),
+      `e2e_vm_payment_purchase` (the buyer's credential written, evidence),
+      `e2e_bare_metal_payment_deal` (the teardown filing held per part, evidence),
+      `e2e_credits_payment_deal` (evidence) — confirmed.
+      Handoff: section 6 extends `helpers/lane_doubles.py` (its control clients
+      `payments_controls()` and `mediation_controls(target)` are there) and the
+      runner's `payments.control_token`, `mediation.*` settings. `e2e-tests/README.md`
+      ("Hosted VM servicing", "Shared payment-scenario configuration") and
+      `TESTING.md`'s "The lanes' payments target" paragraphs still describe the
+      unanswerable `.invalid` authority and the blocked case stages: 9.9's D6 and D9
+      promotions rewrite them. Left for the owner, as section 1 recorded:
+      `e2e-tests` now depends on the controls wheel, which `make dist` builds into
+      the release wheelhouse as well; this section changes nothing there.
 
 ## 6. The VM controls module
 

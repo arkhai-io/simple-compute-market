@@ -66,6 +66,8 @@ from market_arkhai_payments import (
     verify_snapshot,
 )
 from market_core.schemas import SettlementOption
+from market_deal_lifecycle_buyer import EndDeliveryProgress
+from market_deal_lifecycle_contracts.models import Accepted
 
 from tests.e2e.roles.helpers.compute_deal import assert_lease_watchdog_held
 from tests.e2e.roles.helpers.compute_deal_stages import (
@@ -78,6 +80,7 @@ from tests.e2e.roles.helpers.domain_deal import (
     ordered_events,
     require_state,
 )
+from tests.e2e.roles.helpers.mediation import mediation_if_configured
 from tests.e2e.roles.helpers.payments import buyer_payments_client, payment_setting
 
 log = logging.getLogger(__name__)
@@ -438,10 +441,11 @@ class Purchase10_BuyerTeardown:
         itself is outside the shared ending's design, so it fails here.
 
         The command also files the delivery's end with the deal's dispute
-        authority. That filing's outcome, ``Unknown`` where the authority does
-        not answer, is the authority's, and is no delivery, access-end or
-        refund evidence: nothing here reads it, and the run's success does not
-        depend on it.
+        authority. Where the run names that authority (MEDIATION), the filing
+        is accepted and each part held by the authority's extension, with no
+        rule installed and so no ruling: a filed case, never a refund. Its
+        outcome is no delivery or access-end evidence either, and where the
+        run names no authority nothing here reads it.
         """
         require_state(deal_state, "purchase_run", "negotiation_id", "settlement_status",
                       "deal_lease", "lease_id", "reserved_resource_id")
@@ -450,6 +454,15 @@ class Purchase10_BuyerTeardown:
         deal_state._buyer_teardown_requested = True
         run = purchase_cli.run(deal_driver.teardown_arguments(deal_state.purchase_run.run_id))
         assert_market_run_succeeded(run, command=deal_driver.teardown_command)
+        if mediation_if_configured() is not None:
+            progress = EndDeliveryProgress.model_validate_json(run.stdout().strip().splitlines()[-1])
+            case = progress.case
+            assert isinstance(case, Accepted) and case.filing is not None, progress
+            assert case.filing.parts and all(
+                part.status == "held" and part.extension_ref for part in case.filing.parts
+            ), case.filing
+            log.info("[p10] Buyer run %s filed case %s, every part held",
+                     deal_state.purchase_run.run_id, case.filing.case_ref)
 
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") != "leased", (

@@ -554,7 +554,7 @@ def test_topology_secrets_writes_the_payments_key_into_each_storefronts_overlay(
 
 def test_topology_secrets_gives_bob_his_compose_dispute_credential(tmp_path: Path) -> None:
     """Bob's runtime overlay states the Compose overlay's dispute credential,
-    bound to the pinned dispute authority release 1's registry recommends; the
+    bound to the mediation double release 1's registry recommends; the
     bare-metal storefront, whose lane carries none, gets none."""
     stored = tmp_path / "secrets"
     _fake_kubectl(tmp_path, tmp_path / "kubectl.log", namespaces=NAMESPACE, secrets=stored)
@@ -570,7 +570,7 @@ def test_topology_secrets_gives_bob_his_compose_dispute_credential(tmp_path: Pat
     assert created.returncode == 0, created.stderr
     with (REPO_ROOT / "dev-env/identities/bob.storefront.secrets.toml").open("rb") as handle:
         compose = tomllib.load(handle)["DisputeCredential"]
-    with (REPO_ROOT / "tools/payments-lane-double/fixtures/dispute-authority.toml").open("rb") as handle:
+    with (REPO_ROOT / "tools/mediation-lane-double/fixtures/authority.toml").open("rb") as handle:
         authority = tomllib.load(handle)
     bob = tomllib.loads((stored / "arkhai-bob-runtime" / "storefront.secrets.toml").read_text())
     assert bob["DisputeCredential"] == compose

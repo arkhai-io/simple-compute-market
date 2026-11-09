@@ -1,15 +1,18 @@
-# The payments lane double, for the VM, bare-metal and API-credit end-to-end lanes.
+# The payments and mediation lane doubles, for the VM, bare-metal and API-credit
+# end-to-end lanes.
 #
 # Layered with `-f` into each lane's compose list in e2e-tests/Makefile; each
 # lane's own overlay mounts its payment storefront's lane configuration, which
-# points at it, and the lane CA that configuration trusts, and makes the
-# storefront wait for it. The full local stack never layers this file.
+# points at the payments double, and the lane CA that configuration trusts, and
+# makes the storefront wait for it. The full local stack never layers this file.
 #
-# The image carries the double's committed fixtures and TLS files, public
+# Each image carries its double's committed fixtures and TLS files, public
 # development values never to be used on a public network
-# (tools/payments-lane-double/README.md), so the service needs no mounts and no
-# configuration. It publishes no host port: its callers reach it on the lane's
-# network at https://payments-double:8443, the name its certificate is issued for.
+# (tools/payments-lane-double/README.md, tools/mediation-lane-double/README.md),
+# so neither service needs mounts or configuration. Neither publishes a host
+# port: callers reach them on the lane's network at https://payments-double:8443
+# and https://mediation-double:8443, the names their certificates, both issued
+# by the one lane CA, are issued for.
 services:
   payments-double:
     image: arkhai:payments-lane-double
@@ -21,6 +24,27 @@ services:
     healthcheck:
       # Trusting the lane CA alone, as every caller of the double does.
       test: ["CMD", "curl", "--fail", "--silent", "--cacert", "/opt/payments-lane-double/tls/lane-ca.pem", "https://localhost:8443/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # The dispute authority the lanes' registries recommend. It extends, reverses
+  # and lifts at the payments double as the authority's own account, so it starts
+  # once that double answers.
+  mediation-double:
+    image: arkhai:mediation-lane-double
+    restart: unless-stopped
+    depends_on:
+      payments-double:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    healthcheck:
+      # Trusting the lane CA alone, as every caller of the double does.
+      test: ["CMD", "curl", "--fail", "--silent", "--cacert", "/opt/mediation-lane-double/tls/lane-ca.pem", "https://localhost:8443/health"]
       interval: 5s
       timeout: 5s
       retries: 12

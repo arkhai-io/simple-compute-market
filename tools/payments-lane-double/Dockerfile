@@ -44,7 +44,7 @@ COPY --from=builder /repo/tools/payments-lane-double/src /repo/tools/payments-la
 # development values, at the paths the double reads by default, so a lane runs it
 # with no mounts. A deployment supplying its own server certificate mounts it over
 # tls/double.pem and tls/double.key.pem.
-COPY tools/payments-lane-double/fixtures/accounts.toml tools/payments-lane-double/fixtures/dispute-authority.toml /opt/payments-lane-double/fixtures/
+COPY tools/payments-lane-double/fixtures/accounts.toml /opt/payments-lane-double/fixtures/
 COPY tools/lane-double-controls/tls/lane-ca.pem /opt/payments-lane-double/tls/lane-ca.pem
 COPY tools/lane-double-controls/tls/payments-double.pem /opt/payments-lane-double/tls/double.pem
 COPY --from=builder /repo/tls/payments-double.key.pem /opt/payments-lane-double/tls/double.key.pem

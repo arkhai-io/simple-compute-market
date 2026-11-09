@@ -37,7 +37,10 @@ funding = "1000000000000"
 account = "00000000-0000-4000-8000-0000000000b2"
 token = "payments-lane-double-seller-public-development-token"
 
-# The pinned dispute authority's account (fixtures/dispute-authority.toml). It has
-# no token: nothing can authenticate at the double as the dispute authority.
+# The account of the dispute authority every lane's registries recommend, the
+# mediation lane double, which extends, reverses and lifts as it with this token.
+# Its fixture, tools/mediation-lane-double/fixtures/authority.toml, restates both,
+# and a repository test holds them equal.
 [accounts.dispute_authority]
 account = "00000000-0000-4000-8000-0000000000d1"
+token = "payments-lane-double-dispute-authority-public-development-token"

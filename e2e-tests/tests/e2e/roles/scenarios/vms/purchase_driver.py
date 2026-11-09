@@ -24,6 +24,11 @@ from e2e_harness.settings import settings
 from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
 from tests.e2e.roles.helpers.compute_deal import wait_for_stage_event
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
+from tests.e2e.roles.helpers.mediation import (
+    buyer_dispute_credential_toml,
+    buyer_mediation_environment,
+    mediation_if_configured,
+)
 from tests.e2e.roles.helpers.payments import (
     buyer_payments_environment,
     dispute_window_seconds,
@@ -50,8 +55,10 @@ SETTLEMENT_POLL_SECONDS = 1.0
 
 def vm_purchase_cli(payments_config: Any, binary: Any, base: Path) -> BuyerCli:
     """The run's VM buyer (``BUYER``), profiled under ``base`` with no wallet,
-    buying through Arkhai payments alone. Each profile keeps its own run
-    logs, so a purchase's compensation finds that purchase alone."""
+    buying through Arkhai payments alone, with its dispute credential for the
+    run's mediation target when the run names one. Each profile keeps its own
+    run logs, so a purchase's compensation finds that purchase alone."""
+    mediation = mediation_if_configured()
     registry_url = str(settings.REGISTRY.API_URL or "").rstrip("/")
     assert registry_url, "REGISTRY.API_URL is required for the purchase's discovery"
     scheme = str(settings.BUYER.get("marketplace_scheme", "eip191") or "eip191")
@@ -68,6 +75,8 @@ def vm_purchase_cli(payments_config: Any, binary: Any, base: Path) -> BuyerCli:
         'priority = ["arkhai.payments.v1"]',
         "",
         *payment_config_toml(payments_config),
+        "",
+        *buyer_dispute_credential_toml(mediation),
     )
     return create_profiled_buyer_cli(
         binary=binary,
@@ -83,7 +92,10 @@ def vm_purchase_cli(payments_config: Any, binary: Any, base: Path) -> BuyerCli:
                 "identifier": str(settings.REGISTRY.get("identifier", "") or ""),
             }],
         }},
-        credential_environment=buyer_payments_environment(payments_config),
+        credential_environment={
+            **buyer_payments_environment(payments_config),
+            **buyer_mediation_environment(mediation),
+        },
         toml_sections=sections,
     )
 

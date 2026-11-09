@@ -115,14 +115,10 @@ generated from the generator's seed (see TLS).
   the identity it yields (distinct from `FakePaymentsClient`'s), the rotation seed,
   the control token, and the buyer,
   seller and dispute authority accounts with their bearer tokens and the buyer's
-  seed balance. The dispute authority's account has no token, so nothing can
-  authenticate as it.
-- `fixtures/dispute-authority.toml` — the pinned dispute authority lanes and the
-  local release recommend through their registries: interface
-  `arkhai.mediation.v1`, origin `https://dispute.invalid`, under a top-level domain
-  reserved never to resolve, its account, a record key with no usable private half,
-  and an advertisement whose mechanisms include `arkhai.payments.v1` and whose
-  minimum dispute window every lane's options meet. Nothing can ever answer as it.
+  seed balance. The dispute authority's account is the mediation lane double's
+  ([`tools/mediation-lane-double`](../mediation-lane-double/README.md)), which
+  extends, reverses and lifts with its token as the authority the lanes'
+  registries recommend.
 
 ## TLS
 
@@ -161,16 +157,17 @@ copied there under those names.
   the lane CA as its `ca_bundle_path`, and binds the CA there; the storefront's
   key is `[Settlement.arkhai_payments].api_key` in its secret overlay under
   `dev-env/identities/`, and its registries layer the shared
-  `dev-env/registry/config-payments-lane.env`, recommending the pinned dispute
-  authority. The test runner reads the lane's payments settings from committed
-  profiles, `e2e-tests/config/config-payments-lane.yml` and the lane's
-  `config-<lane>-lane.yml`, with the lane CA mounted where they name it.
-  Every one of those files restates a value here: the storefront configurations
-  the receipt identity, fee, service URL and the seller's account
+  `dev-env/registry/config-payments-lane.env`, recommending the mediation lane
+  double as the dispute authority. The test runner reads the lane's payments
+  settings from committed profiles, `e2e-tests/config/config-payments-lane.yml`
+  and the lane's `config-<lane>-lane.yml`, with the lane CA mounted where they
+  name it. Every one of those files restates a value here: the storefront
+  configurations the receipt identity, fee, service URL and the seller's account
   (`e2e-tests/tests/unit/test_domain_stack_configuration.py`), the secret
-  overlays the seller's token and the registry profile the pinned authority
-  (`scripts/tests/test_committed_stack_values.py`), and the runner profiles the
-  accounts, tokens, identity and fee (`tests/integration/test_lane_env.py`),
+  overlays the seller's token and the mediation double's fixture the dispute
+  authority's token (`scripts/tests/test_committed_stack_values.py`), and the
+  runner profiles the accounts, tokens, control token, identity and fee
+  (`tests/integration/test_lane_env.py`),
   each test holding the copy to the fixture. `scripts/lane_env.py` prints the two
   values read at run time: `seller-account`, which each lane target passes to its
   storefront's payments check, and `seller-token`. Its callers run it with the
@@ -188,9 +185,10 @@ copied there under those names.
   Secret's overlay. `make -C helm topology-secrets` creates the ConfigMap and
   writes the token, from these fixtures with `scripts/lane_env.py seller-token`.
   The release's
-  values repeat the receipt identity, fee, service URL, the accounts and the
-  pinned authority, and `helm/tests/test_release_topology.py` holds them to the
-  fixtures. It serves no payment scenario there; each storefront's `helm test`
+  values repeat the receipt identity, fee, service URL and the accounts, and
+  `helm/tests/test_release_topology.py` holds them to these fixtures, and the
+  registry's recommended authority to the mediation double's. It serves no
+  payment scenario there; each storefront's `helm test`
   payments check reads the seller's balance.
 - `make test` (here) runs the unit and library integration suite: the kit's real
   `PaymentsClient` and the controls' typed client against the app through an

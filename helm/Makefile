@@ -21,7 +21,7 @@ LOCAL_VALUES := local-values.yaml
 # `make topology-secrets` creates them). Enabling api-credits-registry adds
 # arkhai-api-credits-registry-identity. Under $(LOCAL_VALUES), which configures
 # Bob for payments, arkhai-bob-runtime's overlay also holds his payments key and
-# his credential toward the pinned dispute authority.
+# his credential toward the mediation double the release's registry recommends.
 LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime \
 	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh
 # ConfigMaps the release's workloads read under $(LOCAL_VALUES) and no chart
@@ -35,7 +35,7 @@ LOCAL_CONFIGMAPS := payments-ca-bundle
 PAYMENTS_LANE_CA_FILE := ../tools/lane-double-controls/tls/lane-ca.pem
 PAYMENTS_LANE_ENV := ../tools/payments-lane-double/scripts/lane_env.py
 # Bob's secret overlay in the Compose stacks, whose [[DisputeCredential]] toward
-# the double's pinned dispute authority topology-secrets copies into his runtime
+# the mediation double topology-secrets copies into his runtime
 # Secret's overlay, so one committed copy serves both. A public development
 # value, never for a public network.
 BOB_COMPOSE_SECRETS_FILE := ../dev-env/identities/bob.storefront.secrets.toml

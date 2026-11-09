@@ -111,7 +111,9 @@ def test_the_shared_runner_profile_restates_the_double_fixtures() -> None:
     # The variable the harness hands the key over under, never one the runner's
     # own settings loader reads.
     assert not payments["api_key_env"].startswith("ARKHAI_")
-    assert payments["ca_bundle_path"] == "/run/payments-lane-double/lane-ca.pem"
+    assert payments["ca_bundle_path"] == "/run/lane-doubles/lane-ca.pem"
+    # The harness reads the double's status with it.
+    assert payments["control_token"] == directory.control_token
 
 
 def test_each_lane_profile_states_its_storefront_signing_key_alone() -> None:

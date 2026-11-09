@@ -18,7 +18,8 @@ Facts the decisions rest on:
 - **No lane runs a dispute authority.** The lanes' registries recommend a fixture
   authority at `https://dispute.invalid` whose record key has no private half and
   whose account has no token at the payments double
-  (`tools/payments-lane-double/fixtures/dispute-authority.toml`). The VM payment
+  (the payments double's `fixtures/dispute-authority.toml`, retired by this
+  change). The VM payment
   scenario's operator-end case and refund stages skip on a blank
   `MEDIATION.SERVICE_URL` (`e2e-tests/tests/e2e/roles/helpers/mediation.py`), and the
   bare-metal buyer's teardown files a `delivery_end` case that reaches nobody and

@@ -15,11 +15,6 @@ def committed_accounts() -> dict[str, Any]:
         return tomllib.load(handle)
 
 
-def committed_dispute_authority() -> dict[str, Any]:
-    with (FIXTURES / "dispute-authority.toml").open("rb") as handle:
-        return tomllib.load(handle)
-
-
 class Clock:
     """An injected clock a test moves by hand."""
 

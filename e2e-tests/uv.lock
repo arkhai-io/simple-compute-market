@@ -408,6 +408,9 @@ dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-payments" },
     { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-deal-lifecycle" },
+    { name = "arkhai-kit-deal-lifecycle-buyer" },
+    { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-pool-overrides" },
     { name = "arkhai-kit-resource-pools-client" },
@@ -422,6 +425,7 @@ dependencies = [
     { name = "eth-typing" },
     { name = "httpx" },
     { name = "jsonschema" },
+    { name = "lane-double-controls" },
     { name = "pydantic" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -456,6 +460,9 @@ requires-dist = [
     { name = "arkhai-kit-alkahest", specifier = ">=0.11.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.4.0" },
     { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.3.0" },
+    { name = "arkhai-kit-deal-lifecycle-buyer", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.1.0" },
     { name = "arkhai-kit-policy", specifier = ">=0.4.0" },
     { name = "arkhai-kit-pool-overrides", specifier = ">=0.2.0" },
     { name = "arkhai-kit-resource-pools-client", specifier = ">=0.1.0" },
@@ -472,6 +479,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13" },
     { name = "jsonschema", specifier = ">=4.21" },
+    { name = "lane-double-controls", specifier = ">=0.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", specifier = ">=8.0" },
@@ -1870,6 +1878,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/43/4b/674af6ef2f97d56f0ab5153bf0bfa28ccb6c3ed4d1babf4305449668807b/keyring-25.7.0.tar.gz", hash = "sha256:fe01bd85eb3f8fb3dd0405defdeac9a5b4f6f0439edbb3149577f244a2e8245b", size = 63516, upload-time = "2025-11-16T16:26:09.482Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/81/db/e655086b7f3a705df045bf0933bdd9c2f79bb3c97bfef1384598bb79a217/keyring-25.7.0-py3-none-any.whl", hash = "sha256:be4a0b195f149690c166e850609a477c532ddbfbaed96a404d4e43f8d5e2689f", size = 39160, upload-time = "2025-11-16T16:26:08.402Z" },
+]
+
+[[package]]
+name = "lane-double-controls"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "arkhai-kit-arkhai-mediation" },
+    { name = "httpx" },
+    { name = "jsonschema" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "lane_double_controls-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

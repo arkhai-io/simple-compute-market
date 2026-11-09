@@ -28,6 +28,9 @@ dev = [
     "arkhai-kit-deal-lifecycle>=0.3.0",
     "httpx>=0.27,<1",
     "pytest>=8.3.4,<9",
+    # The lanes' runner profile, which tests/unit/test_lane_profile.py holds to
+    # the fixture, is YAML.
+    "pyyaml>=6",
 ]
 
 [build-system]

@@ -1,16 +1,20 @@
 # ---------------------------------------------------------------------------
 # Profile: payments-lane
 #
-# The payments target every end-to-end lane runs, the payments lane double, and
-# what the payment scenarios need of it, shared by the three lanes. A lane target
-# runs the runner with ACTIVE_PROFILES=docker,payments-lane,<lane>-lane, and the
-# lane's own profile adds only what differs by lane; Dynaconf merges the
-# `payments` section key by key.
+# The payments and mediation targets every end-to-end lane runs, the payments
+# and mediation lane doubles, and what the payment scenarios need of them,
+# shared by the three lanes. A lane target runs the runner with
+# ACTIVE_PROFILES=docker,payments-lane,<lane>-lane, and the lane's own profile
+# adds only what differs by lane; Dynaconf merges the `payments` section key by
+# key.
 #
 # Every value is a public deterministic development value, never for a public
-# network. The double's own values restate tools/payments-lane-double/fixtures/
-# accounts.toml, and tools/payments-lane-double/tests/integration/test_lane_env.py
-# holds them equal. Strings are quoted, so an identifier or token stays a string.
+# network. The payments double's values restate tools/payments-lane-double/
+# fixtures/accounts.toml, and tools/payments-lane-double/tests/integration/
+# test_lane_env.py holds them equal; the mediation double's restate
+# tools/mediation-lane-double/fixtures/authority.toml, and
+# tools/mediation-lane-double/tests/unit/test_lane_profile.py holds them equal.
+# Strings are quoted, so an identifier or token stays a string.
 # ---------------------------------------------------------------------------
 
 payments:
@@ -26,7 +30,7 @@ payments:
   lane_owned: true
   # The lane CA, which test-buyer-machine mounts here: the only authority the
   # probe and the buyer's payments client trust for the double.
-  ca_bundle_path: "/run/payments-lane-double/lane-ca.pem"
+  ca_bundle_path: "/run/lane-doubles/lane-ca.pem"
   # The buyer's bearer token at the double, which the harness hands the buyer
   # process under the variable api_key_env names.
   api_key_env: "PAYMENTS_BUYER_API_KEY"
@@ -37,3 +41,27 @@ payments:
   # of 0xb1, as the unpadded base64url an Ed25519 credential is written in. Its
   # byte echoes the buyer's payments account, which it is independent of.
   buyer_marketplace_credential: "sbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbE"
+  # The bearer token of the double's control routes, with which the harness
+  # reads its status.
+  control_token: "payments-lane-double-control-public-development-token"
+
+mediation:
+  # The double's service name on the lane's network and port, which its leaf
+  # certificate is issued for, and the origin of the dispute authority the
+  # lanes' registries recommend.
+  service_url: "https://mediation-double:8443"
+  # The authority's payments account and record key, which bind the buyer's
+  # dispute credential to the recommended authority's identity.
+  account: "00000000-0000-4000-8000-0000000000d1"
+  record_key: "ed25519:2b8hSHSKhcidparY7gsPwtEF_TnUGkx5ZTY1TwrikAw"
+  # The lane runs this target itself, so an unready one fails setup by name.
+  lane_owned: true
+  # The lane CA, which issues the mediation double's certificate too.
+  ca_bundle_path: "/run/lane-doubles/lane-ca.pem"
+  # The buyer's bearer token at the double, which the harness hands each buyer
+  # process under the variable api_key_env names, as its dispute credential
+  # names it.
+  api_key_env: "MEDIATION_BUYER_API_KEY"
+  buyer_api_key: "mediation-lane-double-buyer-public-development-token"
+  # The bearer token of the double's control routes.
+  control_token: "mediation-lane-double-control-public-development-token"

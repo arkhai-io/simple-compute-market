@@ -223,13 +223,17 @@ the lane's settings in `e2e-tests/config/config-docker.yml` pin the same one. Th
 
 ## The payments lane double
 
-Each lane runs the payments lane double (`compose.payments-double.yml`), and its
-payment storefront — Bob's VM storefront, the bare-metal storefront, the credits
-storefront — settles against it. The double's own values live with it, in
-`tools/payments-lane-double/fixtures/`, documented in its
-[README](../../tools/payments-lane-double/README.md): the receipt-signing seed and
-identity, the buyer's and seller's payments accounts and bearer tokens, and the
-pinned dispute authority. The lane CA it serves under is generated in
+Each lane runs the payments and mediation lane doubles
+(`compose.payments-double.yml`). Its payment storefront — Bob's VM storefront,
+the bare-metal storefront, the credits storefront — settles against the payments
+double, and its registries recommend the mediation double as the dispute
+authority. Each double's own values live with it, in
+`tools/payments-lane-double/fixtures/` and `tools/mediation-lane-double/fixtures/`,
+documented in their READMEs ([payments](../../tools/payments-lane-double/README.md),
+[mediation](../../tools/mediation-lane-double/README.md)): the receipt-signing seed
+and identity, the payments accounts and bearer tokens, the dispute authority's
+identity and record key, and each party's mediation token. The lane CA both serve
+under is generated in
 `tools/lane-double-controls/tls/` ([README](../../tools/lane-double-controls/README.md#tls)).
 Where a stack needs one of them, a
 committed file here or beside a stack restates it, and repository tests hold
@@ -237,16 +241,21 @@ each restatement to its fixture:
 
 | Restated value | Where | Role |
 |---|---|---|
-| the seller's bearer token | `[Settlement.arkhai_payments].api_key` in `bob.storefront.secrets.toml`, `bare-metal.storefront.secrets.toml` and `api-credits.storefront.secrets.toml` | each lane storefront's payments key at the double |
-| the pinned dispute authority | `dev-env/registry/config-payments-lane.env` | the lanes' registries' recommended dispute authorities, one JSON line |
-| the lane CA's path | `ca_bundle_path` in each lane storefront configuration | where each lane overlay binds `tools/lane-double-controls/tls/lane-ca.pem` |
+| the seller's bearer token | `[Settlement.arkhai_payments].api_key` in `bob.storefront.secrets.toml`, `bare-metal.storefront.secrets.toml` and `api-credits.storefront.secrets.toml` | each lane storefront's payments key at the payments double |
+| the dispute authority | `dev-env/registry/config-payments-lane.env` | the lanes' registries' recommended dispute authorities, one JSON line, the mediation double's identity |
+| the dispute authority's payments token | `[accounts.dispute_authority].token` in `tools/payments-lane-double/fixtures/accounts.toml` | the token the mediation double extends, reverses and lifts with at the payments double |
+| the seller's mediation token | `[[DisputeCredential]]` in `bob.storefront.secrets.toml`, which `helm/scripts/topology-secrets.sh` copies into the local Helm release's `arkhai-bob-runtime` | Bob's credential toward the mediation double, bound to its identity, with the lane CA's path as its `ca_bundle_path` |
+| the lane CA's path | `ca_bundle_path` in each lane storefront configuration and in Bob's dispute credential | where each lane overlay binds `tools/lane-double-controls/tls/lane-ca.pem` |
 
-The test runner reads the lanes' payments settings from committed profiles,
-which restate the double's values too: `e2e-tests/config/config-payments-lane.yml`
-the target, the accounts, the CA path and the buyer's token, and each
-`config-<lane>-lane.yml` the seller credential of the lane's storefront, its key
-in `bob.identity.env` or `api-credits.identity.env`.
-`tools/payments-lane-double/tests/integration/test_lane_env.py` holds each to its
+The test runner reads the lanes' payments and mediation settings from committed
+profiles, which restate the doubles' values too:
+`e2e-tests/config/config-payments-lane.yml` each double's target, CA path and
+control token, the payments accounts and the buyer's payments token, and the
+dispute authority's account and record key and the buyer's mediation token; and
+each `config-<lane>-lane.yml` the seller credential of the lane's storefront, its
+key in `bob.identity.env` or `api-credits.identity.env`.
+`tools/payments-lane-double/tests/integration/test_lane_env.py` and
+`tools/mediation-lane-double/tests/unit/test_lane_profile.py` hold each to its
 source.
 
 The lane values that are not the double's:
@@ -255,7 +264,6 @@ The lane values that are not the double's:
 |---|---|---|
 | 32 bytes of `0xb1`, as unpadded base64url | `buyer_marketplace_credential` in `e2e-tests/config/config-payments-lane.yml` | the payment scenarios' wallet-free Ed25519 buyer marketplace seed |
 | `bob.identity.env`, `api-credits.identity.env` | this directory, restated in each `config-<lane>-lane.yml` | the seller credential a payment scenario refunds with: each lane storefront's own key, in its own scheme |
-| `vm-lane-dispute-public-development-credential` | `[[DisputeCredential]]` in `bob.storefront.secrets.toml`, which `helm/scripts/topology-secrets.sh` copies into the local Helm release's `arkhai-bob-runtime` | Bob's credential toward the pinned dispute authority; nothing at its `.invalid` origin ever reads it |
 
 The full local stack mounts the same secret overlays. There the storefront
 configurations leave payments off, and its registries recommend no dispute

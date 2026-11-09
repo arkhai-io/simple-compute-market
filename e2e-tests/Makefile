@@ -116,10 +116,11 @@ E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication or e2e_bare_metal_introducti
 
 # The runner's profiles, from config/: each lane target layers the shared
 # payments profile and its own, `docker,payments-lane,<lane>-lane`, so the
-# payment scenarios reach the lane's payments double; unset, the runner has no
-# payments target, as a run against none does. A rerun against a lane's stack
-# passes that lane's list. The lane CA is mounted where config-payments-lane.yml's
-# ca_bundle_path names it; nothing else reaches the runner's environment.
+# payment scenarios reach the lane's payments and mediation doubles; unset, the
+# runner has neither target, as a run against none does. A rerun against a lane's
+# stack passes that lane's list. The lane CA, which issues both doubles'
+# certificates, is mounted where config-payments-lane.yml's ca_bundle_paths name
+# it; nothing else reaches the runner's environment.
 RUNNER_PROFILES ?= docker
 
 test-buyer-machine:
@@ -127,7 +128,7 @@ test-buyer-machine:
 		--network=$(NETWORK) \
 		-e ACTIVE_PROFILES=$(RUNNER_PROFILES) \
 		-e CONFIG_DIRECTORY=/app/config \
-		-v $(abspath $(CURDIR)/../tools/lane-double-controls/tls/lane-ca.pem):/run/payments-lane-double/lane-ca.pem:ro \
+		-v $(abspath $(CURDIR)/../tools/lane-double-controls/tls/lane-ca.pem):/run/lane-doubles/lane-ca.pem:ro \
 		-v $(CURDIR)/tests:/app/tests:ro \
 		-v $(CURDIR)/src:/app/src:ro \
 		-v $(CURDIR)/config:/app/config:ro \

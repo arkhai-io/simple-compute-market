@@ -21,7 +21,7 @@
 # repository root, the project directory of the lane's first compose file.
 services:
   # Both registries the buyer reads layer the lane's profile recommending its
-  # pinned dispute authority over their own.
+  # mediation double as the dispute authority over their own.
   api-credits-registry:
     environment:
       - ACTIVE_PROFILES=api-credits-registry,payments-lane
@@ -37,7 +37,7 @@ services:
       - ./domains/apicredits/storefront/storefront.credits.lane.toml:/etc/arkhai/storefront.toml:ro
       # The lane CA, at the ca_bundle_path the lane configuration names: the
       # only authority its payments client trusts for the double.
-      - ./tools/lane-double-controls/tls/lane-ca.pem:/run/payments-lane-double/lane-ca.pem:ro
+      - ./tools/lane-double-controls/tls/lane-ca.pem:/run/lane-doubles/lane-ca.pem:ro
 
   sample-app:
     environment:

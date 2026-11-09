@@ -2,12 +2,13 @@
 
 The commit and servicing stages need a payments target, which the VM lane runs
 as its payments double (PAYMENTS). The operator-end and refund stages also need
-a dispute authority that accepts a filed case, MEDIATION.SERVICE_URL, and report
-a blocked skip naming it where none is configured, as in the lane, whose
-registries recommend an authority that can never answer. Servicing still reads
-the deal running then, because the storefront holds a dispute credential for that
-authority. Provisioning uses the VM lane's mock executor, not a real guest or SSH
-proof.
+the dispute authority the registries recommend, MEDIATION.SERVICE_URL, which the
+lane runs as its mediation double: with no rule installed it accepts the
+seller's filing and holds each part by an extension at the payments double, and
+rules nothing, so the seller's refund reverses the held money. Where no target
+is named they report a blocked skip naming it; an unready lane-owned target
+fails them by name. Provisioning uses the VM lane's mock executor, not a real
+guest or SSH proof.
 """
 
 from __future__ import annotations
@@ -56,6 +57,7 @@ pytestmark = [
         "payments_config", "storefront_loops_held", "alice_loops_held",
         "fulfillment_convergence_held", "lease_watchdog_held",
         "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
+        "lane_doubles_evidence",
     ),
     pytest.mark.e2e_vm_payment_deal,
 ]
@@ -68,7 +70,8 @@ def payments_config():
 
 @pytest.fixture(scope="module")
 def mediation_target():
-    """The case stages' dispute authority; a blocked skip when none is configured."""
+    """The case stages' dispute authority: a blocked skip when none is
+    configured, a failure when the lane's own is not ready."""
     return configured_mediation()
 
 
@@ -220,6 +223,11 @@ def test_operator_end_files_one_case_without_a_local_payment_remedy(
     )
     assert first["settlement_action"] == "delivery_end_filing", first
     assert first["lifecycle_outcome"]["status"] == "accepted", first
+    # With no rule installed the authority accepts the filing and holds every
+    # part by an extension of its own, ruling nothing.
+    filing = first["lifecycle_outcome"]["filing"]
+    assert filing and filing["parts"], first
+    assert all(part["status"] == "held" and part["extension_ref"] for part in filing["parts"]), filing
     assert first["delivery"]["progress"] == "tearing_down", first
     again = storefront_admin_client.admin_interrupt_deal(
         negotiation_id, reason="development hosted VM reclaim",
@@ -229,12 +237,19 @@ def test_operator_end_files_one_case_without_a_local_payment_remedy(
     view = _read(negotiation_id)
     assert view.authority.outcome.status == "accepted", view
     assert len(view.authority.cases) == 1, view
+    (case,) = view.authority.cases
     assert any(event.kind == "filed" for event in view.authority.disputes), view
+    assert not any(event.kind == "ruled" for event in view.authority.disputes), view
     assert len(view.delivery.site_reports) == 1, view
     assert view.delivery.progress == "tearing_down", view
+    # Each part is held at the payments double by the case's own extension.
+    snapshot = _snapshot(payments_config, hosted["transaction"])
     assert all(part.reversed.root == "0" and part.held.root == part.gross.root
-               for part in _snapshot(payments_config, hosted["transaction"]).parts)
-    hosted["case_ref"] = view.authority.cases[0].case_ref
+               for part in snapshot.parts)
+    assert sorted(extension.part for extension in view.authority.extensions) == sorted(
+        str(part.part) for part in snapshot.parts), view
+    assert all(extension.case_ref == case.case_ref for extension in view.authority.extensions), view
+    hosted["case_ref"] = case.case_ref
     purchase = hosted["purchase"]
     purchase.receipt = {"selected_end": view.delivery.recorded_end.model_dump(mode="json")}
     purchase.reports = [item.model_dump(mode="json") for item in view.delivery.site_reports]

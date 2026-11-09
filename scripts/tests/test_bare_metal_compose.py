@@ -45,7 +45,8 @@ def test_bare_metal_compose_merges_bindings_and_preserves_mount_paths(
         "bare-metal-storefront",
     }
     assert set(services) == expected | (
-        {"anvil", "mailpit", "payments-double", "bare-metal-buyer"} if development else set()
+        {"anvil", "mailpit", "payments-double", "mediation-double", "bare-metal-buyer"}
+        if development else set()
     )
     provisioning = services["bare-metal-provisioning"]
     # The base file runs real provisioning; the development overlay appends the
