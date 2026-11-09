@@ -44,7 +44,7 @@ the one its `pyproject.toml` declares.
 | `arkhai-core-storefront` | `core/storefront/` | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-schema-migrations` |
 | `arkhai-core-storefront-client` | `core/storefront-client/` | `arkhai-kit-identity` |
 | `arkhai-core-registry-client` | `core/registry-client/` | `arkhai-core`, `arkhai-kit-identity` |
-| `arkhai-core-registry` | `core/registry/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity` |
+| `arkhai-core-registry` | `core/registry/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity`, `arkhai-kit-schema-migrations` |
 | `arkhai-kit-site` | `kit/site/` | `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-schema-migrations` |
 | `arkhai-kit-site-client` | `kit/site-client/` | `arkhai-kit-identity`, `arkhai-kit-resource-pools-contracts` |
 | `arkhai-kit-capability-shape` | `kit/capability-shape/` | none |

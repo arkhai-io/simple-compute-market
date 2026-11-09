@@ -1,0 +1,799 @@
+{
+  "tables": {
+    "alembic_version": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "version_num",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR(32)"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "version_num",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "api_keys": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "name",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "key_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "'read'",
+          "hidden": 0,
+          "name": "scope",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "revoked_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "key_hash",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "revoked_at",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_api_keys_revoked_at",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "identities": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "publisher_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "'primary'",
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "active_until",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "retired_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "disabled_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "publisher_id"
+          ],
+          "match": "NONE",
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION",
+          "references": [
+            "publisher_id"
+          ],
+          "table": "publishers"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "publisher_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_identities_publisher_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "publisher_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ux_identities_one_primary_per_publisher",
+          "origin": "c",
+          "unique": true,
+          "where": "status = 'primary'"
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "scheme",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "identifier",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ux_identities_scheme_identifier",
+          "origin": "c",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "listings": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "listing_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "publisher_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "listing_resource",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "accepted_escrows",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "settlement_options",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "demands",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "max_duration_seconds",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "oracle_address",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR(7)"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "publisher_id"
+          ],
+          "match": "NONE",
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION",
+          "references": [
+            "publisher_id"
+          ],
+          "table": "publishers"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "listing_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "created_at",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_listings_created_at",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "publisher_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_listings_publisher_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "status",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_listings_status",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "publisher_identity_rotations": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "publisher_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "nonce",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "intent_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "current_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "current_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "replacement_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "replacement_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "overlap_seconds",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "expires_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "applied_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "retire_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "retired_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "publisher_id"
+          ],
+          "match": "NONE",
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION",
+          "references": [
+            "publisher_id"
+          ],
+          "table": "publishers"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "publisher_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "nonce",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "publisher_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_publisher_rotations_publisher_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "publisher_replay_reservations": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "request_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "request_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "response_status",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "response_body",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "lease_owner",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "lease_expires_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "completed_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "principal_scheme",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "principal_identifier",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "request_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "created_at",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_publisher_replay_created_at",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "lease_expires_at",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "idx_publisher_replay_lease_expires_at",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "publishers": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "publisher_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "storefront_url",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [],
+      "strict": false,
+      "without_rowid": false
+    }
+  },
+  "triggers": {},
+  "views": {}
+}
