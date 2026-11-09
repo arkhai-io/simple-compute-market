@@ -839,10 +839,12 @@ keeps its clock synchronized with the stack's to within a second.
 
 A rerun against the same stack reconciles rather than duplicates. The host's
 connection is replaced where it differs and the declaration rewritten, and the
-open listing an earlier run left on the scenario's resource is adopted, paused,
-rather than created, since a publication source backs one listing for good,
-whether it is open or closed. Several listings, a closed one, or one of another
-shape fail naming them, for an operator to recover. The settle stage waits for
+sole open listing on the scenario's resource is adopted, paused, rather than
+created. Closed historical listings retain their bindings and are preserved.
+Closed listings with no open one, several open listings, a listing of unknown
+status, or an open listing of another shape fail naming them, for an operator to
+recover; a closed binding does not authorize creating a replacement. The settle
+stage waits for
 the deal's own `job_submitted` event, filtered by its negotiation and counted
 from a mark taken before settling, because an adopted listing's event log holds
 earlier deals' events.
@@ -881,9 +883,10 @@ without its target it skips before any holds or supply writes. Unit and mock
 pipeline results do not substitute for this physical qualification.
 
 The real-provisioning modules and the qualification modules below share the
-target's resource, and a capacity source backs one listing for good. So the
-resource's listing offers a settlement option for each deal mechanism the
-storefront composes and reports ready, Alkahest and Arkhai payments. On VM
+target's resource and adopt its sole compatible open listing, retaining closed
+historical bindings. That listing offers a settlement option for each deal
+mechanism the storefront composes and reports ready, Alkahest and Arkhai
+payments. On VM
 every module creates or adopts it through one helper
 (`e2e-tests/tests/e2e/roles/scenarios/vms/composed_listing.py`); bare metal's
 published options already are the composed mechanisms. Contact exchange settles
@@ -898,6 +901,15 @@ buyer purchases; the third, observation 6's, makes no deal and runs after them o
 the stack their purchases populated. The payments target is the runner's
 `PAYMENTS` section, with `LANE_OWNED` unset so an unready target is a blocked skip. Without
 either target they report a blocked skip before any hold or write.
+
+VM payments listings take their declared delivery allowance from
+`PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS`, a positive integer number of seconds
+(or a decimal integer string), defaulting to 300. Listing composition and the
+purchase's option check use the same value; the buyer CLI waits at least that
+long. Set the allowance before publishing an offer, with
+`PAYMENTS.DISPUTE_WINDOW_SECONDS` covering it plus the authority's minimum filing
+window. Existing immutable terms must match the run's inputs. This does not
+extend an accepted Agreement, move a clock, or accept late delivery.
 
 - `e2e_vm_qualification` (observation 2) buys two CPU-only guests through
   `market buy`, keeps an SSH heartbeat on the first across the second's create
@@ -915,7 +927,9 @@ either target they report a blocked skip before any hold or write.
   since the service's state guards keep that site's convergence and watchdog
   from restoring anything a faulty reapply removed. Relay-port reconciliation
   runs ungated on both sites, so it compares each quarantined relay lease's whole
-  record, release time included.
+  record, release time included. The listing baseline includes closed history:
+  every identity, state and pause must remain exactly as before, with no added
+  or removed listing, rather than requiring that history contain only one row.
 
 A module failing after the buyer approved a payment refunds it as the seller,
 unless the module had begun ending that purchase, ends a delivered guest or host

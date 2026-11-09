@@ -197,8 +197,12 @@ scenario whose lease ends another way, such as by the buyer's teardown, runs its
 ending stage, which ends in the state teardown completion starts from. A shared stage
 from fulfillment onwards MUST read each input it checks from state an earlier stage
 wrote independently of the lease under check: the expected host from the Alkahest
-settlement preview or from the driver's declared host, and the teardown's fulfillment
-from whichever ending ran.
+settlement preview or from the driver's declared host, the Agreement window from
+accepted terms, and the teardown's fulfillment from whichever ending ran. The
+late-settlement-only stage additionally checks the submitting stage's recorded
+settlement instant; paid purchases do not supply that input. Every shared lease
+check MUST compare activation against both ends of the independently supplied
+Agreement window, allowing its documented clock tolerance at the start.
 
 A shared stage MUST NOT depend on the mock profile. Holding a provisioning job before
 its result, releasing it, and evaluating a mock rule are mock gates: they are stages of
@@ -526,6 +530,30 @@ twice within its capacity, and a bare-metal host its physical machine identity a
 SSH host public key. A relay named by a host is resolved in the provisioning service
 that host's scenario runs against. The section MUST NOT carry the private key the
 provisioning service reaches hosts with, nor any relay token or key.
+
+A VM target MAY name its capacity declaration through `resource_id`. The real
+VM deal, purchase, qualification and reapply scenarios MUST use that identifier
+for registration, listing adoption and capacity checks. Omitted, it MUST retain
+`compute-e2e-real-001`. Each real VM purchase MUST refresh its site projections
+before discovery, including with background lifecycle loops held, so host
+diagnostics do not age out its source confirmation. Before a real purchase
+approves payment, its region query MUST select its intended listing alone; an
+empty, different or ambiguous result MUST refuse the purchase. Selecting a declaration MUST NOT bypass the site's
+single-declaration-per-host invariant.
+
+A bare-metal target MAY name its existing pool and capacity declaration through
+`pool_id` and `resource_id`. When stated, the real deal, purchase, cleanup
+qualification and reapply scenarios MUST reconcile those identifiers. Omitted,
+they MUST retain their default scenario identifiers. Selecting an existing
+declaration MUST NOT bypass refusal of another declaration for the same host or
+physical machine.
+
+#### Scenario: Qualification adopts a registered bare-metal declaration
+
+- **WHEN** the target names the pool and resource already declared for its machine
+- **THEN** registration reconciles that resource rather than creating another
+  declaration, and reapply reports the selected resource
+- **AND** a different declaration for the same host or physical machine is refused
 
 #### Scenario: A field is misspelled
 
@@ -867,6 +895,9 @@ cannot end. A purchase the module ended itself is left as it is.
 - **THEN** existing listings are adopted with identities, states and pauses intact, no
   duplicate host, pool, resource, allocator or listing appears, unexpired relay
   quarantine is retained, and the consumed-UID history is unchanged
+- **AND** the listing comparison preserves the entire existing history, including
+  closed listings; adding, dropping, replacing, reopening or changing the pause of
+  any historical listing fails the observation
 
 #### Scenario: A qualification stage fails after the payment is approved
 
@@ -903,6 +934,41 @@ naming the listing and its options, changing nothing.
 
 - **WHEN** a module finds the resource's listing offering no option of its mechanism
 - **THEN** it fails naming the listing and its options before any deal
+
+#### Scenario: Closed listing history accompanies an open target listing
+
+- **WHEN** the target resource has closed historical listings and exactly one open
+  listing of the required shape offering the module's mechanism
+- **THEN** the module adopts that open listing, preserves the closed history, and
+  creates or reopens no listing
+
+#### Scenario: No unique open target listing exists
+
+- **WHEN** the resource has only closed listings, multiple open listings, or a
+  listing with an unknown status
+- **THEN** the module refuses before any deal, naming the listings and changing
+  none of them; closed history does not permit replacement creation
+
+### Requirement: VM payment scenarios declare their configured delivery allowance
+
+VM payment scenario listings and purchase option checks MUST use
+`PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS`, defaulting to 300 seconds. A named value
+MUST be a positive integer or decimal integer string; malformed values MUST fail
+before publication. The CLI wait MUST be at least that allowance. Configured
+dispute coverage MUST cover it, with authority minimum coverage still validated
+by the service. Accepted Agreement deadlines and late-delivery checks MUST remain
+unchanged by the setting.
+
+#### Scenario: A run declares a longer setup allowance
+
+- **WHEN** the run names a delivery allowance and sufficient dispute coverage
+- **THEN** publication states that allowance, the purchase requires it, and the CLI
+  waits at least that long without changing an existing Agreement
+
+#### Scenario: Delivery allowance is invalid or differs from an existing option
+
+- **WHEN** the setting is malformed, nonpositive, or differs from the option
+- **THEN** publication or the purchase's option check fails before payment
 
 ### Requirement: The real-provisioning target names diagnostics and admission inputs
 

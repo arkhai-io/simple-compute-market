@@ -20,6 +20,7 @@ import ast
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -28,6 +29,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     MAX_CLOCK_WAIT,
     ComputeDealState,
     Stage08b_SettlementSubmittedAndJobQueued,
+    Stage09c_LeaseRecorded,
     wait_until,
 )
 from tests.unit.stage_sources import (
@@ -667,3 +669,27 @@ def test_an_instant_beyond_the_bound_is_refused_without_waiting():
     with pytest.raises(AssertionError, match="refusing to wait"):
         wait_until(start + MAX_CLOCK_WAIT + timedelta(seconds=1), now=clock.now, sleep=clock.sleep)
     assert clock.sleeps == []
+
+
+@pytest.mark.parametrize("activation_offset", [-2.0, -0.5, 0.0, 60.0, 3601.0])
+def test_shared_lease_activation_is_within_the_independent_agreement_window(activation_offset):
+    start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    end = start + timedelta(hours=1)
+    lease = {
+        "id": "lease", "negotiation_id": "negotiation", "host_id": "example-host",
+        "create_job_id": "create-job", "status": "active",
+        "lease_start_utc": start.isoformat(), "lease_end_utc": end.isoformat(),
+        "activated_at_utc": (start + timedelta(seconds=activation_offset)).isoformat(),
+    }
+    view = SimpleNamespace(deal_field="negotiation_id", deal_value="negotiation",
+                           refresh=lambda: lease, is_ledger=True)
+    driver = SimpleNamespace(lease_view=lambda state: view, reserved_resource_id="example-resource")
+    state = ComputeDealState(domain_identity="vms.compute", negotiation_id="negotiation", settlement_ref="negotiation",
+                             settlement_status="ready", fulfillment_id="fulfillment",
+                             expected_host_id="example-host", agreement_start=start, agreement_end=end)
+    if activation_offset < -1 or activation_offset >= 3600:
+        with pytest.raises(AssertionError):
+            Stage09c_LeaseRecorded().test_09c_provisioning_lease_recorded(driver, state)
+    else:
+        Stage09c_LeaseRecorded().test_09c_provisioning_lease_recorded(driver, state)
+        assert state.deal_lease is view
