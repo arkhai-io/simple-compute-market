@@ -18,7 +18,7 @@ from change_workflow.common import FORMAT, StepError
 from change_workflow.find import change_directory
 from change_workflow.log import (append_entry, log_path, note_orchestrator, note_round,
                                  read_log, record_outcome, unused_direction)
-from change_workflow_fixtures import configured
+from change_workflow_fixtures import ACCEPTING, LANDED, configured
 
 CHANGE = "shape-bounds"
 # The review kind the design records below are named for.
@@ -109,8 +109,12 @@ def _validation(commit: str = HEAD, result: str = "passed") -> str:
 
 
 def _log(root: Path, step_name: str, outcome: dict, **extra) -> dict:
+    """A run's line; a finished merge or archive cleanup records the landing branch
+    it fetched, contained in HEAD, unless the outcome gives its own."""
+    if step_name in ("merge", "archive-cleanup") and outcome.get("outcome") == "finished":
+        outcome = {"landing": LANDED, **outcome}
     return record_outcome(log_path(root, CHANGE), step_name, outcome, session="s",
-                          commit=HEAD, extra=extra or None)
+                          commit=HEAD, extra=extra or None, checkout=ACCEPTING)
 
 
 def _review(root: Path, name: str, *, reviewed: str | None = None,

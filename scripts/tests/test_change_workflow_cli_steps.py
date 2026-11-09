@@ -14,13 +14,15 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow.cli import expand_sections, main, parse_sections, split_rules
+from change_workflow.cli import (expand_sections, main, merge_arguments, parse_sections,
+                                 split_rules)
 from change_workflow.common import StepError
 from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow.running import live_runs, recorded_run, select_run, signal_run, stop
-from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, FakeClaude, configured,
-                                      event_lines, log_file, make_wrapper, option, option_rules,
-                                      repository, review_text)
+from change_workflow_fixtures import (ACCEPTING, CHANGE, COMMIT, DENIALS, HEAD, LANDED, VALID,
+                                      FakeClaude, configured, event_lines, log_file,
+                                      make_wrapper, option, option_rules, repository,
+                                      review_text)
 
 
 def _checkout(path: Path) -> Path:
@@ -251,6 +253,70 @@ def test_a_cleaned_up_changes_log_is_printed_from_its_archived_records(
 
     assert [json.loads(line)["step"] for line in capsys.readouterr().out.splitlines()] == [
         "validate"]
+
+
+# `start merge` brings in the branch it is given, else the one the last finished merge
+# recorded, else the one the change's clone recorded.
+
+def _merge_recorded(log: Path, landing: dict | None) -> None:
+    """A finished merge in the log, recording `landing`, or, for a line an engine
+    before the record wrote, none."""
+    outcome = {"outcome": "finished", "message": "Merged.", "next": {"step": "closeout"}}
+    if landing is None:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"seq": 1, "step": "merge", **outcome}) + "\n")
+        return
+    record_outcome(log, "merge", {**outcome, "landing": landing}, session="s", commit=HEAD,
+                   checkout=ACCEPTING)
+
+
+def _cloned(root: Path, base: str) -> Path:
+    """`root` made the change's clone, its marker recording `base`."""
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (root / ".git" / "change-clone.json").write_text(
+        json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": base}), "utf-8")
+    return root
+
+
+def test_a_change_worked_in_place_with_no_recorded_merge_needs_its_branch(
+        tmp_path: Path) -> None:
+    """CW-s3ju, "A change worked in place merges with no base given"."""
+    log_file(tmp_path)
+
+    with pytest.raises(StepError, match="FROM=<branch>"):
+        merge_arguments(tmp_path, CHANGE, "")
+
+
+def test_the_merge_repeated_after_its_review_brings_in_the_branch_it_was_given(
+        tmp_path: Path) -> None:
+    """CW-s3ju, "The merge before closeout is repeated after a review of it": the clone
+    recorded dev, the first merge was given main, and the repeat brings in main."""
+    root = _cloned(tmp_path, "dev")
+    log = log_file(root)
+    assert merge_arguments(root, CHANGE, "") == "from dev"
+    _merge_recorded(log, {**LANDED, "remote": "workspace", "branch": "main"})
+
+    # The recorded branch is taken alone, never its remote.
+    assert merge_arguments(root, CHANGE, "") == "from main"
+    assert merge_arguments(root, CHANGE, "from release/2.1") == "from release/2.1"
+
+
+def test_a_merge_after_the_archive_of_a_change_worked_in_place(tmp_path: Path) -> None:
+    """CW-5vkd, "A merge after the archive of a change worked in place"."""
+    archived = tmp_path / "openspec/changes/archive" / f"2026-10-20-{CHANGE}"
+    _merge_recorded(archived / "reviews" / "workflow.jsonl", {**LANDED, "branch": "main"})
+
+    assert merge_arguments(tmp_path, CHANGE, "") == "from main"
+
+
+def test_an_older_log_records_no_branch(tmp_path: Path) -> None:
+    """CW-5vkd, "An older log records no branch": a change with no clone whose
+    finished merge recorded no landing names FROM."""
+    _merge_recorded(log_file(tmp_path), None)
+
+    with pytest.raises(StepError, match="FROM=<branch>"):
+        merge_arguments(tmp_path, CHANGE, "")
 
 
 def test_a_non_ascii_digit_is_a_section_name() -> None:

@@ -28,13 +28,18 @@ modified CW-s3ju. Touches `.agents/change-outcome.schema.json`,
 `.agents/skills/change-merge/SKILL.md`, `change-archive-cleanup/SKILL.md`,
 `change-orchestrate/SKILL.md`, and `.claude/change-steps.toml`.
 
-- [ ] 1.1 Add the optional `landing` object, `{"remote", "branch", "commit"}`, to the
+- [x] 1.1 Add the optional `landing` object, `{"remote", "branch", "commit"}`, to the
   step outcome schema, and its form to the outcome check: each field a non-empty
   string, the commit a full hexadecimal object name, no other field (D10). Verify:
   unit tests in `scripts/tests/test_change_workflow_outcome.py` accept a well-formed
   `landing` on any outcome, refuse each malformed form naming the field, and accept an
   outcome without it.
-- [ ] 1.2 Make the log's writer, in `record_outcome` and `record_interactive`, require
+  Done: the schema holds the shape (closed, three non-empty strings); the full object
+  name (40 or 64 lower-case hex) is checked in `outcome.outcome_problems`, since the
+  schema check understands no `pattern`. Unit: `test_change_workflow_outcome.py`
+  (`test_a_well_formed_landing_is_accepted_on_any_outcome`, `test_a_malformed_landing_*`,
+  `test_an_outcome_without_landing_is_accepted`) passes.
+- [x] 1.2 Make the log's writer, in `record_outcome` and `record_interactive`, require
   and check `landing` on a merge's `finished` line (D10, CW-5vkd): refuse it absent —
   but for a repair when no finished merge in the log recorded one — or naming a remote
   that is neither one of the checkout's remotes nor `.`, or a commit the line's commit
@@ -46,7 +51,35 @@ modified CW-s3ju. Touches `.agents/change-outcome.schema.json`,
   the merged HEAD finishes", and "A repair of a merge logged before the record
   existed"; a library-integration test with a real repository whose merge commit
   contains the recorded commit and one whose `HEAD` does not.
-- [ ] 1.3 Make the log's writer, for a `finished` archive cleanup line, resolve the
+  Done: `log.landing_problems`, called by `record_outcome` for a finished merge or
+  archive cleanup, with the Git reads injected as `log.Checkout` (`remotes`,
+  `contains(commit, ancestor)`, `base`); `log.git_checkout` reads them through
+  `records.git_remotes` and `records.git_contains`. `record_outcome` refuses a
+  finished merge or cleanup when no checkout is given; the wrapper and `record` pass
+  `git_checkout(root, change)`. "A repair" is read as: an earlier finished merge
+  exists, none recorded `landing`, and the change's latest validation record failed
+  (`_repairs_unrecorded`). The writer does not compare a repair's `landing` with the
+  repaired merge's: it requires one, and the skill says which. Unit:
+  `test_change_workflow_log.py` (`test_a_merges_outcome_records_no_landing_branch`
+  ×3, `test_a_merge_stops_at_a_conflict_it_asks_about` ×3 — no checkout read for them,
+  `test_a_repair_of_the_merged_head_carries_the_landing_it_repairs` — a repair
+  without `landing` refused once a merge recorded one,
+  `test_a_repair_of_a_merge_logged_before_the_record_existed` — the writer's half;
+  the cleanup line read as checked is section 3's guard,
+  `test_a_first_merge_finished_without_landing_is_no_repair`,
+  `test_an_interactive_merge_is_checked_as_an_unattended_one`) passes. Library
+  integration (a real Git repository, no application):
+  `test_the_writer_checks_a_merges_landing_in_a_real_repository` passes.
+  Outside the plan: the wrapper logs a finished merge or cleanup whose landing the
+  writer refuses as `stopped`, the step's message kept (`wrapper.landed_outcome`), as
+  it does a triage naming no records, since a refusal raised inside `record_outcome`
+  would leave the run without a line; unit tests in `test_change_workflow_wrapper.py`
+  (`test_a_merge_whose_landing_the_writer_refuses_is_logged_stopped`,
+  `test_a_merge_recording_its_landing_is_logged_as_it_ended`) pass. The shared fixtures
+  gain `LANDED` and `ACCEPTING`, `make_wrapper` passes `ACCEPTING`, and
+  `test_change_next_step._log` gives a finished merge or cleanup `LANDED`, so the
+  routing tests record merges as the writer now requires.
+- [x] 1.3 Make the log's writer, for a `finished` archive cleanup line, resolve the
   source as cleanup does — the last finished merge's `landing.remote` and
   `landing.branch`, else the clone marker's `base` — refuse the line without a
   well-formed `landing` whenever a source resolves, on every run, reruns included, and
@@ -58,7 +91,21 @@ modified CW-s3ju. Touches `.agents/change-outcome.schema.json`,
   another branch" (the source resolved from the merge's `landing`, not the clone's) and
   the writer's half of "Archive cleanup's fetch fails"; a library-integration test
   computes the containment against a real repository.
-- [ ] 1.4 Make `start merge` (`cli.merge_arguments`) bring in the branch it is given,
+  Done: `log.landing_source` resolves the source (the latest finished merge line
+  recording `landing`, else `Checkout.base`, the clone marker's `base`); the
+  containment is recorded on the line as `landing_contained` (`log.CONTAINED`), the
+  field section 3's guard reads. A cleanup line's remote is not checked against the
+  checkout's remotes, nor its branch against the source: the delta asks only that it
+  be well-formed there, and which branch cleanup fetches is the skill's text. Unit:
+  `test_a_cleanup_line_without_landing_is_refused_when_a_source_resolves` (merge,
+  clone; and again for a rerun after a finished cleanup line),
+  `test_a_cleanup_line_without_a_source_records_no_landing`,
+  `test_a_cleanup_line_records_whether_its_commit_contains_the_landing` (true, false),
+  `test_cleanup_fetches_the_branch_the_merge_was_given` — the source resolved from the
+  merge's `landing`, not the clone's, and named in the refusal — pass. Library
+  integration:
+  `test_the_writer_records_a_cleanups_containment_in_a_real_repository` passes.
+- [x] 1.4 Make `start merge` (`cli.merge_arguments`) bring in the branch it is given,
   else the last finished merge's `landing.branch` read from the change's log, else the
   clone marker's `base` (`find.landing_branch`), and refuse with none, naming `FROM`;
   it takes the branch name alone, never the recorded remote (D10, CW-s3ju). Verify:
@@ -66,7 +113,16 @@ modified CW-s3ju. Touches `.agents/change-outcome.schema.json`,
   scenarios "A change worked in place merges with no base given", "The merge before
   closeout is repeated after a review of it", "A merge after the archive of a change
   worked in place", and "An older log records no branch".
-- [ ] 1.5 Teach `change-merge` to end every `finished` outcome with `landing` — the
+  Done: `cli.merge_arguments` reads `log.recorded_landing` from the change's log;
+  `find.py` needed no edit. Library integration — each runs `git` in a temporary
+  directory, since `find.landing_branch` reads the clone marker through `git
+  rev-parse`, and the clone case holds a real marker: `test_change_workflow_cli_steps.py`
+  (`test_a_change_worked_in_place_with_no_recorded_merge_needs_its_branch`,
+  `test_the_merge_repeated_after_its_review_brings_in_the_branch_it_was_given`,
+  `test_a_merge_after_the_archive_of_a_change_worked_in_place`,
+  `test_an_older_log_records_no_branch`) passes; the existing start tests in
+  `test_change_workflow_cli.py` still pass.
+- [x] 1.5 Teach `change-merge` to end every `finished` outcome with `landing` — the
   remote it fetched from as its checkout names it, `.` for a branch the checkout holds,
   the branch, and the commit fetched, whether or not anything merged — and a repair to
   carry the `landing` of the merge it repairs, read from the log, omitting it only when
@@ -81,19 +137,43 @@ modified CW-s3ju. Touches `.agents/change-outcome.schema.json`,
   archive cleanup skill's text answers the delta scenarios "A merge in a clone fetched
   from the workspace", "The recorded remote is absent from cleanup's checkout", and
   "Archive cleanup's fetch fails".
-- [ ] 1.6 Orchestrator's, on the owner's word, before this section's session starts:
+  Done: `change-merge` states the record in its opening, its outcome, step 3.1 (`git
+  rev-parse <remote>/<base>`), and the repair; `change-archive-cleanup` gains step 1's
+  "Landing branch" check, run on reruns too, reading the whole log (`grep` of
+  `workflow.jsonl`, since `log --last` reads a window) and `find --json`; it reads the checkout's remotes from its Git configuration (`git
+  rev-parse --git-path config`), since no step's rules allow `git remote`.
+  `change-orchestrate`'s merge paragraph passes `FROM` only when the owner names
+  another branch. `make check-agent-skills` passes.
+- [x] 1.6 Orchestrator's, on the owner's word, before this section's session starts:
   add `Bash(git fetch origin *)` and `Bash(git fetch workspace *)` to
   `[steps.archive-cleanup]` in `.claude/change-steps.toml`, under a comment saying
   archive cleanup fetches the branch the last merge brought in (D10). The section's
   session commits it with the section. Verify: `pytest -q
   scripts/tests/test_change_workflow_steps.py` passes; the row loads with both rules.
-- [ ] 1.7 Verification: `pytest -q scripts/tests/test_change_workflow_outcome.py
+  Done: the edit was in the worktree and is committed with the section;
+  `test_change_workflow_steps.py` passes. Owed: its comment ends "(D10)", a citation
+  of this change's design that AGENTS.md's comment rule forbids (the hygiene check
+  does not catch it); no step may edit `.claude/`, so the orchestrator removes it,
+  on the owner's word, in a commit of its own before the round's review.
+- [x] 1.7 Verification: `pytest -q scripts/tests/test_change_workflow_outcome.py
   scripts/tests/test_change_workflow_log.py scripts/tests/test_change_workflow_cli_steps.py
   scripts/tests/test_change_workflow_steps.py scripts/tests/test_find_change.py` (unit,
   and library integration where a real Git repository is used) passes; `make
   check-agent-skills` passes; `scripts/change-workflow run pre-commit merge-after-archive`
   passes, which runs `make test`. End-to-end: none; no scenario exercises the workflow
   tooling.
+  Done: the named suites (390 passed, with `test_check_agent_skills.py` and
+  `test_change_workflow_assumptions.py`), `test_change_workflow_wrapper.py`,
+  `test_change_workflow_cli.py`, and `test_change_next_step.py` pass; `make
+  check-agent-skills` and `make check-comment-hygiene` pass. `scripts/change-workflow
+  run pre-commit merge-after-archive` passed (`after-functional-change`,
+  `pre-commit-functional` with `make test` and the packaging check, and `pre-commit`
+  with the repository's checks) on the section's work before the fresh-context
+  check; its fixes — the skills' log reading, the rerun case in the cleanup test, and
+  these notes — were checked again by `make check-agent-skills` and the log suite. A
+  second pre-commit run overlapped section 2's edits in the worktree and is not
+  evidence for this section. End-to-end: none, confirmed; no scenario in
+  `e2e-tests/` exercises the workflow tooling. Owed by validation: none.
 
 ## 2. The graph declares the merge after the archive, its review, and cleanup's first-exit guard (D1, D2, D4, D5, D6, D8)
 

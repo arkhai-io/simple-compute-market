@@ -77,6 +77,17 @@
       "description": "Any outcome: the tool calls the run was denied, as the run's own record lists them, each with the harness's reason; the wrapper sets this on every outcome, and it is required on stopped.",
       "type": "array",
       "items": {"type": "object"}
+    },
+    "landing": {
+      "description": "finished, from the merge and archive cleanup: the landing branch the run fetched — remote, the remote it fetched from as its checkout names it, or . for a branch the checkout holds; branch, the branch; commit, the full object name of the commit fetched, recorded whether or not anything merged. A repair of a failed validation of the merged HEAD, which fetches nothing, carries the landing of the merge it repairs.",
+      "type": "object",
+      "properties": {
+        "remote": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1},
+        "commit": {"type": "string", "minLength": 1}
+      },
+      "required": ["remote", "branch", "commit"],
+      "additionalProperties": false
     }
   },
   "required": ["outcome", "message"],

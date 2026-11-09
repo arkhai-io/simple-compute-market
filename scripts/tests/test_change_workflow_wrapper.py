@@ -22,8 +22,9 @@ from change_workflow.outcome import harness_schema, load_schema, outcome_problem
 from change_workflow.running import Run, Terminated, live_runs, recorded_run, runs_directory
 from change_workflow.steps import Model, load_steps
 from change_workflow.wrapper import Wrapper
-from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LIMIT, MODELS, NETWORK, OPUS,
-                                      SESSION, VALID, FakeClaude, clock, configured,
+from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LANDED, LIMIT, MODELS,
+                                      NETWORK, OPUS, SESSION, VALID, FakeClaude, clock,
+                                      configured,
                                       event_lines, failed_run, make_wrapper, not_installed,
                                       option, option_rules, without_session_id)
 
@@ -1022,6 +1023,27 @@ def test_a_triage_that_does_not_name_what_it_triaged_is_logged_stopped(
 
 def test_a_triage_that_asks_names_nothing_it_triaged(tmp_path: Path) -> None:
     assert _triage(tmp_path, VALID["question"])["outcome"] == "question"
+
+
+# A finished merge records the landing branch it fetched, which the log's writer checks.
+
+def test_a_merge_whose_landing_the_writer_refuses_is_logged_stopped(tmp_path: Path) -> None:
+    outcome = {"outcome": "finished", "message": "Merged.", "next": {"step": "closeout"}}
+
+    line = make_wrapper(tmp_path, FakeClaude((event_lines(outcome), 0))).run("merge", CHANGE)
+
+    assert line["outcome"] == "stopped"
+    assert "records no landing" in line["reason"]
+    assert line["message"] == f"Merged.\n\n{line['reason']}"
+
+
+def test_a_merge_recording_its_landing_is_logged_as_it_ended(tmp_path: Path) -> None:
+    outcome = {"outcome": "finished", "message": "Merged.", "next": {"step": "closeout"},
+               "landing": LANDED}
+
+    line = make_wrapper(tmp_path, FakeClaude((event_lines(outcome), 0))).run("merge", CHANGE)
+
+    assert (line["outcome"], line["landing"]) == ("finished", LANDED)
 
 
 def test_a_checkout_without_git_has_no_runs_directory(tmp_path: Path) -> None:

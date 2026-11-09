@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -14,9 +15,10 @@ import pytest
 from change_workflow import graph
 from change_workflow.cli import main
 from change_workflow.common import FORMAT, StepError
-from change_workflow.log import (LogError, NewerFormat, append_entry, branch_decisions,
-                                 last_entries, newer, note_orchestrator, note_round, numbered,
-                                 older, open_log, read_log, record_interactive, record_outcome,
+from change_workflow.log import (Checkout, LogError, NewerFormat, append_entry,
+                                 branch_decisions, git_checkout, landing_source, last_entries,
+                                 newer, note_orchestrator, note_round, numbered, older,
+                                 open_log, read_log, record_interactive, record_outcome,
                                  replace_log, revisit_direction, undeclared, unused_direction)
 from change_workflow.outcome import triaged_problems
 from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, clock, descriptors_of,
@@ -946,3 +948,246 @@ def test_a_direction_to_any_other_step_is_used_by_its_run_taking_an_exit(
     # Only the owner's latest direction counts.
     note_orchestrator(log, "closeout", "r", by="owner", next_step="closeout")
     assert unused_direction(read_log(log))["next"] == {"step": "closeout"}
+
+
+# A finished merge, and archive cleanup, record the landing branch they fetched.
+
+MERGED = {"outcome": "finished", "message": "Merged.", "next": {"step": "closeout"}}
+CLEANED = {"outcome": "finished", "message": "Cleaned up.", "next": {"step": "done"}}
+# Full object names: the commit a merge fetched, and the one it ran at.
+FETCHED = "b" * 40
+MERGE_HEAD = "c" * 40
+
+
+def _checkout(*, remotes=("origin", "workspace"), contains=True, base=None) -> Checkout:
+    return Checkout(remotes=lambda: set(remotes), contains=lambda *_: contains,
+                    base=lambda: base)
+
+
+def _landing(**fields) -> dict:
+    return {"remote": "origin", "branch": "main", "commit": FETCHED, **fields}
+
+
+def _merge(log: Path, outcome: dict, checkout: Checkout | None = None) -> dict:
+    return record_outcome(log, "merge", outcome, session="s", commit=MERGE_HEAD,
+                          checkout=checkout or _checkout(), clock=clock)
+
+
+def _cleanup(log: Path, outcome: dict = CLEANED, checkout: Checkout | None = None) -> dict:
+    return record_outcome(log, "archive-cleanup", outcome, session="s", commit=MERGE_HEAD,
+                          checkout=checkout or _checkout(), clock=clock)
+
+
+def _failed_validation(log: Path) -> None:
+    log.parent.mkdir(parents=True, exist_ok=True)
+    (log.parent / "07-validation.md").write_text(
+        f"# Validation\n\n- **Commit:** {MERGE_HEAD}\n- **Result:** failed\n", "utf-8")
+
+
+def test_a_merges_finished_outcome_records_its_landing(tmp_path: Path) -> None:
+    line = _merge(log_file(tmp_path), {**MERGED, "landing": _landing()})
+
+    assert line["landing"] == _landing()
+    assert "landing_contained" not in line
+
+
+@pytest.mark.parametrize("landing,checkout,named", [
+    (None, _checkout(), "records no landing"),
+    (_landing(remote="upstream"), _checkout(), "landing.remote 'upstream' is none of the "
+                                               "checkout's remotes"),
+    (_landing(), _checkout(contains=False), f"landing.commit {FETCHED[:12]} is not contained "
+                                            f"in the run's commit {MERGE_HEAD[:12]}"),
+], ids=["absent", "remote", "commit"])
+def test_a_merges_outcome_records_no_landing_branch(tmp_path: Path, landing, checkout,
+                                                     named: str) -> None:
+    """CW-5vkd, "A merge's outcome records no landing branch"."""
+    log = log_file(tmp_path)
+    outcome = {**MERGED, **({"landing": landing} if landing else {})}
+
+    with pytest.raises(StepError, match="the merge outcome is refused") as refused:
+        _merge(log, outcome, checkout)
+
+    assert named in str(refused.value)
+    assert read_log(log) == []
+
+
+def test_a_merge_of_a_branch_the_checkout_holds_names_no_remote(tmp_path: Path) -> None:
+    line = _merge(log_file(tmp_path), {**MERGED, "landing": _landing(remote=".")},
+                  _checkout(remotes=()))
+
+    assert line["landing"]["remote"] == "."
+
+
+def test_an_interactive_merge_is_checked_as_an_unattended_one(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+
+    with pytest.raises(StepError, match="records no landing"):
+        record_interactive(log, "merge", MERGED, session="s", commit=MERGE_HEAD,
+                           checkout=_checkout())
+    line = record_interactive(log, "merge", {**MERGED, "landing": _landing()}, session="s",
+                              commit=MERGE_HEAD, checkout=_checkout())
+
+    assert line["interactive"] and line["landing"] == _landing()
+
+
+def test_a_finished_merge_is_refused_without_the_checkout_it_ran_in(tmp_path: Path) -> None:
+    with pytest.raises(StepError, match="none was given"):
+        record_outcome(log_file(tmp_path), "merge", {**MERGED, "landing": _landing()},
+                       session="s", commit=MERGE_HEAD)
+
+
+@pytest.mark.parametrize("outcome", [
+    VALID["question"], {**VALID["stopped"], "denials": []}, VALID["returned"]],
+    ids=["question", "stopped", "returned"])
+def test_a_merge_stops_at_a_conflict_it_asks_about(tmp_path: Path, outcome: dict) -> None:
+    """CW-5vkd, "A merge stops at a conflict it asks about": a question at a conflict
+    left in progress, a stop before the fetch, and a proposed return need no landing,
+    and nothing of the checkout is read for them."""
+    unread = Checkout(remotes=lambda: pytest.fail("read the remotes"),
+                      contains=lambda *_: pytest.fail("read the ancestry"),
+                      base=lambda: pytest.fail("read the base"))
+
+    line = _merge(log_file(tmp_path), outcome, unread)
+
+    assert line["outcome"] == outcome["outcome"] and "landing" not in line
+
+
+def test_a_repair_of_the_merged_head_carries_the_landing_it_repairs(tmp_path: Path) -> None:
+    """CW-5vkd, "A repair of the merged HEAD finishes": the repair carries the landing
+    the merge it repairs recorded, and cleanup fetches that remote and branch."""
+    log = log_file(tmp_path)
+    _merge(log, {**MERGED, "landing": _landing(remote="workspace")})
+    _failed_validation(log)
+
+    with pytest.raises(StepError, match="records no landing"):
+        _merge(log, MERGED)
+    _merge(log, {**MERGED, "landing": _landing(remote="workspace")})
+
+    assert landing_source(read_log(log), lambda: "dev") == ("workspace", "main")
+
+
+def test_a_repair_of_a_merge_logged_before_the_record_existed(tmp_path: Path) -> None:
+    """CW-5vkd, "A repair of a merge logged before the record existed": the repair of a
+    merge an older engine logged without landing finishes without it, and cleanup
+    fetches the clone's branch, or, with no clone, nothing."""
+    log = log_file(tmp_path)
+    append_entry(log, {"step": "merge", "session": "s", "commit": MERGE_HEAD, **MERGED})
+
+    # A merge that is no repair, the latest validation not failed, records it.
+    with pytest.raises(StepError, match="records no landing"):
+        _merge(log, MERGED)
+    _failed_validation(log)
+    repaired = _merge(log, MERGED)
+
+    assert "landing" not in repaired
+    assert landing_source(read_log(log), lambda: "dev") == (None, "dev")
+    assert landing_source(read_log(log), lambda: None) is None
+    assert _cleanup(log)["outcome"] == "finished"
+
+
+def test_a_first_merge_finished_without_landing_is_no_repair(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    _failed_validation(log)
+
+    with pytest.raises(StepError, match="records no landing"):
+        _merge(log, MERGED)
+
+
+@pytest.mark.parametrize("merged,source", [
+    (True, "fetches main from origin"), (False, "fetches dev:")], ids=["merge", "clone"])
+def test_a_cleanup_line_without_landing_is_refused_when_a_source_resolves(
+        tmp_path: Path, merged: bool, source: str) -> None:
+    """CW-5vkd, the writer's half of "Archive cleanup's fetch fails": a finished cleanup
+    line without landing is refused while the last merge's landing, or the clone's
+    branch, names what cleanup fetches, on every run."""
+    log = log_file(tmp_path)
+    if merged:
+        _merge(log, {**MERGED, "landing": _landing()})
+    else:
+        log.parent.mkdir(parents=True)
+
+    with pytest.raises(StepError, match="archive-cleanup outcome is refused") as refused:
+        _cleanup(log, checkout=_checkout(base="dev"))
+    assert source in str(refused.value)
+    # A rerun, after a finished cleanup line, records it too.
+    _cleanup(log, {**CLEANED, "landing": _landing()}, _checkout(base="dev"))
+    with pytest.raises(StepError, match=source):
+        _cleanup(log, checkout=_checkout(base="dev"))
+
+
+def test_a_cleanup_line_without_a_source_records_no_landing(tmp_path: Path) -> None:
+    line = _cleanup(log_file(tmp_path), checkout=_checkout(base=None))
+
+    assert "landing" not in line and "landing_contained" not in line
+
+
+@pytest.mark.parametrize("contains", [True, False])
+def test_a_cleanup_line_records_whether_its_commit_contains_the_landing(
+        tmp_path: Path, contains: bool) -> None:
+    line = _cleanup(log_file(tmp_path), {**CLEANED, "landing": _landing()},
+                    _checkout(contains=contains, base="dev"))
+
+    assert line["landing_contained"] is contains
+
+
+def test_cleanup_fetches_the_branch_the_merge_was_given(tmp_path: Path) -> None:
+    """CW-5vkd, "The merge before closeout was given another branch": the source is the
+    merge's landing, not the branch the clone recorded."""
+    log = log_file(tmp_path)
+    _merge(log, {**MERGED, "landing": _landing(branch="main")})
+
+    assert landing_source(read_log(log), lambda: "dev") == ("origin", "main")
+    with pytest.raises(StepError, match="fetches main from origin"):
+        _cleanup(log, checkout=_checkout(base="dev"))
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                           *args], cwd=repo, check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def _merged_repository(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """A repository whose `feat` merged `dev`: its root, the commit `dev` reached, the
+    merge commit, and `feat`'s commit before the merge."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "feat")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "base")
+    _git(repo, "checkout", "-q", "-b", "dev")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "landed")
+    landed = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "feat")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "change")
+    before = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "merge", "-q", "--no-ff", "-m", "merge dev", "dev")
+    _git(repo, "remote", "add", "origin", str(repo))
+    return repo, landed, _git(repo, "rev-parse", "HEAD"), before
+
+
+def test_the_writer_checks_a_merges_landing_in_a_real_repository(tmp_path: Path) -> None:
+    repo, landed, merged, before = _merged_repository(tmp_path)
+    log = log_file(repo)
+    outcome = {**MERGED, "landing": {"remote": "origin", "branch": "dev", "commit": landed}}
+
+    with pytest.raises(StepError, match="is not contained in the run's commit"):
+        record_outcome(log, "merge", outcome, session="s", commit=before,
+                       checkout=git_checkout(repo, CHANGE))
+    line = record_outcome(log, "merge", outcome, session="s", commit=merged,
+                          checkout=git_checkout(repo, CHANGE))
+
+    assert line["landing"]["commit"] == landed
+
+
+def test_the_writer_records_a_cleanups_containment_in_a_real_repository(
+        tmp_path: Path) -> None:
+    repo, landed, merged, before = _merged_repository(tmp_path)
+    log = log_file(repo)
+    outcome = {**CLEANED, "landing": {"remote": "origin", "branch": "dev", "commit": landed}}
+
+    moved = record_outcome(log, "archive-cleanup", outcome, session="s", commit=before,
+                           checkout=git_checkout(repo, CHANGE))
+    checked = record_outcome(log, "archive-cleanup", outcome, session="s", commit=merged,
+                             checkout=git_checkout(repo, CHANGE))
+
+    assert (moved["landing_contained"], checked["landing_contained"]) == (False, True)

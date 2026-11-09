@@ -17,9 +17,19 @@ which then tests the change as it will land.
 
 **The branch you merge** — the *base* below — is the one your invocation names
 after the change: `<change> from <branch>`. The engine names the branch the owner
-gives it (`make merge FROM=<branch>`), or else the branch the change's clone
-recorded as the one it lands on, and refuses to start with neither. Invoked with
-no branch, ask the owner which branch the change will land on; never assume one.
+gives it (`make merge FROM=<branch>`), else the branch the change's last finished
+merge recorded in its outcome's `landing`, else the branch the change's clone
+recorded as the one it lands on, and refuses to start with none. Invoked with no
+branch, ask the owner which branch the change will land on; never assume one.
+
+**Every finished outcome records what you fetched**, as `landing`: `{"remote":
+<the remote you fetched from, as this checkout names it>, "branch": <the base>,
+"commit": <the full object name of the commit you fetched>}`, or `"remote": "."`
+for a base this checkout holds itself and you fetched from nowhere. Record it
+whether or not anything merged. The log's writer refuses a finished merge without
+it, or with a remote this checkout does not name, or with a commit `HEAD` does not
+contain; a question or a stop carries none. Archive cleanup fetches what the last
+finished merge recorded, and a later merge given no branch brings in its branch.
 
 You also decide what the merge needs next, and the owner confirms what costs more
 than the default:
@@ -79,8 +89,9 @@ reads as written:
   is the last.
 - **The end is an outcome.** Once the merge is concluded and pushed and its exit
   chosen (step 7), end with `finished`, `next` that exit — `{"step": "closeout"}`
-  or `{"step": "review", "kind": "pre-closeout"}` — and `message` the report (step
-  8). When the merge shows the change's design or plan no longer holds, end with
+  or `{"step": "review", "kind": "pre-closeout"}` — `landing` what step 3 fetched,
+  or for a repair the landing of the merge it repairs ("Repairing a failed
+  validation"), and `message` the report (step 8). When the merge shows the change's design or plan no longer holds, end with
   `returned`, `next` `{"step": "plan"}` or `{"step": "design"}`, and `evidence`
   naming where you recorded what you found; the owner confirms the return.
 
@@ -94,9 +105,11 @@ end with unattended:
 scripts/change-workflow record <change> merge --outcome '<the outcome, as JSON>'
 ```
 
-Record `finished` or `returned`, never a question or a stop, which the owner,
-present, settles in the session. When the owner waived the validation of the merged
-`HEAD`, record their direction after the outcome (step 7).
+Record `finished`, with its `landing` — which only a repair of a merge logged
+before the record existed omits — or `returned`, never a question or a stop, which
+the owner, present, settles in the session. When `record` refuses the
+`landing`, correct what it names and record again. When the owner waived the
+validation of the merged `HEAD`, record their direction after the outcome (step 7).
 
 ## 1. Check that the merge may start
 
@@ -132,7 +145,10 @@ the latest pre-closeout review and its triage; and the latest validation record.
    them; `origin` in this repository): `git fetch <remote> <base>`; for a change
    worked in its own clone, a branch only the owner's workspace holds comes from its
    `workspace` remote, `git fetch workspace <base>`. The base is then
-   `<remote>/<base>`, written `<base>` below. List what it gained: `git log
+   `<remote>/<base>`, written `<base>` below. Note the commit you fetched, `git
+   rev-parse <remote>/<base>`, with the remote and the base, for your outcome's
+   `landing`; a base this checkout holds itself is recorded with the remote `.` and
+   `git rev-parse <base>`. List what it gained: `git log
    --oneline HEAD..<base>`. When it lists nothing, the base is merged already:
    nothing is merged, and `HEAD` and its validation stand. Go to step 7, which
    advances to closeout without asking.
@@ -270,6 +286,14 @@ failures, with the logs it cites:
   fixture the base changed — is yours: fix it as step 4 does, run step 5's checks,
   commit the repair naming the change and the validation record, push it, and take
   the exit you took before (step 7), whose guard validates the repaired `HEAD`.
+  A repair fetches nothing: its outcome carries the `landing` of the merge it
+  repairs, read from the latest finished merge line that records one in the whole
+  log — `grep '"step": "merge"' <records>/workflow.jsonl`,
+  `scripts/change-workflow find --records <change>` naming the records — so the
+  last finished merge's
+  record stays the branch the merge brought in. Only when no finished merge in the
+  log recorded one — a merge logged before the record existed — does the repair
+  finish without it.
 - A failure the merge did not cause — one the change's own code had before the
   merge, or one the base has — is not yours to fix: ask the owner, with the
   evidence and your recommendation, since only they decide whether it returns the

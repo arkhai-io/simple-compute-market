@@ -25,8 +25,8 @@ from change_workflow import (clone, cli, config, cost_report, diagram, find, his
                              next_step, push, round_view, skills, tasks)
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
-from change_workflow_fixtures import (CHANGE, CONFIGURED, VALID, FakeClaude, configured,
-                                      event_lines, make_wrapper, option_rules)
+from change_workflow_fixtures import (CHANGE, CONFIGURED, LANDED, VALID, FakeClaude,
+                                      configured, event_lines, make_wrapper, option_rules)
 
 REPO = Path(__file__).resolve().parents[2]
 FRAGMENT = REPO / "scripts" / "change_workflow" / "workflow.mk"
@@ -456,7 +456,7 @@ def test_a_session_that_cannot_be_started_is_a_refusal(
 
 def test_an_unattended_start_runs_the_step_through_the_wrapper(tmp_path: Path) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
-    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    claude = FakeClaude((event_lines({**VALID["finished"], "landing": LANDED}), 0))
     launched = Launched()
 
     assert cli.main(["start", "merge", CHANGE, "--arguments", "from dev", "--unattended",

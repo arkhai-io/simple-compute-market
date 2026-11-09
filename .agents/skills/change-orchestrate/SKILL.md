@@ -355,11 +355,16 @@ Never pass a waiver in a validation's `ARGUMENTS`: validation reads waivers only
 from the log, where every later validation, by hand or orchestrated, finds them.
 
 After the pre-closeout triage, the merge step brings the branch the change lands on
-into the change's branch and proposes what follows it. `make merge` merges the
-target's default branch unless given `FROM=<branch>`: pass the branch the change
-was branched from — the `FROM` you created its clone with, or the one the owner
-named — and when you no longer know it, as after compaction, ask the owner rather
-than taking the default. A review of the merge, and closeout without
+into the change's branch and proposes what follows it. Given no `FROM=<branch>`,
+`make merge` brings in the branch the change's last finished merge recorded in its
+outcome's `landing`, else the one its clone recorded, and refuses with neither,
+naming `FROM`. Pass `FROM` only when the owner names another branch than that: the
+merge records the branch it brought in, so every later merge of the change — a
+repair, the merge repeated after its review, a merge after the archive — brings in
+the branch the owner named without your passing it again. For a change worked in
+place, with no clone and no merge recorded yet, the merge refuses until you pass the
+branch the change was branched from, which you ask the owner for when you no longer
+know it. A review of the merge, and closeout without
 validating the merged `HEAD`, are each the owner's to confirm: the merge asks, and
 you relay its question and the owner's answer as with any step. When the owner's
 answer waives the validation, the merge finishes naming closeout and says so;

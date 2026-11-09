@@ -18,7 +18,8 @@ appended to the workflow log, with what the run invoked as `invoked`: what each 
 its attempts' sessions invoked for the change through `run`, and through the
 guarded push, that no line has taken yet. A run that crashes, ends without an outcome, or ends
 with one the schema rejects is logged `stopped` by the wrapper itself, and so is
-a triage whose outcome does not name the records it triaged. A step
+a triage whose outcome does not name the records it triaged, and a finished merge
+or archive cleanup whose landing record the log's writer refuses. A step
 denied a tool ends `stopped` only when it cannot go on without it; one that went
 on is logged with the outcome it ended with, and the orchestrating session reads
 the recorded denials before the change moves on. A run whose session took further
@@ -41,7 +42,8 @@ from .common import ORCHESTRATOR, Clock, Entry, StepError, repository_root, utc_
 from .cost import conversation_file, measured_before, measured_cost, read_conversation
 from .harness import (NETWORK_RETRIES, Runner, claude_command, missing_program, run_claude,
                       unreachable)
-from .log import last_run, log_path, read_log, record_outcome, revisit_direction, revisit_refusal
+from .log import (Checkout, git_checkout, landing_problems, last_run, log_path, read_log,
+                  record_outcome, revisit_direction, revisit_refusal)
 from .outcome import load_schema, outcome_problems, triage_outcome_problems
 from .records import git_head, next_transcript
 from .running import (drop_invocations, invocations_directory, kept_invocations, recorded_run,
@@ -109,6 +111,20 @@ def triage_outcome(outcome: Entry, reviews: Path) -> Entry:
             "reason": reason, "denials": outcome.get("denials", [])}
 
 
+def landed_outcome(outcome: Entry, step: str, log: Path, commit: str | None,
+                   checkout: Checkout) -> Entry:
+    """A merge's or archive cleanup's outcome as it is logged: as the step gave it
+    when the log's writer accepts its landing record, or when it ends without an
+    exit; otherwise `stopped`, naming why, the step's own message kept ahead of the
+    reason. A refusal would otherwise leave the run without a line."""
+    if not (problems := landing_problems(read_log(log), step, outcome, commit, checkout,
+                                         log.parent)):
+        return outcome
+    reason = f"the {step} outcome's landing is refused: " + "; ".join(problems)
+    return {"outcome": "stopped", "message": f"{outcome['message']}\n\n{reason}",
+            "reason": reason, "denials": outcome.get("denials", [])}
+
+
 # The fields of an outcome a later turn of the same run would otherwise hide.
 _EARLIER_FIELDS = ("outcome", "message", "next", "reason", "awaiting")
 
@@ -162,6 +178,9 @@ class Wrapper:
     # Where a session's invocations through `run` and the guarded push wait for its
     # line.
     invocations: Callable[[Path], Path | None] = invocations_directory
+    # What the log's writer reads of the checkout a run ran in, for a change, to check
+    # a merge's or archive cleanup's landing record.
+    checkout: Callable[[Path, str], Checkout] = git_checkout
 
     def run(self, step: str, change: str, *, arguments: str = "",
             sections: Sequence[int | str] | None = None, fresh: bool = False,
@@ -341,9 +360,11 @@ class Wrapper:
             pass
         if step == "triage":
             outcome = triage_outcome(outcome, log.parent)
-        line = record_outcome(log, step, outcome, session=ran,
-                              commit=self.head(self.root), extra=extra, schema=schema,
-                              clock=self.clock)
+        commit = self.head(self.root)
+        checkout = self.checkout(self.root, change)
+        outcome = landed_outcome(outcome, step, log, commit, checkout)
+        line = record_outcome(log, step, outcome, session=ran, commit=commit, extra=extra,
+                              schema=schema, checkout=checkout, clock=self.clock)
         # Forgotten only once the line holds them; a resumed turn's line takes only
         # what the session invoked since.
         for s in sessions:

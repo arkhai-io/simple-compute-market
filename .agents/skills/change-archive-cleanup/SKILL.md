@@ -1,6 +1,6 @@
 ---
 name: change-archive-cleanup
-description: Clean up an archived OpenSpec change once its closeout review's triage has advanced it — release the changes that depend on it, set its index row to `archived`, keep its reviews, commit, draft the merge commit message and pull request description, run the cleanup of the repository's validation parts and commit any file it wrote, push, and copy its history into the owner's workspace. Use when the next-step computation names archive cleanup — a closeout triage's exit, or the owner's direction — and the change's row still says `in closeout`, when the owner says "clean up the archive of <change>", or when `make archive-cleanup` invokes you.
+description: Clean up an archived OpenSpec change once its closeout review's triage has advanced it — fetch and record the branch it lands on, release the changes that depend on it, set its index row to `archived`, keep its reviews, commit, draft the merge commit message and pull request description, run the cleanup of the repository's validation parts and commit any file it wrote, push, and copy its history into the owner's workspace. Use when the next-step computation names archive cleanup — a closeout triage's exit, or the owner's direction — and the change's row still says `in closeout`, when the owner says "clean up the archive of <change>", or when `make archive-cleanup` invokes you.
 ---
 
 # Cleaning up an archived change
@@ -63,13 +63,17 @@ the session, and every turn ends with an outcome matching
   <a checkout>`.
 - **The end is an outcome.** When the index edit and any file the cleanup wrote are
   committed and pushed, the pull request drafted, and the history copied (step
-  10), end with `finished`, `next` the terminal node, `{"step": "done"}`, and the
-  message naming the pull request's opening from the drafts, which the
-  orchestrating session does at `done`; you never create it. A failed cleanup and
-  a history copy that refused a file end `finished` too,
-  with what failed and how to rerun it in the message. A row already `archived`
-  (step 1) ends `finished` once steps 7 to 10 have run again, saying the rest of
-  cleanup had run.
+  10), end with `finished`, `next` the terminal node, `{"step": "done"}`,
+  `landing` what step 1's Landing branch check fetched, and the message naming the
+  pull request's opening from the drafts, which the orchestrating session does at
+  `done`; you never create it. A failed cleanup and a history copy that refused a
+  file end `finished` too, with what failed and how to rerun it in the message. A
+  row already `archived` (step 1) ends `finished` once steps 7 to 10 have run
+  again, saying the rest of cleanup had run. A fetch of the landing branch that
+  failed ends `stopped`, never `finished`, its `reason` naming the fetch: the
+  log's writer refuses a finished line without `landing` whenever there is a branch
+  to fetch, so a failed fetch never passes for a check, and the computation names
+  archive cleanup again, whose rerun fetches.
 
 ## Running interactively
 
@@ -87,11 +91,11 @@ appends it to the change's workflow log with the session's id, `HEAD`, and
 unattended run's. It reads the session's id from `CLAUDE_CODE_SESSION_ID`, which
 `printenv CLAUDE_CODE_SESSION_ID` shows; where the variable is unset it refuses,
 and `--session <id>` gives the id. Record the outcome the session ends with —
-`finished` — never a question or a stop, which the owner, present, settles in the
-session: a recorded stop would wait for a resume only the wrapper makes. When
-`record` refuses, correct what it names and run it again. Run after
-the history copy (step 10), the record reaches the owner's workspace with the next
-copy. Once the row says `archived` the computation names `done` whatever the log
+`finished`, with its `landing` unless step 1 found no branch to fetch — never a
+question or a stop, which the owner, present, settles in the session: a recorded
+stop would wait for a resume only the wrapper makes. When `record` refuses, correct
+what it names and run it again. Run after the history copy (step 10), the record
+reaches the owner's workspace with the next copy. Once the row says `archived` the computation names `done` whatever the log
 holds, so a session closed after that without recording loses only its report;
 closed earlier, it leaves archive cleanup in progress, and the computation names it
 again, to be resumed, or its outcome recorded with the command above.
@@ -111,8 +115,8 @@ again, to be resumed, or its outcome recorded with the command above.
   row already `archived` means steps 3 to 6 ran, after the checks below held: say
   so, skip the Route and Validated checks — the computation names `done` for an
   archived row, and a file step 8 committed would otherwise read as an
-  unvalidated change — and go on from step 7, each step after it being safe to
-  repeat.
+  unvalidated change — run the Landing branch check, and go on from step 7, each
+  step after it being safe to repeat.
 - **Route.** `scripts/change-workflow next <change>` names
   `archive-cleanup`: the exit of the latest closeout review's triage, once any
   validation it owes cleared `HEAD`, or the owner's direction to archive cleanup.
@@ -161,6 +165,33 @@ again, to be resumed, or its outcome recorded with the command above.
   the disposition. The check itself stands: a
   merge carries every commit on the branch, whichever change wrote it.
 - **Worktree.** It is clean, and `scripts/change-workflow check round-view` passes.
+- **Landing branch.** Fetch the branch the change lands on, to record in your
+  outcome's `landing` what you fetched; the engine reads it to tell whether that
+  branch moved while the change was closed out. Run this on every run, a rerun on
+  a row already `archived` included. The source:
+  - the `landing.remote` and `landing.branch` of the latest finished merge line
+    that records one, read from the whole log — `grep '"step": "merge"'
+    <records>/workflow.jsonl`, `scripts/change-workflow find --records <change>`
+    naming the records — never a branch a merge's message names in prose;
+  - else the `base` `scripts/change-workflow find --json <change>` prints, the
+    branch the change's clone recorded, fetched from the remote the merge would
+    choose: the remote the branch tracks in the owner's workspace, `origin` in this
+    repository, or, in a clone, `workspace` for a branch only the owner's workspace
+    holds;
+  - else none: an older log's merge of a change worked in place. Fetch nothing,
+    record no `landing`, and say so in your message; the engine reads the run as
+    checked.
+
+  The remote a merge recorded is named as the checkout it ran in names it, and you
+  run in that checkout, so fetch it as it stands. When it is neither `.` nor one of
+  this checkout's remotes — the `[remote "<name>"]` sections of the configuration
+  `git rev-parse --git-path config` names — ask the owner which source to fetch, and
+  record nothing you guessed. For `.`, a branch this checkout holds itself, fetch
+  nothing and record `{"remote": ".", "branch": <branch>, "commit": <git rev-parse
+  <branch>>}`. Otherwise `git fetch <remote> <branch>`, then record `{"remote":
+  <remote>, "branch": <branch>, "commit": <git rev-parse <remote>/<branch>>}`. When
+  the fetch fails, end `stopped`, its `reason` naming the fetch and what it
+  reported, and commit nothing.
 
 If any check fails, stop and say why.
 
