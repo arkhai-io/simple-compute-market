@@ -982,7 +982,7 @@ HTTP call (D14). No stage steps the storefront's servicing while a ruling waits 
 gate (D15). Each module holds the loops it depends on through the fixtures
 `test_vm_payment_deal.py` uses and records lane-double evidence (`lane_doubles_evidence`).
 
-- [ ] 6.1 Fixtures in `e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`, re-exported
+- [x] 6.1 Fixtures in `e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`, re-exported
       by `tests/e2e/roles/conftest.py` as `lane_doubles_evidence` is (D2, D4, "Scope and
       access"):
       - `lane_double_rules`, module-scoped: installs a rule on either double through
@@ -994,7 +994,19 @@ gate (D15). Each module holds the loops it depends on through the fixtures
         together through `advance_clock` and returns both perceived nows; its
         finaliser, whatever the module's outcome, resets both through `reset_clock`
         and fails naming a double that does not then report a zero offset.
-- [ ] 6.2 The buyer's filing, in `e2e-tests/tests/e2e/roles/helpers/mediation.py` (D14):
+      Done. The objects are `LaneDoubleRules` (`install`, `view` for a rule's
+      counts, `resume`, `delete`, which forgets a rule the module removed, and
+      `remove_all`) and `LaneDoubleClock` (`advance`, `reset`); each fixture runs
+      its cleanup through a context manager, `rules_removed_after` and
+      `clocks_reset_after`, so the unit test drives the same cleanup after a body
+      that raises. `remove_all` reads both listings before deleting, since a
+      deleted rule leaves the listing, attempts every read and deletion through
+      `run_cleanup` whichever fails, and fails only after; a `rule_not_found` on
+      delete is cleanup's success. Both fixtures
+      take `lane_double_controls()`, a blocked skip unless both targets are the
+      lane's own (`PAYMENTS.LANE_OWNED`, `MEDIATION.LANE_OWNED`), since only those
+      offer controls.
+- [x] 6.2 The buyer's filing, in `e2e-tests/tests/e2e/roles/helpers/mediation.py` (D14):
       a helper filing a delivery-end claim (`{kind: delivery_end, ended_at,
       delivered: true, cause: payer}`) as the buyer on a deal it names by negotiation
       id, transaction and accepted Agreement. It builds a `MediationClient` for the
@@ -1007,7 +1019,17 @@ gate (D15). Each module holds the loops it depends on through the fixtures
       filing answer carries the case reference and each part's hold. Declare
       `arkhai-kit-arkhai-mediation` in `e2e-tests/pyproject.toml` (the harness now
       imports it directly) and relock (`make lock PROJECTS=e2e-tests`).
-- [ ] 6.3 Shared stages (D17, D21):
+      Done as `file_as_buyer` (target, negotiation id, transaction, Agreement,
+      store directory, optional `ended_at` and `transport`). It submits through
+      the deal-lifecycle kit's `submit_dispute` — the path `BuyerLifecycle.submit`
+      takes, without its courtesy hint to the storefront, which would be a
+      second side effect — with the adapter in a `DisputeAdapterTable`; the
+      operation key names the deal, since the harness files once per deal. The
+      credential's identity is the target's, so `MediationClient` refuses an
+      Agreement pinning another authority before sending. `e2e-tests` declares
+      `arkhai-kit-arkhai-mediation>=0.3.0`; the kit was already in the lock
+      transitively, so the relock adds only the declaration's two lines.
+- [x] 6.3 Shared stages (D17, D21):
       - `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`: one executor host,
         pool and resource id for each of the six scenarios, as every VM scenario has
         its own.
@@ -1030,7 +1052,47 @@ gate (D15). Each module holds the loops it depends on through the fixtures
         case listing showing no case beyond the scenario's own (D17: a stage that
         files nothing). Should the storefront file a case for that end, the
         implementation stops and reports it, since the design settled none other.
-- [ ] 6.4 `dispute/test_ruled_delivery_end.py` (D15): commit; install through
+      Done, with these placements. `host_registry.py` gains each scenario's
+      resource id beside its host and pool. `payment_deal.py` holds
+      `commit_hosted_deal` (returning a `HostedDeal` with the accepted Agreement)
+      and, beside it rather than in `dispute/stages.py`, the reads
+      `lifecycle_read`, `commit` and `payment_snapshot`, moved out of
+      `test_vm_payment_deal.py` so that module and the dispute modules share one
+      definition (`dispute/stages.py` re-exports `lifecycle_read` and wraps the
+      snapshot as `snapshot_part` and `snapshot_events`). The commit also writes
+      the handoff the shared lease-expiry stages read: the listing, negotiation,
+      fulfillment, `settlement_ref` (the negotiation, as a VM lease is keyed),
+      the lease view and id, and the resource. `dispute/stages.py` holds
+      `DisputeState`, `scenario_driver`, `servicing_step`, `cases`, the commit
+      stage `DisputeStage01_HostedDealCommitted` and the closing
+      `DisputeStageZ_NoFurtherCase`; `dispute/conftest.py` holds the modules'
+      `payments_config`, `mediation_target`, `dispute` and `vm_lifecycle_buyer`
+      fixtures. A module still delivering at its end subclasses
+      `Stage09c2_ArmTeardownGate` (the purchase's ending arms the gate too)
+      through `Stage11b_TeardownCompletion`, then the case-listing stage; since
+      `Stage09c2` and `Stage10a` require `_provisioning_storefront_ok`, every
+      module also subclasses the readiness stages `Stage00`, `00a`, `00b`, `00c`
+      and `00h`. The storefront dispatches a journaled filing only at a
+      servicing step or an operator end (`seller.py`, `dispatch_filings`), and
+      a lease-ended site report can journal one, so
+      `DisputeStageZ_NoFurtherCase` steps servicing once before reading the
+      listing; without the step it could not see such a filing, and a later
+      module's servicing would dispatch it. Where the buyer filed first, the
+      adapter refuses a second delivery-end filing without sending it, so the
+      listing alone would not show one; the stage also reads the lifecycle
+      read's `filings`, the storefront's own, and requires none. The stages read
+      their `DisputeState` prerequisites through `require_state`, so a stage
+      after a failed one reports blocked, not failed. The commit stage runs
+      `commit_hosted_deal`'s several side effects as one, the body the plan
+      moves unchanged out of `test_vm_payment_deal.py`. Beyond the plan:
+      `e2e-tests/tests/unit/test_scenario_cleanup_order.py` globbed each lane's
+      directory without recursing, so it would have skipped `dispute/`; it now
+      recurses. None of the six modules was run in this session: no lane ran,
+      and each scenario's assertions about the storefront and the doubles rest
+      on reading their code; two fresh-context checks read them against the
+      storefront's servicing, the adapter, both doubles and the shared stages,
+      and their corrections are in these notes.
+- [x] 6.4 `dispute/test_ruled_delivery_end.py` (D15): commit; install through
       `lane_double_rules` a mediation rule matching `{"operation": "file",
       "transaction": <the deal's>}` with a ruling (a `RulingBasis` for a payer-filed
       claim, `delivery_end: true`, one `reverse` on part 0 of a stated amount,
@@ -1043,14 +1105,24 @@ gate (D15). Each module holds the loops it depends on through the fixtures
       `tearing_down`; then the teardown to the capacity's release, as the VM payment
       scenario's `Stage12c_CapacityReleasedOnce` proves it. No servicing step runs
       between the filing and the resume.
-- [ ] 6.5 `dispute/test_operator_discount.py` (D6, D17): commit; the buyer files
+      Done. The ruling's basis is `operator` (the contract's bases are
+      `payee_filed`, `payee_signed` and `operator`, and the claim is the
+      payer's); the reverse is a quarter of the part's gross. A stage of its own
+      arms the mock teardown gate before the servicing step, which records the
+      end and site reports into `lifecycle_purchase` for `Stage12c`. Not run
+      (6.3's note).
+- [x] 6.5 `dispute/test_operator_discount.py` (D6, D17): commit; the buyer files
       with no rule — each part held; a servicing step — the storefront's answer on
       the record (an `appended` entry by the seller, a contest, since no surrender
       matches); decide through `ControlClient.decide` a partial `reverse` with no
       delivery end and `close: true` — the snapshot reversing that amount, the
       extension lifted, the case `closed`; a servicing step — delivery `active`, no
       end recorded; the deal's ending (6.3).
-- [ ] 6.6 `dispute/test_lost_filing_answer.py` (D18): commit; install a mediation rule
+      Done; the answer is asserted as one `appended` entry whose actor is
+      `PAYMENTS.SELLER_ACCOUNT` — that it is a contest rather than a
+      concurrence, the plan's wording, is not asserted — and the lift as the
+      snapshot part's open `extensions` emptied. Not run (6.3's note).
+- [x] 6.6 `dispute/test_lost_filing_answer.py` (D18): commit; install a mediation rule
       `{"operation": "file", "transaction": <the deal's>}` with
       `drop_response_after_commit`; the operator end (`admin_interrupt_deal`) — the
       filing's outcome unknown, the end recorded, delivery `tearing_down`, the rule's
@@ -1059,13 +1131,25 @@ gate (D15). Each module holds the loops it depends on through the fixtures
       adopting the one case, the outcome accepted with its case reference; a servicing
       step — the lifecycle read and the case listing each showing exactly one case;
       the teardown to the capacity's release.
-- [ ] 6.7 `dispute/test_mediation_unavailable.py` (D18): commit; the buyer files with
+      Done with the servicing step as the adopting stage: every servicing watch
+      dispatches the deal's pending filings first (`seller.py`, `watch` and
+      `dispatch_filings`), so the storefront retries the filing itself, the
+      plan's second branch. The stage reads the adoption from the lifecycle
+      read's `filings` (one, accepted, naming the double's one case) and the end
+      as first recorded; the next servicing step shows one case at both. A
+      stage of its own arms the mock teardown gate before the operator end. Not
+      run (6.3's note).
+- [x] 6.7 `dispute/test_mediation_unavailable.py` (D18): commit; the buyer files with
       no rule; a servicing step answering it; install mediation *unavailable* (`match:
       {}`); a servicing step — the lifecycle read's authority outcome not accepted, as
       the adapter reports an unreachable authority, delivery `active`; delete the rule;
       a servicing step — the authority read accepted again with the case; the deal's
       ending (6.3).
-- [ ] 6.8 `dispute/test_payments_hold_a_ruling.py` (D16): commit; the buyer files with
+      Done; the unreachable authority is asserted as the lifecycle read's
+      outcome `unknown`, which the adapter answers a transport failure with
+      (the read polls the watch live), and which respondent discovery, whose
+      failed listing the cycle catches, does not change. Not run (6.3's note).
+- [x] 6.8 `dispute/test_payments_hold_a_ruling.py` (D16): commit; the buyer files with
       no rule; a servicing step answering it; install a payments rule `{"route":
       "events", "account": <the authority's account>, "event": "reverse",
       "transaction": <the deal's>}` with `drop_response_after_commit`; decide two
@@ -1077,20 +1161,39 @@ gate (D15). Each module holds the loops it depends on through the fixtures
       *unavailable*; the decision repeated — the case `closed`, the snapshot reversing
       both amounts, each exactly once (two `reverse` events, one per effect id); a
       servicing step — the case closed in the lifecycle read; the deal's ending (6.3).
-- [ ] 6.9 `dispute/test_hold_passed.py` (D18; "A once part's hold is passed"): commit;
+      Done; the amounts are an eighth and a quarter of the part's gross, and
+      the reverse events are read from the buyer's snapshot, their amounts in
+      order and their `effect_id`s distinct. Deleting the drop rule and
+      installing *unavailable* are two stages. Not run (6.3's note).
+- [x] 6.9 `dispute/test_hold_passed.py` (D18; "A once part's hold is passed"): commit;
       the deal's ending (6.3), before any clock moves; advance both doubles through
       `lane_double_clock` past the part's release instant read from its signed
       snapshot — the snapshot showing the part paid out; the buyer files — the answer
       reporting part 0 `not_held` with reason `paid_out`, and the case listing it
       `closed`, dismissed with nothing held. No storefront step follows the advance;
       the fixture resets both clocks when the module ends.
-- [ ] 6.10 Markers, one per module as every VM scenario has its own:
+      Done in two advances where the plan has one: the hosted part's hold is
+      `afterStop`, and a once part stops only at its terms end (`end.at`, the
+      Agreement start plus its hour), which the lease's ending does not move,
+      so its snapshot states no `releaseAt` until then. The first stage
+      advances both doubles past `end.at`, after which the snapshot states
+      `releaseAt` with the money still held; the second advances past
+      `releaseAt` and reads the payout. Each advance is the instant less the
+      payments double's perceived now, plus a second. "Dismissed with nothing
+      held" is read as every part `not_held` and the case `closed`. Not run
+      (6.3's note).
+- [x] 6.10 Markers, one per module as every VM scenario has its own:
       `e2e_vm_dispute_ruled_end`, `e2e_vm_dispute_discount`,
       `e2e_vm_dispute_lost_filing`, `e2e_vm_dispute_mediation_unavailable`,
       `e2e_vm_dispute_payments_hold`, `e2e_vm_dispute_hold_passed`, registered with
       their descriptions in `e2e-tests/pyproject.toml` and added to
       `e2e-tests/Makefile`'s `E2E_MODULE`. No order among them is needed (D21).
-- [ ] 6.11 Verification.
+      Done; the Makefile's comment says why no order is needed: each module
+      removes its rules and resets the clocks. Cases, records and transactions
+      stay behind, each on that module's own deal; after the hold-passed module
+      the payments engine still evaluates that one transaction at its own,
+      later instant, which no other module reads.
+- [x] 6.11 Verification.
       Unit (`make test-e2e-unit`): `e2e-tests/tests/unit/test_lane_doubles_fixtures.py`
       — the rule fixture deletes every rule it installed on both doubles after a
       failing module and names one left waiting; the clock fixture advances both
@@ -1107,6 +1210,60 @@ gate (D15). Each module holds the loops it depends on through the fixtures
       doubles report a zero offset, and the lane's later modules pass.
       Owed by validation: `tests.yml`, job `test · test-e2e-unit` — the harness unit
       suite passes with the fixtures' and the buyer filing's cases.
+      Evidence: unit, `make test-e2e-unit` — 833 passed, 1 skipped.
+      `test_lane_doubles_fixtures.py` (seven cases, each double an in-memory
+      control surface behind `ControlClient` on a mock transport, the cleanup
+      driven through the context managers the fixtures run): every rule a
+      failing body installed deleted on both doubles; a rule the module deleted
+      itself not deleted again; a rule left holding a case named after every
+      rule is deleted; an unreadable listing still leaving no rule installed;
+      the clock advancing both doubles together; both clocks reset after a
+      failing body; a double keeping an offset after its reset named.
+      `test_mediation_helper.py` (two cases, the mediation kit's
+      `MediationContractFake` as the authority behind a mock transport, the real
+      client, adapter, `submit_dispute` and `FileEvidenceStore`): the buyer's
+      filing posts the contract's `Filing` to `/cases` with the delivery-end
+      claim, the buyer's bearer token, the Agreement and transaction, under the
+      adapter's key, a 64-character lowercase hex SHA-256 (its derivation is
+      the kit's, not asserted here), and is accepted with its case reference
+      and parts;
+      an unreachable authority leaves the outcome `unknown` with no case. The
+      unit suite's existing source checks pass over the six modules:
+      `test_scenario_holds.py` (no pause or resume outside the hold helpers),
+      `test_scenario_lane_holds.py` (each module in the VM lane's marker
+      expression holds every lane hold, which also collects them), and, now that
+      it recurses, `test_scenario_cleanup_order.py` (holds released after the
+      module's other cleanup; the lane's cleanup set up). No stage-set check
+      covers these modules: `test_compute_deal_stages.py` holds named lanes'
+      modules to the whole canonical stage order, which a dispute module runs
+      only part of.
+      `scripts/change-workflow run pre-commit`, run last over the finished
+      section: `after-functional-change`, `pre-commit-functional` (`make
+      check-packaging`, then every suite) and `pre-commit` (the index, tasks,
+      skills and strict OpenSpec checks, then `check-repository`, its citations
+      check now resolving every path the plan cites) all passed, exit 0.
+      End-to-end: not run in this session; the six markers and
+      `e2e_vm_payment_deal` (its commit now `commit_hosted_deal`) are
+      validation's pipeline evidence, `make -C e2e-tests test-e2e-vm`.
+      End-to-end scenarios covering the section once deployed:
+      `e2e_vm_dispute_ruled_end`, `e2e_vm_dispute_discount`,
+      `e2e_vm_dispute_lost_filing`, `e2e_vm_dispute_mediation_unavailable`,
+      `e2e_vm_dispute_payments_hold`, `e2e_vm_dispute_hold_passed`, and
+      `e2e_vm_payment_deal` for the moved commit — confirmed.
+      Owed by validation: confirmed as written above.
+      Handoff: these six modules have never run, and validation's pipeline is
+      their first execution; expect its first failures here, read against the
+      code each stage exercises rather than relaxed. The assertions most
+      exposed: 6.4's and 6.6's site reports present right after the end (as the
+      VM payment scenario's operator end finds them); 6.6's lifecycle read
+      `filings` naming the adopted case; 6.8's ruled entry listing both
+      reverses unapplied while payments holds it; 6.9's `releaseAt` appearing
+      once the part's terms end has passed. A failure that shows the
+      storefront files for a lease-expiry end is the stop 6.3 names: report it,
+      since the design settled no such filing. The harness files as the buyer
+      without the courtesy hint `BuyerLifecycle.submit` sends the storefront;
+      the storefront learns of the case by respondent discovery at its next
+      servicing step.
 
 ## 7. The storefront's mediation check
 

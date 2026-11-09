@@ -14,15 +14,36 @@ hands the token to each ``market`` process under that variable, as the buyer's
 own credential resolves it. The credential is bound to the authority's identity,
 MEDIATION.ACCOUNT and MEDIATION.RECORD_KEY at the target's origin, and trusts
 MEDIATION.CA_BUNDLE_PATH alone when one is set.
+
+No buyer command files a case on a deal still delivering, so where a scenario
+needs one the harness files as the buyer itself (``file_as_buyer``): through the
+mediation kit's dispute adapter over its typed client, as the buyer's lifecycle
+submits a filing, never a hand-built request.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+import hashlib
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
+from typing import Any
 
+import httpx
 import pytest
+from market_arkhai_mediation.adapter import MediationAdapter
+from market_arkhai_mediation.client import MediationClient, MediationCredential
+from market_deal_lifecycle.adapters import (
+    DeliveryEndIntent, DisputeAdapterTable, DisputeBinding, submit_dispute,
+)
+from market_deal_lifecycle.terms import decode_terms
+from market_deal_lifecycle_buyer import FileEvidenceStore
+from market_deal_lifecycle_contracts.models import LifecycleCommand, LifecycleOutcome, Rejected
+from market_identity import canonical_json
+from pydantic import SecretStr
 
 from e2e_harness.settings import settings
 from tests.e2e.roles.buyer_cli import _toml_quote
@@ -144,3 +165,57 @@ def buyer_dispute_credential_toml(target: MediationTarget | None) -> tuple[str, 
     if target.ca_bundle_path:
         lines += (f"ca_bundle_path = {_toml_quote(target.ca_bundle_path)}",)
     return lines
+
+
+def file_as_buyer(
+    target: MediationTarget, *, negotiation_id: str, transaction: str,
+    agreement: Mapping[str, Any], store: Path, ended_at: int | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> LifecycleOutcome:
+    """File a delivery-end claim as the buyer on the accepted deal; the dispute
+    adapter's lifecycle outcome.
+
+    The claim is the one the buyer's ``market end`` sends: delivery ended now,
+    delivered, caused by the payer. The client is bound to the target's
+    identity, so an Agreement pinning another authority fails here before
+    anything is sent, and authenticates with the buyer's token, trusting the
+    target's CA bundle alone. The adapter takes its single-writer check and
+    idempotency keys from a buyer evidence store over ``store``, a directory of
+    the caller's own, as the buyer's lifecycle supplies one. An accepted outcome's
+    filing answer carries the case reference and each part's hold. ``transport``
+    replaces the network, for a test.
+    """
+    if not target.buyer_api_key:
+        pytest.fail("MEDIATION.BUYER_API_KEY not configured")
+    terms = decode_terms(agreement["settlement"]["lifecycle"])
+    assert terms is not None, f"the accepted Agreement of {negotiation_id} names no dispute authority"
+    binding = DisputeBinding(negotiation_id, transaction, terms.adjudication.dispute)
+    credential = MediationCredential(
+        (INTERFACE, target.service_url, target.account, target.record_key),
+        token=SecretStr(target.buyer_api_key),
+    )
+    intent = DeliveryEndIntent(
+        ended_at=int(time.time()) if ended_at is None else ended_at, delivered=True, cause="payer",
+    )
+
+    async def file() -> LifecycleOutcome:
+        async with MediationClient(binding.authority, credential, transport=transport,
+                                   ca_bundle=target.ca_bundle_path) as client:
+            adapter = MediationAdapter(binding, dict(agreement), client)
+            request = adapter.build_request(intent)
+            if isinstance(request, Rejected):
+                return request
+            command = LifecycleCommand(
+                negotiation_id=negotiation_id, kind="dispute",
+                # The harness files at most once per deal, so the key names the deal.
+                operation_key=hashlib.sha256(canonical_json(
+                    {"harness": "buyer filing", "negotiation_id": negotiation_id},
+                )).hexdigest(),
+                payload=request.model_dump(mode="json"),
+            )
+            return await submit_dispute(
+                command, binding, DisputeAdapterTable([(INTERFACE, lambda _: adapter)]),
+                FileEvidenceStore(store),
+            )
+
+    return asyncio.run(file())

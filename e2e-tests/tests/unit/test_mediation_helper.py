@@ -11,10 +11,14 @@ fixture, never used on any network.
 
 from __future__ import annotations
 
+import json
+import re
 import tomllib
 from typing import Any
 
+import httpx
 import pytest
+from market_arkhai_mediation.fixtures.authority import MediationContractFake
 from market_deal_lifecycle.configuration import AuthorityIdentity, dispute_config
 
 from tests.e2e.roles.helpers import mediation
@@ -163,3 +167,59 @@ def test_the_buyer_credential_binds_the_authority_and_resolves_the_handed_token(
     environment = mediation.buyer_mediation_environment(target)
     assert environment == {"MEDIATION_BUYER_API_KEY": _LANE_OWNED["BUYER_API_KEY"]}
     assert credential.resolve(environment).get_secret_value() == _LANE_OWNED["BUYER_API_KEY"]
+
+
+# The buyer's filing, against the mediation kit's in-process contract peer: its
+# published authority, Agreement and transaction, and its fixture payer token.
+# The claim's end is a fixed past instant, since the adapter refuses a future one.
+_ENDED_AT = 1_700_000_000
+
+
+def _peer_target(peer: MediationContractFake) -> mediation.MediationTarget:
+    authority = peer.authority
+    return mediation.MediationTarget(
+        service_url=authority["origin"], account=authority["account"],
+        record_key=authority["record_key"], api_key_env="MEDIATION_BUYER_API_KEY",
+        lane_owned=True, buyer_api_key="fixture-payer",
+    )
+
+
+def _file(peer: MediationContractFake, tmp_path, transport: httpx.MockTransport):
+    request = peer.data["filing"]["request"]
+    return mediation.file_as_buyer(
+        _peer_target(peer), negotiation_id="negotiation-fixture",
+        transaction=request["transaction"], agreement=request["agreement"],
+        store=tmp_path, ended_at=_ENDED_AT, transport=transport,
+    )
+
+
+def test_the_buyer_files_the_delivery_end_claim_through_the_adapter(tmp_path) -> None:
+    peer = MediationContractFake()
+
+    outcome = _file(peer, tmp_path, peer.transport())
+
+    (filing,) = [request for request in peer.requests if request.method == "POST"]
+    sent = json.loads(filing.content)
+    assert filing.url.path == "/cases"
+    assert filing.headers["authorization"] == "Bearer fixture-payer"
+    assert sent["request"] == {"kind": "delivery_end", "ended_at": _ENDED_AT,
+                               "delivered": True, "cause": "payer"}
+    assert sent["agreement"] == peer.data["filing"]["request"]["agreement"]
+    assert sent["transaction"] == peer.data["filing"]["request"]["transaction"]
+    # The adapter derives the authority's key, a SHA-256, from the deal and the claim.
+    assert re.fullmatch(r"[0-9a-f]{64}", filing.headers["idempotency-key"])
+    assert outcome.status == "accepted" and outcome.filing is not None, outcome
+    assert outcome.filing.case_ref in peer.cases
+    assert outcome.filing.parts
+
+
+def test_an_unreachable_authority_leaves_the_buyer_s_filing_unknown(tmp_path) -> None:
+    peer = MediationContractFake()
+
+    def unreachable(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    outcome = _file(peer, tmp_path, httpx.MockTransport(unreachable))
+
+    assert outcome.status == "unknown", outcome
+    assert peer.cases == {}
