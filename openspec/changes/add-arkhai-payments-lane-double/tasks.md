@@ -1272,7 +1272,7 @@ Delivers the mediation kit's access check and the VM storefront's
 configuration from its own container"). Requirement: deployment-state "A storefront
 checks its mediation configuration from its own container".
 
-- [ ] 7.1 `kit/arkhai-mediation`: a mediation access check beside the client
+- [x] 7.1 `kit/arkhai-mediation`: a mediation access check beside the client
       (`src/market_arkhai_mediation/access_check.py`), modelled on
       `kit/arkhai-payments/src/market_arkhai_payments/access_check.py`: from a role's
       dispute credentials and an origin it selects the credential, resolves its token,
@@ -1282,11 +1282,41 @@ checks its mediation configuration from its own container".
       request), `credential` (an unresolvable token, before any request), `transport`,
       or `refused` with the authority's code — every detail fixed text plus public
       configuration. It asserts nothing about the read's answer. (D11)
-- [ ] 7.2 `domains/vms/storefront/src/market_storefront/cli.py`:
+      Done: `check_mediation_access(credentials, origin)` and
+      `check_configured_mediation_access(read_credentials, origin)`, whose reader's
+      `ValueError` is the `configuration` step, and `authority_origin`, the origin
+      check both run first (a malformed origin raises `ValueError`: a scheme and a
+      host with an optional port, nothing after, no user part). The outcome's JSON
+      is `{"check": "mediation", "outcome", "origin"}`, plus `step`, `code` and
+      `detail` on a failure; nothing from the read's answer. The credential is the
+      `arkhai.mediation.v1` one whose `origin` equals the given origin exactly; a
+      credential for another interface at that origin is passed over.
+      `configuration` beyond the plan's cases, each an exception building the
+      client would otherwise raise out of the check: more than one such
+      credential naming the origin (two authorities at one origin, which the
+      plan's `--origin` alone cannot choose between, though `serve` binds each by
+      its whole identity; no lane or release configures one); an account or
+      record key the contract refuses; plain HTTP outside loopback. As in the payments
+      check, a bundle failure with no `ca_bundle_path` is `transport`, naming
+      `SSL_CERT_FILE`. The authority is built from the credential's identity with
+      empty `params`, which the contract's `DisputeAuthority` admits; the check has
+      no Agreement to take params from, and the respondent read sends none. The
+      kit README's "Composition" describes it. No version bump: the kit is 0.3.0
+      in this change (3.2). Its floor on `arkhai-kit-deal-lifecycle` rose to
+      0.3.0, since the check reads a credential's `ca_bundle_path` (3.1), and the
+      kit relocked. Beyond the plan: the kit's `tests/integration` became the
+      package `TESTING.md`'s "Test File Layout" requires (`__init__.py`), its
+      modules importing their siblings relatively.
+- [x] 7.2 `domains/vms/storefront/src/market_storefront/cli.py`:
       `check-mediation --origin <authority>` loads configuration as `serve` does, calls
       the kit check, prints one JSON line with no credential, and exits 0 on `ok`, 1 on a
       failed step, 2 on a malformed origin, as `check-payments` does. (D11)
-- [ ] 7.3 Verification.
+      Done: the command module's seams are `dispute_credentials()`, reading
+      `dispute_config(settings.as_dict(), role="seller").credentials` as the
+      settlement composition reads the storefront's dispute configuration (its
+      secret overlay included), and `mediation_transport()`, `None` in
+      production. No version bump: the storefront is 0.28.0 in this change (3.3).
+- [x] 7.3 Verification.
       Unit: `kit/arkhai-mediation/tests` — each failing step and `ok` against an
       injected transport, including an empty and a full respondent listing both `ok`.
       Application integration: `domains/vms/storefront/tests/unit/cli/test_check_mediation.py`
@@ -1295,6 +1325,62 @@ checks its mediation configuration from its own container".
       End-to-end: none in the Compose lanes (D9); section 8's Helm test runs it.
       Owed by validation: `tests.yml`, jobs `test · test-kits` and `test · test-domains`
       — both pass.
+      Evidence: `make -C kit/arkhai-mediation test` — contract and
+      generated-model checks, `mypy` clean, 114 passed, 31 of them new. Unit,
+      `tests/unit/test_access_check.py` (25; the real check, client and
+      credential over a `MockTransport` to the kit's `MediationContractFake`): an
+      empty listing `ok` with one `GET /respondent` under the credential's bearer
+      token; a full listing (a case filed as payer, read as payee) `ok`; the token
+      from the variable `api_key_env` names; `configuration` for no credential,
+      two mediation credentials at the origin, only another interface's (and that
+      one passed over beside a mediation credential, `ok`), an account the
+      contract refuses, plain HTTP off loopback, and a missing, unreadable (a
+      directory) or malformed CA bundle, none sending a request; `credential` for
+      an unset, empty or padded variable, before any request; `transport` for an
+      untrusted certificate's `ConnectError` and for a body outside the contract;
+      `refused` with `authentication_required` for a token the fake does not
+      know; a malformed origin raising `ValueError`; an unreadable configuration
+      `configuration`, the origin checked before the reader runs; one case
+      holding that no outcome — `ok`, and each failing step — carries a token.
+      Library integration, `tests/integration/test_access_check_tls.py` (6; the
+      real check and client against a real TLS listener on loopback, serving a
+      leaf a throwaway CA issued): the CA's bundle as `ca_bundle_path` `ok`;
+      another CA's bundle, or none, `transport` with no request reaching the
+      listener; a loopback port nothing listens on, its connection refused,
+      `transport`; a missing or malformed process `SSL_CERT_FILE` with no
+      `ca_bundle_path` `transport`. An origin whose name does not resolve, which
+      the delta's untrusted-authority scenario also names, is not exercised: it
+      reaches the check as the same `httpx.TransportError` a refused connection
+      does, which the client maps to `MediationTransportError`. The listener and CA helpers moved out of
+      `test_client_tls.py` into `tests/integration/tls_listener.py`, which both
+      modules import.
+      Correction to the application integration line: `tests/unit/cli/test_check_mediation.py`
+      is a unit test, as its sibling `test_check_payments.py` is — the command
+      through Typer's runner, its module's own factories replaced
+      (`dispute_credentials`, `mediation_transport`), the real kit check and
+      client over a mocked HTTP boundary; no application runs. Its cases: `ok`
+      and exit 0 with one respondent read; exit 1 naming `configuration` (no
+      credential, an unreadable configuration), `credential`, `transport` (an
+      untrusted certificate's `ConnectError`) and `refused` with its code; the
+      real reader over the storefront's settings (`replaced_setting`) reading a
+      credential with its `api_key`; exit 2 on a malformed origin with no
+      request; no output carrying the token. `make -C domains/vms/storefront
+      test` (after `make dist-ci-kits` rebuilt the kit's wheel): unit 1174
+      passed, 1 skipped; integration 551 passed.
+      `scripts/change-workflow run pre-commit`, run last over the finished
+      section: `after-functional-change` (it relocked `kit/arkhai-mediation`
+      for the raised floor), `pre-commit-functional` (`make check-packaging`,
+      then every suite, the storefront's and the kit's included) and
+      `pre-commit` (the index, tasks, skills and strict OpenSpec checks, then
+      `check-repository`: comment hygiene, documentation citations, local
+      imports and the rest) all passed, exit 0.
+      End-to-end scenarios covering the section once deployed: none in the
+      Compose lanes (D9); Helm validation's `-mediation-check` pod, which
+      section 8 adds, is its first deployed run.
+      Handoff: section 8's test pod runs `market-storefront check-mediation
+      --origin https://mediation-double:8443`; it passes only if Bob's runtime
+      overlay holds a credential whose `origin` is exactly that string and whose
+      `ca_bundle_path` loads in the pod.
 
 ## 8. The local Helm release
 
@@ -1450,7 +1536,17 @@ implementation. In the order of `openspec/README.md#plan-closeout-requirements`:
         `docs/development/TESTING.md`, the Helm validation paragraph under "4. System
         Integration Tests (End-to-End)" and "Chart Render Tests";
         `docs/operator-handbook.md`, "Payments access"; `docs/development/VALIDATION_RUNBOOK.md`,
-        where it describes `check-payments`.
+        where it describes `check-payments`; `docs/development/DEPLOYMENT_AND_CONFIG.md`,
+        "Settlement consumer configuration and cutover", the paragraph "The
+        storefront payments check" (beside it, the storefront's `check-mediation`,
+        its outcome and steps) and "Storefront agents: pass-through configuration"
+        (the `-mediation-check` test pod beside `-payments-check`);
+        `openspec/specs/deployment-state/architecture.md`, "Arkhai payment consumers",
+        where it says why each storefront CLI's `check-payments` reads from the
+        storefront's own process (the same reason for `check-mediation`);
+        `docs/seller-quickstart.md`, beside its `check-payments` step (a VM seller
+        with a dispute credential runs `check-mediation --origin`); and
+        `kit/arkhai-mediation/README.md`, "Composition" (written in section 7).
       - D12, D13: no permanent destination.
       - D14: `e2e-tests/README.md`, "VM dispute controls" (the harness files as the
         buyer through the mediation kit's dispute adapter, and why no SCM command
