@@ -21,8 +21,10 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from compute_provisioning.hosts.db import Host
+from compute_provisioning.hosts import ConnectionCodecs
+from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning_ansible import SshConnectionCodec
+from compute_provisioning_ansible.runner import inventory_target
 from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.migrations import (
     SchemaDriftError,
@@ -73,8 +75,8 @@ def _engine(path: Path):
 
 def _database_before_the_rewrite(tmp_path: Path, hosts=_HOSTS):
     """A migrated database whose hosts are stored at version 1, with the
-    rewrite's record removed, as a database the previous release migrated
-    holds them."""
+    rewrite's record removed, as a database migrated by the chain without the
+    rewrite holds them."""
     engine = _engine(tmp_path / "provisioning.db")
     run_migrations(engine)
     with engine.begin() as connection:
@@ -129,10 +131,20 @@ def _recorded(engine) -> bool:
         ).first() is not None
 
 
+def _authority(engine) -> HostAuthority:
+    return HostAuthority(
+        sessionmaker(bind=engine), codecs=ConnectionCodecs([SshConnectionCodec()])
+    )
+
+
 def test_version_1_hosts_are_rewritten_with_their_fields_and_ciphertext_as_stored(tmp_path):
     engine = _database_before_the_rewrite(tmp_path)
     hosts_before = _rows(engine, "hosts", "host_id")
     jobs_before = _rows(engine, "ansible_jobs", "id")
+    # Before the rewrite, each job's host is refused where the runner reads it.
+    for job_id, job in jobs_before.items():
+        with pytest.raises(ValueError, match="not an ssh connection at version 2"):
+            inventory_target(_authority(engine).lookup(job["host_id"]))
 
     apply_schema_migrations(engine)
 
@@ -149,17 +161,26 @@ def test_version_1_hosts_are_rewritten_with_their_fields_and_ciphertext_as_store
     assert _recorded(engine)
 
     # The unfinished jobs hold no connection of their own: their rows are
-    # unchanged, and the host each names now reads at the served version.
+    # unchanged, and the host each stored job names now reads at the served
+    # version through the host lookup the job engine is given for dispatch and
+    # the runner's inventory target, which refused it above.
     assert _rows(engine, "ansible_jobs", "id") == jobs_before
-    with sessionmaker(bind=engine)() as db:
-        for job_id, job in _JOBS.items():
-            connection = db.get(Host, job["host_id"]).connection()
-            parsed = SshConnectionCodec.parse(connection)
-            assert parsed.ssh_host == _HOSTS[job["host_id"]]["public"]["ssh_host"], job_id
-            assert connection.protected_schemes() == {
-                name: value["scheme"]
-                for name, value in _HOSTS[job["host_id"]]["protected"].items()
-            }
+    authority = _authority(engine)
+    assert set(jobs_before) == set(_JOBS)
+    for job_id, job in jobs_before.items():
+        execution_host = authority.lookup(job["host_id"])
+        assert execution_host is not None, job_id
+        assert execution_host.connection.version == 2, job_id
+        target = inventory_target(execution_host)
+        stored = _HOSTS[job["host_id"]]["public"]
+        assert (target.ssh_host, target.ssh_port) == (
+            stored["ssh_host"],
+            stored["ssh_port"],
+        ), job_id
+        assert execution_host.connection.protected_schemes() == {
+            name: value["scheme"]
+            for name, value in _HOSTS[job["host_id"]]["protected"].items()
+        }
 
 
 def test_a_connection_version_2_refuses_fails_naming_its_host_and_nothing_is_rewritten(

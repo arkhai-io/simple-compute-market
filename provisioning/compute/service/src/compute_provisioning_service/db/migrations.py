@@ -36,7 +36,6 @@ from compute_provisioning.hosts import ConnectionEnvelope, ProtectedValue
 from compute_provisioning.relays.db import PoolRelay, RelayRetiredGrantKey
 from compute_provisioning_ansible.connection import (
     SSH_CONNECTION_KIND,
-    SSH_CONNECTION_VERSION,
     SshConnectionCodec,
 )
 from compute_provisioning_service.db.models import (
@@ -3646,17 +3645,27 @@ def _migrate_reservation_placement_key(engine: Engine) -> None:
         )
 
 
+_SSH_VERSION_2 = 2
+
+
 def _migrate_ssh_connections_to_version_2(engine: Engine) -> None:
     """Rewrite every host's ``ssh`` connection stored at version 1 to version 2.
 
-    The connection envelope migration stored every existing host at version 1,
-    which no codec serves, so such a host runs no work and a teardown against
-    it fails. Version 2 is version 1 with one optional field, ``public_port``,
-    which falls back to the connection's port when absent, so the mapping is
-    exact: the version changes and the public fields and protected values stay
-    byte for byte as stored. Each connection's public fields are first checked
-    by the version-2 codec, which neither encrypts nor decrypts; if it refuses
-    any, the migration fails naming every refused host and rewrites none.
+    Earlier migrations in this chain store hosts at ``ssh`` version 1, which no
+    codec serves, so such a host runs no work and every job dispatched to it
+    fails before its playbook. Version 2 is version 1 with one optional field,
+    ``public_port``, which falls back to the connection's port when absent, so
+    the mapping is exact: the version changes and the public fields and
+    protected values stay byte for byte as stored. Each connection's public
+    fields are first checked by the ``ssh`` codec, which neither encrypts nor
+    decrypts; if it refuses any, the migration fails naming every refused host
+    and rewrites none.
+
+    The target version is fixed at 2 rather than read from the codec: this
+    mapping is exact only from version 1 to version 2. A codec serving another
+    version refuses every version-2 envelope it is asked to check, so the
+    migration then fails naming each host instead of stamping a version whose
+    fields it never mapped.
 
     Only the host row holds a connection: a job names its host and reads the
     host's connection when it is dispatched, so an unfinished job runs against
@@ -3687,7 +3696,7 @@ def _migrate_ssh_connections_to_version_2(engine: Engine) -> None:
                 codec.validate(
                     ConnectionEnvelope(
                         kind=SSH_CONNECTION_KIND,
-                        version=SSH_CONNECTION_VERSION,
+                        version=_SSH_VERSION_2,
                         public=public,
                         protected={
                             name: ProtectedValue.from_stored(value)
@@ -3700,8 +3709,8 @@ def _migrate_ssh_connections_to_version_2(engine: Engine) -> None:
         if refused:
             raise SchemaDriftError(
                 f"{len(refused)} ssh connection(s) stored at version 1 are not valid at "
-                f"version {SSH_CONNECTION_VERSION}, so none was rewritten; submit each "
-                "host again at version 2, then rerun the migration:\n  "
+                f"version {_SSH_VERSION_2}, so none was rewritten; submit each "
+                f"host again at version {_SSH_VERSION_2}, then rerun the migration:\n  "
                 + "\n  ".join(refused)
             )
         for row in rows:
@@ -3710,13 +3719,13 @@ def _migrate_ssh_connections_to_version_2(engine: Engine) -> None:
                     "UPDATE hosts SET connection_version = :version "
                     "WHERE host_id = :host_id"
                 ),
-                {"version": SSH_CONNECTION_VERSION, "host_id": row["host_id"]},
+                {"version": _SSH_VERSION_2, "host_id": row["host_id"]},
             )
     if rows:
         logger.info(
             "[MIGRATION] Rewrote %d ssh connection(s) from version 1 to version %d",
             len(rows),
-            SSH_CONNECTION_VERSION,
+            _SSH_VERSION_2,
         )
 
 
