@@ -29,7 +29,7 @@ DOUBLE_FIXTURES = REPO_ROOT / "tools/payments-lane-double/fixtures"
 IDENTITIES = REPO_ROOT / "dev-env/identities"
 REGISTRY_PROFILES = REPO_ROOT / "dev-env/registry"
 RUNNER_PINS = REPO_ROOT / "e2e-tests/config/config-docker.yml"
-LANE_CA = REPO_ROOT / "tools/payments-lane-double/tls/lane-ca.pem"
+LANE_CA = REPO_ROOT / "tools/lane-double-controls/tls/lane-ca.pem"
 
 # Each stack's files, in the order e2e-tests/Makefile layers them.
 STACKS = {

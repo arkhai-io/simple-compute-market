@@ -127,7 +127,7 @@ test-buyer-machine:
 		--network=$(NETWORK) \
 		-e ACTIVE_PROFILES=$(RUNNER_PROFILES) \
 		-e CONFIG_DIRECTORY=/app/config \
-		-v $(abspath $(CURDIR)/../tools/payments-lane-double/tls/lane-ca.pem):/run/payments-lane-double/lane-ca.pem:ro \
+		-v $(abspath $(CURDIR)/../tools/lane-double-controls/tls/lane-ca.pem):/run/payments-lane-double/lane-ca.pem:ro \
 		-v $(CURDIR)/tests:/app/tests:ro \
 		-v $(CURDIR)/src:/app/src:ro \
 		-v $(CURDIR)/config:/app/config:ro \

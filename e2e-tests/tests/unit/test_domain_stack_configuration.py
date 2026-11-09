@@ -273,7 +273,7 @@ def test_each_lane_overlay_wires_its_storefront_to_the_double(lane, overlay, ser
 
     assert storefront["depends_on"]["payments-double"] == {"condition": "service_healthy"}
     assert not set(_environment(storefront)) & _PAYMENTS_VARIABLES
-    assert f"./tools/payments-lane-double/tls/lane-ca.pem:{_CA_MOUNT}:ro" in storefront["volumes"]
+    assert f"./tools/lane-double-controls/tls/lane-ca.pem:{_CA_MOUNT}:ro" in storefront["volumes"]
     assert f"./{lane}:/etc/arkhai/storefront.toml:ro" in storefront["volumes"]
 
 

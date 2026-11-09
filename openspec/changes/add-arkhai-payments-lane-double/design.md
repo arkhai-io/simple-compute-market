@@ -276,6 +276,26 @@ models, the route declarations, a typed client and the transport-fault middlewar
 Both doubles and `e2e-tests` depend on it; the doubles themselves stay unimported.
 This is the mock-provisioning split of contracts, client and service.
 
+**Control shapes (settled in section 1).** A rule's `match` is a string map over
+its double's properties: payments matches `route` (`transactions`, `snapshot`,
+`mandate`, `attachments`, `events`, `balances`), `account`, `event` and
+`transaction`; mediation matches `operation`, `filer`, `kind`, `cause` and
+`transaction`. Any other property, or an action its double does not take
+(payments takes no filing answer or ruling), is `422 invalid_request`. A ruling's
+`basis` is validated against the contract's `RulingBasis`, and its `effects` against
+`Effect`. `delivery_end` is a boolean, recording the contract's `end_delivery` at the
+ruling's time, and an `end_delivery` entry in `effects` is refused, so a delivery end
+has one spelling. A filing-answer override is `{status: pending}`, `{status: error,
+code}` with a `MediationFailure` code, or `{status: rejected, reason}` with a
+`FilingRefusalCode`. Neither the health route nor a control route is ever faulted
+or shown to a double's classifier: an orchestrator's liveness probe must not
+restart a double during an outage. The middleware decides nothing itself: each
+double's classifier matches a request against its rules and counts the match in
+the listing, since only the double knows its accounts and rules. A control call
+without the double's control token is `401 authentication_required`. The client
+raises an error status whose body is not a control error with the client-side
+code `unexpected_response`, which no double sends.
+
 **Scope and access.** There are no run scopes: a lane is its own stack, a module holds
 its services, a rule's `match` is its scope, and the scenario's finaliser deletes its
 rules, so a leftover rule shows in the listing. Control routes sit on each double's

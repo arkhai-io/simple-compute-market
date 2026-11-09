@@ -35,4 +35,4 @@ services:
       - ./domains/vms/storefront/storefront.bob.lane.toml:/etc/arkhai/storefront.toml:ro
       # The lane CA, at the ca_bundle_path Bob's lane configuration names: the
       # only authority its payments client trusts for the double.
-      - ./tools/payments-lane-double/tls/lane-ca.pem:/run/payments-lane-double/lane-ca.pem:ro
+      - ./tools/lane-double-controls/tls/lane-ca.pem:/run/payments-lane-double/lane-ca.pem:ro

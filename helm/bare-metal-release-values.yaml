@@ -29,7 +29,7 @@
 #                                           token>", from its committed fixtures
 #   arkhai-bare-metal-provisioning-identity `credential`: Anvil account 9's key
 # Its storefront shares release 1's CA bundle ConfigMap, which the same target
-# creates from the payments lane double's committed lane CA:
+# creates from the lane doubles' committed lane CA:
 #   ConfigMap payments-ca-bundle            `ca-bundle.pem`: the committed lane CA
 # Release 2's provisioning reuses release 1's SSH and runtime Secrets, which mock
 # provisioning does not read for delivery. `topology-check` also needs release

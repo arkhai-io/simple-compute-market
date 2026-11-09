@@ -10,10 +10,11 @@
 # bare-metal-release-values.yaml pin the matching principal to, so anyone can
 # reproduce them and none is secret. The values not derived are committed:
 # provisioning's SSH key, the placeholder the bare-metal Compose lane mounts,
-# since mock provisioning never opens a connection; the payments lane double's
-# lane CA and seller token, from its fixtures, which the storefronts' payments
-# configuration in local-values.yaml and bare-metal-release-values.yaml trusts
-# and authenticates with; and Bob's credential toward the double's pinned
+# since mock provisioning never opens a connection; the lane doubles' lane CA,
+# from the controls project that generates it, and the payments lane double's
+# seller token, from its fixtures, which the storefronts' payments configuration
+# in local-values.yaml and bare-metal-release-values.yaml trusts and
+# authenticates with; and Bob's credential toward the double's pinned
 # dispute authority, from his Compose secret overlay.
 #
 # Inputs:
@@ -29,8 +30,8 @@
 #   DEV_ACCOUNT_BARE_METAL_PROVISIONING release 2's provisioning signer (9)
 #   PROVISIONING_SSH_KEY_FILE          the file both provisioning services mount
 #                                      as their SSH key
-#   PAYMENTS_LANE_CA_FILE              the payments lane double's committed lane
-#                                      CA, the storefronts' CA bundle
+#   PAYMENTS_LANE_CA_FILE              the lane doubles' committed lane CA, the
+#                                      storefronts' CA bundle
 #   PAYMENTS_LANE_ENV                  the double's lane_env.py, which prints its
 #                                      seller token (`seller-token`)
 #   BOB_COMPOSE_SECRETS_FILE           Bob's secret overlay in the Compose stacks,
@@ -215,12 +216,12 @@ apply arkhai-e2e-credentials "config-e2e-secret.yml=$work/config-e2e-secret.yml"
 echo "  arkhai-e2e-credentials: buyer $DEV_ACCOUNT_BUYER, seller $DEV_ACCOUNT_BOB, provisioning admin $DEV_ACCOUNT_PROVISIONING_ADMIN and service $DEV_ACCOUNT_PROVISIONING"
 credential arkhai-buyer-profile-credential "$DEV_ACCOUNT_BUYER"
 
-# Both releases' storefronts' CA bundle, the double's committed lane CA, which
+# Both releases' storefronts' CA bundle, the committed lane CA, which
 # local-values.yaml's double serves under.
 kubectl create configmap payments-ca-bundle --namespace "$NAMESPACE" \
     "--from-file=ca-bundle.pem=$PAYMENTS_LANE_CA_FILE" \
     --dry-run=client --output yaml | kubectl apply --namespace "$NAMESPACE" --filename -
-echo "  ConfigMap payments-ca-bundle: the payments lane double's lane CA ($PAYMENTS_LANE_CA_FILE)"
+echo "  ConfigMap payments-ca-bundle: the lane CA ($PAYMENTS_LANE_CA_FILE)"
 
 # Release 2: the bare-metal storefront and its own provisioning service.
 credential arkhai-bare-metal-storefront-identity "$DEV_ACCOUNT_BARE_METAL_STOREFRONT"

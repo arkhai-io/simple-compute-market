@@ -19,14 +19,25 @@ import (D4), its clock models (D2), and the lane CA moved into it with a
 `mediation-double` leaf (D7). Requirement: "Lane double controls are typed
 deterministic steps".
 
-- [ ] 1.1 Create `tools/lane-double-controls` (import `lane_double_controls`):
+- [x] 1.1 Create `tools/lane-double-controls` (import `lane_double_controls`):
       `pyproject.toml`, `uv.lock`, `Makefile` (`test`, `reinit`, `typecheck`, `check-tls`),
       `README.md`, `src/lane_double_controls/`, `tests/unit/`, `tests/integration/`, built
       into the wheelhouse by `make dist` like every internal distribution. Add root
       `make test-lane-double-controls`, put it in `make test`, and add it to
       `.github/workflows/tests.yml`'s matrix (`scripts/tests/test_tests_workflow.py`
       holds the matrix to `make test`). (D4, "Where the contract lives")
-- [ ] 1.2 Models in `src/lane_double_controls/models.py`: a rule (`rule_id`, required
+      Done. Root `dist-lane-double-controls` is in both `dist` and `dist-ci` (CI's
+      matrix builds with `dist-ci`). `make test` runs reinit, `check-tls`, `mypy --strict`
+      over `src`, then the suite. `requires-python = ">=3.12,<3.14"`, because the
+      mediation kit requires 3.12. Runtime dependencies: the mediation kit, httpx,
+      jsonschema, pydantic; `cryptography` (the generator) and `uvicorn` (loopback fault
+      tests) are dev-only. The middleware is plain ASGI and needs no starlette.
+      `scripts/uv_project.py lock` refuses a project with no `uv.lock`, so the first lock
+      was a header-only seed (`version`, `revision`, `requires-python`) that
+      `make lock PROJECTS=tools/lane-double-controls` then rewrote; section 4's new
+      project needs the same. Scripts suite (`make test-release-tooling`, unit, which
+      includes `test_tests_workflow.py`): 2686 passed.
+- [x] 1.2 Models in `src/lane_double_controls/models.py`: a rule (`rule_id`, required
       `match`, and one of refusal `{status, code}`, `drop_response_after_commit`,
       `unavailable`, or, for mediation, filing-answer override or ruling
       `{basis, delivery_end, effects, close}` with optional `pause_before_effects`);
@@ -36,17 +47,55 @@ deterministic steps".
       `{"code", "message"}`. An *unavailable* rule requires `match: {}` (26 F2). Ruling
       and effect shapes validate against the vendored mediation contract through
       `market_arkhai_mediation.contract`. (D2, D3, D4's table and "Control semantics")
-- [ ] 1.3 Route declarations and a typed sync client (`routes.py`, `client.py`) over
+      Done. The shapes chosen within D4 are recorded in `design.md`, D4, "Control
+      shapes": the boolean `delivery_end` with `end_delivery` refused in `effects`, the
+      basis and effects validated against the contract, the filing-answer forms, and
+      each double's match properties and actions (`MATCH_KEYS`, `ACTIONS`;
+      `Rule.check_supported(double)` refuses others `422 invalid_request` for the
+      doubles to call). `award` validates as the contract allows; whether the double
+      can apply it is section 4's. `ControlError(status, code, message)` is the one error on
+      both sides. `Status.contracts` maps each contract resource name to its SHA-256.
+      `CaseView` (`case_ref`, `transaction`, `agreement`, `state`, `filer`, `kind`,
+      `cause`) is a first cut section 4 may extend. Unit (`tests/unit/test_models.py`):
+      passed.
+- [x] 1.3 Route declarations and a typed sync client (`routes.py`, `client.py`) over
       httpx, authenticated by the control bearer token and trusting a configured CA
       bundle, raising one typed error carrying the control code. Routes live under
       `/test/` on each double's API port. (D4, "Scope and access")
-- [ ] 1.4 The transport-fault ASGI middleware (`middleware.py`): it applies only to the
+      Done. `routes.py` declares each route with the doubles serving it (`routes_for`);
+      resume is mediation's only, since no payments rule waits. `authorize(header,
+      token)` is the control-token check both doubles call. The client sets
+      `trust_env=False` so no runner proxy sees a lane-private name, keeps httpx's own
+      error for a transport failure, and raises `ControlError(…, "unexpected_response",
+      …)` for an error status whose body is not a control error. Unit
+      (`tests/unit/test_routes.py`): passed. Library integration
+      (`tests/integration/test_client.py`): passed — a stand-in over `MockTransport`
+      that answers only the declared methods and paths (404 otherwise) holds each of
+      the twelve client methods to its literal method, path, query and body and to the
+      control token, and checks every declared route has a method; each control code
+      raised as `ControlError`; a loopback HTTPS server with the mediation leaf, trusted
+      through `ca_bundle_path` and refused under default trust. The stand-in is not a
+      double: the client against the doubles' real routes is sections 2 and 4.
+- [x] 1.4 The transport-fault ASGI middleware (`middleware.py`): it applies only to the
       contract's API routes, never to `/test/` routes; *unavailable* starts and then
       abandons every API response; *drop after commit* lets the matching request
       complete in the application, then starts and abandons its response. A matched
       request is counted in the rule listing. (D4, "Transport faults live in the
       doubles", "How a response is abandoned", "Control routes are never faulted")
-- [ ] 1.5 Move the lane CA generator and certificates from
+      Done. The middleware reads the body, hands a `FaultRequest` (method, path,
+      lower-cased headers, body) to the double's classifier, and replays the body to the
+      app. The classifier owns matching and the matched count, since only the double
+      knows its accounts and rules: sections 2 and 4 count a match in the listing
+      (2.5 and 4.8 now verify a fault rule's count). Beside the control routes,
+      `/health` is never faulted or classified (`routes.is_contract_path`): under
+      *unavailable* a Helm liveness probe would otherwise restart the double and drop
+      every deal's state; recorded in D4, "Control shapes". An
+      abandoned response is started with `content-length: 1` and never finished, so the
+      closed connection cannot read as a complete empty answer whatever framing uvicorn
+      picks. Library integration (`tests/integration/test_middleware.py`, the
+      middleware under uvicorn on loopback): passed, each fault raising
+      `httpx.RemoteProtocolError` and the drop's handler running once.
+- [x] 1.5 Move the lane CA generator and certificates from
       `tools/payments-lane-double/tls/` to `tools/lane-double-controls/tls/`, issuing a
       second leaf for `mediation-double` (SANs `mediation-double`, `localhost`,
       `127.0.0.1`), deterministic as before, private keys still generated at image
@@ -58,7 +107,29 @@ deterministic steps".
       holding mounts to sources (`scripts/tests/test_lane_compose.py`,
       `scripts/tests/test_committed_stack_values.py`). `check-tls` regenerates both
       leaves and requires them unchanged. (D7)
-- [ ] 1.6 Verification.
+      Done. The files are `lane-ca.pem`, `payments-double.pem` and
+      `mediation-double.pem` (keys `<service>.key.pem`, ignored by `.gitignore`); the CA
+      is named `lane doubles CA (public development value)`, so its bytes and the
+      payments leaf's changed, and every reader takes them from the files. The payments
+      image still places the CA, leaf and key at `/opt/payments-lane-double/tls/`
+      (`lane-ca.pem`, `double.pem`, `double.key.pem`), so `compose.payments-double.yml`'s
+      healthcheck and the `payments-lane-double` chart needed no edit. Repointed beyond
+      the list: `e2e-tests/tests/unit/test_payments_helper.py` and
+      `test_domain_stack_configuration.py`, `helm/tests/test_release_topology.py`, the
+      payments double's `tests/integration/test_lane_env.py` and `Dockerfile.dockerignore`,
+      `.gitignore`, `dev-env/identities/README.md` (its prose and restated-value table),
+      the lane CA's provenance in `docs/development/DEPLOYMENT_AND_CONFIG.md`'s
+      `make helm-topology-secrets` bullet, `helm/scripts/topology-secrets.sh`,
+      `helm/Makefile`, `helm/bare-metal-release-values.yaml` and comments in two tests,
+      and the false `check-tls` statements in `tools/README.md` and the payments
+      double's README; the
+      payments double's `check-tls`/`tls` targets and `tests/unit/test_tls.py` moved into
+      the controls project. Compose mount targets stay `/run/payments-lane-double/…`
+      (section 5 decides any new path). The certificates were written with the Write tool
+      from the generator's output, since this run's `make -C tools/lane-double-controls
+      tls` was denied; `check-tls` confirms them byte for byte. `make
+      build-payments-lane-double` built the image.
+- [x] 1.6 Verification.
       Unit (`tools/lane-double-controls/tests/unit`): every refusal of D4's "Control
       semantics" table at the model level — a rule without `match`, an *unavailable*
       rule with a non-empty `match`, a malformed ruling or effect, an empty effect list
@@ -74,6 +145,39 @@ deterministic steps".
       package's `make test` passes, `check-tls` included; and job
       `test · test-payments-lane-double` — the payments double's suite passes against
       the moved certificates.
+      Evidence: `make -C tools/lane-double-controls test` — `check-tls` passed, `mypy
+      --strict` clean, 112 passed (unit: models, routes, TLS generator against the
+      committed CA and both leaves; library integration: middleware under loopback
+      uvicorn, typed client). `make -C tools/payments-lane-double test`: 43 passed
+      against the moved certificate. `make test-e2e-unit` (unit): 786 passed, 1 skipped.
+      `make -C helm test-render` (render and release-topology units): passed.
+      `scripts/change-workflow run pre-commit`: `after-functional-change` and
+      `pre-commit-functional` passed, `make check-packaging` included (locks, layout,
+      architecture); `pre-commit`'s `check-repository` failed only on the citations
+      check, for three paths the plan cites that sections 4 and 6 create
+      (`tools/mediation-lane-double/README.md`,
+      `e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`,
+      `e2e-tests/tests/e2e/roles/scenarios/vms/test_vm_dispute_controls.py`), cited
+      since planning.
+      End-to-end scenarios covering the section once deployed: none; the lanes first
+      run the package in section 5.
+      Handoff: a fault is observable only through a real server — httpx's
+      `ASGITransport` asserts on a response the app never completes rather than
+      raising a transport error — so section 2's drop-after-commit and *unavailable*
+      cases must serve the payments double under uvicorn on loopback, as
+      `tests/loopback.py` here does (each project keeps its own copy, as the
+      storefronts do). Declaring `lane-double-controls` in the payments double raises
+      its `requires-python` floor to 3.12. Running the payments double outside its
+      image takes the leaf and key copied under the image's names (its README, "Running
+      it"); 2.1 may let `Settings` read the generator's names instead. Left for the
+      owner: `make dist` now builds the controls wheel, as 1.1 prescribes, and
+      `dist-release` is `make dist`, so the release workflow's
+      `marketplace-wheelhouse.tar.gz` carries this development-only wheel; keeping it
+      out means a release aggregate without it, to settle before section 5 makes
+      `e2e-tests` depend on the wheel. For 9.9: `tools/README.md`'s "Lane
+      collaborators" says nothing imports a collaborator and it ships only as an image,
+      which the controls package (imported, a wheel) does not fit; promotion amends that
+      definition or adds a category rather than only an entry.
 
 ## 2. The payments double's controls, perceived clock and claimed surface
 
@@ -114,7 +218,10 @@ controls are typed deterministic steps".
       commit on an approval retried under the same key returns the original receipt with
       no second debit; *unavailable* refuses API routes while `/test/status` answers;
       signer rotation signs later snapshots with the second key; status hashes equal
-      the kit's installed contract hashes.
+      the kit's installed contract hashes; a drop-after-commit and an *unavailable*
+      match each counted in the rule listing, the classifier counting it (section 1's
+      middleware leaves matching and counting to the double); `/health` answering
+      under *unavailable*.
       End-to-end: none in this section; section 5's lanes run this double.
       Owed by validation: `tests.yml`, job `test · test-payments-lane-double` — the
       double's `make test` passes with the new suites.
@@ -216,7 +323,8 @@ perceived clock the scenario advances".
       without duplicates; appends, concurrence and the closed-case refusal; record
       cursors and the empty page; the respondent listing answered by an append; a lost
       filing response adopted under the same key; *unavailable* with control routes
-      answering; a clock advance past a once hold yielding `not_held` with `paid_out`.
+      answering, and its match and the lost filing's counted in the rule listing; a
+      clock advance past a once hold yielding `not_held` with `paid_out`.
       End-to-end: none in this section; the HTTP hop to the payments double is first
       exercised in section 5.
       Owed by validation: `tests.yml`, job `test · test-mediation-lane-double` — the

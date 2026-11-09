@@ -58,6 +58,8 @@ RELEASE_TWO_VALUES = (*RELEASE_ONE_VALUES, OVERLAY)
 # The payments lane double, whose committed fixtures the releases' payments
 # values restate, and the script a Compose lane reads them with.
 DOUBLE = UMBRELLA.parent / "tools" / "payments-lane-double"
+# The lane CA, which the controls project generates for both lane doubles.
+LANE_CA = UMBRELLA.parent / "tools" / "lane-double-controls" / "tls" / "lane-ca.pem"
 _LANE_ENV_SPEC = importlib.util.spec_from_file_location("lane_env", DOUBLE / "scripts" / "lane_env.py")
 assert _LANE_ENV_SPEC is not None and _LANE_ENV_SPEC.loader is not None
 lane_env = importlib.util.module_from_spec(_LANE_ENV_SPEC)
@@ -589,7 +591,7 @@ def _rendered_names(manifest: str, kind: str) -> set[str]:
 
 def test_topology_secrets_creates_every_configmap_the_releases_read_and_no_chart_renders() -> None:
     """The one such ConfigMap is the storefronts' CA bundle, created from the
-    payments lane double's committed lane CA under the key both storefronts
+    lane doubles' committed lane CA under the key both storefronts
     mount; `check-local-secrets` checks for it. Neither storefront reads a
     payments key from a Secret key: the key is in the runtime Secret's overlay
     each mounts (scripts/tests/test_change_build_and_helm_targets.py runs the
@@ -602,7 +604,7 @@ def test_topology_secrets_creates_every_configmap_the_releases_read_and_no_chart
 
     assert referenced - rendered == created == set(_make_words("LOCAL_CONFIGMAPS")) == {"payments-ca-bundle"}
     assert '"--from-file=ca-bundle.pem=$PAYMENTS_LANE_CA_FILE"' in script
-    assert (UMBRELLA / _make_variable("PAYMENTS_LANE_CA_FILE")).resolve() == DOUBLE / "tls" / "lane-ca.pem"
+    assert (UMBRELLA / _make_variable("PAYMENTS_LANE_CA_FILE")).resolve() == LANE_CA
     assert (UMBRELLA / _make_variable("PAYMENTS_LANE_ENV")).resolve() == DOUBLE / "scripts" / "lane_env.py"
     for manifest, chart, runtime in (
         (release_one, "storefront", "arkhai-bob-runtime"),

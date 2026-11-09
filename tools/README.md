@@ -175,13 +175,12 @@ restating them — and unlike a developer tool it is not invoked through
 ### `payments-lane-double/`
 
 An HTTPS double of the Arkhai Payments service, mirroring its API over the
-payments kit's engine, with committed public development fixtures and a lane
-CA. Its [README](payments-lane-double/README.md) says what it serves, what its
-results establish and what they do not.
+payments kit's engine, with committed public development fixtures, served under
+the lane CA `tools/lane-double-controls/tls/` generates. Its
+[README](payments-lane-double/README.md) says what it serves, what its results
+establish and what they do not.
 
-- `make test` (in its directory) runs its unit and library-integration suites
-  and `check-tls`, which regenerates the committed certificates and requires
-  them unchanged.
+- `make test` (in its directory) runs its unit and library-integration suites.
 - From the repository root, `make test-payments-lane-double` runs its
   `make test` and is part of `make test` and the Tests workflow's matrix.
 - `make build-payments-lane-double`, part of `make build-dev` and each lane's

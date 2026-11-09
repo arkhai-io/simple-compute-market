@@ -243,10 +243,10 @@ pi-session-*.html
 mise.local.toml
 .claude/skills/implement-change/SKILL.md
 
-# The payments lane double's leaf key, which `make -C tools/payments-lane-double tls`
-# writes beside the committed certificates; the image build generates its own, and
-# the secret gate refuses a committed private key block.
-tools/payments-lane-double/tls/double.key.pem
+# The lane doubles' leaf keys, which `make -C tools/lane-double-controls tls` writes
+# beside the committed certificates; each double's image build generates its own,
+# and the secret gate refuses a committed private key block.
+tools/lane-double-controls/tls/*.key.pem
 
 # Review records written while an OpenSpec change is worked; never tracked.
 openspec/changes/**/reviews/

@@ -226,10 +226,12 @@ the lane's settings in `e2e-tests/config/config-docker.yml` pin the same one. Th
 Each lane runs the payments lane double (`compose.payments-double.yml`), and its
 payment storefront — Bob's VM storefront, the bare-metal storefront, the credits
 storefront — settles against it. The double's own values live with it, in
-`tools/payments-lane-double/fixtures/` and `tls/`, documented in its
+`tools/payments-lane-double/fixtures/`, documented in its
 [README](../../tools/payments-lane-double/README.md): the receipt-signing seed and
-identity, the buyer's and seller's payments accounts and bearer tokens, the
-pinned dispute authority, and the lane CA. Where a stack needs one of them, a
+identity, the buyer's and seller's payments accounts and bearer tokens, and the
+pinned dispute authority. The lane CA it serves under is generated in
+`tools/lane-double-controls/tls/` ([README](../../tools/lane-double-controls/README.md#tls)).
+Where a stack needs one of them, a
 committed file here or beside a stack restates it, and repository tests hold
 each restatement to its fixture:
 
@@ -237,7 +239,7 @@ each restatement to its fixture:
 |---|---|---|
 | the seller's bearer token | `[Settlement.arkhai_payments].api_key` in `bob.storefront.secrets.toml`, `bare-metal.storefront.secrets.toml` and `api-credits.storefront.secrets.toml` | each lane storefront's payments key at the double |
 | the pinned dispute authority | `dev-env/registry/config-payments-lane.env` | the lanes' registries' recommended dispute authorities, one JSON line |
-| the lane CA's path | `ca_bundle_path` in each lane storefront configuration | where each lane overlay binds `tools/payments-lane-double/tls/lane-ca.pem` |
+| the lane CA's path | `ca_bundle_path` in each lane storefront configuration | where each lane overlay binds `tools/lane-double-controls/tls/lane-ca.pem` |
 
 The test runner reads the lanes' payments settings from committed profiles,
 which restate the double's values too: `e2e-tests/config/config-payments-lane.yml`

@@ -898,8 +898,9 @@ pod reads the double's seller account. The release serves no payment scenario.
   change's validation namespace), deriving each key with `cast` from Foundry's
   default development mnemonic at `helm/Makefile`'s `DEV_ACCOUNT_*` indices
   (development values only); provisioning's SSH key is the committed mock
-  placeholder, `PROVISIONING_SSH_KEY_FILE`. From the payments lane double's committed
-  fixtures it takes the lane CA for the ConfigMap and the seller's token, which it
+  placeholder, `PROVISIONING_SSH_KEY_FILE`. It takes the committed lane CA, from
+  `tools/lane-double-controls/tls/`, for the ConfigMap, and from the payments lane
+  double's committed fixtures the seller's token, which it
   writes as `[Settlement.arkhai_payments] api_key` into both storefronts' runtime
   overlays, and it copies Bob's `[[DisputeCredential]]` from his Compose secret
   overlay, `dev-env/identities/bob.storefront.secrets.toml`, so both stacks hold one

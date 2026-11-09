@@ -74,7 +74,7 @@ services:
       - ./kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
       # The lane CA, at the ca_bundle_path the storefront's configuration names:
       # the only authority its payments client trusts for the double.
-      - ./tools/payments-lane-double/tls/lane-ca.pem:/run/payments-lane-double/lane-ca.pem:ro
+      - ./tools/lane-double-controls/tls/lane-ca.pem:/run/payments-lane-double/lane-ca.pem:ro
 
   # A one-shot buyer in the `buyer` profile, which the lane never starts: the
   # lane's scenarios drive the buyer through typed clients from the test runner.

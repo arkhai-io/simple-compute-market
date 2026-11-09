@@ -26,12 +26,13 @@ LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime
 	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh
 # ConfigMaps the release's workloads read under $(LOCAL_VALUES) and no chart
 # creates, provisioned out of band the same way: the storefronts' CA bundle,
-# which holds the payments lane double's committed lane CA.
+# which holds the lane doubles' committed lane CA.
 LOCAL_CONFIGMAPS := payments-ca-bundle
-# The payments lane double's committed fixtures topology-secrets reads: the lane
-# CA, and the script that prints the seller's token from its account directory.
-# Public development values, never for a public network.
-PAYMENTS_LANE_CA_FILE := ../tools/payments-lane-double/tls/lane-ca.pem
+# The committed lane doubles' files topology-secrets reads: the lane CA, from the
+# controls project that generates it, and the script that prints the seller's
+# token from the payments double's account directory. Public development values,
+# never for a public network.
+PAYMENTS_LANE_CA_FILE := ../tools/lane-double-controls/tls/lane-ca.pem
 PAYMENTS_LANE_ENV := ../tools/payments-lane-double/scripts/lane_env.py
 # Bob's secret overlay in the Compose stacks, whose [[DisputeCredential]] toward
 # the double's pinned dispute authority topology-secrets copies into his runtime

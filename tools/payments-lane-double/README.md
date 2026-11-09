@@ -65,10 +65,10 @@ service's ledger, funding or availability.
 
 ## Fixtures
 
-Every value under `fixtures/` and `tls/` is a public development value, for lanes
-and local releases. Never use one on a public network. The fixtures and the two
-certificates are committed; the leaf key is generated from the generator's seed
-(see TLS).
+Every value under `fixtures/`, and the lane CA and leaf it serves with, is a
+public development value, for lanes and local releases. Never use one on a public
+network. The fixtures and the certificates are committed; the leaf key is
+generated from the generator's seed (see TLS).
 
 - `fixtures/accounts.toml` — the asset and fee policy, the receipt-signing seed and
   the identity it yields (distinct from `FakePaymentsClient`'s), and the buyer,
@@ -84,19 +84,14 @@ certificates are committed; the leaf key is generated from the generator's seed
 
 ## TLS
 
-`tls/generate.py` derives the lane CA's and the double's keys from fixed seeds and
-writes the CA certificate (`lane-ca.pem`), the double's leaf certificate
-(`double.pem`, for `payments-double`, `localhost` and `127.0.0.1`) and its key
-(`double.key.pem`), with fixed serials and validity ending 9999-12-31. Ed25519
-signatures are deterministic, so the output is the same bytes on every run. The CA's
-private key is never written to a file, but its seed is in the generator, so anyone
-can issue a certificate under the lane CA: it is trusted only inside lanes and local
-releases. The two certificates are committed. The leaf key is not, since the
-repository's secret gate refuses a private key block: the image build runs the
-generator and takes the key from it, the same bytes every time. `make check-tls`,
-part of `make test`, regenerates into a temporary directory and fails unless the
-committed certificates are identical; `make tls` rewrites them and writes the key
-beside them, ignored by Git, for running the double outside its image.
+The lane CA is the lane doubles' one CA, generated in the controls project
+([`tools/lane-double-controls/tls/`](../lane-double-controls/README.md#tls)),
+which also issues the mediation double's leaf. The double serves its leaf,
+`payments-double.pem`, for `payments-double`, `localhost` and `127.0.0.1`. The
+certificates are committed; the leaf key is not, since the repository's secret
+gate refuses a private key block: the image build runs the generator and takes
+`payments-double.key.pem` from it, the same bytes every time, and places the leaf
+and its key at `tls/double.pem` and `tls/double.key.pem`.
 
 Callers trust the lane CA through their payments configuration's
 `ca_bundle_path`, which the kit's client verifies the double against alone; it
@@ -113,6 +108,10 @@ its own server certificate mounts it over `tls/double.pem` and `tls/double.key.p
 there. Outside the image, `python -m payments_lane_double` reads
 `PAYMENTS_LANE_DOUBLE_FIXTURES`, `PAYMENTS_LANE_DOUBLE_TLS`,
 `PAYMENTS_LANE_DOUBLE_HOST` and `PAYMENTS_LANE_DOUBLE_PORT`.
+`PAYMENTS_LANE_DOUBLE_TLS` names a directory holding the leaf and its key under
+the image's names, `double.pem` and `double.key.pem`: `make tls` in the controls
+project writes them as `payments-double.pem` and `payments-double.key.pem`, to be
+copied there under those names.
 
 - The VM, bare-metal and API-credit lanes run the image as the Compose service in
   `compose.payments-double.yml`, with no host port. Each lane's overlay mounts its
@@ -151,9 +150,9 @@ there. Outside the image, `python -m payments_lane_double` reads
   pinned authority, and `helm/tests/test_release_topology.py` holds them to the
   fixtures. It serves no payment scenario there; each storefront's `helm test`
   payments check reads the seller's balance.
-- `make test` (here) checks the TLS files and runs the unit and library integration
-  suite: the kit's real `PaymentsClient` against the app through an in-process
-  transport, with an injected clock. From the repository root,
+- `make test` (here) runs the unit and library integration suite: the kit's real
+  `PaymentsClient` against the app through an in-process transport, with an
+  injected clock. From the repository root,
   `make test-payments-lane-double` runs it, as part of `make test` and the Tests
   workflow's matrix.
 - `make build-payments-lane-double`, from the repository root, builds the image

@@ -15,7 +15,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOUBLE_FIXTURES = REPO_ROOT / "tools/payments-lane-double/fixtures"
-LANE_CA = REPO_ROOT / "tools/payments-lane-double/tls/lane-ca.pem"
+LANE_CA = REPO_ROOT / "tools/lane-double-controls/tls/lane-ca.pem"
 REGISTRY_PROFILES = REPO_ROOT / "dev-env/registry"
 
 # Each stack: its compose project and its files, in the order e2e-tests/Makefile
