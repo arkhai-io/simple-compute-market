@@ -1,7 +1,7 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
 
-.PHONY: help init reinit test serve build clean
+.PHONY: help init reinit test migrate serve build clean
 
 .DEFAULT_GOAL := help
 
@@ -18,6 +18,9 @@ reinit: ## Force-reinstall all internal wheel dependencies. Run make dist-* from
 
 test: reinit ## Run the test suite
 	uv run --find-links $(DIST_DIR) pytest tests -q
+
+migrate: ## Apply the storefront's database migrations; serve refuses a database without them
+	uv run --find-links $(DIST_DIR) apicredits-storefront-migrate
 
 serve: ## Run the storefront locally
 	uv run --find-links $(DIST_DIR) apicredits-storefront serve

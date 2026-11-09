@@ -81,6 +81,10 @@ services:
 
   bare-metal-storefront:
     image: ${BARE_METAL_STOREFRONT_IMAGE:-arkhai:bare-metal-storefront}
+    # The migration command runs before the storefront, which refuses a
+    # database it has not migrated. Setting the entrypoint drops the image's
+    # `serve` command, which this line restates.
+    entrypoint: ["sh", "-c", "bare-metal-storefront-migrate && exec bare-metal-storefront serve"]
     depends_on:
       bare-metal-registry:
         condition: service_healthy

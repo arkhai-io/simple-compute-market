@@ -1474,7 +1474,7 @@ wait on a service's dependencies". Touches each storefront's `pyproject.toml`, C
 `domains/apicredits/compose.yml`, and any lane or local overlay that overrides a
 storefront's `command`).
 
-- [ ] 9.1 Add `market-storefront-migrate`, `bare-metal-storefront-migrate`, and
+- [x] 9.1 Add `market-storefront-migrate`, `bare-metal-storefront-migrate`, and
       `apicredits-storefront-migrate`, each reading only the storefront's database path
       and log level from its configuration and applying its chain, with `--check`;
       each `serve` path calls `check` before constructing anything that opens the
@@ -1484,7 +1484,58 @@ storefront's `command`).
       ahead, or absent database exits naming the command and creates no file; the
       command reads no configuration beyond the database path and log level (two
       configurations, one schema). (D4, D5, D6, D14)
-- [ ] 9.2 Add a `migrate` init container to `helm/charts/storefront` (per agent) and
+      Each storefront's migrations module gains `check_storefront_database` (the
+      engine's `check_sqlite_file`, read-only), `IncompatibleStorefrontDatabase` (the
+      engine's refusal message) and `require_compatible_storefront_database`, which
+      replaces the interim `migrate_storefront_database` call in each composition, at
+      the same point, before anything opens the database: VM's `_build_vm_services`,
+      bare metal's `build_runtime_from_configuration`, and the API-credit server's
+      composition, whose `refuse_unbound_listings` now runs once the check passes.
+      The commands are `market_storefront.migrate`, `arkhai_bare_metal_storefront.migrate`
+      and `apicredits_storefront.migrate` (`main`, provisioning's form), registered as
+      console scripts; the storefronts' versions already carry this branch's minor
+      bumps (0.28.0, 0.28.0, 0.21.0), so none moves. Each reads `db_path` (VM and API
+      credits `log_level` too; bare metal's configuration states none, so its command
+      logs at INFO), refusing a configuration naming no `db_path`, from the
+      storefront's layered settings without resolving them:
+      VM's and API credits' `utils/config.py` resolve chains, the agent id, and VM's
+      base URL (through ZeroTier) at import, so their Dynaconf construction moved to a
+      new `settings_source.py` in each package, which `utils/config.py` builds on;
+      bare metal's `config.settings_source()` already only reads. Library integration
+      (`tests/integration/test_migrate_command.py` per storefront, real SQLite files,
+      the command through its entry point with its settings in the loader's
+      environment layer and no configuration file, no application): `--check` on a
+      behind database (baselines only; API credits, whose chain has no later
+      migration, all but its last baseline) exits 1 listing the pending IDs and naming
+      the command, bytes unchanged; `--check` on a missing database exits 1 creating
+      neither file nor directory; the command twice then `--check` exit 0; the command
+      on an ahead database exits 1 naming the unknown ID, bytes unchanged; two
+      configurations give one schema, one ledger, and the same rows — the second
+      stating settings the application reads (VM and API credits: log level, agent
+      name, base URL; bare metal: port and a watchdog interval its configuration
+      would refuse); a configuration whose `db_path` is empty exits 1 naming it; for
+      VM and API credits, importing the command in a fresh interpreter leaves
+      `utils.config`, which resolves configuration at import, unimported;
+      `require_compatible_storefront_database`
+      refuses behind and ahead databases naming the command and each differing ID,
+      bytes unchanged, and a missing one creating nothing; the console script loads
+      `main` — passed. Application integration (`test_store_open.py` per storefront,
+      the real app and lifespan composed from configuration, as 7.2's tests start it):
+      on an unmigrated path startup raises `IncompatibleStorefrontDatabase` naming the
+      command and creates no file (bare metal: no runtime composed) — passed. "serve
+      against a behind or ahead database" is shown at the check the composition calls,
+      not through `serve`; the absent case through the composition's startup.
+      Tests that start a storefront through its composition now migrate its database
+      first: VM's `test_degraded_startup.py`, `test_alkahest_address_books.py`,
+      `test_publishable_startup.py`; bare metal's `test_app_composition.py` (a
+      `_migrated_configuration` helper behind `_configured_runtime` and `_started_app`,
+      which takes `migrated=False` for the refusal test) and `test_site_trust.py`; API
+      credits' `test_alkahest_release_conditions.py`, whose `_started` migrates unless
+      `migrated=False`, which the five tests asserting a startup refused before any
+      database exists pass. Suites: `make -C domains/vms/storefront test` — unit 1137
+      passed and 1 skipped, integration 562 passed; `make -C domains/bare_metal/storefront test`
+      — 607 passed; `make -C domains/apicredits/storefront test` — 274 passed.
+- [x] 9.2 Add a `migrate` init container to `helm/charts/storefront` (per agent) and
       `helm/charts/bare-metal-storefront`, running the storefront's migration command
       from the application's image without `entrypoint.sh`, with the application's
       environment, configuration mounts, and data volume; change both render tests from
@@ -1492,7 +1543,29 @@ storefront's `command`).
       the application's image, over the data volume", keeping the startup-probe
       assertion. Verify with `make -C helm test-render`. (D7; `deployment-state` "A
       storefront chart renders")
-- [ ] 9.3 Make every Compose storefront start as
+      Both Deployments render `initContainers` with one `migrate` container: the
+      application's image and pull policy, `command: [market-storefront-migrate]` /
+      `[bare-metal-storefront-migrate]`, the application's `env` and configuration
+      mounts through the same helpers, and the data volume at the persistence mount
+      path; VM's carries no ZeroTier device or capabilities, which its render test
+      asserts. Chart render tests (static
+      configuration, no cluster): each chart's
+      `test_no_release_waits_on_a_dependency_...` now asserts, over every release it
+      rendered before (VM: defaults, the local release, every rendering fixture, a
+      second agent; bare metal: the example, the defaults, the umbrella release),
+      exactly one init container, `migrate`, running the command alone, no
+      `entrypoint.sh`, image and `env` equal to the application container's, its
+      mounts among the application's (bare metal: equal to them) with the data volume
+      at `/var/lib/arkhai` and `storefront.json`, the init containers before the
+      containers, and the application's startup probe. The payments-check pod tests
+      and bare metal's environment and command helpers read the application container
+      now, since the first `env` and `volumeMounts` in the Deployment are the init
+      container's. `make -C helm test-render` — passed; with the VM init container's
+      data mount removed it failed on that assertion, and the template was restored.
+      A Helm template comment saying registration needs "no separate init container"
+      was reworded. `TESTING.md`'s "Chart Render Tests" still says no VM storefront
+      Deployment renders an init container; closeout corrects it (11.9).
+- [x] 9.3 Make every Compose storefront start as
       `sh -c "<storefront>-migrate && exec <its serve command>"`, keeping
       `entrypoint.sh` for the VM storefront's serve where it starts ZeroTier, and add a
       `migrate` target to each storefront's `Makefile`. Verify by bringing up each local
@@ -1500,7 +1573,23 @@ storefront's `command`).
       `compose.apicredits-local.yml` overlays) and reading the migration's log line
       before the server's. (D7, D11; `deployment-state` "A storefront under Compose has
       pending migrations")
-- [ ] 9.4 **Verification.** Run the three storefronts' suites,
+      VM's `bob-storefront` and `alice-storefront` (`domains/vms/compose.yml`) and
+      `compose/seller.yml`'s `seller-storefront`, found beyond the plan's list:
+      `command: ["./entrypoint.sh", "sh", "-c", "market-storefront-migrate && exec market-storefront serve"]`,
+      ZeroTier first through the image's entrypoint script. Bare metal
+      (`domains/bare_metal/compose.yml`, which `compose.bare-metal.yml` extends):
+      `entrypoint: ["sh", "-c", "bare-metal-storefront-migrate && exec bare-metal-storefront serve"]`,
+      since its image's entrypoint is the CLI; setting it drops the image's `serve`
+      command, which the line restates. API credits (`domains/apicredits/compose.yml`):
+      `command: ["sh", "-c", "apicredits-storefront-migrate && exec apicredits-storefront serve --host 0.0.0.0 --port 8000"]`.
+      No lane or local overlay overrides a storefront's command or entrypoint. Each
+      storefront `Makefile` gains `migrate` (`uv run ... <storefront>-migrate`). The
+      images' own default commands are unchanged: Helm runs the migration as an init
+      container, and Compose states its command. Not run: the local Compose bring-ups,
+      denied in this session as 8.2's was; the lanes start every storefront through
+      these commands on fresh volumes (9.4), so the pipeline's result is this task's
+      pending evidence, for validation to judge.
+- [x] 9.4 **Verification.** Run the three storefronts' suites,
       `make -C helm test-render`, `make check-packaging`, and
       `scripts/change-workflow run pre-commit add-database-migration-commands`.
       End-to-end: every lane deploys its storefronts through the migration phase —
@@ -1509,6 +1598,45 @@ storefront's `command`).
       tests — and validation's Helm checks render and install both charts with their
       init containers.
       Owed by validation: none.
+      End-to-end, read from the lanes' files, not yet observed: the VM, bare-metal and
+      API-credit lanes start their storefronts from the domain compose files above on
+      fresh volumes, so a passing pipeline is evidence `e2e_deal`,
+      `e2e_vm_introduction`, `e2e_bare_metal_mock_deal`, `e2e_bare_metal_publication`
+      and `e2e_credits_deal` ran on databases the storefronts' commands built; a
+      passing Helm part of validation is evidence the installed release's storefront
+      pods started through their init containers. Owed by validation: none,
+      confirmed. Results in the section's notes.
+
+**Section 9 notes — completed 2026-11-09.**
+
+Suites: as 9.1 and 9.2 record; `scripts/change-workflow run pre-commit
+add-database-migration-commands` — `after-functional-change`, `pre-commit-functional`
+(`make check-packaging` and `make test`, every suite) and `pre-commit` each "passed,
+exit 0" before the fresh-context fixes, and again over the final tree.
+
+Fresh-context check. Fixed: a test showed only that in-process settings left no trace,
+with `utils.config` already imported by the suite — VM and API credits now prove in a
+fresh interpreter that the command never imports it, and the two-configuration tests
+name settings the application reads; bare metal's command read a `log_level` its
+configuration does not state — it logs at INFO; an unset or empty `db_path` would have
+migrated a file named `None` or a temporary database — refused, tested; `entrypoint.sh`'s
+comment described a Helm init container running `register` and Compose passing no
+arguments; VM's `settings.toml` said serve creates the database's directory; a missing
+blank line; the render note claimed a ZeroTier assertion the test lacked — added;
+11.9 now names `DEPLOYMENT_AND_CONFIG.md`'s render-test sentence too; 9.4's end-to-end
+lines read as observed. Declined: a `--config` option on the VM and API-credit commands
+— `--config` reaches `storefront_config_file()` alone, and the settings serve reads its
+`db_path` from come from `storefront_config_files()`, which ignores it, so serve and the
+command read the same database; unchecking 9.3, whose Compose bring-ups were denied, as
+8.2's were; moving the command's `main`, now four near-identical copies with
+provisioning's and the API-credit service's, and the storefronts' check helpers into the
+engine kit — a shared helper is reasonable, and the round's review should weigh it.
+
+Handoff. Every storefront starts only on a database its migration command built:
+composition calls `require_compatible_storefront_database` where it called the
+migration. A test that starts a storefront through its composition migrates first, as
+the files 9.1 lists do. `utils/config.py`'s `_build_settings` (VM, API credits) is a
+wrapper over `settings_source()`, kept for the tests that call it.
 
 ## 10. The registry on the shared contract
 
@@ -1637,7 +1765,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
         Compose form, the floor and adoption, configuration-free migration, and the
         upgrade notes for individual old migrations and frozen tables removed (D2–D8,
         D14, D16); "Kubernetes: ConfigMap and Secret mounting" — the init-container
-        sentence (D7); "Combined compute-family storefront" — the
+        sentence, and the sentence that render tests assert no init container
+        renders for a storefront (D7; the second added 2026-11-09 by section 9); "Combined compute-family storefront" — the
         `migrate-storefront-domains` paragraph removed (D3); "Current limits" (D1).
       - `docs/operator-handbook.md`: a new "## Upgrading a deployment" — backup,
         `--check`, deploy, the refusal of a pre-v0.3.0 or any existing API-credit
@@ -1659,7 +1788,9 @@ Per `openspec/README.md#plan-closeout-requirements`.
         its `.svg` draw it in the foundation band (D2; added 2026-11-09 by section 3).
       - `docs/development/TESTING.md`: a "## Migration Tests" section — the floor
         fixture, adoption, the store-open test, and the per-service integration suite
-        (D5, D9).
+        (D5, D9); "Chart Render Tests" stating that each storefront chart renders one
+        init container, its migration, where it now says the VM chart renders none
+        (D7; added 2026-11-09 by section 9).
       - `docs/development/RELEASING.md`: "Cutting a release" gains the step of weighing
         a new migration floor when an official release is promoted (D16).
       - `openspec/specs/physical-provisioning/architecture.md`: "The host registry owns

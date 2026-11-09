@@ -149,6 +149,9 @@ services:
   credits-storefront:
     image: arkhai:apicredits-storefront
     platform: linux/amd64
+    # The migration command runs before the storefront, which refuses a
+    # database it has not migrated.
+    command: ["sh", "-c", "apicredits-storefront-migrate && exec apicredits-storefront serve --host 0.0.0.0 --port 8000"]
     depends_on:
       anvil:
         condition: service_healthy

@@ -45,6 +45,7 @@ dependencies = [
 
 [project.scripts]
 bare-metal-storefront = "arkhai_bare_metal_storefront.cli:app"
+bare-metal-storefront-migrate = "arkhai_bare_metal_storefront.migrate:main"
 
 [project.entry-points."market.storefront_contributions"]
 bare_metal = "arkhai_bare_metal_storefront.contribution:BARE_METAL_STOREFRONT_CONTRIBUTION"

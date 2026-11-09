@@ -23,10 +23,13 @@ from market_deal_servicing import create_schema as create_servicing_schema
 from market_pool_overrides import migrations as pool_override_migrations
 from market_schema_migrations import (
     Chain,
+    CheckResult,
     MigrateReport,
     Migration,
     SqliteMigrationConnection,
+    check_sqlite_file,
     migrate,
+    refusal_message,
 )
 from market_settlement_runtime import migrations as settlement_migrations
 
@@ -319,3 +322,29 @@ def migrate_storefront_database(db_path: str | Path) -> MigrateReport:
         return migrate(CHAIN, SqliteMigrationConnection(connection))
     finally:
         connection.close()
+
+
+class IncompatibleStorefrontDatabase(RuntimeError):
+    """The database is not exactly at the chain this image carries."""
+
+    def __init__(self, result: CheckResult) -> None:
+        super().__init__(
+            refusal_message(result, service=CHAIN.service, command=CHAIN.command)
+        )
+        self.result = result
+
+
+def check_storefront_database(db_path: str | Path) -> CheckResult:
+    """The database's state against :data:`CHAIN`, read without changing it.
+
+    The file is opened read-only, so a missing database is *absent* and is not
+    created.
+    """
+    return check_sqlite_file(CHAIN, db_path)
+
+
+def require_compatible_storefront_database(db_path: str | Path) -> None:
+    """Refuse to serve a database not exactly at :data:`CHAIN`, naming the command."""
+    result = check_storefront_database(db_path)
+    if not result.compatible:
+        raise IncompatibleStorefrontDatabase(result)

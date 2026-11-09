@@ -4,7 +4,8 @@ The real app and lifespan compose the storefront from configuration over a
 database its chain migrated, as ``test_degraded_startup`` does: the database
 client, every store the composition opens, and every startup step, then a
 publication cycle. The database's tables, columns, indexes, and triggers are
-the same before and after, so no store issues DDL of its own.
+the same before and after, so no store issues DDL of its own. Over a database
+the chain has not migrated, the same startup refuses before opening it.
 
 Every key, address, and principal here is a deterministic development value,
 never used on a public network.
@@ -27,7 +28,10 @@ from market_storefront.domain_runtime import (
 )
 from market_storefront.utils import config as storefront_config
 from market_storefront.utils import sqlite_client as sqlite_module
-from market_storefront.utils.migrations import migrate_storefront_database
+from market_storefront.utils.migrations import (
+    IncompatibleStorefrontDatabase,
+    migrate_storefront_database,
+)
 from tests._settings_overrides import replaced_setting
 from tests.integration.test_degraded_startup import (  # noqa: F401  (fixture)
     _CHAINS,
@@ -82,3 +86,34 @@ async def test_starting_the_storefront_and_opening_its_stores_changes_no_schema(
 
     assert health.checks["database"] == "ok"
     assert _snapshot(path) == migrated
+
+
+async def test_the_storefront_refuses_to_start_on_a_database_it_has_not_migrated(
+    tmp_path, monkeypatch, lifecycle_registry
+):
+    """Startup checks the database before anything opens it: with none migrated
+    it refuses, naming the migration command, and creates no file."""
+    monkeypatch.setenv(
+        "ARKHAI_IDENTITY_CREDENTIAL", base64.urlsafe_b64encode(_SEED).rstrip(b"=").decode()
+    )
+    monkeypatch.setattr(sqlite_module, "_sqlite_client", None)
+    path = tmp_path / "storefront.db"
+    chain = _Chain()
+    app = server.build_vm_storefront_app(
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+        seams=server.VmCompositionSeams(
+            alkahest_client_constructor=chain.constructor,
+            alkahest_json_rpc=chain.rpc,
+        ),
+    )
+    configuration = {**_CONFIGURATION, "db_path": str(path)}
+    with ExitStack() as stack:
+        for key, value in configuration.items():
+            stack.enter_context(replaced_setting(key, value))
+        stack.enter_context(patch.dict(storefront_config.CHAINS, _CHAINS, clear=True))
+        with pytest.raises(IncompatibleStorefrontDatabase) as refused:
+            async with app.router.lifespan_context(app):
+                pass
+
+    assert "`market-storefront-migrate`" in str(refused.value)
+    assert not path.exists()

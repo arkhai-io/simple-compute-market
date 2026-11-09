@@ -38,6 +38,7 @@ dependencies = [
 
 [project.scripts]
 apicredits-storefront = "apicredits_storefront.cli:app"
+apicredits-storefront-migrate = "apicredits_storefront.migrate:main"
 
 [project.entry-points."market.storefront_domains"]
 apicredits = "apicredits_storefront.domain_runtime:APICREDITS_STOREFRONT_DOMAIN"

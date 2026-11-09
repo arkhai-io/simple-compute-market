@@ -74,6 +74,9 @@ services:
   bob-storefront:
     image: arkhai:storefront
     platform: linux/amd64
+    # entrypoint.sh starts ZeroTier, then the migration command runs before
+    # the storefront, which refuses a database it has not migrated.
+    command: ["./entrypoint.sh", "sh", "-c", "market-storefront-migrate && exec market-storefront serve"]
     depends_on:
       registry:
         condition: service_healthy
@@ -132,6 +135,8 @@ services:
   alice-storefront:
     image: arkhai:storefront
     platform: linux/amd64
+    # As Bob's: ZeroTier, then the migration command, then the storefront.
+    command: ["./entrypoint.sh", "sh", "-c", "market-storefront-migrate && exec market-storefront serve"]
     depends_on:
       registry:
         condition: service_healthy

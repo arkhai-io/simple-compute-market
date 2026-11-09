@@ -80,7 +80,7 @@ from .lifecycle_steps import (
     site_projection_status,
 )
 from .listing_source_check import build_listing_source_check
-from .migrations import migrate_storefront_database
+from .migrations import require_compatible_storefront_database
 from .negotiation import default_seller_round_hook, seller_chain_check
 from .negotiation_runtime import build_bare_metal_negotiation_runtime
 from .pool_overrides import (
@@ -914,10 +914,10 @@ def build_runtime_from_configuration(
         )
     except (TypeError, ValueError) as exc:
         raise RuntimeError(f"bare-metal storefront site bindings are invalid: {exc}") from exc
-    # The storefront's chain is applied before anything opens the database,
-    # since constructing the client or opening a store issues no DDL; on a
-    # migrated database it applies nothing.
-    migrate_storefront_database(active.db_path)
+    # Before anything opens the database: `bare-metal-storefront-migrate`
+    # builds it, and nothing here issues DDL, so a database not exactly at the
+    # chain is refused naming the command, and none is created.
+    require_compatible_storefront_database(active.db_path)
     db = SQLiteClient(active.db_path, domain=selected_domain)
     # Built here and seeded when the server starts (``seed_service_peer_trust``),
     # so composing a runtime writes nothing to the identity state.

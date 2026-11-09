@@ -80,7 +80,7 @@ from apicredits_storefront.utils.config import (
     settings,
     settlement_config_mapping,
 )
-from apicredits_storefront.utils.migrations import migrate_storefront_database
+from apicredits_storefront.utils.migrations import require_compatible_storefront_database
 from apicredits_storefront.utils.sqlite_client import (
     get_sqlite_client,
     refuse_unbound_listings,
@@ -223,11 +223,11 @@ def _build_api_credit_services(
             constructor=seams.alkahest_client_constructor,
             json_rpc=seams.alkahest_json_rpc,
         )
-    # The storefront's chain is applied before anything opens the database,
-    # since constructing the client or opening a store issues no DDL; on a
-    # migrated database it applies nothing. The unbound-listing refusal reads
-    # data, so it runs on the migrated database.
-    migrate_storefront_database(settings.db_path)
+    # Before anything opens the database: `apicredits-storefront-migrate`
+    # builds it, and nothing here issues DDL, so a database not exactly at the
+    # chain is refused naming the command, and none is created. The
+    # unbound-listing refusal reads data, so it runs once the check passes.
+    require_compatible_storefront_database(settings.db_path)
     refuse_unbound_listings(settings.db_path)
     sqlite_client = get_sqlite_client()
     set_stage_event_db_path(sqlite_client.db_path)

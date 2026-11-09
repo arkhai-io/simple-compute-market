@@ -379,13 +379,17 @@ def _alkahest(document: dict, *, enabled: bool = True) -> dict:
     return document
 
 
+def _migrated_configuration(monkeypatch, tmp_path, document=None, *, secrets=None) -> None:
+    """Write the configuration files, and migrate the database they name, as
+    the storefront's migration command does before ``serve``."""
+    if document is None:
+        document = publishable_configuration(tmp_path / "storefront.db")
+    write_configuration(monkeypatch, tmp_path, document, secrets=secrets)
+    migrate_storefront_database(document["db_path"])
+
+
 def _configured_runtime(monkeypatch, tmp_path, document=None, *, secrets=None, **kwargs):
-    write_configuration(
-        monkeypatch,
-        tmp_path,
-        publishable_configuration(tmp_path / "storefront.db") if document is None else document,
-        secrets=secrets,
-    )
+    _migrated_configuration(monkeypatch, tmp_path, document, secrets=secrets)
     kwargs.setdefault("credential", SELLER_CREDENTIAL)
     return build_runtime_from_configuration(**kwargs)
 
@@ -403,15 +407,19 @@ def test_the_runtime_takes_its_principal_and_administrators_from_configuration(
     assert runtime.pool_override_service() is not None
 
 
-def _started_app(monkeypatch, tmp_path, document=None):
+def _started_app(monkeypatch, tmp_path, document=None, *, migrated=True):
     """The app over a runtime composed from the configuration files, only the
     site's transport replaced and its loops held, so starting it seeds the peers
-    and loads the site without any timer publishing."""
-    write_configuration(
-        monkeypatch,
-        tmp_path,
-        publishable_configuration(tmp_path / "storefront.db") if document is None else document,
-    )
+    and loads the site without any timer publishing. Unless ``migrated`` is
+    false, the database the files name is migrated first."""
+    if migrated:
+        _migrated_configuration(monkeypatch, tmp_path, document)
+    else:
+        write_configuration(
+            monkeypatch,
+            tmp_path,
+            publishable_configuration(tmp_path / "storefront.db") if document is None else document,
+        )
     monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
     sites = SignedSites({"site-a.test": SignedSite(SITE)})
     domain = get_market_domain_contract()
@@ -491,9 +499,7 @@ def test_a_credential_that_does_not_own_the_identity_is_refused(monkeypatch, tmp
 
 def test_the_credential_is_read_from_its_own_environment_variable(monkeypatch, tmp_path):
     monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
-    write_configuration(
-        monkeypatch, tmp_path, publishable_configuration(tmp_path / "storefront.db")
-    )
+    _migrated_configuration(monkeypatch, tmp_path)
 
     assert build_runtime_from_configuration().seller_principal == SELLER.identity
 
@@ -1066,9 +1072,7 @@ async def test_a_storefront_configured_through_files_starts_and_serves(
     projections before health reads them. The loops start held, so no timer
     publishes to the configured registry, which nothing serves. Spec scenario:
     "An operator overrides a setting on a development cluster"."""
-    write_configuration(
-        monkeypatch, tmp_path, publishable_configuration(tmp_path / "storefront.db")
-    )
+    _migrated_configuration(monkeypatch, tmp_path)
     monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
     monkeypatch.setenv("STOREFRONT_NEGOTIATION_WATCHDOG_INTERVAL", "45")
     monkeypatch.setenv("STOREFRONT_CAPACITY__POLL_INTERVAL", "7")
@@ -1153,7 +1157,7 @@ async def test_startup_does_not_wait_on_a_chain_whose_client_never_finishes_buil
     )
     document["Wallet"] = {"address": WALLET_ADDRESS}
     document["Chains"] = {"anvil": {"rpc_url": "ws://anvil.test:8545", "chain_id": 31337}}
-    write_configuration(
+    _migrated_configuration(
         monkeypatch, tmp_path, document, secrets=f'[Wallet]\nprivate_key = "{WALLET_KEY}"\n'
     )
     monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
