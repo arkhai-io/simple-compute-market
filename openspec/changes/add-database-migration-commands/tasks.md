@@ -10,6 +10,10 @@ Amended on 2026-11-09 after section 1 returned the change to design and D15a was
 narrowed to hosts: section 1's tasks 1.1, 1.2 and 1.4 and closeout parts 11.5 and 11.9
 are amended; nothing else moved.
 
+Amended on 2026-11-09 after section 10 returned to planning before any of its tasks
+started: section 10 is replanned (its own note says how its tasks map to the old ones);
+nothing else moved.
+
 ## 1. Stored `ssh` connections are repaired and a connection's version is required
 
 Replanned on 2026-11-09 against the design as settled after section 1's return: D15a's
@@ -828,7 +832,7 @@ tests, and no scenario is owed.
 ## 5. Permanent promotion
 
 Replanned against the reviewed design: 5.2's promotion work is section 11's, and 5.3's
-comment hygiene and import placement are task 10.5.
+comment hygiene and import placement are task 10.7.
 
 - [x] 5.1 **Withdrawn** 2026-10-14: closeout does this — 6.9 writes the architecture companion by hand, and the archive in 6.11 writes the `deployment-state` spec its delta covers. As first planned: Promote explicit command/guard/ordering requirements to `openspec/specs/deployment-state/spec.md` and rationale to `architecture.md`.
 
@@ -1640,39 +1644,110 @@ wrapper over `settings_source()`, kept for the tests that call it.
 
 ## 10. The registry on the shared contract
 
-Delivers D1, D3, D5, D6, D7, D11, and D14 for the registry, and `deployment-state`'s
-"The registry refuses a database behind its head" and "The registry chart renders".
-Touches `core/registry` (`alembic/versions/`, `alembic/env.py`,
-`src/core_registry/db/database.py`, `src/core_registry/main.py`, `pyproject.toml`,
-`Dockerfile`, `Makefile`, its tests), `helm/charts/registry` (`templates/deployment.yaml`
-and a new `tests/test_render.py`), and every Compose file that starts a registry.
+Replanned on 2026-11-09 after the section returned before any task was started (its
+notes below): the floor fixture's generator and its grant are named, the registry's
+packaging — the Alembic scripts inside its wheel, the wheel installed in its image —
+becomes its own task, and the squash, the command and check, and the deployment
+surfaces are separate tasks. Old 10.1 is now 10.1 (fixture) and 10.3 (squash and
+adoption); old 10.2 is 10.2 (packaging) and 10.4 (command and check); old 10.3 is 10.5;
+old 10.4–10.6 are 10.6–10.8.
 
-- [ ] 10.1 Generate the registry's floor fixture from `9fffe41e9` (a blank database
-      migrated to `018_listing_resource_column`), then squash the eighteen revisions
-      into one baseline revision written in Alembic operations that reproduces it, and
-      adopt a database at `018` by rewriting `alembic_version` to the baseline in one
-      transaction; delete the old revisions, the blank-database `create_all` +
-      `stamp head`, and the legacy-revision detection. Verify with library integration
-      tests in `core/registry/tests/`: a blank database's `schema_snapshot` equals the
-      fixture; a database at `018` adopts; a database at an earlier revision or with no
-      `alembic_version` but tables is refused as unsupported. (D3)
-- [ ] 10.2 Add `registry-migrate` with `--check`, reporting through the engine kit's
-      result type and message renderer; replace `init_db()`'s in-process upgrade at
-      startup with a read-only check that refuses a database not at the script head
-      (behind, ahead, absent, unsupported), naming the command and both revisions; add
-      `make migrate`. Verify with library integration tests: startup refuses each
-      result in the shared message form; `--check` exit codes; rerun changes nothing.
-      (D5, D6, D11, D14; `deployment-state` "The registry refuses a database behind
-      its head")
-- [ ] 10.3 Add the registry chart's `migrate` init container (the application's image,
-      `registry-migrate`, the configuration profile and data volume) and a render test
-      in `helm/charts/registry/tests/test_render.py` asserting exactly one init
-      container, the migration, over the data volume, and none for a disabled registry
-      instance; make every Compose registry start as
-      `sh -c "registry-migrate && exec <its uvicorn command>"`. Verify with
-      `make -C helm test-render` and a local Compose bring-up reading the migration's
-      log line first. (D7; `deployment-state` "The registry chart renders")
-- [ ] 10.4 Find every file the change added or touched that names a removed command,
+Delivers D1, D3, D4, D5, D6, D7, D11, and D14 for the registry, and `deployment-state`'s
+"The registry refuses a database behind its head", "The registry chart renders", and the
+registry's part of "A chain begins at its supported baseline". Touches `core/registry`
+(`alembic/` moving to `src/core_registry/alembic/` with `env.py` and `versions/`,
+`alembic.ini`, `src/core_registry/db/database.py`, `src/core_registry/main.py`, a new
+migration command module and configuration-free settings loader, `pyproject.toml`,
+`uv.lock`, `Dockerfile`, `Makefile`, `README.md`, its tests and a new
+`tests/fixtures/v0_3_0_floor/`); `helm/charts/registry` (`templates/deployment.yaml` and
+a new `tests/test_render.py`), which renders both the `registry` instance and its
+`api-credits-registry` alias; and every Compose service that starts the registry image —
+`registry` and `registry-b` in `domains/vms/compose.yml`, `bare-metal-registry` in
+`domains/bare_metal/compose.yml`, `api-credits-registry` in `domains/apicredits/compose.yml`,
+`compute-registry` in `compose.apicredits-lane.yml`, `registry` in `compose/registry.yml`
+and `compose/registry.dev.yml`, and `core/registry/docker-compose.yml`.
+
+- [ ] 10.1 Generate the registry's floor fixture from the v0.3.0 release, as 4.1 and 6.1
+      did: install the published `arkhai-core-registry==0.5.0` wheel in an environment
+      constrained to `core/registry/uv.lock` at `9fffe41e9` (SQLAlchemy 2.0.44, Alembic
+      1.17.2), place that commit's `core/registry/alembic/` where the release's
+      `db/database.py` finds it (three directories above the installed package, as the
+      release image did), run the release's `init_db()` on a fresh SQLite file — on a
+      blank database `Base.metadata.create_all` then `stamp head` — and write
+      `core/registry/tests/fixtures/v0_3_0_floor/`: the normalized schema
+      (`schema_snapshot`, `schema.json`), the recorded revision (`018_listing_resource_column`),
+      the DDL (`ddl.sql`), and a README stating the procedure and that the release's
+      `db/`, `alembic/` and `pyproject.toml` are unchanged since `9fffe41e9`. The
+      generator is not committed. Running it needs a one-run rule the implementation
+      step's table does not hold: the orchestrator grants it on the owner's word before
+      the section's session starts, as for 4.1 and 6.1. Verify the fixture holds every
+      table the release's models declare, `alembic_version` at `018` included. (D3)
+- [ ] 10.2 Package the Alembic scripts in the registry's wheel and install the wheel in
+      its image, so the migration command 10.4 adds exists in the image (D6; the
+      API-credit service's image is the precedent, 8.2): move `core/registry/alembic/`
+      to `src/core_registry/alembic/` with `script_location = core_registry:alembic`
+      in `alembic.ini` and in `db/database.py`'s configuration; remove `env.py`'s
+      `sys.path` insertion, which assumes the source layout; make the image install the
+      project's own wheel through `scripts/uv_project.py install-wheel`, stop copying
+      `src/` and `alembic/` into it, keep copying the two filter specifications, and
+      start `uvicorn core_registry.main:app` without `--app-dir`; bump
+      `arkhai-core-registry`'s version per `docs/development/RELEASING.md`'s versioning
+      policy and refresh the locks it reaches (`make lock`). Verify with a unit test
+      that the installed package's `core_registry/alembic/env.py` and `versions/`
+      resolve through `importlib.resources`, with `make dist` building a wheel that
+      carries them, and with `make check-packaging`; the image itself is built by the
+      e2e lanes. (D6, D7)
+- [ ] 10.3 Squash the eighteen revisions into one baseline revision, written in Alembic
+      operations, whose ID fits `alembic_version`'s 32 characters, reproducing 10.1's
+      fixture; adopt a database whose `alembic_version` is `018_listing_resource_column`
+      by rewriting it to the baseline in one transaction before upgrading, since
+      Alembic cannot locate the deleted revision; refuse a database at any other
+      unknown revision as ahead and one with tables but no `alembic_version` as
+      unsupported. Delete the old revisions, the blank-database `create_all` +
+      `stamp head`, the legacy-revision detection (`_legacy_revision`), and the tests
+      of what they did (`tests/unit/test_principal_migrations.py`, and
+      `tests/unit/test_database.py`'s mocked stamp-and-upgrade cases). Verify with
+      library integration tests in `core/registry/tests/integration/`: a blank
+      database migrated through the chain has a `schema_snapshot` equal to the fixture;
+      a database built as 10.1 built the floor adopts, records the baseline, and keeps
+      its rows; a database at an earlier pre-floor revision, or with tables and no
+      `alembic_version`, is refused as unsupported and left unchanged. (D3;
+      `deployment-state` "A v0.3.0 database is adopted", "A database older than v0.3.0
+      is refused")
+- [ ] 10.4 Add the `registry-migrate` console script with `--check`, and replace
+      `init_db()`'s in-process migration at startup with a read-only check. Both map the
+      registry's Alembic state onto the engine kit's `CheckResult` — at the script head
+      *compatible*, at a known earlier revision or the floor *behind* with the pending
+      revisions or the adoption, at an unknown revision *ahead*, tables without
+      `alembic_version` *unsupported*, no file or no tables *absent* — and render
+      refusals with its `refusal_message` naming `registry-migrate`; the check opens
+      the database read-only and creates no file. The command and `env.py` resolve only
+      the database URL and log level, through a loader that reads those two settings
+      from the resolved profile files and nothing else, as the storefronts'
+      `settings_source.py` do (D4). `make migrate` runs the command. Test fixtures that
+      start the application migrate their database through the command's function
+      first; fixtures that build ORM tables for route tests without the application's
+      lifespan are left as they are. Verify with library integration tests: startup
+      refuses each of behind, ahead, absent and unsupported in the shared message
+      form, mutating nothing and creating no file; `--check` exits successfully only
+      when compatible and lists the differing revisions; a rerun changes nothing; the
+      command runs with no credential file and no keys in its profile. (D4, D5, D6, D11,
+      D14; `deployment-state` "The registry refuses a database behind its head", "An
+      operator previews an upgrade")
+- [ ] 10.5 Add the registry chart's `migrate` init container — the application's image,
+      `registry-migrate`, the configuration profile mounts, the resolver variables, and
+      the data volume at the database path — and `helm/charts/registry/tests/test_render.py`
+      asserting, for both the `registry` instance and its `api-credits-registry` alias,
+      exactly one init container, the migration command, from the application's image,
+      over the data volume, and nothing rendered for a disabled instance. Make every
+      Compose registry service named above start as
+      `sh -c "registry-migrate && exec uvicorn core_registry.main:app --host 0.0.0.0 --port 8080"`,
+      and the image's own command the same. Verify with `make -C helm test-render`,
+      including one assertion seen failing with the init container's data mount
+      removed; the Compose start is evidenced by the e2e lanes, which start every
+      registry through it on fresh volumes. (D7; `deployment-state` "The registry chart
+      renders", "A service has no separate deployment step for migrations")
+- [ ] 10.6 Find every file the change added or touched that names a removed command,
       module, migration ID, or frozen table — tests, fixtures, scripts, Makefiles,
       e2e helpers, documentation outside the closeout's promotion list — and update or
       remove each reference. Verify with a repository search for
@@ -1680,18 +1755,21 @@ and a new `tests/test_render.py`), and every Compose file that starts a registry
       `apply_schema_migrations`, `_ensure_tables_sync`, and `required_tables` returning
       only what the change intends to keep. (D3; repository obligation:
       `AGENTS.md` "Cross-references must resolve")
-- [ ] 10.5 **Comment hygiene and import placement, before the pre-closeout review.** Run
+- [ ] 10.7 **Comment hygiene and import placement, before the pre-closeout review.** Run
       `make check-comment-hygiene` and read the comments this change added for any that
       narrate the review or migration that introduced them; move each import the change
       added to module level unless a verified circular import or a recorded lazy-load
       reason keeps it local. Closeout only confirms both. (Repository obligation:
       `openspec/README.md#plan-closeout-requirements`, parts 1–2)
-- [ ] 10.6 **Verification.** Run `make -C core/registry test`,
-      `make -C helm test-render`, `make check-packaging`, and
+- [ ] 10.8 **Verification.** Run `make -C core/registry test` (unit and library
+      integration), `make -C helm test-render`, `make check-packaging`, and
       `scripts/change-workflow run pre-commit add-database-migration-commands`.
       End-to-end: `registry`, `multi_registry`, `e2e_deal`, `e2e_bare_metal_mock_deal`,
-      and `e2e_credits_deal` start every registry through `registry-migrate`; validation's
-      Helm checks install the registry chart with its init container.
+      and `e2e_credits_deal` build the registry image from its wheel and start every
+      registry through `registry-migrate` on a fresh volume, so a passing pipeline is
+      evidence for 10.2's packaging and 10.5's Compose form; validation's Helm checks
+      install the registry chart with its init container. Adoption is proven by 10.3's
+      library integration tests, and no scenario is owed.
       Owed by validation: none.
 
 **Section 10 notes — returned to planning 2026-11-09, on the owner's direction.**
