@@ -159,25 +159,39 @@ Rejected:
 
 ### D5 — Archive cleanup's first exit detects an advanced landing branch; otherwise the owner directs
 
-Archive cleanup fetches the branch the change's last merge brought in — the branch
-the merge was given, or else the one the change's clone recorded (CW-s3ju). Its first
-exit to `done`, the one before the pull request opens, is guarded by that branch
-having gained nothing `HEAD` lacks (`git merge-base --is-ancestor`), the guard's
-remedy `late-merge`; the computation then names the merge, carrying `done` as its
-target, and the orchestrating session runs it without asking. A later exit is not
-guarded. The guard reads the fetched ref, so the computation stays off the network.
+Archive cleanup fetches the branch the change's last merge brought in — the
+`landing.branch` that merge's outcome recorded (D10), or else the one the change's
+clone recorded (CW-s3ju) — and records what it fetched in its own outcome's `landing`.
+Its first exit to `done`, the exit of the first archive cleanup run in the log, before
+the pull request opens, is guarded in the engine by that recorded commit being
+contained in the run's commit, the guard's remedy `late-merge`; the computation then
+names the merge, carrying `done` as its target, and the orchestrating session runs it
+without asking. The log's writer decides the containment as it writes cleanup's line,
+in the checkout that fetched the commit, and records the result on the line; the
+guard reads only that result, never a ref, so a later fetch — after the pull request
+opens, by anyone — cannot make the same exit name a merge, and the computation stays
+off the network and needs no commit object (11 F1). A later archive cleanup run's exit
+is not guarded. An archive cleanup line with no `landing` — every one written before
+this engine, and one for a change whose last merge recorded no branch and which has no
+clone — is read as checked, so a change archived before this engine stays at `done`.
 After the pull request opens, the merge after the archive starts only by the owner's
 direction to `{"step": "late-merge"}`, recorded by the orchestrating session on their
 word.
 
 For an archived change, the computation reads the route and answers `done` only while
 it ends at archive cleanup's exit to `done`, following a direction or exit logged
-after it. The check moves after the computation locates the change, so a change with
-a clone is computed in the clone, where the owner's direction is written, rather than
-answered `done` from the workspace's copy of its log. For `late-merge` the result
-names the step to run, `{"step": "merge", …}`, the node in its reason, so the
-orchestrating session's `make <step>` and the merge skill's route check work
-unchanged.
+after it. The order is (11 F3): a newer log and an undeclared line are refused first,
+as now; then a change with a live clone is named to its clone (`in-clone`), or, in
+that clone, computed there, where the owner's direction is written, rather than
+answered `done` from the workspace's copy of its log; otherwise the route is read, and
+`done` answered when it ends at archive cleanup's exit to `done`, when the change has
+no log, or when its row was pruned — before any check of which branch is checked out,
+so an archived change without a clone, in a workspace with another branch checked
+out, is still `done`; only a route with a step to run goes on to `locate`'s branch
+checks, so a directed `late-merge` names the owner until the change's branch is
+checked out. For `late-merge` the result names the step to run, `{"step": "merge",
+…}`, the node in its reason, so the orchestrating session's `make <step>` and the
+merge skill's route check work unchanged.
 
 Rejected:
 
@@ -191,6 +205,19 @@ Rejected:
   lacks and is tied to the hosting; and a merge started by itself would move the
   branch the owner is reviewing (Open Questions).
 - **The result names `late-merge`,** leaving every caller to map it to `make merge`.
+- **A guard reading the fetched ref whenever the route is computed** (11 F1). Nothing
+  recorded that the check was made, so a fetch after the pull request opened would
+  make the same first exit name a merge the owner never asked for, and every change
+  archived before this engine, its landing branch long moved on, would compute to a
+  merge.
+- **Archive cleanup's own exit to `late-merge`, its ancestry check in the skill**
+  (11 F1). Stable in the log and no outcome field, but the check would be the skill's
+  instructions rather than the engine's code; the owner chose the engine.
+- **A recorded "pull request opened" event** (11 F1). Tied to the hosting, and still
+  needing a rule for older logs.
+- **`done` answered only after `locate`** (11 F3). `locate` names the owner for a
+  change whose records are in the workspace while its branch is not checked out — every
+  archived change without a clone once it has landed.
 
 ### D6 — The merged HEAD is validated, as before closeout
 
@@ -201,10 +228,21 @@ repairs what it found; an inconclusive one names the owner. When the landing bra
 gained nothing, nothing is merged, and `HEAD` and its validation stand. Only the
 owner waives the validation: the merge may recommend a waiver on the guide's
 "Waivers" criteria, never after reconciling the change's own code, and the waiver is
-the owner's direction past the guard to archive cleanup.
+the owner's direction past the guard to the exit the merge named — the merge review
+when it named that, archive cleanup otherwise — so a review the merge chose survives a
+waiver of the validation alone (11 F4). Skipping a chosen review as well is the
+owner's direction to archive cleanup, its reason saying it skips both.
 
-Rejected: **no validation after the archive** — the end-to-end pipeline is the only
-check that finds a stale call in a scenario.
+Rejected:
+
+- **No validation after the archive** — the end-to-end pipeline is the only check
+  that finds a stale call in a scenario.
+- **The waiver always a direction to archive cleanup** (11 F4). A direction checks no
+  exit guard, so it would skip a review the merge chose with the validation: before
+  closeout the owner answers review and waiver together (CW-a6ow), but after the
+  archive D3 leaves the review to the merge, and the two are separate.
+- **A separately defined waiver of both** (11 F4). A direction to archive cleanup
+  already does it, its reason naming what it skips.
 
 ### D7 — The archived change's own files are resolved so it stays archived
 
@@ -243,8 +281,9 @@ deltas cannot be reversed (D1), and the case is rare.
 
 The change is implemented in one round of one session: the graph's node, review kind,
 and guards; the computation's run rule, its reading of the route for an archived
-change, and the order of locating; archive cleanup's fetch and exit guard; their
-tests; the graph diagram; and the skills — `change-merge`'s section for the archived
+change, and the order of locating; the outcome's `landing` record, its check, and the
+containment the log's writer records (D10); archive cleanup's fetch and exit guard;
+their tests; the graph diagram; and the skills — `change-merge`'s section for the archived
 case, `change-review`'s and `change-triage`'s for the merge kind,
 `change-archive-cleanup`'s fetch and route check, and `change-orchestrate`. The
 specification, its index, the companion README, and the workflow guide are promoted
@@ -252,6 +291,38 @@ at closeout.
 
 Rejected: **two rounds,** the engine before the skills, which would have reviewed the
 table before the skills name its vocabulary, at the cost of a second round.
+
+### D10 — The merges and archive cleanup record the landing branch they fetched
+
+The outcome of each merge — before closeout and after the archive — and of archive
+cleanup carries `landing: {"branch": <the branch fetched>, "commit": <the commit
+fetched>}`, the commit recorded whether or not anything was merged (11 F1, 11 F2). The
+engine enforces it in code: the outcome check refuses a merge's outcome without a
+well-formed `landing`, and the log's writer refuses a merge's line whose recorded
+commit `HEAD` does not contain, which proves the merge brought it in. For archive
+cleanup's line the writer records whether the run's commit contains the fetched
+commit, the result D5's guard reads. Archive cleanup takes its branch from the
+engine, never from a merge's prose: the last merge run's `landing.branch`, else the
+clone marker's `base`; with neither — only an older log's merge of a change worked in
+place, written before the field existed — it fetches nothing, records no `landing`,
+and says so, and D5's guard reads the run as checked rather than stalling a change
+whose merge the older engine accepted. The remote is not recorded: the merge picks it
+from the branch's upstream, as cleanup can, and a clone and the workspace name their
+remotes differently (`workspace`).
+
+The field is an addition to the outcome every step shares: a reader that does not
+know it rejects nothing it read before, a line without it keeps its meaning, and only
+a merge's new outcome must carry it.
+
+Rejected:
+
+- **Cleanup always fetches the clone's recorded landing branch** (11 F2). Simpler, but
+  a merge given `FROM` another branch would be checked against the wrong one, and a
+  change worked in place, whose merge had to be given its branch, could never be
+  checked.
+- **The branch recorded only on the wrapper's log line,** from `start`'s resolved
+  `from <branch>`. An interactive merge has no wrapper line, so its branch would be
+  lost.
 
 ## Implementation cadence
 

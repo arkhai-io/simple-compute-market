@@ -15,7 +15,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-hdxi](spec.md#requirement-cw-hdxi-the-merge-brings-in-the-branch-the-change-lands-on) — after pre-closeout, a merge brings in the landing branch and reconciles the change's code with it.
 - [CW-a6ow](spec.md#requirement-cw-a6ow-closeout-waits-for-a-validation-of-the-merged-head) — closeout waits for a passed validation of the merged `HEAD`; another review or a waiver needs the owner.
 - [CW-m4qe](spec.md#requirement-cw-m4qe-an-archived-changes-branch-merges-its-landing-branch-again) — after archive cleanup, a merge after the archive brings in the landing branch again, entered by the owner's direction or cleanup's first exit, with no return.
-- [CW-x9tb](spec.md#requirement-cw-x9tb-the-merge-after-the-archive-judges-its-review) — the merge after the archive judges, on written criteria, whether a merge review is needed; its exit is followed without asking.
+- [CW-x9tb](spec.md#requirement-cw-x9tb-the-merge-after-the-archive-judges-its-review) — the merge after the archive judges, on written criteria, whether a merge review is needed; its exit is followed without asking, and a waiver of its validation directs that exit.
 - [CW-g3zn](spec.md#requirement-cw-g3zn-a-merge-after-the-archive-keeps-the-change-archived) — a merge after the archive keeps the row `archived`, releases dependents the landing branch brought, and appends to the drafts.
 - [CW-9pbk](spec.md#requirement-cw-9pbk-the-owner-is-consulted-at-fixed-touchpoints) — the owner answers design questions, round notes, discussed findings' dispositions, and another round when recommended; advancing is taken without asking.
 
@@ -25,7 +25,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-trdu](spec.md#requirement-cw-trdu-archive-cleanup-waits-on-the-closeout-reviews-triage) — cleanup waits on the closeout triage advancing, and a passed validation when a path outside the inert paths changed since, unless waived.
 - [CW-pkug](spec.md#requirement-cw-pkug-closeout-changes-documentation-only) — closeout edits documentation only; needing a code change returns the change to implementation.
 - [CW-r2hu](spec.md#requirement-cw-r2hu-a-merge-review-reads-what-a-merge-after-the-archive-did) — a `merge` review reads a merge after the archive's resolutions; its triage advances to archive cleanup or another merge review.
-- [CW-5vkd](spec.md#requirement-cw-5vkd-archive-cleanups-first-exit-waits-for-the-landing-branch) — cleanup fetches the landing branch; its first exit to `done` names the merge after the archive when that branch moved.
+- [CW-5vkd](spec.md#requirement-cw-5vkd-archive-cleanups-first-exit-waits-for-the-landing-branch) — each merge records the landing branch and commit it fetched; cleanup fetches that branch, and its first exit to `done` names the merge after the archive when the logged commit is not contained.
 - [CW-p8fy](spec.md#requirement-cw-p8fy-archive-cleanup-run-again-cleans-up-and-copies-only) — cleanup run again on an `archived` row cleans up validation, commits, pushes, and copies the history only.
 - [CW-1iaz](spec.md#requirement-cw-1iaz-steps-after-the-archive-find-a-change-by-name) — post-archive steps find an archived change by name; design, planning, and implementation refuse it.
 - [CW-z83w](spec.md#requirement-cw-z83w-a-design-decision-after-the-design-review-returns-to-design) — a design decision after the design review returns to design; the owner may waive another review.
@@ -211,7 +211,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-nkys](spec.md#requirement-cw-nkys-validation-is-always-named-with-a-target) — validation is always named with a target, whose guards are checked again on validation's exit.
 - [CW-izj1](spec.md#requirement-cw-izj1-a-confirmed-return-starts-its-work-afresh) — a confirmed return releases the returned review, so its work is a fresh round; declined returns go to the owner.
 - [CW-tnp6](spec.md#requirement-cw-tnp6-a-round-and-the-merge-advance-only-on-a-passed-validation) — a round and either merge advance only on a passed validation of their commit; a failed merge validation repeats that merge.
-- [CW-j7wp](spec.md#requirement-cw-j7wp-the-computation-answers-done-from-the-route) — an archived change is `done` only while its route ends at cleanup's exit, and is computed in its clone first.
+- [CW-j7wp](spec.md#requirement-cw-j7wp-the-computation-answers-done-from-the-route) — an archived change is `done` only while its route ends at cleanup's exit, computed in its clone first and answered before any branch check.
 
 ### The graph
 

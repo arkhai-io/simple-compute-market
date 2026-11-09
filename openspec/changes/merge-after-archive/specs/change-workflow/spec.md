@@ -36,7 +36,10 @@ against written criteria: a conflict resolved outside the mechanical files, a
 reconciliation of the change's code or scenarios, a file both sides changed since the
 merge base, or a contract the landing branch changed in meaning. It MUST name the
 merge review or archive cleanup as its exit, which the orchestrating session MUST
-follow without asking the owner.
+follow without asking the owner. The owner's waiver of the merged `HEAD`'s validation
+MUST be a direction to the exit the merge named, so that a merge review it named is
+not skipped with the validation; skipping that review too MUST be a direction to
+archive cleanup whose reason says it skips both.
 
 #### Scenario: Both changes edited one specification
 
@@ -51,6 +54,13 @@ follow without asking the owner.
   nothing
 - **THEN** it names archive cleanup, and the orchestrating session asks the owner
   nothing
+
+#### Scenario: The owner waives only the validation of a merge that named its review
+
+- **WHEN** the merge after the archive named `{"step": "review", "kind": "merge"}`,
+  and the owner waives the validation of the merged `HEAD`
+- **THEN** the owner's direction names the merge review, and the computation names
+  that review, not archive cleanup
 
 ### Requirement: CW-r2hu A merge review reads what a merge after the archive did
 
@@ -76,25 +86,57 @@ declare no return.
 
 ### Requirement: CW-5vkd Archive cleanup's first exit waits for the landing branch
 
-Archive cleanup MUST fetch the branch the change's last merge brought in. Its first
-exit to `done`, the one before the pull request opens, MUST be guarded by that branch
-having gained nothing `HEAD` lacks, the guard's remedy the merge after the archive; a
-later exit MUST NOT be. The guard MUST read the fetched ref, so that the computation
-reads nothing over the network.
+Each merge's outcome, before closeout and after the archive, MUST record as
+`landing` the branch it fetched and the commit it fetched, and the log's writer MUST
+refuse a merge's line whose `landing` is absent, malformed, or names a commit the
+run's `HEAD` does not contain. Archive cleanup MUST fetch the branch the last merge's
+`landing` names, else the branch the change's clone recorded (CW-s3ju), and MUST
+record what it fetched as its outcome's `landing`, the log's writer recording whether
+the run's commit contains it. Archive cleanup's first exit to `done` MUST be guarded
+by that recorded result, the guard's remedy the merge after the archive; a later exit
+MUST NOT be. The guard MUST read only the log, so that no fetch after the line was
+written changes it and the computation reads nothing over the network. An archive
+cleanup line with no `landing` MUST be read as checked.
 
 #### Scenario: The landing branch moved during closeout
 
 - **WHEN** archive cleanup first ends finished naming `{"step": "done"}`, and the
-  branch the change lands on gained a commit after the merge before closeout
+  commit its `landing` records is not contained in the run's commit
 - **THEN** the computation names the merge, carrying `done` as its target, and the
   orchestrating session runs it without asking the owner
 
-#### Scenario: The landing branch moved after the pull request opened
+#### Scenario: The landing branch moves after the pull request opened
+
+- **WHEN** archive cleanup's first run recorded a `landing` commit its commit
+  contains, and a later fetch moves the landing branch's ref while the pull request
+  is open
+- **THEN** the computation still names `done`, and the owner directs a merge when
+  they want one
+
+#### Scenario: The landing branch moved after a merge after the archive
 
 - **WHEN** archive cleanup ends finished after a merge after the archive, and the
   branch the change lands on has gained a commit since that merge
 - **THEN** the computation names `done`, and the owner directs another merge when
   they want one
+
+#### Scenario: A change archived before the record existed
+
+- **WHEN** an archived change's log ends at an archive cleanup line with no `landing`,
+  and its landing branch has moved on since
+- **THEN** the computation names `done`
+
+#### Scenario: The merge before closeout was given another branch
+
+- **WHEN** a change's clone recorded `dev`, the merge before closeout was given
+  `FROM=main`, and archive cleanup runs
+- **THEN** archive cleanup fetches `main`, the branch the merge's `landing` names
+
+#### Scenario: A merge's outcome records no landing branch
+
+- **WHEN** a merge's outcome has no `landing`, or one whose commit `HEAD` does not
+  contain
+- **THEN** the log's writer refuses the line, naming the field
 
 ### Requirement: CW-p8fy Archive cleanup run again cleans up and copies only
 
@@ -115,9 +157,11 @@ pull request's drafts.
 ### Requirement: CW-j7wp The computation answers done from the route
 
 For an archived change, the next-step computation MUST read the workflow log's route,
-and answer `done` only while that route ends at archive cleanup's exit to `done`; a
-direction or exit logged after it MUST be followed. A change worked in its own clone
-MUST be named to its clone before `done` is answered.
+and answer `done` only while that route ends at archive cleanup's exit to `done`, or
+the change has no log or no index row; a direction or exit logged after it MUST be
+followed. A change worked in its own clone MUST be named to its clone before `done` is
+answered. `done` MUST be answered before any check of which branch this checkout has
+checked out, and only a route with a step to run MUST go on to those checks.
 
 #### Scenario: The owner's direction follows done
 
@@ -131,6 +175,18 @@ MUST be named to its clone before `done` is answered.
   clone still exists
 - **THEN** it names the clone, where the change's log is current, rather than `done`
 
+#### Scenario: An archived change without a clone, another branch checked out
+
+- **WHEN** the computation runs in the owner's workspace, with another branch checked
+  out, for an archived change with no clone whose records the workspace holds and
+  whose route ends at archive cleanup's exit to `done`
+- **THEN** it names `done`, not the owner
+
+#### Scenario: A merge after the archive directed without the branch
+
+- **WHEN** the owner directs `{"step": "late-merge"}` for an archived change with no
+  clone, and the workspace has another branch checked out
+- **THEN** the computation names the owner, until the change's branch is checked out
 ### Requirement: CW-g3zn A merge after the archive keeps the change archived
 
 The merge after the archive MUST keep the change's index row `archived` and its
@@ -211,8 +267,8 @@ to it (CW-5vkd).
 
 #### Scenario: Archive cleanup finishes
 
-- **WHEN** archive cleanup ends finished, naming `{"step": "done"}`, and the branch
-  the change lands on has gained nothing `HEAD` lacks
+- **WHEN** archive cleanup ends finished, naming `{"step": "done"}`, and the run's
+  commit contains the landing commit its outcome recorded
 - **THEN** the computation names `done`, with the reason `archived`, and no step runs
 
 #### Scenario: The owner directs done
