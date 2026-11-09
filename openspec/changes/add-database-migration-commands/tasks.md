@@ -1694,6 +1694,36 @@ and a new `tests/test_render.py`), and every Compose file that starts a registry
       Helm checks install the registry chart with its init container.
       Owed by validation: none.
 
+**Section 10 notes — returned to planning 2026-11-09, on the owner's direction.**
+
+Nothing of section 10 is implemented; no task is checked. Found before starting it:
+
+- 10.1's floor fixture means running the v0.3.0 release's registry, as 4.1 and 6.1 ran
+  theirs: `arkhai-core-registry==0.5.0` on PyPI (its `db/`, `alembic/` and
+  `pyproject.toml` are unchanged since `9fffe41e9`; its lock there pins SQLAlchemy
+  2.0.44 and Alembic 1.17.2). The published wheel carries no Alembic scripts — its
+  hatch target packages `src/core_registry` alone, and the release image copied
+  `core/registry/alembic` beside `src/`, where `db/database.py`'s `_alembic_config`
+  finds it three directories above the package. A generator therefore needs the
+  release wheel and that commit's `alembic/` directory together, running the
+  release's `init_db()` on a fresh file, which on a blank database is
+  `Base.metadata.create_all` then `stamp head` at `018_listing_resource_column`. The
+  implementation step's rules run Python only as `uv run pytest`, so the run needs the
+  owner's one-run grant, as 4.1's and 6.1's did.
+- 10.2's `registry-migrate` console script needs the registry's own wheel installed
+  in its image, and that wheel needs the Alembic scripts: the image installs only the
+  lock's dependencies (`--no-install-project`) and serves from copied source with
+  `--app-dir /app/src`. Likely shape: move `alembic/` into the package
+  (`script_location = core_registry:alembic`), install the wheel through
+  `uv_project.py install-wheel` as the API-credit service's image now does (8.2), and
+  stop copying `src/` and `alembic/` into the runtime stage. That touches the
+  registry's `Dockerfile`, `pyproject.toml`, `alembic.ini` and `alembic/env.py` (whose
+  `sys.path` insertion assumes the source layout), and the registry's version — none
+  of which the plan names.
+- The planning amendment should name those files and the floor generator's grant, and
+  may split section 10 (the squash and fixture apart from the command, check, chart
+  and Compose) given the session size each needs.
+
 ## 11. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
