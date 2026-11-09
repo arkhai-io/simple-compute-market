@@ -1,0 +1,43 @@
+# The mediation lane double's identity, its callers and its own credentials.
+#
+# Every value in this file is a public deterministic development value, committed
+# for end-to-end lanes and local releases. Never use one on a public network, and
+# never configure a real dispute authority with one.
+
+# The dispute authority the double answers as: its interface, its origin, a
+# lane-private service name that resolves only inside a lane or a validation
+# namespace, and its payments account.
+interface = "arkhai.mediation.v1"
+origin = "https://mediation-double:8443"
+account = "00000000-0000-4000-8000-0000000000d1"
+params = {}
+
+# The seed the double signs its record with, and the record key it yields, which
+# lanes pin as the authority's record key. The double refuses to start if they
+# disagree.
+record_seed = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+record_key = "ed25519:2b8hSHSKhcidparY7gsPwtEF_TnUGkx5ZTY1TwrikAw"
+
+# The authority account's bearer token at the payments double, with which the
+# double extends, reverses and lifts as the authority.
+payments_token = "payments-lane-double-dispute-authority-public-development-token"
+
+# The bearer token of the double's control routes under /test/, on its
+# lane-private port.
+control_token = "mediation-lane-double-control-public-development-token"
+
+# What the authority advertises. Its minimum dispute window is zero seconds, so
+# every lane's payment options meet it.
+[advertisement]
+mechanisms = ["arkhai.payments.v1"]
+minimum_dispute_window_seconds = 0
+
+# The parties who may call the double, by their payments accounts: the payer every
+# lane's buyer acts as, and the payee every lane's storefront acts as.
+[accounts.buyer]
+account = "00000000-0000-4000-8000-0000000000b1"
+token = "mediation-lane-double-buyer-public-development-token"
+
+[accounts.seller]
+account = "00000000-0000-4000-8000-0000000000b2"
+token = "mediation-lane-double-seller-public-development-token"

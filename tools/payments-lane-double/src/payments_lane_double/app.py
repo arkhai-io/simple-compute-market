@@ -26,6 +26,7 @@ from pydantic import BaseModel, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from lane_double_controls import routes as controls
+from lane_double_controls.clock import PerceivedClock, WallClock, wall_clock
 from lane_double_controls.middleware import FaultRequest, TransportFaultMiddleware
 from lane_double_controls.models import (
     ClockAdvance,
@@ -53,7 +54,6 @@ from market_arkhai_payments.receipts import transaction_id
 
 from payments_lane_double.accounts import AccountDirectory, bearer_token
 from payments_lane_double.admission import admit
-from payments_lane_double.clock import PerceivedClock, WallClock, wall_clock
 from payments_lane_double.rules import RuleBook
 
 _TRANSACTION_ID = re.compile(r"^[0-9a-f]{64}$")

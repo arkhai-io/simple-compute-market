@@ -1,10 +1,11 @@
 # lane-double-controls
 
 The control contract of the end-to-end lanes' doubles, the payments double
-(`tools/payments-lane-double`) and the mediation double: the contract a double
-serves and a scenario calls. It holds the wire models, the control route
-declarations, a typed client and the transport-fault middleware, and the lane CA
-the doubles serve under. It imports no double, so a caller of the controls
+(`tools/payments-lane-double`) and the mediation double
+(`tools/mediation-lane-double`): the contract a double serves and a scenario
+calls. It holds the wire models, the control route declarations, a typed client,
+the transport-fault middleware, the perceived clock both doubles read
+(`lane_double_controls.clock`), and the lane CA the doubles serve under. It imports no double, so a caller of the controls
 installs neither FastAPI nor a double's internals, and nothing here is part of
 the market runtime.
 
@@ -62,6 +63,8 @@ wire as `ControlError`:
 | resuming a rule not waiting at its gate | `409 rule_not_waiting` |
 | deciding or closing an unknown case; funding an unknown account | `404 case_not_found`; `404 account_not_found` |
 | deciding or closing a closed case | `409 case_closed` |
+| deciding a case that is applying another ruling | `422 invalid_request` |
+| closing a case whose extensions payments does not lift | `502 payments_unavailable` |
 
 Deleting a rule that has matched is cleanup and answers `204`; listing a
 transaction with no cases answers an empty list.

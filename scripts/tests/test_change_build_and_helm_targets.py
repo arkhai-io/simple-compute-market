@@ -60,6 +60,7 @@ ROOT_IMAGE_TARGETS = {
     "build-apicredits-storefront": ["arkhai:apicredits-storefront"],
     "build-apicredits-sample-app": ["arkhai:apicredits-sample-app"],
     "build-payments-lane-double": ["arkhai:payments-lane-double"],
+    "build-mediation-lane-double": ["arkhai:mediation-lane-double"],
 }
 # Each subproject's image target, and the root target that delegates to it.
 SUBPROJECT_IMAGE_TARGETS = {

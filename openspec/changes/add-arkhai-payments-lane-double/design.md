@@ -296,6 +296,41 @@ without the double's control token is `401 authentication_required`. The client
 raises an error status whose body is not a control error with the client-side
 code `unexpected_response`, which no double sends.
 
+**Mediation shapes (settled in section 4).** A mediation rule's `operation` is
+`file`, `append`, `case`, `record` or `respondent`; a filing answer applies to a
+filing alone and is not remembered under its key, so a retry once the rule is
+gone files for real, a `pending` answer's case reference being the one that
+filing then takes. A refusal rule's code is one of the contract's
+`MediationFailure` codes. A ruling's effects are applied only when each is a
+per-part `reverse`; a `penalty` or an `award` needs arithmetic over the parts, and a
+`stop` depends on the part's stop authority and payments' clock, which no once-only
+lane exercises, so each is refused at install, `422 invalid_request`, as is a match
+value no call can have. A ruling with `close`
+lifts the case's own extensions and records the closed entry; without it, a
+second ruled entry attests the effects applied and the case stays open. A case
+waits on its rule while held at the gate or stopped part-way by payments, and
+resuming the rule continues it; repeating the ruling a case is applying, as an
+operator's decision, continues it too, whether or not its rule is still installed,
+and another ruling there is `422 invalid_request`; closing a case applying a ruling
+records the ruling as far as it was applied, so no refusal holds a case open. The
+gate holds a ruling's delivery end with its other effects. A rule whose action a
+call's operation cannot take is passed over for that call, neither counted nor
+hiding a later rule. A rule that could never act is refused at install, `422 invalid_request`:
+a filing answer on any operation but `file`, a ruling on any but `file` or
+`append`, and a `record` or `respondent` read matched on anything but its
+operation. Effect ids are `<case_ref>:<ruling>:<n>`, case references carry a
+prefix unique to the process, and each effect's payment event is fixed when it is
+first sent, so every resend is the same request.
+Closing without a ruling answers `502 payments_unavailable` when payments does not
+lift the case's extensions, a code outside the table above, since no table case
+covers payments failing under a control; `ControlCode` lists it. The API refuses an
+unauthenticated call `401 authentication_required`, a malformed one `400
+invalid_request`, and an unknown case, an unknown Agreement, and a reader who is
+no party alike `404 invalid_request`; an Agreement is known from its first filing
+whose transaction payments answers. The double checks a filer is a party
+(`filer_not_party`) and, as D1 says, verifies no Agreement digest or authority
+listing.
+
 **Scope and access.** There are no run scopes: a lane is its own stack, a module holds
 its services, a rule's `match` is its scope, and the scenario's finaliser deletes its
 rules, so a leftover rule shows in the listing. Control routes sit on each double's

@@ -16,7 +16,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
-.PHONY: test-lane-double-controls dist-lane-double-controls test-payments-lane-double build-payments-lane-double
+.PHONY: test-lane-double-controls dist-lane-double-controls test-payments-lane-double build-payments-lane-double test-mediation-lane-double build-mediation-lane-double
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
 .PHONY: run-e2e run-ci fetch-e2e-logs
@@ -165,7 +165,7 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-domains test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-e2e-unit test-deployment-packaging test-frp-grant-admission test-lane-double-controls test-payments-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
+test: test-domains test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-e2e-unit test-deployment-packaging test-frp-grant-admission test-lane-double-controls test-payments-lane-double test-mediation-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
 
 test-domains:
 	$(MAKE) -C domains test
@@ -218,6 +218,11 @@ test-lane-double-controls:
 test-payments-lane-double:
 	$(MAKE) -C tools/payments-lane-double test
 
+# The lanes' mediation double under tools/: its unit and in-process library
+# integration suite.
+test-mediation-lane-double:
+	$(MAKE) -C tools/mediation-lane-double test
+
 # The e2e project's unit tests; its scenarios need the docker-compose stack.
 test-e2e-unit:
 	cd e2e-tests && $(MAKE) test-unit
@@ -252,11 +257,12 @@ build: ## Build the wheels, the buyer CLI binary, and every runtime image
 	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
 	$(MAKE) -j4 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-frp-grant-admission
 
-build-dev: ## Build everything `build` does, the dev chain image, the test image, and the payments double
+build-dev: ## Build everything `build` does, the dev chain image, the test image, and the lane doubles
 	$(MAKE) build
 	$(MAKE) build-dev-env
 	$(MAKE) build-test-image
 	$(MAKE) build-payments-lane-double
+	$(MAKE) build-mediation-lane-double
 
 # One end-to-end lane's images: the wheels, the dev chain with its baked state,
 # the test image (which installs `market` from the wheels, so no lane needs
@@ -395,6 +401,13 @@ build-payments-lane-double: ## Build the payments double's image
 	docker build --ulimit nofile=65536:65536 \
 		-f tools/payments-lane-double/Dockerfile \
 		-t arkhai:payments-lane-double$(IMAGE_SUFFIX) .
+
+# The lanes' mediation double, built from the repository root as the payments
+# double is. Lanes and the local release run it; it is never pushed.
+build-mediation-lane-double: ## Build the mediation double's image
+	docker build --ulimit nofile=65536:65536 \
+		-f tools/mediation-lane-double/Dockerfile \
+		-t arkhai:mediation-lane-double$(IMAGE_SUFFIX) .
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.

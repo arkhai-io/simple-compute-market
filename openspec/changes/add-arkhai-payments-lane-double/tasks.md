@@ -432,7 +432,7 @@ D4, D7). Requirements: "Lanes run a mediation double that answers from programme
 rules", "Lane double controls are typed deterministic steps", "Each lane double reads a
 perceived clock the scenario advances".
 
-- [ ] 4.1 Create `tools/mediation-lane-double` (import `mediation_lane_double`):
+- [x] 4.1 Create `tools/mediation-lane-double` (import `mediation_lane_double`):
       `pyproject.toml` declaring the mediation and payments kits and
       `lane-double-controls`, `uv.lock`, `Makefile`, `Dockerfile` building image
       `arkhai:mediation-lane-double` from the wheelhouse and the committed lock with its
@@ -441,41 +441,116 @@ perceived clock the scenario advances".
       routes, as the payments double is built. Root `make test-mediation-lane-double`
       in `make test` and `tests.yml`'s matrix; root `make build-mediation-lane-double`;
       add the image to `scripts/change_namespace.py`'s image list. (D7)
-- [ ] 4.2 Fixtures in `fixtures/`, every value labelled a public development value,
+      Done, the payments double's layout: `authority.py` (fixture), `protection.py`
+      (not-held reason), `rules.py` (rule book), `service.py` (framework-free
+      `MediationDouble`), `app.py` (routes and controls; service calls run in
+      Starlette's thread pool, since a payments call waits on the network),
+      `settings.py`, `__main__.py`, `Dockerfile.dockerignore`. `build-dev` builds the
+      image, since `change_namespace.BUILT_IMAGES` is every image `build-dev` writes;
+      `scripts/tests/test_change_build_and_helm_targets.py`'s root image targets gain
+      it. The lane build targets are section 5's (5.1). Seed lock as in 1.1, then
+      `make lock PROJECTS=…`. Beyond the plan: `PerceivedClock` moved from the
+      payments double into `lane_double_controls.clock`, which both doubles import
+      (its `test_clock.py` moved with it), rather than a second copy; the payments
+      double needs no further bump (0.2.0 in this change), nor the controls package
+      (0.1.0, new).
+- [x] 4.2 Fixtures in `fixtures/`, every value labelled a public development value,
       never for a public network: the authority identity (origin
       `https://mediation-double:8443`, account `00000000-0000-4000-8000-0000000000d1`, a
       record key from a committed seed), bearer tokens mapping the buyer and seller
       payment accounts, the authority's payments token, and the control token. (D5, D7)
-- [ ] 4.3 API mechanics against the vendored contract: `POST /cases`, `POST /append`,
+      Done: `fixtures/authority.toml`, record seed `0f…0f`, record key
+      `ed25519:2b8hSHSKhcidparY7gsPwtEF_TnUGkx5ZTY1TwrikAw` (the loader refuses a key
+      its seed does not yield), payments token
+      `payments-lane-double-dispute-authority-public-development-token`, which 5.2
+      gives `…00d1` in the payments double's accounts. It also holds `params` and
+      `advertisement`, which 5.2's registry profile renders in place of the
+      retired `dispute-authority.toml`. The payments URL and CA are settings, not
+      fixture values (`https://payments-double:8443`, the image's lane CA).
+- [x] 4.3 API mechanics against the vendored contract: `POST /cases`, `POST /append`,
       `GET /cases/{ref}`, `GET /record`, `GET /respondent`; bearer authentication;
       schema validation; idempotency and `idempotency_conflict`; either party appending
       evidence, only `mandate.to` concurring; the closed-case refusal; the signed
       per-agreement record with sequences and cursors, an empty signed page for a known
       agreement with no cases, the contract's refusal for an unknown agreement or
       reader. (D1, "Real mechanics")
-- [ ] 4.4 Filing protection through the payments kit's client as the authority's
+      Done; the answers chosen are in `design.md`, D4, "Mediation shapes": 401
+      `authentication_required`, 400 `invalid_request` for a malformed body, query
+      or key, and one `404 invalid_request` for an unknown case, an unknown
+      Agreement and a non-party reader (the kit's adapter already reads an initial
+      404 `invalid_request` as "nothing filed yet"). An Agreement is known from its
+      first filing whose transaction payments answers, so a filing left
+      `protection_incomplete` makes it known with an empty page. Parties come from
+      the transaction's signed receipt (`from`, `to`), read as the authority. The
+      only filing refusal is `filer_not_party`; no digest or authority-listing check
+      (D1). Records are signed with the fixture key over `records.record_message`,
+      which validates each entry against `RecordEntry`.
+- [x] 4.4 Filing protection through the payments kit's client as the authority's
       account: `extend` per part; only `hold_not_extendable` reports `not_held`, its
       reason classified from the part's signed snapshot amounts — `paid_out`, else
       `reversed`, else `nothing_held`; every other refusal and every transport failure
       answers `error` with `protection_incomplete`, completed by a same-key retry; a case
       whose every part is `not_held` is dismissed with `nothing_held`. (D1, "Extension
       results", "A not-held part's reason")
-- [ ] 4.5 Programmed decisions: rules matching `operation`, `filer`, `kind`, `cause` and
+      Done. Each extend's request id is `<case_ref>:<part>`, and an incomplete
+      filing keeps its case reference under its key, bound to that filing (another
+      filing under the key is `idempotency_conflict`), so a retry re-sends the same
+      extends and payments answers each with its stored event; `extension_ref` is
+      the stored event's sequence. The snapshot is read once, after every extend,
+      for the not-held parts' reasons; a failed read is `protection_incomplete` too.
+- [x] 4.5 Programmed decisions: rules matching `operation`, `filer`, `kind`, `cause` and
       `transaction`; filing-answer overrides; a ruling recorded in the signed record,
       its effects applied as payment events with stable effect keys and the case
       reference, then only that case's extensions lifted; `pause_before_effects` and
       resume; an incompletely applied ruling resumed without a duplicate effect; operator
       decide and close on an open case; no ruling without a rule; no signature, digest or
       guard verification. (D1, "Programmed")
-- [ ] 4.6 Controls and clock: the shared middleware on the API routes; `/test/` routes
+      Done; shapes in `design.md`, D4, "Mediation shapes". Effect ids are
+      `<case_ref>:<ruling>:<n>` (the delivery end `<case_ref>:<ruling>:end`, recorded
+      applied unless the gate holds it), so a second ruling on an open case never
+      reuses a first's, and case references carry a per-process prefix
+      (`case-<hex>-<n>`), so a restarted double never meets the payments double's
+      stored answers to an earlier process's keys; each effect's event, fixed when
+      first sent, carries `{case_ref, effect_id}`
+      under request id `mediation:<case_ref>:<ruling>:effect:<n>`, and a lift
+      `mediation:<case_ref>:lift:<part>` with the part's `extension_ref` (an
+      `extension_closed` lift counts as done), following the producer's traces. Only
+      `reverse` effects are applied; a `stop` is refused at install with `penalty`
+      and `award`, since its partial period and time depend on the part's stop
+      authority and payments' clock, which no once-only lane exercises (README,
+      "Deviation"); convergence's rate rows will need it. Rule
+      matching on `filer` before the app runs needs the transaction's parties, so
+      the classifier reads an unseen transaction's receipt itself, on the event loop
+      and outside the service's lock, and only while a rule matches on `filer`
+      (commented in `service._properties`). A refusal rule acts on every operation,
+      reads included, for a call past authentication, validation and the party and
+      case checks; a rule whose action an operation cannot take is passed over for
+      it; a rule that could never act, a match value no call has included, is
+      refused at install. Left as it is: with payments unreadable at
+      classification, the middleware sees no `filer` while the service later reads
+      it, so the two layers can take different first rules for that one call. A ruling stopped
+      part-way stays recorded as its ruled entry left it, effects `prepared`, with
+      no further entry until it completes or the case is closed: that is the
+      delta's "recorded as incompletely applied". Closing an applying case is the
+      way out of a ruling payments keeps refusing. A case's `filed_at` is its signed
+      filed entry's time, which the kit's adapter compares with the respondent
+      listing's.
+- [x] 4.6 Controls and clock: the shared middleware on the API routes; `/test/` routes
       for rules, decide, close, the case listing by transaction, the rule listing, clock
       advance and reset, and status reporting the perceived now and the installed
       mediation contract hashes; refusals per D4's table. Record times come from the
       perceived clock. (D2, D3, D4)
-- [ ] 4.7 `README.md`: what the double serves, its deviation from its producer (a case
+      Done. Status's `contracts` keys are `contract_data/<name>` for the schema,
+      vectors and `publication.json`. A case listing without `transaction` is `422
+      invalid_request`. Handlers are registered from `routes_for("mediation")`, and
+      app construction fails if one is missing. `payments_unavailable` joined the
+      controls package's `ControlCode` for the close that payments does not lift.
+- [x] 4.7 `README.md`: what the double serves, its deviation from its producer (a case
       the authority would rule mechanically is ruled only by a rule), what its results
       establish and what they do not. (D1; the double's own documentation)
-- [ ] 4.8 Verification.
+      Done: "What it serves", "What a rule decides", "Deviation from its producer",
+      "What its results establish", "Controls and clock", "Fixtures", "Running it".
+- [x] 4.8 Verification.
       Unit (`tests/unit`): the not-held classification's five cases — released only,
       reversed only, released and reversed, refunded only, nothing moved; rule matching;
       control refusals per D4's table.
@@ -494,6 +569,88 @@ perceived clock the scenario advances".
       exercised in section 5.
       Owed by validation: `tests.yml`, job `test · test-mediation-lane-double` — the
       double's `make test` passes.
+      Evidence: `make -C tools/mediation-lane-double test` — 67 passed. Unit
+      (`tests/unit`): `test_protection.py`, the five cases; `test_rules.py`, matching
+      (every stated property equal, a missing one never matching, install order,
+      *unavailable* first), install refusals (`rule_exists`, a payments property, an
+      unpublished code, an `award` effect), `rule_not_found` and `rule_not_waiting`,
+      matched and waiting counts; `test_fixtures.py`, the committed fixture and its
+      refusals. The fresh-context check's fixes added: a filing whose second extend
+      fails once after the first committed (transport, and a `ledger_unavailable`
+      refusal), completed by a retry whose extends, one per part, all carry the
+      retried case's reference; a failed
+      snapshot read after a nothing-held refusal completed on retry; another filing
+      under an incomplete filing's key refused as a conflict; a ruling's second
+      effect lost after payments took it, resumed with no second reverse; a second
+      ruling on an open case applying its own effect ids; a close payments does not
+      lift answered `502 payments_unavailable`; a refusal rule on a record read; the
+      rules that could never act refused; and a control call with no `Authorization`
+      at all (a rejection-path call, its status alone asserted). The second check's
+      fixes added: a ruling's second effect refused (`ledger_unavailable`),
+      unreachable, or lost after commit, each resumed with one reverse per effect; a
+      case whose effect payments keeps refusing closed with its ruling recorded as
+      far as applied; the gate recording the delivery end `prepared`; the `error`
+      and `rejected` filing answers; an append's exact retry and conflict. The third
+      check's fixes added unit cases for the pass-over and for match values no call
+      has. Payments
+      failures are injected through `create_app`'s payments argument
+      (`support.Failing`). Correction: the case refusals of D4's table (`case_not_found`,
+      `case_closed`, an empty listing, the control token) are proven through the
+      typed client in `test_controls.py`, not at unit level, since each needs a case
+      the service filed. Library integration, the kit's real `MediationClient` over
+      an ASGI transport to the app and the payments kit's `FakePaymentsClient` acting
+      as the authority over its engine, the engine's clock the double's perceived
+      clock: `test_mechanics.py` (two parts held, their `extension_ref`s the extend
+      events' sequences; an unauthorized extend answered `protection_incomplete` with
+      no part not held; the retries above; an exact retry and an
+      `idempotency_conflict`; `filer_not_party`; a part refunded first dismissed
+      `reversed`/`nothing_held`; an eight-day clock advance
+      giving `paid_out` and a dismissal; evidence, payer concurrence refused and
+      payee concurrence accepted, then `case_closed` after a close; record paging by
+      cursor and the stranger refused; an unfiled Agreement refused and a known one
+      reading an empty page; the respondent listing cleared by the respondent's
+      append; a party's case read), `test_rulings.py` (a ruling recorded `prepared`,
+      its reverse carrying `{case_ref, effect_id}`, both parts' extensions lifted and
+      `applied` in the closed entry; a gated ruling applying only on resume; a
+      payments failure on the second effect leaving the case `applying` and waiting,
+      then resumed with one reverse each, 300 reversed; a ruling without `close`
+      attested by a second ruled entry, nothing lifted), `test_controls.py`
+      (through `ControlClient` over Starlette's test client: rule refusals, a
+      refusal answered to the kit client and counted, a pending override followed by
+      the same case once removed, an operator's partial reverse leaving the case
+      open, close without ruling recorded `dismissed`/`operator`, the case listing,
+      clock and status hashes against the kit's resources, records dated by the
+      perceived clock, the control token required). Library integration under
+      uvicorn on loopback (`test_faults.py`): *unavailable* abandoning a respondent
+      read and a filing (`MediationTransportError`) while `/test/status` answers,
+      both matches counted, and its removal restoring the API; a filing whose
+      response a payee-scoped drop rule lost, counted, and adopted under the same key
+      as the one case with one extend. `scripts/change-workflow run pre-commit`:
+      `after-functional-change` and `pre-commit-functional` passed, `make
+      check-packaging` (locks, layout, architecture) and every suite included,
+      `make check-comment-hygiene` among `pre-commit`'s checks; `check-repository`
+      failed only on the citations check, for the two section 6 paths 1.6 names
+      (`tools/mediation-lane-double/README.md` now exists).
+      `make build-mediation-lane-double` built the image; `make build-payments-lane-double` rebuilt the payments image after the
+      clock move. `make -C tools/lane-double-controls test` 117 passed (the moved
+      clock tests among them); `make -C tools/payments-lane-double test` 85.
+      End-to-end scenarios covering the section once deployed: none; section 5
+      first runs the double in the lanes, and section 6's module drives its
+      controls. No test here crosses HTTP to the payments double; 5.6 is the first.
+      Handoff: section 5 adds service `mediation-double` to the overlay and the
+      lane build targets, gives `…00d1` the payments token the fixture states, and
+      renders the registry recommendation from `fixtures/authority.toml` (identity,
+      `params`, `advertisement`). The buyer's and seller's mediation tokens are the
+      fixture's `accounts` tokens. A rule matching `filer` on a filing reads the
+      transaction's parties from payments before the app runs, so it needs payments
+      answering; with payments unavailable a filer-scoped drop rule does not match.
+      Section 6's journey 5 (payments failing between two programmed effects) has
+      no control sequence yet: a payments rule matches `route`, `account`, `event`
+      and `transaction`, which two reverses of one ruling share, and a gated ruling
+      resumed under payments *unavailable* fails its first effect, not its second.
+      6.2 must settle how a lane stops a ruling after its first effect before
+      writing that journey; it may need a payments match property, which is a
+      design question, not a scenario detail.
 
 ## 5. Lane wiring and the existing payment scenarios
 

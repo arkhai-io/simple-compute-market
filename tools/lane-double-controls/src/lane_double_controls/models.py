@@ -50,6 +50,9 @@ ControlCode = Literal[
     "case_not_found",
     "case_closed",
     "account_not_found",
+    # A control that must reach payments and could not, such as closing a
+    # mediation case whose extensions payments did not lift.
+    "payments_unavailable",
 ]
 
 # A rule id sits in a control route's path, so it is restricted to characters

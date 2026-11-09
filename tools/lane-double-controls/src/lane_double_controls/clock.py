@@ -1,12 +1,13 @@
-"""The double's perceived clock: wall time plus an offset only a control moves.
+"""A lane double's perceived clock: wall time plus an offset only a control moves.
 
-The engine evaluates due state lazily at each read against this clock, so moving
+Each double evaluates due state lazily at each read against this clock, so moving
 it forward makes a notice stop, funding exhaustion or a matured hold visible at
 the next read, with nothing running in the background. The offset only grows,
 except for a reset back to zero, which bounds an advance to the run of work that
-made it. A record made while the clock was ahead stays readable after a reset:
-the engine evaluates a transaction at the later of its clock and the
-transaction's own instant.
+made it. A record a double made while its clock was ahead stays readable after a
+reset: the payments engine evaluates a transaction at the later of its clock and
+the transaction's own instant, and the mediation double keeps every record's time
+as it signed it.
 """
 
 from __future__ import annotations
@@ -50,3 +51,6 @@ class PerceivedClock:
 
         with self._lock:
             self._offset = 0
+
+
+__all__ = ["PerceivedClock", "WallClock", "wall_clock"]

@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import pytest
 
-from payments_lane_double.clock import PerceivedClock
-
-from conftest import Clock
+from lane_double_controls.clock import PerceivedClock
 
 T0 = 1_800_000_000
+
+
+class Clock:
+    """An injected wall clock a test moves by hand."""
+
+    def __init__(self, now: int) -> None:
+        self.now = now
+
+    def __call__(self) -> int:
+        return self.now
 
 
 def test_with_no_offset_it_reads_wall_time() -> None:
