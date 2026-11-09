@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 import ipaddress
 import re
+import ssl
 from typing import Any, TypeVar
 from urllib.parse import quote, urlsplit
 
@@ -64,11 +65,21 @@ class MediationCredential:
 
 
 class MediationClient:
+    """One authority's mediation API, authenticated by its bound credential.
+
+    ``ca_bundle`` names a PEM file the client verifies the authority against,
+    instead of the default trust store; the bundle is loaded here, so one that is
+    missing, unreadable or malformed raises ``OSError`` before any request. A
+    supplied ``transport`` keeps its own TLS settings: the bundle is still loaded,
+    but verification is the transport's.
+    """
+
     def __init__(
         self, authority: DisputeAuthority, credential: MediationCredential, *,
         transport: httpx.AsyncBaseTransport | None = None,
         capture: Callable[[bytes], None] | None = None,
         timeout: float = 10,
+        ca_bundle: str | None = None,
     ):
         validate("DisputeAuthority", authority.model_dump(mode="json"))
         if authority.identity != credential.identity:
@@ -77,11 +88,22 @@ class MediationClient:
         url = urlsplit(authority.origin)
         if url.scheme != "https" and not _loopback(url.hostname or ""):
             raise ValueError("mediation requires HTTPS outside loopback")
+        # A context built from the bundle alone is this client's verification:
+        # httpx consults SSL_CERT_FILE only when verification is left at its
+        # default, so the process's trust store, and every other client's,
+        # stays as it is.
+        verify: ssl.SSLContext | bool = True
+        if ca_bundle is not None:
+            # The ssl module reads an empty cafile as none given and would load
+            # the default trust store instead of this bundle alone.
+            if not ca_bundle.strip():
+                raise ValueError("ca_bundle must name a file")
+            verify = ssl.create_default_context(cafile=ca_bundle)
         self.authority = authority.model_copy(deep=True)
         self._capture = capture
         self._http = httpx.AsyncClient(
             base_url=authority.origin, headers={"Authorization": "Bearer " + token},
-            timeout=timeout, transport=transport, follow_redirects=False,
+            timeout=timeout, transport=transport, follow_redirects=False, verify=verify,
         )
 
     async def __aenter__(self):

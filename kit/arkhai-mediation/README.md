@@ -39,6 +39,14 @@ env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,12
   break raises `ValueError`, so a positional call passing a variable name fails
   there rather than sending the name as a token.
   Non-loopback origins require HTTPS. Redirects are never followed.
+  `ca_bundle=` names a PEM bundle the client verifies the authority against in
+  place of the default trust store, for an authority behind a private CA; a role
+  passes its credential's `ca_bundle_path`. The bundle is loaded at construction,
+  so one that is missing, unreadable or malformed raises `OSError` before any
+  request, and an empty path raises `ValueError` rather than reading as the
+  default store. The process's trust store is never changed, and without
+  `ca_bundle` the client uses the default trust store. A `transport=` supplied
+  for a test keeps its own TLS settings; the bundle is still loaded.
 
   ```python
   # disputes is the role's DisputeConfig; resolve() raises ValueError when the
@@ -47,6 +55,7 @@ env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,12
   if credential is not None:
       client = MediationClient(
           authority, MediationCredential(authority.identity, token=credential.resolve()),
+          ca_bundle=credential.ca_bundle_path,
       )
   ```
 - Construct `MediationAdapter(binding, exact_agreement, client)`, then inject it

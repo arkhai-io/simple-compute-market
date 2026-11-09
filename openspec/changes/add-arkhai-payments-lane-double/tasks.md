@@ -311,14 +311,22 @@ Delivers `[[DisputeCredential]].ca_bundle_path` and the mediation client's CA ar
 passed by all four lifecycle compositions (D8). Requirement: settlement-configuration
 "Dispute credentials are bound by identity and no template ships an authority".
 
-- [ ] 3.1 `kit/deal-lifecycle`: `DisputeCredential` (`configuration.py`) gains an
+- [x] 3.1 `kit/deal-lifecycle`: `DisputeCredential` (`configuration.py`) gains an
       optional `ca_bundle_path`, refused when empty, as the payments section refuses an
       empty one; it appears in no option, Agreement or status. (D8)
-- [ ] 3.2 `kit/arkhai-mediation`: `MediationClient` (`client.py`) takes an optional CA
+      Done: a blank path is refused too (`ca_bundle_path must name a file`), as the
+      payments section refuses one. The credential is only ever configuration, so no
+      projection changed. Version 0.3.0 (new public field).
+- [x] 3.2 `kit/arkhai-mediation`: `MediationClient` (`client.py`) takes an optional CA
       bundle and uses it as its verification context
       (`ssl.create_default_context(cafile=…)`); absent means default trust; no process
       state changes. Update `kit/arkhai-mediation/README.md`'s client section. (D8)
-- [ ] 3.3 Pass the credential's `ca_bundle_path` in every construction:
+      Done: keyword `ca_bundle=`, the payments client's shape. The context is built
+      before the httpx client whether or not a transport is injected, so a missing or
+      malformed bundle raises `OSError` (`FileNotFoundError`, `ssl.SSLError`) at
+      construction and an empty one `ValueError`. README "Composition" says so and its
+      example passes `credential.ca_bundle_path`. Version 0.3.0.
+- [x] 3.3 Pass the credential's `ca_bundle_path` in every construction:
       `domains/vms/storefront/src/market_storefront/deal_lifecycle.py`,
       `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/lifecycle.py`,
       `domains/vms/buyer/src/arkhai_vms_buyer/lifecycle.py`,
@@ -326,7 +334,31 @@ passed by all four lifecycle compositions (D8). Requirement: settlement-configur
       storefronts' generated values schemas keep refusing `[[DisputeCredential]]` whole
       in public chart configuration; regenerate them if the model change alters them.
       (D8)
-- [ ] 3.4 Verification.
+      Done. The values schemas did not change: both definitions refuse the section as
+      `false`, and both drift tests pass unregenerated. Beyond the plan, what a bundle
+      the client cannot load (`OSError` at construction) does, by the rules already
+      written for an unusable credential: each buyer's `_MediationPort` answers it as a
+      `MediationTransportError`, as it answers an unresolvable credential, which by
+      that port's existing rule leaves surrender usable (no test here runs a
+      surrender); each storefront's `credential_available`
+      now builds (and caches) the client, so a credential whose token does not resolve
+      or whose bundle does not load is not usable and the deal reads `repair required`
+      ("a storefront holding no usable credential for a deal's authority reports the
+      deal `repair_required`", `DEPLOYMENT_AND_CONFIG.md`, "Dispute authority
+      preferences"). Without it the VM storefront's `cycle()`, which builds the
+      respondent poller's adapter outside its per-deal `try`, would fail the whole
+      servicing cycle for every deal on the page. A duplicate credential binding is
+      still refused at lookup, outside that `try`; an origin the client refuses (not
+      HTTPS off loopback) now reads `repair required` too, where the VM cycle raised.
+      The repair reason is `deal-servicing`'s fixed "Agreement authority credential is
+      missing", which misnames a present credential with an unloadable bundle, and the
+      `OSError` is not logged: left as it is, since rewording the kit's text is outside
+      this section, and section 7's `check-mediation` names the failing step. Versions, minor because each role
+      honours a new setting: VM storefront and bare-metal storefront 0.28.0 (the VM
+      storefront's exact pin on the bare-metal storefront moved), VM buyer 0.11.0,
+      bare-metal buyer 0.8.0; each raises its lower bounds on the two kits to 0.3.0.
+      `make lock` relocked every project.
+- [x] 3.4 Verification.
       Unit: `kit/deal-lifecycle` configuration tests — the field parses, an empty value
       is refused, the resolved credential carries it.
       Library integration: `kit/arkhai-mediation/tests` — a client given a CA bundle
@@ -337,6 +369,60 @@ passed by all four lifecycle compositions (D8). Requirement: settlement-configur
       End-to-end: section 5's lanes are the first deployed use.
       Owed by validation: `tests.yml`, jobs `test · test-kits` and `test · test-domains`
       — both pass.
+      Evidence: unit, `make -C kit/deal-lifecycle test` — 81 passed
+      (`tests/unit/test_dispute_credential.py`: none unless stated, empty and blank
+      refused, the credential `credential_for` resolves from TOML carrying the path).
+      `make -C kit/arkhai-mediation test` — contract and generated-model checks,
+      `mypy` clean, 83 passed: unit (`tests/unit/test_client_ca_bundle.py`, a missing
+      bundle `FileNotFoundError`, a malformed one `ssl.SSLError`, an empty or blank one
+      `ValueError`, all at construction); library integration
+      (`tests/integration/test_client_tls.py`, the real client against a loopback TLS
+      listener serving a leaf a throwaway CA issued: given that CA's bundle it reads a
+      respondent page; given another CA's bundle, or none, `MediationTransportError`
+      and the listener receives no request).
+      Correction to the application integration line: what reaches each composition
+      is shown by the client's construction failing on a bundle that does not exist,
+      which only the client loads; that a bundle verifies a server, and that none
+      leaves a private CA untrusted, is the kit's TLS test above, and no test here
+      shows which trust store a client built without a bundle holds. VM storefront,
+      application integration (`tests/integration/test_lifecycle_mediation_trust.py`,
+      over `test_payment_settlement`'s harness: the storefront's settle and lifecycle
+      routes in an in-process app, real SQLite, the lifecycle class built by the
+      harness from a dispute document rather than by the storefront's composition
+      root): after a settled, delivered payment deal, the lifecycle's cycle (the
+      `settlement-servicing` step) and the buyer's read through `LifecycleClient` —
+      with no bundle the authority is contacted and the outcome is `Unknown`; with a
+      missing bundle nothing is sent and the outcome is `repair required`.
+      Bare-metal storefront (`tests/integration/test_lifecycle_mediation_trust.py`,
+      the harness's runtime behind its in-process app, its dispute configuration
+      replaced as the harness replaces its composition): with a missing bundle the
+      buyer's `LifecycleClient` read reports `repair required` and no client is kept;
+      with none, the composition's dispute port called directly, through no app,
+      builds the deal's client — kept as the contrast because a read with a usable
+      credential would contact the harness's authority origin. Buyers, unit
+      (`tests/test_lifecycle_adoption.py`, the composition's `_MediationPort` called
+      directly): a missing bundle is a `MediationTransportError` caused by
+      `FileNotFoundError`, no client kept; a buyer is a CLI with no app, so the
+      planned application-integration level is not delivered for the buyers.
+      Suite results: VM storefront 551 passed, bare-metal storefront 598, VM buyer
+      216, bare-metal buyer 33 (both storefronts' values-schema drift tests among
+      them). `scripts/change-workflow run pre-commit`: `after-functional-change` and
+      `pre-commit-functional` passed, `make check-packaging` (locks, layout,
+      architecture) and every suite included; `pre-commit`'s `check-repository`
+      failed only on the citations check, for the three later-section paths 1.6
+      names. The first pre-commit run also failed `domains/apicredits`'
+      `tests/test_distribution_install.py` (two wheel-install cases whose throwaway
+      environment imported a `market_core.schemas` lacking a name); it did not
+      reproduce — `make -C domains/apicredits test-domain` then passed 41, and the
+      second pre-commit run passed it; the cause was not found.
+      End-to-end scenarios covering the section once deployed: none yet; section 5's
+      VM case stages and bare-metal filing are the first (Bob's and the buyer's
+      credentials carry `ca_bundle_path` from 5.3 and 5.4).
+      Handoff: section 5 writes `ca_bundle_path` into Bob's secret overlay and the
+      buyer's credential; the field is strict text, refused blank. Section 7's access
+      check builds the client with `ca_bundle=credential.ca_bundle_path` and should
+      read an `OSError` at construction as its `configuration` step, as the payments
+      check reads its own.
 
 ## 4. The mediation double
 
@@ -625,7 +711,12 @@ implementation. In the order of `openspec/README.md#plan-closeout-requirements`:
       - D7: `tools/README.md`, "Lane collaborators"; `dev-env/identities/README.md`'s
         table (the mediation fixture tokens, the retired `.invalid` authority).
       - D8: `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Dispute authority
-        preferences"; `kit/arkhai-mediation/README.md` (section 3).
+        preferences" (the credential's `ca_bundle_path`, and that one whose bundle
+        cannot be loaded is no usable credential: a storefront reports the deal
+        `repair_required`, a buyer's filing reads the authority unreachable);
+        `openspec/specs/settlement-configuration/architecture.md`, where it says a
+        private CA is the payments section's alone; `kit/arkhai-mediation/README.md`
+        (section 3).
       - D9: `docs/development/TESTING.md`, "Private Service Dependencies", and the
         paragraph on the lanes' doubles under "4. System Integration Tests
         (End-to-End)"; `e2e-tests/README.md`, "Shared payment-scenario configuration".
