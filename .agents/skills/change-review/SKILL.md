@@ -1,6 +1,6 @@
 ---
 name: change-review
-description: Review an OpenSpec change as an independent reviewer — a design, implementation, pre-closeout, or closeout review — and produce one Markdown review whose findings each carry a lens, a basis, a severity, evidence, and its alternatives. Use when asked to review a change ("review <change>", "design review of <change>"), or when `make review` invokes you. Review only; never edit files.
+description: Review an OpenSpec change as an independent reviewer — a design, implementation, pre-closeout, closeout, or merge review — and produce one Markdown review whose findings each carry a lens, a basis, a severity, evidence, and its alternatives. Use when asked to review a change ("review <change>", "design review of <change>"), or when `make review` invokes you. Review only; never edit files.
 ---
 
 # Reviewing an OpenSpec change
@@ -15,9 +15,9 @@ This is review only. Change no file. Your final message is the review itself, in
 the format in section 6, and nothing else: it is saved verbatim as the review
 record.
 
-You are told the **review kind** (`design`, `implementation`, `pre-closeout`, or
-`closeout`), the **change**, and for the later kinds the **base** branch the change
-is measured against.
+You are told the **review kind** (`design`, `implementation`, `pre-closeout`,
+`closeout`, or `merge`), the **change**, and for the later kinds the **base** branch
+the change is measured against.
 
 ## Running unattended
 
@@ -56,8 +56,8 @@ Read all of this before forming a view:
   `openspec/changes/README.md`.
 - Every file in the change's directory, including `specs/` and
   `interventions.jsonl`. The directory is what `scripts/change-workflow find
-  <change>` prints: `openspec/changes/<change>/`, or for a closeout review, which
-  follows the archive, the change's dated directory under
+  <change>` prints: `openspec/changes/<change>/`, or for a closeout or merge review,
+  which follow the archive, the change's dated directory under
   `openspec/changes/archive/`.
 - Every earlier review and triage in the change's `reviews/`: the
   numbered `NN-*.md` files only. They are the history of this change's review; you
@@ -74,7 +74,7 @@ Read all of this before forming a view:
   `index.md`, which you read too, and `architecture.md` elsewhere.
 - The code the change cites, and the code it changes or would change. Read enough
   to verify every factual claim it makes.
-- For `implementation`, `pre-closeout`, and `closeout`: the change's diff,
+- For `implementation`, `pre-closeout`, `closeout`, and `merge`: the change's diff,
   `git diff <base>...HEAD`, and `git log <base>..HEAD`; and the validation record
   of the commit you review, `reviews/NN-validation.md`, if one exists. Never wait
   for one: validation runs beside an implementation review, and its results are
@@ -232,6 +232,44 @@ specifications as they now stand, not the deltas.
    permanent `spec.md` saying what the change's deltas meant?
 2. **`readiness`** — May the change land: is anything left before its archive is
    cleaned up and its dependents released?
+
+### Merge review
+
+The change is archived and its archive cleaned up, and the merge after the archive
+brought the branch it lands on into its branch again, judging that its resolutions
+need this review. Find the merge in the workflow log — the latest `merge` run after
+an `archive-cleanup` run, `scripts/change-workflow log <change>` — read its report,
+and the note it appended to the archived change's `reviews/pull-request.md`. The
+merge commit is the latest merge on the first-parent history (`git log
+--first-parent --merges -1`); a merge without conflicts concluded itself, and its
+reconciliations follow it as a commit of their own. Its parents are this branch,
+`<merge>^1`, and the landing branch, `<merge>^2`, and "since the merge base" below
+means since `git merge-base <merge>^1 <merge>^2`.
+
+1. **`consistency`** — Does each conflict's resolution keep both sides? Read the
+   merge commit's own resolution against both parents (`git show --remerge-diff
+   <merge>`) and every commit since the merge's first parent (`git log -p
+   <merge>^1..HEAD`): the change's behaviour as its sections built it, and the
+   landing branch's as its commits made it. A resolution that took one side whole
+   where both changed meaning is a finding.
+2. **`documentation`** — Does each permanent specification and index the merge
+   touched say what both changes meant? For each `openspec/specs/<capability>/spec.md`
+   and `index.md` either side changed since the merge base, read the requirements
+   both changes added or modified: every one says what its change's delta meant,
+   none contradicts another, every requirement id is unique, and each change's index
+   entries are kept. Check the permanent documents both changes promoted into the
+   same way, and the change index: this change's row still `archived`, a dependent
+   the landing branch brought released.
+3. **`consistency`** — Does the change's code still use what the landing branch
+   offers? For each file the landing branch changed since the merge base that
+   defines something the change's diff uses, does the change's code still call what
+   the landing branch renamed, removed, moved into a kit, or changed in meaning, and
+   did its new callers move where the landing branch moved the others? Do its
+   end-to-end scenarios still match the landing branch's harness and fixtures?
+4. **`readiness`** — May archive cleanup run again, or does a finding need a fix
+   first? A fix is the triage's, validated before archive cleanup when it changes a
+   path outside the repository's inert paths; nothing after the archive returns the
+   change to an earlier phase.
 
 ## 3. Answer every question
 

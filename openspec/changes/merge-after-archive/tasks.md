@@ -425,7 +425,7 @@ and CW-g3zn. Touches `.agents/skills/change-merge/SKILL.md`, `change-review/SKIL
 `change-triage/SKILL.md`, `change-archive-cleanup/SKILL.md`, and
 `change-orchestrate/SKILL.md`.
 
-- [ ] 4.1 Give `change-merge` a section for an archived change (D3, D6, D7, D8;
+- [x] 4.1 Give `change-merge` a section for an archived change (D3, D6, D7, D8;
   CW-x9tb, CW-g3zn): its route check accepts the computation naming the merge for
   `late-merge`; it resolves as before closeout and also keeps this change's row
   `archived` and its archived directory, keeps both sides in `openspec/specs/`, each
@@ -439,7 +439,21 @@ and CW-g3zn. Touches `.agents/skills/change-merge/SKILL.md`, `change-review/SKIL
   both sides cannot hold or the design no longer does, and declares no return. Verify:
   `make check-agent-skills` passes; the section states each D7 rule and each D3
   criterion.
-- [ ] 4.2 Give `change-review` the `merge` kind (D2, CW-r2hu): its description and kind
+  Done: `change-merge` gains "After the archive" — the D7 rules (index row kept
+  `archived`, a dependent released as archive cleanup's step 3 does, the archived
+  directory, both sides in `openspec/specs/`, `index.md`, and permanent documents,
+  the later capacity figure, never `ready for closeout`, a note appended to
+  `reviews/pull-request.md` saying what it merged and how `HEAD` is to be validated,
+  archive cleanup run again appending the result), the four D3 criteria, the D6
+  waiver as the owner's direction to the exit named with its interactive command,
+  and D8's question in place of a return — and its route check, step 2, step 3.1,
+  step 7, outcome bullet, and description point to it. `make check-agent-skills`
+  passes. The D3 criterion "a file both sides changed since the merge base" is
+  written outside the mechanical files, since a conflicted index row is changed by
+  both sides and the delta's scenario "Only the change index conflicted" names
+  archive cleanup; CW-x9tb's own wording lacks that exception, which closeout's
+  promotion (5.9) carries into the index summary and README.
+- [x] 4.2 Give `change-review` the `merge` kind (D2, CW-r2hu): its description and kind
   list name it, and a section asks what a merge after the archive did — each
   resolution against both parents (`git show --remerge-diff`) and every commit since
   the merge's first parent, each permanent specification and index it touched for both
@@ -447,23 +461,65 @@ and CW-g3zn. Touches `.agents/skills/change-merge/SKILL.md`, `change-review/SKIL
   against what the landing branch renamed, removed, moved, or changed in meaning.
   Verify: `make check-agent-skills` passes; `pytest -q
   scripts/tests/test_change_workflow_review.py` passes.
-- [ ] 4.3 Give `change-triage` the `merge` kind (D4, D8, CW-r2hu): its exits are archive
+  Done: description, kind list, the change directory and diff for the kind, and a
+  "Merge review" section of four questions (resolutions against both parents and
+  every commit since the first parent; specifications, indexes, permanent documents,
+  and the change index for both changes' meaning; the code and scenarios against
+  what the landing branch changed; readiness for archive cleanup). `make
+  check-agent-skills` and `test_change_workflow_review.py` pass.
+- [x] 4.3 Give `change-triage` the `merge` kind (D4, D8, CW-r2hu): its exits are archive
   cleanup on advancing and another merge review, with no return; a finding needing a
   code fix is fixed in the triage and validated by its exit's guard. Verify: `make
   check-agent-skills` passes; the section names both exits and no return.
-- [ ] 4.4 Make `change-archive-cleanup` accept `late-merge` and `triage:merge` as its
+  Done: the exit table's row (archive cleanup; another merge review; no return), the
+  status table's row (`archived`, unchanged), a "fix, at a merge review's triage"
+  outcome, and step 1's and step 5's archived-change wording. `make
+  check-agent-skills` passes.
+- [x] 4.4 Make `change-archive-cleanup` accept `late-merge` and `triage:merge` as its
   routes in, and, on a row already `archived`, append what its cleanup reported to
   `reviews/pull-request.md` rather than redraft it (D4, CW-p8fy). Verify: `make
   check-agent-skills` passes; the skill's status check names both routes.
-- [ ] 4.5 Make `change-orchestrate` record the owner's direction to `{"step":
+  Done: the Route check names both routes in on an `archived` row, which now runs
+  the Route and Landing branch checks before steps 7 to 10, never releasing,
+  editing the row, or redrafting; step 8 already appended on a rerun. The
+  "Running interactively" paragraph said the computation names `done` for an
+  archived row whatever the log holds, false since section 3; it now says `done`
+  comes only from a finished cleanup line. `make check-agent-skills` passes.
+- [x] 4.5 Make `change-orchestrate` record the owner's direction to `{"step":
   "late-merge"}` on their word, run the merge the computation names after the archive
   as any merge, record a waiver of the merged `HEAD`'s validation as a direction to the
   exit the merge named, and say that at `done` an advanced landing branch is the owner's
   to direct a merge for (D1, D5, D6). Verify: `make check-agent-skills` passes.
-- [ ] 4.6 Verification: `make check-agent-skills` passes; `pytest -q
+  Done: a paragraph after the merge before closeout — archive cleanup's first exit
+  run without asking, the owner's direction recorded on their word with its command,
+  the writer's refusals relayed, the merge's exit followed, a waiver recorded as a
+  direction to the exit named with its command, no return, and `done` leaving a
+  moved landing branch to the owner — the refusals list, and the pull request at
+  `done` after a merge after the archive (no second one; the appended notes
+  relayed). `make check-agent-skills` passes.
+- [x] 4.6 Verification: `make check-agent-skills` passes; `pytest -q
   scripts/tests/test_check_agent_skills.py scripts/tests/test_change_workflow_assumptions.py`
   (unit) passes; `scripts/change-workflow run pre-commit merge-after-archive` passes.
   End-to-end: none; no scenario exercises the skills.
+  Done: `make check-agent-skills` passes; the two suites with
+  `test_change_workflow_review.py` pass (104). The fresh-context check found, and
+  this section fixed: archive cleanup's rerun skipping a validation its route still
+  owed (it now stops on one, runs the Worktree check, writes a waiver's ledger
+  line, and appends the validation's result); the orchestrator assuming a pull
+  request exists at `done` after a merge after the archive; no interactive waiver
+  command after the archive; stale wording in archive cleanup's description and
+  introduction, the triage's fix procedure, the merge's step 2 and 3.1, the
+  orchestrator's refusals (a `merge` direction for an archived change), and the
+  review's merge base and inert-path exemption; the dependent release restated in
+  full. Declined: a closeout direction for an archived change is accepted by the
+  log's writer, since closeout carries no entry guard (it is the step that
+  archives); the closeout skill refuses it itself, and guarding the table is outside
+  this change. `scripts/change-workflow run pre-commit merge-after-archive` passed on
+  the finished section, after those fixes (`after-functional-change`,
+  `pre-commit-functional` with `make test` and the packaging check, `pre-commit`).
+  End-to-end: none, confirmed. Owed by validation: none. Handoff: the round's
+  sections are all committed; the `(D10)` in the step table's comment (1.6) is still
+  owed by the orchestrator.
 
 ## 5. Closeout
 

@@ -1,6 +1,6 @@
 ---
 name: change-archive-cleanup
-description: Clean up an archived OpenSpec change once its closeout review's triage has advanced it — fetch and record the branch it lands on, release the changes that depend on it, set its index row to `archived`, keep its reviews, commit, draft the merge commit message and pull request description, run the cleanup of the repository's validation parts and commit any file it wrote, push, and copy its history into the owner's workspace. Use when the next-step computation names archive cleanup — a closeout triage's exit, or the owner's direction — and the change's row still says `in closeout`, when the owner says "clean up the archive of <change>", or when `make archive-cleanup` invokes you.
+description: Clean up an archived OpenSpec change once its closeout review's triage has advanced it — fetch and record the branch it lands on, release the changes that depend on it, set its index row to `archived`, keep its reviews, commit, draft the merge commit message and pull request description, run the cleanup of the repository's validation parts and commit any file it wrote, push, and copy its history into the owner's workspace. Use when the next-step computation names archive cleanup — a closeout triage's exit, or the owner's direction — and the change's row still says `in closeout`, or, run again after a merge after the archive or a merge review's triage, `archived`, when the owner says "clean up the archive of <change>", or when `make archive-cleanup` invokes you.
 ---
 
 # Cleaning up an archived change
@@ -17,8 +17,9 @@ repository's validation parts writes, such as this repository's capacity figure
 (steps 7 and 8). That cleanup removes what the change's validation left, and, for
 a change worked in its own clone, archive cleanup copies the change's history into
 the owner's workspace as its last act. The archived change, its specs, and the permanent
-documents are as the closeout review read them; a defect found now in any of them
-is not this skill's to fix — stop and tell the owner.
+documents are as the closeout review read them, or, run again after a merge after
+the archive, as that merge and any merge review's triage left them; a defect found
+now in any of them is not this skill's to fix — stop and tell the owner.
 
 ## Running unattended
 
@@ -95,10 +96,11 @@ and `--session <id>` gives the id. Record the outcome the session ends with —
 question or a stop, which the owner, present, settles in the session: a recorded
 stop would wait for a resume only the wrapper makes. When `record` refuses, correct
 what it names and run it again. Run after the history copy (step 10), the record
-reaches the owner's workspace with the next copy. Once the row says `archived` the computation names `done` whatever the log
-holds, so a session closed after that without recording loses only its report;
-closed earlier, it leaves archive cleanup in progress, and the computation names it
-again, to be resumed, or its outcome recorded with the command above.
+reaches the owner's workspace with the next copy. A session closed without
+recording leaves archive cleanup in progress whatever the row says, since the
+computation answers `done` only from a finished archive cleanup line: it names
+archive cleanup again, to be resumed, or its outcome recorded with the command
+above.
 
 ## 1. Check that cleanup may start
 
@@ -113,13 +115,26 @@ again, to be resumed, or its outcome recorded with the command above.
   there.
 - **Status.** The change's row in `openspec/changes/README.md` is `in closeout`. A
   row already `archived` means steps 3 to 6 ran, after the checks below held: say
-  so, skip the Route and Validated checks — the computation names `done` for an
-  archived row, and a file step 8 committed would otherwise read as an
-  unvalidated change — run the Landing branch check, and go on from step 7, each
-  step after it being safe to repeat.
+  so, and run again only what is safe to repeat — the Route, Worktree, and Landing
+  branch checks, then steps 7 to 10 — never releasing dependents, editing the row, or
+  redrafting the pull request. The Validated check, which measures from the first
+  closeout review, is not run there: the guard on the exit that named archive
+  cleanup — the merge after the archive's, or a merge review's triage's — owes its
+  own validation, which the Route check reads. When the Route check names a
+  validation of `HEAD`, or the owner, with archive cleanup as its target, stop: the
+  validation is owed (`make validate CHANGE=<change>`), or the owner waives it as
+  their direction to archive cleanup. When the computation named archive cleanup
+  from that direction, write the waiver's ledger line as the Validated check
+  describes, under the record name of the latest merge review, or `merge` with none,
+  and commit it alone before step 7. Append to `reviews/pull-request.md` the latest
+  validation record's commit and result, or the waiver, so the drafts say how the
+  merged `HEAD` was validated.
 - **Route.** `scripts/change-workflow next <change>` names
   `archive-cleanup`: the exit of the latest closeout review's triage, once any
-  validation it owes cleared `HEAD`, or the owner's direction to archive cleanup.
+  validation it owes cleared `HEAD`, or the owner's direction to archive cleanup;
+  on a row already `archived`, the exit of the merge after the archive (its run
+  logged as `merge`, after an archive cleanup run) or of a merge review's triage,
+  each once the validation its guard owes cleared `HEAD`, or the owner's direction.
   When it names a validation of `HEAD`, or the owner, with archive cleanup as its
   `target`, the triage advanced and the validation it owes is missing: go on to the
   Validated check. When it names anything else — a triage in progress, another

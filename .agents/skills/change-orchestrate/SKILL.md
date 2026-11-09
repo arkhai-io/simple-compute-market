@@ -296,7 +296,11 @@ You direct nothing of your own accord, and never record a step's exit on its
 behalf. A direction checks no exit guard on the way there, so its `reason` says
 what it skips. The log's writer refuses one an unwaivable entry guard of a node it
 names refuses — design, planning, or implementation of an archived change; the
-closeout review, its triage, or archive cleanup of a change not archived; a triage
+closeout review, its triage, or archive cleanup of a change not archived; the merge
+before closeout, `merge`, of an archived change, whose merge after the archive is
+directed as `late-merge`; the merge after the archive before archive cleanup has run
+or without the change's row saying `archived`, and the merge review or its triage of
+a change not archived; a triage
 with no review of its kind awaiting it, nor a validation after the latest review,
 when that review is of its kind;
 a validation naming no target; `done`,
@@ -377,6 +381,43 @@ scripts/change-workflow note <change> orchestrator --by owner --resolves <merge-
 
 A failed validation of the merged `HEAD` names the merge again, which repairs it;
 an inconclusive one names the owner, as any validation's does.
+
+After the archive the change's branch may need the landing branch again: it moved
+while closeout ran, or while the pull request waits and now conflicts with it. Two
+things start the merge after the archive. Archive cleanup's first exit, when the
+commit it fetched is not in the branch, makes the computation name `merge`, its
+reason beginning `late-merge:`, carrying `done`; run it without asking, as any step
+it names. Otherwise only the owner starts it: on their word — "merge main into the
+change again" — record their direction, and pass `FROM` to `make merge` only if they
+name another branch than the one the last merge recorded:
+
+```text
+scripts/change-workflow note <change> orchestrator --by owner --next late-merge --decision "merge the landing branch after the archive" --reason <the owner's words>
+```
+
+The log's writer refuses it before archive cleanup has run, or while the change
+index has no row for the change saying `archived`: relay the refusal, which names
+the row to restore. Run the merge the computation names as any merge, from the
+change's clone while it has one, else from a checkout of its branch. The merge
+chooses its own exit without asking — the merge review, `{"step": "review", "kind":
+"merge"}`, or archive cleanup — and you follow it, through the validation of the
+merged `HEAD` its guard names. When its message recommends waiving that validation,
+ask the owner; on their word, record the waiver as their direction to the exit the
+merge named, resolving its run, so a review it chose is not skipped with the
+validation; a waiver of the review as well is a direction to archive cleanup, its
+reason saying it skips both:
+
+```text
+scripts/change-workflow note <change> orchestrator --by owner --resolves <merge-seq> --next review --kind merge --decision "the merge review without validating the merged HEAD" --reason <the owner's words>
+```
+
+A merge review's triage advances to archive cleanup or names another merge review;
+archive cleanup runs again on the archived row and ends at `done`. No step after the
+archive returns the change to an earlier phase: where the merge asks because both
+sides cannot hold, relay its question; the owner resolves it, lands the change and
+follows up in a new change, or takes it off the workflow. At `done`, a landing
+branch that has moved since is the owner's to direct another merge for; nothing
+detects it once the pull request is open.
 
 ### Interrupting and revisiting
 
@@ -476,7 +517,11 @@ Open the pull request from the drafts archive cleanup wrote to the archived
 change's `reviews/pull-request.md`: from the change's branch into `dev`, titled
 with the merge commit message's subject, its body the pull request description.
 When a pull request from the branch already exists, open no second one; give its
-link. When the drafts say the branch carries another change that is not archived,
+link, and relay the notes a merge after the archive and archive cleanup appended to
+the drafts, for the owner to add to it. A merge after the archive that archive
+cleanup's first exit started reaches `done` before any pull request was opened:
+open it then, from the drafts as they stand.
+When the drafts say the branch carries another change that is not archived,
 the pull request would merge that change too: ask the owner before opening it.
 In the report, give the pull request's link and then the merge commit message, in
 a fenced block, for the owner to paste into the squash merge.

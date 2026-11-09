@@ -1,6 +1,6 @@
 ---
 name: change-merge
-description: Merge the branch an OpenSpec change will land on — the branch it was branched from, or another the owner names — into the change's branch once its pre-closeout review's triage advanced it — resolve every conflict, reconcile the change's own code with what that branch renamed or removed even where Git reported no conflict, run the suites, conclude and push the merge, then judge whether the merge merits another pre-closeout review and whether its validation may be waived, asking the owner to confirm either before taking it; or repair what a failed validation of the merged HEAD found. Use when the next-step computation names `merge`, when the owner says "merge <branch> into <change>", or when `make merge` invokes you.
+description: Merge the branch an OpenSpec change will land on — the branch it was branched from, or another the owner names — into the change's branch once its pre-closeout review's triage advanced it — resolve every conflict, reconcile the change's own code with what that branch renamed or removed even where Git reported no conflict, run the suites, conclude and push the merge, then judge whether the merge merits another pre-closeout review and whether its validation may be waived, asking the owner to confirm either before taking it; or repair what a failed validation of the merged HEAD found; or, after the archive, merge that branch again, keeping the change archived, and choose between a merge review and archive cleanup without asking. Use when the next-step computation names `merge`, when the owner says "merge <branch> into <change>", or when `make merge` invokes you.
 ---
 
 # Merging a change's base into it before closeout
@@ -93,7 +93,9 @@ reads as written:
   or for a repair the landing of the merge it repairs ("Repairing a failed
   validation"), and `message` the report (step 8). When the merge shows the change's design or plan no longer holds, end with
   `returned`, `next` `{"step": "plan"}` or `{"step": "design"}`, and `evidence`
-  naming where you recorded what you found; the owner confirms the return.
+  naming where you recorded what you found; the owner confirms the return. After
+  the archive the exits are `{"step": "review", "kind": "merge"}` and `{"step":
+  "archive-cleanup"}`, and there is no return ("After the archive").
 
 ## Running interactively
 
@@ -109,7 +111,8 @@ Record `finished`, with its `landing` — which only a repair of a merge logged
 before the record existed omits — or `returned`, never a question or a stop, which
 the owner, present, settles in the session. When `record` refuses the
 `landing`, correct what it names and record again. When the owner waived the
-validation of the merged `HEAD`, record their direction after the outcome (step 7).
+validation of the merged `HEAD`, record their direction after the outcome: step 7's
+command before closeout, "After the archive"'s after it.
 
 ## 1. Check that the merge may start
 
@@ -121,7 +124,11 @@ validation of the merged `HEAD`, record their direction after the outcome (step 
 - **Base.** Your invocation names it. It is not the change's own branch.
 - **Route.** `scripts/change-workflow next <change>` names `merge`: the
   pre-closeout triage's exit, a failed validation of the merged `HEAD`, or the
-  owner's direction. When a merge is in progress it names the owner, `merging`;
+  owner's direction. For an archived change its reason begins `late-merge:` — the
+  owner's direction to the merge after the archive, archive cleanup's first exit
+  finding the landing branch moved, or a failed validation of the `HEAD` it merged —
+  and the run follows "After the archive" as well. When a merge is in progress it
+  names the owner, `merging`;
   that is yours to continue only when this session started it and is resumed with
   the owner's answer. Otherwise, when it names anything else, stop: its reason says
   what comes first.
@@ -136,7 +143,8 @@ validation of the merged `HEAD`, record their direction after the outcome (step 
 Read in full: the documents `scripts/change-workflow config load merge` prints; the change's
 `proposal.md`, `design.md`, and `tasks.md`, the section notes above all, which say
 which files each section owns and which suites and end-to-end scenarios prove it;
-the latest pre-closeout review and its triage; and the latest validation record.
+the latest pre-closeout review and its triage, and after the archive the latest
+closeout review's and any merge review's too; and the latest validation record.
 
 ## 3. Merge
 
@@ -151,7 +159,7 @@ the latest pre-closeout review and its triage; and the latest validation record.
    `git rev-parse <base>`. List what it gained: `git log
    --oneline HEAD..<base>`. When it lists nothing, the base is merged already:
    nothing is merged, and `HEAD` and its validation stand. Go to step 7, which
-   advances to closeout without asking.
+   advances without asking: to closeout, or after the archive to archive cleanup.
 2. Before merging, record what the base changed and what the change depends on —
    the merge base is `git merge-base HEAD <base>`:
    - `git diff --stat <merge-base> <base>` and `git log --oneline
@@ -236,7 +244,8 @@ if it refuses, stop and report its reasons.
 
 ## 7. Choose the exit
 
-Judge the merge, then take the exit it merits:
+After the archive, choose the exit as "After the archive" says instead of this
+step. Before closeout, judge the merge, then take the exit it merits:
 
 - **Review.** Recommend another pre-closeout review when the merge changed what
   the change does, so the pre-closeout review just triaged no longer describes it:
@@ -301,6 +310,90 @@ failures, with the logs it cites:
 
 Never finish while the latest validation of `HEAD` failed and you committed no
 repair: the computation would name this step again for the same record.
+
+## After the archive
+
+Once archive cleanup has run, the branch the change lands on may move again — while
+closeout ran, or while the pull request waits — and the change is merged with it
+again: the merge after the archive, `late-merge`, which the computation names as
+`merge`, its reason beginning `late-merge:`. The change is archived: its deltas are
+merged into `openspec/specs/`, its row says `archived`, and no step returns it to an
+earlier phase. Merge, reconcile, check, conclude, and push as steps 1 to 6 say, a
+repair as "Repairing a failed validation" says, and resolve as before closeout, with
+these rules besides:
+
+- **The change index.** This change's row from its branch, still `archived`; every
+  other row from the landing branch. A row the landing branch brought whose `Depends
+  on` names this change is released by every rule of archive cleanup's step 3 —
+  this change removed from its `Depends on`, leaving `—` when nothing remains; a
+  status of `ready for planning`, `in planning`, or `ready for implementation` set
+  to `ready for design`, its `Notes` saying its design is reverified; a `blocked in`
+  status kept, its `Notes` saying reverification is owed once the blocker clears —
+  since archive cleanup run again does not release it.
+- **The archived change's directory** as this branch has it.
+- **`openspec/specs/`, each `index.md`, and the permanent documents:** both sides.
+  Every requirement says what each change meant, every id is unique, and each
+  change's index entries are kept; two changes' edits to one requirement are merged
+  into one that says both, never one side taken whole.
+- **The validation capacity figure** (`helm/validation-capacity.toml`): the one
+  whose `measured_at` is later.
+- **The row's status is never set to `ready for closeout`:** step 7's status edit
+  does not apply.
+- **`reviews/pull-request.md`**, untracked, never conflicts: append a note on what
+  you merged — the branch, its commits since the merge base by subject, each
+  conflict and reconciliation — and how the merged `HEAD` is to be validated: the
+  exit's guard, or the waiver you recommend. Archive cleanup run again appends the
+  validation's result. Never rewrite what is there, since archive cleanup may have
+  copied it into the owner's workspace, where only a file that grew is brought up to
+  date.
+
+**Choose the exit yourself, and take it without asking** — the orchestrating
+session follows it. Name the merge review, `{"step": "review", "kind": "merge"}`,
+when any of these holds, and archive cleanup, `{"step": "archive-cleanup"}`, when
+none does:
+
+- a conflict resolved outside the mechanical files — the change index, other
+  changes' documents, files the repository's hooks rebuild such as a lock, version-
+  only bumps, and a file a validation part's cleanup writes, such as the capacity
+  figure;
+- a reconciliation of the change's own code or end-to-end scenarios (step 4);
+- a file outside those mechanical files that both sides changed since the merge
+  base, even where Git merged it without a conflict — two changes' edits to one
+  specification can merge into a contradiction (`git diff --name-only <merge-base>
+  <base>` against `git diff --name-only <merge-base> HEAD`, from before the merge);
+- a contract the change depends on that the landing branch changed in meaning, not
+  only in name.
+
+When the landing branch gained nothing, nothing is merged: name archive cleanup,
+and `HEAD` and its validation stand. Say in your report which criteria held, with
+their evidence.
+
+**Validation.** The merged `HEAD` is validated before the exit you named — with the
+inert paths exempt before archive cleanup, records only before the merge review —
+and a failed validation brings the change back here to repair it. Only the owner
+waives it. Recommend a waiver only when a criterion of `docs/agents/change-workflow.md`'s
+"Waivers" holds, naming it and its evidence, and never after a reconciliation of
+the change's own code. The waiver is the owner's direction past the guard to the
+exit you named — the merge review when you named it, archive cleanup otherwise — so
+a review you chose is not skipped with the validation: skipping both is the owner's
+direction to archive cleanup, its reason saying it skips both. Say the
+recommendation in your report and finish naming your exit; the orchestrating
+session asks the owner and records their answer. Interactively, record the owner's
+waiver yourself after your outcome, its `--next` the exit you named:
+
+```text
+scripts/change-workflow note <change> orchestrator --by owner --decision "<the exit> without validating the HEAD merged after the archive" --reason "<the owner's words>" --resolves <your run's seq> --next review --kind merge
+```
+
+with `--next archive-cleanup` and no `--kind` when you named archive cleanup.
+Never step 7's direction to closeout: closeout has run.
+
+**Ask instead of returning.** No exit returns: design, planning, and implementation
+refuse an archived change. Where a conflict cannot be resolved so that both sides
+hold, or the landing branch has invalidated the change's design, ask the owner with
+the options and your recommendation, leaving the merge in progress: they resolve it
+as they direct, land the change and follow up in a new change, or take it off the
+workflow.
 
 ## 8. Report
 
