@@ -24,8 +24,8 @@ from market_core.schemas import SettlementOption
 from storefront_client import StorefrontClientError
 
 from tests.e2e.roles.helpers.ssh_access import SshEndpoint
-from tests.e2e.roles.scenarios.vms.purchase_driver import VmPurchaseParts
 from tests.e2e.roles.scenarios.vms.host_registry import refresh_storefront_projections
+from tests.e2e.roles.scenarios.vms.purchase_driver import VmPurchaseParts
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
     REAL_REGION,
     RealVmComputeDealDriver,

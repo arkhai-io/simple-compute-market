@@ -18,6 +18,7 @@ from market_core.schemas import RateValue
 
 from tests.e2e.roles.helpers import payments
 from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import BareMetalComputeDealDriver
+from tests.e2e.roles.scenarios.vms import test_vm_payment_deal as hosted_deal
 from tests.e2e.roles.scenarios.bare_metal.purchase_driver import (
     DELIVERY_DEADLINE_SECONDS as BARE_METAL_DELIVERY_DEADLINE,
     BareMetalPurchaseDriver,
@@ -27,7 +28,6 @@ from tests.e2e.roles.scenarios.vms.composed_listing import (
     payments_settlement,
 )
 from tests.e2e.roles.scenarios.vms.real_purchase_driver import RealVmPurchaseDriver
-from tests.e2e.roles.scenarios.vms import test_vm_payment_deal as hosted_deal
 
 Failed = pytest.fail.Exception
 
