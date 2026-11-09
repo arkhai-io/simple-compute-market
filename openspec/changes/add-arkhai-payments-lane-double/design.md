@@ -81,7 +81,11 @@ mock provisioning takes a job's outcome. It never re-implements the authority's
 decision logic.
 
 **Real mechanics:** routes, bearer authentication, schema validation against the
-vendored contract, idempotency and conflict answers, the closed-case refusal, either
+vendored contract, idempotency and conflict answers, the filing's admission checks
+— a filer who is neither party refused `filer_not_party`, and a filed Agreement
+whose JCS SHA-256 is not the signed payment receipt's `deal` refused
+`agreement_hash_mismatch`, both before any case is reserved or part extended (62
+F1) — the closed-case refusal, either
 party appending evidence with only `mandate.to` appending concurrence, the signed
 per-agreement record with its sequence and cursors, the respondent listing,
 per-part `extend` at the payments double as the authority's own account, the
@@ -118,8 +122,15 @@ per-part effects with their amounts, filing-answer overrides (`pending`, `error`
 refusal), and a gate holding a ruling before its effects. An operator ruling on an
 open case takes the same shape, matched by case.
 
-The double verifies no concurrence signature, Agreement digest or mechanical guard:
-SCM's verification is proven in the kits against the producer's vectors. With no
+The double verifies no concurrence signature or mechanical guard: SCM's verification
+is proven in the kits against the producer's vectors, and a guard is the authority's
+decision logic. The Agreement's binding to its payment is different (62 F1): it is
+the authority's admission rule, not SCM's verification or a decision, the receipt
+the double already reads carries the `deal` it is checked against, and the payments
+double makes the same comparison when an Agreement is attached. An honest filing
+always passes it, since SCM's buyer side checks the receipt's `deal` against the
+Agreement it negotiated, so in a lane it catches only SCM filing a different or
+re-serialised Agreement. With no
 matching rule, mechanics proceed (a filing is accepted, each part's extension is
 attempted, appends are recorded, a case with nothing held is dismissed) and nothing
 is ever ruled, consistent with silence never ruling. A payee-filed or concurred case therefore rules only when a rule says
@@ -343,8 +354,9 @@ unauthenticated call `401 authentication_required`, a malformed one `400
 invalid_request`, and an unknown case, an unknown Agreement, and a reader who is
 no party alike `404 invalid_request`; an Agreement is known from its first filing
 whose transaction payments answers. The double checks a filer is a party
-(`filer_not_party`) and, as D1 says, verifies no Agreement digest or authority
-listing.
+(`filer_not_party`) and the filed Agreement's binding to the receipt's `deal`
+(`agreement_hash_mismatch`), both answered as the contract's `rejected` filing,
+and, as D1 says, verifies no authority listing.
 
 **Scope and access.** There are no run scopes: a lane is its own stack, a module holds
 its services, a rule's `match` is its scope, and the scenario's finaliser deletes its

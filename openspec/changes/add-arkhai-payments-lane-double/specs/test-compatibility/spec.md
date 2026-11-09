@@ -2,13 +2,18 @@
 
 ### Requirement: Lanes run a mediation double that answers from programmed rules
 
-Every lane MUST run a mediation double, recommended by the lane's registries, that reproduces the dispute authority's API mechanics — authentication, idempotency, signed per-agreement records and cursors, the respondent listing, the closed-case refusal, extensions at the payments double, execution of a ruling's per-part `reverse` effects and the record of its delivery end — and takes every ruling from a scenario-programmed rule. It MUST NOT compute a ruling, and with no matching rule it MUST rule nothing. It MUST refuse at install, and install nothing for, a rule whose ruling carries a `stop` or `penalty` effect, which act on rate parts no lane running the double has, or an `award`, which the contract makes unexecutable on `arkhai.payments.v1`.
+Every lane MUST run a mediation double, recommended by the lane's registries, that reproduces the dispute authority's API mechanics — authentication, idempotency, the filing's admission checks, signed per-agreement records and cursors, the respondent listing, the closed-case refusal, extensions at the payments double, execution of a ruling's per-part `reverse` effects and the record of its delivery end — and takes every ruling from a scenario-programmed rule. It MUST NOT compute a ruling, and with no matching rule it MUST rule nothing. It MUST refuse at install, and install nothing for, a rule whose ruling carries a `stop` or `penalty` effect, which act on rate parts no lane running the double has, or an `award`, which the contract makes unexecutable on `arkhai.payments.v1`.
 
 #### Scenario: A case is filed with no rule installed
 
 - **WHEN** a party files a case and no rule matches it
 - **THEN** the double accepts the filing, sends `extend` for each part to the payments double as the authority's own account, and reports each part `held` with its reference, or, when payments refuses it as nothing held, `not_held` with a reason classified from the part's signed amounts: `paid_out` when any money was released, otherwise `reversed` when any was reversed or refunded, otherwise `nothing_held`
 - **AND** the case stays open and unruled, unless every part is `not_held`, when the contract's automatic dismissal closes it with nothing held
+
+#### Scenario: A filing's Agreement is not the payment's
+
+- **WHEN** a party files a case whose Agreement's JCS SHA-256 differs from the `deal` in the transaction's signed payment receipt
+- **THEN** the double rejects the filing with `agreement_hash_mismatch`, reserves no case, and extends no part
 
 #### Scenario: Protection cannot be established
 
