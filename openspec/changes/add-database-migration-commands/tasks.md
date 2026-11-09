@@ -6,7 +6,17 @@ covered only the VM storefront and the API-credit services. Section 5 keeps its
 completed task; its other tasks moved to section 10 (comment hygiene and import
 placement) and section 11 (promotion).
 
+Amended on 2026-11-09 after section 1 returned the change to design and D15a was
+narrowed to hosts: section 1's tasks 1.1, 1.2 and 1.4 and closeout parts 11.5 and 11.9
+are amended; nothing else moved.
+
 ## 1. Stored `ssh` connections are repaired and a connection's version is required
+
+Replanned on 2026-11-09 against the design as settled after section 1's return: D15a's
+migration rewrites hosts only, since no job holds a copy of a connection, and a lease
+already `release_failed` on a version-1 host is recovered by the operator, not by
+retry-release. Tasks 1.1, 1.2 and 1.4 are amended; 1.3 and 1.5 stand. The work in
+progress the notes below describe is the starting point.
 
 Delivers D15a and `physical-provisioning`'s modified "Host connections are typed by
 their implementation's codec" and "Host registry records the connection port".
@@ -21,20 +31,24 @@ caller that builds a `ConnectionSubmission`.
       carries a connection rather than reading its host at dispatch — and record the
       list in the section's notes. Verify by reading the job engine's host lookup
       (`compute_provisioning/jobs/engine.py`, `HostLookup`) and each job table's
-      columns; the list is the input to 1.2. (D15a)
+      columns. The section notes' "What 1.1 found" records the result — the `hosts`
+      row alone — which D15a now states; check this task once the notes are
+      compressed to that result. (D15a)
 - [ ] 1.2 Add one migration to compute provisioning's chain, after its last entry,
-      that rewrites every `ssh` connection stored at version 1 — on hosts, and on each
-      stored copy 1.1 found on a job not yet finished — to version 2 with the same
-      public fields and protected values, validating the public fields through the
-      version-2 codec and failing, naming the host or job and rewriting nothing, when
-      the codec refuses them. It takes only the database. Verify with library
-      integration tests in `provisioning/compute/service/tests/integration/`: a
-      database with version-1 hosts (protected key and key file) and a queued create
-      and pending teardown that captured them migrates to version 2 with identical
-      public fields and ciphertext; a connection the version-2 codec refuses fails the
-      migration naming it with nothing rewritten; a rerun changes nothing. (D15a;
-      `physical-provisioning` "A provisioning database holding version-1 connections
-      is migrated", "A version-1 connection's fields are not valid at version 2")
+      that rewrites every host's `ssh` connection stored at version 1 to version 2
+      with the same public fields and protected values, validating the public fields
+      through the version-2 codec and failing, naming every refused host and
+      rewriting nothing, when the codec refuses them. It takes only the database and
+      touches no job row. Verify with library integration tests in
+      `provisioning/compute/service/tests/integration/`: a database with version-1
+      hosts (protected key and key file) and a queued create and a queued teardown
+      naming them migrates the hosts to version 2 with identical public fields and
+      ciphertext, leaves both jobs' rows unchanged, and each job's host parses at
+      version 2 at dispatch; a host the version-2 codec refuses fails the migration
+      naming it with nothing rewritten and the migration unrecorded; a rerun changes
+      nothing. (D15a; `physical-provisioning` "A provisioning database holding
+      version-1 connections is migrated", "A version-1 connection's fields are not
+      valid at version 2")
 - [ ] 1.3 Make `ConnectionSubmission.version` required (no default), and state the
       version explicitly in every caller that relied on the default — host
       definitions documents' parsing, the INI import, the typed connection factory,
@@ -46,12 +60,15 @@ caller that builds a `ConnectionSubmission`.
       through the typed client (an unversioned host submission is refused and nothing
       is stored; a version-1 submission is refused naming version 2). (D15a;
       `physical-provisioning` "A version-1 or unversioned connection is submitted")
-- [ ] 1.4 Prove recovery of a stuck release: an application-integration test in
-      `provisioning/compute/service/tests/integration/` in which a reservation's
-      teardown job held a version-1 connection and failed to `release_failed`, the
-      migration runs, and `retry-release` tears the deal down through the typed client
-      without a force-release. (D15a; `physical-provisioning` "A release that failed
-      on a version-1 connection is retried after migration")
+- [ ] 1.4 Delete `provisioning/compute/service/tests/integration/test_ssh_connection_version_recovery.py`,
+      the failing test that showed retry-release cannot recover a teardown whose job
+      failed: D15a no longer claims that recovery, and the scenario it proved is
+      removed from the delta. A lease already `release_failed` on a version-1 host is
+      recovered by the operator's manual teardown and force-release, which closeout
+      writes into the operator handbook (11.9), and re-running such a teardown is the
+      unowned roadmap gap closeout records (11.5); neither is code in this change.
+      Verify with the provisioning service's integration suite passing with no
+      failure. (D15a)
 - [ ] 1.5 **Verification.** Run `make -C provisioning/compute/service test`,
       `make -C provisioning/compute/contracts test`, and the provisioning client and
       ansible suites (`make -C provisioning/compute test`), then
@@ -597,9 +614,16 @@ Per `openspec/README.md#plan-closeout-requirements`.
       permanent-documentation destinations, moving durable rationale into `design.md`
       first.
 - [ ] 11.5 **Roadmap currency.** In `docs/development/ROADMAP.md`, close the deferral
-      "Dropping the frozen tables … belongs to a later follow-up" (it is done), and
-      record that no roadmap goal's gap row is otherwise affected: the change sits under
-      the "Registry productionization" lesser goal, which has no roadmap goal.
+      "Dropping the frozen tables … belongs to a later follow-up" (it is done); add to
+      Goal 1's open-gap table the unowned row D15a records — a teardown that failed
+      before its executor ran (as on a version-1 host) is resolved only by an
+      operator's manual teardown and force-release, since its job identity is fixed per
+      reservation and retry-release re-observes the failed job; re-running such a
+      teardown under a new job identity would change the one-teardown-one-job rule —
+      owned "Unowned — needs a new change", with background in
+      `openspec/specs/physical-provisioning/architecture.md`, "Proof-driven release";
+      and record that no other gap row is affected: the change sits under the
+      "Registry productionization" lesser goal, which has no roadmap goal. (D15a)
 - [ ] 11.6 **Campaign index currency.** In `openspec/changes/README.md`: update this
       change's row; remove `hollow-pre-floor-provisioning-migrations`'s directory and
       row, since this change supersedes it, and reconcile the campaign graph line that
@@ -638,7 +662,11 @@ Per `openspec/README.md#plan-closeout-requirements`.
       - `docs/operator-handbook.md`: a new "## Upgrading a deployment" — backup,
         `--check`, deploy, the refusal of a pre-v0.3.0 or any existing API-credit
         database, rollback by backup, the `ssh` connection repair and required version,
-        and option IDs not stable across an envelope change (D3, D14, D15).
+        the recovery of a lease already `release_failed` on a version-1 host (find it
+        through release-oversight, read its teardown job's error, remove from the host
+        what the domain's teardown would have removed, then force-release with a reason
+        and evidence; a failed create's lease after the host check alone), and option
+        IDs not stable across an envelope change (D3, D14, D15).
       - `docs/seller-quickstart.md`: "Upgrading from CSV inventory" removed (D3).
       - `docs/development/ARCHITECTURE.md`: "Terms" gains *role* and *service* (D16);
         "Build, packaging, and initialization" restates its fresh-database sentence
@@ -650,8 +678,10 @@ Per `openspec/README.md#plan-closeout-requirements`.
       - `docs/development/RELEASING.md`: "Cutting a release" gains the step of weighing
         a new migration floor when an official release is promoted (D16).
       - `openspec/specs/physical-provisioning/architecture.md`: "The host registry owns
-        the connection" — rewriting by a recorded exact migration, and the required
-        version (D15a).
+        the connection" — rewriting a host's connection by a recorded exact migration,
+        jobs reading their host's at dispatch, and the required version (D15a);
+        "Proof-driven release" is unchanged, already stating that a failed teardown
+        waits for an operator's verification and force-release.
       - `openspec/specs/storefront-publication/architecture.md`: "Registry convergence"
         — the sweep beside the convergence repair (D15b).
       - The vocabulary sweep (D16): every permanent document's use of *role* for a
