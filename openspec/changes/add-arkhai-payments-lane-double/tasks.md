@@ -901,6 +901,103 @@ deterministic steps".
       it, both doubles report wall time, and the lane's later modules pass.
       Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes.
 
+Notes before 6.1: nothing of the section is implemented. Section 6 returns to
+design, on the owner's direction, with the questions below; the owner's rulings
+so far:
+- "The e2e scenario should have specific stages for each side effect in the
+  system", each initiated by the scenario. Who causes each side effect in
+  journeys 1 and 2 is for the design session to set out; the recap below is
+  what it starts from.
+- Journey 5 needs expanding before the owner rules on it (below).
+- "Neither the e2e tests nor dependencies only they have are required to be in
+  marketplace-wheelhouse for official releases." This settles section 1's open
+  item: the controls wheel, which only `e2e-tests` and the lane doubles depend
+  on, need not ship in the release wheelhouse, though `make dist`, which
+  `dist-release` runs, builds it there today. Whether to take it out is for the
+  design or plan to decide.
+
+What SCM can file. SCM files only delivery-end cases, and both ways end delivery
+as they file: the VM storefront's operator end tears delivery down at once
+(`test_vm_payment_deal.py` reads `tearing_down` straight after it), and the
+buyer's `market end` files after a surrender the storefront acknowledges
+(`kit/deal-lifecycle-buyer/src/market_deal_lifecycle_buyer/ending.py`). No SCM
+command files a case on a running deal. The storefront answers a case another
+party filed as respondent (`kit/deal-servicing/src/market_deal_servicing/respondent.py`),
+and records a ruling's `delivery_end` effect as an end with cause `ruling`
+(`watch.py`).
+
+Journey 1, a programmed ruling with a delivery end and a reverse. Side effects,
+in order:
+1. A once deal committed and delivering (the VM payment scenario's commit stages).
+2. A mediation rule installed for the deal's transaction: a ruling with
+   `delivery_end`, one `reverse` effect and `close` (control, the scenario).
+3. A case filed while delivery runs. Delivery must still be active here, so
+   neither of SCM's ways of filing fits; the scenario would file as the buyer
+   through the mediation kit's buyer-side adapter, SCM's buyer half used directly.
+4. The double applies the ruling. A rule acts on the filing request itself, so
+   the ruled entry, the reverse at payments, the delivery end, the lift and the
+   closed entry all happen inside step 3. To give the ruling a stage of its own,
+   either the rule's `pause_before_effects` holds it at the gate and a resume
+   (control) applies it, or there is no rule and an operator decision (control)
+   rules the open case.
+5. The storefront's servicing step answers the case as respondent (an append).
+6. A servicing step observes the ruling's delivery end and records the end,
+   cause `ruling`; teardown follows through the canonical deal's stages.
+Observations: the reverse in the payments snapshot; the storefront's delivery
+`end_recorded` or `tearing_down` only after step 6.
+
+Journey 2, an operator decision with a partial reverse and no delivery end:
+1. A delivering once deal.
+2. A case filed with no rule while delivery runs (as in journey 1, step 3): each
+   part held by the double's extension.
+3. A servicing step answers it as respondent.
+4. An operator decision (control) rules a partial `reverse`, no delivery end,
+   with `close`: the reverse lands and the case's extensions are lifted.
+5. A servicing step observes the ruling; delivery stays `active`.
+
+Journey 5, payments failing between two programmed effects. The goal: one ruling
+with two `reverse` effects on the deal's part (say 100 and 200), the first applied
+at payments and the second not, the ruling recorded as incompletely applied
+(ruled entry, effects `prepared`, case `applying`), then completed with exactly
+one reverse per effect. The difficulty: a payments rule matches `route`,
+`account`, `event` and `transaction`, which the two reverses share, so any
+payments rule takes the first reverse; and *unavailable* covers every API route
+and cannot be scoped (26 F2), so installing it before the decision fails the
+first effect, not the second. Setting: a delivering deal, a case filed with no
+rule and answered as respondent, as journey 2's steps 1–3, then:
+- (A) Existing controls. A payments drop-after-commit rule on the authority's
+  `reverse` for the transaction; the operator decision sends effect 1, payments
+  commits it and its answer is lost, so the double stops with the case `applying`
+  (its record shows effect 1 `prepared`, though payments holds it). Delete the
+  rule and install payments *unavailable*; repeating the decision fails at
+  effect 1's resend, and the case stays `applying`, with effect 1 at payments and
+  effect 2 not. Remove *unavailable*; repeating the decision resends effect 1,
+  which payments answers with its stored event (no second reverse), then applies
+  effect 2, lifts and closes. Each control is its own stage, and a servicing
+  step may read the incomplete ruling between them. The failure that first
+  stops the ruling is a lost answer to effect 1, not payments down after it.
+- (B) A payments match property, such as the event's `amount` or the request
+  id, so a refusal or drop rule takes effect 2 alone: effect 1 commits, effect 2
+  is refused, the case waits `applying`; deleting the rule and repeating the
+  decision completes it. The failure falls between the effects as the delta's
+  double scenario words it, but it amends D4's control shapes, the controls
+  package and the payments double's classifier, and it is a refusal or a drop,
+  not *unavailable*.
+- (C) A mediation gate after the nth effect, such as a ruling's
+  `pause_after_effects: 1`: effect 1 applies and the ruling holds; the scenario
+  installs payments *unavailable* and resumes (effect 2 fails, the case stays
+  `applying`), removes it and resumes again (complete). It is the closest to D6's
+  "payments unavailable between two programmed effects", but it amends D4's
+  ruling shape and the mediation double.
+
+Journeys 3, 4 and 6 need nothing new: a mediation drop rule on the storefront's
+filing, its retry adopting the one case; mediation *unavailable* while servicing
+steps a running deal with a case, reported unreachable; a clock advance past the
+once part's hold, the payout read from payments, then a later filing reported
+`not_held` (`paid_out`) and dismissed, with no storefront step after the advance.
+Journeys 3 and 6's filer is open in the same way as 1 and 2's (operator end or
+the scenario as buyer).
+
 ## 7. The storefront's mediation check
 
 Delivers the mediation kit's access check and the VM storefront's
