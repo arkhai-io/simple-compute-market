@@ -36,6 +36,7 @@ from arkhai_bare_metal.fixtures.publication_view import (
     DEFAULT_GPU_MODEL,
     build_bare_metal_publication_view,
 )
+from core_storefront.multi_registry_client import RegistryListings
 from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
 from market_alkahest import AlkahestChainProbe, ProbedChain
 from market_alkahest.alkahest import get_recipient_arbiter
@@ -54,6 +55,7 @@ from market_site_client.fixtures.resource_pools import (
     build_resource_pool_projection,
     build_resource_pool_row,
 )
+from registry_client.models import ListingSummary
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.listing_source_check import build_listing_source_check
@@ -214,13 +216,33 @@ class RecordingRegistries:
     """Stands where ``MultiRegistryClient`` wraps the registry, recording sends.
 
     ``failing`` holds ``(operation, url)`` pairs that fail until removed; an
-    update's operation is the status it sets.
+    update's operation is the status it sets. A read of the storefront's open
+    listings returns what a test planted with :meth:`plant`, and a close sent
+    for one removes it; ``unreachable`` makes the read fail.
     """
 
     def __init__(self) -> None:
         self.urls = [REGISTRY_URL]
         self.sent: list[tuple[str, str, str, dict[str, Any]]] = []
         self.failing: set[tuple[str, str]] = set()
+        self.planted: list[ListingSummary] = []
+        self.unreachable = False
+        self.publisher_reads: list[Any] = []
+
+    def plant(self, listing_id: str, *, offering_mode: str) -> None:
+        self.planted.append(
+            ListingSummary(
+                id=listing_id,
+                status="open",
+                listing_resource={"offering_mode": offering_mode},
+            )
+        )
+
+    async def list_publisher_listings_per_registry(self, principal):
+        self.publisher_reads.append(principal)
+        if self.unreachable:
+            return [RegistryListings(REGISTRY_URL, None, "unreachable")]
+        return [RegistryListings(REGISTRY_URL, tuple(self.planted))]
 
     def __call__(self) -> "RecordingRegistries":
         return self
@@ -250,7 +272,10 @@ class RecordingRegistries:
             body = request.to_dict()
             status = str(body["status"])
             self.sent.append((status, url, listing_id, body))
-            results.append(self._result(status, url))
+            result = self._result(status, url)
+            if result["success"] and status == "closed":
+                self.planted = [item for item in self.planted if item.id != listing_id]
+            results.append(result)
         return results
 
     def operations(self) -> list[tuple[str, str]]:
@@ -992,6 +1017,56 @@ async def test_a_registry_left_closed_by_a_failed_reopen_is_repaired_by_the_next
     assert storefront.registries.sent == []
 
 
+async def test_a_run_closes_registry_listings_the_storefront_does_not_hold(db):
+    """The registry is read under the storefront's principal. A bare-metal
+    listing it does not hold open closes there, one it holds stays open, and a
+    VM listing another storefront publishes under the same principal is left
+    alone; a preview closes nothing."""
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    await storefront.run()
+    held = storefront.listing("site-a", "pool-1", "r1")[0]
+    storefront.registries.plant("superseded-1", offering_mode="bare_metal")
+    storefront.registries.plant(held, offering_mode="bare_metal")
+    storefront.registries.plant("vm-1", offering_mode="vm")
+
+    preview = await storefront.run(dry_run=True)
+
+    assert storefront.registries.sent == []
+    assert actions(preview, "close") == [
+        {
+            "action": "close",
+            "listing_id": "superseded-1",
+            "registry": REGISTRY_URL,
+            "reason": "not_held",
+        }
+    ]
+
+    report = await storefront.run()
+
+    assert storefront.registries.operations() == [("closed", "superseded-1")]
+    assert [item["listing_id"] for item in actions(report, "close")] == ["superseded-1"]
+    assert [item.id for item in storefront.registries.planted] == [held, "vm-1"]
+    assert storefront.registries.publisher_reads[-1] == SELLER
+    assert storefront.listing("site-a", "pool-1", "r1") == (held, "open", None)
+
+
+async def test_an_unreachable_registry_is_swept_by_a_later_run(db):
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    await storefront.run()
+    storefront.registries.plant("superseded-1", offering_mode="bare_metal")
+    storefront.registries.unreachable = True
+
+    report = await storefront.run()
+
+    assert storefront.registries.sent == []
+    assert actions(report, "skip") == [
+        {"action": "skip", "registry": REGISTRY_URL, "reason": "registry_unreachable"}
+    ]
+    storefront.registries.unreachable = False
+    await storefront.run()
+    assert storefront.registries.operations() == [("closed", "superseded-1")]
+
+
 # -- an existing listing ---------------------------------------------------
 
 
@@ -1005,6 +1080,7 @@ async def test_a_sellers_close_is_left_closed(db):
         storefront.registries,
         registry_urls=(REGISTRY_URL,),
         storefront_url=STOREFRONT_URL,
+        publisher=SELLER,
     )
     await seller_close.close(
         BoundListing(listing_id, PublicationBinding("site-a", "bare_metal", "r1", BACKED)),

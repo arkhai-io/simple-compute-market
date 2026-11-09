@@ -171,7 +171,7 @@ storefront supplies), and the three storefronts' publication wiring
 `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication.py`,
 `domains/apicredits/storefront/src/apicredits_storefront/`).
 
-- [ ] 2.1 Add a per-registry listing read to the cross-registry client, beside
+- [x] 2.1 Add a per-registry listing read to the cross-registry client, beside
       `publish_listing_per_registry`, `update_listing_per_registry`,
       `delete_listing_per_registry`, and `get_descriptors`: for each configured
       registry it pages `list_listings_for_publisher(principal, status="open")` to
@@ -180,7 +180,23 @@ storefront supplies), and the three storefronts' publication wiring
       keep their registry; more than one page is read; a failure on a later page
       yields unreachable for that registry and leaves the others' results intact.
       (D15b)
-- [ ] 2.2 Add the sweep to the publication runtime in `kit/capacity-publication`: after
+      `MultiRegistryClient.list_publisher_listings_per_registry` returns one
+      `RegistryListings` per configured registry (`listings` `None` when
+      unreachable), pages of `REGISTRY_PAGE_LIMIT` (200, the registry's maximum),
+      the per-call deadline bounding each registry's whole read. The client gains a
+      constructor-injected `client_factory` (unset: `RegistryClient`, resolved when
+      the clients are built, so existing tests patching the module's name still
+      apply) — the seam the unit tests use. Unit
+      (`tests/unit/test_multi_registry_publisher_listings.py`, fake registry clients
+      through the factory): per-registry results in order; five listings over three
+      pages; a full last page followed by an empty one; a failure on the second page
+      makes that registry unreachable and keeps the other's three listings; a page
+      size below one refused — passed. Core also gains `SQLiteClient.open_listing_ids`
+      (every locally open listing, paused or not), the sweep's held set: library
+      integration (`tests/integration/test_open_listing_ids.py`, real SQLite) —
+      passed. `make -C core/storefront test`: 240 passed. arkhai-core-storefront
+      0.18.0 (new public API).
+- [x] 2.2 Add the sweep to the publication runtime in `kit/capacity-publication`: after
       a pass's local reconciliation, for each registry the read returns, close through
       the existing per-registry update every open listing under the storefront's own
       principal, of an offering mode it serves, that it does not hold open locally;
@@ -194,7 +210,29 @@ storefront supplies), and the three storefronts' publication wiring
       open during a site-projection outage stay open; a partial read closes nothing;
       a preview closes nothing and reports. (D15b; every scenario of the added
       requirement)
-- [ ] 2.3 Wire the sweep into each storefront's publication pass — the VM publication
+      `PublicationRuntime.retire_unheld(dry_run=...)` returns a `RegistrySweep`
+      (each `UnheldListingClose` `planned`, `closed`, or `failed`, and the
+      unreachable registries); `retire_unheld_listings(runtime, report)` in
+      `cycle.py`, run after `converge_registries`, reports each close as `close`
+      with reason `NOT_HELD` (`not_held`) and its `registry`, an unreachable
+      registry as `skip`/`registry_unreachable`, and a refused close as
+      `fail`/`registry_close_failed`. The held set is the repository's
+      `open_listing_ids` (every storefront's repository is core's SQLite client);
+      the publisher and offering modes are the domain hooks' new
+      `registry_publisher` and `served_offering_modes`. The held set is read after
+      the registries, since a listing is recorded locally before any registry is
+      told of it. Closes are not recorded as publications: a failed one is found
+      again by the next sweep. A registry listing whose resource states no
+      `offering_mode` is never swept, since nothing says which storefront under
+      the principal it belongs to. Unit (`tests/unit/test_registry_sweep.py`): an
+      unknown listing closes; a locally closed listing with no publication record
+      closes; another mode's and a locally open listing stay open (the outage
+      itself is driven in 2.3's VM test); two served modes both sweep; an unreachable
+      registry is skipped while the other is swept; a preview reports both closes
+      and makes none; a refused close is reported and closed next pass; publication
+      turned off sweeps nothing — passed. arkhai-kit-capacity-publication 0.12.0
+      (new API; the hooks protocol and repository protocol each gain members).
+- [x] 2.3 Wire the sweep into each storefront's publication pass — the VM publication
       cycle, the API-credit capacity reconciliation, and each bare-metal publication
       run — and prove it against a real registry: an application-integration test per
       storefront, or one shared fixture driving each, in which a registry holds an
@@ -204,7 +242,71 @@ storefront supplies), and the three storefronts' publication wiring
       `domains/bare_metal/storefront/tests/test_publication_cycle.py`, and
       `domains/apicredits/storefront/tests/unit/test_capacity_reconcile_converges.py`
       or their integration neighbours. (D15b)
-- [ ] 2.4 **Verification.** Run `make -C core/storefront test`,
+      Wired: VM's cycle runs the sweep after convergence in its `converge` stage,
+      its hooks naming the signer's principal and `vm` alone — the only mode its
+      loop publishes, so a bare-metal listing under a shared principal is the
+      bare-metal storefront's even where VM composes that domain; bare metal's
+      cycle the same, its hooks naming the publisher `build_publication_runtime`
+      now requires and `bare_metal` alone; API credits' capacity reconciliation
+      ends with `publication_service.retire_unheld_listings`, which logs, since
+      that pass keeps no report and its capacity-events preview does not
+      reconcile.
+
+      Differs from the plan: no test runs a storefront against a real registry.
+      A first version ran the registry application in process in a kit test,
+      which `docs/development/TESTING.md`'s library integration (the library's own
+      database, collaborators injected) does not cover and which made a kit
+      depend on a deployed service (`ARCHITECTURE.md`, "Kit areas"); it was
+      removed. The proof is split by level instead, and no test runs the
+      cross-registry client's read against a real registry: the registry's own
+      integration test, through its typed client, shows it honours `limit` and
+      `offset` with the publisher and status filters, which that read relies on
+      — a publisher's open listings paged to the end are each of them once, none
+      closed and none of another publisher (`core/registry/tests/integration/test_listings.py::TestListPublisherListings::test_open_listings_page_by_offset_to_the_end`;
+      its rows are inserted directly, as the file's fixtures do, to fix their
+      creation order), beside its existing owner-signed close tests; the
+      cross-registry client's paging and per-registry failure are 2.1's unit
+      tests; the sweep's decisions are 2.2's; each storefront's wiring is proven
+      against its own double, which replaces the cross-registry client itself,
+      serves planted listings, and drops one it is sent a close for — so the
+      client's paged read runs in no storefront test. The triage should weigh
+      whether that composition answers 2.3's "against a real registry"; the
+      cross-service close itself is a system-level observation no lane makes,
+      since no lane plants an orphaned listing.
+
+      VM (`test_publication_loop.py`, the storefront app through its typed
+      client's lifecycle controls, the cross-registry client doubled):
+      `test_a_cycle_closes_registry_listings_the_storefront_does_not_hold` — read
+      under the signer's principal; an unheld `vm` listing closes at both
+      registries; the held listing, and a `bare_metal` listing under the same
+      principal, stay open; the preview sends nothing — passed;
+      `test_a_listing_held_through_a_site_outage_stays_open_at_the_registry` —
+      restarted with its site unreachable, the storefront holds the site's
+      listing (`site_projection_unknown`) and the sweep leaves it open at the
+      registry while closing an unheld one — passed. Bare metal
+      (`test_publication_cycle.py`, the cycle over a real database with site and
+      registry doubles, which its module docstring states is not integration
+      evidence): an unheld `bare_metal` listing closes, a held one and a `vm`
+      listing under the same principal stay open, a preview sends nothing; an
+      unreachable registry is reported `skip` and swept by the next run — passed.
+      API credits (`tests/integration/test_publish_reconcile.py::test_the_sweep_closes_registry_listings_the_storefront_does_not_hold`,
+      the publication service's `retire_unheld_listings` called over the
+      storefront's real database, its registry-client factory `_make_registry_client`
+      replaced on the module that defines it, as TESTING.md's factory-seam
+      convention allows — not application integration, since the API-credit
+      storefront has no injected registry client to override): an unheld
+      `api_credits` listing closes, the held one and a `vm` listing stay open, the
+      read names the seller's principal — passed; and
+      `tests/unit/test_capacity_reconcile_converges.py`, which already replaced
+      each step of the reconciliation on `publication_service`, now holds the
+      sweep last, after convergence. Versions: the three storefronts take minor bumps — bare
+      metal 0.28.0, since its exported `build_publication_runtime` and
+      `BareMetalPublicationHooks` gain a required `publisher`; VM 0.28.0 and API
+      credits 0.21.0 for their new public hook methods and API credits'
+      `retire_unheld_listings` — pin the kit at 0.12.0, and require core-storefront
+      `>=0.18.0`; VM's exact pin on the bare-metal storefront moves to 0.28.0, and
+      the provisioning service's dev pin on the kit to 0.12.0.
+- [x] 2.4 **Verification.** Run `make -C core/storefront test`,
       `make -C kit/capacity-publication test`, and the three storefronts' suites
       (`make -C domains/vms/storefront test`, `make -C domains/bare_metal/storefront test`,
       `make -C domains/apicredits/storefront test`), then
@@ -215,8 +317,70 @@ storefront supplies), and the three storefronts' publication wiring
       orphaned listing, and no scenario is owed, since the application integration
       tests prove the close against a real registry.
       Owed by validation: none.
+      Correction: no application integration test proves the close against a real
+      registry; 2.3's note says how the proof is split by level instead. The
+      pipeline has not run on this section: the end-to-end markers above are what
+      a passing run would show, read from the scenarios' code. "Owed by
+      validation: none" stands, since no push-only workflow is owed.
+
+**Section 2 notes — completed 2026-11-09.**
+
+Suites (final run, before the commit): `make -C core/storefront test` — 240 passed;
+`make -C core/registry test` — unit 139 passed, integration 129 passed;
+`make -C kit/capacity-publication test` — 135 passed; `make -C domains/vms/storefront test`
+— unit 1166 passed and 1 skipped, integration 551 passed;
+`make -C domains/bare_metal/storefront test` — 598 passed;
+`make -C domains/apicredits/storefront test` — 256 passed; and
+`scripts/change-workflow run pre-commit add-database-migration-commands`, whose
+`pre-commit-functional` runs every suite and the packaging check, passed.
+
+End-to-end, confirmed from the scenarios' code (no pipeline has run on this section):
+`e2e_bare_metal_publication`, `multi_registry`, `e2e_listing_shapes`, and
+`e2e_credits_deal` run publication passes against live registries, so a passing
+pipeline is evidence the sweep closes no listing a storefront holds. No e2e scenario
+publishes to a registry under a storefront's principal except through the storefront
+(only `validate_publish_listing`, a dry run), so none plants a listing to be swept and
+none shows a close. The sweep is scoped by principal and by the mode a storefront
+publishes, so storefronts of different modes may share a principal; the two VM
+storefronts of the development stack, Bob and Alice, have distinct principals.
+
+Fresh-context check. Fixed: VM swept every mode its domain registry composes, so with
+bare metal composed it would close the dedicated bare-metal storefront's listings under
+a shared principal, against the delta's scenario — VM now serves `vm` alone and its
+test asserts the bare-metal listing stays open; the kit's in-process registry test
+broke TESTING.md's library-integration definition and made a kit depend on a deployed
+service — removed, the registry's side now proven in the registry's own suite;
+the site-outage scenario had no test — the VM restart test drives it; the storefronts'
+patch bumps were minor changes; an import added inside a function in `capacity_client.py`
+was moved to module level, failed collection with the circular import
+(`publication_service` imports `build_capacity_runtime` from it), and was restored with
+the reason beside it; the API-credit sweep's docstring misdescribed the preview; the
+kit test's docstring claimed an outage it does not set up; 2.4's claim of a real-registry
+application test is corrected. A second check found the API-credit test replacing
+`build_capacity_runtime` on a module that imports it, against TESTING.md's mocking
+rules: it now calls the sweep function directly and replaces only the publication
+service's own registry-client factory; the cross-registry client's docstring named the
+removed in-process test; and these notes overstated what the storefront and registry
+tests run, now corrected. Kept: `test_capacity_reconcile_converges.py` asserts the
+reconciliation's order by replacing each step on `publication_service`, as it did
+before this section, and the sweep joins it; the bare-metal cycle tests stay in a module
+whose docstring says they are not integration evidence. Noted for closeout: `ARCHITECTURE.md`'s "Capacity publication and
+multi-domain storefront composition" says the kit owns "the registry convergence every
+publication pass ends with"; 11.9 now names it.
+
+Known limit, for the triage. A registry listing whose resource states no
+`offering_mode` is not swept: under a principal two storefronts of different modes may
+share, nothing says whose it is. Listings published before the offering mode was
+written into the resource would be such listings; the upgrade defect D15b fixes was a
+bare-metal listing, which states its mode.
+
+Handoff. The sweep reads every registry each pass: a VM or bare-metal publication
+cycle, and an API-credit capacity reconciliation, which runs per capacity event — the
+cadence convergence already has there. The cross-registry client's `client_factory` is
+the seam for a test that needs a registry client of its own.
 
 ## 3. One migration engine, in a foundation kit
+
 
 Delivers D2's engine and the engine side of D5 and D14, for `deployment-state`'s added
 "One migration mechanism serves every stateful service", "A chain begins at its
@@ -651,7 +815,10 @@ Per `openspec/README.md#plan-closeout-requirements`.
       - `docs/development/ARCHITECTURE.md`: "Terms" gains *role* and *service* (D16);
         "Build, packaging, and initialization" restates its fresh-database sentence
         against the baseline (D3); "Kit areas" names the migration kit among the
-        foundation capabilities (D2).
+        foundation capabilities (D2); "Capacity publication and multi-domain
+        storefront composition", which says every publication pass ends with
+        registry convergence, gains the sweep that follows it (D15b; added
+        2026-11-09 by section 2).
       - `docs/development/TESTING.md`: a "## Migration Tests" section — the floor
         fixture, adoption, the store-open test, and the per-service integration suite
         (D5, D9).
@@ -663,7 +830,10 @@ Per `openspec/README.md#plan-closeout-requirements`.
         "Proof-driven release" is unchanged, already stating that a failed teardown
         waits for an operator's verification and force-release.
       - `openspec/specs/storefront-publication/architecture.md`: "Registry convergence"
-        — the sweep beside the convergence repair (D15b).
+        — the sweep beside the convergence repair (D15b); and
+        `openspec/specs/storefront-publication/spec.md`'s "Evidence", which the
+        archive does not write, gains the sweep's tests section 2 names (added
+        2026-11-09 by section 2).
       - The vocabulary sweep (D16): every permanent document's use of *role* for a
         service becomes *service*; a requirement whose name or text changes is carried
         as a delta in this change's `specs/` before 11.10, and

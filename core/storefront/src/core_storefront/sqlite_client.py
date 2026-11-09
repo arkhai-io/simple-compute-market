@@ -4490,6 +4490,21 @@ class SQLiteClient:
     # Orders API helpers
     # ------------------------------------------------------------------
 
+    async def open_listing_ids(self) -> frozenset[str]:
+        """The ID of every listing this storefront holds open, paused or not."""
+
+        def _read() -> frozenset[str]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT listing_id FROM listings WHERE status = 'open'"
+                ).fetchall()
+            finally:
+                conn.close()
+            return frozenset(str(row[0]) for row in rows)
+
+        return await asyncio.to_thread(_read)
+
     async def list_listings(
         self,
         *,

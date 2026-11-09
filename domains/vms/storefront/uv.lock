@@ -197,7 +197,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.27.0"
+version = "0.28.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -237,7 +237,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.27.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.28.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -343,7 +343,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.17.1"
+version = "0.18.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -356,7 +356,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.17.1-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.18.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -455,7 +455,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capacity-publication"
-version = "0.11.0"
+version = "0.12.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core-storefront" },
@@ -463,7 +463,7 @@ dependencies = [
     { name = "arkhai-kit-site-client" },
 ]
 wheels = [
-    { path = "arkhai_kit_capacity_publication-0.11.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capacity_publication-0.12.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -849,7 +849,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.27.0"
+version = "0.28.0"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -936,20 +936,20 @@ dev = [
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-bare-metal", specifier = ">=0.10.0" },
-    { name = "arkhai-bare-metal-storefront", specifier = "==0.27.0" },
+    { name = "arkhai-bare-metal-storefront", specifier = "==0.28.0" },
     { name = "arkhai-compute", specifier = ">=0.2.0" },
     { name = "arkhai-compute-delivery", specifier = ">=0.1.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.11.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.1" },
-    { name = "arkhai-core-storefront", specifier = ">=0.17.0" },
+    { name = "arkhai-core-storefront", specifier = ">=0.18.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.27.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.11.0" },
     { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.2.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.6.0" },
     { name = "arkhai-kit-capability-admissibility", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-capacity-publication", specifier = "==0.11.0" },
+    { name = "arkhai-kit-capacity-publication", specifier = "==0.12.0" },
     { name = "arkhai-kit-config", specifier = ">=0.5.0" },
     { name = "arkhai-kit-contact-exchange", specifier = "==0.4.1" },
     { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.2.0" },

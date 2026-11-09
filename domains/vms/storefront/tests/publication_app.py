@@ -27,7 +27,9 @@ from unittest.mock import patch
 
 import httpx
 from core_storefront import multi_registry_client
+from core_storefront.multi_registry_client import RegistryListings
 from fastapi import FastAPI
+from registry_client.models import ListingSummary
 from market_config.config_loader import ChainConfig
 from market_capacity_publication import SiteDerivationLog
 from market_capacity_publication.capacity_remote import reset_site_event_cursors
@@ -362,6 +364,11 @@ class RecordingRegistries:
     every registry answers success. ``sent`` holds, in order,
     ``(operation, registry_url, listing_id, request)`` with each request as the
     JSON the client would serialize.
+
+    A registry's read of the storefront's open listings returns only what a
+    test planted there with :meth:`plant` -- a listing the storefront did not
+    publish through this double -- and a close it is sent removes it.
+    ``publisher_reads`` records the principal each read named.
     """
 
     def __init__(self) -> None:
@@ -370,6 +377,22 @@ class RecordingRegistries:
         # (operation, registry_url) pairs that fail until removed; an update's
         # operation is the status it sets.
         self.failing: set[tuple[str, str]] = set()
+        self.planted: dict[str, list[ListingSummary]] = {url: [] for url in REGISTRY_URLS}
+        self.publisher_reads: list[Any] = []
+
+    def plant(self, url: str, listing_id: str, *, offering_mode: str) -> None:
+        """An open listing at ``url``, under the storefront's principal."""
+        self.planted[url].append(
+            ListingSummary(
+                id=listing_id,
+                status="open",
+                listing_resource={"offering_mode": offering_mode},
+            )
+        )
+
+    async def list_publisher_listings_per_registry(self, principal):
+        self.publisher_reads.append(principal)
+        return [RegistryListings(url, tuple(self.planted[url])) for url in self.urls]
 
     def __call__(self, *_args: Any, **_kwargs: Any) -> "RecordingRegistries":
         return self
@@ -402,7 +425,12 @@ class RecordingRegistries:
         for url, request in payloads.items():
             body = self._json(request)
             self.sent.append(("update", url, listing_id, body))
-            results.append(self._result(str(body.get("status")), url))
+            result = self._result(str(body.get("status")), url)
+            if result["success"] and body.get("status") == "closed":
+                self.planted[url] = [
+                    item for item in self.planted[url] if item.id != listing_id
+                ]
+            results.append(result)
         return results
 
     def to(self, operation: str, listing_id: str) -> list[tuple[str, dict[str, Any]]]:
