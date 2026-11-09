@@ -1,3 +1,39 @@
+## ADDED Requirements
+
+### Requirement: A storefront checks its mediation configuration from its own container
+
+The VM storefront CLI MUST offer `check-mediation --origin <authority>`, which loads the storefront's configuration as the running storefront does, selects the dispute credential for the named authority, makes one authenticated read through the mediation kit with that credential's token and configured trust, prints one JSON outcome containing no credential, and exits nonzero naming the failing step: configuration, credential, transport, or the authority's refusal code. It MUST assert nothing about the read's answer and MUST change no state at the authority. The storefront chart MUST offer a Helm test that runs it directly, not through the storefront's entrypoint, for an agent with a dispute credential and a named authority to check, with the storefront's image, configuration and secrets mounts, identity credential and CA bundle mount, rendered from the same chart definitions as the storefront Deployment, and without the storefront's data volume, health probes, or network-overlay capabilities and device. Helm validation MUST run each such test and count it passed only on its pod's own exit status of 0.
+
+#### Scenario: The storefront can reach its dispute authority
+
+- **WHEN** an operator or Helm validation runs `check-mediation` for the authority a configured storefront's dispute credential names
+- **THEN** it prints an `ok` outcome naming the authority's origin and exits zero, whatever the read returned
+
+#### Scenario: The copied credential names a CA file the pod lacks
+
+- **WHEN** the dispute credential's `ca_bundle_path` names a file that is missing, unreadable or malformed
+- **THEN** the check prints a `failed` outcome naming the configuration step, before any request, and exits nonzero
+
+#### Scenario: The storefront does not trust the authority's certificate
+
+- **WHEN** the credential's CA bundle does not cover the certificate the authority's origin serves, or the origin does not resolve
+- **THEN** the check prints a `failed` outcome naming the transport step and exits nonzero
+
+#### Scenario: The credential's token cannot be resolved
+
+- **WHEN** the dispute credential names its token by a variable the storefront's environment does not set
+- **THEN** the check prints a `failed` outcome naming the credential step, before any request, and exits nonzero
+
+#### Scenario: The authority refuses the storefront's token
+
+- **WHEN** the authority refuses the read, as for a token it does not accept
+- **THEN** the check prints a `failed` outcome naming the refusal step with the authority's error code and exits nonzero
+
+#### Scenario: The storefront names no credential for the authority
+
+- **WHEN** no dispute credential in the storefront's configuration names the given origin
+- **THEN** the check prints a `failed` outcome naming the configuration step and exits nonzero
+
 ## MODIFIED Requirements
 
 ### Requirement: Payment credentials stay with their owning process
@@ -21,7 +57,7 @@ The local Helm release MUST configure payments through the same values a deploym
 #### Scenario: The local release is deployed
 
 - **WHEN** the local deploy target installs the release
-- **THEN** the payments double and the mediation double run, the storefronts are configured for payments through the deployment-facing values, the VM storefront's secret overlay holds its credential for the mediation double with the chart's CA file as its `ca_bundle_path`, and no storefront uses development authentication
+- **THEN** the payments double and the mediation double run, the storefronts are configured for payments through the deployment-facing values, the VM storefront's secret overlay holds its credential for the mediation double with the chart's CA file as its `ca_bundle_path`, the release's Helm tests check Bob's mediation configuration against the mediation double, and no storefront uses development authentication
 
 #### Scenario: A deployment supplies its own TLS
 

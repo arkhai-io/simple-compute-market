@@ -36,7 +36,10 @@ surface. Convergence's rate matrix and spot's rotation row have no lane to run i
   target that fails setup rather than skips, the buyer's mediation credential, and one
   lane CA issuing both doubles' certificates.
 - **The local Helm release** runs the mediation double as a subchart beside the
-  payments double, and the copied dispute credential names the chart's CA mount.
+  payments double, and the copied dispute credential names the chart's CA mount. A
+  VM storefront `check-mediation` command, run by a storefront chart Helm test that
+  Helm validation runs, checks the storefront's mediation configuration from its own
+  container: one authenticated read, asserting nothing about its answer.
 - **Mediation trust through configuration:** `[[DisputeCredential]]` gains an optional
   `ca_bundle_path`, which the mediation client uses as its verification context.
 - **Scenarios:** the VM case and refund stages and the bare-metal filing run against
@@ -57,7 +60,7 @@ surface. Convergence's rate matrix and spot's rotation row have no lane to run i
   mediation client trusts.
 - `deployment-state`: the local release runs the mediation double's subchart, which
   release values never enable, and its copied dispute credential names the chart's
-  CA file.
+  CA file; a storefront checks its mediation configuration from its own container.
 
 ### New Capabilities
 
@@ -101,8 +104,12 @@ hosted-ledger or adjudication evidence.
 - `e2e-tests`: the mediation helper and settings, the VM case stages and bare-metal
   filing assertions, a controls module, and a dependency on the controls package.
 - `helm`: a `mediation-lane-double` subchart enabled by `local-values.yaml`, the
-  local release's registry recommendation, and `topology-secrets.sh` rewriting the
-  copied dispute credential's `ca_bundle_path` to the chart's CA mount.
+  local release's registry recommendation, `topology-secrets.sh` rewriting the
+  copied dispute credential's `ca_bundle_path` to the chart's CA mount, and the
+  storefront chart's `mediation-check` Helm test.
+- `kit/arkhai-mediation` and `domains/vms/storefront`: the mediation access check and
+  the storefront's `check-mediation` command; `scripts/validate_slice.py` runs the
+  mediation-check pods as it runs the payments checks.
 - No database migration and no wire change.
 
 ## Permanent documentation impact
@@ -144,7 +151,9 @@ hosted-ledger or adjudication evidence.
   `docs/development/DEPLOYMENT_AND_CONFIG.md`, the local release's payments
   paragraph and `make helm-topology-secrets`, which state the mediation subchart and
   the rewritten CA path; `docs/development/TESTING.md`, "Private Service
-  Dependencies".
+  Dependencies"; `check-mediation` and its Helm test in `kit/arkhai-mediation/README.md`,
+  `docs/operator-handbook.md` and `docs/development/VALIDATION_RUNBOOK.md`, beside
+  `check-payments`.
 - D12: no permanent destination — it removes scope from this change's earlier design.
 - D13: no permanent destination — an implementation cadence, recorded in the change's
   history.

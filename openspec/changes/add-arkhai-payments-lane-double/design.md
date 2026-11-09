@@ -59,7 +59,8 @@ Facts the decisions rest on:
   the mediation double, and one VM-lane module proving the lane's dispute wiring
   through six named journeys, every other control proven by its double's suite.
 - The mediation double in the local Helm release beside the payments double, as a
-  subchart of the umbrella chart.
+  subchart of the umbrella chart, with a Helm test checking the VM storefront's
+  mediation configuration from its own container.
 
 **Non-goals:** a rules engine reproducing the dispute authority's or the payments
 service's decisions; contract modes; a production guard on fixture identities;
@@ -92,13 +93,23 @@ applying an effect twice, then lifting only that case's extensions.
 `paid_out`, `reversed` and `nothing_held`, and its `MediationFailure` carries
 `protection_incomplete`, mediation's own error, retried under the original key. So
 only payments' nothing-held refusal, `hold_not_extendable`, reports a part
-`not_held`, with the reason the transaction's part shows — `paid_out`, `reversed` or
-`nothing_held` — which the double reads as the authority's account. Every other
+`not_held`. Every other
 refusal (`caller_not_authorized`, `transaction_not_found`, `invalid_event`,
 `ledger_unavailable` and the rest) and every transport failure answers the filing
 `error` with `protection_incomplete`, which SCM's adapter reads as pending; a retry
 under the same key completes it. A payments outage or a misconfigured authority
 account therefore never tells a filer its money is not held.
+
+**A not-held part's reason (26 F1).** The payments snapshot states no reason: a
+part's `status` is `held`, `released`, `reversed` or `settled`, and the engine reports
+`settled` alike for a refunded part, a part both released and reversed, and a part
+where nothing moved. So the double, reading the part's signed snapshot as the
+authority's account, classifies its amounts: `paid_out` when any money was released
+to the payee; otherwise `reversed` when any was reversed or refunded to the payer;
+otherwise `nothing_held`. Paid-out money comes first because it is what mediation
+cannot recover, which a filer most needs to know. The double's suite covers each
+case: released only, reversed only, released and reversed, refunded only, and
+nothing moved.
 
 **Programmed:** whether a case is ruled, the ruling's basis, delivery end and
 per-part effects with their amounts, filing-answer overrides (`pending`, `error`, a
@@ -247,7 +258,8 @@ carrying the code.
 | Case | Answer |
 |---|---|
 | A rule without `match` | `422 invalid_request`; nothing is installed. A rule states its scope |
-| `match: {}` | accepted: every call of its double, stated explicitly. *Unavailable* takes no `match`; it covers every API route |
+| `match: {}` | accepted: every call of its double, stated explicitly |
+| *Unavailable* (26 F2) | a rule like any other, with `match: {}`: it covers every contract API route. Any other `match` is `422 invalid_request` and installs nothing: a scoped outage has no caller, and would only drop some requests before commit |
 | Installing an existing `rule_id` | `409 rule_exists`; a silent replace would hide a leaked rule |
 | Deleting or resuming an unknown `rule_id` | `404 rule_not_found` |
 | Deleting a rule that has matched or completed | `204`, removed: deleting is cleanup, whatever the rule's state |
@@ -289,14 +301,20 @@ verifier tests prove those refusals at the lowest level that can.
   second port in every lane.
 - **Deferring the operations whose semantics were open** (15 F4). Each has a caller in
   this change, D6's module or its finalisers.
+- **_Unavailable_ as a control of its own, outside the rules** (26 F2). A second
+  install and cleanup contract, and a second thing for a finaliser to remove, for no
+  behaviour a rule with `match: {}` lacks.
 
 ### D5. No production guard on fixture identities
 
-The mediation double's identity is inert outside lanes by construction: an origin
-that is only a Compose service name, a deterministic fixture account whose only token
-is at the payments double, and a record key derived from a committed seed labelled a
-public development value, never for a public network. Registries recommend it only
-in lane profiles and the local release. A live deal naming it could only come from a
+The mediation double's identity is inert outside development topologies by
+construction: an origin that is only a lane-private service name, `mediation-double`,
+answered in a Compose lane or in a validation namespace whose own local values enable
+the subchart (D11), while a release rendered from release values runs no double
+(26 F4); a deterministic fixture account whose only token is at the payments double;
+and a record key derived from a committed seed labelled a public development value,
+never for a public network. Registries recommend it only in lane profiles and the
+local release. A live deal naming it could only come from a
 buyer accepting it from its own list or a registry it opted into, which the buyer's
 acceptance list already governs; the marketplace does not protect a party from an
 authority it chose.
@@ -408,14 +426,14 @@ talks to an authority; lanes take the authority from the registry and have no
   buyer's `[[DisputeCredential]]`. Tests hold every restated value to its fixture.
 - Bob's storefront dispute credential carries the mediation double's seller token and
   `ca_bundle_path`.
-- No storefront `check-mediation` command: the controls module proves the storefront's
-  mediation access.
+- In the Compose lanes, the controls module and the VM case stages prove the
+  storefront's mediation access; the lanes run no `check-mediation`. Its caller is the
+  local release's Helm test (D11).
 
 **Rejected:**
 
 - **The mediation double in the VM and bare-metal lanes only.** Overlays that differ
   to save one container.
-- **A `check-mediation` command.** A diagnostic with no caller.
 
 ### D10. The payments double's claimed surface
 
@@ -425,7 +443,7 @@ earliest pending stop, per-part `end`, funding exhaustion at funded-through,
 `afterStop` holds, partial `reverse` before and after a stop, and `extend` and `lift`
 with their published refusals. No lane rate scenario is added.
 
-### D11. The local Helm release (15 F2, 15 F6)
+### D11. The local Helm release (15 F2, 15 F6, 26 F3)
 
 The umbrella chart's subchart pattern is extended: a `mediation-lane-double` subchart
 runs beside `payments-lane-double`, enabled only by `local-values.yaml`, with its
@@ -445,6 +463,25 @@ Secret, rewrites the copied credential's `ca_bundle_path` to the chart's CA file
 a test holds the rewritten value to `storefront.caBundleFile`. The `deployment-state`
 delta modifies "Payment credentials stay with their owning process" and "The local
 release rehearses a deployment's payments interface" accordingly.
+
+**The storefront checks its mediation configuration from its own container (26 F3).**
+The rewrite, the Service name, the leaf's name and the token are a seam this change
+creates, and the storefront builds its mediation client lazily, so a defect in any of
+them would first show at a payment deal's dispute servicing. As `check-payments` does
+for payments, the VM storefront offers `market-storefront check-mediation --origin
+<authority>`, its logic in the mediation kit: it loads the storefront's configuration
+as `serve` does, selects the `[[DisputeCredential]]` for that origin, builds the
+mediation client with the credential's `ca_bundle_path`, makes one authenticated
+`respondent` read, prints one JSON outcome carrying no credential, and exits nonzero
+naming the failing step — configuration, an unresolvable token (credential),
+transport, or the authority's refusal with its code. The storefront chart renders a `<agent>-mediation-check` Helm test pod
+beside `-payments-check`, from the same helpers as the Deployment, for an agent with a
+dispute credential and a `tests.mediationOrigin` — in the local release, Bob, at
+`https://mediation-double:8443` — and `scripts/validate_slice.py` runs it as it runs
+the payments checks. It is a configuration and connectivity sanity check, as the
+chart's smoke tests are: it asserts nothing about the read's answer, an empty listing
+and a full one alike, and files, rules and changes nothing, so it covers nothing the
+lanes prove.
 
 No scenario runs against the release's doubles in this change: payment scenarios in
 Helm validation belong to `helm-e2e-pipeline-parity`. Moving the lane collaborators —
@@ -467,6 +504,12 @@ rest.
 - **Mounting the lane CA at the chart's path in every Compose stack** (15 F6), so one
   path is right verbatim in both. It changes every lane's mounts and TOML paths for
   one copied key.
+- **Claiming only the rendered topology, leaving access to `helm-e2e-pipeline-parity`**
+  (26 F3). It ships a connection nobody has made; one read is not a payment scenario.
+- **Running `check-mediation` in the Compose lanes too** (26 F3). The lanes already
+  prove the storefront's mediation access through their scenarios.
+- **A smoke test asserting the authority's answer.** The chart's smoke tests are
+  sanity checks of configuration and liveness; behaviour belongs to the lanes.
 
 ### D12. Scope removed from the earlier design
 
@@ -492,8 +535,9 @@ Two rounds:
      deal-lifecycle and mediation kits and the four lifecycle compositions.
 2. **Lane wiring, one session.** The overlay, fixtures, registries, the runner's
    `MEDIATION` section and helper, buyer configuration, the VM case and refund stages,
-   the bare-metal filing and the controls module, and D11's subchart, release values
-   and `topology-secrets.sh` rewrite.
+   the bare-metal filing and the controls module, and D11's subchart, release values,
+   `topology-secrets.sh` rewrite, `check-mediation` with its Helm test and its step in
+   `validate_slice.py`.
 
 The doubles are reviewed before any lane uses them, so a wiring defect cannot hide a
 double's.

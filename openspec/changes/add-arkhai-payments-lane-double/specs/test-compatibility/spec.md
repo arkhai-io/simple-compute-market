@@ -7,7 +7,7 @@ Every lane MUST run a mediation double, recommended by the lane's registries, th
 #### Scenario: A case is filed with no rule installed
 
 - **WHEN** a party files a case and no rule matches it
-- **THEN** the double accepts the filing, sends `extend` for each part to the payments double as the authority's own account, and reports each part `held` with its reference, or, when payments refuses it as nothing held, `not_held` with the reason the transaction's part shows: `paid_out`, `reversed` or `nothing_held`
+- **THEN** the double accepts the filing, sends `extend` for each part to the payments double as the authority's own account, and reports each part `held` with its reference, or, when payments refuses it as nothing held, `not_held` with a reason classified from the part's signed amounts: `paid_out` when any money was released, otherwise `reversed` when any was reversed or refunded, otherwise `nothing_held`
 - **AND** the case stays open and unruled, unless every part is `not_held`, when the contract's automatic dismissal closes it with nothing held
 
 #### Scenario: Protection cannot be established
@@ -42,7 +42,7 @@ Every lane MUST run a mediation double, recommended by the lane's registries, th
 
 ### Requirement: Lane double controls are typed deterministic steps
 
-Both doubles MUST offer controls through one typed contract and client, shared with the end-to-end harness: when→then rules with refusals and transport faults, the mediation double's filing overrides, rulings, effects gate, operator decisions, closes and case listing, the payments double's funding and receipt-signer rotation, and rule listings. Controls MUST be lane-private, authenticated by a fixture token, and each MUST act only when the scenario advances it. Transport faults MUST apply only to the contract's API routes, never to the control routes. Every rule MUST state its `match`. A control MUST refuse an unknown or malformed target with a typed code and install nothing. Each control the VM controls module does not exercise — funding, signer rotation, refusal with a published code, the filing-answer override, close without ruling and the rule listing — MUST be proven by its double's suite through the typed client over HTTP.
+Both doubles MUST offer controls through one typed contract and client, shared with the end-to-end harness: when→then rules with refusals and transport faults, the mediation double's filing overrides, rulings, effects gate, operator decisions, closes and case listing, the payments double's funding and receipt-signer rotation, and rule listings. Controls MUST be lane-private, authenticated by a fixture token, and each MUST act only when the scenario advances it. Transport faults MUST apply only to the contract's API routes, never to the control routes. Every rule MUST state its `match`, and an unavailable rule MUST state `match: {}` and covers every contract API route. A control MUST refuse an unknown or malformed target with a typed code and install nothing. Each control the VM controls module does not exercise — funding, signer rotation, refusal with a published code, the filing-answer override, close without ruling and the rule listing — MUST be proven by its double's suite through the typed client over HTTP.
 
 #### Scenario: A response is lost after commit
 
@@ -51,9 +51,14 @@ Both doubles MUST offer controls through one typed contract and client, shared w
 
 #### Scenario: A double is unavailable
 
-- **WHEN** an unavailable rule is installed on a double
+- **WHEN** an unavailable rule with `match: {}` is installed on a double
 - **THEN** every API request's response is abandoned and its callers see a transport error, never an HTTP error status
 - **AND** the control routes still answer, and removing the rule restores the API
+
+#### Scenario: An unavailable rule is scoped
+
+- **WHEN** a scenario installs an unavailable rule whose `match` is not empty
+- **THEN** the double refuses it as an invalid request and installs nothing
 
 #### Scenario: A rule states no scope
 
