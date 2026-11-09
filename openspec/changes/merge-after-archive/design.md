@@ -351,7 +351,12 @@ and the rerun fetches. Cleanup runs in the checkout
 the merge it reads ran in — a clone is removed only after `done`, and a change with a
 clone is computed in its clone (D5) — so the recorded remote is fetched as it stands,
 with no translation between a clone's and the workspace's remote names; if it is not
-one of cleanup's remotes, cleanup asks the owner rather than guessing.
+one of cleanup's remotes, cleanup asks the owner rather than guessing. For `.`, a
+branch the checkout holds itself, cleanup fetches nothing and records that branch's
+commit. Archive cleanup's row of the step table therefore gains the merge's fetch
+rules, `git fetch origin *` and `git fetch workspace *`; the step table is under
+`.claude/`, which no step may edit, so the orchestrating session makes that edit on
+the owner's word.
 
 `start merge` finds the branch the merge brings in the same way (18 F3): the `from
 <branch>` given, else the last finished merge's `landing.branch`, else the clone
