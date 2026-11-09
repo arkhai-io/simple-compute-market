@@ -406,6 +406,7 @@ dependencies = [
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools-contracts" },
+    { name = "arkhai-kit-schema-migrations" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -471,7 +472,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.5.1"
+version = "0.5.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -482,7 +483,7 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.5.1-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.5.2-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -597,16 +598,17 @@ sqlalchemy = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-schema-migrations" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]

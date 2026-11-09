@@ -842,12 +842,24 @@ store changes no schema". Touches `core/storefront` (`sqlite_client.py`,
 `kit/deal-servicing` (`journal.py`, `evidence.py`, `watch.py`, `respondent.py`,
 `seller.py`), each moving onto the engine kit.
 
-- [ ] 6.1 Generate the storefront floor fixtures: from a worktree at `9fffe41e9`,
+- [x] 6.1 Generate the storefront floor fixtures: from a worktree at `9fffe41e9`,
       construct each storefront's database client on a fresh database — VM, bare metal,
       and, for its own baseline only, API credits — without opening any store, and
       commit each normalized schema and each chain's recorded floor IDs under the
       owning storefront's `tests/fixtures/`, with a README stating the command. (D3)
-- [ ] 6.2 Write core storefront's baseline as fixed DDL reproducing the tables and
+      `tests/fixtures/v0_3_0_floor/` under each storefront (`schema.json`,
+      `floor_ids.json`, `ddl.sql`, README). Differs from the plan as 4.1 did, on the
+      owner's direction and grant: built from the release's published PyPI wheels
+      (`arkhai-vms-storefront==0.27.0`, `arkhai-bare-metal-storefront==0.27.0`,
+      `arkhai-apicredits-storefront==0.20.0`), each environment constrained to its
+      lock at `9fffe41e9`, not from a worktree. VM: 26 tables, 29 IDs; bare metal: 28
+      tables, 37 IDs; API credits: 26 tables, 20 IDs. Core's tables, indexes and
+      triggers are identical in all three (the `ddl.sql` files differ only in each
+      domain's tables and the obligation columns VM and API credits add to
+      `escrows`); no fresh floor database holds a frozen table or a store-open
+      table. The generator is not committed, as 4.1's was not; each README states
+      the procedure.
+- [x] 6.2 Write core storefront's baseline as fixed DDL reproducing the tables and
       indexes the floor constructor creates for core, and each table-owning kit's
       (settlement runtime, contact exchange, pool overrides) as its own exported
       baseline; delete `_ensure_tables_sync`'s unversioned bootstrap, the core chain's
@@ -858,7 +870,41 @@ store changes no schema". Touches `core/storefront` (`sqlite_client.py`,
       (`apply_migrations`), so constructing `SQLiteClient` issues no DDL. Verify with
       unit tests in each package that its baseline creates exactly its floor tables.
       (D2, D3, D4)
-- [ ] 6.3 Write the store-open migration's contributions: deal-servicing's tables and
+      Amended 2026-11-09 on the owner's direction (option 1 of the section's pause on
+      size): this task delivers the baselines; the deletions it lists move to 7.5,
+      since removing the constructor's bootstrap switches all three storefronts at
+      once and cannot pass the pre-commit suites before section 7 declares the
+      chains. Each package exports `BASELINE` (an engine `Migration` over a `sqlite3`
+      connection) and `BASELINE_TABLES` from a `migrations` module:
+      `core_storefront.migrations`, `market_settlement_runtime.migrations`,
+      `market_contact_exchange.migrations` (beside the floor-era migrations 7.5
+      deletes), `market_pool_overrides.migrations`; IDs `v0_3_0_baseline_<package>`.
+      The DDL is the floor's, with each column a later `ALTER` added written into its
+      `CREATE TABLE` in stored order. Core's `escrows` leaves out `obligation_ref`
+      and `obligation_index`, which VM's and API credits' domain baselines add.
+      Library integration (real SQLite, no application; the plan said unit, but each
+      opens a real database, which TESTING.md places in `tests/integration/`):
+      each package's `tests/integration/test_baseline.py` — the baseline creates
+      exactly `BASELINE_TABLES` — passed; and
+      `domains/bare_metal/storefront/tests/integration/test_shared_baselines.py`,
+      beyond the plan — the four baselines applied in chain order give a
+      `schema_snapshot` equal to the bare-metal floor fixture's restricted to those
+      packages' tables and their triggers (column for column, with indexes, keys and
+      trigger text), the bare-metal floor being the one whose `escrows` is core's
+      alone — passed. Versions: settlement runtime 0.8.0, contact exchange 0.5.0,
+      pool overrides 0.3.0, each depending on `arkhai-kit-schema-migrations>=0.1.0`
+      (in the settlement runtime's and contact exchange's package allowlists too);
+      core storefront stays 0.18.0, already bumped on this branch. The exact pins
+      moved: settlement runtime `==0.8.0` in contact exchange, arkhai-payments
+      (0.6.2), config (0.5.2), core buyer (0.6.2), the bare-metal buyer (0.7.3) and
+      the VM buyer (0.10.3), each patch-bumped for the pin alone; contact exchange
+      `==0.5.0` and pool overrides `==0.3.0` in both storefronts and buyers that pin
+      them; arkhai-payments `==0.6.2` and core buyer `==0.6.2` where pinned.
+      `kit/schema-migrations` now supports Python `>=3.10`, as wide as the
+      settlement runtime, whose lock could not otherwise resolve; it uses nothing
+      newer. RELEASING.md's internal-dependency table names the engine for the four
+      packages, and the API-credit domain's installation test builds its wheel.
+- [x] 6.3 Write the store-open migration's contributions: deal-servicing's tables and
       core's post-chain domain-index hook become `IF NOT EXISTS` DDL each package
       exports for composition into the one post-baseline migration each storefront
       chain carries (composed in section 7), and every `create_schema` call at store
@@ -866,7 +912,35 @@ store changes no schema". Touches `core/storefront` (`sqlite_client.py`,
       `kit/deal-servicing` that opening each store on a database already holding its
       tables issues no DDL, and that the migration creates them where absent and leaves
       them unchanged where present. (D3, D9)
-- [ ] 6.4 **Verification.** Run `make -C core/storefront test`,
+      `market_deal_servicing.schema`: `SERVICING_SCHEMA` (every table and index the
+      kit uses, the respondent poller's two included) and `create_schema(conn)`, the
+      store-open migration's body; no session or poller issues DDL, `SellerSession`
+      lost its `initialize` flag, the README's "Schema" section says so;
+      arkhai-kit-deal-servicing 0.2.0. Core contributes no DDL: at the floor no
+      storefront creates an index after its chain (see the notes). Library
+      integration (`tests/integration/test_servicing_schema.py`, real SQLite files,
+      no application; the plan said unit): the schema creates exactly the objects
+      its own statements declare on an empty database, leaves present tables and
+      rows unchanged, and completes a database holding only the evidence tables
+      (built from the schema's own evidence statements, not from the DDL the 0.1.0
+      sessions issued, though the statements are those sessions' text) to a fresh
+      one's schema; constructing each of the four sessions traces no DDL and changes
+      no schema, and creates nothing on an empty database (no session method is
+      traced: that they issue none rests on the DDL having been removed from them);
+      the poller's `repairs()` reads its table on a schema'd database and, without
+      the tables, fails on the missing table and creates none (its poll path is not
+      run). That the schema holds every table the kit uses rests on the kit's 70
+      tests passing over it — `make -C kit/deal-servicing test`, 70 passed. Until section
+      7's migration replaces them, each storefront applies the schema when its
+      lifecycle store opens: VM's `deal_lifecycle.py` and `delivery_records.py`
+      already did (now through `market_deal_servicing.schema`), and bare metal's
+      `BareMetalLifecycle` gains the call beside its cursor table, since its reads
+      and watch polls would otherwise meet a missing table before the first deal
+      registers; bare metal's `test_site_trust.py`, which plants a delivery after the
+      app's lifespan opened that store, failed without it. Tests that plant
+      servicing state without a store apply the schema first: the kit's own and
+      `domains/compute/delivery/tests/conftest.py`.
+- [x] 6.4 **Verification.** Run `make -C core/storefront test`,
       `make -C kit/settlement-runtime test`, `make -C kit/contact-exchange test`,
       `make -C kit/pool-overrides test`, `make -C kit/deal-servicing test`,
       `make check-architecture`, and
@@ -874,6 +948,102 @@ store changes no schema". Touches `core/storefront` (`sqlite_client.py`,
       storefront suites run in section 7, which composes these baselines.
       End-to-end: none until section 7 composes the chains.
       Owed by validation: none.
+      Correction: 6.3 changes deal servicing's consumers and the bumps move pins in
+      eight packages, so the storefront and consumer suites ran here too, as
+      TESTING.md's boundary-change validation asks; the section's notes give every
+      result. End-to-end: the storefront lanes (`e2e_deal`, `e2e_vm_payment_deal`,
+      `e2e_bare_metal_mock_deal`, `e2e_bare_metal_payment_deal`) deliver deals
+      through deal servicing's tables, now created at store open by the storefronts
+      rather than by the sessions, so a passing pipeline is evidence those tables
+      still exist when a deal reaches them; no scenario exercises the baselines.
+      Owed by validation: none, confirmed.
+
+**Section 6 notes — completed 2026-11-09.**
+
+How the section ran. The first run stopped at 6.1, since running the fixture generator
+was denied; the owner granted one run on resumption. The section then paused on its
+size, and the owner chose to commit section 6 without the bootstrap deletion, which
+moves to 7.5 (6.2's amendment).
+
+Why the deletion moved. Removing the constructor's bootstrap (6.2's deletion half) changes
+every storefront at once, since all three construct core's `SQLiteClient`: from then on
+constructing a client issues no DDL, and every test that builds a client on a fresh
+file must migrate it first. That is about 149 constructions in 66 test files across
+core and the three storefronts (a search for `SQLiteClient(` under `tests/`), beside
+core's four migration-test modules (`test_domain_binding_migrations.py`,
+`test_rate_structure_column.py`, `test_listing_resource_migration.py`,
+`test_identity_migrations.py`) and VM's reconciler and freeze tests that import core's
+pre-floor migrations. A section 6 commit with the bootstrap gone cannot pass the
+pre-commit hooks, which run every suite, until section 7 declares the chains, so 6.2's
+deletion and section 7 land together or not at all. Adding the baselines also gives
+each table-owning package new public API and a dependency on the engine kit, and
+`arkhai-kit-settlement-runtime` is pinned exactly (`==0.7.0`) by `kit/contact-exchange`,
+`kit/arkhai-payments`, `kit/config`, `core/buyer`, and the VM and bare-metal buyers,
+so its minor bump reaches each of those; the storefronts pin `arkhai-kit-pool-overrides`
+and `arkhai-kit-contact-exchange` exactly too. 6.2's note records the bumps and pins.
+
+Outside the plan. `kit/schema-migrations`' `requires-python` widened to `>=3.10`: the
+settlement runtime supports 3.10 and its lock could not resolve the engine otherwise;
+the engine's code uses no feature newer than 3.10, though its suite runs only on 3.13,
+and `schema_snapshot` reads `PRAGMA table_list` (SQLite 3.37 or later). The API-credit
+domain's wheel-installation test (`domains/apicredits/tests/conftest_wheels.py`) builds
+the engine's wheel, since core storefront and the settlement runtime now require it;
+the first pre-commit run failed on that alone. The VM and bare-metal callers changed
+for 6.3: VM's `deal_lifecycle.py` and `delivery_records.py` take `create_schema` from
+`market_deal_servicing.schema` (the former's alias now `create_servicing_schema`, since
+it applies the whole schema, not the watch tables alone), both storefronts'
+`receipt_claim` call `SellerSession(conn)`, and bare metal's `BareMetalLifecycle` gains
+a store-open `create_schema` (6.3's note says why). The bare-metal storefront requires
+`arkhai-kit-settlement-runtime>=0.8.0` and declares the engine as a test dependency.
+
+Suites (before the fresh-context fixes, then again after them; see below):
+`make -C kit/deal-servicing test` — 70 passed; `make -C core/storefront test` — 242;
+`make -C kit/settlement-runtime test` — 187; `make -C kit/contact-exchange test` — 142;
+`make -C kit/pool-overrides test` — 82; `make -C domains/bare_metal/storefront test` —
+599 (one failure first, `test_site_trust.py`, fixed by bare metal's store-open call);
+`make -C domains/vms/storefront test` — unit and integration (551) passed;
+`make -C domains/compute/delivery test` — 126 (92 errors first, its rig applying no
+schema, fixed); `make -C domains/apicredits test-domain` — 41;
+`scripts/change-workflow run pre-commit add-database-migration-commands` — the first run
+failed only on the API-credit installation test; the second passed every hook
+(`make lock`, `make check-packaging`, `make test`, and `pre-commit`'s checks), and a
+third, over the tree with the fresh-context fixes, passed every hook again.
+
+Fresh-context check. No layering or comment-hygiene break (it ran `make
+check-architecture`, `make check-comment-hygiene` and `make check-repository`). Fixed:
+VM's misleading `create_watch_schema` alias; the bare-metal storefront's settlement
+runtime lower bound, which its new test needs at 0.8.0; the kit baseline tests'
+docstrings, which claimed proof against the storefronts' fixtures where only the
+bare-metal one is compared; the deal-servicing README and the fixture READMEs, which
+described behaviour section 7 brings; 6.3's evidence claims (constructors traced, not
+methods; `repairs()` alone; the partial database built from the schema's own
+statements; completeness resting on the kit suite); 6.4, amended for the consumer
+suites; these notes, which still described the paused state. Declined: the bare
+`See openspec/specs/deployment-state/spec.md.` pointers ending the new modules'
+docstrings, the form sections 3 and 4 used (the requirements they mean exist only in
+the change's delta until archive; 11.1 confirms comments at closeout); the four
+packages' baseline tests in `tests/integration/` where 6.2 said unit, since each opens a
+real database (6.2's note records it).
+
+Handoff for section 7. The chains compose, in order, `core_storefront.migrations.BASELINE`,
+the settlement runtime's, then contact exchange's and pool overrides' where composed
+(VM and bare metal; API credits composes neither), then the domain's baseline, which
+for VM and API credits adds `escrows.obligation_ref` and `obligation_index` with that
+domain's two indexes (`idx_escrows_*` for VM, `idx_credit_escrows_*` for API credits).
+The store-open migration's body is `market_deal_servicing.create_schema` plus bare
+metal's `bare_metal_lifecycle_cursor`, which a bare-metal floor database holds only if
+its lifecycle store ever opened.
+Each floor fixture's `ddl.sql` builds a v0.3.0 database for the adoption tests, the
+ledger's DDL included (`schema_migrations` with `id TEXT` and `applied_at TEXT`), as
+provisioning's `floor_database.py` does. 7.5 does the deletion with 7.1, as one commit.
+
+Found for 6.3 and 7.1. At the floor no storefront creates indexes after its chain:
+core's `_ensure_domain_indexes` is empty, VM and bare metal do not override it, and API
+credits' override holds only its refusal checks (`git show 9fffe41e9:` of each
+`sqlite_client.py`). So core contributes no DDL to the store-open migration, which
+holds deal servicing's tables and the domains' own store-open tables (bare metal's
+lifecycle cursor); D3's "domain indexes the constructor creates after it" names
+nothing the floor builds, for closeout's documentation compliance.
 
 ## 7. Storefront chains
 
@@ -932,6 +1102,29 @@ migration is transactional". Touches `domains/vms/storefront`
       tables, so the pipeline is evidence that the chains build a working schema;
       adoption is proven by the library integration tests, and no scenario is owed.
       Owed by validation: none.
+- [ ] 7.5 Added 2026-11-09 from 6.2 on the owner's direction, and done with 7.1 in
+      one commit, since it switches all three storefronts at once. Delete what 6.2
+      lists: `_ensure_tables_sync`'s unversioned bootstrap, the core chain's pre-floor
+      migration bodies (`core_storefront/sqlite_migrations.py`), the two-pass
+      application, the `required_tables` skip, the identity and legacy context hooks
+      (`LegacyMigrationInputs`, `apply_with_identity_context`,
+      `apply_with_legacy_context`), the duck-typed `MigrationLike` protocol, the
+      settlement runtime's own runner (`SettlementSQLiteRepository`'s
+      `apply_migrations` and `settlement_migrations`), and contact exchange's and pool
+      overrides' floor-era migrations, so constructing `SQLiteClient` issues no DDL;
+      then the interim store-open `create_schema` calls 6.3 left (VM's
+      `deal_lifecycle.py` and `delivery_records.py`, bare metal's `BareMetalLifecycle`
+      and `lifecycle_records.py`) and bare metal's cursor table creation go with 7.1's
+      store-open migration. Every test that constructs a client on a fresh file
+      migrates it first through its storefront's chain, or through a core-only chain
+      in core's own tests — about 149 constructions in 66 test files (a search for
+      `SQLiteClient(` under `tests/`) — and the tests whose subject is a deleted
+      pre-floor migration are deleted (core's `test_domain_binding_migrations.py`,
+      `test_rate_structure_column.py`, `test_listing_resource_migration.py`,
+      `test_identity_migrations.py`; VM's reconciler and freeze tests that import
+      core's migrations, judged one by one). Verify with every storefront suite,
+      core's, and the kits', and with a test that constructing each storefront's
+      client on a migrated database changes no schema. (D2, D3, D4, D9)
 
 ## 8. The API-credit service on the engine
 

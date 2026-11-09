@@ -41,7 +41,8 @@ from market_deal_servicing.end import EndService
 from market_deal_servicing.evidence import EvidenceSession, in_transaction, transaction
 from market_deal_servicing.ingress import VerifiedSiteEnd
 from market_deal_servicing.journal import atomic
-from market_deal_servicing.watch import WatchSession, create_schema as create_watch_schema
+from market_deal_servicing.schema import create_schema as create_servicing_schema
+from market_deal_servicing.watch import WatchSession
 from market_identity import Identity, canonical_json
 
 from market_storefront import container
@@ -75,7 +76,7 @@ class VmDealLifecycle:
         self.mediation_transport = mediation_transport
         self.evidence = SQLiteEvidenceStore(self.path)
         with transaction(self.path) as conn:
-            create_watch_schema(conn)
+            create_servicing_schema(conn)
         self.clients = {}
         self.respondents = {}
         self.continuation = None
@@ -371,7 +372,7 @@ class VmDealLifecycle:
         # Ingress holds its write transaction; this immutable binding read
         # must not open a competing writer while building a local claim.
         with sqlite3.connect(self.path) as conn:
-            binding = SellerSession(conn, initialize=False).read(negotiation_id).dispute_binding
+            binding = SellerSession(conn).read(negotiation_id).dispute_binding
         adapter = self.seller.disputes.resolve(binding) if binding else None
         if not isinstance(adapter, DeliveryEndClaims):
             return None

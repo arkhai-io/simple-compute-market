@@ -2,7 +2,9 @@
 name = "arkhai-kit-schema-migrations"
 version = "0.1.0"
 description = "One migration engine for every in-house stateful service: chains that begin at a baseline, atomic recording, a read-only startup check, and its refusal message"
-requires-python = ">=3.12,<3.14"
+# As wide as its narrowest-supporting consumer, the settlement runtime: the
+# engine uses nothing of the standard library newer than Python 3.10.
+requires-python = ">=3.10,<3.14"
 license = "MIT"
 # Standard library only, so a consumer holding no SQLAlchemy composes the
 # engine over sqlite3 and installs nothing else with it.

@@ -12,7 +12,8 @@ from market_deal_lifecycle.adapters import PaymentSelector
 from market_deal_lifecycle.delivery import DeliveryPhase
 from market_deal_lifecycle.terms import decode_terms
 from market_deal_servicing import DeliveryRecord, EndSession, SellerDeal, SellerSession
-from market_deal_servicing.journal import create_schema, FinalRequest
+from market_deal_servicing.journal import FinalRequest
+from market_deal_servicing.schema import create_schema
 from market_identity import Identity
 
 

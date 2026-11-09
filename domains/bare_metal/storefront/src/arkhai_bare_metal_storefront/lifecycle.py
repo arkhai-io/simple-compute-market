@@ -30,7 +30,7 @@ from market_deal_servicing import (
     Classification, DealWatch, DeliveryIngress, EndService, EndSession,
     FinalRequest, LifecycleRouteBinding, LifecycleRouteServices, RespondentPoller,
     PhysicalResult, SellerDeal, SellerServicing, SellerSession, SQLiteEvidenceStore, VerifiedSiteEnd,
-    seller_retention,
+    seller_retention, create_schema,
 )
 from market_deal_servicing.evidence import EvidenceSession, in_transaction, transaction
 from market_deal_servicing.journal import stable_ref
@@ -53,6 +53,9 @@ class BareMetalLifecycle:
         self.locks: dict[str, asyncio.Lock] = {}
         self.clients = {}
         with transaction(self.path) as conn:
+            # Deal servicing's sessions issue no DDL, so the store creates the
+            # tables they read before any read or poll reaches them.
+            create_schema(conn)
             conn.execute("CREATE TABLE IF NOT EXISTS bare_metal_lifecycle_cursor (id INTEGER PRIMARY KEY CHECK (id=1), continuation TEXT)")
         self.end = EndService(self.path, self, clock=self.clock)
         # An Alkahest deal authorizes delivery through its once-only adapter,
@@ -258,7 +261,7 @@ class BareMetalLifecycle:
         # Ingress holds its write transaction; this immutable binding read
         # must not open a competing writer while building a local claim.
         with sqlite3.connect(self.path) as conn:
-            binding = SellerSession(conn, initialize=False).read(negotiation_id).dispute_binding
+            binding = SellerSession(conn).read(negotiation_id).dispute_binding
         adapter = self.seller.disputes.resolve(binding) if binding else None
         if not isinstance(adapter, DeliveryEndClaims):
             return None

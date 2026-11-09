@@ -23,7 +23,7 @@ from pydantic import Field, JsonValue
 
 from .end import SQLiteOperationStore
 from .evidence import EvidenceSession, in_transaction, transaction
-from .journal import Classification, EndSession, FinalRequest, JournalIntent, atomic, create_schema, stable_ref
+from .journal import Classification, EndSession, FinalRequest, JournalIntent, atomic, stable_ref
 from .watch import DealWatch, WatchSession
 
 
@@ -45,11 +45,11 @@ class SellerDeal(WireModel):
 
 
 class SellerSession:
-    def __init__(self, conn, *, initialize: bool = True):
+    """Seller registrations over the caller's connection; it issues no DDL, so
+    a read-only callback may share a database with an active ingress writer."""
+
+    def __init__(self, conn):
         self.conn = conn
-        # Read-only callbacks may share a database with an active ingress writer.
-        if initialize:
-            create_schema(conn)
 
     def register(self, deal: SellerDeal) -> None:
         """Register in the transaction that records the verified commitment."""

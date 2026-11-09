@@ -16,6 +16,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
+from market_schema_migrations import Migration
 from market_settlement_runtime import SettlementMigration
 
 from .introduction_routes import IntroductionPayloadsDeletedError, IntroductionRecord
@@ -128,6 +129,81 @@ def _add_seller_dispatch_claims(conn: sqlite3.Connection) -> None:
         )
         """
     )
+
+
+_BASELINE_DDL: tuple[str, ...] = (
+    """
+    CREATE TABLE contact_introductions (
+        obligation_ref TEXT PRIMARY KEY,
+        agreement_ref TEXT NOT NULL,
+        buyer_contact TEXT NOT NULL,
+        seller_contact TEXT NOT NULL,
+        introduction_package TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+        payloads_deleted_at TEXT
+    )
+    """,
+    """
+    CREATE TRIGGER contact_introductions_redaction_only
+    BEFORE UPDATE ON contact_introductions
+    WHEN NOT (
+        OLD.payloads_deleted_at IS NULL
+        AND NEW.payloads_deleted_at IS NOT NULL
+        AND NEW.payloads_deleted_at <> ''
+        AND NEW.buyer_contact = '{}'
+        AND NEW.seller_contact = '{}'
+        AND NEW.obligation_ref IS OLD.obligation_ref
+        AND NEW.agreement_ref IS OLD.agreement_ref
+        AND NEW.introduction_package IS OLD.introduction_package
+        AND NEW.created_at IS OLD.created_at
+    )
+    BEGIN
+        SELECT RAISE(
+            ABORT,
+            'a contact introduction changes only by one-way payload redaction'
+        );
+    END
+    """,
+    """
+    CREATE TRIGGER contact_introductions_keep_unredacted
+    BEFORE DELETE ON contact_introductions
+    WHEN OLD.payloads_deleted_at IS NULL
+    BEGIN
+        SELECT RAISE(
+            ABORT,
+            'an unredacted contact introduction cannot be removed'
+        );
+    END
+    """,
+    "CREATE INDEX contact_introductions_retention"
+    " ON contact_introductions (created_at) WHERE payloads_deleted_at IS NULL",
+    """
+    CREATE TABLE contact_introduction_seller_dispatches (
+        obligation_ref TEXT NOT NULL PRIMARY KEY,
+        claimed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+    )
+    """,
+)
+
+BASELINE_TABLES: frozenset[str] = frozenset(
+    {"contact_introductions", "contact_introduction_seller_dispatches"}
+)
+"""The tables :data:`BASELINE` creates."""
+
+
+def _create_baseline(conn: sqlite3.Connection) -> None:
+    for statement in _BASELINE_DDL:
+        conn.execute(statement)
+
+
+BASELINE: Migration[sqlite3.Connection] = Migration(
+    "v0_3_0_baseline_contact_exchange", _create_baseline
+)
+"""The introduction tables as the marketplace v0.3.0 release's storefronts built
+them, for a storefront chain to compose after core storefront's baseline. A later
+change to them is a migration after it, never an edit to it, since an adopted
+v0.3.0 database records the baseline without running it.
+See openspec/specs/deployment-state/spec.md."""
 
 
 CONTACT_EXCHANGE_MIGRATIONS = (
@@ -283,6 +359,8 @@ def select_expired_introductions(
 
 
 __all__ = [
+    "BASELINE",
+    "BASELINE_TABLES",
     "CONTACT_EXCHANGE_INTRODUCTIONS_MIGRATION_ID",
     "CONTACT_EXCHANGE_MIGRATIONS",
     "CONTACT_EXCHANGE_SELLER_DISPATCH_CLAIMS_MIGRATION_ID",

@@ -8,7 +8,7 @@ dependencies = [
     "arkhai-compute>=0.2.0",
     "arkhai-compute-delivery>=0.1.0",
     "arkhai-kit-arkhai-mediation>=0.2.0",
-    "arkhai-kit-deal-servicing>=0.1.0",
+    "arkhai-kit-deal-servicing>=0.2.0",
     "arkhai-kit-deal-lifecycle>=0.2.0",
     "arkhai-kit-deal-lifecycle-contracts>=0.1.0",
     "arkhai-compute-provisioning-contracts>=0.11.0",
@@ -16,7 +16,7 @@ dependencies = [
     "arkhai-bare-metal>=0.15.0",
     "arkhai-kit-delivery==0.2.1",
     "arkhai-kit-delivery-apprise==0.1.1",
-    "arkhai-kit-contact-exchange==0.4.1",
+    "arkhai-kit-contact-exchange==0.5.0",
     "arkhai-compute-provisioning-client>=0.7.0",
     "arkhai-core>=0.4.0",
     "arkhai-core-registry-client>=0.12.1",
@@ -29,10 +29,10 @@ dependencies = [
     "arkhai-kit-identity==0.4.0",
     "arkhai-kit-site-client>=0.11.0",
     "arkhai-kit-capacity-publication==0.12.0",
-    "arkhai-kit-pool-overrides==0.2.1",
+    "arkhai-kit-pool-overrides==0.3.0",
     "arkhai-kit-resource-pools>=0.7.0",
-    "arkhai-kit-arkhai-payments==0.6.1",
-    "arkhai-kit-settlement-runtime>=0.7.0",
+    "arkhai-kit-arkhai-payments==0.6.2",
+    "arkhai-kit-settlement-runtime>=0.8.0",
     "arkhai-kit-storefront==0.10.0",
     "dynaconf>=3.0.0",
     "fastapi~=0.115.8",
@@ -71,6 +71,8 @@ dev = [
     "sqlalchemy>=2.0",
     # Validates documents against the generated Helm values schema.
     "jsonschema>=4.0",
+    # The schema snapshot the floor-fixture comparison reads. Test-only.
+    "arkhai-kit-schema-migrations>=0.1.0",
 ]
 
 [tool.uv]

@@ -37,11 +37,11 @@ the one its `pyproject.toml` declares.
 | `arkhai-kit-arkhai-payments` | `kit/arkhai-payments/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-deal-servicing` | `kit/deal-servicing/` | `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
 | `arkhai-kit-policy` | `kit/policy/` | `arkhai-core`, `arkhai-kit-identity` |
-| `arkhai-kit-settlement-runtime` | `kit/settlement-runtime/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity` |
+| `arkhai-kit-settlement-runtime` | `kit/settlement-runtime/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity`, `arkhai-kit-schema-migrations` |
 | `arkhai-kit-negotiation-runtime` | `kit/negotiation-runtime/` | `arkhai-kit-identity`, `arkhai-kit-policy` |
 | `arkhai-core` | `core/` | none |
 | `arkhai-core-buyer` | `core/buyer/` | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-kit-config`, `arkhai-kit-delivery`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-settlement-runtime` |
-| `arkhai-core-storefront` | `core/storefront/` | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-resource-pools-contracts` |
+| `arkhai-core-storefront` | `core/storefront/` | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-schema-migrations` |
 | `arkhai-core-storefront-client` | `core/storefront-client/` | `arkhai-kit-identity` |
 | `arkhai-core-registry-client` | `core/registry-client/` | `arkhai-core`, `arkhai-kit-identity` |
 | `arkhai-core-registry` | `core/registry/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity` |
@@ -52,11 +52,11 @@ the one its `pyproject.toml` declares.
 | `arkhai-kit-capability-pricing` | `kit/capability-pricing/` | `arkhai-kit-capability-shape` |
 | `arkhai-kit-schema-migrations` | `kit/schema-migrations/` | none |
 | `arkhai-kit-capacity-publication` | `kit/capacity-publication/` | `arkhai-core-storefront`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site-client` |
-| `arkhai-kit-contact-exchange` | `kit/contact-exchange/` | `arkhai-core`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
+| `arkhai-kit-contact-exchange` | `kit/contact-exchange/` | `arkhai-core`, `arkhai-kit-identity`, `arkhai-kit-schema-migrations`, `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-delivery` | `kit/delivery/` | `arkhai-kit-identity` |
 | `arkhai-kit-delivery-apprise` | `kit/delivery-apprise/` | `arkhai-kit-delivery` |
 | `arkhai-kit-fulfillment` | `kit/fulfillment/` | `arkhai-core`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-schema-migrations`, `arkhai-kit-site` |
-| `arkhai-kit-pool-overrides` | `kit/pool-overrides/` | `arkhai-kit-identity`, `arkhai-kit-site-client` |
+| `arkhai-kit-pool-overrides` | `kit/pool-overrides/` | `arkhai-kit-identity`, `arkhai-kit-schema-migrations`, `arkhai-kit-site-client` |
 | `arkhai-kit-resource-pools` | `kit/resource-pools/` | `arkhai-kit-resource-pools-contracts`, `arkhai-kit-schema-migrations` |
 | `arkhai-kit-resource-pools-contracts` | `kit/resource-pools-contracts/` | `arkhai-kit-capability-admissibility`, `arkhai-kit-capability-shape` |
 | `arkhai-kit-resource-pools-client` | `kit/resource-pools-client/` | `arkhai-kit-resource-pools-contracts` |
