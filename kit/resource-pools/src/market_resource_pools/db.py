@@ -1,10 +1,11 @@
 """Provider-neutral resource-pool persistence model.
 
-Owns its own declarative ``Base``/metadata, matching the shape
-``market_site`` already uses for the site-authority ledger: a domain
-service composes this package's ``Base.metadata`` alongside its own at
-``create_all`` time, and re-exports the ORM classes it needs through its
-own ``db.models`` module so existing call sites keep working unchanged.
+Owns its own declarative ``Base``/metadata, as ``market_site`` does for the
+site-authority ledger, and a service re-exports the ORM classes it needs
+through its own ``db.models`` module. The table's schema is
+``market_resource_pools.migrations``, which a migration chain holding the table
+composes, so this mapping is read against that schema and a column added here
+needs a migration there.
 """
 
 from __future__ import annotations

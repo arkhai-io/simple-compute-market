@@ -2,10 +2,13 @@
 file-backed SQLite.
 
 A host stored at version 1 runs no work, since the ``ssh`` codec serves version 2
-alone. These tests prove each such host is rewritten with its public fields and
-protected values exactly as stored, that the jobs naming it read the rewritten
-connection, that a connection version 2 refuses fails the migration naming its
-host with nothing rewritten, and that a rerun changes nothing.
+alone. Each test starts from a v0.3.0 database holding such hosts, as that
+release's chain wrote them, and runs the migration command's chain over it: the
+database is adopted at the baseline and the migrations after it apply. These
+tests prove each such host is rewritten with its public fields and protected
+values exactly as stored, that the jobs naming it read the rewritten connection,
+that a connection version 2 refuses fails the migration naming its host with
+nothing rewritten, and that a rerun changes nothing.
 
 Addresses are RFC 5737 documentation values, and the ciphertext is a stand-in,
 not a real Fernet token: fixture values that must never be used on a public
@@ -21,15 +24,15 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+from market_schema_migrations import MigrationFailed
+
 from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning_ansible import SshConnectionCodec
 from compute_provisioning_ansible.runner import inventory_target
-from compute_provisioning_service.db.database import run_migrations
-from compute_provisioning_service.db.migrations import (
-    SchemaDriftError,
-    apply_schema_migrations,
-)
+from compute_provisioning_service.db.database import migrate_database
+
+from .floor_database import create_floor_database
 
 _MIGRATION_ID = "20261108_001_ssh_connections_version_2"
 
@@ -69,16 +72,10 @@ _JOBS = {
 }
 
 
-def _engine(path: Path):
-    return create_engine(f"sqlite:///{path}")
-
-
-def _database_before_the_rewrite(tmp_path: Path, hosts=_HOSTS):
-    """A migrated database whose hosts are stored at version 1, with the
-    rewrite's record removed, as a database migrated by the chain without the
-    rewrite holds them."""
-    engine = _engine(tmp_path / "provisioning.db")
-    run_migrations(engine)
+def _v0_3_0_database(tmp_path: Path, hosts=_HOSTS):
+    """A v0.3.0 database whose hosts are stored at version 1, as that release's
+    chain wrote them, with unfinished jobs naming them."""
+    engine = create_engine(f"sqlite:///{create_floor_database(tmp_path / 'provisioning.db')}")
     with engine.begin() as connection:
         for host_id, host in hosts.items():
             connection.execute(
@@ -110,9 +107,6 @@ def _database_before_the_rewrite(tmp_path: Path, hosts=_HOSTS):
                     "action": job["action"],
                 },
             )
-        connection.execute(
-            text("DELETE FROM schema_migrations WHERE id = :id"), {"id": _MIGRATION_ID}
-        )
     return engine
 
 
@@ -138,7 +132,7 @@ def _authority(engine) -> HostAuthority:
 
 
 def test_version_1_hosts_are_rewritten_with_their_fields_and_ciphertext_as_stored(tmp_path):
-    engine = _database_before_the_rewrite(tmp_path)
+    engine = _v0_3_0_database(tmp_path)
     hosts_before = _rows(engine, "hosts", "host_id")
     jobs_before = _rows(engine, "ansible_jobs", "id")
     # Before the rewrite, each job's host is refused where the runner reads it.
@@ -146,8 +140,10 @@ def test_version_1_hosts_are_rewritten_with_their_fields_and_ciphertext_as_store
         with pytest.raises(ValueError, match="not an ssh connection at version 2"):
             inventory_target(_authority(engine).lookup(job["host_id"]))
 
-    apply_schema_migrations(engine)
+    report = migrate_database(engine)
 
+    assert report.adopted
+    assert _MIGRATION_ID in report.applied
     hosts_after = _rows(engine, "hosts", "host_id")
     assert {host_id: row["connection_version"] for host_id, row in hosts_after.items()} == {
         "bm1": 2, "kvm1": 2,
@@ -195,12 +191,13 @@ def test_a_connection_version_2_refuses_fails_naming_its_host_and_nothing_is_rew
             "protected": {},
         },
     }
-    engine = _database_before_the_rewrite(tmp_path, hosts)
+    engine = _v0_3_0_database(tmp_path, hosts)
     before = _rows(engine, "hosts", "host_id")
 
-    with pytest.raises(SchemaDriftError) as refused:
-        apply_schema_migrations(engine)
+    with pytest.raises(MigrationFailed) as refused:
+        migrate_database(engine)
 
+    assert refused.value.migration_id == _MIGRATION_ID
     assert "'bad1'" in str(refused.value)
     assert "ssh_port" in str(refused.value)
     assert "'kvm1'" not in str(refused.value)
@@ -216,17 +213,17 @@ def test_a_host_naming_no_usable_key_fails_naming_it(tmp_path):
             "protected": {},
         },
     }
-    engine = _database_before_the_rewrite(tmp_path, hosts)
+    engine = _v0_3_0_database(tmp_path, hosts)
 
-    with pytest.raises(SchemaDriftError, match="'keyless'"):
-        apply_schema_migrations(engine)
+    with pytest.raises(MigrationFailed, match="'keyless'"):
+        migrate_database(engine)
 
     assert _rows(engine, "hosts", "host_id")["keyless"]["connection_version"] == 1
 
 
 def test_a_rerun_changes_nothing(tmp_path):
-    engine = _database_before_the_rewrite(tmp_path)
-    apply_schema_migrations(engine)
+    engine = _v0_3_0_database(tmp_path)
+    migrate_database(engine)
     hosts = _rows(engine, "hosts", "host_id")
     jobs = _rows(engine, "ansible_jobs", "id")
 
@@ -234,7 +231,7 @@ def test_a_rerun_changes_nothing(tmp_path):
         connection.execute(
             text("DELETE FROM schema_migrations WHERE id = :id"), {"id": _MIGRATION_ID}
         )
-    apply_schema_migrations(engine)
+    assert migrate_database(engine).applied == (_MIGRATION_ID,)
 
     assert _rows(engine, "hosts", "host_id") == hosts
     assert _rows(engine, "ansible_jobs", "id") == jobs

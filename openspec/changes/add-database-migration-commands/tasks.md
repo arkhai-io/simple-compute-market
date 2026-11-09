@@ -532,7 +532,7 @@ whose tables provisioning's database holds — `kit/site`, `kit/resource-pools`,
 `kit/fulfillment`, `provisioning/compute` (`hosts`, `jobs`, `relays`), and
 `domains/vms/provisioning/adapter` — and `helm/charts/provisioning/tests/test_render.py`.
 
-- [ ] 4.1 Generate the floor fixture: from a worktree at `9fffe41e9`, start compute
+- [x] 4.1 Generate the floor fixture: from a worktree at `9fffe41e9`, start compute
       provisioning's migration on a fresh database and commit its schema, normalized by
       the method `schema_snapshot` uses, under
       `provisioning/compute/service/tests/fixtures/`, with the floor's recorded
@@ -540,7 +540,24 @@ whose tables provisioning's database holds — `kit/site`, `kit/resource-pools`,
       and that the commit is the v0.3.0 release's service code. Verify the fixture
       lists every table the floor code creates, including `kit/site`'s
       `capacity_reservations`. (D3)
-- [ ] 4.2 Write the baselines — one per table-owning package in provisioning's database
+      `provisioning/compute/service/tests/fixtures/v0_3_0_floor/`: `schema.json`
+      (the snapshot), `floor_ids.json` (43 IDs, ending
+      `20261106_001_reservation_activated_at`), `ddl.sql` (each object's stored
+      DDL, the ledger's included), and a README stating the procedure. Differs from
+      the plan, on the owner's direction: built from the release's published PyPI
+      wheels (`arkhai-compute-provisioning-service[adapters]==0.24.0`, every
+      distribution constrained to the release lock's version, SQLAlchemy 2.0.51
+      included), not from a worktree build of `9fffe41e9`, whose dependencies a
+      rebuild may resolve differently; the release's own
+      `compute-provisioning-migrate` ran on a fresh file with only
+      `PROVISIONING_DATABASE_URL` set. The generator and its environment's
+      `pyproject.toml` (a hundred-odd version constraints) are not committed: the
+      README states the procedure, and the fixture is regenerated only to correct it
+      against that release. The fixture holds 23 tables, every one the
+      floor's `run_migrations` creates through its eight metadata sets and its
+      chain, `capacity_reservations` among them (read against `9fffe41e9`'s
+      `db/database.py`).
+- [x] 4.2 Write the baselines — one per table-owning package in provisioning's database
       (`kit/site`, `kit/resource-pools`, `kit/fulfillment`, `compute_provisioning`'s
       hosts, jobs and relays, the VM adapter, and the service's own models) — as fixed
       DDL each package exports as engine `Migration`s, composed in provisioning's
@@ -553,7 +570,45 @@ whose tables provisioning's database holds — `kit/site`, `kit/resource-pools`,
       integration test: a fresh chain's `schema_snapshot` equals the floor fixture with
       the post-floor migrations applied; a database built by the floor's chain adopts
       and then applies the post-floor migrations. (D2, D3, D4)
-- [ ] 4.3 Replace `run_migrations` and `check_schema_version` with the engine:
+      Each package exports `BASELINE` from a `migrations` module:
+      `market_resource_pools`, `market_site` (with `RESERVATION_PLACEMENT_KEY` and
+      `MIGRATIONS`), `market_fulfillment`, `compute_provisioning.{hosts,jobs,relays}`,
+      `vm_provisioning_adapter`; the service's `db/migrations.py` holds its own
+      baseline, the ssh rewrite on a connection, `FLOOR_IDS`, and `CHAIN` (pools,
+      relays, VM, hosts, jobs, service, fulfillment, site; then the placement key and
+      the ssh rewrite). Baseline IDs are `v0_3_0_baseline_<package>`. The DDL is the
+      floor's stored DDL, reformatted. Deleted: the 3,880-line pre-floor chain, the
+      `create_all` calls, and 25 test modules (16 integration, 9 unit) whose only
+      subject was a pre-floor migration or the legacy backfill it ran, with their
+      helper `legacy_default_pool.py`. Library integration
+      (`tests/integration/test_migration_chain.py`, file-backed SQLite through the
+      engine, no application): the baselines alone give the fixture's snapshot; a
+      fresh chain's snapshot equals a database built from `ddl.sql` with the floor IDs,
+      adopted and migrated, whose run the engine reports as an adoption applying
+      exactly the two later migrations (that adoption calls no baseline is section 3's
+      engine test, with baselines that raise); adoption keeps rows; the chain's floor IDs are the fixture's; every
+      table and column the eight metadata sets map exists in the migrated schema —
+      passed. The integration suite's `db_engine` fixture now builds its schema with
+      the chain instead of `create_all`, so every integration test using that fixture
+      runs on the chain's schema; three modules that build only the tables they
+      exercise (`test_scheduling_composition.py`, `test_ledger_lease_lifecycle.py`,
+      `test_fulfillment_convergence.py`) still do so with `create_all`, unchanged.
+      Also deleted, beyond the plan's list: VM's `legacy_backfill.py` and
+      `market_fulfillment.backfill` (with its two exports), whose only caller was the
+      deleted backfill migration, and their unit test
+      `tests/unit/services/test_legacy_vm_fulfillment_backfill.py`. Two tests this
+      section touched that run on a real SQLite file moved from `tests/unit/services/`
+      to `tests/integration/`, as TESTING.md asks of a test exercising a real
+      database: `test_capacity_definitions_startup.py` and
+      `test_definition_document_restart_safety.py`. `kit/site`
+      exports the placement-key migration for every chain holding the ledger; the
+      API-credit service composes it in section 8 (8.1), and until then keeps its own
+      `20261106_008`.
+      Versions: kit-resource-pools 0.10.0, kit-site 0.14.0, kit-fulfillment 0.8.0,
+      compute-provisioning 0.27.0, vms-provisioning-adapter 0.19.0, each depending
+      on `arkhai-kit-schema-migrations>=0.1.0`; the service 0.25.0 on its
+      `[sqlalchemy]` extra and the new minimums.
+- [x] 4.3 Replace `run_migrations` and `check_schema_version` with the engine:
       `compute-provisioning-migrate` applies the chain, reading only the database URL
       and log level, with `--check` reporting the result and exiting successfully only
       when compatible; the service's startup calls `check` and refuses any result but
@@ -567,11 +622,51 @@ whose tables provisioning's database holds — `kit/site`, `kit/resource-pools`,
       `deployment-state` "Service-owned migration history" scenarios, "An operator
       previews an upgrade", "A v0.3.0 database is adopted", "A database older than
       v0.3.0 is refused")
-- [ ] 4.4 Add render assertions to `helm/charts/provisioning/tests/test_render.py`: the
+      `db/database.py`: `migrate_database`, `check_database` (the engine's
+      `check_engine`, read-only for a file), `require_compatible_database` raising
+      `IncompatibleDatabase` with the engine's refusal message, which
+      `app_runtime.initialise_container_resources` calls; `db/migrate.py` parses
+      `--check`, prints `describe` and, when not compatible, the refusal, and exits
+      1 on a refused database or a failed migration. `make migrate` unchanged.
+      Library integration (`test_database.py`, rewritten; SQLite file or shared
+      in-memory, no application): fresh — compatible, no pool; rerun — nothing
+      applied, schema unchanged; a v0.3.0 database — behind with adoption pending,
+      refused by the startup check naming the later IDs, then adopted; one floor ID missing —
+      unsupported naming it, the command refuses and changes nothing; tables with no
+      ledger — unsupported, both the check's and the command's refusals naming the
+      command; behind — the refusal names the pending ID; ahead,
+      unknown alone and unknown with one missing — both named, the command refuses,
+      nothing changes; absent — the check creates neither file nor directory; every
+      startup refusal these tests provoke names `` `compute-provisioning-migrate` ``
+      and no `migrate-job.yaml`;
+      the placement key over v0.3.0 reservations — none backfilled, uniquely
+      indexed; through `migrate.main` with the service's own settings loader:
+      `--check` exits 1 on a behind database listing its pending IDs and leaves its
+      bytes unchanged, exits 1 on a missing one creating none, exits 0 after the
+      command migrated; the command exits 1 on an ahead database, bytes unchanged —
+      passed. `test_migration_reads_no_configuration.py`: two copies of a v0.3.0
+      database migrated under two configurations give one schema and one set of
+      rows — passed. The startup refusal is proven at `require_compatible_database`,
+      the function `app_runtime.initialise_container_resources` calls; no test starts
+      the application on a refused database, and no test drives a failing migration
+      through `migrate.main` to its exit status (the engine's failure path is
+      section 3's, and section 1's ssh test drives it through `migrate_database`).
+- [x] 4.4 Add render assertions to `helm/charts/provisioning/tests/test_render.py`: the
       migration init container is present, runs `compute-provisioning-migrate` from the
       application's image, mounts the same data volume at the same database path, and
       precedes the application container. Verify with `make -C helm test-render`. (D8)
-- [ ] 4.5 **Verification.** Run `make -C provisioning/compute/service test`,
+      `test_the_migration_runs_first_from_the_application_image_over_its_database`,
+      over the defaults and over mock mode with a chart-owned volume: exactly one init
+      container, `provisioning-migrate`, running `["compute-provisioning-migrate"]`
+      from the application container's image, both mounting the `data` volume at
+      `/app/data` and the profile `config-production.yml`, the rendered manifest
+      setting `database_url` to `sqlite:////app/data/provisioning.db` (asserted
+      anywhere in the render, not within the profile's document), the init
+      containers rendered before the containers. Chart render test (static configuration, no cluster):
+      `make -C helm test-render` — passed; with the init container's data mount moved
+      to `/app/elsewhere` it failed on the mount, and the template was restored. Done
+      first, while 4.1–4.3 waited on the floor fixture.
+- [x] 4.5 **Verification.** Run `make -C provisioning/compute/service test`,
       `make -C kit/site test`, `make -C kit/resource-pools test`,
       `make -C kit/fulfillment test`, `make -C provisioning/compute test`, the VM
       provisioning adapter's suite, `make -C helm test-render`, `make check-packaging`,
@@ -582,6 +677,113 @@ whose tables provisioning's database holds — `kit/site`, `kit/resource-pools`,
       a working schema; adoption of a v0.3.0 database is proven by the library
       integration tests, and no scenario is owed for it.
       Owed by validation: none.
+      `make -C provisioning/compute/service test` — unit 622 passed, integration 540
+      passed; `make -C kit/site test` — 366 passed; `make -C kit/resource-pools test`
+      — 141 passed; `make -C kit/fulfillment test` — 211 passed;
+      `make -C provisioning/compute test` — 531 passed;
+      `make -C domains/vms/provisioning/adapter test` — 292 passed;
+      `make -C helm test-render` — passed; `make check-architecture` — passed;
+      `scripts/change-workflow run pre-commit add-database-migration-commands` —
+      `after-functional-change` (`make lock`), `pre-commit-functional`
+      (`make check-packaging` and `make test`, every suite) and `pre-commit` (the
+      change index, tasks, skills, strict validation, and the repository's eight
+      checks) passed, and passed again over the final tree after the second
+      fresh-context check's docstring and note fixes. End-to-end confirmed as the
+      section's notes record; the pipeline has not run on this section.
+
+**Section 4 notes — completed 2026-11-09.**
+
+How the floor was produced. The first session stopped at 4.1: the implementation step
+runs Python only as `uv run pytest`, and running the fixture generator was denied. The
+owner directed that the floor come from the v0.3.0 release's published PyPI wheels, not
+a build of `9fffe41e9`, and granted the resumed session a one-run rule for the
+generator, which the session then ran: the release's `compute-provisioning-migrate`
+applied its 43 migrations to a fresh file and the generator wrote the fixture (23
+tables, ledger columns `id` and `applied_at`). `main` has not moved past the release,
+and `d595f0c2e`'s tree equals `9fffe41e9`'s, so PyPI's wheels are the release's code.
+Constraining third-party distributions mattered: unconstrained, the environment resolved
+SQLAlchemy 2.1.8, against the 2.0.51 the release shipped. A later floor (D16's release
+step) is produced the same way; the fixture README gives the procedure.
+
+Seams and surprises. Adoption keeps a deployment that already ran this branch's chain
+working: it records every floor ID plus `20261106_002` and `20261108_001`, so it is
+adopted with nothing pending. The ssh rewrite's test now starts from a v0.3.0 database
+built from `ddl.sql`, the real upgrade path, so the rewrite runs after adoption and the
+placement key; its refusal surfaces as the engine's `MigrationFailed` naming the
+migration, with the host list as its cause. `migrate.main` takes `argv`, since pytest's
+own arguments would otherwise reach its parser; tests call `migrate.main([])`. The
+service's chain needs no `_table_exists` guards: every migration after the baseline runs
+on a database the baselines built or an adopted floor.
+
+Left for review and closeout, outside this section's plan:
+- Permanent specifications still state requirements whose pre-floor migrations this
+  section deleted: `openspec/specs/fulfillment/spec.md` "Existing lease continuity
+  during fulfillment cutover"; `physical-provisioning/spec.md` "Existing host
+  identities migrate without loss" and "Active fulfillment migration";
+  `site-capacity/spec.md` "A stored reservation in a retired state is converted at
+  upgrade" (whose rule still holds for the API-credit service until section 8) and
+  "Capacity schema separation"'s scenario "Existing host migration". No delta of the
+  change covers these requirements, though it has deltas for `physical-provisioning`
+  and `deployment-state`, and 11.9 names none of them.
+- Permanent Evidence lines cite test modules this section deleted or moved:
+  `fulfillment/spec.md` (~664–665), `physical-provisioning/spec.md` (~3446–3451, one of
+  them `tests/unit/services/test_definition_document_restart_safety.py`, now under
+  `tests/integration/`), `site-capacity/spec.md` (~305, offering-mode backfill; ~314,
+  reservation release mirror), `resource-pool-management/spec.md` (~1020–1029, which
+  also cites `test_database.py` for a legacy host backfill it no longer tests), and
+  `deployment-state/spec.md` (~1240, `test_job_envelope_migration.py`).
+- Permanent architecture text describes what this section removed:
+  `openspec/specs/physical-provisioning/architecture.md` (~line 21: the service's
+  database modules naming VM's tables and VM's legacy lease conversion) and
+  `openspec/specs/fulfillment/architecture.md` "Atomic legacy-lease cutover" (~66–70).
+  `fulfillment/spec.md` "Dependency boundary" (~40) lists what `market_fulfillment` may
+  depend on and omits the migration engine kit it now imports.
+- `openspec/changes/README.md`'s unowned row on anchor-form citations counts thirteen
+  citations in files including `legacy_backfill.py` and seven `kit/fulfillment` modules;
+  this section deleted `legacy_backfill.py` and `market_fulfillment/backfill.py`, so the
+  row's counts are stale.
+- The triage should place each of these: REMOVED or MODIFIED deltas, Evidence and
+  architecture corrections, and the proposal's capability list, most likely as
+  amendments to 11.9 and 11.10.
+- TESTING.md defines library integration for kit libraries; this section, like section
+  1, names a service's migration tests with no application "library integration" (a
+  real component against real storage, no application). 11.9's planned "Migration
+  Tests" section should say so for a service's migration suite.
+- The command's tests set the settings object's source through the service's own
+  loader, as the existing configuration test did; giving `migrate.main` its settings as
+  a parameter would be the cleaner seam.
+
+Fresh-context check, run twice. Fixed after the first: 4.2 and 4.3 had been duplicated
+in an edit, unchecked copies left beside the checked ones; the notes described the
+stopped session and named a scratch path outside the repository; the service chain's
+docstring cited a requirement heading that exists only in the delta; the kits' `db.py`
+docstrings still prescribed `create_all`; `kit/site`'s migrations docstring described a
+consumer section 8 adds; the no-ledger test checked no refusal message; overstated notes
+(every integration test on the chain, every refusal checked, a refusal "at startup");
+the orphaned backfill modules and their test, deleted; two real-database tests moved
+out of `unit/`. The first pre-commit run failed on RELEASING.md's internal-dependency
+table (now listing `arkhai-kit-schema-migrations` for the six packages), the duplicated
+tasks, and one history-wording hit, all fixed. Fixed after the second: kit docstrings
+reworded to the rule rather than a consumer the branch lacks; a stale backfill example
+in `job_fulfillment.teardown_operation`'s docstring; Compose added to the command's
+"Used by"; the fulfillment boundary test's docstring; four overstated or wrong notes
+(eight metadata sets, the adoption claim, 4.4's `database_url` assertion, the spec
+list). Declined: committing the floor generator (the README states the procedure; its
+environment is a hundred-odd constraints, regenerated only to correct the fixture);
+keeping a service-level test of backfilled fulfillment rows (the rows the deleted
+backfill wrote are ordinary fulfillment states, which `test_fulfillment_convergence.py`
+covers with natively created rows; the deleted tests' subject was the backfill that
+produced them); kit-level tests of each exported baseline (only the provisioning
+service holds the floor fixture they reproduce, and its chain test proves them against
+it, with every mapped column).
+
+End-to-end. `provisioning`, `provisioning_readonly`, `e2e_deal`, and
+`e2e_bare_metal_mock_deal` (markers in `e2e-tests/pyproject.toml`) run on lanes whose
+provisioning service starts through its migration init container (Helm) or its
+migration command before the application (Compose) on a fresh database, so a passing
+pipeline is evidence the baselines and later migrations build a schema the service runs
+on. No lane holds a v0.3.0 database; adoption is proven by the library integration
+tests, and no scenario is owed.
 
 ## 5. Permanent promotion
 

@@ -38,7 +38,7 @@ from vm_provisioning_adapter.services.ansible_pool_config_handler import (
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.config import settings as service_settings
-from compute_provisioning_service.db.database import run_migrations
+from compute_provisioning_service.db.database import migrate_database
 from compute_provisioning_service.db.models import DefinitionDocumentImport
 from compute_provisioning_service.services.definition_documents import (
     DefinitionDocumentImporter,
@@ -105,7 +105,7 @@ class _Site:
 
     def __init__(self, tmp_path, monkeypatch, *, pool_document=_POOL_DOCUMENT, seed=None):
         self.engine = create_engine(f"sqlite:///{tmp_path / 'provisioning.db'}")
-        run_migrations(self.engine)
+        migrate_database(self.engine)
         self.session_factory = sessionmaker(bind=self.engine)
         with self.session_factory() as db, db.begin():
             # Service-internal state setup: the relay the relay pool dials. A

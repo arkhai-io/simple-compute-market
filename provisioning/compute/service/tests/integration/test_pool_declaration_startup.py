@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.config import settings as service_settings
-from compute_provisioning_service.db.database import run_migrations
+from compute_provisioning_service.db.database import migrate_database
 from compute_provisioning_service.db.models import DefinitionDocumentImport
 from compute_provisioning_service.services.definition_documents import (
     DefinitionDocumentImporter,
@@ -98,7 +98,7 @@ class _Deployment:
         self.document = tmp_path / "pools.yaml"
         if pool_document is not None:
             self.document.write_text(pool_document, encoding="utf-8")
-        run_migrations(self.engine)
+        migrate_database(self.engine)
         if existing_default:
             # Migration creates no pool: a site already serving holds its VM
             # `default`, with both declarations and its playbook.

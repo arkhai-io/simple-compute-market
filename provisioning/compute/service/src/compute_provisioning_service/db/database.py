@@ -1,17 +1,14 @@
-from sqlalchemy import create_engine, Engine, inspect
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy import Engine, create_engine
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from market_fulfillment.db import Base as FulfillmentBase
-from market_resource_pools.db import Base as PoolsBase
-from market_site.db import Base as SiteBase
-from vm_provisioning_adapter.db import Base as VmBase
+from market_schema_migrations import CheckResult, MigrateReport, migrate, refusal_message
+from market_schema_migrations.sqlalchemy_adapter import (
+    SqlAlchemyMigrationConnection,
+    check_engine,
+)
 
-from compute_provisioning.hosts.db import Base as HostsBase
-from compute_provisioning.jobs.db import Base as JobsBase
-from compute_provisioning.relays.db import Base as RelaysBase
-from compute_provisioning_service.db.migrations import apply_schema_migrations
-from compute_provisioning_service.db.models import Base
+from compute_provisioning_service.db.migrations import CHAIN
 
 
 def create_db_engine(database_url: str, is_sqlite: bool) -> Engine:
@@ -42,42 +39,39 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def run_migrations(engine: Engine) -> None:
-    """Create all tables and apply versioned migrations.
+class IncompatibleDatabase(RuntimeError):
+    """The database is not exactly at the chain this image carries."""
 
-    This is the full migration entrypoint: ``compute-provisioning-migrate`` (CLI,
-    for local dev and the Helm init container) and ``make migrate`` both
-    call this. It is idempotent — safe to run on every deploy/restart.
+    def __init__(self, result: CheckResult) -> None:
+        super().__init__(refusal_message(result, service=CHAIN.service, command=CHAIN.command))
+        self.result = result
 
-    It takes only the database: its result depends on the code and the data
-    already stored, never on the service's configuration, which startup applies
-    instead (seeding pools, importing documents and inventory). See
+
+def migrate_database(engine: Engine) -> MigrateReport:
+    """Bring the database to the chain's head, adopting a v0.3.0 database.
+
+    ``compute-provisioning-migrate`` calls this, and nothing else does outside
+    tests: the application only checks. It takes only the database, so its
+    result depends on the code and the data already stored, never on the
+    service's configuration, which startup applies instead (seeding pools,
+    importing documents). See
     openspec/specs/deployment-state/spec.md#requirement-service-owned-migration-history.
-
-    The main service container does **not** call this at startup; it calls
-    :func:`compute_provisioning_service.db.migrations.check_schema_version` instead and fails fast if
-    migrations haven't been applied.
     """
-    # Resource-pool tables must be created before the relays' and VM's:
-    # pool_relays and ansible_pool_configs have foreign keys to resource_pools,
-    # and SQLAlchemy's cross-metadata FK resolution during create_all needs the
-    # referenced table to exist.
-    PoolsBase.metadata.create_all(bind=engine)
-    RelaysBase.metadata.create_all(bind=engine)
-    VmBase.metadata.create_all(bind=engine)
-    HostsBase.metadata.create_all(bind=engine)
-    JobsBase.metadata.create_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    FulfillmentBase.metadata.create_all(bind=engine)
+    with engine.connect() as connection:
+        return migrate(CHAIN, SqlAlchemyMigrationConnection(connection))
 
-    # Preserve the legacy reservation table name until the versioned rename
-    # migration has claimed the current name. Other site tables may be created
-    # before migrations because historical migrations depend on them existing.
-    existing = set(inspect(engine).get_table_names())
-    site_tables = list(SiteBase.metadata.sorted_tables)
-    if "site_allocations" in existing and "capacity_reservations" not in existing:
-        site_tables = [table for table in site_tables if table.name != "capacity_reservations"]
-    SiteBase.metadata.create_all(bind=engine, tables=site_tables)
 
-    apply_schema_migrations(engine)
-    SiteBase.metadata.create_all(bind=engine)
+def check_database(engine: Engine) -> CheckResult:
+    """The database's state against the chain, read without changing anything.
+
+    A file-backed database is read through a read-only connection, so a
+    missing file is reported absent and is not created.
+    """
+    return check_engine(CHAIN, engine)
+
+
+def require_compatible_database(engine: Engine) -> None:
+    """Refuse to serve a database not exactly at the chain this image carries."""
+    result = check_database(engine)
+    if not result.compatible:
+        raise IncompatibleDatabase(result)

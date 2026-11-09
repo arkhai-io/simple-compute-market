@@ -31,7 +31,7 @@ from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
 from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.relays import GrantKey, Relay, RelayService
-from compute_provisioning_service.db.database import run_migrations
+from compute_provisioning_service.db.database import migrate_database
 
 # Development-only Fernet key, generated per run and never used on a network.
 _KEY = Fernet.generate_key().decode()
@@ -65,7 +65,7 @@ class _Deployment:
         self.db_path = tmp_path / "provisioning.db"
         self.document = tmp_path / "relays.yaml"
         self.engine = create_engine(f"sqlite:///{self.db_path}")
-        run_migrations(self.engine)
+        migrate_database(self.engine)
         self.session_factory = sessionmaker(bind=self.engine)
         self.settings = SimpleNamespace(
             ssh_decryption_key=_KEY,

@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-site"
-version = "0.13.0"
+version = "0.14.0"
 license = "MIT"
 description = "Site-authority scaffold: capacity ledger, tables, and HTTP surface"
 requires-python = ">=3.12"
@@ -11,6 +11,9 @@ dependencies = [
     # router package, not only of its clients.
     "arkhai-kit-identity>=0.4.0",
     "arkhai-kit-resource-pools>=0.9.0",
+    # The migration type the ledger's baseline and later migrations are
+    # exported as.
+    "arkhai-kit-schema-migrations>=0.1.0",
     "fastapi>=0.115.0",
     "pydantic>=2.7",
     # Capacity-definitions documents are YAML.

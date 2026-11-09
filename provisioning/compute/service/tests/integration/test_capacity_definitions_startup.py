@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker
 
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
-from compute_provisioning_service.db.database import run_migrations
+from compute_provisioning_service.db.database import migrate_database
 from compute_provisioning_service.db.models import DefinitionDocumentImport
 from compute_provisioning_service.services.definition_documents import (
     CapacityDefinitionsRejected,
@@ -43,7 +43,7 @@ class _Deployment:
     def __init__(self, tmp_path):
         self.document = tmp_path / "capacity-definitions.yaml"
         engine = create_engine(f"sqlite:///{tmp_path / 'provisioning.db'}")
-        run_migrations(engine)
+        migrate_database(engine)
         self.session_factory = sessionmaker(bind=engine)
         # Migration creates no pool; the document's declarations name this one.
         with self.session_factory() as db, db.begin():
