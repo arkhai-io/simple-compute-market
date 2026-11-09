@@ -187,11 +187,20 @@ Requirements: "The in-lane payments double mirrors the service and proves its en
 surface", "Each lane double reads a perceived clock the scenario advances", "Lane double
 controls are typed deterministic steps".
 
-- [ ] 2.1 `tools/payments-lane-double`: declare `lane-double-controls`; a perceived clock
+- [x] 2.1 `tools/payments-lane-double`: declare `lane-double-controls`; a perceived clock
       (wall time plus a forward-only offset, reset to zero) injected into
       `PaymentsAuthority` in place of `wall_clock` (`src/payments_lane_double/app.py`);
       mount the middleware on the API routes. (D2, D4)
-- [ ] 2.2 Control routes under `/test/`, authenticated by a fixture control token added
+      Done. `PerceivedClock` (`src/payments_lane_double/clock.py`) wraps the injected
+      wall clock; `create_app(directory, clock=…)` still takes the wall clock, so the
+      existing suite's injected clock keeps working, and admission reads the
+      perceived clock too. The middleware wraps the whole app
+      (`app.add_middleware`); `routes.is_contract_path` keeps it off the control and
+      health routes. `requires-python` is now `>=3.12`, the version 0.2.0, and the
+      lock relocked (`make lock PROJECTS=tools/payments-lane-double`). The bearer
+      parse moved to `accounts.bearer_token`, shared by authentication and the rule
+      book.
+- [x] 2.2 Control routes under `/test/`, authenticated by a fixture control token added
       to `fixtures/accounts.toml` and labelled a public development value: rules
       (install, list, delete) for refusals with a published `ApiError` status and code,
       drop after commit and *unavailable*; clock advance and reset; fund an account
@@ -199,17 +208,46 @@ controls are typed deterministic steps".
       directory); rotate the receipt signer to a second committed fixture seed; status
       reporting the perceived now and the installed contract hashes from
       `market_arkhai_payments.contracts`. Refusals follow D4's table. (D2, D3, D4)
-- [ ] 2.3 Suite coverage of the rate and hold surface through the payments kit's
+      Done. `fixtures/accounts.toml` gains `control_token` and `rotation_seed` (both
+      labelled public development values); the loader refuses a control token that
+      is also an account's token and a rotation seed equal to the receipt seed. No
+      lane pins the rotated identity, so the fixture states only its seed. Handlers
+      are registered from `routes_for("payments")`, and app construction fails if one
+      is missing. The rule book (`src/payments_lane_double/rules.py`) is read twice:
+      the middleware's classifier acts on and counts a drop or *unavailable* match;
+      each API handler, after authenticating the caller, acts on and counts a
+      refusal. Both take the first matching rule, an *unavailable* rule first, so one
+      call meets one rule and is counted once. A refusal's code must be a published
+      `ApiErrorCode` (else 422). For an approval, `transaction` is the id its mandate
+      will have, so a rule can be scoped to one deal from its first call. Rotation
+      swaps the engine's signer; a snapshot after it embeds the receipt under its
+      original signature, so a verifier trusts both keys. Status reports
+      `schema/payments.schema.json` and `test-vectors/payments.json`.
+- [x] 2.3 Suite coverage of the rate and hold surface through the payments kit's
       `PaymentsClient` over an ASGI transport, with clock advances: rate parts and
       payee-only `start`; `stop` with notice and the earliest pending stop taking effect
       when the perceived clock reaches it; per-part `end`; funding exhaustion at
       funded-through; `afterStop` holds releasing after the clock passes them; partial
       `reverse` before and after a stop; `extend` and `lift` with `hold_not_extendable`,
       `extension_not_found` and `extension_closed`. (D10)
-- [ ] 2.4 Update `tools/payments-lane-double/README.md`'s claim from the once-only
+      Done in `tests/integration/test_double.py`, under "the rate and hold surface",
+      each case moving time through the clock control and reading state through the
+      kit's `PaymentsClient` (snapshots and the balance), the app in process behind
+      Starlette's test client: payee-only start and earning; the payer's PT2H-notice
+      stop superseded by the payee's earlier PT1H one, which takes effect at T0+1h; a
+      part's `end` stopping it (`cause: terms`, the stop event naming the part); a
+      payer funded with exactly two periods through the funding control, stopped at
+      its funded-through; an `afterStop` once hold still held one second before
+      T0+1h and released, net of fee, at it; reverses of 500 before and after a
+      stop, then `insufficient_held_funds`; extend, lift, `extension_closed`,
+      `extension_not_found`, and `hold_not_extendable` on a released once part. The
+      shared lane helpers moved to `tests/integration/support.py`.
+- [x] 2.4 Update `tools/payments-lane-double/README.md`'s claim from the once-only
       surface to the rate and hold surface, and describe the controls and clock. (D10;
       the README is the double's own documentation, maintained with its code)
-- [ ] 2.5 Verification.
+      Done: "What it is", a new "Controls" section, "What it claims", the fixtures
+      list and the `make test` bullet.
+- [x] 2.5 Verification.
       Unit (`tests/unit`): the clock moves only forward, reset returns to wall time;
       control authentication refuses a missing or wrong token.
       Library integration (`tests/integration/test_double.py`, `test_controls.py`):
@@ -222,9 +260,50 @@ controls are typed deterministic steps".
       match each counted in the rule listing, the classifier counting it (section 1's
       middleware leaves matching and counting to the double); `/health` answering
       under *unavailable*.
+      Correction: the `/health` case is proven where the exemption lives, in the
+      controls package's middleware test (`/health` answering under *unavailable*,
+      never classified); no typed client here reads `/health`, and a raw call would
+      break `TESTING.md`'s "no raw calls" rule.
       End-to-end: none in this section; section 5's lanes run this double.
       Owed by validation: `tests.yml`, job `test · test-payments-lane-double` — the
       double's `make test` passes with the new suites.
+      Evidence: `make -C tools/payments-lane-double test` — 90 passed. Unit
+      (`tests/unit`): `test_clock.py` (forward-only advance, reset to wall time);
+      `test_rules.py` (each route's properties, the approval's transaction, first
+      match, *unavailable* first, each layer counting only its own action, published
+      codes, 409/404); `test_fixtures.py` (control token and rotation seed load and
+      are refused when they collide). Control-token admission is unit-tested in the
+      controls package (`authorize`); here it is proven through the app, in
+      `test_controls.py`, rather than at unit level. Library integration, the app in
+      process behind Starlette's test client: `test_double.py` (2.3's surface) and
+      `test_controls.py` (refusal answered with its code and counted, a rule scoped to
+      one transaction, funding through `get_balance` and its 404, rotation — a
+      snapshot signed with the second key and verifying under both, an earlier
+      receipt under the first, a later receipt under the second alone — status hashes
+      against `get_contract().metadata`, clock advance and reset, admission on the
+      perceived clock, wrong, missing and account tokens refused, `rule_exists` and
+      `rule_not_found`, and a rule without `match` or a scoped *unavailable* rule
+      refused by hand as rejection paths reading the status only). Library
+      integration, the app under uvicorn on loopback (`test_faults.py`): a dropped
+      approval raising `PaymentsTransportError`, counted; with the rule removed, the
+      buyer already debited and the snapshot present before any retry, and a retry a
+      minute later returning that receipt, approved at T0, with no second debit;
+      *unavailable* abandoning a balance read and an approval while `/test/status`
+      answers, both matches counted, and its removal restoring the API. `make
+      build-payments-lane-double` built the image from the new lock.
+      `scripts/change-workflow run pre-commit`: `after-functional-change` and
+      `pre-commit-functional` (packaging and every suite) passed; `check-repository`
+      failed only on the citations check, for the three later-section paths 1.6
+      names.
+      End-to-end scenarios covering the section once deployed: none; section 5's lanes
+      run this double, and section 6's module drives its controls.
+      Handoff: the lane-double evidence of 5.5 can read status through
+      `ControlClient.status()`; its `contracts` keys are the kit's resource paths. The
+      permanent `test-compatibility` companion ("The in-lane payments double") and
+      `ROADMAP.md`'s row still say the double claims only the once-only surface: 9.9
+      should name the companion beside the README for D10, and 9.5 the roadmap row.
+      The double serves rotation but no scenario resets it; a lane that rotates keeps
+      the second key for the rest of its run.
 
 ## 3. Mediation trust through configuration
 
@@ -550,7 +629,11 @@ implementation. In the order of `openspec/README.md#plan-closeout-requirements`:
       - D9: `docs/development/TESTING.md`, "Private Service Dependencies", and the
         paragraph on the lanes' doubles under "4. System Integration Tests
         (End-to-End)"; `e2e-tests/README.md`, "Shared payment-scenario configuration".
-      - D10: `tools/payments-lane-double/README.md` (section 2).
+      - D10: `tools/payments-lane-double/README.md` (section 2);
+        `openspec/specs/test-compatibility/architecture.md`, "The in-lane payments
+        double", whose once-only claim and its statement that a result establishes
+        nothing about rate parts and holds at the HTTP boundary are restated to the
+        claimed rate and hold surface.
       - D11: `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Release topology" (the local
         release paragraph and the `make helm-topology-secrets` bullet);
         `docs/development/TESTING.md`, the Helm validation paragraph under "4. System

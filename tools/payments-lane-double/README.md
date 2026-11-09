@@ -12,9 +12,9 @@ The double serves the payments service's HTTP API over the payments kit's
 clock-injected engine, `PaymentsAuthority`
 (`kit/arkhai-payments/src/market_arkhai_payments/fixtures/authority.py`), the same
 engine the kit's in-process `FakePaymentsClient` runs, so there is one ledger
-implementation for both. The clock is wall time. State is in memory in one
-process, one lock serialising requests, and is lost on restart: a run lives only
-as long as its lane.
+implementation for both. The engine reads the double's perceived clock (see
+Controls). State is in memory in one process, one lock serialising requests, and
+is lost on restart: a run lives only as long as its lane.
 
 It mirrors the service's API — its routes, bearer authentication, approval
 admission, read authorization, idempotency and error codes — and serves whatever
@@ -51,17 +51,58 @@ the engine serves, rate parts and `start`, `stop`, `extend` and `lift` included.
   not accept, 404 for an account it does not know.
 - **Receipts.** Signed with the fixture receipt key, always `livemode: false`, so a
   live-configured role refuses every receipt the double signs.
-- **Funding.** The buyer is funded once at startup from the account file. There is
-  no funding route: funding is topology.
+- **Funding.** The buyer is funded once at startup from the account file; the
+  funding control credits any account in it later.
+
+## Controls
+
+Beside the API the double serves the lane doubles' control routes under `/test/`
+on the same port, authenticated by the fixture `control_token` as a bearer token,
+through the shared contract in
+[`tools/lane-double-controls`](../lane-double-controls/README.md), whose typed
+client calls them. They are lane-private: no lane publishes the port to its host.
+
+- **Rules.** `POST /test/rules` installs a rule matching on `route` (`transactions`,
+  `snapshot`, `mandate`, `attachments`, `events`, `balances`), the authenticated
+  `account`, an event's kind as `event`, and `transaction` (for an approval, the
+  transaction its mandate will have). A rule refuses a matching call with a status
+  and a published `ApiError` code, after authentication; drops its response after
+  it commits; or, as *unavailable* with `match: {}`, abandons every API response
+  while installed. A call meets the first rule it matches, an *unavailable* rule
+  before any other, and that rule's listing counts it. `GET /test/rules` lists the
+  rules with their counts; `DELETE /test/rules/{rule_id}` removes one. The control
+  and health routes are never faulted.
+- **Clock.** The engine reads a perceived clock, wall time plus an offset.
+  `POST /test/clock/advance` moves it forward, and the engine's due state — a
+  notice stop taking effect, funding exhaustion, a matured hold — shows at the
+  next read, with nothing running in the background; `POST /test/clock/reset`
+  returns it to wall time. Admission reads it too.
+- **Funding.** `POST /test/funding` credits an account in the account file with
+  minor units of `USD/6`; any other account is 404 `account_not_found`.
+- **Signer rotation.** `POST /test/signer/rotate` signs every later receipt and
+  snapshot with the fixture's `rotation_seed`; a receipt signed before keeps its
+  signature, and a snapshot embedding it verifies under both keys.
+- **Status.** `GET /test/status` reports the perceived now, the offset and the
+  SHA-256 of each installed contract resource, read from the payments kit wheel.
+
+A control refusal is `{"code", "message"}`: 401 `authentication_required` without
+the control token, 422 `invalid_request` for a malformed or unsupported rule,
+409 `rule_exists`, 404 `rule_not_found`.
 
 ## What it claims
 
-Its suite, and any result against it, claims only the once-only surface:
-approval, Agreement attachment, signed receipts, transaction snapshots, the seller's
-reverse, and the balance read. Rate parts, stops and holds are served because the
-engine serves them, not qualified. A scenario passing against the double
-establishes this repository's use of the payments boundary, never the payments
-service's ledger, funding or availability.
+Its suite drives the payments kit's real client against the app through an
+in-process transport, and over loopback HTTP for the transport faults, with the
+clock moved through the control, and claims what the engine serves: approval, Agreement
+attachment, signed receipts, transaction snapshots, reverses and the balance read;
+and the rate and hold surface — rate parts and payee-only `start`, `stop` with
+notice and the earliest pending stop taking effect when the clock reaches it,
+per-part `end`, funding exhaustion at funded-through, `afterStop` holds releasing
+once the clock passes them, partial `reverse` before and after a stop, and
+`extend` and `lift` with `hold_not_extendable`, `extension_not_found` and
+`extension_closed`. Each answer is the engine's. A scenario passing against the
+double establishes this repository's use of the payments boundary, never the
+payments service's ledger, funding or availability.
 
 ## Fixtures
 
@@ -71,7 +112,8 @@ network. The fixtures and the certificates are committed; the leaf key is
 generated from the generator's seed (see TLS).
 
 - `fixtures/accounts.toml` — the asset and fee policy, the receipt-signing seed and
-  the identity it yields (distinct from `FakePaymentsClient`'s), and the buyer,
+  the identity it yields (distinct from `FakePaymentsClient`'s), the rotation seed,
+  the control token, and the buyer,
   seller and dispute authority accounts with their bearer tokens and the buyer's
   seed balance. The dispute authority's account has no token, so nothing can
   authenticate as it.
@@ -151,8 +193,10 @@ copied there under those names.
   fixtures. It serves no payment scenario there; each storefront's `helm test`
   payments check reads the seller's balance.
 - `make test` (here) runs the unit and library integration suite: the kit's real
-  `PaymentsClient` against the app through an in-process transport, with an
-  injected clock. From the repository root,
+  `PaymentsClient` and the controls' typed client against the app through an
+  in-process transport, with an injected wall clock, and the transport faults
+  against the app served by uvicorn on loopback, since only a real server
+  abandons a response. From the repository root,
   `make test-payments-lane-double` runs it, as part of `make test` and the Tests
   workflow's matrix.
 - `make build-payments-lane-double`, from the repository root, builds the image
