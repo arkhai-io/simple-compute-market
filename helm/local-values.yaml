@@ -29,7 +29,16 @@
 # configuration step, naming neither api_key nor api_key_env configured. The
 # release serves no payment scenario; that check reads
 # Bob's own balance at the double.
+#
+# The registry below recommends the mediation lane double this overlay enables
+# beside the payments double, which it reaches as `payments-double`. Bob's copied
+# [[DisputeCredential]] names the CA file his chart mounts from
+# `payments-ca-bundle`, which topology-secrets rewrites it to, since the lane CA
+# issues both doubles' leaves; `helm test`'s mediation check reads the double's
+# respondent listing with that credential.
 payments-lane-double:
+  enabled: true
+mediation-lane-double:
   enabled: true
 storefront:
   persistence:
@@ -42,13 +51,18 @@ storefront:
         configMapName: arkhai-node-operator-dev-env-alkahest-addresses
         key: alkahest_anvil_addresses.json
         mountPath: /etc/arkhai/alkahest
-      # The lane CA, the only CA Bob's HTTPS peer, the double, chains to.
+      # The lane CA, the only CA Bob's HTTPS peers, the payments and mediation
+      # doubles, chain to: the payments section's derived ca_bundle_path and
+      # his copied dispute credential's both name the file it mounts as.
       caBundle:
         configMapName: payments-ca-bundle
         key: ca-bundle.pem
-      # The double's seller account, whose balance the payments check reads.
+      # The payments double's seller account, whose balance the payments check
+      # reads, and the mediation double's origin, the authority the mediation
+      # check reads with Bob's dispute credential for it.
       tests:
         paymentsAccount: 00000000-0000-4000-8000-0000000000b2
+        mediationOrigin: https://mediation-double:8443
       config:
         # Development values only, never for a public network: the address is
         # Anvil's deterministic account 2, whose key every Anvil instance

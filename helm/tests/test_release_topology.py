@@ -63,6 +63,9 @@ LANE_CA = UMBRELLA.parent / "tools" / "lane-double-controls" / "tls" / "lane-ca.
 # The mediation lane double's committed fixture, whose identity the release's
 # registry recommends.
 MEDIATION_AUTHORITY = UMBRELLA.parent / "tools" / "mediation-lane-double" / "fixtures" / "authority.toml"
+# Bob's Compose secret overlay, whose dispute credential topology-secrets copies
+# into his runtime overlay.
+BOB_COMPOSE_SECRETS = UMBRELLA.parent / "dev-env" / "identities" / "bob.storefront.secrets.toml"
 _LANE_ENV_SPEC = importlib.util.spec_from_file_location("lane_env", DOUBLE / "scripts" / "lane_env.py")
 assert _LANE_ENV_SPEC is not None and _LANE_ENV_SPEC.loader is not None
 lane_env = importlib.util.module_from_spec(_LANE_ENV_SPEC)
@@ -437,9 +440,9 @@ def test_topology_up_restarts_every_deployment_but_the_chain() -> None:
     components = {component for _, component in deployments}
 
     assert order == ["registry", "provisioning", "storefront", "bare-metal-storefront"]
-    # The payments lane double is left out for the same reason as the chain: it
-    # keeps every payment in memory, which a restart loses.
-    assert components == {*order, "dev-env", "payments-lane-double"}
+    # The lane doubles are left out for the same reason as the chain: they keep
+    # every payment and case in memory, which a restart loses.
+    assert components == {*order, "dev-env", "payments-lane-double", "mediation-lane-double"}
 
 
 def _mapping_under(lines: list[str], header: str) -> dict[str, str]:
@@ -509,6 +512,7 @@ _EXPECTED_TEST_TEMPLATES = {
         "templates/tests/e2e-deal-test.yaml",
         "templates/tests/chain-environment-test.yaml",
         "templates/tests/payments-check-test.yaml",
+        "templates/tests/mediation-check-test.yaml",
     },
     RELEASE_TWO: {
         "templates/tests/provisioning-smoke-test.yaml",
@@ -732,6 +736,31 @@ def test_the_local_payments_values_are_the_payments_doubles_committed_fixtures()
     lane = _lane_runner_payments()
     assert {key: lane[key] for key in profile} == profile
     assert "payments" not in _smoke_profile(release_two)
+
+
+def test_bobs_mediation_check_reads_the_mediation_double_his_credential_names() -> None:
+    """Release 1 runs the mediation double behind `mediation-double`, the name
+    its leaf covers, and release 2 runs none. Bob's mediation check names the
+    origin that Service answers, which is the double's fixture origin and the
+    origin of the dispute credential his runtime overlay copies from his Compose
+    overlay, so the check selects that credential."""
+    release_one, release_two = _release_one(), _release_two()
+
+    deployments = [name for name, component in _labelled(release_one, "Deployment")
+                   if component == "mediation-lane-double"]
+    assert deployments == [f"{RELEASE_ONE}-mediation-lane-double"]
+    assert not any("/charts/mediation-lane-double/" in source for source in _sources(release_two))
+    service = _named(release_one, "Service", "mediation-double")
+    port = re.search(r"^\s+port: (\d+)$", service, re.MULTILINE)
+    assert port, "Service mediation-double renders no port"
+    origin = f"https://mediation-double:{port.group(1)}"
+
+    check = _source(release_one, "storefront/templates/tests/mediation-check-test.yaml")
+    assert f'- "{origin}"' in {line.strip() for line in check.splitlines()}
+    assert _recommended_mediation_double()["origin"] == origin
+    with BOB_COMPOSE_SECRETS.open("rb") as handle:
+        (credential,) = tomllib.load(handle)["DisputeCredential"]
+    assert credential["origin"] == origin
 
 
 def test_the_e2e_tests_chart_refuses_a_payments_credential() -> None:

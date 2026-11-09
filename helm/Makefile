@@ -39,6 +39,12 @@ PAYMENTS_LANE_ENV := ../tools/payments-lane-double/scripts/lane_env.py
 # Secret's overlay, so one committed copy serves both. A public development
 # value, never for a public network.
 BOB_COMPOSE_SECRETS_FILE := ../dev-env/identities/bob.storefront.secrets.toml
+# The file the storefront chart mounts an agent's caBundle as (its
+# storefront.caBundleFile), which topology-secrets writes as the copied dispute
+# credential's ca_bundle_path in place of the Compose lane's mount. A release
+# tooling test (scripts/tests/test_change_build_and_helm_targets.py) holds the
+# two equal.
+STOREFRONT_CA_BUNDLE_FILE := /etc/arkhai/ca/ca-bundle.pem
 
 # The Secrets the release's `helm test` reads beyond a deploy's: the e2e-tests
 # chart's deal test credentials, which under local-values.yaml the registry smoke
@@ -189,9 +195,10 @@ TOPOLOGY_SECRETS := arkhai-bare-metal-storefront-identity arkhai-bare-metal-stor
 # not among them: its Anvil reloads its state file, so the contracts survive a
 # restart, but every transaction since start-up -- escrows, attestations,
 # balances -- is lost while the other services' volumes still refer to them. A
-# rebuilt dev-env image therefore does not roll. Nor is payments-lane-double: it
-# keeps every payment in memory, so a restart loses each transaction the
-# storefronts' databases refer to, and its image does not roll either. A render
+# rebuilt dev-env image therefore does not roll. Nor are the lane doubles:
+# payments-lane-double keeps every payment in memory, so a restart loses each
+# transaction the storefronts' databases refer to, and mediation-lane-double
+# every case filed on them; their images do not roll either. A render
 # test holds this list to the Deployments both releases render.
 TOPOLOGY_ROLLOUT_ORDER := registry provisioning storefront bare-metal-storefront
 
@@ -271,6 +278,7 @@ topology-secrets:
 	NAMESPACE="$(NAMESPACE)" DEV_MNEMONIC="$(DEV_MNEMONIC)" \
 	PAYMENTS_LANE_CA_FILE="$(PAYMENTS_LANE_CA_FILE)" PAYMENTS_LANE_ENV="$(PAYMENTS_LANE_ENV)" \
 	BOB_COMPOSE_SECRETS_FILE="$(BOB_COMPOSE_SECRETS_FILE)" \
+	STOREFRONT_CA_BUNDLE_FILE="$(STOREFRONT_CA_BUNDLE_FILE)" \
 	DEV_ACCOUNT_PROVISIONING="$(DEV_ACCOUNT_PROVISIONING)" DEV_ACCOUNT_BUYER="$(DEV_ACCOUNT_BUYER)" \
 	DEV_ACCOUNT_BOB="$(DEV_ACCOUNT_BOB)" DEV_ACCOUNT_REGISTRY="$(DEV_ACCOUNT_REGISTRY)" \
 	DEV_ACCOUNT_PROVISIONING_ADMIN="$(DEV_ACCOUNT_PROVISIONING_ADMIN)" \

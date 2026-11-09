@@ -1390,27 +1390,61 @@ credential, and the storefront chart's mediation-check test run by Helm validati
 process", "The local release rehearses a deployment's payments interface", "A storefront
 checks its mediation configuration from its own container".
 
-- [ ] 8.1 Subchart `helm/charts/mediation-lane-double` modelled on
+- [x] 8.1 Subchart `helm/charts/mediation-lane-double` modelled on
       `helm/charts/payments-lane-double`: Service `mediation-double`, TLS from a named
       Secret or the image's files, disabled by default; `helm/Chart.yaml`,
       `helm/values.yaml` and `helm/values.schema.json` declare it; `helm/local-values.yaml`
       enables it; `helm/bare-metal-release-values.yaml` disables it, as for the payments
       double. (D11)
-- [ ] 8.2 The release's registry recommends the mediation double's identity
+      Done: the payments subchart's shape (`Chart.yaml`, `values.yaml`,
+      `values.schema.json`, `_helpers.tpl`, `service.yaml`, `deployment.yaml`),
+      one replica under `Recreate`, HTTPS probes, a named TLS Secret mounted over
+      `/opt/mediation-lane-double/tls/double.pem` and `double.key.pem`. The
+      double needs no configuration in the cluster: its image's default payments
+      URL is `https://payments-double:8443`, the payments subchart's Service in
+      the same namespace, trusted under the image's lane CA. `helm/values.yaml`
+      restates the image so a change's validation suffixes its tag, as for the
+      payments double. Beyond the plan: `helm/Makefile`'s `TOPOLOGY_ROLLOUT_ORDER`
+      comment and `helm/tests/test_release_topology.py`'s restart case name the
+      mediation double among the Deployments `topology-up` does not restart, since
+      a restart loses every case; `helm/Chart.lock` is untracked (`.gitignore`),
+      so `helm dependency update`'s rewrite of it is not part of the change.
+- [x] 8.2 The release's registry recommends the mediation double's identity
       (`helm/local-values.yaml`); `helm/scripts/topology-secrets.sh` rewrites the copied
       dispute credential's `ca_bundle_path` to the storefront chart's CA file, and a test
       holds it to `storefront.caBundleFile`. (D11)
-- [ ] 8.3 Storefront chart test pod `helm/charts/storefront/templates/tests/mediation-check-test.yaml`,
+      Done. The recommendation was written in 5.2. `topology-secrets.sh` takes a
+      new input, `STOREFRONT_CA_BUNDLE_FILE` (`helm/Makefile`,
+      `/etc/arkhai/ca/ca-bundle.pem`), and writes it as `ca_bundle_path` in each
+      copied entry that states one; an entry stating none keeps none. The
+      rewritten entries still pass the script's read-back check.
+- [x] 8.3 Storefront chart test pod `helm/charts/storefront/templates/tests/mediation-check-test.yaml`,
       rendered from the Deployment's helpers for an agent with a dispute credential and
       `tests.mediationOrigin` (values and `values.schema.json`), running
       `market-storefront check-mediation --origin` directly with the Deployment's image,
       configuration and secrets mounts, identity credential and CA bundle mount, without
       the data volume, probes or ZeroTier capabilities and device; the local release
       sets Bob's `tests.mediationOrigin` to `https://mediation-double:8443`. (D11)
-- [ ] 8.4 `scripts/validate_slice.py` runs every `-mediation-check` pod the release's
+      Done, the payments check's template with `check-mediation --origin`. The
+      pod renders whenever `tests.mediationOrigin` names an origin: the chart
+      never reads the runtime Secret's overlay where the credential lives, so
+      naming the origin is what states the agent holds one, and a missing
+      credential fails the check at its `configuration` step (the comment and the
+      chart's `values.yaml` say so). `mediationOrigin` is declared in both the
+      storefront chart's and the umbrella's `values.schema.json`, beside
+      `paymentsAccount`; both are hand-written there, not generated.
+- [x] 8.4 `scripts/validate_slice.py` runs every `-mediation-check` pod the release's
       hooks render as it runs the payments checks, counting each passed only on its
       pod's exit status of 0 and keeping its log. (D11)
-- [ ] 8.5 Verification.
+      Done by generalising the payments checks rather than copying them: a
+      `CheckPods` kind (step name, pod suffix, evidence key, what it shows) and
+      `CHECK_PODS`, payments then mediation, each run through one
+      `_run_check_pods`; `check_pods(hooks, suffix)` replaces
+      `payments_check_pods`. The mediation checks run after the payments checks
+      unless the commit changed; their evidence is `mediation_checks` and the
+      rendered summary lists each pod, as for payments. A release rendering none
+      is warned, never passed.
+- [x] 8.5 Verification.
       Unit: `helm/charts/mediation-lane-double/tests/test_render.py` (off by default, one
       Service `mediation-double` in the local release, none in the bare-metal release,
       a named TLS Secret over the image's files); `helm/charts/storefront/tests/test_render.py`
@@ -1422,6 +1456,65 @@ checks its mediation configuration from its own container".
       release's mediation double; no payment scenario runs on the release.
       Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — the chart
       render and release-topology suites pass.
+      Evidence: `make -C helm test-render` (chart render tests, which need Helm,
+      no cluster; Helm v4.3.0 reported) — passed:
+      `helm/charts/mediation-lane-double/tests/test_render.py` (off by default;
+      one Deployment, `Recreate`, three HTTPS probes, nothing mounted, its pods
+      selected by the Service `mediation-double` on 8443 in the local release;
+      none in the bare-metal release; a named TLS Secret mounted over the
+      image's two files; the chart alone names its Service `mediation-double`);
+      `helm/charts/storefront/tests/test_render.py` (Bob's
+      `-mediation-check` pod in the local release runs `market-storefront
+      check-mediation --origin https://mediation-double:8443` with the
+      Deployment's image, environment, mounts and volumes less the data volume
+      and the ZeroTier device, no probe, capability or entrypoint, the
+      `payments-ca-bundle` CA mount and the Secret overlay present, a test label
+      and no workload selector; no pod without an origin, one with any origin,
+      none once the local release's origin is removed);
+      `helm/tests/test_release_topology.py` (release 1 runs one mediation double
+      and release 2 none; Bob's mediation check names the origin the rendered
+      `mediation-double` Service answers, which is the double's fixture origin
+      and his Compose credential's origin; release 1 renders the mediation
+      check's template among its expected test pods; no test pod carries a
+      workload selector; `topology-up` restarts neither double). That release
+      values render no double is the subchart's own default-off case above.
+      Correction to the plan's line: the rewritten `ca_bundle_path` is held in
+      release tooling, not in the topology test. Release tooling, `make
+      test-release-tooling` (unit; fake `kubectl`, `helm` and `cast` on `PATH`)
+      — 2697 passed: `test_change_build_and_helm_targets.py`, `topology-secrets`
+      run for real writes Bob's copied credential with `ca_bundle_path` equal to
+      the storefront chart's `storefront.caBundleFile`, read from its
+      `_helpers.tpl`, and every other key the Compose overlay's, and leaves an
+      entry stating no `ca_bundle_path` without one;
+      `test_validate_slice.py`, the Helm part running each mediation-check pod
+      after the payments checks with `helm test --filter`, keeping its log and
+      exit status as `mediation_checks` evidence and in the rendered summary, a
+      non-zero exit failing the part, no exit status failing it and deleting
+      the pod, a commit during a payments check running no mediation check, and
+      a release rendering none warned; the pod-name reader taking each kind's
+      pods only, and the suffix the one the chart renders.
+      `scripts/change-workflow run pre-commit`, run last over the finished
+      section: `after-functional-change`, `pre-commit-functional` (`make
+      check-packaging`, then every suite, `make -C helm test-render` and `make
+      test-release-tooling` among them) and `pre-commit` (the index, tasks,
+      skills and strict OpenSpec checks, then `check-repository`, comment
+      hygiene and citations included) all passed, exit 0. An earlier run failed
+      only because an edit landed while it ran (a test using a constant not yet
+      added); the run after it passed.
+      End-to-end scenarios covering the section once deployed: Helm validation's
+      `arkhai-node-operator-storefront-bob-mediation-check` pod, against the
+      release's mediation double; no payment scenario runs on the release.
+      For 10.9's D11: `docs/development/TESTING.md`, "Chart Render Tests", says
+      release tooling holds Bob's `[[DisputeCredential]]` equal to his Compose
+      overlay's; that is now false (its `ca_bundle_path` is rewritten) and is
+      corrected there, beside the mediation subchart's render test and the
+      mediation-check pod.
+      Handoff: the pod passes only if `make -C helm topology-secrets` wrote Bob's
+      overlay after this section (the rewritten `ca_bundle_path`) and the
+      mediation double's image is built (`build-dev` builds both doubles through
+      `build-tools`); the respondent read makes no payments call, so the check
+      does not depend on the payments double. Validation's Helm part is the
+      first run of all of it.
 
 ## 9. The release wheelhouse
 
