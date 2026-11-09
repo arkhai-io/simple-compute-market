@@ -18,7 +18,7 @@ The offering-mode-neutral composition root lets generic services dispatch by rec
 
 The mock mechanism is a worked instance of the five-piece route pattern (`docs/development/ARCHITECTURE.md`, "Route contracts and their HTTP binding") in which the family owns every piece but the binding's location. `compute_provisioning_contracts.mock_rules` holds the route-contract template, `MockRouteMount`, a path prefix and an operation-name prefix whose `route_declarations()` yields the rule add, list, delete, and resume routes and the evaluate-job route, and the wire models those routes answer with (`MockRuleAdded`, `MockRuleView`, `MockRuleDeleted`, `MockRuleResumed`, `MockJobEvaluation`, and the request `MockRuleCreate`). The family kit's `MockRuleRouteService` (`compute_provisioning.jobs.executor_mock`) answers with them, and `compute_provisioning_client`'s `MockRuleClient` and `SyncMockRuleClient` sign each call from a mount's declarations and return the same models. A domain states only its mount: VM's is `VM_MOCK_ROUTE_MOUNT`, `("/test", "provisioning_test")`, in `vm_provisioning_operator.routes`; bare metal's two values, `"/test/bare-metal"` and `"provisioning_test_bare_metal"`, live in `arkhai_bare_metal.provisioning_routes`, so `arkhai-bare-metal` keeps no compute dependency and its adapter builds the mount. Each adapter binds the route service under its mount's prefix and contributes the mount's declarations to the service's table. The evaluate-job request stays each domain's, since its fields are the domain's job parameters. A further compute domain mounts the mechanism by stating its two values.
 
-The service's database holds VM's tables, so its metadata (`db/database.py`) and its one migration history (`db/migrations.py`) name them: the history is the record of how those tables were created and evolved, including VM's pool-configuration table and VM's legacy lease conversion. `deployment-state`'s "Service-owned migration history" still gives the migration entrypoint only its database; nothing injects VM's schema. A single chain is adequate while one compute domain owns provisioning-side tables. When a second domain needs its own, each adapter would own its chain, run in an order the contributions declare, which amends that requirement.
+The service's database holds VM's tables, so its metadata (`db/database.py`) maps them and its one chain (`db/migrations.py`) composes the VM adapter's baseline, `vm_provisioning_adapter.migrations.BASELINE`, beside the baselines `kit/resource-pools`, `kit/site`, `kit/fulfillment`, the family kit's hosts, jobs and relays, and the service's own tables export, in foreign-key order, followed by the migrations after the v0.3.0 baseline. `deployment-state`'s "Service-owned migration history" still gives the migration command only its database; nothing injects VM's schema. A single chain is adequate while one compute domain owns provisioning-side tables. When a second domain needs its own, its adapter exports its baseline and migrations and the service's chain composes them in an order the contributions declare.
 
 The resource-pool projection a site serves is neutral, and a domain that publishes more — a view of a whole machine it sells, or a pool's configured defaults — contributes an `InventoryViewProjection` from `compute_provisioning.inventory_views`, which owns the protocol and its composer. The service merges what each projection returns and never names a domain's view, attribute, or provider configuration. A resource view is built with its pool's context, an `InventoryPoolContext` of pool ID, provider, and the pool's resolved declarations, because what a view may carry depends on them: a bare-metal view carries its delivery terms only where the pool's backing delegate passes them through (see the [resource-pool management architecture](../resource-pool-management/architecture.md#advertisement-delivery-and-backing)). The provisioning service, as the composition root, reads the pool rows in its own resource pass, resolves each pool once through the shared resolver, and hands each declaration its pool's context, interpreting none of it; the pool pass reads raw tags and the provider from the same column, so the two passes cannot drift on a pool's provider. A stored pool whose declarations do not resolve, which startup refuses and no write path produces, gives its members no context, so they project with no views and no problems, and the service logs a warning. The declarations the service hands the composer are the site ledger's offered read, whose `enabled` already says whether the site offers each one, so a view that reports availability, such as bare metal's, reports a declaration with no usable host as unavailable without the service or the view reading a host (see the [site-capacity architecture](../site-capacity/architecture.md#declared-capacity-and-connection-identity)). Building the context is compute-family work, so it sits at the contributed-view seam and nothing above the compute family learns of it: `kit/site` copies the per-resource result into its projection without reading it, and `kit/resource-pools` and core do not see it.
 
@@ -358,13 +358,30 @@ pool has no buyer relay; for a relay-backed pool, the leased relay endpoint is
 delivered instead. A VM guest is reached at its own forwarded or relayed port,
 never the host's `public_host` or `public_port`.
 
-The `ssh` connection is served at version 2 alone, and a submission stating no
-version, or another, is refused. A host stored at version 1 is refused before
-any inventory is written, and runs nothing until it is submitted again at
-version 2 by an update or an inventory import. An update restates every stored
-public field. A protected key it neither resubmits nor replaces with a key file
-is carried forward from the stored row as ciphertext, never read or decrypted.
-Nothing rewrites a stored row on its own.
+The `ssh` connection is served at version 2 alone. A submission must state its
+version — the contract gives it no default — and one stating no version, or
+another, is refused. A host stored at a version no codec serves is refused
+before any inventory is written, and runs nothing until it is submitted again
+by an update or an inventory import. An update restates every stored public
+field. A protected key it neither resubmits nor replaces with a key file is
+carried forward from the stored row as ciphertext, never read or decrypted.
+
+No reader upgrades a stored connection. Besides a submission, only a recorded
+migration with an exact mapping rewrites one: compute provisioning's chain
+rewrites every host's `ssh` connection stored at version 1 — which the v0.3.0
+chain wrote and v0.3.0 refuses — to version 2 with the same public fields and
+the same ciphertext, since version 2 is version 1 with an optional
+`public_port` falling back to the connection's port. The target version is the
+literal 2, not the codec's current one, so a later codec version makes the
+migration fail rather than stamp a version it never mapped; a host whose fields
+the version-2 codec refuses fails the migration, naming it, and nothing is
+rewritten. Only the `hosts` row stores a connection: a job reads its host's at
+dispatch, through the host lookup the job engine is given, and no job record,
+parameter or envelope carries a copy, so a job queued before the migration
+dispatches against the rewritten host. A teardown that had already failed on a
+version-1 host is not re-run by the migration ([Proof-driven
+release](#proof-driven-release)); the operator handbook's upgrade procedure
+recovers it.
 
 The port renders explicitly even at its default, so an inventory line states
 what the registry holds rather than leaving the default implied by an absent

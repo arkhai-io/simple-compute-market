@@ -93,6 +93,154 @@ give it a startup probe, so that a slow start is not judged by its liveness prob
 - **THEN** its Deployment carries exactly one init container, the registry's migration
   command from the application's image over the registry's data volume
 
+### Requirement: Schema-isolated registry composition
+
+One Helm release MAY compose multiple registry instances by aliasing the same
+registry service. Each enabled instance MUST select exactly one filter
+specification and MUST have independent authority identity, credential Secret,
+descriptor, authentication, Service, persistence, and workload coordinates.
+Disabling an optional instance MUST emit no resource for that instance and MUST
+preserve the existing compute-registry render.
+
+The compute-family instance MUST select its filter specification by the schema
+identity naming the family rather than one domain within it, since that
+specification carries bare-metal, virtual-machine, and container listings alike. A
+deployment MUST NOT select the retired single-domain identity, and because buyer
+commands declare the schema identity they understand, a registry and the buyers
+querying it MUST move together.
+
+#### Scenario: Compute and API-credit registries are enabled
+
+- **WHEN** an operator enables compute and API-credit registry instances with
+  their respective filter specifications
+- **THEN** Helm renders two independently named registry workloads, Services,
+  PVCs, signer Secret references, descriptors, and schema paths
+
+#### Scenario: API-credit registry is disabled
+
+- **WHEN** an operator renders the default umbrella values
+- **THEN** only the existing compute registry resources are emitted and they
+  select the `compute.market` filter specification
+
+#### Scenario: Registry identities differ
+
+- **WHEN** two registry aliases configure different authority principals
+- **THEN** each registry process uses its own identity and credential Secret
+  without requiring either to equal an umbrella-global identity
+
+### Requirement: Independently deployable bare-metal seller role
+The bare-metal storefront MUST be buildable as a wheel from the repository `.dist` artifact set and as a dedicated image containing its declared domain and shared-role dependencies. It MUST own a writable database distinct from every other storefront, with separate immutable agreement-artifact, fulfillment-lifecycle, and reservation-to-site routing tables. It MUST read its configuration as every storefront does, from `storefront.toml`, `storefront.json`, and the Secret overlay `storefront.secrets.toml`, under the keys the other compute storefront uses for the same concepts. Operator configuration MUST bind every stable site identifier to one exact authority URL and to exactly one service peer, whose durable active principals that site's responses and callbacks are both verified against, while the signer credential remains Secret-injected and diagnostics carry no credential. A site's URL is public configuration, refused at startup if it carries credentials, so it may appear in a diagnostic's error text, although a report of the site bindings never names it.
+
+#### Scenario: Bare-metal storefront package is installed
+- **WHEN** the distribution is installed from staged wheels outside the source checkout
+- **THEN** the `bare-metal-storefront` entry point and `market.storefront_contributions` hook load without editable sibling packages
+
+#### Scenario: Operator enables only bare-metal
+- **WHEN** the bare-metal storefront service is enabled and VM storefront is disabled
+- **THEN** the service starts with its own persistence and trusted-site configuration without waiting for or referencing a VM storefront
+
+#### Scenario: Operator enables both compute storefronts
+- **WHEN** VM and bare-metal storefront services use one provisioning service
+- **THEN** they remain separate processes with separate writable storefront databases and explicit public service URLs or gateway paths
+
+#### Scenario: Site configuration is diagnosed
+- **WHEN** health or operator status reports configured bare-metal site bindings
+- **THEN** it reports stable site IDs and canonical authority principals but no authority URL, signer credential, provider configuration, or private inventory
+
+#### Scenario: A site has no service peer
+- **WHEN** the bare-metal storefront starts with a configured site that no service peer is bound to, or that two are
+- **THEN** it refuses to start, naming the site
+
+#### Scenario: Helm deploys the one-domain role
+- **WHEN** an operator supplies the storefront's public configuration, an existing signer credential Secret, an optional existing Secret overlay, one persistent volume, and a pinned dedicated image to `helm/charts/bare-metal-storefront`
+- **THEN** the chart renders the configuration unchanged into `storefront.json`, mounts it and the overlay as files, injects only the credential and the configuration directory through the environment, and renders one unprivileged storefront process with startup, liveness, and readiness probes and no wait or import dependency on the VM storefront
+
+### Requirement: Payment credentials stay with their owning process
+
+The Arkhai payments API key MUST reach only its owning buyer or seller process. Outside loopback the payments service origin MUST use HTTPS. Public renderings MUST omit resolved credentials and contain no payment authority, provider, database or worker deployment. The payments lane double is a development fixture, not a payment authority: only the end-to-end lanes and the local release, whose own values enable its subchart, run it, and release values never enable it.
+
+#### Scenario: A non-loopback origin is plain HTTP
+
+- **WHEN** a buyer or seller process's `[Settlement.arkhai_payments]` names an `http://` service origin on a non-loopback host
+- **THEN** its configuration is refused, naming the HTTPS requirement
+
+#### Scenario: A release is rendered from release values
+
+- **WHEN** the umbrella chart is rendered without the local release's values
+- **THEN** it renders no payments double and no other payment authority
+
+### Requirement: Identity configuration separates public and secret material
+
+Private identity credentials MUST arrive through service-scoped Secret references and MUST NOT enter committed values, ConfigMaps, manifests, run logs, public principal fields, public URLs, or generated evidence. Payment consumer profiles MUST keep provider credentials and bank/card data out of marketplace roles. Owner-scoped API credentials are separate from marketplace signing credentials. Runtime MUST derive the public principal from the credential and compare it with configured public identity before readiness.
+
+#### Scenario: Public identity configuration contains a private credential
+
+- **WHEN** a values file, ConfigMap, release artifact, readiness response, log, or conformance fixture contains private identity material
+- **THEN** validation fails and the value is not deployed or published
+
+#### Scenario: Payment credential enters public values
+
+- **WHEN** a public ConfigMap contains the resolved payments API key
+- **THEN** validation fails before deployment
+
+#### Scenario: Payments-only storefront is rendered
+
+- **WHEN** a profile enables only Ed25519 marketplace identity and Arkhai payment settlement
+- **THEN** Helm/Compose rendering requires the identity Secret reference but no wallet, chain, RPC, deployed-address, or gas configuration
+
+#### Scenario: Identity secret is missing
+
+- **WHEN** a role has a public principal but cannot load matching private credential material
+- **THEN** startup fails before serving authenticated routes, publishing, negotiating, or submitting settlement operations
+
+#### Scenario: A service-peer profile is rendered
+
+- **WHEN** a storefront and provisioning authority are configured to trust one another
+- **THEN** ordinary configuration contains each exact scheme-tagged public principal and site trust binding, while each service's matching signer credential is supplied only through its own Secret boundary
+
+### Requirement: Deployment uses one settlement hierarchy
+
+Storefront and buyer TOML, committed defaults, environment overlays, Helm values/schema/templates, Compose, examples, and generated configuration MUST use the same typed `[Settlement]` root and mechanism subsection names. Marketplace deployment MUST keep public identity, wallet/chains, and mechanism trust/policy separate from Secret-injected credentials, and MUST reject payment-provider/admin/webhook secrets or payment-service-owned state.
+
+#### Scenario: Payment-only role starts
+
+- **WHEN** marketplace identity, trusted Arkhai payments consumer policy, and owner-scoped credentials are supplied with Alkahest disabled
+- **THEN** the role does not construct a wallet, chain, or RPC client
+
+#### Scenario: Legacy environment variable remains
+
+- **WHEN** startup receives a removed settlement configuration path after cutover
+- **THEN** readiness fails with the corresponding new path and migration command rather than applying hidden precedence
+
+### Requirement: Configuration cutover is atomic and coordinated
+
+Migration tooling MUST be deployable before runtime rejection, and production cutover MUST preview, back up, migrate, and validate every storefront and buyer configuration file, Secret mapping, Helm value, Compose environment, and automation caller before enabling the clean-cutover release. Old and new names MUST NOT be accepted concurrently by runtime. Rollback before activation MUST restore the matching config and prior artifacts together.
+
+#### Scenario: Helm values and image contract differ
+
+- **WHEN** a new image receives old settlement values or an old image receives new settlement values
+- **THEN** schema validation or startup readiness fails before publication or settlement mutation
+
+### Requirement: Deployable stack per market domain
+
+Every market domain intended for deployment MUST have a stack definition that
+stands its services up through the repository's ordinary images and public
+process contracts. Domain stack definitions MUST follow the same topology
+conventions, select an exact domain contribution and version, persist each
+authority's state independently, and carry credentials only through explicit
+service-scoped Secret references. A domain without such a stack MUST NOT be
+described as deployable.
+
+#### Scenario: A domain is stood up
+
+- **WHEN** an operator stands up a market domain's services
+- **THEN** its stack definition composes the exact registry, storefront, domain authorities, and optional buyer role without source sharing, provider shortcuts, or committed secret values
+
+#### Scenario: A domain's deployment topology changes
+
+- **WHEN** a domain contribution moves between a standalone storefront and a shared multi-domain storefront process
+- **THEN** only the stack's contribution/config binding changes while public domain identity, selected-site routing, and scenario endpoints remain exact
+
 ## ADDED Requirements
 
 ### Requirement: Identity cutover is coordinated and fails closed

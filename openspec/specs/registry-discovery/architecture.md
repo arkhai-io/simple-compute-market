@@ -81,12 +81,6 @@ Publisher identity history is separate from publisher and listing records. Rotat
 
 The replacement becomes primary immediately. The old credential is either retired immediately or remains an active overlap credential until the bounded deadline, and only the replacement primary can retire it early. The registry exposes the recorded rotation state so a multi-authority coordinator can verify convergence before retiring an old credential elsewhere; no cross-service database transaction is assumed. Neither rotation nor retirement rewrites publisher IDs, listing IDs, or listing ownership.
 
-## Atomic legacy identity migration
-
-Supported legacy address-owned state is converted to canonical `eip191` bindings as one schema transaction. The migration validates the complete publisher, identity, and listing population before removing legacy ownership columns: principal normalization and uniqueness, exactly one active owner binding, stable publisher mapping, listing referential integrity, and non-conflicting storefront ownership must all hold.
-
-Preserving publisher and listing identifiers avoids turning an identity-format change into resource replacement. Aborting the whole transaction on malformed identities, cross-scheme ambiguity, duplicate bindings, partial conversion, or missing references avoids a mixed schema in which different routes could disagree about authority. Rollback is therefore safer than a best-effort row-by-row conversion.
-
 ## Related contracts
 
 - [Marketplace identity](../marketplace-identity/spec.md)

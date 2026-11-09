@@ -150,20 +150,6 @@ Every negotiation MUST persist durable ownership by the exact canonical scheme-t
 - **WHEN** Ed25519 buyer and seller principals complete deterministic rounds selecting `arkhai.payments.v1`
 - **THEN** the Agreement preserves both exact party principals and the settlement selection without requiring EVM addresses
 
-### Requirement: Negotiation identity migration and recovery are deterministic
-
-Address-shaped negotiation parties, message authors, and accepted Terms MUST migrate transactionally to canonical `eip191` principals while preserving negotiation, message, listing, option, settlement-plan, and operation identities. Migration MUST validate the complete owned population before committing and MUST leave the prior state intact when any row is malformed, conflicting, incomplete, or ambiguously owned. Recovery of a persisted thread MUST use its recorded buyer and seller principals and MUST authorize a continuation only for the recorded buyer or a replacement principal bound by a completed rotation.
-
-#### Scenario: Nonterminal thread is recovered after migration
-
-- **WHEN** a valid address-owned negotiation is migrated before its next round and the recorded `eip191` buyer resumes it
-- **THEN** the seller continues the same thread and canonical history without replaying prior policy decisions or changing accepted party ownership
-
-#### Scenario: Negotiation identity population is unsafe
-
-- **WHEN** migration encounters a malformed principal, conflicting identity representation, incomplete party population, or ambiguous owner
-- **THEN** the migration aborts atomically without leaving mixed address and principal authorization state
-
 ### Requirement: Negotiation inherits an immutable listing-domain binding
 
 Opening a negotiation MUST transactionally load the authoritative seller listing and common binding, resolve the exact pre-registered contract, validate the versioned provision envelope with that contract, and persist the thread, canonical parties, opening message, initial domain artifact, trusted site, offering mode, domain identity, and contract version before policy runs. Caller-supplied discriminators are assertions only. Continuation, Terms reduction, and acceptance MUST route from the recorded thread binding.
@@ -450,6 +436,15 @@ unaffected.
 - **WHEN** a buyer selects an option charging 1 base unit an hour for 60 seconds
 - **THEN** the seller refuses the selection, whatever amount it carries, and keeps nothing
 
+### Requirement: Negotiation recovery is deterministic
+
+Recovery of a persisted thread MUST use its recorded buyer and seller principals and MUST authorize a continuation only for the recorded buyer or a replacement principal bound by a completed rotation.
+
+#### Scenario: A nonterminal thread is recovered
+
+- **WHEN** the seller restarts with a nonterminal negotiation persisted and the thread's recorded buyer resumes it
+- **THEN** the seller continues the same thread and canonical history without replaying prior policy decisions or changing accepted party ownership
+
 ## Evidence
 
 - Selection-scalar openings and materialized-plan checks: `kit/policy/tests/unit/test_selection_scalar.py`, `kit/alkahest/tests/unit/test_selected_escrow_plan.py`, and, against the served storefront, `domains/vms/storefront/tests/integration/test_buyer_selection_negotiation.py`.
@@ -458,7 +453,7 @@ unaffected.
 - Thread message ordering, terminal detection, exact message authorship, and uint256-domain storage: `domains/vms/storefront/tests/unit/test_negotiation_thread.py`.
 - History reconstruction and policy-chain primitives: `core/storefront/tests/unit/test_negotiation_sync.py`.
 - Agreed-term commit and authenticated administrator authorship: `domains/vms/storefront/tests/services/test_negotiation_service.py` and `domains/vms/storefront/tests/integration/test_negotiations_api.py`.
-- Transactional principal migration and fail-closed recovery ownership: `core/storefront/tests/unit/test_identity_migrations.py` and `core/buyer/tests/unit/test_identity_recovery.py`.
+- Fail-closed recovery ownership: `core/buyer/tests/unit/test_identity_recovery.py`.
 - Immutable listing-to-thread inheritance, cross-domain rejection, exact contract resolution, and restart binding: `domains/vms/storefront/tests/unit/test_domain_thread_bindings.py`, `test_sync_negotiation_domain.py`, and `core/storefront/tests/unit/test_domain_registry.py`.
 
 The complete live VM/bare-metal restart proof is owned by the multi-domain system lane and remains gated on the production bare-metal contribution.

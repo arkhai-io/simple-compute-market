@@ -20,50 +20,6 @@ The provisioning service MUST persist each resource pool under a stable operator
 - **WHEN** a create, replace, patch, or import request names a provider with no registered pool configuration handler
 - **THEN** the service rejects the request before persisting any change
 
-### Requirement: Explicit valid host membership
-
-A provisioning host MAY reference one existing resource pool; a host that references none is unplaced. A host create, update, inventory import, or host definitions entry that names a pool MUST be refused unless that pool exists. A create or a new inventory entry that names no pool MUST leave the host unplaced rather than assign a pool. On update, an omitted pool MUST leave the host's pool unchanged and an explicit `null` MUST unplace it. In an INI inventory, a non-empty `pool_id=` places or moves the host, an empty `pool_id=` unplaces it, and an absent `pool_id` leaves an existing host's pool unchanged. A host definitions entry declares its host's whole placement: an entry that names no pool, or names a `null` one, leaves a new host unplaced and unplaces an existing one. Every move, unplacing included, MUST pass the host authority's pool-change hooks, and a refusal MUST leave every host in the request, import, or document unchanged.
-
-#### Scenario: Existing schema is migrated
-
-- **WHEN** the resource-pool migration runs against a database whose hosts predate resource pools and no `default` pool exists
-- **THEN** it refuses with an actionable schema-drift error, creating no pool and assigning no host
-
-#### Scenario: Host names an unknown pool
-
-- **WHEN** an operator creates or updates a host with a pool ID that does not exist
-- **THEN** the service rejects the host mutation without changing the stored host
-
-#### Scenario: A host is created without a pool
-
-- **WHEN** an operator creates a host, or imports an inventory entry for a new host, naming no pool
-- **THEN** the host is stored unplaced and is not assigned to any pool
-
-#### Scenario: An update omits the pool
-
-- **WHEN** an operator updates a placed host without stating a pool
-- **THEN** the host keeps its pool
-
-#### Scenario: An update unplaces a host
-
-- **WHEN** an operator updates a placed host with an explicit `null` pool and no pool-change hook refuses
-- **THEN** the host is stored unplaced
-
-#### Scenario: An inventory import unplaces a host
-
-- **WHEN** an INI inventory entry for an existing placed host carries an empty `pool_id=`
-- **THEN** the host is unplaced if every pool-change hook allows it, and otherwise the whole import is refused and no host changes
-
-#### Scenario: An inventory entry states no pool for an existing host
-
-- **WHEN** an INI inventory entry for an existing placed host carries no `pool_id`
-- **THEN** the host keeps its pool
-
-#### Scenario: A host definitions entry omits the pool of a placed host
-
-- **WHEN** a reconciled host definitions entry for an existing placed host states no `pool_id`
-- **THEN** the host is unplaced if every pool-change hook allows it, and otherwise the whole document is refused and no host changes
-
 ### Requirement: Non-destructive pool lifecycle
 
 Pool removal MUST disable the pool rather than delete it. No pool, `default` included, is exempt from being disabled.
@@ -243,37 +199,6 @@ Resource Pool policy metadata MUST support stable domain-neutral keys for `listi
 
 - **WHEN** VM publication reads a Resource Pool's `listing_shapes`
 - **THEN** it reads only the list under the `vm` offering mode and interprets its shapes through the VM domain's schema, without that schema being added to this shared package
-
-### Requirement: Pool-declared offering modes
-
-Each Resource Pool MUST declare the set of offering modes its configured provider can deliver under the domain-neutral `deliverable_modes` policy tag. The shared resource-pool capability MUST validate this declaration as a JSON-compatible set of unique, non-empty strings and expose typed resolution and membership behavior without defining which names are meaningful to a domain. An absent or empty declaration authorizes no mode and MUST NOT be widened by a default.
-
-Create, replace, patch, bulk import, projection, and canonical export MUST use the existing policy-tag channel and precedence. An existing pool's initial set MUST be derived only from durable provider, playbook, and registered requirement-delegate configuration that proves the pool can deliver that mode. Derivation MUST cover every stored pool, whatever its ID, MUST NOT use reservation history as capability evidence, MUST replace an unproved legacy declaration with the exact proved set, and MUST report each derived set at INFO.
-
-#### Scenario: Pool declares two modes
-
-- **WHEN** an operator stores `deliverable_modes: [bare_metal, vm]`
-- **THEN** typed resolution returns exactly those two opaque mode names through ordinary projection and administration paths
-
-#### Scenario: Declaration is absent
-
-- **WHEN** a Resource Pool has no `deliverable_modes` tag
-- **THEN** typed resolution returns an empty set and the pool delivers no offering mode
-
-#### Scenario: Existing default pool is migrated
-
-- **WHEN** a stored pool named `default` has an Ansible playbook and the registered VM requirement delegate
-- **THEN** migration declares exactly `vm`, reports that conclusion, and does not infer another mode from historical reservations
-
-#### Scenario: Legacy declaration is wider than configuration
-
-- **WHEN** a pool's durable provider configuration proves no deliverable mode but its legacy policy metadata names one or more modes
-- **THEN** migration narrows the declaration to empty rather than retaining an unproved capability
-
-#### Scenario: Declaration is malformed
-
-- **WHEN** any Resource Pool write supplies a non-list, duplicate, empty, or non-string deliverable mode
-- **THEN** validation rejects the write without changing the pool
 
 ### Requirement: Reservation hold and SLA preference validation
 
@@ -482,43 +407,6 @@ what a valid declaration is.
 
 - **WHEN** the resolver receives valid declarations
 - **THEN** it returns the advertisable modes and the backing delegate the declared label selects
-
-### Requirement: Complete emission and upgrade derivation
-
-Create, replace, patch, bulk import, projection, and canonical export MUST carry
-both tags on the existing policy-tag channel. A producer that emits either tag MUST
-emit it for every Resource Pool it projects, so that a consumer can distinguish a
-producer that predates the tag from a producer that omitted it for one pool.
-
-On upgrade, every stored Resource Pool, whatever its ID — including pools held by
-any service that stores its own Resource Pools — MUST have
-both tags written by migration: `advertisable_modes` equal to its proved
-deliverable set, and `capacity_backing: backed`. Migration MUST overwrite any value
-previously stored under either key, MUST report each derived value at INFO, and MUST
-NOT change any pool's advertising surface or admission behavior.
-
-#### Scenario: An existing pool is migrated
-
-- **GIVEN** a Resource Pool whose proved deliverable set is `[vm]`
-- **WHEN** migration runs
-- **THEN** its advertisable set is exactly `[vm]` and its backing is `backed`
-- **AND** both values are reported at INFO and its admission behavior is unchanged
-
-#### Scenario: An existing pool held an opaque value under a new key
-
-- **GIVEN** a Resource Pool whose policy tags already carry `capacity_backing` or `advertisable_modes` as unrecognized opaque metadata
-- **WHEN** migration runs
-- **THEN** both keys are overwritten with the derived values
-
-#### Scenario: A migrated site is projected
-
-- **WHEN** a migrated producer projects its Resource Pools
-- **THEN** every projected pool carries both tags
-
-#### Scenario: A producer emits the tags incompletely
-
-- **WHEN** a producer emits `capacity_backing` for some Resource Pools and omits it for another it projects
-- **THEN** the projection is malformed with respect to this requirement, and the omitted pool is not treated as predating the tag
 
 ### Requirement: Listing-shape hint validation
 
@@ -738,26 +626,6 @@ commitment nothing stands behind.
 
 - **WHEN** an unbacked listing or view carries one of its domain's delivery terms
 - **THEN** its validation refuses it
-
-### Requirement: VM provider identity is namespaced
-
-The VM adapter MUST register as `vm.ansible`, alongside `bare_metal.ansible`.
-Upgrade MUST canonicalize historical `ansible` routing columns in pools and
-fulfillment records while preserving pool IDs, configuration, host membership,
-lifecycle state, job identity and accepted operation envelopes. Runtime documents
-and callers MUST use the canonical name; no historical-name alias is required.
-
-#### Scenario: Existing VM state is upgraded
-
-- **WHEN** migration encounters pools or fulfillment records with provider `ansible`
-- **THEN** only their provider routing columns become `vm.ansible`
-- **AND** configuration, members and accepted work retain their values, including on repeated migration
-- **AND** bare-metal records are unchanged
-
-#### Scenario: A canonical VM pool is administered
-
-- **WHEN** an operator creates or edits a VM pool with provider `vm.ansible`
-- **THEN** the VM adapter validates its configuration and handles fulfillment through that registration
 
 ### Requirement: A pool's provider is fixed at creation
 
@@ -1010,6 +878,89 @@ The provisioning service MAY be configured with a pool definitions document thro
 - **WHEN** the service starts on a database storing no pool, with a `pool_definitions_path` whose document fails pool document validation
 - **THEN** startup fails, no pool is created, the seed is not applied, and no digest is recorded
 
+### Requirement: Explicit valid host placement
+
+A provisioning host MAY reference one existing resource pool; a host that references none is unplaced. A host create, update, inventory import, or host definitions entry that names a pool MUST be refused unless that pool exists. A create or a new inventory entry that names no pool MUST leave the host unplaced rather than assign a pool. On update, an omitted pool MUST leave the host's pool unchanged and an explicit `null` MUST unplace it. In an INI inventory, a non-empty `pool_id=` places or moves the host, an empty `pool_id=` unplaces it, and an absent `pool_id` leaves an existing host's pool unchanged. A host definitions entry declares its host's whole placement: an entry that names no pool, or names a `null` one, leaves a new host unplaced and unplaces an existing one. Every move, unplacing included, MUST pass the host authority's pool-change hooks, and a refusal MUST leave every host in the request, import, or document unchanged.
+
+#### Scenario: Host names an unknown pool
+
+- **WHEN** an operator creates or updates a host with a pool ID that does not exist
+- **THEN** the service rejects the host mutation without changing the stored host
+
+#### Scenario: A host is created without a pool
+
+- **WHEN** an operator creates a host, or imports an inventory entry for a new host, naming no pool
+- **THEN** the host is stored unplaced and is not assigned to any pool
+
+#### Scenario: An update omits the pool
+
+- **WHEN** an operator updates a placed host without stating a pool
+- **THEN** the host keeps its pool
+
+#### Scenario: An update unplaces a host
+
+- **WHEN** an operator updates a placed host with an explicit `null` pool and no pool-change hook refuses
+- **THEN** the host is stored unplaced
+
+#### Scenario: An inventory import unplaces a host
+
+- **WHEN** an INI inventory entry for an existing placed host carries an empty `pool_id=`
+- **THEN** the host is unplaced if every pool-change hook allows it, and otherwise the whole import is refused and no host changes
+
+#### Scenario: An inventory entry states no pool for an existing host
+
+- **WHEN** an INI inventory entry for an existing placed host carries no `pool_id`
+- **THEN** the host keeps its pool
+
+#### Scenario: A host definitions entry omits the pool of a placed host
+
+- **WHEN** a reconciled host definitions entry for an existing placed host states no `pool_id`
+- **THEN** the host is unplaced if every pool-change hook allows it, and otherwise the whole document is refused and no host changes
+
+### Requirement: Pool-declared deliverable offering modes
+
+Each Resource Pool MUST declare the set of offering modes its configured provider can deliver under the domain-neutral `deliverable_modes` policy tag. The shared resource-pool capability MUST validate this declaration as a JSON-compatible set of unique, non-empty strings and expose typed resolution and membership behavior without defining which names are meaningful to a domain. An absent or empty declaration authorizes no mode and MUST NOT be widened by a default.
+
+Create, replace, patch, bulk import, projection, and canonical export MUST use the existing policy-tag channel and precedence.
+
+#### Scenario: Pool declares two modes
+
+- **WHEN** an operator stores `deliverable_modes: [bare_metal, vm]`
+- **THEN** typed resolution returns exactly those two opaque mode names through ordinary projection and administration paths
+
+#### Scenario: Declaration is absent
+
+- **WHEN** a Resource Pool has no `deliverable_modes` tag
+- **THEN** typed resolution returns an empty set and the pool delivers no offering mode
+
+#### Scenario: Declaration is malformed
+
+- **WHEN** any Resource Pool write supplies a non-list, duplicate, empty, or non-string deliverable mode
+- **THEN** validation rejects the write without changing the pool
+
+### Requirement: Complete emission of advertisement and backing tags
+
+Create, replace, patch, bulk import, projection, and canonical export MUST carry
+both tags on the existing policy-tag channel. A producer that emits either tag MUST
+emit it for every Resource Pool it projects, so that a consumer can distinguish a
+producer that predates the tag from a producer that omitted it for one pool.
+
+#### Scenario: A producer emits the tags incompletely
+
+- **WHEN** a producer emits `capacity_backing` for some Resource Pools and omits it for another it projects
+- **THEN** the projection is malformed with respect to this requirement, and the omitted pool is not treated as predating the tag
+
+### Requirement: VM provider registration is namespaced
+
+The VM adapter MUST register as `vm.ansible`, alongside `bare_metal.ansible`.
+Runtime documents and callers MUST use the canonical name; no historical-name alias
+is required.
+
+#### Scenario: A canonical VM pool is administered
+
+- **WHEN** an operator creates or edits a VM pool with provider `vm.ansible`
+- **THEN** the VM adapter validates its configuration and handles fulfillment through that registration
+
 ## Evidence
 
 - Domain-neutral hint keys, typed deliverable-mode resolution and membership, advertisement and backing declaration shape, both cross-tag rules, and the strict resolver including absent-versus-malformed discrimination: `kit/resource-pools-contracts/tests/unit/test_hints.py`.
@@ -1017,16 +968,13 @@ The provisioning service MAY be configured with a pool definitions document thro
 - Pool persistence, registered requirement-delegate validation, strict import, dry-run, idempotency, lifecycle, provider refusal on replace, patch, and import with every pool field and configuration preserved and no handler write, the no-write equal-provider patch, indexed `provider_immutable` and `capacity_backing_immutable` document problems with atomic refusal, identical declaration validation across individual and bulk administration, backing immutability and repair, path-named import errors, and stored-declaration checks including the startup repair path: `kit/resource-pools/tests/integration/test_resource_pool_service.py`.
 - The pure provider and backing comparison, including the backing repair allowance and exact messages: `kit/resource-pools/tests/unit/test_pool_immutability.py`.
 - Composition accepting a configuration handler without a deletion operation and refusing one missing a remaining required hook: `provisioning/compute/tests/unit/test_composition.py`.
-- Existing VM state upgraded to `vm.ansible` with configuration, membership, and accepted work preserved, bare-metal rows unchanged, and idempotent rerun: `provisioning/compute/service/tests/integration/test_vm_provider_identity_migration.py`.
-- Existing-pool derivation, a stored pre-offering-mode `default` pool's inclusion, idempotency, narrowing, drift rejection, and INFO evidence: `provisioning/compute/service/tests/unit/test_pool_offering_mode_migration.py`.
-- Advertisement and backing migration on every existing pool, clobbering prior opaque values, unchanged admission, and malformed-delivery drift: `provisioning/compute/service/tests/integration/test_pool_advertisement_backing_migration.py`, `domains/apicredits/service/tests/integration/test_pool_declarations_migration.py`.
-- Startup refusal of a seeded or stored pool without valid declarations, and the check's position after the pool document import: `provisioning/compute/service/tests/integration/test_pool_declaration_startup.py`, `domains/apicredits/service/tests/integration/test_pool_declarations_migration.py`.
+- Startup refusal of a seeded or stored pool without valid declarations, and the check's position after the pool document import: `provisioning/compute/service/tests/integration/test_pool_declaration_startup.py`, `domains/apicredits/service/tests/integration/test_default_pool.py`.
 - A changed-provider startup document failing with its entry named and state and digest unchanged, then retried and corrected; a fresh site with a pool document holding only its pools, with its digest; a missing or invalid pool document failing startup with the seed not standing in; a fresh site with no pool document seeded with `vm-default` and `bare-metal-default`, logged, recording no import, and unchanged on a second start; no seed where pools are stored, a disabled one included, or `pool_seed_path` is empty; a missing or invalid seed failing startup with no pool where it applies, and unread where it does not; an operator's own seed creating exactly its pools; and the step order: `provisioning/compute/service/tests/integration/test_pool_declaration_startup.py`.
 - The seeded pools through the typed pool client, a host placed in `vm-default` selling only once capacity naming it is declared, and an unplaced host declaring nothing: `provisioning/compute/service/tests/integration/test_pool_seed_api.py`; the packaged seed path resolving beside `settings.toml`, absolute and relative paths, and empty values: `provisioning/compute/service/tests/unit/test_config.py`.
 - Typed administrative API, `default` disabled like any pool and a document naming no `default` imported, canonical round trip, host assignment and a host registered with no pool, an execution-less pool advertising through a configuration-free provider, server-side refusal of invalid declarations, HTTP 422 for malformed hints with stored state unchanged, and HTTP 400 provider refusal with the member-migration message, preserved state and export, and the no-write equal-provider patch: `provisioning/compute/service/tests/integration/test_pools_api.py`.
 - Both declarations on every projected pool, each resolving through the shared resolver: `provisioning/compute/service/tests/integration/test_capacity_api.py`.
-- Migration ordering, legacy host backfill, schema-drift rejection, a fresh database holding no pool, and a database whose hosts predate resource pools refused without a `default` pool: `provisioning/compute/service/tests/integration/test_database.py`.
-- Optional host placement: a host created, imported, or updated with no pool, an explicit `null`, or an empty INI `pool_id=` through the typed clients, an unknown pool refused, and a relay hook refusing an unplacing rolling back the whole import: `provisioning/compute/service/tests/integration/test_hosts_api.py` (`TestHostPlacement`) and `test_host_pool_moves_api.py`; the authority's three inventory states and hook-run unplacing: `provisioning/compute/tests/integration/test_host_authority.py`; INI parsing of a pool, an empty value, and an absent key: `provisioning/compute/ansible/tests/unit/test_inventory.py`; the client sending an explicit `null`: `provisioning/compute/client/tests/unit/test_client.py`; the `hosts` rebuild keeping every row: `provisioning/compute/service/tests/integration/test_host_pool_optional_migration.py`.
+- A freshly migrated database holding no pool, and the startup check refusing a database behind or ahead of the chain: `provisioning/compute/service/tests/integration/test_database.py`; the API-credit service's `default` pool seeded at startup and never by its migration: `domains/apicredits/service/tests/integration/test_migrations.py` and `test_default_pool.py`.
+- Optional host placement: a host created, imported, or updated with no pool, an explicit `null`, or an empty INI `pool_id=` through the typed clients, an unknown pool refused, and a relay hook refusing an unplacing rolling back the whole import: `provisioning/compute/service/tests/integration/test_hosts_api.py` (`TestHostPlacement`) and `test_host_pool_moves_api.py`; the authority's three inventory states and hook-run unplacing: `provisioning/compute/tests/integration/test_host_authority.py`; INI parsing of a pool, an empty value, and an absent key: `provisioning/compute/ansible/tests/unit/test_inventory.py`; the client sending an explicit `null`: `provisioning/compute/client/tests/unit/test_client.py`.
 - `listing_shapes` hint structure, including constraint mappings and a base shape stated twice with different constraints, validated identically on create, replace, patch, and bulk import: `kit/resource-pools-contracts/tests/unit/test_hints.py` (`TestListingShapesHint`) and `kit/resource-pools/tests/integration/test_resource_pool_service.py`; refused and projected verbatim by the provisioning service: `provisioning/compute/service/tests/integration/test_pools_api.py` and `test_capacity_api.py`.
 - `asking_rates` structure, including the unit-token period and a stated null: `kit/resource-pools-contracts/tests/unit/test_asking_rates.py`; its validation identically on every pool-write surface: `kit/resource-pools/tests/integration/test_resource_pool_service.py`; resolution through the contracts-owned entry check with exact matching, override precedence, and unreadable input: `kit/resource-pools/tests/unit/test_asking_rates.py`.
 

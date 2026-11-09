@@ -141,6 +141,88 @@ when it is dispatched.
   whose public fields the version-2 codec refuses
 - **THEN** the migration fails naming the host, and nothing is rewritten
 
+## ADDED Requirements
+
+### Requirement: Host inventory is connection identity, not capacity
+
+Host inventory records MUST describe how to reach and dispatch work to a machine —
+addressing, credentials, machine alias, pool membership, and enabled state — and
+MUST NOT be the authoritative source of a Physical Resource's sellable capacity.
+Capacity projection MUST NOT read host inventory records for capacity,
+attributes, or connection identity, and MUST NOT project a host that no capacity
+declaration names. A host record is joined to a capacity declaration only where
+its connection is used: at dispatch. Site admission, settlement scheduling, and
+capacity projection MUST learn of hosts only the identifiers of those taking new
+delivery, as the compute composition reports them.
+
+#### Scenario: Host inventory is inspected for capacity authority
+
+- **WHEN** the projection path is traced from host inventory to published capacity
+- **THEN** no host inventory record contributes capacity or attributes to the
+  projection, and the projection reads of hosts only the identifiers of those
+  taking new delivery
+
+#### Scenario: A host has no capacity declaration
+
+- **WHEN** no capacity declaration names a registered host
+- **THEN** the projection contains no entry for that host
+- **AND** no entry with empty or omitted capacity is published in its place
+
+### Requirement: Host writes create no capacity declaration
+
+A compute provisioner MUST NOT create a capacity declaration from a host record on any host write: not when a host definitions document is applied, at startup or through its import API, not when an INI inventory is submitted through the host import API, and not when a host is created or updated through the individual host API. Capacity MUST be declared only through capacity registration, a capacity-definitions document, or capacity import.
+
+A host MUST be treated as already declared when any declaration names it as its
+`host_id`, which is also the only rule the capacity projection uses to correlate
+declarations to hosts.
+
+#### Scenario: Deployment configured only through host inventory
+
+- **WHEN** a provisioner applies a host definitions document, at startup or through its
+  import API, or an INI inventory through the host import API, and no capacity
+  declarations exist
+- **THEN** the hosts are registered, no capacity declaration is created for them, and
+  the capacity projection contains no entry for them
+
+#### Scenario: A host has no GPUs
+
+- **WHEN** a host is registered for a machine without GPUs
+- **THEN** no declaration is created for it, as for any host
+
+#### Scenario: A declaration's resource id differs from its host
+
+- **WHEN** a declaration whose resource id differs from a host's `host_id` names that
+  host as its `host_id`
+- **THEN** the host is treated as declared
+
+#### Scenario: A host is created through the individual host API
+
+- **WHEN** an operator creates a host through the individual host API
+- **THEN** no declaration is created, and the host's capacity is declared through the
+  capacity administration surface
+
+### Requirement: A host record carries no hardware description
+
+A host record MUST NOT carry a GPU count, a GPU model, or any other description of the
+machine's hardware: a Physical Resource's hardware is stated only by its capacity
+declaration. The host API's create, update, and response models MUST NOT define such a field,
+and a request carrying `gpu_count` or `gpu_model` MUST be accepted with those fields ignored,
+as any field the models do not define is. The INI inventory format MUST NOT read `gpus=` or
+`gpu_model=`; like any variable it does not read, they are ignored without a warning.
+
+#### Scenario: A host is created with GPU fields
+
+- **WHEN** an operator creates a host through the host API with a body carrying `gpu_count`
+  and `gpu_model`
+- **THEN** the host is created, and neither its stored record nor its response carries a GPU
+  field
+
+#### Scenario: An inventory line carries GPU variables
+
+- **WHEN** host inventory is applied from an INI line carrying `gpus=8 gpu_model=H200`
+- **THEN** the host is registered from its connection fields and its pool, and nothing is
+  recorded or reported for the GPU variables
+
 ## REMOVED Requirements
 
 ### Requirement: Existing host identities migrate without loss
@@ -154,3 +236,27 @@ when it is dispatched.
 **Reason**: The migrations that placed existing hosts in a resource pool and backfilled fulfillment records for active VM reservations (among them `20260713_002_resource_pools_and_hosts_pool_id` and `20260724_001_legacy_vm_leases_to_fulfillment`) are part of compute provisioning's v0.3.0 floor: every database the chain adopts has already run them, and the chain refuses any older database as unsupported, so their bodies are deleted with the pre-floor history.
 
 **Migration**: An operator holding a provisioning database from before the marketplace v0.3.0 release starts the service from a fresh database.
+
+### Requirement: A bare-metal storefront refuses state written under a retired listing kind
+
+**Reason**: The refusal it governs (`bare-metal-storefront-0009-refuse-retired-listing-kind`) is part of the bare-metal storefront's v0.3.0 floor: every database its migration command adopts has already passed it, so none holds state written under the retired listing kind, and the command refuses any older database as unsupported, directing the operator to a fresh database. The refusal is deleted with the storefront's pre-floor chain; a fresh database's schema is governed by `deployment-state`'s "A chain begins at its supported baseline".
+
+**Migration**: An operator holding a bare-metal storefront database from before the marketplace v0.3.0 release starts the storefront from a fresh database.
+
+### Requirement: Host inventory is connection identity
+
+**Reason**: Its scenario "Host record carries a legacy capacity column" governs the migration that dropped the host table's capacity columns (`20261028_002_hosts_drop_gpu_columns`), which is part of compute provisioning's v0.3.0 floor: every database the chain adopts has already run it, and the chain refuses any older database as unsupported, so its body is deleted with the pre-floor history. Its normative text is kept unchanged as "Host inventory is connection identity, not capacity", with every other scenario, since a MODIFIED requirement cannot drop a scenario.
+
+**Migration**: An operator holding a provisioning database from before the marketplace v0.3.0 release starts the service from a fresh database; the rule is unchanged under the new requirement's name.
+
+### Requirement: Host writes declare no capacity
+
+**Reason**: Its sentence on the declaration derived once at upgrade, and its scenarios "Existing hosts at upgrade" and "Operator declaration and legacy host value disagree", govern the migrations `20260921_004_legacy_host_capacity_declarations` and `20261028_002_hosts_drop_gpu_columns`, which are part of compute provisioning's v0.3.0 floor: every database the chain adopts has already run them, and the chain refuses any older database as unsupported, so their bodies are deleted with the pre-floor history. Its remaining rule is kept unchanged as "Host writes create no capacity declaration", since a MODIFIED requirement cannot drop a scenario.
+
+**Migration**: An operator holding a provisioning database from before the marketplace v0.3.0 release starts the service from a fresh database; the rule is unchanged under the new requirement's name.
+
+### Requirement: A host record describes no hardware
+
+**Reason**: Its rule that the ordered migrations drop the host table's GPU columns, and its scenario "An existing database is upgraded", govern the migration `20261028_002_hosts_drop_gpu_columns`, which is part of compute provisioning's v0.3.0 floor: every database the chain adopts has already run it, and the chain refuses any older database as unsupported, so its body is deleted with the pre-floor history. Its remaining rule is kept unchanged as "A host record carries no hardware description", since a MODIFIED requirement cannot drop a scenario.
+
+**Migration**: An operator holding a provisioning database from before the marketplace v0.3.0 release starts the service from a fresh database; the rule is unchanged under the new requirement's name.

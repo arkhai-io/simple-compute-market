@@ -70,7 +70,7 @@ my-domain-registry     # filter specs and validation schema
 ```
 
 Use whatever package layout makes distribution and ownership clear. The
-important part is that each deployed role imports compatible versions of
+important part is that each deployed service and buyer tool imports compatible versions of
 the same domain semantics.
 
 ## Required contract surfaces
@@ -236,7 +236,7 @@ Some domains need a seller-operated service behind the storefront:
 - storage allocator
 - license server
 
-Keep this service role separate from the registry. It is seller
+Keep this service separate from the registry. It is seller
 infrastructure, even when it is reusable across sellers.
 
 Document:
@@ -299,7 +299,7 @@ A domain should have tests at the same boundaries users will rely on:
   behavior
 - storefront tests for negotiation guards and settlement verification
 - service tests for optional resource/provisioning behavior
-- one compose or e2e happy path showing the deployed roles together
+- one compose or e2e happy path showing the deployed services together
 
 Failure-path coverage should scale with risk. Domains that allocate scarce
 resources, hold funds, or issue credentials should test retries, expired

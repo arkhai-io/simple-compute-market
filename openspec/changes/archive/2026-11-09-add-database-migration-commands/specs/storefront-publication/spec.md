@@ -46,6 +46,50 @@ Every publication pass MUST list, at each configured registry it can reach, the 
 - **WHEN** the storefront holds a listing open while its site's projection is unavailable, and a registry holds that listing open
 - **THEN** the sweep leaves it open at that registry
 
+### Requirement: Storefront holds no physical-resource authority or inventory
+
+A storefront MUST NOT actively maintain physical-resource inventory, host
+inventory, or physical-allocation state. Authoritative physical state belongs to the site
+authority and the provisioning service, and a storefront obtains it only through
+projections. A storefront MAY persist commercial state — pricing, accepted
+settlement terms, seller policy, and listing derivation records — including
+per-pool commercial values keyed by a projected pool identity.
+
+Fresh storefront databases MUST NOT create the retired local inventory or
+physical-allocation tables, columns, triggers, or indexes. The VM storefront's
+migration chain MUST drop the retired inventory tables — `compute_allocations`,
+`resources`, `hosts`, `resource_transition_events`, `compute_pool_members`,
+`compute_capacity_pools`, and `compute_inventory_pools` — with their rows from a
+database it adopts that holds them, so that a storefront's database holds no
+physical-resource tables. Storefront code MUST NOT read or write any retired table,
+including during startup, publication, negotiation, diagnostics, or reservation
+cleanup.
+
+#### Scenario: A fresh storefront database is initialized
+
+- **WHEN** a storefront bootstraps a new database
+- **THEN** it creates no retired local physical-inventory or allocation schema,
+  while commercial and listing-derivation persistence remains
+
+#### Scenario: An adopted VM storefront database holds the retired inventory tables
+
+- **WHEN** the VM storefront's migration command runs against a database it adopts
+  that holds retired inventory tables and their rows
+- **THEN** those tables and their rows are gone, and the storefront reads and writes
+  no physical-resource state
+
+#### Scenario: Provisioning reports a physical lifecycle transition
+
+- **WHEN** a physical resource is released or its lifecycle state changes
+- **THEN** the authoritative record changes at the site authority and the
+  storefront does not maintain a parallel physical state record to be updated
+
+#### Scenario: Publication needs physical facts
+
+- **WHEN** a storefront derives publishable listing candidates
+- **THEN** the physical facts come from site projections, and no local physical
+  inventory is consulted or retained as an alternative source
+
 ## REMOVED Requirements
 
 ### Requirement: Storefront identity state migrates atomically
@@ -53,3 +97,9 @@ Every publication pass MUST list, at each configured registry it can reach, the 
 **Reason**: The conversion it governs, of address-only identity rows to canonical principals, is part of every storefront's v0.3.0 floor: each database a storefront's migration command adopts has already run it, and the command refuses any older database as unsupported, so the conversion is deleted with core storefront's pre-floor chain.
 
 **Migration**: An operator holding a storefront database from before the marketplace v0.3.0 release starts the storefront from a fresh database.
+
+### Requirement: Storefront holds no physical-resource authority
+
+**Reason**: Its permission for an upgraded database to retain the retired inventory schema and rows, its rule that the retirement not drop them, its paragraph on an operator's use of retained rows, and its scenarios "A populated legacy database is upgraded", "An operator uses retained inventory to seed provisioning", and "Physical state changes after the cutover" describe retained data no supported database still holds: a fresh database never creates the retired inventory tables, and the VM storefront's migration `20261109_002_vm_frozen_inventory_dropped` drops them, with their rows, from a database its migration command adopts. Its remaining rule is kept as "Storefront holds no physical-resource authority or inventory", which states that drop, since a MODIFIED requirement cannot drop a scenario.
+
+**Migration**: An operator who wants the rows of a VM storefront's retired inventory tables extracts them before running the migration command; inventory is declared at provisioning, and the storefront's rule is otherwise unchanged under the new requirement's name.

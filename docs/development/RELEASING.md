@@ -4,10 +4,10 @@
 packages to PyPI.
 
 Registries, storefronts, provisioning, buyers, and the metering
-middleware are roles that operators, sellers, and buyers install and run
-independently. Each of those roles is published, along with the
-libraries and SDK clients they build on. Three packages are not roles
-and are not published: the end-to-end test harness (`arkhai-e2e-tests`),
+middleware are services and tools that operators, sellers, and buyers
+install and run independently. Each of them is published, along with the
+libraries and SDK clients they build on. Three other packages are not
+published: the end-to-end test harness (`arkhai-e2e-tests`),
 the demo API it drives (`arkhai-apicredits-sample-app`), and the
 issue-discovery development tool (`scm-issue-discovery`).
 
@@ -158,6 +158,18 @@ release:
 3. Commit and push to `main` (or merge a PR that touches the package).
 4. The workflow detects the path change, rebuilds, and publishes via OIDC
    trusted publishing.
+
+When an official marketplace release is promoted, weigh whether it becomes a
+new migration floor: each stateful service's chain begins at baselines
+reproducing the schema of the floor release, adopts a database that release's
+chain built, and refuses an older one
+([`DEPLOYMENT_AND_CONFIG.md`, "Migrations at startup"](DEPLOYMENT_AND_CONFIG.md#migrations-at-startup)).
+A new floor replaces each chain's baselines and floor IDs with the new release's,
+deletes the migrations it absorbs, regenerates each service's floor fixture from
+the release's published packages as the fixtures' READMEs describe, and leaves
+deployments older than the new floor to start from a fresh database. Moving the
+floor is a decision about which deployments stay upgradeable, so it is made for
+each release, not by default.
 
 `make audit-secrets` reports what gitleaks' rules find in the tracked tree,
 including the rules the public-content checks turn off, and refuses

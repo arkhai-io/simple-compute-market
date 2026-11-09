@@ -63,12 +63,6 @@ Fulfillment acceptance freezes provider input before external side effects. One 
 
 Shared orchestration never interprets Ansible fields. Teardown receives a provider-neutral settlement-result view, while the Ansible adapter validates its own metadata and derives the exact target it created.
 
-## Atomic legacy-lease cutover
-
-Active workloads and provider-operation identities are financially and operationally significant, while unused pre-release reservation rows are not authoritative. The cutover therefore joins reservation and resource-pool data around the legacy lease population, validates the complete population before writing, and commits all generated settlement aggregates and provisioned-resource rows in one transaction. Ambiguity is handled by aborting the cutover rather than by speculative repair.
-
-Per-candidate state derivation and provider-envelope preparation are implemented as a pure, domain-owned compiler (one already-read historical row in, a durable row draft or a validation error out — no database session). The enumerating migration owns everything the compiler does not: the SQL join, cross-candidate identity/target deduplication, comparison against already-persisted rows, and the single atomic write. Keeping per-candidate logic free of database access lets every historical state and validation branch be tested directly, independent of a live schema, while the population-level concerns that only make sense against a real connection are tested separately against one.
-
 ## Fulfillment result ownership
 
 The fulfillment kit owns lifecycle identity, durable output identity through `provisioned_resource_id`, and the outer `fulfillment.result.v1` envelope. Domain adapters own nested versioned result payloads and credential schemas. Provider-domain object identifiers used to execute or tear down work remain in versioned provider metadata; they are not duplicated on generic `ProvisionedResource` rows. Active result reads close the database transaction before provider I/O, fetch a fresh domain result on every call, and fail atomically when that fetch cannot be completed.
