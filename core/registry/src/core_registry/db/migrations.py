@@ -13,7 +13,8 @@ in the same words (``refusal_message``), naming ``registry-migrate``:
 - an earlier revision of the script: *behind*, with the revisions after it
   pending;
 - ``018_listing_resource_column``, where the v0.3.0 release leaves a database:
-  *behind*, with the baseline's adoption pending;
+  *behind*, with the baseline revision to be adopted and the revisions after
+  it pending;
 - a revision of the chain the release squashed into its baseline: *unsupported*,
   naming the revisions it lacks;
 - any other revision: *ahead*, written by an image this one does not know.
@@ -150,7 +151,7 @@ def classify(
         return CheckResult(
             CheckState.BEHIND,
             pending=tuple(known[1:]),
-            adoption_pending=True,
+            adopting=(known[0],),
             current=revision,
         )
     position = list(known).index(revision)

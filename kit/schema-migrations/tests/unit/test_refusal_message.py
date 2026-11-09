@@ -28,12 +28,25 @@ def test_behind_names_each_pending_migration_and_the_preview() -> None:
     assert f"`{_COMMAND} --check`" in message
 
 
-def test_behind_with_adoption_pending_says_so() -> None:
+def test_behind_with_adoption_pending_names_the_baselines_it_records() -> None:
     message = _message(
-        CheckResult(CheckState.BEHIND, pending=("later_1",), adoption_pending=True)
+        CheckResult(
+            CheckState.BEHIND, pending=("later_1",), adopting=("base_1", "base_2")
+        )
     )
-    assert "supported baseline is to be adopted" in message
+    assert "supported baseline is to be adopted (recording base_1, base_2)" in message
     assert "later_1" in message
+
+
+def test_an_adoption_with_nothing_after_it_names_both_revisions() -> None:
+    message = refusal_message(
+        CheckResult(CheckState.BEHIND, adopting=("0002_baseline",), current="0001_floor"),
+        service="registry",
+        command="registry-migrate",
+    )
+    assert "at 0001_floor is behind" in message
+    assert "0002_baseline" in message
+    assert "pending" not in message
 
 
 def test_ahead_names_unknown_and_pending_migrations_and_the_backup() -> None:
@@ -78,10 +91,13 @@ def test_describe_names_the_state_and_every_differing_id() -> None:
             CheckState.AHEAD,
             pending=("later_2",),
             unknown=("newer",),
-            adoption_pending=True,
+            adopting=("base_1", "base_2"),
         )
     )
-    assert line == "ahead; supported baseline to be adopted; unknown: newer; pending: later_2"
+    assert line == (
+        "ahead; supported baseline to be adopted: base_1, base_2; "
+        "unknown: newer; pending: later_2"
+    )
     assert describe(CheckResult(CheckState.COMPATIBLE, current="later_2")) == (
         "compatible; at later_2"
     )

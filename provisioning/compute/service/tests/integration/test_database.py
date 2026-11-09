@@ -110,11 +110,11 @@ def test_a_v0_3_0_database_is_behind_with_its_adoption_pending_then_adopted(tmp_
 
     result = check_database(engine)
     assert result.state is CheckState.BEHIND
-    assert result.adoption_pending
+    assert result.adopting == CHAIN.baseline_ids
     assert result.pending == _LATER_IDS
     message = _refusal(engine)
     assert "supported baseline is to be adopted" in message
-    for migration_id in _LATER_IDS:
+    for migration_id in (*CHAIN.baseline_ids, *_LATER_IDS):
         assert migration_id in message
 
     report = migrate_database(engine)

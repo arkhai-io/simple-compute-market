@@ -25,6 +25,7 @@ None.
 - `storefront-publication`: a storefront retires registry listings it does not hold open.
 - `physical-provisioning`: hosts' stored `ssh` version-1 connections are rewritten to version 2 by migration, and a connection submission must state its version; the requirements for the host-identity and active-fulfillment migrations, part of the v0.3.0 floor, are removed.
 - `fulfillment`: the requirement for the legacy-lease cutover, part of the v0.3.0 floor, is removed, and the kit's dependency boundary admits the migration kit.
+- `registry-discovery`: the requirement for the legacy publisher-identity migration, part of the registry's v0.3.0 floor, is removed, and "Stable publisher-chosen listing identity" no longer requires that migration to preserve identifiers.
 - `site-capacity`: the requirement for converting reservations in retired states — part of compute provisioning's v0.3.0 floor, and of the API-credit service's chain, which no longer migrates an existing database — is removed, and "Capacity schema separation" is restated without its pre-floor migration scenario.
 
 ## Dependencies and Related Changes

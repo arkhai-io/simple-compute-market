@@ -40,22 +40,30 @@ class CheckResult:
     apply; ``unknown`` the recorded migrations the image does not know, which
     take precedence over pending ones, since this image cannot vouch for such a
     database. ``missing`` lists the baseline-floor migrations an unsupported
-    database never recorded. ``adoption_pending`` says a supported database's
-    floor records are still to be replaced by the baseline's. ``current`` is the
-    newest migration the database records that the image knows, or the
-    revision it is at, where a service has one.
+    database never recorded. ``adopting`` lists the baseline migrations a run
+    would record, without running them, in place of a supported database's
+    floor records, so a preview names every ID the run records even when no
+    migration follows the baseline. ``current`` is the newest migration the
+    database records that the image knows, or the revision it is at, where a
+    service has one.
     """
 
     state: CheckState
     pending: tuple[str, ...] = ()
     unknown: tuple[str, ...] = ()
     missing: tuple[str, ...] = ()
-    adoption_pending: bool = False
+    adopting: tuple[str, ...] = ()
     current: str | None = None
 
     @property
     def compatible(self) -> bool:
         return self.state is CheckState.COMPATIBLE
+
+    @property
+    def adoption_pending(self) -> bool:
+        """The supported baseline is still to be adopted."""
+
+        return bool(self.adopting)
 
 
 def _ids(ids: tuple[str, ...]) -> str:
@@ -68,8 +76,8 @@ def describe(result: CheckResult) -> str:
     parts = [result.state.value]
     if result.current is not None:
         parts.append(f"at {result.current}")
-    if result.adoption_pending:
-        parts.append("supported baseline to be adopted")
+    if result.adopting:
+        parts.append(f"supported baseline to be adopted: {_ids(result.adopting)}")
     if result.unknown:
         parts.append(f"unknown: {_ids(result.unknown)}")
     if result.pending:
@@ -98,8 +106,11 @@ def refusal_message(result: CheckResult, *, service: str, command: str) -> str:
         )
     if state is CheckState.BEHIND:
         steps = []
-        if result.adoption_pending:
-            steps.append("its supported baseline is to be adopted")
+        if result.adopting:
+            steps.append(
+                "its supported baseline is to be adopted "
+                f"(recording {_ids(result.adopting)})"
+            )
         if result.pending:
             steps.append(f"migrations {_ids(result.pending)} are pending")
         at = f" at {result.current}" if result.current is not None else ""

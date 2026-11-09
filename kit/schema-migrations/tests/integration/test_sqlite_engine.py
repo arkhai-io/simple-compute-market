@@ -291,6 +291,7 @@ def test_the_check_changes_nothing_on_a_behind_database(
 
     assert result.state is CheckState.BEHIND
     assert result.adoption_pending is True
+    assert result.adopting == ("base_hosts", "base_jobs")
     assert result.pending == ("later_port_default", "later_jobs_index")
     assert database.read_bytes() == before
 

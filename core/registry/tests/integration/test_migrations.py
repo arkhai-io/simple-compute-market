@@ -150,7 +150,7 @@ def test_a_rerun_changes_nothing(tmp_path: Path) -> None:
 def test_a_v0_3_0_database_is_adopted_keeping_its_rows(tmp_path: Path) -> None:
     database = _floor_database(tmp_path / "registry.db")
     result = check_database(_url(database))
-    assert result.state is CheckState.BEHIND and result.adoption_pending
+    assert result.state is CheckState.BEHIND and result.adopting == (BASELINE,)
     assert result.current == FLOOR_REVISION
 
     report = migrate_database(_url(database))
@@ -241,9 +241,11 @@ def test_the_startup_check_refuses_every_state_but_compatible(tmp_path: Path) ->
         assert "`registry-migrate`" in str(refused.value)
         assert (path.read_bytes() if path.exists() else None) == before
     assert not absent.parent.exists()
-    # The floor's refusal names the revision it is at and the adoption pending.
+    # The floor's refusal names both revisions: the one it is at and the
+    # baseline its adoption records.
     message = str(_refusal(behind))
-    assert FLOOR_REVISION in message and "supported baseline is to be adopted" in message
+    assert f"at {FLOOR_REVISION} is behind" in message
+    assert f"supported baseline is to be adopted (recording {BASELINE})" in message
 
 
 async def test_the_application_refuses_to_start_on_an_unmigrated_database(
@@ -295,6 +297,7 @@ def test_check_lists_the_adoption_and_changes_nothing(
     assert exited.value.code == 1
     out, err = capsys.readouterr()
     assert "behind" in out and FLOOR_REVISION in out
+    assert f"supported baseline to be adopted: {BASELINE}" in out
     assert "`registry-migrate`" in err
     assert command_database.read_bytes() == before
 

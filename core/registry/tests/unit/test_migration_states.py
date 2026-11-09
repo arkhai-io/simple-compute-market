@@ -59,11 +59,12 @@ def test_an_earlier_revision_is_behind_with_the_later_ones_pending() -> None:
 def test_the_floor_is_behind_with_the_baseline_to_adopt() -> None:
     result = classify(TABLES, [FLOOR_REVISION], KNOWN)
     assert result.state is CheckState.BEHIND
-    assert result.adoption_pending
+    assert result.adopting == ("v0_3_0_baseline",)
     assert result.pending == ("019_later", "020_latest")
     assert result.current == FLOOR_REVISION
     alone = classify(TABLES, [FLOOR_REVISION], ("v0_3_0_baseline",))
-    assert alone.state is CheckState.BEHIND and alone.adoption_pending
+    assert alone.state is CheckState.BEHIND
+    assert alone.adopting == ("v0_3_0_baseline",)
     assert alone.pending == ()
 
 

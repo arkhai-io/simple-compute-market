@@ -54,8 +54,9 @@ def test_the_whole_floor_is_behind_with_adoption_pending() -> None:
         _chain(), tables={"hosts", "schema_migrations"}, recorded=["floor_a", "floor_b"]
     )
     assert result == CheckResult(
-        CheckState.BEHIND, pending=("later_1", "later_2"), adoption_pending=True
+        CheckState.BEHIND, pending=("later_1", "later_2"), adopting=("base_1", "base_2")
     )
+    assert result.adoption_pending
 
 
 def test_the_floor_with_a_later_migration_already_applied_is_still_adopted() -> None:
@@ -64,7 +65,9 @@ def test_the_floor_with_a_later_migration_already_applied_is_still_adopted() -> 
         tables={"hosts", "schema_migrations"},
         recorded=["floor_a", "later_1", "floor_b"],
     )
-    assert result == CheckResult(CheckState.BEHIND, pending=("later_2",), adoption_pending=True)
+    assert result == CheckResult(
+        CheckState.BEHIND, pending=("later_2",), adopting=("base_1", "base_2")
+    )
 
 
 def test_an_unknown_id_beside_the_floor_is_ahead() -> None:
@@ -77,7 +80,7 @@ def test_an_unknown_id_beside_the_floor_is_ahead() -> None:
         CheckState.AHEAD,
         pending=("later_1", "later_2"),
         unknown=("newer",),
-        adoption_pending=True,
+        adopting=("base_1", "base_2"),
     )
 
 

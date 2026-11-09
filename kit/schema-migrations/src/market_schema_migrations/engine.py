@@ -202,7 +202,7 @@ def classify(
         pending = tuple(m.id for m in chain.migrations if m.id not in known)
         state = CheckState.AHEAD if unknown else CheckState.BEHIND
         return CheckResult(
-            state, pending=pending, unknown=unknown, adoption_pending=True
+            state, pending=pending, unknown=unknown, adopting=chain.baseline_ids
         )
 
     return CheckResult(

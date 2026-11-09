@@ -2000,6 +2000,43 @@ it made, which the check reports unsupported, to be replaced by a fresh database
 fresh database it is. The application container in the chart states its own command,
 since the image's command migrates first for Compose.
 
+**Round-2 triage fixes, 2026-11-09** (reviews 49, validation 37 at `6ec41c9fc`, which
+passed, its lanes the pending evidence 10.2 and 10.5 named: every lane built the
+registry image from its wheel and started each Compose registry through
+`registry-migrate`).
+
+- 49 F1, placed as 32 F1 placed section 4's: `specs/registry-discovery/spec.md` (new)
+  REMOVES "Publisher identity migration preserves ownership" and MODIFIES "Stable
+  publisher-chosen listing identity" to keep only rotation's preservation of
+  identifiers; `proposal.md` lists `registry-discovery`, D12 names the removal, and 11.9
+  assigns the Evidence line and the architecture section. Strict validation passes.
+- 49 F2: the floor's refusal and `--check` now name both revisions. The engine kit's
+  `CheckResult` carries `adopting`, the baseline IDs adoption records unrun, in place of
+  its `adoption_pending` flag, which is now derived from it; `describe` and the behind
+  refusal name them ("its supported baseline is to be adopted (recording
+  v0_3_0_baseline)"; `--check`: "supported baseline to be adopted: v0_3_0_baseline").
+  The registry's `classify` sets its baseline, the in-house engine's its chain's
+  baselines. This corrects 10.4's note that the floor's refusal does not name the head.
+  Unit (`kit/schema-migrations/tests/unit/test_refusal_message.py`: the baselines named,
+  and an adoption with nothing after it naming both revisions and nothing pending;
+  `test_classification.py`; `core/registry/tests/unit/test_migration_states.py`:
+  `adopting == ("v0_3_0_baseline",)`); library integration
+  (`kit/schema-migrations/tests/integration/test_sqlite_engine.py`;
+  `core/registry/tests/integration/test_migrations.py`: the startup refusal names
+  `018_listing_resource_column` and `v0_3_0_baseline`, `--check` prints the baseline;
+  service integration `provisioning/compute/service/tests/integration/test_database.py`:
+  the refusal names every baseline ID). `make -C kit/schema-migrations test` — 61 passed;
+  `scripts/change-workflow run pre-commit add-database-migration-commands` —
+  `after-functional-change`, `pre-commit-functional` (every suite; registry unit 137 and
+  integration 148 passed) and `pre-commit` each "passed, exit 0"; no lock changed.
+  Fresh-context check: no defect. Declined, as outside the findings: the kit's
+  pre-existing "migrations X are pending" for a single ID, and the in-house adoption
+  refusal naming no current migration (its floor has no single revision, and the
+  scenario requiring both revisions is the registry's). Left to 11.3:
+  `registry-discovery/architecture.md`'s line that credential independence lets "key
+  rotation and schema migration" preserve discovery URLs, which still reads true of any
+  migration.
+
 **The return to planning, 2026-11-09, on the owner's direction.**
 
 At the return nothing of section 10 was implemented and no task was checked. Found
@@ -2169,14 +2206,23 @@ Per `openspec/README.md#plan-closeout-requirements`.
         "Capacity schema separation" restated as "A capacity reservation is stored
         apart from its host, pool, and assignment", and `fulfillment`'s "Dependency
         boundary" MODIFIED to admit the migration kit.
+      - The registry specification whose pre-floor migration section 10 deleted (49 F1):
+        `registry-discovery/spec.md`'s "Evidence", which the archive does not write,
+        loses the line "Atomic canonical-principal migration and rollback", which cites
+        the deleted `core/registry/tests/unit/test_principal_migrations.py`; and
+        `openspec/specs/registry-discovery/architecture.md`'s "Atomic legacy identity
+        migration" is removed. The requirements are this change's `registry-discovery`
+        delta: "Publisher identity migration preserves ownership" REMOVED and "Stable
+        publisher-chosen listing identity" MODIFIED.
       - The vocabulary sweep (D16): every permanent document's use of *role* for a
         service becomes *service*; a requirement whose name or text changes is carried
         as a delta in this change's `specs/` before 11.10, and
         `openspec/specs/README.md` is updated where a capability's description uses the
         word.
       - The `deployment-state`, `storefront-publication`, `physical-provisioning`,
-        `fulfillment`, and `site-capacity` `spec.md` files are written by the archive in
-        11.11; the record names them. None of these capabilities has an `index.md`.
+        `fulfillment`, `site-capacity`, and `registry-discovery` `spec.md` files are
+        written by the archive in 11.11; the record names them. None of these
+        capabilities has an `index.md`.
 - [ ] 11.10 **Documentation citations.** Run
       `make check-doc-citations CHANGE=add-database-migration-commands` and resolve every
       match, then `scripts/change-workflow openspec validate add-database-migration-commands --strict`.
