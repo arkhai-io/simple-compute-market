@@ -389,14 +389,27 @@ supported baseline", and "A migration and its record commit together". Touches a
 `market_schema_migrations`), `docs/development/ARCHITECTURE.toml` (`[kit_areas]`
 foundation list), and the repository's wheel and lock wiring for a new kit.
 
-- [ ] 3.1 Create the kit with the repository's project layout (one flat import package
+- [x] 3.1 Create the kit with the repository's project layout (one flat import package
       under `src/`, `pyproject.toml` declaring only what it imports, the standard
       library for the engine), add it to `[kit_areas].foundation` in
       `docs/development/ARCHITECTURE.toml`, and wire it into `make dist` and the
       locks of its consumers as later sections add them. Verify with
       `make check-architecture` and `make check-packaging`. (D2; repository obligation:
       `AGENTS.md` "Package and dependency discipline")
-- [ ] 3.2 Implement the engine: `Migration` (an ID and an apply callable on a
+      `kit/schema-migrations` (`arkhai-kit-schema-migrations` 0.1.0,
+      `market_schema_migrations`): no runtime dependency, SQLAlchemy only as the
+      `sqlalchemy` extra, and a package allowlist naming it alone. Wired into
+      `kit/Makefile` (`dist-schema-migrations`, `test-schema-migrations`, both in
+      the aggregates) and published beside its future consumers, since `kit/site` and
+      the provisioning service are published and section 4 makes them depend on it:
+      first in `manifests/published-distributions.json`, in `publish-pypi.yml`'s
+      filters and package table, and in `RELEASING.md`'s published-packages table.
+      Its lock was seeded by hand and resolved by `make lock PROJECTS=kit/schema-migrations`
+      (a direct `uv lock` was not permitted in the session). `make check-architecture`
+      — passed; `make check-packaging` (in `pre-commit-functional`) — passed;
+      `make test-release-tooling` (in `make test`, `scripts/tests/test_publish_matrix.py`
+      over the three publication files) — passed.
+- [x] 3.2 Implement the engine: `Migration` (an ID and an apply callable on a
       connection); `Chain` (its service, command, ordered migrations, the v0.3.0 floor
       IDs, and its baseline IDs); `migrate`, which applies each pending migration and
       records its ID in one transaction, adopts a database recording every floor ID by
@@ -419,11 +432,94 @@ foundation list), and the repository's wheel and lock wiring for a new kit.
       `ALTER`-added and a created column. (D2, D5, D14; `deployment-state` "A
       migration and its record commit together", "A migration fails partway through a
       chain")
-- [ ] 3.3 **Verification.** Run `make -C kit/schema-migrations test`,
+      `engine.py` (`Migration`, `Chain` of `baselines`, `migrations`, `floor_ids`;
+      `classify`, `check`, `migrate`, `MigrationRefused`, `MigrationFailed`),
+      `result.py` (`CheckState`, `CheckResult`, `describe`, `refusal_message`; imports
+      nothing of the engine), `sqlite.py` (`SqliteMigrationConnection`,
+      `connect_read_only`, `check_sqlite_file`), `sqlalchemy_adapter.py`
+      (`SqlAlchemyMigrationConnection`, `check_engine`), `snapshot.py`
+      (`schema_snapshot`). Differs from the plan: the tests that open a real database
+      are library integration tests in `tests/integration/`, as `TESTING.md`'s
+      library-package rule places them, not unit tests; `tests/unit/` holds the pure
+      classification and message tests. Unit (`test_classification.py`,
+      `test_refusal_message.py`): every result from tables and recorded IDs — absent
+      (no file; an empty ledger), unsupported (tables without records, part of the
+      floor naming what it lacks, a floorless chain's foreign records), behind (on the
+      chain, in chain order; the floor with adoption pending, with or without a later
+      migration already recorded), ahead (unknown beside the floor; unknown taking
+      precedence over pending; leftover floor records), compatible; chain validation;
+      each state's message naming the service, the command, and each differing ID,
+      and a revision-based result naming both revisions — passed. Library integration
+      over real SQLite files (`test_sqlite_engine.py`, `test_sqlalchemy_engine.py`):
+      fresh, rerun, adoption without running the baselines (baselines that raise if
+      called), adoption keeping an already-recorded later migration, ahead and
+      unsupported refused with schema and ledger unchanged, tables without a ledger
+      refused with no ledger created, a migration failing after DDL leaving earlier
+      ones recorded and no trace of itself under default transaction control,
+      `isolation_level=None`, `autocommit=True`, and through SQLAlchemy, a failed
+      adoption keeping the floor records, the check of a missing file creating no file
+      or directory, the check leaving a behind database's bytes unchanged, an
+      in-memory engine checked through its own connection — passed;
+      `test_schema_snapshot.py`: an `ALTER`-added column equal to a created one, column
+      type, nullability, default, extra column and primary key seen, unique
+      constraints by columns not generated names, foreign keys, partial and expression
+      indexes, `CHECK` text without whitespace, `AUTOINCREMENT`, `STRICT`,
+      `WITHOUT ROWID`, triggers and views, the ledger left out — passed.
+- [x] 3.3 **Verification.** Run `make -C kit/schema-migrations test`,
       `make check-architecture`, `make check-packaging`, and
       `scripts/change-workflow run pre-commit add-database-migration-commands`.
       End-to-end: none — the kit has no deployed behaviour until section 4 composes it.
       Owed by validation: none.
+      `make -C kit/schema-migrations test` — 60 passed; the rest as section 3's notes
+      record. End-to-end confirmed: no scenario exercises the kit until section 4.
+
+**Section 3 notes — completed 2026-11-09.**
+
+Suites: `make -C kit/schema-migrations test` — unit and integration, 60 passed;
+`make check-architecture` — passed; `scripts/change-workflow run pre-commit
+add-database-migration-commands` — `after-functional-change`, `pre-commit-functional`
+(every suite, `make check-packaging`, the release tooling's publish-matrix tests) and
+`pre-commit` passed before the fresh-context check's fixes. Run again after them, every
+hook passed but for one test of the change workflow's clone tooling,
+`scripts/tests/test_change_clone.py::test_the_bootstrap_failed` (`ChildProcessError:
+No child processes` from its own `os.waitpid`), which this section does not touch and
+which had passed in the first run; `make test-release-tooling` rerun alone — 2691
+passed.
+
+Engine semantics the next sections rely on. A database records the chain once it
+records any baseline ID; an ID the chain does not list then makes it *ahead*. A database
+recording no baseline but every floor ID is *behind* with `adoption_pending`, and any
+other ID it records beside the floor makes it *ahead*. Anything else holding tables or
+records is *unsupported*, including tables with no ledger: design D5's "no file or no
+records is *absent*" holds only for a database with no tables, which the delta's
+"refuse any other non-empty database" already says — D5's sentence is looser than the
+code, for closeout's documentation compliance. `migrate` reads the state, refuses, and
+adopts in one transaction; every migration then runs in its own transaction with its
+record. The ledger is `schema_migrations`; the engine reads and writes only `id`, so the
+provisioning and storefront ledgers an earlier engine created serve as they are, and
+`schema_snapshot` leaves the ledger out. A migration cannot turn `PRAGMA foreign_keys`
+off, since it runs inside the engine's transaction; a later table rebuild must work with
+enforcement as the connection has it. `check_engine` reads a file-backed SQLite URL
+through a read-only `sqlite3` connection of its own, and any other engine, in-memory
+included, through the engine.
+
+Fresh-context check. Fixed: under `autocommit=True` the driver's `commit()` does
+nothing, so the adapter now ends its transactions with `COMMIT`/`ROLLBACK` statements
+and the failure test runs under all three transaction controls; the snapshot could not
+see `AUTOINCREMENT`, which v0.3.0 storefront tables use, nor `STRICT`, `WITHOUT ROWID`
+or an expression index's definition — now it does (a column's `COLLATE` is still not
+seen, as its docstring says); an untested guard re-checked the floor in a second
+transaction — the read, the refusal, and the adoption are now one transaction, and a
+test fails adoption midway and finds the floor records kept; docstrings that described
+consumers sections 6–10 add, and a citation of requirement headings that exist only in
+the delta, reworded; a test name that overstated what it exercised renamed. Not run
+again after these fixes, which were confined to the findings. Declined: a URI-form
+SQLite URL (`sqlite:///file:...?uri=true`) is checked as a plain path — no service
+configures one. Noted for closeout: `ARCHITECTURE.md`'s "Kind" lists the packages with
+a package allowlist, and the kit-areas diagram draws the foundation kits; 11.9 now names
+both. Outside the repository: publishing needs a PyPI trusted publisher and the
+`pypi-arkhai-kit-schema-migrations` environment (`RELEASING.md`, "One-time setup"),
+until which this package's publish job fails on `main`.
 
 ## 4. Compute provisioning on the engine, as the reference service
 
@@ -818,7 +914,9 @@ Per `openspec/README.md#plan-closeout-requirements`.
         foundation capabilities (D2); "Capacity publication and multi-domain
         storefront composition", which says every publication pass ends with
         registry convergence, gains the sweep that follows it (D15b; added
-        2026-11-09 by section 2).
+        2026-11-09 by section 2); "Kind" lists the migration kit among the packages
+        with a package allowlist, and `docs/development/diagrams/kit-areas.drawio` and
+        its `.svg` draw it in the foundation band (D2; added 2026-11-09 by section 3).
       - `docs/development/TESTING.md`: a "## Migration Tests" section — the floor
         fixture, adoption, the store-open test, and the per-service integration suite
         (D5, D9).

@@ -50,6 +50,7 @@ the one its `pyproject.toml` declares.
 | `arkhai-kit-capability-shape` | `kit/capability-shape/` | none |
 | `arkhai-kit-capability-admissibility` | `kit/capability-admissibility/` | `arkhai-kit-capability-shape` |
 | `arkhai-kit-capability-pricing` | `kit/capability-pricing/` | `arkhai-kit-capability-shape` |
+| `arkhai-kit-schema-migrations` | `kit/schema-migrations/` | none |
 | `arkhai-kit-capacity-publication` | `kit/capacity-publication/` | `arkhai-core-storefront`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site-client` |
 | `arkhai-kit-contact-exchange` | `kit/contact-exchange/` | `arkhai-core`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-delivery` | `kit/delivery/` | `arkhai-kit-identity` |
