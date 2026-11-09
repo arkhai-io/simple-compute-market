@@ -228,7 +228,7 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
     dispatch_bound: float = DISPATCH_BOUND_SECONDS
 
     def __post_init__(self) -> None:
-        self.reserved_resource_id = self.target.resource_id or REAL_RESOURCE_ID
+        self.reserved_resource_id = self.target.resource_id or self.reserved_resource_id
 
     @property
     def listing_status_after_first_fulfillment(self) -> str:

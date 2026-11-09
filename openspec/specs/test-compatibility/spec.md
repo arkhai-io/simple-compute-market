@@ -537,9 +537,8 @@ for registration, listing adoption and capacity checks. Omitted, it MUST retain
 `compute-e2e-real-001`. Each real VM purchase MUST refresh its site projections
 before discovery, including with background lifecycle loops held, so host
 diagnostics do not age out its source confirmation. Before a real purchase
-approves payment, its region query
-MUST select its intended listing alone; an empty, different or ambiguous result
-MUST refuse the purchase. Selecting a declaration MUST NOT bypass the site's
+approves payment, its region query MUST select its intended listing alone; an
+empty, different or ambiguous result MUST refuse the purchase. Selecting a declaration MUST NOT bypass the site's
 single-declaration-per-host invariant.
 
 A bare-metal target MAY name its existing pool and capacity declaration through

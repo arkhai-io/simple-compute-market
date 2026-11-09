@@ -841,9 +841,10 @@ A rerun against the same stack reconciles rather than duplicates. The host's
 connection is replaced where it differs and the declaration rewritten, and the
 sole open listing on the scenario's resource is adopted, paused, rather than
 created. Closed historical listings retain their bindings and are preserved.
-Only closed history, multiple open listings, an unknown status or an open listing
-of another shape fail naming them, for an operator to recover; a closed binding
-does not authorize replacement creation. The settle stage waits for
+Closed listings with no open one, several open listings, a listing of unknown
+status, or an open listing of another shape fail naming them, for an operator to
+recover; a closed binding does not authorize creating a replacement. The settle
+stage waits for
 the deal's own `job_submitted` event, filtered by its negotiation and counted
 from a mark taken before settling, because an adopted listing's event log holds
 earlier deals' events.
@@ -883,8 +884,9 @@ pipeline results do not substitute for this physical qualification.
 
 The real-provisioning modules and the qualification modules below share the
 target's resource and adopt its sole compatible open listing, retaining closed
-historical bindings. That listing offers a settlement option for each deal mechanism the
-storefront composes and reports ready, Alkahest and Arkhai payments. On VM
+historical bindings. That listing offers a settlement option for each deal
+mechanism the storefront composes and reports ready, Alkahest and Arkhai
+payments. On VM
 every module creates or adopts it through one helper
 (`e2e-tests/tests/e2e/roles/scenarios/vms/composed_listing.py`); bare metal's
 published options already are the composed mechanisms. Contact exchange settles

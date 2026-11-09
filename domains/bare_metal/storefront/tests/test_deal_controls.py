@@ -342,7 +342,6 @@ async def test_wait_resolves_a_payments_deal_by_its_negotiation_and_its_transact
     assert len(deal.capacity.reserve_calls) == len(provisioning.begin_calls) == 1
 
 
-
 async def test_wait_answers_a_delivery_conflict_as_the_fulfillment_reads_do(
     tmp_path,
 ) -> None:
