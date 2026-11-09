@@ -894,7 +894,7 @@ each compute lane against the lane doubles".
       `EndDeliveryProgress` and asserts its case `accepted` with every part held,
       only where the run names a mediation target. The `e2e_vm_payment_deal`
       marker's text follows. Not run end to end in this session.
-- [ ] 5.7 Verification.
+- [x] 5.7 Verification.
       Unit: `e2e-tests/tests/unit/test_mediation_helper.py` (lane-owned failure,
       external blocked skip, missing settings), the buyer configuration writer's
       credential, the value-to-fixture tests, `scripts/tests/test_lane_compose.py` for
@@ -945,6 +945,21 @@ each compute lane against the lane doubles".
       promotions rewrite them. Left for the owner, as section 1 recorded:
       `e2e-tests` now depends on the controls wheel, which `make dist` builds into
       the release wheelhouse as well; this section changes nothing there.
+      Checked in the next session, on the evidence above: the section's suites
+      passed again in that session's `pre-commit-functional` (every suite,
+      `make test-e2e-unit` and `make test-release-tooling` among them) on 4.9's
+      working tree, base `1407827ca`. Correction to a level above: the doubles'
+      `tests/integration` suites run each double's app in process through a typed
+      client, which is application integration, not library integration. Its
+      end-to-end lines are validation's: no pipeline has yet run a commit carrying
+      section 5 (validation 49 judged `4e6430991`, before it), so the four markers
+      above, none skipping for want of a mediation target, await the round's
+      validation, which must read their per-scenario results. The `Owed by
+      validation:` line is confirmed: `test · test-e2e-unit`; the section's other
+      suites run in `tests.yml` jobs other sections already owe
+      (`test-deployment-packaging`, both doubles' jobs), except `core/registry`'s
+      profile test, whose job validation reads with the rest of `tests.yml`. Section 9 (the release
+      wheelhouse) now owns the wheelhouse note.
 
 ## 6. The VM controls scenarios
 
