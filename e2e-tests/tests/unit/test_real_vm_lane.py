@@ -165,6 +165,7 @@ def test_a_host_an_earlier_run_left_disabled_is_enabled_again():
 def test_a_host_an_earlier_run_left_has_its_connection_replaced():
     stale = ConnectionSubmission(
         kind="ssh",
+        version=2,
         public={**target_connection(TARGET).public, "ssh_host": "192.0.2.99"},
     )
     hosts = FakeHosts(**{HOST: _host(HOST, REAL_POOL_ID, stale)})
@@ -205,7 +206,9 @@ def test_the_target_connection_is_at_the_version_the_service_accepts():
 def test_a_host_registered_otherwise_is_not_the_target():
     hosts = FakeHosts(**{HOST: _host(
         HOST, REAL_POOL_ID,
-        ConnectionSubmission(kind="ssh", public={**target_connection(TARGET).public, "ssh_port": 2200}),
+        ConnectionSubmission(
+            kind="ssh", version=2, public={**target_connection(TARGET).public, "ssh_port": 2200}
+        ),
     )})
     with pytest.raises(AssertionError, match="not the target's"):
         assert_registered_as_target(hosts.get_host(HOST), TARGET)

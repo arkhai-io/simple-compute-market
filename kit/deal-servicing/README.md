@@ -8,8 +8,8 @@ interprets financial snapshots nor owns payment accounting.
 
 `SQLiteEvidenceStore(path)` implements the foundation's async evidence port.
 `EvidenceSession(connection)` borrows an existing storefront SQLite transaction
-so capture and acceptance can commit together. Initialize its schema with
-`create_schema(connection)`; none of these session operations commits. Call
+so capture and acceptance can commit together; none of these session operations
+commits. Call
 `capture` from the verified-envelope sink, before returning parsed input, and
 `accept` on each acceptance path with the captured buyer message ID and the
 accepting seller or administrator principal. Pass lifecycle terms from the
@@ -25,7 +25,7 @@ adapter pruning keeps evidence indefinitely.
 
 ## End service
 
-Initialize `EndSession`'s schema in a caller-owned transaction. Register immutable
+Register immutable
 Agreement timing, commitment and seller identity before delivery. `admit` returns
 `retry` on a stale revision and `ended` once a controlling end has arrived; keep
 the same session through the corresponding reservation/dispatch/activation or
@@ -105,8 +105,8 @@ Agreement through its accessors. `SellerServicing` resolves adapters using those
 pinned bindings, not the currently offered authorities. Its credential hook checks
 the complete authority identity, independently of publication preferences.
 For an immutable binding read while ingress owns a write transaction, use
-`SellerSession(conn, initialize=False)` on the separate read connection; schema
-installation belongs to the writer, not the receipt-signing callback.
+`SellerSession(conn)` on a separate read connection: a session issues no DDL, so
+it opens no competing writer.
 
 `list` returns bounded keyset pages from durable watched views. `read` refreshes
 both records and returns physical progress even without a payment adapter. A
@@ -163,8 +163,17 @@ Constructors do not open databases. Async public operations run bounded database
 units in worker threads and never keep a SQLite transaction across authority or
 physical I/O. The explicit synchronous sessions and `DeliveryIngress` methods
 are composition seams: async callers must use `asyncio.to_thread` (as the router
-does), or an existing database worker. Session schema creation is lazy and shares
-the caller's transaction; no session commits it.
+does), or an existing database worker.
+
+## Schema
+
+No session or poller creates a table. `SERVICING_SCHEMA` holds every table and
+index the library reads and writes as `CREATE ... IF NOT EXISTS` DDL, and a
+storefront composing it applies that DDL in a migration of its own chain, with
+`create_schema(connection)` as the migration's body, so that opening the
+library's sessions changes no schema. The statements tolerate tables already present, since a
+storefront database built while sessions created these tables on first use may
+hold some of them.
 
 ## First use
 

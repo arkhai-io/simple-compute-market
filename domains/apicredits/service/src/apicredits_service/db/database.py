@@ -4,15 +4,19 @@ from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
-from market_resource_pools import ResourcePool
+from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
 from market_resource_pools_contracts import (
     BACKED,
     PoolDeclarationError,
     resolve_pool_declarations,
 )
+from market_schema_migrations import CheckResult, MigrateReport, migrate, refusal_message
+from market_schema_migrations.sqlalchemy_adapter import (
+    SqlAlchemyMigrationConnection,
+    check_engine,
+)
 
-from apicredits_service.db.migrations import apply_schema_migrations
-from apicredits_service.db.models import Base
+from apicredits_service.db.migrations import CHAIN
 
 
 def create_db_engine(database_url: str, is_sqlite: bool) -> Engine:
@@ -44,22 +48,53 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def run_migrations(engine: Engine) -> None:
-    """Create all tables and apply versioned migrations.
+class IncompatibleDatabase(RuntimeError):
+    """The database is not exactly at the chain this image carries."""
 
-    Called once during application startup, before the app is ready to
-    serve requests (see ``container.py``). Idempotent — safe to call on
-    every restart. ``create_all`` remains appropriate for an empty
-    bootstrap (it only creates missing tables, never alters existing
-    ones); anything beyond that — a column rename, a dropped column, a
-    backfill — is what ``apply_schema_migrations`` is for once this
-    service's schema actually needs to evolve.
+    def __init__(self, result: CheckResult) -> None:
+        super().__init__(refusal_message(result, service=CHAIN.service, command=CHAIN.command))
+        self.result = result
+
+
+def migrate_database(engine: Engine) -> MigrateReport:
+    """Bring the database to the chain's head, refusing one it did not build.
+
+    ``apicredits-service-migrate`` calls this, and nothing else does outside
+    tests: the application only checks. It takes only the database, so its
+    result depends on the code and the data already stored, never on the
+    service's configuration.
     """
-    Base.metadata.create_all(bind=engine)
-    from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
-    from market_resource_pools.db import Base as PoolsBase
+    with engine.connect() as connection:
+        return migrate(CHAIN, SqlAlchemyMigrationConnection(connection))
 
-    PoolsBase.metadata.create_all(bind=engine)
+
+def check_database(engine: Engine) -> CheckResult:
+    """The database's state against the chain, read without changing anything.
+
+    A file-backed database is read through a read-only connection, so a
+    missing file is reported absent and is not created.
+    """
+    return check_engine(CHAIN, engine)
+
+
+def initialise_database(engine: Engine) -> None:
+    """Startup's database steps: check, seed the ``default`` pool, check pools.
+
+    A database not exactly at the chain is refused before anything writes to
+    it, naming the migration command. The ``default`` pool every quota resource
+    registers into is seeded here rather than by a migration: no schema
+    constraint requires it, so it is runtime initialization
+    (``docs/development/ARCHITECTURE.md``, "Build, packaging, and
+    initialization").
+    """
+    result = check_database(engine)
+    if not result.compatible:
+        raise IncompatibleDatabase(result)
+    _seed_default_pool(engine)
+    _require_valid_pool_declarations(engine)
+
+
+def _seed_default_pool(engine: Engine) -> None:
     with Session(engine) as session, session.begin():
         if session.get(ResourcePool, DEFAULT_POOL_ID) is None:
             session.add(
@@ -75,12 +110,6 @@ def run_migrations(engine: Engine) -> None:
                     },
                 )
             )
-    # Site-authority quota ledger tables ride market_site's own metadata.
-    from market_site.db import Base as SiteBase
-    SiteBase.metadata.create_all(bind=engine)
-
-    apply_schema_migrations(engine)
-    _require_valid_pool_declarations(engine)
 
 
 def _require_valid_pool_declarations(engine: Engine) -> None:

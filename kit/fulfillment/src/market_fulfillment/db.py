@@ -9,10 +9,9 @@ reservation have a settlement, and what state is it in" with one lookup and
 keeps both callers' idempotency checks on the same primary key. See
 ``openspec/specs/fulfillment/spec.md``.
 
-The mounting service (the compute provisioning service) is responsible for
-``Base.metadata.create_all`` (or migrations) on its own engine, the same
-composition pattern ``market_site.db`` and ``market_resource_pools`` already
-use for their own tables.
+The tables' schema is ``market_fulfillment.migrations``, which a migration
+chain holding the aggregate composes, so these mappings are read against that
+schema and a column added here needs a migration there.
 """
 
 from __future__ import annotations

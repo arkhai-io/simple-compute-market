@@ -13,6 +13,7 @@ import pytest
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.listing_source_check import build_listing_source_check
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.negotiation import default_seller_round_hook
 from arkhai_bare_metal_storefront.negotiation_runtime import (
     BareMetalNegotiationRefusal,
@@ -185,6 +186,7 @@ class _Opening:
 
 async def _service(tmp_path) -> tuple[_Opening, dict[str, Any]]:
     domain = get_market_domain_contract()
+    migrate_storefront_database(tmp_path / "storefront.db")
     db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
     option = _intro_option()
     await db.upsert_bare_metal_listing(
@@ -353,6 +355,7 @@ async def _payment_service(
 ) -> tuple[_Opening, dict[str, Any]]:
     """A listing offering one mechanism that settles from the Agreement alone."""
     domain = get_market_domain_contract()
+    migrate_storefront_database(tmp_path / "storefront.db")
     db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
     option = _payment_option(hourly)
     await db.upsert_bare_metal_listing(

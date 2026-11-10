@@ -44,38 +44,45 @@ spec:
       # the PVC's mount root is root-owned and SQLite can't write.
       securityContext:
         fsGroup: 1000
+      # The registry's migration, from the application's image over the same
+      # profile and data volume, runs before the application, which refuses a
+      # database the command has not brought to its script head. It reads only
+      # the database URL and the log level, so it mounts no credential.
+      initContainers:
+        - name: migrate
+          image: {{ include "registry.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["registry-migrate"]
+          env:
+            {{- include "registry.resolverEnv" . | nindent 12 }}
+          volumeMounts:
+            - name: arkhai-data
+              mountPath: {{ .Values.persistence.mountPath | quote }}
+            {{- include "registry.profileMounts" . | nindent 12 }}
       containers:
         - name: registry
           image: {{ include "registry.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - uvicorn
+            - core_registry.main:app
+            - --host
+            - "0.0.0.0"
+            - --port
+            - {{ .Values.service.port | quote }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
-          # Only the resolver variables: every setting is in a profile file under
-          # the configuration directory, and a pod variable would override it.
           env:
-            - name: CONFIG_DIRECTORY
-              value: "/app/config"
-            - name: ACTIVE_PROFILES
-              value: {{ include "registry.activeProfiles" . | quote }}
+            {{- include "registry.resolverEnv" . | nindent 12 }}
           volumeMounts:
             - name: arkhai-data
               mountPath: {{ .Values.persistence.mountPath | quote }}
             - name: registry-identity
               mountPath: {{ include "registry.credentialFile" . | dir }}
               readOnly: true
-            - name: config
-              mountPath: /app/config/config-production.env
-              subPath: config-production.env
-              readOnly: true
-            {{- if $secretProfile.secretName }}
-            {{- $profile := include "registry.secretProfileName" . }}
-            - name: secret-profile
-              mountPath: {{ printf "/app/config/config-%s.env" $profile | quote }}
-              subPath: {{ printf "config-%s.env" $profile | quote }}
-              readOnly: true
-            {{- end }}
+            {{- include "registry.profileMounts" . | nindent 12 }}
           livenessProbe:
             httpGet:
               path: /health

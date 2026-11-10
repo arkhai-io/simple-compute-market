@@ -25,7 +25,7 @@ Production topology MUST support independently operated registries, seller store
 ### Requirement: Schema-isolated registry composition
 
 One Helm release MAY compose multiple registry instances by aliasing the same
-registry role. Each enabled instance MUST select exactly one filter
+registry service. Each enabled instance MUST select exactly one filter
 specification and MUST have independent authority identity, credential Secret,
 descriptor, authentication, Service, persistence, and workload coordinates.
 Disabling an optional instance MUST emit no resource for that instance and MUST
@@ -65,11 +65,11 @@ Each service MUST own its database and migration history; cross-service identifi
 - **THEN** correlation identifiers cross the API while provisioning retains ownership of its allocation records
 
 ### Requirement: Service-owned migration history
-Each stateful service MUST run and record its own ordered migration chain against its owned database; a deployed provisioning service MUST apply pending migrations before application startup and MUST reject schema drift from its normal startup path instead of applying migrations in-process. The provisioning migration entrypoint MUST receive only its database and MUST NOT read operational configuration; configuration-driven seeding belongs to runtime initialization.
+Each stateful service — compute provisioning, the VM storefront, the bare-metal storefront, the API-credit storefront, the API-credit service, and the registry — MUST run and record its own ordered migration chain against its owned database through its packaged migration command, before its application starts, and MUST NOT apply migrations in-process. Its application startup MUST check its database without issuing DDL and MUST refuse a database that is absent, behind its chain, ahead of its chain, or below its supported baseline, naming the migration command and the migration IDs that differ. A database is compatible only when its recorded migrations are exactly its chain's. The migration command MUST receive only its database location and log level and MUST NOT read operational configuration; configuration-driven seeding belongs to runtime initialization, after the startup check passes.
 
 #### Scenario: Database initialization is repeated
-- **WHEN** a service initializes a database whose migrations are already applied
-- **THEN** initialization leaves the schema at the same current version without duplicate schema changes
+- **WHEN** a service's migration command runs against a database whose migrations are already applied
+- **THEN** it leaves the schema at the same current version without duplicate schema changes or duplicated rows
 
 #### Scenario: Provisioning deployment has pending migrations
 - **WHEN** a provisioning pod is created with an older owned database
@@ -80,12 +80,40 @@ Each stateful service MUST run and record its own ordered migration chain agains
 - **THEN** startup fails with an actionable schema-drift error and does not mutate the schema
 
 #### Scenario: A service has no separate deployment step for migrations
-- **WHEN** a stateful service has no Kubernetes init container or standalone migration CLI to apply migrations ahead of the application process (for example, the API-credit service, which has no Helm chart)
-- **THEN** it MAY apply its own ordered migration chain in-process at application startup, before serving requests, rather than rejecting drift from its normal startup path — this is a valid instantiation of service-owned migration history for a service without the provisioning service's deployment topology, not an exception to it
+- **WHEN** a stateful service has no Kubernetes chart, such as the API-credit service, which runs only under Compose
+- **THEN** its migration command still runs before its application, as the command followed by the application in one container, and its application refuses a database behind its chain rather than migrating in-process
 
 #### Scenario: Provisioning migration runs under different configuration
 - **WHEN** the provisioning migration runs against the same database under two configurations that differ in playbooks, host defaults, or pool and seed documents
 - **THEN** both runs produce the same schema and the same rows
+
+#### Scenario: A deployment has pending migrations
+- **WHEN** a service is deployed over an older owned database
+- **THEN** its migration phase applies the pending migrations before the application process starts
+
+#### Scenario: Application sees a database behind its chain
+- **WHEN** the application process starts against a database missing migrations its chain lists
+- **THEN** startup fails without mutating the schema, naming the migration command and each pending migration ID
+
+#### Scenario: Application sees a database ahead of its chain
+- **WHEN** the application process starts against a database recording a migration its chain does not list, such as after an image rollback over a migrated database, whether or not it also lacks migrations its chain lists
+- **THEN** startup fails without mutating the schema, reporting the database ahead and naming each unknown migration ID and each pending one, and recovery is restoring the pre-upgrade backup or rolling forward
+
+#### Scenario: The migration command meets an unknown migration
+- **WHEN** a service's migration command runs against a database recording a migration its chain does not list
+- **THEN** it applies nothing, changes nothing, and exits unsuccessfully reporting the database ahead with its unknown and pending migration IDs
+
+#### Scenario: Application finds no database
+- **WHEN** the application process starts and its database file does not exist or records no migrations
+- **THEN** startup fails naming the migration command and creates no database file
+
+#### Scenario: Migration runs under different configuration
+- **WHEN** a service's migration command runs against the same database under two configurations that differ in anything but the database location and log level
+- **THEN** both runs produce the same schema and the same rows
+
+#### Scenario: The API-credit service starts on a fresh database
+- **WHEN** the API-credit service starts against a database its migration command has just created
+- **THEN** its startup seeds the `default` resource pool after the startup check passes, and its migrations wrote no pool
 
 ### Requirement: Shared Dynaconf bootstrap preserves consumer policy
 
@@ -116,11 +144,11 @@ The bare-metal storefront MUST be buildable as a wheel from the repository `.dis
 - **THEN** the `bare-metal-storefront` entry point and `market.storefront_contributions` hook load without editable sibling packages
 
 #### Scenario: Operator enables only bare-metal
-- **WHEN** the bare-metal seller role is enabled and VM storefront is disabled
-- **THEN** the role starts with its own persistence and trusted-site configuration without waiting for or referencing a VM storefront
+- **WHEN** the bare-metal storefront service is enabled and VM storefront is disabled
+- **THEN** the service starts with its own persistence and trusted-site configuration without waiting for or referencing a VM storefront
 
 #### Scenario: Operator enables both compute storefronts
-- **WHEN** VM and bare-metal seller roles use one provisioning service
+- **WHEN** VM and bare-metal storefront services use one provisioning service
 - **THEN** they remain separate processes with separate writable storefront databases and explicit public service URLs or gateway paths
 
 #### Scenario: Site configuration is diagnosed
@@ -168,7 +196,7 @@ The Arkhai payments API key MUST reach only its owning buyer or seller process. 
 
 #### Scenario: A non-loopback origin is plain HTTP
 
-- **WHEN** a role's `[Settlement.arkhai_payments]` names an `http://` service origin on a non-loopback host
+- **WHEN** a buyer or seller process's `[Settlement.arkhai_payments]` names an `http://` service origin on a non-loopback host
 - **THEN** its configuration is refused, naming the HTTPS requirement
 
 #### Scenario: A release is rendered from release values
@@ -196,7 +224,7 @@ Marketplace builds MUST install `arkhai-kit-arkhai-payments` from the staged whe
 
 ### Requirement: Identity configuration separates public and secret material
 
-Private identity credentials MUST arrive through role-scoped Secret references and MUST NOT enter committed values, ConfigMaps, manifests, run logs, public principal fields, public URLs, or generated evidence. Payment consumer profiles MUST keep provider credentials and bank/card data out of marketplace roles. Owner-scoped API credentials are separate from marketplace signing credentials. Runtime MUST derive the public principal from the credential and compare it with configured public identity before readiness.
+Private identity credentials MUST arrive through service-scoped Secret references and MUST NOT enter committed values, ConfigMaps, manifests, run logs, public principal fields, public URLs, or generated evidence. Payment consumer profiles MUST keep provider credentials and bank/card data out of marketplace roles. Owner-scoped API credentials are separate from marketplace signing credentials. Runtime MUST derive the public principal from the credential and compare it with configured public identity before readiness.
 
 #### Scenario: Public identity configuration contains a private credential
 
@@ -221,25 +249,11 @@ Private identity credentials MUST arrive through role-scoped Secret references a
 #### Scenario: A service-peer profile is rendered
 
 - **WHEN** a storefront and provisioning authority are configured to trust one another
-- **THEN** ordinary configuration contains each exact scheme-tagged public principal and site trust binding, while each role's matching signer credential is supplied only through its own Secret boundary
-
-### Requirement: Identity migrations are coordinated and fail closed
-
-Each owning service MUST migrate its identity-bearing rows through its own ordered migration chain while preserving cross-service opaque IDs and provider-operation identity. Versioned buyer run logs MUST have an explicit migration path. Authorities MUST reject old schema, old signature versions, drift, ambiguous principals, or partially migrated state; production cutover MUST quiesce authenticated mutations until all required authorities and clients report the new identity capability.
-
-#### Scenario: One authority remains on the old signature contract
-
-- **WHEN** deployment readiness detects a registry, storefront, service peer that lacks the pinned identity version
-- **THEN** the affected workflow remains unavailable rather than downgrading or submitting a legacy proof
-
-#### Scenario: Migration encounters conflicting owners
-
-- **WHEN** two address-only rows would create an invalid active-principal ownership relation
-- **THEN** that service migration rolls back completely and readiness remains false
+- **THEN** ordinary configuration contains each exact scheme-tagged public principal and site trust binding, while each service's matching signer credential is supplied only through its own Secret boundary
 
 ### Requirement: Deployment uses one settlement hierarchy
 
-Role TOML, committed defaults, environment overlays, Helm values/schema/templates, Compose, examples, and generated configuration MUST use the same typed `[Settlement]` root and mechanism subsection names. Marketplace deployment MUST keep public identity, wallet/chains, and mechanism trust/policy separate from Secret-injected credentials, and MUST reject payment-provider/admin/webhook secrets or payment-service-owned state.
+Storefront and buyer TOML, committed defaults, environment overlays, Helm values/schema/templates, Compose, examples, and generated configuration MUST use the same typed `[Settlement]` root and mechanism subsection names. Marketplace deployment MUST keep public identity, wallet/chains, and mechanism trust/policy separate from Secret-injected credentials, and MUST reject payment-provider/admin/webhook secrets or payment-service-owned state.
 
 #### Scenario: Payment-only role starts
 
@@ -253,7 +267,7 @@ Role TOML, committed defaults, environment overlays, Helm values/schema/template
 
 ### Requirement: Configuration cutover is atomic and coordinated
 
-Migration tooling MUST be deployable before runtime rejection, and production cutover MUST preview, back up, migrate, and validate every role file, Secret mapping, Helm value, Compose environment, and automation caller before enabling the clean-cutover release. Old and new names MUST NOT be accepted concurrently by runtime. Rollback before activation MUST restore the matching config and prior artifacts together.
+Migration tooling MUST be deployable before runtime rejection, and production cutover MUST preview, back up, migrate, and validate every storefront and buyer configuration file, Secret mapping, Helm value, Compose environment, and automation caller before enabling the clean-cutover release. Old and new names MUST NOT be accepted concurrently by runtime. Rollback before activation MUST restore the matching config and prior artifacts together.
 
 #### Scenario: Helm values and image contract differ
 
@@ -559,25 +573,6 @@ not an extension of an image-owned domain choice.
 - **WHEN** an operator overlay selects VM and bare-metal registrations
 - **THEN** the effective configuration contains exactly those two registrations, with no packaged registration appended by configuration merging
 
-### Requirement: Legacy storefront domain migration is transactional
-
-An operator MUST quiesce effects and run the explicitly selected contribution's migration adapter in read-only check mode before write. Write MUST require a restrictive same-directory backup, fsync the complete validated replacement, atomically replace the source, and retain stable listing, negotiation, settlement, obligation, reservation, fulfillment, operation, and provider identities. Missing provenance, mixed kinds, orphan relationships, collision, binding disagreement, or unsupported version MUST abort without partial source mutation. No adapter may infer a domain from payload shape or from having one installed contribution.
-
-#### Scenario: A valid VM database is activated
-
-- **WHEN** every legacy derived row proves its site and pool or Physical Resource provenance and the configured registration matches exactly
-- **THEN** migration records common listing/thread/fulfillment bindings, retires the old mapping as a writable authority, and an idempotent check succeeds after replacement
-
-#### Scenario: A legacy row is ambiguous
-
-- **WHEN** a row lacks trusted site/provenance, conflicts with public mode, is orphaned, duplicates a derivation identity, or names another contract
-- **THEN** check and write fail with redacted diagnostics while the source database and backup set remain unchanged
-
-#### Scenario: Replacement is interrupted
-
-- **WHEN** failure occurs after the original backup but before atomic replacement
-- **THEN** the original database remains byte-identical, the restrictive backup is retained for recovery, and startup does not activate mixed state
-
 ### Requirement: Deployable stack per market domain
 
 Every market domain intended for deployment MUST have a stack definition that
@@ -585,7 +580,7 @@ stands its services up through the repository's ordinary images and public
 process contracts. Domain stack definitions MUST follow the same topology
 conventions, select an exact domain contribution and version, persist each
 authority's state independently, and carry credentials only through explicit
-role-scoped Secret references. A domain without such a stack MUST NOT be
+service-scoped Secret references. A domain without such a stack MUST NOT be
 described as deployable.
 
 #### Scenario: A domain is stood up
@@ -975,11 +970,12 @@ The provisioning chart MUST render each entry of `configFiles` verbatim into its
 
 A chart MUST NOT hold a service back with init containers that wait for or validate its
 external dependencies, such as a registry, a chain, or a site, and a service MUST NOT
-wait for one, or refuse to start because one is unreachable, in its own startup. The
-service MUST start while a dependency is unreachable, report the dependency as degraded
-in its status while its process health check answers, and recover without a restart when
-the dependency answers. A chart whose service starts slowly MUST give it a startup probe,
-so that a slow start is not judged by its liveness probe.
+wait for one, or refuse to start because one is unreachable, in its own startup. The only
+init container a chart runs for a service is that service's own migration, which acts on
+its own state. The service MUST start while a dependency is unreachable, report the
+dependency as degraded in its status while its process health check answers, and recover
+without a restart when the dependency answers. A chart whose service starts slowly MUST
+give it a startup probe, so that a slow start is not judged by its liveness probe.
 
 #### Scenario: The VM storefront starts before its registry and chain
 
@@ -1002,8 +998,15 @@ so that a slow start is not judged by its liveness probe.
 #### Scenario: A storefront chart renders
 
 - **WHEN** the VM or bare-metal storefront chart is rendered
-- **THEN** its Deployment carries no init container that waits on a dependency, and its
+- **THEN** its Deployment carries exactly one init container, the storefront's migration
+  command from the application's image, none that waits on a dependency, and its
   container carries a startup probe
+
+#### Scenario: The registry chart renders
+
+- **WHEN** the registry chart is rendered
+- **THEN** its Deployment carries exactly one init container, the registry's migration
+  command from the application's image over the registry's data volume
 
 ### Requirement: Helm test pods carry no workload selector labels
 
@@ -1233,11 +1236,98 @@ The registry MUST load, after its default dotenv files, `config-<profile>.env` f
 - **WHEN** a release's registry values set `auth.adminKeySecret` or `auth.bootstrapKeySecret`
 - **THEN** rendering fails naming `secretProfile`
 
+### Requirement: Identity cutover is coordinated and fails closed
+
+Versioned buyer run logs MUST have an explicit migration path. Authorities MUST reject old schema, old signature versions, drift, ambiguous principals, or partially migrated state; production cutover MUST quiesce authenticated mutations until all required authorities and clients report the new identity capability.
+
+#### Scenario: One authority remains on the old signature contract
+
+- **WHEN** deployment readiness detects a registry, storefront, service peer that lacks the pinned identity version
+- **THEN** the affected workflow remains unavailable rather than downgrading or submitting a legacy proof
+
+### Requirement: One migration mechanism serves every stateful service
+
+Every stateful service MUST expose a packaged migration command named for its service command with a `-migrate` suffix, such as `market-storefront-migrate`, that applies its chain, and a `--check` mode that reports the startup check's result and the pending or unknown migration IDs, changes nothing, and exits successfully only for a compatible database. A deployment MUST run the command before the application: a chart as an init container from the application's image with the application's configuration and data volume, and Compose as the command followed by the application in one container. The in-house services MUST apply their chains through one shared migration engine; the registry MUST keep Alembic behind the same command, check result, and refusal message.
+
+#### Scenario: An operator previews an upgrade
+
+- **WHEN** an operator runs a service's migration command with `--check` against a database behind the new image's chain
+- **THEN** it lists the pending migration IDs, changes nothing, and exits unsuccessfully
+
+#### Scenario: A storefront under Compose has pending migrations
+
+- **WHEN** a storefront container starts under Compose over a database behind its chain
+- **THEN** its migration command applies the pending migrations and the storefront starts only after it succeeds
+
+#### Scenario: The registry refuses a database behind its head
+
+- **WHEN** the registry starts against a database whose Alembic revision is not its script head
+- **THEN** startup fails without mutating the schema, naming the registry's migration command and both revisions, in the same form as every other service's refusal
+
+### Requirement: A chain begins at its supported baseline
+
+Each in-house chain MUST begin with baseline migrations, one for each package whose tables its database's startup builds, whose bodies are fixed DDL. The baselines of compute provisioning, the VM storefront, and the bare-metal storefront MUST reproduce the schema the marketplace v0.3.0 release builds at startup; the registry's chain MUST begin with one Alembic baseline revision reproducing its v0.3.0 schema; the baselines of the API-credit storefront and the API-credit service reproduce their schema as of their baseline. For compute provisioning, the VM storefront, the bare-metal storefront, and the registry, the migration command MUST adopt a database that records every migration the v0.3.0 chain recorded by replacing those records with the baseline's in one transaction, without running the baselines; every service MUST refuse any other non-empty database as unsupported. A defect in data or schema a supported database carries MUST be repaired by an ordinary migration after the baseline, so that an adopted database is one the release can serve. The tables and indexes the v0.3.0 release created outside its chain — when a store opened, or after the chain in the storefront's constructor — MUST be created by one such migration, which alone among migrations tolerates objects that already exist, since a v0.3.0 database may or may not hold them.
+
+#### Scenario: A fresh database is migrated
+
+- **WHEN** a service's migration command runs against an empty database
+- **THEN** the baselines and every later migration run, producing the baseline schema followed by the later migrations
+
+#### Scenario: A v0.3.0 database is adopted
+
+- **WHEN** the migration command of compute provisioning, the VM storefront, the bare-metal storefront, or the registry runs against a database that recorded every migration of the v0.3.0 chain
+- **THEN** it records the baselines as applied without running them, removes the v0.3.0 records, and applies the migrations after the baseline
+
+#### Scenario: A v0.3.0 storefront database never opened a store's tables
+
+- **WHEN** a VM storefront database that recorded every migration of the v0.3.0 chain lacks the deal-servicing tables because no deal was ever delivered, and its migration command runs
+- **THEN** it adopts the database, and the migration after the baseline creates the missing tables and indexes, leaving those that exist unchanged
+
+#### Scenario: A database older than v0.3.0 is refused
+
+- **WHEN** the migration command runs against a database missing any migration the v0.3.0 chain recorded
+- **THEN** it changes nothing and refuses the database as unsupported, naming the missing migrations and directing the operator to a fresh database
+
+#### Scenario: An API-credit database is refused
+
+- **WHEN** the API-credit storefront's or service's migration command runs against a non-empty database created before its baseline
+- **THEN** it refuses the database as unsupported and changes nothing
+
+### Requirement: A migration and its record commit together
+
+The shared migration engine MUST apply each migration and record its ID in one transaction, so that a failed migration leaves the migrations before it recorded and itself neither applied nor recorded.
+
+#### Scenario: A migration fails partway through a chain
+
+- **WHEN** a migration raises after earlier migrations in the same run succeeded
+- **THEN** the earlier migrations stay recorded, the failed one leaves no schema change and no record, the command exits unsuccessfully naming it, and application startup reports the database behind with that migration pending
+
+### Requirement: Opening a store changes no schema
+
+A service MUST NOT issue DDL outside its migration chain. Constructing a database client, opening a store, or starting the application MUST leave the database's schema unchanged.
+
+#### Scenario: A storefront opens its stores on a migrated database
+
+- **WHEN** a storefront starts and opens its database client and every store it composes against a database its migration command has migrated
+- **THEN** the database's tables, columns, indexes, and triggers are the same before and after
+
+### Requirement: Composition-owned migration ordering
+
+A concrete storefront composition MUST declare its chain from the shared core storefront's migrations, the migrations of each kit it composes that owns tables, and its domain's migrations, in a deterministic declared order, and MUST expose one compatibility result to its application startup.
+
+#### Scenario: Domain migration fails
+
+- **WHEN** shared migrations succeed but a composition-specific migration fails
+- **THEN** application startup does not begin and the failure identifies the unsuccessful migration without claiming a compatible chain
+
 ## Evidence
 
-- Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.
-- Service-owned persistence, provisioning migration init, and schema-drift rejection: registry Alembic tests, `provisioning/compute/service/tests/integration/test_database.py`, and `helm/charts/provisioning/templates/deployment.yaml`.
-- The provisioning migration reading no operational configuration, the same database migrated under two configurations to equal schema and rows: `provisioning/compute/service/tests/integration/test_migration_reads_no_configuration.py`; job-envelope host evidence: `provisioning/compute/service/tests/integration/test_job_envelope_migration.py`.
+- Configurable registry endpoints and independently composed service stacks: core buyer registry configuration plus domain Compose and Helm manifests.
+- Service-owned persistence, each service's migration command and `--check`, and its startup check refusing absent, behind, ahead and unsupported databases: `provisioning/compute/service/tests/integration/test_database.py`; `domains/apicredits/service/tests/integration/test_migrations.py`; `test_migrate_command.py` and `test_store_open.py` under each storefront's `tests/integration/`; the registry's `core/registry/tests/integration/test_migrations.py` and `core/registry/tests/unit/test_migration_states.py`.
+- The shared engine — classification, refusal messages, atomic recording under every transaction control, adoption, the read-only check, and `schema_snapshot`: `kit/schema-migrations/tests/unit/` and `kit/schema-migrations/tests/integration/`.
+- Each chain reproducing its v0.3.0 floor fixture, adoption keeping rows, and the migrations after the baseline: `test_migration_chain.py` under `provisioning/compute/service/tests/integration/` and each storefront's `tests/integration/`, beside each service's `tests/fixtures/v0_3_0_floor/`; the shared storefront baselines against the bare-metal floor: `domains/bare_metal/storefront/tests/integration/test_shared_baselines.py`; deal servicing's store-open schema: `kit/deal-servicing/tests/integration/test_servicing_schema.py`.
+- The migration init containers: `helm/charts/provisioning/tests/test_render.py`, `helm/charts/storefront/tests/test_render.py`, `helm/charts/bare-metal-storefront/tests/test_render.py`, and `helm/charts/registry/tests/test_render.py`.
+- Migration reading no operational configuration, the same database migrated under two configurations to equal schema and rows: `provisioning/compute/service/tests/integration/test_migration_reads_no_configuration.py`, `domains/apicredits/service/tests/integration/test_migrations.py`, each storefront's `test_migrate_command.py`, and `core/registry/tests/integration/test_migrations.py`.
 - The provisioning chart's `configFiles` rendered, mounted, and named in the profile, exact content and names, and refused names: `helm/charts/provisioning/tests/test_render.py`.
 - Wheel-directory dependency resolution without parent-path UV sources: package `pyproject.toml` files and package Makefiles using `--find-links`.
 - Package architecture in the packaging check: `make check-architecture`, `scripts/check_architecture_*.py`, and `scripts/tests/test_check_architecture.py`.
@@ -1247,7 +1337,6 @@ The registry MUST load, after its default dotenv files, `config-<profile>.env` f
 - One Python version: the root `.python-version`, the `UV_PYTHON` export in each Makefile that runs uv, and the CI step that sets it.
 - Extracted compute API/worker packaging and image lifecycle: `provisioning/compute/service/pyproject.toml`, `provisioning/compute/service/Dockerfile`, and its composition, worker, and image smoke tests.
 - Explicit contribution configuration and secret-free render surfaces: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_cli.py`, `helm/charts/storefront/templates/tests/storefront-environment-test.yaml`, and Helm schema fixtures.
-- Transactional legacy storefront migration, byte-stable refusal, restrictive backup, atomic replacement, and idempotency: `domains/vms/storefront/tests/unit/test_domain_migration.py`.
 - Bare-metal staged-wheel/image boundary and installed contribution: `domains/bare_metal/storefront/pyproject.toml`, `domains/bare_metal/storefront/Dockerfile`, `domains/bare_metal/storefront/tests/test_package.py`, `test_import_boundaries.py`, and `test_app_composition.py`.
 
-Repository-wide migration entrypoints and compatibility-preserving non-additive registry rollout remain proposed in `add-database-migration-commands` and `migrate-registry-to-postgres`.
+The registry's PostgreSQL cutover and its rollout remain proposed in `migrate-registry-to-postgres`.

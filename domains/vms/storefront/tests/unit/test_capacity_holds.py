@@ -3,11 +3,13 @@ from __future__ import annotations
 import pytest
 
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 
 @pytest.fixture
 def client(tmp_path):
+    migrate_storefront_database(tmp_path / "agent.db")
     return SQLiteClient(db_path=str(tmp_path / "agent.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 

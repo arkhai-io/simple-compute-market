@@ -14,6 +14,7 @@ from market_identity import Ed25519Signer
 
 from market_storefront.services.system_service import SystemService
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.fake_site import FakeProjectionSite, site_projection_state
 
@@ -26,6 +27,7 @@ MARKETPLACE_SIGNER = Ed25519Signer(b"\x41" * 32)
 
 @pytest.fixture
 def db(tmp_path) -> SQLiteClient:
+    migrate_storefront_database(tmp_path / "system_service_test.db")
     return SQLiteClient(db_path=str(tmp_path / "system_service_test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 

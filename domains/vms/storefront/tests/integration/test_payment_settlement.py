@@ -51,6 +51,7 @@ from market_storefront.deal_lifecycle import VmDealLifecycle
 from market_deal_servicing import create_lifecycle_router, PhysicalResult
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
 
@@ -271,6 +272,7 @@ async def _harness(
         fulfillment=ImmutableFulfillmentCapability(fulfill=delivery),
     )
     registry = build_vm_storefront_registry(domain)
+    migrate_storefront_database(tmp_path / "storefront.db")
     db = SQLiteClient(str(tmp_path / "storefront.db"), registry=registry)
     payments = FakePaymentsClient()
     stage = PaymentSellerStage(_config(), client_for_owner=payments)

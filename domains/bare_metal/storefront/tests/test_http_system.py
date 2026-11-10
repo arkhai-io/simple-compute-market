@@ -25,6 +25,7 @@ from arkhai_bare_metal_storefront.lifecycle_steps import (
     PublicationWake,
     bare_metal_loop_controller,
 )
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.publication import (
     BareMetalPublicationCycle,
     BareMetalPublicationError,
@@ -69,6 +70,7 @@ ADMIN_SIGNER = Eip191Signer(bytes.fromhex("33" * 32))
 
 def _runtime(path: str) -> BareMetalStorefrontRuntime:
     domain = get_market_domain_contract()
+    migrate_storefront_database(path)
     return BareMetalStorefrontRuntime(
         db=SQLiteClient(path, domain=domain),
         domain=domain,

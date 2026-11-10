@@ -7,7 +7,7 @@ is written; there is no `tasks.md` yet.
 
 Verified against the tree on 2026-10-01.
 
-- `core/registry/filter-spec.yaml` (version 6, schema `compute.market` version 2)
+- `core/registry/src/core_registry/filter-spec.yaml` (version 6, schema `compute.market` version 2)
   declares `listing_shape` with `additionalProperties: true` at the top level and
   inside `listing_resource`, and refuses only the retired `offer`,
   `offer_resource`, and `virtualization_type` spellings.

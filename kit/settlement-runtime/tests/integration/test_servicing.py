@@ -13,6 +13,7 @@ import time
 import pytest
 
 from market_identity import Identity, IdentityScheme
+from settlement_tables import settlement_database
 
 from market_settlement_runtime import (
     ConditionOutcome,
@@ -99,7 +100,7 @@ class PollingClient:
 async def test_worker_restarts_from_durable_backoff_and_operation_state(
     tmp_path,
 ) -> None:
-    repository = SettlementSQLiteRepository(str(tmp_path / "worker.db"))
+    repository = SettlementSQLiteRepository(settlement_database(tmp_path / "worker.db"))
     client = PollingClient()
     runtime = SettlementRuntime(repository, {"test.v1": client})
     record = (
@@ -172,7 +173,7 @@ class ExpiredClient(PollingClient):
 
 
 async def test_expired_obligation_dispatches_terminal_outcome(tmp_path) -> None:
-    repository = SettlementSQLiteRepository(str(tmp_path / "expired.db"))
+    repository = SettlementSQLiteRepository(settlement_database(tmp_path / "expired.db"))
     client = ExpiredClient()
     runtime = SettlementRuntime(repository, {"test.v1": client})
     record = (
@@ -226,7 +227,7 @@ class ReturnedClient(PollingClient):
 
 
 async def test_return_cleanup_retries_durably_after_restart(tmp_path) -> None:
-    repository = SettlementSQLiteRepository(str(tmp_path / "returned.db"))
+    repository = SettlementSQLiteRepository(settlement_database(tmp_path / "returned.db"))
     client = ReturnedClient()
     runtime = SettlementRuntime(repository, {"test.v1": client})
     record = (
@@ -300,7 +301,7 @@ async def test_return_cleanup_retries_durably_after_restart(tmp_path) -> None:
     assert stored["collection_state"] == "pending"
 
 async def _adopted_without_fulfillment(tmp_path, client):
-    repository = SettlementSQLiteRepository(str(tmp_path / "one.db"))
+    repository = SettlementSQLiteRepository(settlement_database(tmp_path / "one.db"))
     runtime = SettlementRuntime(repository, {"test.v1": client})
     record = (
         await runtime.register_plan(
@@ -628,7 +629,7 @@ async def test_a_failed_start_is_left_to_the_workers_retry(tmp_path) -> None:
 
 
 async def test_service_obligation_refuses_an_unknown_obligation(tmp_path) -> None:
-    repository = SettlementSQLiteRepository(str(tmp_path / "none.db"))
+    repository = SettlementSQLiteRepository(settlement_database(tmp_path / "none.db"))
     worker = SettlementServicingWorker(
         SettlementRuntime(repository, {"test.v1": PollingClient()}),
         repository,
@@ -678,7 +679,7 @@ async def test_an_unstarted_ready_obligation_is_due_until_an_attempt_holds_it(
 async def test_an_obligation_that_is_not_ready_is_not_due_for_fulfillment(
     tmp_path,
 ) -> None:
-    repository = SettlementSQLiteRepository(str(tmp_path / "pending.db"))
+    repository = SettlementSQLiteRepository(settlement_database(tmp_path / "pending.db"))
     runtime = SettlementRuntime(repository, {"test.v1": PollingClient()})
     await runtime.register_plan(
         agreement_ref="agreement-pending",

@@ -97,9 +97,10 @@ serve:
 # Database Management
 # ==============================================================================
 
-# Run database migrations
+# Adopt a v0.3.0 database and upgrade to the script head; the registry refuses
+# to start on a database this has not migrated.
 migrate:
-	uv run alembic upgrade head
+	uv run registry-migrate
 
 # Create a new migration
 # Usage: make create-migration MESSAGE="description"

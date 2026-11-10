@@ -19,9 +19,12 @@ DIST_DIR ?= ../../../.dist
 # wheel set an explicit cache key for both image stages.
 DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
 
-.PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration
+.PHONY: build build-images build-no-cache deploy deploy-storefront init reinit migrate test test-unit test-integration
 
 init: reinit ## Resolve deps from verified wheels and create .venv.
+
+migrate: ## Apply the storefront's database migrations; serve refuses a database without them
+	uv run --find-links $(DIST_DIR) market-storefront-migrate
 
 reinit: ## Force-reinstall verified internal wheels.
 	python3 ../../../scripts/uv_project.py reinit

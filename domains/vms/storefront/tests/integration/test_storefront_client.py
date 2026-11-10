@@ -19,6 +19,7 @@ from fastapi import FastAPI
 
 import market_storefront.container as _container
 from market_storefront.controllers.listings_controller import router as listings_router
+from market_storefront.utils.migrations import migrate_storefront_database
 
 _COMPUTE_LISTING_RESOURCE = {
     "gpu_model": "RTX 4090",
@@ -60,6 +61,7 @@ async def orders_client(mock_svc, tmp_path) -> AsyncIterator[httpx.AsyncClient]:
         build_vm_storefront_registry,
     )
     from market_storefront.utils.sqlite_client import SQLiteClient
+    migrate_storefront_database(tmp_path / "orders_test.db")
     db = SQLiteClient(db_path=str(tmp_path / "orders_test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = mock_svc

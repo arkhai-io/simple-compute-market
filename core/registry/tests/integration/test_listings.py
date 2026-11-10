@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 import httpx
 import pytest
 from market_identity import TrustedIdentitySet
@@ -13,6 +15,7 @@ from registry_client.models import (
     ListingSummary,
     UpdateListingRequest,
 )
+from core_registry.db.models import Listing, OrderStatusEnum
 from core_registry.main import app
 
 
@@ -151,6 +154,59 @@ class TestListPublisherListings:
             status=None,
         )
         assert open_order.listing_id in [str(item.id) for item in result.listings]
+
+    async def test_open_listings_page_by_offset_to_the_end(
+        self,
+        registry_client,
+        db_session,
+        maker_publisher,
+        taker_publisher,
+        maker_signer,
+    ):
+        """A publisher's open listings, read a page at a time, are every open
+        listing of that publisher once: none closed, none of another publisher.
+        Each carries its resource's offering mode, by which a storefront's sweep
+        tells its own listings from another storefront's under a shared principal
+        and leaves a listing stating none open."""
+        created = iter(range(100))
+
+        def add(listing_id, publisher, status):
+            # Distinct creation times, so the newest-first order every page is
+            # cut from is the same order on each read.
+            db_session.add(
+                Listing(
+                    listing_id=listing_id,
+                    publisher_id=publisher.publisher_id,
+                    listing_resource={"offering_mode": "vm"},
+                    accepted_escrows=[],
+                    max_duration_seconds=3600,
+                    status=status,
+                    created_at=datetime(2026, 11, 1) + timedelta(minutes=next(created)),
+                )
+            )
+
+        for n in range(5):
+            add(f"maker-open-{n}", maker_publisher, OrderStatusEnum.open)
+        add("maker-closed", maker_publisher, OrderStatusEnum.closed)
+        add("taker-open", taker_publisher, OrderStatusEnum.open)
+        db_session.commit()
+
+        pages = []
+        offset = 0
+        while True:
+            page = await registry_client.list_listings_for_publisher(
+                maker_signer.identity, status="open", limit=2, offset=offset
+            )
+            pages.append([str(item.id) for item in page.listings])
+            assert [item.listing_resource.get("offering_mode") for item in page.listings] == [
+                "vm"
+            ] * len(page.listings)
+            if len(page.listings) < 2:
+                break
+            offset += len(page.listings)
+
+        assert [len(page) for page in pages] == [2, 2, 1]
+        assert sorted(sum(pages, [])) == [f"maker-open-{n}" for n in range(5)]
 
     async def test_different_scheme_principal_does_not_resolve(
         self,

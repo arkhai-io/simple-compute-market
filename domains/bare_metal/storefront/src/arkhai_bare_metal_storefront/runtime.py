@@ -80,6 +80,7 @@ from .lifecycle_steps import (
     site_projection_status,
 )
 from .listing_source_check import build_listing_source_check
+from .migrations import require_compatible_storefront_database
 from .negotiation import default_seller_round_hook, seller_chain_check
 from .negotiation_runtime import build_bare_metal_negotiation_runtime
 from .pool_overrides import (
@@ -274,10 +275,7 @@ class BareMetalStorefrontRuntime:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "loops", self.loop_controller_factory())
-        repository = SettlementSQLiteRepository(
-            self.db.db_path,
-            apply_migrations=False,
-        )
+        repository = SettlementSQLiteRepository(self.db.db_path)
         clients = (
             self.settlement_composition.runtime_clients()
             if self.settlement_composition is not None
@@ -916,12 +914,11 @@ def build_runtime_from_configuration(
         )
     except (TypeError, ValueError) as exc:
         raise RuntimeError(f"bare-metal storefront site bindings are invalid: {exc}") from exc
-    db = SQLiteClient(
-        active.db_path,
-        domain=selected_domain,
-        local_listing_principal=principal,
-        expected_legacy_sellers=(storefront_url,),
-    )
+    # Before anything opens the database: `bare-metal-storefront-migrate`
+    # builds it, and nothing here issues DDL, so a database not exactly at the
+    # chain is refused naming the command, and none is created.
+    require_compatible_storefront_database(active.db_path)
+    db = SQLiteClient(active.db_path, domain=selected_domain)
     # Built here and seeded when the server starts (``seed_service_peer_trust``),
     # so composing a runtime writes nothing to the identity state.
     service_peer_trust = ServicePeerTrust(db.db_path, active.service_peer_configs())

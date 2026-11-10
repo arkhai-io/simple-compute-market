@@ -51,7 +51,7 @@ class _Codec:
 
 
 def _connection(address: str = "192.0.2.10", **secrets: str) -> ConnectionSubmission:
-    return ConnectionSubmission(kind="fake", public={"address": address}, secrets=secrets)
+    return ConnectionSubmission(kind="fake", version=1, public={"address": address}, secrets=secrets)
 
 
 @pytest.fixture
@@ -136,7 +136,7 @@ def test_execution_hosts_carry_each_enabled_hosts_full_envelope_in_id_order(auth
         HostCreate(
             host_id="h1",
             connection=ConnectionSubmission(
-                kind="fake", public={"address": "192.0.2.11", "key_path": "/keys/h1"}
+                kind="fake", version=1, public={"address": "192.0.2.11", "key_path": "/keys/h1"}
             ),
         )
     )
@@ -169,11 +169,15 @@ def test_execution_hosts_of_an_empty_registry_are_none(authority) -> None:
 def test_a_connection_its_codec_refuses_is_not_stored(authority) -> None:
     with pytest.raises(ValueError, match="needs an address"):
         authority.register_host(
-            HostCreate(host_id="h1", connection=ConnectionSubmission(kind="fake", public={}))
+            HostCreate(
+                host_id="h1", connection=ConnectionSubmission(kind="fake", version=1, public={})
+            )
         )
     with pytest.raises(ValueError, match="not supported"):
         authority.register_host(
-            HostCreate(host_id="h1", connection=ConnectionSubmission(kind="ssh", public={}))
+            HostCreate(
+                host_id="h1", connection=ConnectionSubmission(kind="ssh", version=2, public={})
+            )
         )
     assert authority.get_host("h1") is None
 

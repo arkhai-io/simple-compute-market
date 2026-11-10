@@ -16,7 +16,7 @@ from market_deal_lifecycle_contracts.models import Accepted, EvidenceItem, Lifec
 from market_identity import Signer, canonical_json
 
 from .evidence import EvidenceSession, in_transaction, transaction
-from .journal import Classification, EndSession, atomic, create_schema, stable_ref
+from .journal import Classification, EndSession, atomic, stable_ref
 from .seller import SellerSession
 
 
@@ -43,18 +43,9 @@ class RespondentPoller:
         self.record = stable_ref(account, "respondent", canonical_json(authority.identity).decode())
 
     async def _database(self, operation):
-        def run(conn):
-            create_schema(conn)
-            conn.execute("""CREATE TABLE IF NOT EXISTS servicing_respondent (
-                record TEXT PRIMARY KEY, cursor TEXT NOT NULL, page TEXT
-            )""")
-            conn.execute("""CREATE TABLE IF NOT EXISTS servicing_respondent_repairs (
-                record TEXT NOT NULL, case_ref TEXT NOT NULL, commitment_ref TEXT NOT NULL,
-                case_json TEXT NOT NULL, reason TEXT NOT NULL,
-                PRIMARY KEY (record,case_ref)
-            )""")
-            return operation(conn)
-        return await in_transaction(self.path, run)
+        # Its tables are the storefront chain's (market_deal_servicing.schema):
+        # a poll issues no DDL.
+        return await in_transaction(self.path, operation)
 
     async def repairs(self, limit: int = 100) -> list[dict]:
         """Unresolved cases stay visible and retry independently of the listing page."""

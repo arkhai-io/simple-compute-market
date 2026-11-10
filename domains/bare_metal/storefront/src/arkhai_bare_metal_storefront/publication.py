@@ -13,7 +13,9 @@ resolves no positive maximum lease duration, are held. A candidate that can
 publish no settlement option is refused: its open listing closes when the
 storefront's configuration rules out every mechanism its clauses name, and is
 held while any of them is unknown. Every cycle then converges each registry the
-storefront publishes to on its listings' local status.
+storefront publishes to on its listings' local status, and closes at each
+registry any open bare-metal listing under its principal that it does not hold
+open.
 
 A held generation may be stale -- its site's latest poll failed -- and the
 cycle derives from it all the same, because holding a site's listings through
@@ -77,6 +79,7 @@ from market_capacity_publication import (
     SiteProjectionState,
     backing_changed,
     converge_registries,
+    retire_unheld_listings,
 )
 from market_identity import Identity
 from market_storefront_kit import LifecycleRouteError
@@ -226,8 +229,9 @@ class BareMetalPublicationCycle:
             registry_client_factory,
             registry_urls=registry_urls,
             storefront_url=storefront_url,
+            publisher=seller_principal,
         )
-        self._hooks = BareMetalPublicationHooks(sqlite_client)
+        self._hooks = BareMetalPublicationHooks(sqlite_client, publisher=seller_principal)
         self.report = PublicationCycleReport()
         self._driver = PublicationCycleDriver()
         self._classifications: dict[str, BareMetalSiteClassification] = {}
@@ -310,6 +314,7 @@ class BareMetalPublicationCycle:
             )
         self._enter_stage("converge")
         await converge_registries(self._runtime, self.report)
+        await retire_unheld_listings(self._runtime, self.report)
         return self.report.as_dict()
 
     def _classify_site(self, site_id: str, view: ProjectionCacheView[Any]) -> None:

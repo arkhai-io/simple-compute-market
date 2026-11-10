@@ -58,41 +58,6 @@ Where capacity admission is requested for such a listing, a pool-only listing pr
 - **WHEN** capacity admission is attempted for a listing with no admission authority behind it
 - **THEN** no reservation claim is constructed and the attempt is refused
 
-### Requirement: Requested offering mode is explicit and bounded by the pool
-
-Every capacity probe and reservation claim MUST carry a non-empty canonical `offering_mode` naming the requested offering mode, and that key MUST be required. It is the same value a Resource Pool declares as deliverable, the same value the durable listing binding records, and the same value the published listing carries; no surface may name it `executor_kind`, `offering_type`, or `virtualization_type`. The site authority MUST persist that exact value on the Capacity Reservation and MUST NOT infer it from `host_id`, `physical_host_id`, resource kind, market name, matched-resource attributes, or any default. A matching Resource Pool MUST currently declare the requested mode before a new hold is created.
-
-The claim's site-inventory discriminator remains a separate field and a separate axis. Naming the offering mode consistently MUST NOT merge the two.
-
-`executor` MUST NOT be used as vocabulary for the offering mode, for the machine, or for the delivery handler. The machine is a host, the handler is a provider, and the mode is an offering mode.
-
-Legacy reservations, settlement assignments, and executor jobs that predate the field MUST be backfilled only when durable request, settlement, provider-input, or executor-reference evidence proves exactly one mode. A reservation persisted under the retired key MUST be migrated to the settled one rather than read through a compatibility mapping, so that a search for the retired name is trustworthy evidence no surface still produces it. An active row with no proof or conflicting proof MUST be quarantined from execution; a completed row keeps its terminal lifecycle state while recording the quarantine. A settlement or request identity that conflicts with an already explicit reservation identity is schema drift, not a precedence choice.
-
-#### Scenario: Claim omits the requested mode
-
-- **WHEN** a capacity probe or reservation claim omits `offering_mode`
-- **THEN** the site authority rejects it before matching resources and does not infer `vm` from a matched resource
-
-#### Scenario: Claim names the requested mode under a retired key
-
-- **WHEN** a capacity probe or reservation claim carries the requested mode under `executor_kind`
-- **THEN** the claim is treated as carrying no offering mode and is refused
-
-#### Scenario: Pool does not declare the requested mode
-
-- **WHEN** a Physical Resource matches the requested shape but its Resource Pool does not declare the claim's offering mode
-- **THEN** reservation is refused with the mode and pool identified before a Capacity Reservation or debit exists
-
-#### Scenario: Legacy identity has one durable proof
-
-- **WHEN** a legacy reservation has no recorded offering mode and durable provider or placement fields prove exactly one mode
-- **THEN** migration records that mode on the reservation and propagates it to its settlement and executor job
-
-#### Scenario: Legacy identity is unproved or conflicting
-
-- **WHEN** a live legacy reservation or executor job has no single provable mode
-- **THEN** migration moves it to the durable unmanaged or failed quarantine path without selecting `vm` or another fallback
-
 ### Requirement: Offering mode is enforced through fulfillment
 
 The same pool-declaration membership predicate MUST be applied independently when the site authority admits a reservation, when fulfillment schedules a Settlement Resource, and immediately before provider dispatch. Scheduling and provisioning MUST re-read the selected Resource Pool's current declaration, including on an idempotent retry or a previously prepared provider operation. Withdrawing a mode after a hold or assignment therefore blocks new execution in that mode without mutating the historical requested mode.
@@ -302,7 +267,6 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - Explicit request identity, absence and undeclared-mode refusal, legacy reservation behavior, declaration narrowing, and independent cross-mode accounting: `kit/site/tests/integration/test_ledger.py`.
 - Scheduling-time mode enforcement and withdrawal after reservation: `kit/fulfillment/tests/integration/test_scheduler.py`.
 - Pre-dispatch enforcement, including a previously prepared operation after declaration withdrawal: `kit/fulfillment/tests/unit/test_fulfillment.py`.
-- Durable reservation/settlement/job backfill, quarantine, idempotency, and schema drift: `provisioning/compute/service/tests/unit/test_pool_offering_mode_migration.py`.
 - Deployed reservation-boundary refusal before a hold exists: `e2e-tests/tests/e2e/roles/scenarios/vms/test_pool_declared_offering_modes.py`.
 - Site-tagged soft-state aggregation and failure isolation: `core/storefront/tests/unit/test_aggregation.py`.
 - Storefront-to-site HTTP contract: `kit/site-client/tests/unit/test_client.py`, `kit/site-client/tests/unit/test_opacity.py`.
@@ -311,12 +275,12 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - A stored declaration with no pool excluded from admission, both projections, scheduling, settlement assignment, and pool moves, logged, and still listed for its operator: `kit/site/tests/integration/test_ledger.py`; from projection and the injected exact matcher: `kit/site/tests/unit/test_projections.py` and `kit/site/tests/unit/test_dict_resource_satisfies_claim.py`; from the provisioning resource-pool projection: `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`.
 - Session-scoped settlement assignment, locked reservation reads, and in-session backing-resource lookup: `kit/site/tests/unit/test_settlement_assignment.py`.
 - Reservation supersede (`resize_reservation`) and unconditional settlement-abandonment hook invocation across TTL lapse, release, and resize: `kit/site/tests/integration/test_ledger.py`.
-- One release-handle name: the ledger payload and model in `kit/site/tests/integration/test_ledger.py`; the published and updatable VM lease handle in `provisioning/compute/service/tests/integration/test_leases_api.py`, the published bare-metal lease handle in `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, and the lease models in `provisioning/compute/service/tests/unit/test_lease_models.py`; the upgrade, including the mirror-only backfill and the refusal on disagreement, in `provisioning/compute/service/tests/integration/test_reservation_release_mirror_migration.py`; and the deployed VM release path through teardown in `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`.
+- One release-handle name: the ledger payload and model in `kit/site/tests/integration/test_ledger.py`; the published and updatable VM lease handle in `provisioning/compute/service/tests/integration/test_leases_api.py`, the published bare-metal lease handle in `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, and the lease models in `provisioning/compute/service/tests/unit/test_lease_models.py`; and the deployed VM release path through teardown in `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`.
 - Listing identity normalization and validation: `domains/vms/storefront/tests/unit/test_listing_model_capacity_identity.py`.
 - Claim identity precedence and fail-closed construction: `domains/vms/storefront/tests/integration/test_vm_delivery_path.py`, `domains/vms/storefront/tests/unit/test_vm_fulfillment_planner.py`, and `domains/compute/delivery/tests/integration/test_drive_entry.py`.
 - Listing publication and legacy-invalid remediation: `domains/vms/storefront/tests/integration/test_listings_api.py`.
 - Per-site/family projection load-state reporting, including partial multi-site failure isolation, never-loaded retry, and `fetched_at` tracking: `core/storefront/tests/unit/test_site_projections.py`, `kit/capacity-publication/tests/unit/test_site_projection_state.py`, and `domains/vms/storefront/tests/unit/services/test_system_service.py`. A genuinely-loaded-empty site is distinguished from a never-loaded one, at both the producer and consumer level, rather than the empty case silently falling back to a different source: `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`. A projected resource's own `available` field is used even when a separately-sourced fallback value is present: `domains/vms/storefront/tests/unit/test_reconciler.py`.
-- Resource-pool projection metadata: allowlisting/redaction, deep-copy isolation, digest advancement, and old-shape preservation: `kit/site/tests/unit/test_projections.py` and `kit/site/tests/unit/test_projection_router.py`. Composition (`ResourcePool`/`AnsiblePoolConfig` -> allowlisted metadata): `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`; the provider/mechanism gate on a pool's views: `provisioning/compute/service/tests/unit/services/test_vm_inventory_views.py`. VM size defaults reachable through the real pool admin API end to end (`ProvisioningClient.create_pool` -> `AnsiblePoolConfigHandler` -> DB -> read-back): `provisioning/compute/service/tests/integration/test_pools_api.py`. The same defaults surfacing through the real projection consumer (`SiteCapacityClient.resource_pool_projection()` over the real in-process app): `provisioning/compute/service/tests/integration/test_capacity_api.py`. Schema migration column addition and idempotency: `provisioning/compute/service/tests/integration/test_database.py`. A declaration's GPU model reaching the projected resource's `attributes`, omitted rather than null when the declaration does not declare one, including when only the host record holds one: `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py` and `provisioning/compute/service/tests/integration/test_capacity_api.py`.
+- Resource-pool projection metadata: allowlisting/redaction, deep-copy isolation, digest advancement, and old-shape preservation: `kit/site/tests/unit/test_projections.py` and `kit/site/tests/unit/test_projection_router.py`. Composition (`ResourcePool`/`AnsiblePoolConfig` -> allowlisted metadata): `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`; the provider/mechanism gate on a pool's views: `provisioning/compute/service/tests/unit/services/test_vm_inventory_views.py`. VM size defaults reachable through the real pool admin API end to end (`ProvisioningClient.create_pool` -> `AnsiblePoolConfigHandler` -> DB -> read-back): `provisioning/compute/service/tests/integration/test_pools_api.py`. The same defaults surfacing through the real projection consumer (`SiteCapacityClient.resource_pool_projection()` over the real in-process app): `provisioning/compute/service/tests/integration/test_capacity_api.py`. The chain's schema holding every mapped column, and an idempotent rerun: `provisioning/compute/service/tests/integration/test_migration_chain.py` and `test_database.py`. A declaration's GPU model reaching the projected resource's `attributes`, omitted rather than null when the declaration does not declare one, including when only the host record holds one: `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py` and `provisioning/compute/service/tests/integration/test_capacity_api.py`.
 - The real HTTP contract (`HealthResponse` server model through the actual `/api/v1/system/status` route to the real `StorefrontClient`) surfacing this state intact: `domains/vms/storefront/tests/integration/test_admin_api.py`.
 
 Job-kind dispatch and deal-event routing across multiple storefront domains are not established by this capacity baseline.
@@ -694,46 +658,6 @@ provider or different capacity backing.
 - **WHEN** a reassignment is requested for a capacity resource with no live capacity obligation
 - **THEN** the reassignment succeeds
 
-### Requirement: A reservation's release handle has one name
-
-A Capacity Reservation MUST represent its durable release handle, when it has
-one, only as `release_job_id`, regardless of the reservation's offering mode. The
-handle is absent until release begins. The site authority MUST NOT write a
-domain-prefixed mirror of it. Every lease contract that publishes a release
-handle MUST name it `release_job_id`. Only the lease lifecycle writes the handle;
-no lease route accepts one.
-
-A reservation's pool, offering mode, and teardown path differ by domain, but the
-handle a caller follows to observe release does not, so one name serves every
-offering mode that shares the reservation table.
-
-#### Scenario: A VM reservation begins releasing
-
-- **WHEN** the compute lifecycle records the release job for a reservation whose offering mode is the VM mode
-- **THEN** the reservation's `release_job_id` is set and no second, VM-named field is written
-
-#### Scenario: A lease is read through either adapter
-
-- **WHEN** a VM lease or a bare-metal lease is read, through the compute family's one lease surface that serves both
-- **THEN** the release handle is published as `release_job_id` and under no other name
-
-#### Scenario: An operator corrects a lease's release handle
-
-- **WHEN** an operator wants to change a lease's release handle
-- **THEN** no lease route accepts one: the handle is written only by the lease lifecycle, and a lease that cannot be released is repaired by retry-release or force-release
-
-#### Scenario: A compute provisioning database is upgraded
-
-- **WHEN** a compute provisioning database whose reservation table holds a domain-prefixed release mirror is migrated
-- **THEN** a reservation whose handle is held only in the mirror keeps it as `release_job_id`
-- **AND** the mirror column is removed without losing any reservation's release handle or other reservation data
-- **AND** a database without the column migrates unchanged
-
-#### Scenario: A compute provisioning database holds two different release handles
-
-- **WHEN** a reservation's `release_job_id` and its domain-prefixed mirror hold different values
-- **THEN** the upgrade stops, naming the reservation, and changes nothing
-
 ### Requirement: A reservation's lease tail is written once
 
 The site authority MUST record a reservation's executor target once, written in the
@@ -922,42 +846,6 @@ eligibility MUST use the same shared feasibility predicate.
 - **WHEN** any requested scheduling dimension exceeds the capacity reservation
 - **THEN** scheduling is rejected before resource assignment
 
-### Requirement: Capacity schema separation
-
-The site-capacity schema MUST name a reservation `CapacityReservation`,
-keyed by `capacity_reservation_id`, with explicit site ownership and
-globally unique identifiers. It MUST keep host identity, pool membership,
-reservable capacity, and settlement-resource assignment separate.
-
-#### Scenario: Existing host migration
-- **WHEN** the schema migration runs
-- **THEN** every existing host is represented in the default resource pool
-  before active fulfillment records are backfilled
-
-### Requirement: A stored reservation in a retired state is converted at upgrade
-
-A service whose database holds the site ledger MUST, in its migration chain, convert a
-reservation stored as `provisioning` to `unmanaged` and one stored as `provisioning_failed`
-to `force_released`, each with a failure reason naming the state it held, so that every
-reservation keeps its capacity effect and reads in a state the lifecycle defines.
-
-#### Scenario: A held reservation in a retired state is upgraded
-
-- **WHEN** a database holding a `provisioning` reservation is migrated
-- **THEN** the reservation is `unmanaged`, its capacity stays held until an operator
-  repairs it, and its failure reason names `provisioning`
-
-#### Scenario: A terminal reservation in a retired state is upgraded
-
-- **WHEN** a database holding a `provisioning_failed` reservation is migrated
-- **THEN** the reservation is `force_released`, its capacity stays free, and its failure
-  reason names `provisioning_failed`
-
-#### Scenario: No reservation holds a retired state
-
-- **WHEN** a database with no such reservation is migrated
-- **THEN** no reservation changes
-
 ### Requirement: A site authority answers an unroutable request by what failed to match
 
 The site kit's authentication middleware MUST answer a request that resolves to no route
@@ -1124,21 +1012,6 @@ revision and digest when it is next produced.
 - **WHEN** a host is enabled, disabled, or registered
 - **THEN** no capacity event is recorded and the capacity version is unchanged
 
-### Requirement: A lease records when it was activated
-
-A reservation MUST carry a nullable `activated_at_utc`, written only by activation as an ISO-8601 UTC instant from the site's clock. Whether the site has recorded a lease's activation MUST be derived from it and stored nowhere else. Null MUST mean only that no activation is recorded: on a reservation that predates the column it says nothing about whether the resource was delivered, and no consumer may treat it as evidence that it was not. Every service hosting the site ledger MUST add it in its migration chain, leaving it null on every existing reservation, with no backfill.
-
-#### Scenario: Existing reservations migrate with no activation recorded
-
-- **WHEN** a compute provisioning or API-credits database holding leased reservations is migrated
-- **THEN** every reservation has a null `activated_at_utc`, and its state, window and expiry are unchanged
-- **AND** nothing records whether a lease that predates the migration was delivered
-
-#### Scenario: The instant is read
-
-- **WHEN** a reservation is read through the site's reservation view
-- **THEN** it carries `activated_at_utc`, null until activation and the recorded instant after it
-
 ### Requirement: Activation records its instant once and changes nothing else
 
 Activation MUST be admissible only for a lease: a `leased` reservation with a lease end. Where `activated_at_utc` is null it MUST write it in one transaction; where set, it MUST return the reservation unchanged. From any other state, and on a `leased` reservation with no lease end, it MUST be refused with nothing written. It MUST NOT change state or window, record a capacity event, or alter admission. It MUST answer 200 with the recorded reservation, 404 for an unknown one, and 409 when refused, naming the state, or for a reservation with no lease end saying that it has no lease tail.
@@ -1216,3 +1089,78 @@ A reserve MAY carry `deal_ref.placement_key`, naming the deal and the purpose of
 
 - **WHEN** the reservation recorded under `neg-4c1e:hold` has expired and a reserve under `neg-4c1e:settlement` arrives
 - **THEN** the site admits the settlement placement as a new reservation, and a replay under `neg-4c1e:hold` still returns the expired one
+
+### Requirement: A capacity reservation is stored apart from its host, pool, and assignment
+
+The site-capacity schema MUST name a reservation `CapacityReservation`,
+keyed by `capacity_reservation_id`, with explicit site ownership and
+globally unique identifiers. It MUST keep host identity, pool membership,
+reservable capacity, and settlement-resource assignment separate.
+
+#### Scenario: A reservation is assigned a resource
+
+- **WHEN** a capacity reservation is assigned a settlement resource
+- **THEN** the reservation is a `CapacityReservation` keyed by its globally unique
+  `capacity_reservation_id`, and the assignment is recorded on the reservation, apart
+  from the host record that holds the host's identity and the capacity record that
+  holds its pool membership and reservable capacity
+
+### Requirement: Requested offering mode is required and bounded by the pool
+
+Every capacity probe and reservation claim MUST carry a non-empty canonical `offering_mode` naming the requested offering mode, and that key MUST be required. It is the same value a Resource Pool declares as deliverable, the same value the durable listing binding records, and the same value the published listing carries; no surface may name it `executor_kind`, `offering_type`, or `virtualization_type`. The site authority MUST persist that exact value on the Capacity Reservation and MUST NOT infer it from `host_id`, `physical_host_id`, resource kind, market name, matched-resource attributes, or any default. A matching Resource Pool MUST currently declare the requested mode before a new hold is created.
+
+The claim's site-inventory discriminator remains a separate field and a separate axis. Naming the offering mode consistently MUST NOT merge the two.
+
+`executor` MUST NOT be used as vocabulary for the offering mode, for the machine, or for the delivery handler. The machine is a host, the handler is a provider, and the mode is an offering mode.
+
+#### Scenario: Claim omits the requested mode
+
+- **WHEN** a capacity probe or reservation claim omits `offering_mode`
+- **THEN** the site authority rejects it before matching resources and does not infer `vm` from a matched resource
+
+#### Scenario: Claim names the requested mode under a retired key
+
+- **WHEN** a capacity probe or reservation claim carries the requested mode under `executor_kind`
+- **THEN** the claim is treated as carrying no offering mode and is refused
+
+#### Scenario: Pool does not declare the requested mode
+
+- **WHEN** a Physical Resource matches the requested shape but its Resource Pool does not declare the claim's offering mode
+- **THEN** reservation is refused with the mode and pool identified before a Capacity Reservation or debit exists
+
+### Requirement: A reservation's release handle has a single name
+
+A Capacity Reservation MUST represent its durable release handle, when it has
+one, only as `release_job_id`, regardless of the reservation's offering mode. The
+handle is absent until release begins. The site authority MUST NOT write a
+domain-prefixed mirror of it. Every lease contract that publishes a release
+handle MUST name it `release_job_id`. Only the lease lifecycle writes the handle;
+no lease route accepts one.
+
+A reservation's pool, offering mode, and teardown path differ by domain, but the
+handle a caller follows to observe release does not, so one name serves every
+offering mode that shares the reservation table.
+
+#### Scenario: A VM reservation begins releasing
+
+- **WHEN** the compute lifecycle records the release job for a reservation whose offering mode is the VM mode
+- **THEN** the reservation's `release_job_id` is set and no second, VM-named field is written
+
+#### Scenario: A lease is read through either adapter
+
+- **WHEN** a VM lease or a bare-metal lease is read, through the compute family's one lease surface that serves both
+- **THEN** the release handle is published as `release_job_id` and under no other name
+
+#### Scenario: An operator corrects a lease's release handle
+
+- **WHEN** an operator wants to change a lease's release handle
+- **THEN** no lease route accepts one: the handle is written only by the lease lifecycle, and a lease that cannot be released is repaired by retry-release or force-release
+
+### Requirement: A lease records its activation instant
+
+A reservation MUST carry a nullable `activated_at_utc`, written only by activation as an ISO-8601 UTC instant from the site's clock. Whether the site has recorded a lease's activation MUST be derived from it and stored nowhere else. Null MUST mean only that no activation is recorded: on a reservation that predates the column it says nothing about whether the resource was delivered, and no consumer may treat it as evidence that it was not.
+
+#### Scenario: The instant is read
+
+- **WHEN** a reservation is read through the site's reservation view
+- **THEN** it carries `activated_at_utc`, null until activation and the recorded instant after it

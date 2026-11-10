@@ -1,13 +1,14 @@
 [project]
 name = "arkhai-kit-contact-exchange"
-version = "0.4.1"
+version = "0.5.0"
 description = "Introduction-only settlement: contact exchange with no payment and no provisioning"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
 dependencies = [
   "arkhai-core==0.5.0",
   "arkhai-kit-identity==0.4.0",
-  "arkhai-kit-settlement-runtime==0.7.0",
+  "arkhai-kit-schema-migrations>=0.1.0",
+  "arkhai-kit-settlement-runtime==0.8.0",
   "pydantic>=2.7",
   "typer>=0.12.0",
 ]
@@ -31,4 +32,4 @@ dev = ["pytest>=8.3.4,<9.0.0", "pytest-asyncio>=0.23"]
 # beyond the standard library, because its lightness is part of its contract.
 # make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
 [tool.arkhai.architecture]
-allowed-dependencies = ["arkhai-core", "arkhai-kit-identity", "arkhai-kit-settlement-runtime", "pydantic", "typer"]
+allowed-dependencies = ["arkhai-core", "arkhai-kit-identity", "arkhai-kit-schema-migrations", "arkhai-kit-settlement-runtime", "pydantic", "typer"]

@@ -37,6 +37,7 @@ from market_storefront.controllers.admin_controller import router as admin_route
 from market_storefront.controllers.system_controller import router as system_router
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 from market_storefront.services.system_service import SystemService
@@ -79,6 +80,7 @@ _SERVICE_PRINCIPALS = TrustedIdentitySet(identities=(_SERVICE_SIGNER.identity,))
 async def db(tmp_path) -> SQLiteClient:
     domain = build_vm_storefront_domain()
     registry = build_vm_storefront_registry(domain)
+    migrate_storefront_database(tmp_path / "admin_test.db")
     return SQLiteClient(
         db_path=str(tmp_path / "admin_test.db"),
         registry=registry,

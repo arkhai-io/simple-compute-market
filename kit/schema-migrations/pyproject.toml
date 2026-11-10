@@ -1,0 +1,37 @@
+[project]
+name = "arkhai-kit-schema-migrations"
+version = "0.1.0"
+description = "One migration engine for every in-house stateful service: chains that begin at a baseline, atomic recording, a read-only startup check, and its refusal message"
+# As wide as its narrowest-supporting consumer, the settlement runtime: the
+# engine uses nothing of the standard library newer than Python 3.10.
+requires-python = ">=3.10,<3.14"
+license = "MIT"
+# Standard library only, so a consumer holding no SQLAlchemy composes the
+# engine over sqlite3 and installs nothing else with it.
+dependencies = []
+
+[project.optional-dependencies]
+# market_schema_migrations.sqlalchemy_adapter imports SQLAlchemy at module
+# level; nothing else in the package imports that module, so only a consumer
+# that selects this extra, and already holds SQLAlchemy, loads it.
+sqlalchemy = ["sqlalchemy>=2.0,<3.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/market_schema_migrations"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests/unit", "tests/integration"]
+
+[dependency-groups]
+dev = ["pytest>=8.3.4,<9.0.0", "sqlalchemy>=2.0,<3.0"]
+
+# The package allowlist: every distribution this package may declare or import
+# beyond the standard library, because its lightness is part of its contract.
+# make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
+[tool.arkhai.architecture]
+allowed-dependencies = ["sqlalchemy"]

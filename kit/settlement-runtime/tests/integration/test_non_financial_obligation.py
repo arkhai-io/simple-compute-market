@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from settlement_tables import settlement_database
 
 from market_settlement_runtime import (
     SettlementRuntime,
@@ -30,7 +31,7 @@ def _introduction_obligation() -> dict[str, Any]:
 
 @pytest.fixture
 def repository(tmp_path) -> SettlementSQLiteRepository:
-    return SettlementSQLiteRepository(str(tmp_path / "settlement.db"))
+    return SettlementSQLiteRepository(settlement_database(tmp_path / "settlement.db"))
 
 
 async def test_amountless_obligation_registers_with_a_stable_identity(

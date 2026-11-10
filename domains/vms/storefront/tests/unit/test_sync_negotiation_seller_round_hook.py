@@ -41,6 +41,7 @@ from market_storefront.negotiation_runtime import (
     _default_seller_round_hook,
     build_vm_negotiation_runtime,
 )
+from market_storefront.utils.migrations import migrate_storefront_database
 from tests.fake_site import FakeProjectionSite, site_projection_state
 
 _BUYER_SIGNER = Ed25519Signer(b"\x41" * 32)
@@ -141,6 +142,7 @@ async def db(tmp_path, monkeypatch):
     from market_storefront.utils.sqlite_client import SQLiteClient
 
     registry = build_vm_storefront_registry(_DOMAIN)
+    migrate_storefront_database(tmp_path / "seller_round_hook.db")
     client = SQLiteClient(
         db_path=str(tmp_path / "seller_round_hook.db"),
         registry=registry,

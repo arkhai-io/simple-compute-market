@@ -27,7 +27,7 @@ from market_alkahest.payment_adapter import AlkahestOnceAdapter
 from market_capacity_publication import CapacityEffects, publication_binding
 from market_core import VersionedEnvelope
 from market_deal_lifecycle.delivery import BillingStartResult, ReadyEvidenceRef
-from market_deal_servicing import DeliveryRecord, EndService, EndSession, PhysicalResult
+from market_deal_servicing import DeliveryRecord, EndService, EndSession, PhysicalResult, create_schema
 from market_deal_servicing.evidence import transaction
 from market_identity import Ed25519Signer
 from market_site_client import SiteCapacityClientError, SiteCapacityUnauthenticatedResponseError
@@ -435,6 +435,10 @@ class Rig:
 def rig(tmp_path) -> Rig:
     """A deal accepted for ``[START, START + 2h)``, its clock half an hour in."""
     path = tmp_path / "storefront.sqlite"
+    # Deal servicing's tables, which the storefront's chain creates and no
+    # session does.
+    with transaction(path) as conn:
+        create_schema(conn)
     clock = [START + 1800]
     site = FakeSite(clock)
     fulfillment = FakeFulfillment(site)

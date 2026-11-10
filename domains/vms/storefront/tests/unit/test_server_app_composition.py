@@ -230,6 +230,9 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         lambda: built.setdefault("signer", signer),
     )
     monkeypatch.setattr(server, "set_stage_event_db_path", lambda _path: None)
+    # The database check reads a real file; tests/integration/test_migrate_command.py
+    # covers it, and this test fakes every store the composition builds.
+    monkeypatch.setattr(server, "require_compatible_storefront_database", lambda _path: None)
     monkeypatch.setattr(
         capacity_client_module,
         "build_capacity_runtime_for",

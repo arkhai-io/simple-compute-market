@@ -2,7 +2,8 @@
 
 from .end import BillingIntentResult, DomainEndPort, EndService, PhysicalResult, SQLiteOperationStore
 from .evidence import EvidenceSession, RetentionObservation, SQLiteEvidenceStore
-from .journal import Admission, Classification, DeliveryRecord, EndSession, FilingIntent, FinalRequest, create_schema
+from .journal import Admission, Classification, DeliveryRecord, EndSession, FilingIntent, FinalRequest
+from .schema import SERVICING_SCHEMA, create_schema
 from .watch import DealWatch, WatchSession
 from .seller import SellerDeal, SellerServicing, SellerSession
 from .respondent import RespondentPoller
@@ -17,6 +18,7 @@ __all__ = [
     "LifecycleRouteBinding", "LifecycleRouteServices", "create_lifecycle_router",
     "Admission", "BillingIntentResult", "Classification", "DealWatch", "DeliveryRecord", "DomainEndPort",
     "EndService", "EndSession", "EvidenceSession", "FilingIntent", "FinalRequest", "PhysicalResult",
-    "RetentionObservation", "SQLiteEvidenceStore", "SQLiteOperationStore", "WatchSession", "create_schema",
+    "RetentionObservation", "SERVICING_SCHEMA", "SQLiteEvidenceStore", "SQLiteOperationStore", "WatchSession",
+    "create_schema",
     "SellerDeal", "SellerServicing", "SellerSession", "DeliveryIngress", "SiteReportVerifier", "VerifiedSiteEnd",
 ]

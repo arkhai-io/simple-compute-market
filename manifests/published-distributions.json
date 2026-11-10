@@ -2,6 +2,11 @@
   "_comment": "Every distribution this repository publishes, in dependency order. One declaration read by every publication path: the registry push and the public index workflow both derive their set from here, because two lists kept in agreement by hand diverge silently and the copy that diverges is discovered by consumers. Order matters -- a distribution must appear after everything it depends on.",
   "distributions": [
     {
+      "key": "kit-schema-migrations",
+      "path": "kit/schema-migrations",
+      "dist": "arkhai-kit-schema-migrations"
+    },
+    {
       "key": "kit-identity",
       "path": "kit/identity",
       "dist": "arkhai-kit-identity"

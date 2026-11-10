@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-settlement-runtime"
-version = "0.7.0"
+version = "0.8.0"
 license = "MIT"
 description = "Mechanism-neutral commercial settlement lifecycle, durable servicing, and SQLite repository."
 requires-python = ">=3.10,<3.14"
@@ -8,6 +8,7 @@ dependencies = [
     "arkhai-core==0.5.0",
     "arkhai-kit-identity==0.4.0",
     "arkhai-kit-deal-lifecycle>=0.1.0",
+    "arkhai-kit-schema-migrations>=0.1.0",
     "pydantic>=2.7",
 ]
 
@@ -19,7 +20,7 @@ build-backend = "hatchling.build"
 packages = ["src/market_settlement_runtime"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 testpaths = ["tests/unit", "tests/integration"]
 asyncio_mode = "auto"
 
@@ -33,4 +34,4 @@ dev = [
 # beyond the standard library, because its lightness is part of its contract.
 # make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
 [tool.arkhai.architecture]
-allowed-dependencies = ["arkhai-core", "arkhai-kit-identity", "arkhai-kit-deal-lifecycle", "pydantic"]
+allowed-dependencies = ["arkhai-core", "arkhai-kit-identity", "arkhai-kit-deal-lifecycle", "arkhai-kit-schema-migrations", "pydantic"]

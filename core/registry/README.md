@@ -40,8 +40,12 @@ curl 'http://localhost:8080/listings?limit=10'
 ```bash
 cd core/registry
 uv sync
-DATABASE_URL=sqlite:///./indexer.db uv run uvicorn core_registry.main:app --port 8080
+export DATABASE_URL=sqlite:///./indexer.db
+uv run registry-migrate        # or `make migrate`; the registry refuses an unmigrated database
+uv run uvicorn core_registry.main:app --port 8080
 ```
+
+`make serve` starts the server alone, so run `make migrate` first.
 
 ## Configuration files
 
@@ -70,7 +74,7 @@ REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES='[{"account": "...", ...}]'
 
 `REGISTRY_FILTER_SPEC_PATH` names the filter specification the registry serves,
 in a profile file or the environment; unset, it serves the packaged
-`filter-spec.yaml`.
+`src/core_registry/filter-spec.yaml`.
 
 ## API key auth
 
@@ -108,7 +112,17 @@ third-party endorsement of the operator or URL.
 - Dev: SQLite (`DATABASE_URL=sqlite:///./indexer.db`)
 - Production: Postgres (`DATABASE_URL=postgresql://...`)
 
-Schema is managed by Alembic. Apply migrations with `make migrate`.
+Schema is managed by Alembic, whose scripts are packaged with the registry
+(`src/core_registry/alembic/`) and begin at one baseline revision, the schema the
+v0.3.0 release builds. `registry-migrate` adopts a v0.3.0 database at that
+baseline and upgrades to the script head, reading only `DATABASE_URL` and
+`LOG_LEVEL` from the registry's settings files; `registry-migrate --check` reports
+the database's state and the revisions that differ without changing anything.
+The registry refuses to start on a database the command has not brought to its
+script head, and refuses a database from before v0.3.0 or one with tables but no
+recorded revision as unsupported, to be replaced by a fresh one. The chart runs
+the command as an init container and Compose before the application; locally,
+`make migrate`.
 
 ## API endpoints
 
@@ -135,5 +149,3 @@ Publishers have stable local IDs and one or more lifecycle bindings to strict
 marketplace principals. EIP-191 identifiers are normalized lowercase
 addresses; Ed25519 identifiers are canonical unpadded base64url public keys.
 Authorization compares the complete principal, never identifier text alone.
-Legacy valid owner addresses migrate to EIP-191 principals before the version
-2 routes serve traffic; malformed, duplicate, or incomplete populations abort.

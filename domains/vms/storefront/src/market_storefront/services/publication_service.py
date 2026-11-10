@@ -6,8 +6,10 @@ from collections.abc import Callable, Collection
 from typing import Any
 
 from core_storefront.stage_log import stage_event
+from market_identity import Identity
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_listings.reconciler import (
+    VM_OFFERING_MODE,
     ReconciliationScope,
     closed_available_listing_ids,
     stale_open_listing_ids,
@@ -51,6 +53,19 @@ class VmPublicationHooks:
             return await capacity_binding_for_listing(self._db, listing_id)
         except RuntimeError:
             return None
+
+    def registry_publisher(self) -> Identity:
+        signer = container.resolved_marketplace_signer
+        if signer is None:
+            raise RuntimeError("marketplace signer is not initialized")
+        return signer.identity
+
+    def served_offering_modes(self) -> Collection[str]:
+        """The VM mode alone: the VM publication loop builds only the VM
+        source, and a bare-metal registration this storefront composes is
+        published by the bare-metal storefront, which may share its principal
+        and whose listings this storefront must leave open."""
+        return (VM_OFFERING_MODE,)
 
 
 def _make_registry_client():

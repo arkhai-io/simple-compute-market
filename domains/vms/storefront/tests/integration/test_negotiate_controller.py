@@ -54,6 +54,7 @@ from market_storefront.domain_runtime import (
 )
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from tests._settings_overrides import settings_overrides
+from market_storefront.utils.migrations import migrate_storefront_database
 from tests.fake_site import FakeProjectionSite, site_projection_state
 
 _BUYER_SIGNER = Ed25519Signer(b"\x21" * 32)
@@ -107,6 +108,7 @@ def _assert_canonical_owners(result: dict) -> None:
 async def db(tmp_path):
     from market_storefront.utils.sqlite_client import SQLiteClient
 
+    migrate_storefront_database(tmp_path / "negotiate_test.db")
     return SQLiteClient(
         db_path=str(tmp_path / "negotiate_test.db"),
         registry=build_vm_storefront_registry(build_vm_storefront_domain()),

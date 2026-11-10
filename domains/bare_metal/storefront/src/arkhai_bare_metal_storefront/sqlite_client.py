@@ -28,10 +28,6 @@ from core_storefront import (
     build_storefront_derivation_key,
 )
 from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
-from core_storefront.sqlite_migrations import MigrationLike
-from market_contact_exchange import (
-    CONTACT_EXCHANGE_MIGRATIONS,
-)
 from market_core import (
     MarketDomainContract,
     SettlementEvidence,
@@ -41,12 +37,9 @@ from market_core.schemas import AGREEMENT_SETTLEMENT_SCHEMA_PATH, Agreement
 from market_identity import Identity
 from market_deal_lifecycle.evidence import CommitmentAttempt
 from market_deal_servicing import EndSession, EvidenceSession
-from market_pool_overrides import pool_override_migrations
-from market_settlement_runtime import settlement_migrations
 from pydantic import BaseModel
 
 from .domain_runtime import get_market_domain_contract
-from .migrations import BARE_METAL_STOREFRONT_MIGRATIONS
 from .settlement_evidence import EvidencePayload
 from .lifecycle_records import register_agreement
 
@@ -66,8 +59,6 @@ class SQLiteClient(CoreSQLiteClient):
         db_path: str,
         *,
         domain: MarketDomainContract | None = None,
-        local_listing_principal: Identity | None = None,
-        expected_legacy_sellers: tuple[str, ...] = (),
     ) -> None:
         self._market_domain = validate_domain_contract(
             domain or get_market_domain_contract(),
@@ -81,32 +72,7 @@ class SQLiteClient(CoreSQLiteClient):
                 ),
             )
         )
-        super().__init__(
-            db_path,
-            local_listing_principal=local_listing_principal,
-            expected_legacy_sellers=expected_legacy_sellers,
-        )
-        required_columns = {
-            "bare_metal_settlement_records": "evidence_json",
-            "bare_metal_fulfillment_lifecycle": "settlement_ref",
-        }
-        with sqlite3.connect(self.db_path) as conn:
-            for table, required_column in required_columns.items():
-                columns = {
-                    row[1] for row in conn.execute(f"PRAGMA table_info({table})")
-                }
-                if required_column not in columns:
-                    raise RuntimeError(
-                        f"{table} schema requires an explicit database reset"
-                    )
-
-    def _domain_migrations(self) -> tuple[MigrationLike, ...]:
-        return (
-            *settlement_migrations(),
-            *CONTACT_EXCHANGE_MIGRATIONS,
-            *pool_override_migrations(),
-            *BARE_METAL_STOREFRONT_MIGRATIONS,
-        )
+        super().__init__(db_path)
 
     async def list_unsettled_payment_negotiations(self, *, mechanism: str, limit: int) -> list[str]:
         """Accepted payment deals not yet verified, refunds left `refunding`, and verified deals whose delivery never started.

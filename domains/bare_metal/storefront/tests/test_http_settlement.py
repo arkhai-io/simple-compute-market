@@ -45,6 +45,7 @@ from market_identity import (
 
 from arkhai_bare_metal import BareMetalMessage, BareMetalTerms
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
@@ -209,6 +210,7 @@ async def _accepted_runtime(
 ) -> tuple[BareMetalStorefrontRuntime, str]:
     """An accepted Alkahest deal for one hour from ``start``, by default now."""
     domain = get_market_domain_contract()
+    migrate_storefront_database(path)
     db = SQLiteClient(path, domain=domain)
     runtime = BareMetalStorefrontRuntime(
         db=db,
@@ -1039,6 +1041,7 @@ async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
         return 0
 
     domain = get_market_domain_contract()
+    migrate_storefront_database(tmp_path / "storefront.db")
     db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
     runtime = BareMetalStorefrontRuntime(
         db=db,
@@ -1155,6 +1158,7 @@ async def _payment_deal(tmp_path, *, provisioning=None) -> SimpleNamespace:
     receipt_signer = Ed25519Signer(bytes.fromhex("55" * 32))
     payments = FakePaymentsClient(signer=receipt_signer)
     domain = get_market_domain_contract()
+    migrate_storefront_database(tmp_path / "payment.db")
     db = SQLiteClient(str(tmp_path / "payment.db"), domain=domain)
     composition = BareMetalStorefrontSettlementComposition.from_raw_config(
         {

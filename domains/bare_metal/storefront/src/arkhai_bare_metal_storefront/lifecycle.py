@@ -52,8 +52,6 @@ class BareMetalLifecycle:
         self.evidence = SQLiteEvidenceStore(self.path)
         self.locks: dict[str, asyncio.Lock] = {}
         self.clients = {}
-        with transaction(self.path) as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS bare_metal_lifecycle_cursor (id INTEGER PRIMARY KEY CHECK (id=1), continuation TEXT)")
         self.end = EndService(self.path, self, clock=self.clock)
         # An Alkahest deal authorizes delivery through its once-only adapter,
         # since a mechanism with no adapter is never allowed.
@@ -258,7 +256,7 @@ class BareMetalLifecycle:
         # Ingress holds its write transaction; this immutable binding read
         # must not open a competing writer while building a local claim.
         with sqlite3.connect(self.path) as conn:
-            binding = SellerSession(conn, initialize=False).read(negotiation_id).dispute_binding
+            binding = SellerSession(conn).read(negotiation_id).dispute_binding
         adapter = self.seller.disputes.resolve(binding) if binding else None
         if not isinstance(adapter, DeliveryEndClaims):
             return None

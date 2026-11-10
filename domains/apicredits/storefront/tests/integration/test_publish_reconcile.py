@@ -10,10 +10,14 @@ import pytest
 
 from core_storefront.auth import signed_response_headers
 from core_storefront.capacity import CapacityDelta
+from core_storefront.multi_registry_client import RegistryListings
 from market_capacity_publication import CapacityReconcileContext
 from market_core.schemas import SettlementOption
+from registry_client.models import ListingSummary
 
+import apicredits_storefront.container as container_module
 from apicredits_storefront.services import capacity_client as cc_module
+from apicredits_storefront.services import publication_service as publication_module
 from apicredits_storefront.services.capacity_client import _capacity_reconciler
 from apicredits_storefront.services.listing_service import ListingService
 from apicredits_storefront.services.publication_service import (
@@ -21,9 +25,12 @@ from apicredits_storefront.services.publication_service import (
     close_token_listings_after_capacity_change,
 )
 from apicredits_storefront.utils import sqlite_client as sqlite_module
+from apicredits_storefront.utils.migrations import migrate_storefront_database
+from apicredits_storefront.utils.sqlite_client import refuse_unbound_listings
 from market_site_client import SiteCapacityClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime import MechanismReadiness, ReadinessBlocker
+from tests._settings_overrides import settings_overrides
 from tests.integration.credit_negotiation import payment_option
 from tests.listing_bindings import upsert_bound_listing
 
@@ -152,6 +159,7 @@ class _SettlementComposition:
 async def db(tmp_path):
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
+    migrate_storefront_database(tmp_path / "publish.db")
     return SQLiteClient(db_path=str(tmp_path / "publish.db"))
 
 
@@ -423,6 +431,75 @@ async def test_capacity_release_does_not_reopen_a_listing_its_seller_closed(
     assert (await db.load_listing(listing_id="L-exhausted"))["status"] == "open"
 
 
+_REGISTRY_URL = "https://registry.example"
+
+
+class _SweptRegistry:
+    """Stands where ``MultiRegistryClient`` wraps the one configured registry.
+
+    Its read of the storefront's open listings returns what a test planted, and
+    a close it is sent removes the listing; ``closes`` records each close.
+    """
+
+    urls = (_REGISTRY_URL,)
+
+    def __init__(self) -> None:
+        self.open: list[ListingSummary] = []
+        self.closes: list[str] = []
+        self.publisher_reads: list = []
+
+    def plant(self, listing_id: str, offering_mode: str) -> None:
+        self.open.append(
+            ListingSummary(
+                id=listing_id,
+                status="open",
+                listing_resource={"offering_mode": offering_mode},
+            )
+        )
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+    async def list_publisher_listings_per_registry(self, principal):
+        self.publisher_reads.append(principal)
+        return [RegistryListings(_REGISTRY_URL, tuple(self.open))]
+
+    async def update_listing_per_registry(self, *, listing_id, payloads):
+        assert {request.to_dict()["status"] for request in payloads.values()} == {"closed"}
+        self.closes.append(listing_id)
+        self.open = [item for item in self.open if item.id != listing_id]
+        return [{"registry_url": url, "success": True} for url in payloads]
+
+
+async def test_the_sweep_closes_registry_listings_the_storefront_does_not_hold(
+    db, monkeypatch
+):
+    """The sweep each capacity reconciliation ends with, over the storefront's
+    database, reads the registry under the storefront's principal: an
+    API-credit listing it does not hold closes there, the listing it holds stays
+    open, and a VM listing another storefront publishes under the same
+    principal is left alone. The registry client is the publication service's
+    own factory, replaced on that module."""
+    await _insert_listing(db, "L-live", "svc-live", "open")
+    registry = _SweptRegistry()
+    registry.plant("L-orphaned", "api_credits")
+    registry.plant("L-live", "api_credits")
+    registry.plant("vm-1", "vm")
+    monkeypatch.setattr(publication_module, "_make_registry_client", lambda: registry)
+    monkeypatch.setattr(container_module, "resolved_marketplace_signer", _SELLER_SIGNER)
+
+    with settings_overrides(enable_registry_discovery=True, registry__urls=[_REGISTRY_URL]):
+        await publication_module.retire_unheld_listings(db)
+
+    assert registry.closes == ["L-orphaned"]
+    assert [item.id for item in registry.open] == ["L-live", "vm-1"]
+    assert registry.publisher_reads == [SELLER_PRINCIPAL]
+    assert (await db.load_listing(listing_id="L-live"))["status"] == "open"
+
+
 async def test_a_resource_moved_to_another_pool_does_not_reopen_its_listing(
     db, monkeypatch
 ):
@@ -573,6 +650,8 @@ async def test_a_database_with_an_unbound_listing_is_refused(tmp_path):
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
     path = str(tmp_path / "unbound.db")
+    migrate_storefront_database(path)
+    refuse_unbound_listings(path)
     db = SQLiteClient(db_path=path)
     await db.upsert_listing(
         listing_id="L-old",
@@ -594,7 +673,7 @@ async def test_a_database_with_an_unbound_listing_is_refused(tmp_path):
     )
 
     with pytest.raises(RuntimeError, match="L-old.*fresh database"):
-        SQLiteClient(db_path=path)
+        refuse_unbound_listings(path)
 
 
 class _PaymentComposition(_SettlementComposition):

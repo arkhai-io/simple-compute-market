@@ -27,6 +27,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.lifecycle import trading_pause
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_negotiation_runtime import (
     NegotiationUnavailableError,
@@ -124,6 +125,7 @@ async def db(tmp_path) -> SQLiteClient:
     domain = build_vm_storefront_domain()
     registry = build_vm_storefront_registry(domain)
     registration = registry.resolve_mode("vm")
+    migrate_storefront_database(tmp_path / "test.db")
     client = SQLiteClient(
         db_path=str(tmp_path / "test.db"),
         registry=registry,

@@ -13,6 +13,7 @@ from market_storefront.failure_actions import (
     apply_fulfillment_failure_policy,
 )
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.fake_site import FakeProjectionSite, site_projection_state
 
@@ -30,6 +31,7 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(
     absent or does not hold the site fails nothing."""
     from tests.fake_site import FakeSite, capacity_runtime_over
 
+    migrate_storefront_database(tmp_path / "failure-policy.db")
     db = SQLiteClient(db_path=str(tmp_path / "failure-policy.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
@@ -127,6 +129,7 @@ async def test_a_compensating_deals_release_is_refused_until_the_site_permits_it
     releases the reservation."""
     from tests.fake_site import FakeSite, capacity_runtime_over
 
+    migrate_storefront_database(tmp_path / "compensating.db")
     db = SQLiteClient(
         db_path=str(tmp_path / "compensating.db"),
         registry=build_vm_storefront_registry(build_vm_storefront_domain()),

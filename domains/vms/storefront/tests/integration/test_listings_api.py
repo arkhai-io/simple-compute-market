@@ -43,6 +43,7 @@ from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services.listing_service import ListingService
 from market_storefront.utils import config as storefront_config
 from market_storefront.utils.config import BASE_URL_OVERRIDE
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.publication_app import recorded_registries
 from tests.fake_site import FakeProjectionSite, loaded_site_projection_state
@@ -92,6 +93,7 @@ def _configure_administrator_auth(
 
 @pytest_asyncio.fixture
 async def db(tmp_path) -> SQLiteClient:
+    migrate_storefront_database(tmp_path / "listings_test.db")
     return SQLiteClient(db_path=str(tmp_path / "listings_test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 

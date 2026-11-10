@@ -157,7 +157,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-storefront"
-version = "0.20.0"
+version = "0.21.0"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -175,6 +175,7 @@ dependencies = [
     { name = "arkhai-kit-negotiation-runtime" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-resource-pools" },
+    { name = "arkhai-kit-schema-migrations" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "arkhai-kit-site-client" },
     { name = "arkhai-kit-storefront" },
@@ -201,18 +202,19 @@ requires-dist = [
     { name = "arkhai-apicredits-domain", specifier = ">=0.8.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.1" },
-    { name = "arkhai-core-storefront", specifier = ">=0.17.0" },
+    { name = "arkhai-core-storefront", specifier = ">=0.18.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.27.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.11.0" },
     { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.1.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.6.0" },
-    { name = "arkhai-kit-capacity-publication", specifier = "==0.11.0" },
+    { name = "arkhai-kit-capacity-publication", specifier = "==0.12.0" },
     { name = "arkhai-kit-config", specifier = ">=0.5.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "arkhai-kit-negotiation-runtime", specifier = "==0.5.2" },
     { name = "arkhai-kit-policy", specifier = ">=0.6.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.7.0" },
-    { name = "arkhai-kit-settlement-runtime", specifier = ">=0.7.0" },
+    { name = "arkhai-kit-schema-migrations", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-settlement-runtime", specifier = ">=0.8.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.9.0" },
     { name = "arkhai-kit-storefront", specifier = "==0.10.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },
@@ -245,7 +247,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-buyer"
-version = "0.6.1"
+version = "0.6.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -259,7 +261,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_core_buyer-0.6.1-py3-none-any.whl" },
+    { path = "arkhai_core_buyer-0.6.2-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -277,7 +279,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.17.1"
+version = "0.18.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -285,12 +287,13 @@ dependencies = [
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools-contracts" },
+    { name = "arkhai-kit-schema-migrations" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.17.1-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.18.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -341,7 +344,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.6.1"
+version = "0.6.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -354,7 +357,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_payments-0.6.1-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_payments-0.6.2-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -378,7 +381,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capacity-publication"
-version = "0.11.0"
+version = "0.12.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core-storefront" },
@@ -386,12 +389,12 @@ dependencies = [
     { name = "arkhai-kit-site-client" },
 ]
 wheels = [
-    { path = "arkhai_kit_capacity_publication-0.11.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capacity_publication-0.12.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.5.1"
+version = "0.5.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -402,7 +405,7 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.5.1-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.5.2-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -485,16 +488,17 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.9.0"
+version = "0.10.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-resource-pools-contracts" },
+    { name = "arkhai-kit-schema-migrations" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -511,17 +515,26 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-schema-migrations"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+wheels = [
+    { path = "arkhai_kit_schema_migrations-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-schema-migrations" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]

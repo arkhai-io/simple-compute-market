@@ -1,6 +1,8 @@
 """API-credit candidate hooks composed onto kit-owned publication."""
 from __future__ import annotations
 
+import logging
+from collections.abc import Collection
 from typing import Any
 
 from arkhai_apicredits.listings.reconciler import (
@@ -15,11 +17,15 @@ from market_capacity_publication import (
     PublicationCandidate,
     PublicationRuntime,
     ReconciliationPlan,
+    RegistrySweep,
     backing_changed,
 )
+from market_identity import Identity
 from registry_client import ListingRequest, UpdateListingRequest
 
+import apicredits_storefront.container as container
 from apicredits_storefront.listing_binding import (
+    API_CREDITS_OFFERING_MODE,
     BoundQuotaSource,
     QuotaPool,
     QuotaPoolUnavailable,
@@ -34,6 +40,8 @@ from apicredits_storefront.utils.config import (
     settings,
 )
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
+
+logger = logging.getLogger(__name__)
 
 
 class ApiCreditPublicationHooks:
@@ -53,10 +61,18 @@ class ApiCreditPublicationHooks:
     ) -> PublicationBinding | None:
         return await api_credit_listing_binding(self._db, listing_id)
 
+    def registry_publisher(self) -> Identity:
+        signer = container.resolved_marketplace_signer
+        if signer is None:
+            raise RuntimeError("storefront marketplace signer is not initialized")
+        return signer.identity
+
+    def served_offering_modes(self) -> Collection[str]:
+        return (API_CREDITS_OFFERING_MODE,)
+
 
 def _make_registry_client():
     from core_storefront.multi_registry_client import MultiRegistryClient
-    import apicredits_storefront.container as container
     signer = container.resolved_marketplace_signer
     if signer is None:
         raise RuntimeError("storefront marketplace signer is not initialized")
@@ -113,6 +129,40 @@ async def converge_registries(db: Any) -> dict[str, tuple[str, ...]]:
     for the next one.
     """
     return await build_publication_runtime(db).converge()
+
+
+async def retire_unheld_listings(db: Any) -> RegistrySweep:
+    """Close at each registry the open API-credit listings the storefront does
+    not hold open.
+
+    Run after :func:`converge_registries` at the end of each capacity
+    reconciliation. The capacity-events preview reports pending events without
+    reconciling, so no preview reaches this sweep, and the pass keeps no cycle
+    report: each close, each close a registry refused, and each registry that
+    could not be read is logged, and a registry not swept now is swept by a
+    later pass.
+    """
+    sweep = await build_publication_runtime(db).retire_unheld()
+    for url in sweep.unreachable:
+        logger.warning(
+            "[REGISTRY] could not read open listings at %s; sweeping it next pass", url
+        )
+    for close in sweep.closes:
+        if close.status == "failed":
+            logger.warning(
+                "[REGISTRY] could not close listing %s, which the storefront does "
+                "not hold, at %s: %s",
+                close.listing_id,
+                close.registry_url,
+                close.error,
+            )
+        else:
+            logger.info(
+                "[REGISTRY] closed listing %s at %s: the storefront does not hold it",
+                close.listing_id,
+                close.registry_url,
+            )
+    return sweep
 
 
 async def _credit_listing_sources(

@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-buyer"
-version = "0.10.2"
+version = "0.10.3"
 license = "MIT"
 description = "Buyer-side CLI for the market: discover sellers, negotiate, place orders. Pure HTTP client; no server, no agent runtime."
 requires-python = ">=3.12,<3.14"
@@ -18,7 +18,7 @@ dependencies = [
   "arkhai-core-buyer>=0.6.0",
   "arkhai-core>=0.4.0",
   "arkhai-kit-alkahest>=0.11.0",
-  "arkhai-kit-contact-exchange==0.4.1",
+  "arkhai-kit-contact-exchange==0.5.0",
   "arkhai-kit-arkhai-payments>=0.5.0",
   "arkhai-kit-identity==0.4.0",
   "arkhai-kit-deal-lifecycle>=0.1.0",
@@ -28,7 +28,7 @@ dependencies = [
   "arkhai-kit-deal-lifecycle-contracts>=0.1.0",
   "arkhai-kit-config>=0.5.0",
   "arkhai-kit-policy",
-  "arkhai-kit-settlement-runtime==0.7.0",
+  "arkhai-kit-settlement-runtime==0.8.0",
   "arkhai-vms>=0.6.0",
   "arkhai-vms-listings>=0.4.1",
   "arkhai-vms-negotiation>=0.4.0",
