@@ -111,7 +111,13 @@ the owner when the recorded remote is not one of its checkout's, MUST end `stopp
 rather than `finished` when the fetch fails, and MUST record what it fetched as its
 outcome's `landing`, the log's writer recording whether the run's commit contains it.
 The log's writer MUST refuse a finished archive cleanup line without a well-formed
-`landing` whenever such a source resolves for the change. Archive cleanup's first exit
+`landing` whenever such a source resolves for the change, and MUST refuse one whose
+`landing` names a branch other than that source's; a remote other than the source's
+where the source names a remote that is `.` or one of the checkout's, or otherwise — no
+source, a source naming no remote, or a remote the checkout lacks — a remote that is
+neither; or a commit other than the one the checkout's ref for that remote and branch
+names as the line is written — the remote-tracking branch, or, for `.`, the branch
+itself. Archive cleanup's first exit
 to `done` MUST be guarded by that recorded result, the guard's remedy the merge after
 the archive; a later exit MUST NOT be. The guard MUST read only the log, so that no
 fetch after the line was written changes it and the computation reads nothing over the
@@ -150,6 +156,14 @@ network. An archive cleanup line with no `landing` MUST be read as checked.
 - **WHEN** a change's clone recorded `dev`, the merge before closeout was given
   `FROM=main`, and archive cleanup runs
 - **THEN** archive cleanup fetches `main`, the branch the merge's `landing` names
+
+#### Scenario: Archive cleanup records another source than it fetched
+
+- **WHEN** the last finished merge's `landing` names `main` from `origin`, and archive
+  cleanup's finished outcome records `dev`, or `main` with a commit other than the one
+  `origin/main` names in its checkout, such as the merge's own `landing.commit`
+- **THEN** the log's writer refuses the line, naming the field, whether or not the
+  run's commit contains the recorded commit
 
 #### Scenario: A merge's outcome records no landing branch
 
@@ -198,8 +212,8 @@ network. An archive cleanup line with no `landing` MUST be read as checked.
 
 - **WHEN** the last finished merge's `landing.remote` is not one of the remotes of the
   checkout archive cleanup runs in
-- **THEN** archive cleanup asks the owner which source to fetch, and records nothing it
-  guessed
+- **THEN** archive cleanup asks the owner which of its checkout's remotes, or `.`, to
+  take the branch from, and records nothing it guessed
 
 #### Scenario: A merge after the archive of a change worked in place
 

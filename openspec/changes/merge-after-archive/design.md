@@ -345,7 +345,20 @@ stalling a change whose merge the older engine accepted. Whenever a source resol
 the log's writer refuses a finished cleanup line without a well-formed `landing`, on
 every cleanup run, reruns included; it resolves the source as cleanup does, so it
 checks only the line it writes and needs no record of which engine wrote the lines
-before it (26 F1). A fetch that fails ends cleanup `stopped`, naming the fetch, never
+before it (26 F1). It also checks that the line records what cleanup fetched from that
+source (34 F1): the source's branch; the source's remote where that remote is `.` or one
+of the checkout's, else — a source from the clone marker, which names none, or a
+recorded remote the owner replaced when cleanup asked — any of the checkout's remotes
+or `.`; and the commit the checkout's ref for that remote and branch names as the line
+is written, compared for equality, since an older commit of the right branch is what
+`HEAD` would contain while the branch moved. A fetch in the checkout between cleanup's
+and the write gets the line refused, logged `stopped`, and the rerun fetches. A cleanup
+that skips the fetch while the ref has not moved since the merge's own still passes:
+the engine does not fetch, and the skill's text governs that. Rejected for 34 F1: the
+engine performing the fetch, which would close that gap but put network Git in the
+engine against the split above; identity without the commit, which misses the merge's
+commit copied from its line.
+A fetch that fails ends cleanup `stopped`, naming the fetch, never
 `finished` as a failed validation cleanup does, so the computation names cleanup again
 and the rerun fetches. Cleanup runs in the checkout
 the merge it reads ran in — a clone is removed only after `done`, and a change with a

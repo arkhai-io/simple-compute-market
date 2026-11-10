@@ -1059,9 +1059,17 @@ FETCHED = "b" * 40
 MERGE_HEAD = "c" * 40
 
 
-def _checkout(*, remotes=("origin", "workspace"), contains=True, base=None) -> Checkout:
-    return Checkout(remotes=lambda: set(remotes), contains=lambda *_: contains,
-                    base=lambda: base)
+def _checkout(*, remotes=("origin", "workspace"), contains=True, base=None,
+              refs: dict | None = None) -> Checkout:
+    """A checkout whose every ref names `FETCHED`, or only those `refs` maps; with
+    `contains=None`, one whose ancestry must not be read."""
+    def contained(*_: str) -> bool:
+        if contains is None:
+            pytest.fail("read the ancestry of a line it refuses")
+        return contains
+
+    return Checkout(remotes=lambda: set(remotes), contains=contained, base=lambda: base,
+                    resolve=lambda ref: FETCHED if refs is None else refs.get(ref))
 
 
 def _landing(**fields) -> dict:
@@ -1145,7 +1153,8 @@ def test_a_merge_stops_at_a_conflict_it_asks_about(tmp_path: Path, outcome: dict
     and nothing of the checkout is read for them."""
     unread = Checkout(remotes=lambda: pytest.fail("read the remotes"),
                       contains=lambda *_: pytest.fail("read the ancestry"),
-                      base=lambda: pytest.fail("read the base"))
+                      base=lambda: pytest.fail("read the base"),
+                      resolve=lambda _: pytest.fail("read a ref"))
 
     line = _merge(log_file(tmp_path), outcome, unread)
 
@@ -1210,7 +1219,8 @@ def test_a_cleanup_line_without_landing_is_refused_when_a_source_resolves(
         _cleanup(log, checkout=_checkout(base="dev"))
     assert source in str(refused.value)
     # A rerun, after a finished cleanup line, records it too.
-    _cleanup(log, {**CLEANED, "landing": _landing()}, _checkout(base="dev"))
+    fetched = _landing() if merged else _landing(branch="dev")
+    _cleanup(log, {**CLEANED, "landing": fetched}, _checkout(base="dev"))
     with pytest.raises(StepError, match=source):
         _cleanup(log, checkout=_checkout(base="dev"))
 
@@ -1224,7 +1234,7 @@ def test_a_cleanup_line_without_a_source_records_no_landing(tmp_path: Path) -> N
 @pytest.mark.parametrize("contains", [True, False])
 def test_a_cleanup_line_records_whether_its_commit_contains_the_landing(
         tmp_path: Path, contains: bool) -> None:
-    line = _cleanup(log_file(tmp_path), {**CLEANED, "landing": _landing()},
+    line = _cleanup(log_file(tmp_path), {**CLEANED, "landing": _landing(branch="dev")},
                     _checkout(contains=contains, base="dev"))
 
     assert line["landing_contained"] is contains
@@ -1239,6 +1249,74 @@ def test_cleanup_fetches_the_branch_the_merge_was_given(tmp_path: Path) -> None:
     assert landing_source(read_log(log), lambda: "dev") == ("origin", "main")
     with pytest.raises(StepError, match="fetches main from origin"):
         _cleanup(log, checkout=_checkout(base="dev"))
+    # CW-5vkd, "Archive cleanup records another source than it fetched": a cleanup
+    # that fetched the clone's branch instead is refused before its containment is
+    # read.
+    with pytest.raises(StepError, match="landing.branch 'dev' is not 'main'"):
+        _cleanup(log, {**CLEANED, "landing": _landing(branch="dev")},
+                 _checkout(base="dev", contains=None))
+    assert _cleanup(log, {**CLEANED, "landing": _landing()},
+                    _checkout(base="dev"))["landing"]["branch"] == "main"
+
+
+@pytest.mark.parametrize("merged,recorded,remotes,accepted", [
+    ("origin", "origin", ("origin", "workspace"), True),
+    ("workspace", "origin", ("origin", "workspace"), False),
+    ("origin", ".", ("origin",), False),
+    (".", ".", (), True),
+    ("upstream", "origin", ("origin",), True),
+    ("upstream", "upstream", ("origin",), False),
+    (None, "workspace", ("origin", "workspace"), True),
+    (None, ".", ("origin",), True),
+    (None, "upstream", ("origin",), False),
+], ids=["the merge's", "another remote", "the checkout's branch for a remote",
+        "the checkout's branch", "the owner's for an absent remote", "the absent remote",
+        "any for the clone's branch", ". for the clone's branch", "none of the checkout's"])
+def test_a_cleanup_lines_remote_is_the_source_it_fetched_from(
+        tmp_path: Path, merged: str | None, recorded: str, remotes: tuple,
+        accepted: bool) -> None:
+    """The remote is the last merge's where the checkout names it; a source from the
+    clone's branch, or a merge's remote the checkout lacks, which cleanup asks the
+    owner to replace, admits any of the checkout's remotes or `.`."""
+    log = log_file(tmp_path)
+    if merged is None:
+        log.parent.mkdir(parents=True)
+    else:
+        _merge(log, {**MERGED, "landing": _landing(remote=merged)},
+               _checkout(remotes=(*remotes, "upstream")))
+    outcome = {**CLEANED, "landing": _landing(remote=recorded)}
+    checkout = _checkout(remotes=remotes, base="main")
+
+    if accepted:
+        assert _cleanup(log, outcome, checkout)["landing"]["remote"] == recorded
+    else:
+        with pytest.raises(StepError, match=f"landing.remote '{recorded}'"):
+            _cleanup(log, outcome, checkout)
+
+
+@pytest.mark.parametrize("remote,ref", [
+    ("origin", "refs/remotes/origin/main"), (".", "refs/heads/main")])
+@pytest.mark.parametrize("held,accepted", [
+    (FETCHED, True), ("d" * 40, False), (None, False)], ids=["fetched", "stale", "no ref"])
+def test_a_cleanup_lines_commit_is_the_one_its_fetch_left(
+        tmp_path: Path, remote: str, ref: str, held: str | None, accepted: bool) -> None:
+    """CW-5vkd, "Archive cleanup records another source than it fetched": a commit
+    other than the one the ref for the fetched remote and branch names — the merge's
+    own, copied from the log, or one read before the fetch — is refused before its
+    containment is read."""
+    log = log_file(tmp_path)
+    _merge(log, {**MERGED, "landing": _landing(remote=remote)})
+    checkout = _checkout(base="dev", refs={} if held is None else {ref: held},
+                         contains=True if accepted else None)
+    outcome = {**CLEANED, "landing": _landing(remote=remote)}
+
+    if accepted:
+        assert _cleanup(log, outcome, checkout)["landing_contained"] is True
+    else:
+        with pytest.raises(StepError, match=f"is not the commit {ref} names, "
+                                            + (held[:12] if held else "none")):
+            _cleanup(log, outcome, checkout)
+        assert len(read_log(log)) == 1
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -1262,6 +1340,8 @@ def _merged_repository(tmp_path: Path) -> tuple[Path, str, str, str]:
     before = _git(repo, "rev-parse", "HEAD")
     _git(repo, "merge", "-q", "--no-ff", "-m", "merge dev", "dev")
     _git(repo, "remote", "add", "origin", str(repo))
+    # The fetch cleanup makes, leaving `refs/remotes/origin/dev` at `landed`.
+    _git(repo, "fetch", "-q", "origin")
     return repo, landed, _git(repo, "rev-parse", "HEAD"), before
 
 
@@ -1291,3 +1371,28 @@ def test_the_writer_records_a_cleanups_containment_in_a_real_repository(
                              checkout=git_checkout(repo, CHANGE))
 
     assert (moved["landing_contained"], checked["landing_contained"]) == (False, True)
+
+
+def test_the_writer_refuses_a_cleanups_stale_commit_in_a_real_repository(
+        tmp_path: Path) -> None:
+    """`dev`'s older commit, which the merged commit contains, is not what the fetch
+    left at `origin/dev`, so it cannot pass for a contained landing branch."""
+    repo, landed, merged, _ = _merged_repository(tmp_path)
+    older = _git(repo, "rev-parse", f"{landed}~1")
+    log = log_file(repo)
+    outcome = {**CLEANED, "landing": {"remote": "origin", "branch": "dev", "commit": older}}
+
+    with pytest.raises(StepError, match="is not the commit refs/remotes/origin/dev names, "
+                                        + landed[:12]):
+        record_outcome(log, "archive-cleanup", outcome, session="s", commit=merged,
+                       checkout=git_checkout(repo, CHANGE))
+    # The branch the checkout holds itself, `.`, is read from `refs/heads/`.
+    held = {**CLEANED, "landing": {"remote": ".", "branch": "dev", "commit": landed}}
+    line = record_outcome(log, "archive-cleanup", held, session="s", commit=merged,
+                          checkout=git_checkout(repo, CHANGE))
+
+    assert line["landing_contained"] is True
+    with pytest.raises(StepError, match="is not the commit refs/heads/dev names"):
+        record_outcome(log, "archive-cleanup",
+                       {**CLEANED, "landing": {**held["landing"], "commit": older}},
+                       session="s", commit=merged, checkout=git_checkout(repo, CHANGE))

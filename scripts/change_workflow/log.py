@@ -68,8 +68,8 @@ from .graph import (LATE_MERGE, NODES, ROUND, STEPS, Node, Standing, TargetError
                     entry_refusal, node_of, review_phase, section_ids)
 from .index import index_rows
 from .outcome import outcome_problems, triage_outcome_problems
-from .records import (NUMBERED, git_contains, git_remotes, has_records, latest_validation,
-                      next_number, validation_result)
+from .records import (NUMBERED, git_contains, git_remotes, git_resolve, has_records,
+                      latest_validation, next_number, validation_result)
 
 LOG = "workflow.jsonl"
 # The lines no step's run writes: the conversion's, and the one `start` opens a
@@ -357,19 +357,28 @@ def _write_over(path: Path, lines: Sequence[Entry], mode: int,
 class Checkout:
     """What the log's writer reads of the checkout a run ran in, to check the landing
     record on a merge's or archive cleanup's line: the remotes it names, whether one
-    commit contains another (`contains(commit, ancestor)`), and the branch the
-    change's clone recorded as the one it lands on."""
+    commit contains another (`contains(commit, ancestor)`), the branch the change's
+    clone recorded as the one it lands on, and the commit a full ref name names
+    (`resolve(ref)`, None for none)."""
 
     remotes: Callable[[], Collection[str]]
     contains: Callable[[str, str], bool]
     base: Callable[[], str | None]
+    resolve: Callable[[str], str | None]
 
 
 def git_checkout(root: Path, change: str) -> Checkout:
     """The checkout at `root`, read through Git, for `change`."""
     return Checkout(remotes=lambda: git_remotes(root),
                     contains=lambda commit, ancestor: git_contains(root, commit, ancestor),
-                    base=lambda: landing_branch(root, change))
+                    base=lambda: landing_branch(root, change),
+                    resolve=lambda ref: git_resolve(root, ref))
+
+
+def landing_ref(remote: str, branch: str) -> str:
+    """The ref a fetch of `branch` from `remote` leaves the fetched commit at: the
+    remote-tracking branch, or, for `.`, the branch the checkout holds itself."""
+    return f"refs/heads/{branch}" if remote == "." else f"refs/remotes/{remote}/{branch}"
 
 
 def _finished_merges(entries: Sequence[Entry]) -> list[Entry]:
@@ -420,7 +429,8 @@ def landing_problems(entries: Sequence[Entry], step: str, outcome: Entry, commit
     which shows the merge brought it in; a repair of a merge logged before the
     record existed may omit it (`_repairs_unrecorded`). Archive cleanup records
     one whenever a source resolves (`landing_source`), on every run, so a fetch that
-    failed never passes for a check; whether `HEAD` contains it is recorded, not
+    failed never passes for a check, and it must be what cleanup fetched from that
+    source (`_cleanup_landing_problems`); whether `HEAD` contains it is recorded, not
     refused (`CONTAINED`).
     """
     if step not in (MERGE, CLEANUP) or outcome.get("outcome") != "finished":
@@ -441,7 +451,8 @@ def landing_problems(entries: Sequence[Entry], step: str, outcome: Entry, commit
     if not commit:
         return ["the run's commit could not be read, so its landing cannot be checked"]
     if step == CLEANUP:
-        return []
+        return _cleanup_landing_problems(landing, landing_source(entries, checkout.base),
+                                         checkout)
     problems = []
     if landing["remote"] != "." and landing["remote"] not in checkout.remotes():
         problems.append(f"its landing.remote {landing['remote']!r} is none of the checkout's "
@@ -449,6 +460,46 @@ def landing_problems(entries: Sequence[Entry], step: str, outcome: Entry, commit
     if not checkout.contains(commit, landing["commit"]):
         problems.append(f"its landing.commit {landing['commit'][:12]} is not contained in the "
                         f"run's commit {commit[:12]}, so the merge did not bring it in")
+    return problems
+
+
+def _cleanup_landing_problems(landing: Mapping[str, Any], source: tuple[str | None, str] | None,
+                              checkout: Checkout) -> list[str]:
+    """Why a finished archive cleanup's `landing` is not what it fetched from `source`.
+
+    The first exit's guard trusts the containment recorded from this line, so a line
+    naming another branch, or a commit other than the one the fetch left, would let
+    a moved landing branch pass for a contained one. The branch is the source's. The
+    remote is the source's where that remote is `.` or one of the checkout's; a
+    source from the clone's recorded branch names none, and a recorded remote the
+    checkout lacks is replaced on the owner's word, so there it is any of the
+    checkout's or `.`. The commit is the one the fetch left at the ref for that remote
+    and branch, compared for equality: an older commit of the right branch, which
+    `HEAD` may well contain, is exactly the record the guard must not accept. A fetch
+    in the checkout between cleanup's and this write makes the line refused, and the
+    rerun fetches again.
+    """
+    problems = []
+    remote, branch = landing["remote"], landing["branch"]
+    if source is not None and branch != source[1]:
+        problems.append(f"its landing.branch {branch!r} is not {source[1]!r}, the branch "
+                        "cleanup fetches")
+    allowed = {".", *checkout.remotes()}
+    if source is not None and source[0] in allowed:
+        if remote != source[0]:
+            problems.append(f"its landing.remote {remote!r} is not {source[0]!r}, the remote "
+                            "cleanup fetches from")
+    elif remote not in allowed:
+        problems.append(f"its landing.remote {remote!r} is none of the checkout's remotes, "
+                        "nor . for a branch the checkout holds")
+    if not problems:
+        ref = landing_ref(remote, branch)
+        fetched = checkout.resolve(ref)
+        if fetched != landing["commit"]:
+            problems.append(f"its landing.commit {landing['commit'][:12]} is not the commit "
+                            f"{ref} names, "
+                            + (fetched[:12] if fetched else "none")
+                            + ", so it is not what the fetch left")
     return problems
 
 

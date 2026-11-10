@@ -34,11 +34,11 @@ VALID = {
 }
 
 # The landing branch a finished merge or archive cleanup records it fetched, and a
-# checkout that names a clone's remotes and contains every commit, for a test that is
-# not about the landing record.
+# checkout that names a clone's remotes, contains every commit, and holds that commit
+# at every ref, for a test that is not about the landing record.
 LANDED = {"remote": "origin", "branch": "dev", "commit": HEAD}
 ACCEPTING = Checkout(remotes=lambda: {"origin", "workspace"}, contains=lambda *_: True,
-                     base=lambda: None)
+                     base=lambda: None, resolve=lambda _: HEAD)
 
 OPUS = Model("claude", "claude-opus-5-5", "high")
 SONNET = Model("claude", "claude-sonnet-5-5", "medium")

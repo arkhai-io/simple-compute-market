@@ -105,6 +105,41 @@ modified CW-s3ju. Touches `.agents/change-outcome.schema.json`,
   merge's `landing`, not the clone's, and named in the refusal — pass. Library
   integration:
   `test_the_writer_records_a_cleanups_containment_in_a_real_repository` passes.
+  Fix (34 F1, the owner chose the writer's check): the writer now refuses a finished
+  cleanup line whose `landing` is not what cleanup fetched from the source it resolves
+  — the source's branch; the source's remote where that is `.` or one of the
+  checkout's, else any of the checkout's or `.`; the commit the checkout's ref for that
+  remote and branch names as the line is written, compared for equality — so the
+  sentence above that left the remote and branch to the skill no longer holds (D10,
+  CW-5vkd, with the scenario "Archive cleanup records another source than it
+  fetched"). A cleanup that skips its fetch while the ref is unmoved since the merge's
+  still passes; D10 records that limit. `log._cleanup_landing_problems`,
+  `log.landing_ref`, `Checkout.resolve`, and `records.git_resolve`;
+  `change-archive-cleanup` says what the writer refuses and asks the owner for a
+  remote, not a branch, when the recorded remote is absent; `index.md`'s CW-5vkd
+  summary updated. Unit (an injected `Checkout`):
+  `test_cleanup_fetches_the_branch_the_merge_was_given` gains the reviewer's
+  regression (the merge names `main`, cleanup records `dev`, refused before
+  containment is read), `test_a_cleanup_lines_remote_is_the_source_it_fetched_from`
+  ×9, `test_a_cleanup_lines_commit_is_the_one_its_fetch_left` ×6 (fetched, stale, no
+  ref; `origin` and `.`). Library integration (a real Git repository):
+  `test_the_writer_refuses_a_cleanups_stale_commit_in_a_real_repository` (`origin/dev`,
+  and `.` read from `refs/heads/dev`); the existing cleanup test now fetches the ref
+  it checks. `test_change_workflow_log.py`, `test_change_next_step.py`,
+  `test_change_workflow_wrapper.py`, `test_change_workflow_cli.py`,
+  `test_change_workflow_cli_steps.py`, `test_change_workflow_outcome.py`,
+  `test_check_agent_skills.py`, `test_change_workflow_steps.py`: 871 passed; `make
+  check-agent-skills` passes. `scripts/change-workflow run pre-commit
+  merge-after-archive` on the fixes: "after-functional-change … passed, exit 0",
+  "pre-commit-functional … passed, exit 0" (`make test` and the packaging check),
+  "pre-commit … passed, exit 0"; no hook rebuilt a file. Fresh-context check against `c5fd1e31d`: no blocking
+  defect; fixed — the skill let the owner name another branch the writer would refuse,
+  its sentence understated the remote rule, the delta left the no-source case
+  implicit, and the tests did not show the refusal precedes containment, cite the new
+  scenario, or take `.` through Git; declined — `records.git_resolve` repeats
+  `clone._ref`'s `rev-parse`, a merge of two modules' helpers outside the fix.
+  End-to-end: none; no scenario exercises the workflow tooling. Owed by validation:
+  the pipeline rerun 35 V1's disposition asks for.
 - [x] 1.4 Make `start merge` (`cli.merge_arguments`) bring in the branch it is given,
   else the last finished merge's `landing.branch` read from the change's log, else the
   clone marker's `base` (`find.landing_branch`), and refuse with none, naming `FROM`;
@@ -155,6 +190,8 @@ modified CW-s3ju. Touches `.agents/change-outcome.schema.json`,
   of this change's design that AGENTS.md's comment rule forbids (the hygiene check
   does not catch it); no step may edit `.claude/`, so the orchestrator removes it,
   on the owner's word, in a commit of its own before the round's review.
+  Fix (34 F2): the orchestrating session dropped "(D10)" on the owner's word during
+  the round's triage, and the triage's fix commit carries it.
 - [x] 1.7 Verification: `pytest -q scripts/tests/test_change_workflow_outcome.py
   scripts/tests/test_change_workflow_log.py scripts/tests/test_change_workflow_cli_steps.py
   scripts/tests/test_change_workflow_steps.py scripts/tests/test_find_change.py` (unit,

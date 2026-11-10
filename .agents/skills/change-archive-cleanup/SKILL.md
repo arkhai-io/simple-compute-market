@@ -200,13 +200,19 @@ above.
   The remote a merge recorded is named as the checkout it ran in names it, and you
   run in that checkout, so fetch it as it stands. When it is neither `.` nor one of
   this checkout's remotes — the `[remote "<name>"]` sections of the configuration
-  `git rev-parse --git-path config` names — ask the owner which source to fetch, and
-  record nothing you guessed. For `.`, a branch this checkout holds itself, fetch
-  nothing and record `{"remote": ".", "branch": <branch>, "commit": <git rev-parse
-  <branch>>}`. Otherwise `git fetch <remote> <branch>`, then record `{"remote":
-  <remote>, "branch": <branch>, "commit": <git rev-parse <remote>/<branch>>}`. When
-  the fetch fails, end `stopped`, its `reason` naming the fetch and what it
-  reported, and commit nothing.
+  `git rev-parse --git-path config` names — ask the owner which of this checkout's
+  remotes, or `.`, to take the branch from, and record nothing you guessed. For `.`,
+  a branch this checkout holds itself, fetch nothing and record `{"remote": ".",
+  "branch": <branch>, "commit": <git rev-parse <branch>>}`. Otherwise `git fetch
+  <remote> <branch>`, then record `{"remote": <remote>, "branch": <branch>,
+  "commit": <git rev-parse <remote>/<branch>>}`. The log's writer refuses a record
+  whose branch is not the source's; whose remote is not the source's where that is
+  `.` or one of this checkout's remotes, or otherwise is neither; or whose commit is
+  not the one that ref names as the line is written — so record what the fetch
+  left, never a commit read before it or copied from the merge's line. When the
+  fetch fails, end
+  `stopped`, its `reason` naming the fetch and what it reported, and commit
+  nothing.
 
 If any check fails, stop and say why.
 

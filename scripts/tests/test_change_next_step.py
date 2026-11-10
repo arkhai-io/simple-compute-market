@@ -1085,7 +1085,7 @@ def _cleaned_up(root: Path, *, contained: bool, landing: bool = True) -> dict:
     """An archive cleanup run naming done, its line recording a landing the log's
     writer found its commit does, or does not, contain; or no landing."""
     checkout = Checkout(remotes=lambda: {"origin"}, contains=lambda *_: contained,
-                        base=lambda: None)
+                        base=lambda: None, resolve=lambda _: HEAD)
     outcome = _done(_to("done"), **({"landing": LANDED} if landing else {}))
     return record_outcome(log_path(root, CHANGE), "archive-cleanup", outcome, session="s",
                           commit=HEAD, checkout=checkout)

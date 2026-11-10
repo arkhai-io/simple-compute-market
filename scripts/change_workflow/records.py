@@ -100,6 +100,13 @@ def git_remotes(root: Path) -> frozenset[str]:
     return frozenset(listed.stdout.split()) if listed.returncode == 0 else frozenset()
 
 
+def git_resolve(root: Path, ref: str) -> str | None:
+    """The commit `ref` names in the checkout at `root`; None where it names none."""
+    resolved = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                              cwd=root, capture_output=True, text=True)
+    return resolved.stdout.strip() if resolved.returncode == 0 else None
+
+
 def git_contains(root: Path, commit: str, ancestor: str) -> bool:
     """Whether `commit` contains `ancestor`, in the checkout at `root`: false too when
     either is no commit the checkout holds, since nothing then shows it does."""
