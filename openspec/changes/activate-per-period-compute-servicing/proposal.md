@@ -1,3 +1,5 @@
+> **Goal 8 MVP.** Goal 8's MVP change `switch-on-hosted-per-period-vm` now owns reduced, VM-only forms of this change's tasks 1.1–1.3, 2.3–2.4 and 3.1–3.4; this change keeps Goal 8's completion bar and is rewritten against it once the MVP change set's boundaries settle.
+
 ## Why
 
 The per-period compute product may be qualified against in-lane doubles before

@@ -1,3 +1,5 @@
+> **Goal 8 MVP.** Goal 8's MVP change `offer-per-period-vm-terms` now owns reduced forms of this change's tasks 1.2, the local half of 2.2, 2.3 and 3.1; this change is rewritten against it once the MVP change set's boundaries settle.
+
 ## Why
 
 Compute buyers need to discover the recurring and seller-stoppable options published

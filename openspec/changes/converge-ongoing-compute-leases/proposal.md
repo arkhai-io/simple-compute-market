@@ -1,3 +1,5 @@
+> **Goal 8 MVP.** Goal 8's MVP change `serve-running-rate-deals-on-vm` now owns reduced forms of this change's tasks 1.3, 2.1, 2.3, 2.4, 2.5, 3.1, 3.5, 4.1 (rows 0, 6, 7 and 9, VM only) and 4.3; this change is rewritten against it once the MVP change set's boundaries settle.
+
 ## Why
 
 Once a deal can be billed per period, nothing in either compute storefront keeps it

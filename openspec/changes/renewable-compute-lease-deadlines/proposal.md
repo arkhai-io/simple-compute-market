@@ -1,5 +1,7 @@
 # Compute lease delivery deadlines
 
+> **Goal 8 MVP.** Goal 8's MVP changes do not wait for this change: the delivery deadline stays seller-configured and storefront-enforced (`offer-per-period-vm-terms`), and an operator runbook covers a lease abandoned before delivery (`switch-on-hosted-per-period-vm`).
+
 ## Why
 
 A storefront can die between committing capacity and delivering it. Today the site

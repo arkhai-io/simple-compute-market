@@ -1,3 +1,5 @@
+> **Goal 8 MVP.** Goal 8's MVP changes now own reduced forms of this change's tasks: `derive-rate-parts-in-the-payments-kit` takes 1.4, 2.1–2.3, 2.6 and 3.1–3.4 and 3.6, and `serve-running-rate-deals-on-vm` takes 4.1–4.6 (not 4.5a) and 5.1. Its design's interim-revision premise predates the vendored contract (`kit/arkhai-payments/schema/SOURCE.md`); this change is rewritten against the MVP changes once their boundaries settle.
+
 ## Why
 
 VM and bare-metal sellers need to sell compute by the period from prepaid credits,

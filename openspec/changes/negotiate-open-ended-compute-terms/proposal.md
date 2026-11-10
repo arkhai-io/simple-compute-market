@@ -1,3 +1,5 @@
+> **Goal 8 MVP.** Goal 8's MVP change `offer-per-period-vm-terms` now owns reduced forms of this change's tasks 2.1, 2.2, 2.3, 3.1, 3.2, 4.1 and D1's derived classes; this change is rewritten against it once the MVP change set's boundaries settle.
+
 ## Why
 
 Compute buyers need a prepaid reserved term, or compute billed per period until they
