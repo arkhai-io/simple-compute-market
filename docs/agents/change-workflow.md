@@ -55,7 +55,10 @@ Every step's outcome names the exit it takes as a target — `{"step": "review",
 "kind": "design"}`, `{"step": "round"}`, `{"step": "plan"}` — and a triage's names
 the records it triaged. An outcome is checked against
 `.agents/change-outcome.schema.json`, and its target against the workflow graph, so
-one naming no node is refused. Run interactively, a
+one naming no node is refused. A validation's exit is the target the computation
+gives it: unattended, the wrapper computes it as the run starts, passes it to the
+session, records it on the line as `target`, and logs a finished validation with it
+as its exit; a resume takes it from the line it resumes. Run interactively, a
 step records its own outcome as its last act:
 
 ```text

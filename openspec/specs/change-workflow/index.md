@@ -171,7 +171,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 ### Step runs and outcomes
 
 - [CW-js86](spec.md#requirement-cw-js86-an-unattended-run-ends-with-a-structured-outcome) — an unattended run ends with a schema outcome: finished, question, proposed return, blocked, or stopped.
-- [CW-5ldi](spec.md#requirement-cw-5ldi-an-exit-or-a-return-is-named-as-a-target) — exits and returns are targets naming a graph node with any kind or sections; unknown kinds are refused.
+- [CW-5ldi](spec.md#requirement-cw-5ldi-an-exit-or-a-return-is-named-as-a-target) — exits and returns are targets naming a graph node with any kind or sections; unknown kinds are refused; the wrapper gives an unattended validation its target and logs it as the finished validation's exit.
 - [CW-4vma](spec.md#requirement-cw-4vma-a-triage-outcome-names-the-records-it-triaged) — a triage outcome names its distinct triaged records, at least one review; otherwise it is recorded stopped.
 - [CW-1a4d](spec.md#requirement-cw-1a4d-the-wrapper-logs-every-outcome-of-a-run) — the wrapper logs every outcome with session and commit, recording stopped for a run that gives none.
 - [CW-4c3e](spec.md#requirement-cw-4c3e-the-files-prevail-over-the-log-on-a-changes-state) — a change's files hold and prevail on its state; the log holds exits and the owner's decisions.

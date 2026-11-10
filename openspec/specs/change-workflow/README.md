@@ -1150,6 +1150,16 @@ entry guards are checked on validation's exit rather than its entry: a round's
 validation starts beside the review its target triages, before that review is
 published.
 
+The wrapper gives an unattended validation its target: it computes it before the
+session starts, passes it in the prompt, records it on the run's line, and logs a
+finished validation with that target as its exit, whatever exit the session named. A
+session asking the computation itself would meet its own run: once a validation's
+question or stop is logged, the computation reads that run and names the owner,
+which is no exit, and a validation that passed would be logged stopped. So a resume
+takes the target from the line it resumes and never computes it again. An interactive
+validation, with no wrapper, reads the target from the computation as it starts,
+before any line of its own exists.
+
 The graph declares no exit that is wrong in a state its node can be in. Where one
 step runs in two places with different exits, as the merge does before closeout and
 after the archive, the table has a node for each, and the computation tells which a

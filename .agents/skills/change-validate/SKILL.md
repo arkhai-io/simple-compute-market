@@ -58,7 +58,9 @@ the session, and every turn ends with an outcome matching
   the harness reports it as don't ask mode — may be done instead by a tool this
   step's rules allow for the same work, such as the Edit tool for a shell write or
   Read or Grep for a shell read. Either way, name the substitute in your message.
-  Never ask about a denial as a question.
+  Never ask about a denial as a question. One refused call is not a reason to
+  stop when the step's next commands are allowed: carry on with them, and name
+  the denial in your message.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
@@ -73,7 +75,9 @@ the session, and every turn ends with an outcome matching
   answered, take only the action the answer names, and rerun the part. When the
   record is written, end with `finished`, `next` the target the computation gave
   this validation (step 1), whatever the record's result: the computation checks
-  that target's guards again from the record. In a round's join the target is the
+  that target's guards again from the record. When your prompt gave the target,
+  the wrapper sets the logged outcome's `next` to it whatever you name, but state
+  it all the same. In a round's join the target is the
   round's triage, which triages the record's failures with the round; as a guard's
   remedy, or after the owner's direction, a passed validation leads to its target
   and a failed or inconclusive one to the owner — but a failed validation of the
@@ -108,11 +112,12 @@ names it again, saying to resume the session or record its outcome.
 
 ## 1. Check that this commit may be validated
 
-`scripts/change-workflow start validate` refuses while a round view is open in this
-checkout (`make round-view` of a change worked in the owner's workspace): the
-branch then points at the round's base, not its commit. If you were started some
-other way, `scripts/change-workflow check round-view` says the same; stop and ask
-the owner to run `make round-done`.
+A round view open in this checkout (`make round-view` of a change worked in the
+owner's workspace) points the branch at the round's base, not its commit. An
+unattended run has already been started by the wrapper, which ran `start validate`
+and its round-view check before your session began: never run `start validate`
+yourself. A session started some other way runs `scripts/change-workflow check
+round-view`; when it fails, stop and ask the owner to run `make round-done`.
 A view the owner opens in their workspace for a change worked in its own clone
 moves nothing here, and validation runs beside it.
 
@@ -136,17 +141,21 @@ moves nothing here, and validation runs beside it.
 - **Commit.** Record `git rev-parse HEAD` and the branch. Every part below describes
   that commit; if `HEAD` moves while you work, stop: the evidence no longer belongs
   to one commit.
-- **Target.** Run `scripts/change-workflow next <change>` and record the
-  `target` its result carries: the round's triage, `{"step": "triage", "kind":
-  "implementation"}`, when it names `validate` or `validate-and-review` in a
-  round's join; the exit whose guard this validation remedies, such as `{"step":
-  "closeout"}`, when it names `validate`, or the owner after a failed or
-  inconclusive validation of it; or the target the owner's direction to validation
-  names. It is this run's exit, under orchestration and interactively alike, read
-  now, before the run waits on anything. When the result carries no `target` — a
-  validation started by hand outside the route — record that, and name the round's
-  triage: in a round's join that is the target the computation gives, and anywhere
-  else the computation brings it to the owner as a target it did not give.
+- **Target.** The target is this run's exit: the round's triage, `{"step":
+  "triage", "kind": "implementation"}`, when the computation names `validate` or
+  `validate-and-review` in a round's join; the exit whose guard this validation
+  remedies, such as `{"step": "closeout"}`, when it names `validate`, or the owner
+  after a failed or inconclusive validation of it; or the target the owner's
+  direction to validation names. Unattended, the wrapper computed it before your
+  session started and gives it in your prompt, labelled `Target`, as JSON, and
+  again on a resume: record it, and never run `scripts/change-workflow next` for
+  it, since once your own run is logged the computation reads that run and names
+  the owner. Interactively, with no wrapper, run `scripts/change-workflow next
+  <change>` now, before the run waits on anything, and record the `target` its
+  result carries. When neither gives a target — a validation started by hand
+  outside the route — record that, and name the round's triage: in a round's join
+  that is the target the computation gives, and anywhere else the computation
+  brings it to the owner as a target it did not give.
 - **Plan.** `scripts/change-workflow config parts <change>` prints validation's
   plan, which the repository's configuration declares and the engine reads: the
   preflight, then each run of a part in declaration order, with its shape — `run`,

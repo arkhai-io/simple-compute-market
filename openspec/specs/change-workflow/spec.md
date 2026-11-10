@@ -1409,13 +1409,26 @@ workflow graph by its step, with its review kind for a review, the kind of revie
 it triages for a triage, and the sections for an implementation out of the plan's
 order. A review or a triage named without its kind, or with an empty or unknown
 one, MUST be refused. A validation MUST name as its exit the target the computation
-gave it, and archive cleanup the terminal node `done`.
+gave it, and archive cleanup the terminal node `done`. An unattended validation's
+target MUST be computed by the wrapper before its session starts, given to the
+session in its prompt, and recorded on its line; its resume MUST take the target
+from the line it resumes, never computing it again, and a finished validation given
+a target MUST be logged with that target as its exit, whatever exit its session
+named. An interactive validation reads its target from the computation itself.
 
 #### Scenario: A triage names its exit
 
 - **WHEN** an unattended triage of review 157 ends with
   `{"outcome": "finished", "message": "…", "triaged": ["157-closeout"], "next": {"step": "review", "kind": "closeout"}}`
 - **THEN** the wrapper records it, and the computation routes on its exit
+
+#### Scenario: An unattended validation names the owner
+
+- **WHEN** the computation names validation with closeout as its target, and the
+  unattended validation, given that target in its prompt, finishes naming
+  `{"step": "owner"}` as its exit
+- **THEN** the wrapper logs it finished with closeout as its exit, and a resume of a
+  question it asked first is given closeout again, from the question's line
 
 ### Requirement: CW-4vma A triage outcome names the records it triaged
 

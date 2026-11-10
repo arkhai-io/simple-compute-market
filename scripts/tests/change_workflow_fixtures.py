@@ -141,7 +141,8 @@ def make_wrapper(tmp_path: Path, claude: FakeClaude) -> Wrapper:
     return Wrapper(root=tmp_path, runner=claude, head=lambda _: COMMIT, clock=clock,
                    echo=None,
                    conversation=lambda _, session: conversations(tmp_path) / f"{session}.jsonl",
-                   runs=lambda _: None, checkout=lambda *_: ACCEPTING)
+                   runs=lambda _: None, checkout=lambda *_: ACCEPTING,
+                   target=lambda *_: None)
 
 
 def option(command: list[str], flag: str) -> str:
