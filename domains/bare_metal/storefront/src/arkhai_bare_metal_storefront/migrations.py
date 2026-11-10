@@ -1,490 +1,168 @@
-"""Versioned SQLite migrations owned by the bare-metal storefront."""
+"""The bare-metal storefront's migration chain.
+
+The chain composes core storefront's baseline, the baselines of the kits whose
+tables the storefront holds (the settlement runtime, contact exchange, and the
+pool-override store), and the bare-metal domain's own, in that order, then
+every migration after the baseline. The baselines reproduce the database the
+marketplace v0.3.0 release's storefront built at construction; a database
+recording every ID that release's chain recorded (:data:`FLOOR_IDS`) is adopted
+at the baseline without running it. A later change to any of these tables is a
+migration appended to :data:`CHAIN`, never an edit to a baseline.
+See openspec/specs/deployment-state/spec.md.
+"""
 
 from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 
-from core_storefront.sqlite_migrations import Migration
+from core_storefront import migrations as core_migrations
+from market_contact_exchange import migrations as contact_exchange_migrations
+from market_deal_servicing import create_schema as create_servicing_schema
+from market_pool_overrides import migrations as pool_override_migrations
+from market_schema_migrations import (
+    Chain,
+    CheckResult,
+    MigrateReport,
+    Migration,
+    SqliteMigrationConnection,
+    check_sqlite_file,
+    migrate,
+    refusal_message,
+)
+from market_settlement_runtime import migrations as settlement_migrations
 
+MIGRATION_COMMAND = "bare-metal-storefront-migrate"
+"""The storefront's migration command's name, which every refusal names as the
+remedy; the command applies :data:`CHAIN` through :func:`migrate_storefront_database`."""
 
-def _add_agreement_payloads(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE bare_metal_agreement_payloads (
-          negotiation_id TEXT PRIMARY KEY,
-          message_json TEXT,
-          terms_json TEXT,
-          materialization_json TEXT,
-          receipt_json TEXT,
-          result_json TEXT,
-          created_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          updated_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        )
-        """,
-    )
-
-
-def _add_derived_publication_tracking(conn: sqlite3.Connection) -> None:
-    existing = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' "
-        "AND name='derived_bare_metal_listings'",
-    ).fetchone()
-    if existing is None:
-        conn.execute(
-            """
-            CREATE TABLE derived_bare_metal_listings (
-              listing_id TEXT PRIMARY KEY,
-              site_id TEXT NOT NULL,
-              physical_resource_id TEXT NOT NULL,
-              host_id TEXT NOT NULL,
-              physical_host_id TEXT NOT NULL,
-              status TEXT NOT NULL,
-              derivation_key TEXT NOT NULL UNIQUE,
-              last_reconciled_at TEXT NOT NULL
-                DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-            )
-            """,
-        )
-    else:
-        columns = {
-            str(row[1])
-            for row in conn.execute(
-                "PRAGMA table_info(derived_bare_metal_listings)",
-            )
-        }
-        if "site_id" not in columns:
-            conn.execute(
-                "ALTER TABLE derived_bare_metal_listings ADD COLUMN site_id TEXT",
-            )
-        if "physical_resource_id" not in columns:
-            conn.execute(
-                "ALTER TABLE derived_bare_metal_listings "
-                "ADD COLUMN physical_resource_id TEXT",
-            )
-        conn.execute(
-            "UPDATE derived_bare_metal_listings SET status = 'closed' "
-            "WHERE site_id IS NULL OR physical_resource_id IS NULL",
-        )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_derived_bare_metal_site_resource "
-        "ON derived_bare_metal_listings(site_id, physical_resource_id)",
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_derived_bare_metal_status "
-        "ON derived_bare_metal_listings(status)",
-    )
-
-
-def _add_operator_state(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE bare_metal_operator_state (
-          singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
-          paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0, 1)),
-          updated_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        )
-        """,
-    )
-    conn.execute(
-        "INSERT INTO bare_metal_operator_state(singleton_id, paused) VALUES (1, 0)",
-    )
-
-
-def _add_selected_site_bindings(conn: sqlite3.Connection) -> None:
-    """Each capacity reservation's site and the service peer that site is bound to.
-
-    The reservation is pinned to the peer, a stable subject whose principals
-    rotate, so an authorized rotation keeps it bound. ``authority_scheme`` and
-    ``authority_identifier`` record the peer's primary principal when the
-    reservation was made, for audit only.
+_BASELINE_DDL: tuple[str, ...] = (
+    # Each capacity reservation's site and the service peer that site is bound
+    # to, so a later release or end reaches the site that holds the reservation.
     """
-    conn.execute(
-        """
-        CREATE TABLE bare_metal_selected_site_bindings (
-          capacity_reservation_id TEXT PRIMARY KEY,
-          site_id TEXT NOT NULL,
-          service_peer TEXT NOT NULL,
-          authority_scheme TEXT NOT NULL,
-          authority_identifier TEXT NOT NULL,
-          created_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          updated_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          CHECK (LENGTH(TRIM(capacity_reservation_id)) > 0),
-          CHECK (LENGTH(TRIM(site_id)) > 0),
-          CHECK (LENGTH(TRIM(service_peer)) > 0),
-          CHECK (LENGTH(TRIM(authority_scheme)) > 0),
-          CHECK (LENGTH(TRIM(authority_identifier)) > 0)
-        )
-        """,
+    CREATE TABLE bare_metal_selected_site_bindings (
+      capacity_reservation_id TEXT PRIMARY KEY,
+      site_id TEXT NOT NULL,
+      service_peer TEXT NOT NULL,
+      authority_scheme TEXT NOT NULL,
+      authority_identifier TEXT NOT NULL,
+      created_at TEXT NOT NULL
+        DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL
+        DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      CHECK (LENGTH(TRIM(capacity_reservation_id)) > 0),
+      CHECK (LENGTH(TRIM(site_id)) > 0),
+      CHECK (LENGTH(TRIM(service_peer)) > 0),
+      CHECK (LENGTH(TRIM(authority_scheme)) > 0),
+      CHECK (LENGTH(TRIM(authority_identifier)) > 0)
     )
-    conn.execute(
-        "CREATE INDEX idx_bare_metal_selected_site "
-        "ON bare_metal_selected_site_bindings(site_id)",
-    )
-
-
-def _add_fulfillment_lifecycle(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE bare_metal_fulfillment_lifecycle (
-          negotiation_id TEXT PRIMARY KEY,
-          settlement_ref TEXT NOT NULL UNIQUE,
-          site_id TEXT NOT NULL,
-          physical_resource_id TEXT NOT NULL,
-          capacity_reservation_id TEXT UNIQUE,
-          settlement_resource_id TEXT,
-          fulfillment_id TEXT UNIQUE,
-          state TEXT NOT NULL,
-          failure_reason TEXT,
-          created_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          updated_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          CHECK (LENGTH(TRIM(negotiation_id)) > 0),
-          CHECK (LENGTH(TRIM(settlement_ref)) > 0),
-          CHECK (LENGTH(TRIM(site_id)) > 0),
-          CHECK (LENGTH(TRIM(physical_resource_id)) > 0)
-        )
-        """,
-    )
-    conn.execute(
-        "CREATE INDEX idx_bare_metal_fulfillment_state "
-        "ON bare_metal_fulfillment_lifecycle(state)",
-    )
-
-
-def _add_selected_site_immutability(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS bare_metal_selected_site_immutable
-        BEFORE UPDATE OF
-          capacity_reservation_id, site_id, service_peer,
-          authority_scheme, authority_identifier
-        ON bare_metal_selected_site_bindings
-        WHEN NOT (
-          OLD.capacity_reservation_id IS NEW.capacity_reservation_id
-          AND OLD.site_id IS NEW.site_id
-          AND OLD.service_peer IS NEW.service_peer
-          AND OLD.authority_scheme IS NEW.authority_scheme
-          AND OLD.authority_identifier IS NEW.authority_identifier
-        )
-        BEGIN
-          SELECT RAISE(
-            ABORT,
-            'bare-metal selected-site authority binding is immutable'
-          );
-        END
-        """
-    )
-
-
-def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
-    """Move historical bare-metal rows under common immutable ownership."""
-    rows = conn.execute(
-        """
-        SELECT d.listing_id, d.site_id, d.physical_resource_id,
-               d.host_id, d.physical_host_id, d.derivation_key,
-               d.last_reconciled_at, l.listing_resource
-        FROM derived_bare_metal_listings d
-        JOIN listings l ON l.listing_id=d.listing_id
-        WHERE d.site_id IS NOT NULL AND d.physical_resource_id IS NOT NULL
-        """
-    ).fetchall()
-    for row in rows:
-        listing_resource = json.loads(str(row[7]))
-        listing_resource["offering_mode"] = "bare_metal"
-        conn.execute(
-            "UPDATE listings SET listing_resource=? WHERE listing_id=?",
-            (
-                json.dumps(
-                    listing_resource,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-                row[0],
-            ),
-        )
-        source_envelope = json.dumps(
-            {
-                "kind": "bare_metal.resource-projection.v1",
-                "host_id": row[3],
-                "physical_host_id": row[4],
-                "physical_resource_id": row[2],
-                "schema_version": 1,
-                "site_id": row[1],
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO storefront_listing_bindings(
-              listing_id, site_id, pool_id, physical_resource_id,
-              offering_mode, domain_identity, contract_major,
-              contract_minor, derivation_key, source_envelope_json,
-              last_reconciled_at, capacity_backing
-            ) VALUES (?, ?, NULL, ?, 'bare_metal', 'bare_metal.v1',
-                      1, 0, ?, ?, ?, 'backed')
-            """,
-            (
-                row[0],
-                row[1],
-                row[2],
-                row[5],
-                source_envelope,
-                row[6],
-            ),
-        )
-    conn.execute(
-        """
-        UPDATE negotiation_threads
-        SET domain_listing_id=our_listing_id,
-            site_id=(
-              SELECT site_id FROM storefront_listing_bindings b
-              WHERE b.listing_id=negotiation_threads.our_listing_id
-            ),
-            offering_mode='bare_metal',
-            domain_identity='bare_metal.v1',
-            contract_major=1,
-            contract_minor=0
-        WHERE EXISTS (
-          SELECT 1 FROM bare_metal_agreement_payloads p
-          WHERE p.negotiation_id=negotiation_threads.negotiation_id
-        )
-        """
-    )
-    artifact_columns = (
-        ("message", "message_json"),
-        ("terms", "terms_json"),
-        ("materialization", "materialization_json"),
-        ("receipt", "receipt_json"),
-        ("result", "result_json"),
-    )
-    orphan = conn.execute(
-        """
-        SELECT p.negotiation_id
-        FROM bare_metal_agreement_payloads p
-        LEFT JOIN negotiation_threads t
-          ON t.negotiation_id=p.negotiation_id
-        WHERE t.negotiation_id IS NULL
-        LIMIT 1
-        """
-    ).fetchone()
-    if orphan is not None:
-        raise RuntimeError(
-            f"historical bare-metal artifact has no negotiation owner: {orphan[0]}"
-        )
-    payload_rows = conn.execute(
-        """
-        SELECT p.negotiation_id, p.message_json, p.terms_json,
-               p.materialization_json, p.receipt_json, p.result_json,
-               t.offering_mode, t.domain_identity,
-               t.contract_major, t.contract_minor
-        FROM bare_metal_agreement_payloads p
-        JOIN negotiation_threads t ON t.negotiation_id=p.negotiation_id
-        """
-    ).fetchall()
-    for payload_row in payload_rows:
-        if any(value is None for value in payload_row[6:]):
-            raise RuntimeError(
-                "historical bare-metal agreement has no exact listing/site binding: "
-                f"{payload_row[0]}"
-            )
-        for index, (artifact_slot, _column) in enumerate(
-            artifact_columns,
-            start=1,
-        ):
-            artifact_json = payload_row[index]
-            if artifact_json is None:
-                continue
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO storefront_domain_artifacts(
-                  negotiation_id, artifact_slot, offering_mode,
-                  domain_identity, contract_major, contract_minor,
-                  artifact_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    payload_row[0],
-                    artifact_slot,
-                    *payload_row[6:],
-                    artifact_json,
-                ),
-            )
-    conn.execute("DROP TABLE bare_metal_agreement_payloads")
-
-
-def _add_bare_metal_settlement_records(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE bare_metal_settlement_records (
-          negotiation_id TEXT PRIMARY KEY,
-          mechanism TEXT NOT NULL,
-          agreement_sha256 TEXT NOT NULL,
-          settlement_ref TEXT UNIQUE,
-          status TEXT NOT NULL CHECK (
-            status IN (
-              'accepted', 'settlement_verified', 'failed', 'refunding', 'refunded'
-            )
-          ),
-          evidence_json TEXT NOT NULL CHECK (json_valid(evidence_json)),
-          created_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          updated_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        )
-        """
-    )
-
-
-def _drop_derived_publication_tracking(conn: sqlite3.Connection) -> None:
-    """Retire the domain table that tracked each listing under a second key.
-
-    A bare-metal listing is tracked only by its common binding's derivation
-    key, which includes its pool, so a Physical Resource moved to another pool
-    is an identity change rather than a refresh under a stale binding.
+    """,
+    "CREATE INDEX idx_bare_metal_selected_site ON bare_metal_selected_site_bindings(site_id)",
     """
-    conn.execute("DROP INDEX IF EXISTS idx_derived_bare_metal_site_resource")
-    conn.execute("DROP INDEX IF EXISTS idx_derived_bare_metal_status")
-    conn.execute("DROP TABLE IF EXISTS derived_bare_metal_listings")
-
-
-class RetiredListingKindError(RuntimeError):
-    """The database holds state this storefront can no longer decode."""
-
-
-def _refuse_retired_listing_kind(conn: sqlite3.Connection) -> None:
-    """Refuse a database written before listings named their host ``host_id``.
-
-    Accepted bare-metal state is signed or digest-pinned, so it cannot be
-    rewritten in place, and no decoder for the earlier listing kind is kept.
-    Starting against such a database would fail only later, on the first
-    decode of a retired record; refusing here names the remedy instead. The
-    retired schema is recognized by structure rather than by decoding, since
-    decoding is exactly what is no longer possible.
+    CREATE TABLE bare_metal_fulfillment_lifecycle (
+      negotiation_id TEXT PRIMARY KEY,
+      settlement_ref TEXT NOT NULL UNIQUE,
+      site_id TEXT NOT NULL,
+      physical_resource_id TEXT NOT NULL,
+      capacity_reservation_id TEXT UNIQUE,
+      settlement_resource_id TEXT,
+      fulfillment_id TEXT UNIQUE,
+      state TEXT NOT NULL,
+      failure_reason TEXT,
+      created_at TEXT NOT NULL
+        DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL
+        DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      lease_ready_evidence_json TEXT,
+      lease_ready_evidence_digest TEXT,
+      evidence_rejections INTEGER NOT NULL DEFAULT 0,
+      CHECK (LENGTH(TRIM(negotiation_id)) > 0),
+      CHECK (LENGTH(TRIM(settlement_ref)) > 0),
+      CHECK (LENGTH(TRIM(site_id)) > 0),
+      CHECK (LENGTH(TRIM(physical_resource_id)) > 0)
+    )
+    """,
+    "CREATE INDEX idx_bare_metal_fulfillment_state ON bare_metal_fulfillment_lifecycle(state)",
     """
-    columns = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info(derived_bare_metal_listings)")
+    CREATE TRIGGER bare_metal_selected_site_immutable
+    BEFORE UPDATE OF
+      capacity_reservation_id, site_id, service_peer,
+      authority_scheme, authority_identifier
+    ON bare_metal_selected_site_bindings
+    WHEN NOT (
+      OLD.capacity_reservation_id IS NEW.capacity_reservation_id
+      AND OLD.site_id IS NEW.site_id
+      AND OLD.service_peer IS NEW.service_peer
+      AND OLD.authority_scheme IS NEW.authority_scheme
+      AND OLD.authority_identifier IS NEW.authority_identifier
+    )
+    BEGIN
+      SELECT RAISE(
+        ABORT,
+        'bare-metal selected-site authority binding is immutable'
+      );
+    END
+    """,
+    """
+    CREATE TABLE bare_metal_settlement_records (
+      negotiation_id TEXT PRIMARY KEY,
+      mechanism TEXT NOT NULL,
+      agreement_sha256 TEXT NOT NULL,
+      settlement_ref TEXT UNIQUE,
+      status TEXT NOT NULL CHECK (
+        status IN (
+          'accepted', 'settlement_verified', 'failed', 'refunding', 'refunded'
+        )
+      ),
+      evidence_json TEXT NOT NULL CHECK (json_valid(evidence_json)),
+      created_at TEXT NOT NULL
+        DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL
+        DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )
+    """,
+    "CREATE UNIQUE INDEX idx_bare_metal_fulfillment_evidence_digest"
+    " ON bare_metal_fulfillment_lifecycle(lease_ready_evidence_digest)"
+    " WHERE lease_ready_evidence_digest IS NOT NULL",
+    # The listing record each negotiation's opening was authorized against.
+    """
+    CREATE TABLE bare_metal_opening_listings (
+      negotiation_id TEXT PRIMARY KEY,
+      listing_json TEXT NOT NULL CHECK (json_valid(listing_json)),
+      created_at TEXT NOT NULL
+        DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )
+    """,
+)
+
+BASELINE_TABLES: frozenset[str] = frozenset(
+    {
+        "bare_metal_selected_site_bindings",
+        "bare_metal_fulfillment_lifecycle",
+        "bare_metal_settlement_records",
+        "bare_metal_opening_listings",
     }
-    if "machine_id" in columns:
-        raise RetiredListingKindError(
-            "this bare-metal storefront database was written under a retired "
-            "listing kind and cannot be decoded; reset it as described in "
-            "docs/bare-metal-seller-quickstart.md, "
-            "\"Resetting the storefront database\""
-        )
+)
+"""The tables :data:`BASELINE` creates."""
 
 
-class RetiredReservationBindingError(RuntimeError):
-    """The database records reservations without their site's service peer."""
+def _create_baseline(connection: sqlite3.Connection) -> None:
+    for statement in _BASELINE_DDL:
+        connection.execute(statement)
 
 
-def _refuse_reservations_without_their_peer(conn: sqlite3.Connection) -> None:
-    """Refuse a database whose reservations name no service peer.
-
-    A reservation is pinned to its site's service peer, a column the
-    selected-site table has had since it was first created; a database created
-    before then records only the principal, which no longer identifies the
-    site's authority once that principal rotates. Its reservations cannot be
-    rebound without guessing, and no upgrade is kept, so startup refuses and
-    names the remedy rather than failing on the missing column later. Recognized
-    by structure, as the retired listing kind is.
-    """
-    columns = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info(bare_metal_selected_site_bindings)")
-    }
-    if columns and "service_peer" not in columns:
-        raise RetiredReservationBindingError(
-            "this bare-metal storefront database records reservations without "
-            "their site's service peer and cannot be read; reset it as described "
-            "in docs/bare-metal-seller-quickstart.md, "
-            "\"Resetting the storefront database\""
-        )
-
-
-def _retire_storefront_negotiation(conn: sqlite3.Connection) -> None:
-    """Abandon threads opened before negotiation moved to the kit runtime, and drop
-    the durable trading pause.
-
-    Those threads were never resumable: continuing one was always refused, and
-    their transcripts use actions the runtime does not read. They are abandoned
-    as the negotiation watchdog abandons a stale thread, which starts no
-    settlement or release, since nothing was reserved or held during
-    negotiation. Terminal threads keep their outcome. The trading pause is now
-    process-local, so its table goes.
-    """
-    conn.execute(
-        """
-        UPDATE negotiation_threads
-        SET terminal_state = 'abandoned', status = 'terminated',
-            updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-        WHERE terminal_state IS NULL
-        """
-    )
-    conn.execute("DROP TABLE IF EXISTS bare_metal_operator_state")
-
-
-def _add_alkahest_lease_ready_evidence(conn: sqlite3.Connection) -> None:
-    """Keep an Alkahest fulfillment's lease-ready evidence beside its lifecycle.
-
-    The chain holds only the evidence's digest, so the storefront keeps the body
-    the digest names and resolves it to an authorized caller, and counts the
-    chain's refusals of its submission.
-    """
-    conn.execute(
-        "ALTER TABLE bare_metal_fulfillment_lifecycle "
-        "ADD COLUMN lease_ready_evidence_json TEXT"
-    )
-    conn.execute(
-        "ALTER TABLE bare_metal_fulfillment_lifecycle "
-        "ADD COLUMN lease_ready_evidence_digest TEXT"
-    )
-    # How many times the chain has refused the evidence submission; the step
-    # leaves the deal to an operator after a bounded number of refusals.
-    conn.execute(
-        "ALTER TABLE bare_metal_fulfillment_lifecycle "
-        "ADD COLUMN evidence_rejections INTEGER NOT NULL DEFAULT 0"
-    )
-    conn.execute(
-        "CREATE UNIQUE INDEX idx_bare_metal_fulfillment_evidence_digest "
-        "ON bare_metal_fulfillment_lifecycle(lease_ready_evidence_digest) "
-        "WHERE lease_ready_evidence_digest IS NOT NULL"
-    )
-
-
-def _add_opening_listings(conn: sqlite3.Connection) -> None:
-    """Keep the listing record each negotiation's opening was authorized against.
-
-    The opening authorizes its escrow under that record's release conditions,
-    and the negotiation continues and is accepted against the same record, so a
-    listing refreshed in place while it runs cannot change what the buyer is
-    asked to fund. One row per negotiation, written once.
-    """
-    conn.execute(
-        """
-        CREATE TABLE bare_metal_opening_listings (
-          negotiation_id TEXT PRIMARY KEY,
-          listing_json TEXT NOT NULL CHECK (json_valid(listing_json)),
-          created_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        )
-        """
-    )
+BASELINE: Migration[sqlite3.Connection] = Migration(
+    "v0_3_0_baseline_bare_metal_storefront", _create_baseline
+)
+"""The bare-metal domain's tables as the v0.3.0 release built them."""
 
 
 #: The members of a recorded access response that say how to reach the host.
 _ACCESS_MATERIAL = ("host", "port", "username")
 
 
-def _add_delivery_activation(conn: sqlite3.Connection) -> None:
+def _add_delivery_activation(connection: sqlite3.Connection) -> None:
     """Record the site's activation instant, and clear recorded access responses.
 
     ``activated_at_utc`` is the instant, in Unix seconds, the site returned when
@@ -501,31 +179,20 @@ def _add_delivery_activation(conn: sqlite3.Connection) -> None:
     provisioning, so it is marked dispatched (state ``dispatch``): delivery
     then repeats the same request and adopts the fulfillment provisioning
     accepted, and an end ends it through the lease rather than releasing its
-    capacity. A rerun changes nothing.
+    capacity.
     """
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(bare_metal_fulfillment_lifecycle)")}
-    if "activated_at_utc" not in columns:
-        conn.execute(
-            "ALTER TABLE bare_metal_fulfillment_lifecycle ADD COLUMN activated_at_utc INTEGER"
-        )
-    artifacts = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='storefront_domain_artifacts'"
-    ).fetchone()
-    if artifacts is not None:
-        conn.execute(
-            "UPDATE bare_metal_fulfillment_lifecycle SET state='dispatch' "
-            "WHERE fulfillment_id IS NULL AND capacity_reservation_id IS NOT NULL "
-            "AND state NOT IN ('dispatch', 'released', 'terminating') "
-            "AND EXISTS (SELECT 1 FROM storefront_domain_artifacts a "
-            "WHERE a.negotiation_id = bare_metal_fulfillment_lifecycle.negotiation_id "
-            "AND a.artifact_slot = 'materialization')"
-        )
-    replay = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='auth_replay_reservations'"
-    ).fetchone()
-    if replay is None:
-        return
-    rows = conn.execute(
+    connection.execute(
+        "ALTER TABLE bare_metal_fulfillment_lifecycle ADD COLUMN activated_at_utc INTEGER"
+    )
+    connection.execute(
+        "UPDATE bare_metal_fulfillment_lifecycle SET state='dispatch' "
+        "WHERE fulfillment_id IS NULL AND capacity_reservation_id IS NOT NULL "
+        "AND state NOT IN ('dispatch', 'released', 'terminating') "
+        "AND EXISTS (SELECT 1 FROM storefront_domain_artifacts a "
+        "WHERE a.negotiation_id = bare_metal_fulfillment_lifecycle.negotiation_id "
+        "AND a.artifact_slot = 'materialization')"
+    )
+    rows = connection.execute(
         "SELECT principal_scheme, principal_identifier, request_id, response_body "
         "FROM auth_replay_reservations WHERE response_body IS NOT NULL"
     ).fetchall()
@@ -541,85 +208,143 @@ def _add_delivery_activation(conn: sqlite3.Connection) -> None:
         ):
             continue
         stripped = {key: value for key, value in body.items() if key not in _ACCESS_MATERIAL}
-        conn.execute(
+        connection.execute(
             "UPDATE auth_replay_reservations SET response_body = ? "
             "WHERE principal_scheme = ? AND principal_identifier = ? AND request_id = ?",
             (
                 json.dumps(stripped, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
-                scheme, identifier, request_id,
+                scheme,
+                identifier,
+                request_id,
             ),
         )
 
 
-BARE_METAL_STOREFRONT_MIGRATIONS = (
-    # First, so a database written under the retired listing kind is refused
-    # before any other pending migration touches a renamed column. On a fresh
-    # database it finds no table and records itself.
-    Migration(
-        id="bare-metal-storefront-0009-refuse-retired-listing-kind",
-        apply=_refuse_retired_listing_kind,
-    ),
-    Migration(
-        id="bare-metal-storefront-0001-agreement-payloads",
-        apply=_add_agreement_payloads,
-    ),
-    Migration(
-        id="bare-metal-storefront-0002-derived-publications",
-        apply=_add_derived_publication_tracking,
-    ),
-    Migration(
-        id="bare-metal-storefront-0003-operator-state",
-        apply=_add_operator_state,
-    ),
-    Migration(
-        id="bare-metal-storefront-0004-selected-site-bindings",
-        apply=_add_selected_site_bindings,
-    ),
-    Migration(
-        id="bare-metal-storefront-0005-fulfillment-lifecycle",
-        apply=_add_fulfillment_lifecycle,
-    ),
-    Migration(
-        id="bare-metal-storefront-0006-common-domain-bindings",
-        apply=_migrate_common_domain_bindings,
-    ),
-    Migration(
-        id="bare-metal-storefront-0007-selected-site-immutability",
-        apply=_add_selected_site_immutability,
-    ),
-    Migration(
-        id="bare-metal-storefront-0008-settlement-records",
-        apply=_add_bare_metal_settlement_records,
-    ),
-    Migration(
-        id="bare-metal-storefront-0010-drop-derived-publications",
-        apply=_drop_derived_publication_tracking,
-    ),
-    # No migration takes 0011's ID: its table, the projection generations
-    # publication once accepted, is frozen. A database that applied it keeps
-    # the table, which nothing reads or writes. See
-    # docs/development/DEPLOYMENT_AND_CONFIG.md, "Migrations at startup".
-    Migration(
-        id="bare-metal-storefront-0012-retire-storefront-negotiation",
-        apply=_retire_storefront_negotiation,
-    ),
-    Migration(
-        id="bare-metal-storefront-0013-alkahest-lease-ready-evidence",
-        apply=_add_alkahest_lease_ready_evidence,
-    ),
-    # After every migration that creates or alters the selected-site table, so
-    # a fresh database passes it and records it, and a database whose table
-    # predates the service-peer column is refused at every start.
-    Migration(
-        id="bare-metal-storefront-0014-refuse-reservations-without-their-peer",
-        apply=_refuse_reservations_without_their_peer,
-    ),
-    Migration(
-        id="bare-metal-storefront-0015-opening-listings",
-        apply=_add_opening_listings,
-    ),
-    Migration(
-        id="bare-metal-storefront-0016-delivery-activation",
-        apply=_add_delivery_activation,
-    ),
+def _create_store_open_tables(connection: sqlite3.Connection) -> None:
+    """Create the tables the v0.3.0 release created when its lifecycle store opened.
+
+    Deal servicing's tables and the lifecycle's continuation cursor: that
+    release created them when the store opened, so an adopted database holds
+    them only if its store ever did. Their DDL tolerates the ones present, and
+    this is the one migration of the chain that does. On a fresh database it
+    creates them.
+    """
+    create_servicing_schema(connection)
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS bare_metal_lifecycle_cursor "
+        "(id INTEGER PRIMARY KEY CHECK (id=1), continuation TEXT)"
+    )
+
+
+def _drop_accepted_site_generations(connection: sqlite3.Connection) -> None:
+    """Drop the projection generations publication once accepted, where present.
+
+    Nothing reads or writes the table; a v0.3.0 database holds it only if an
+    earlier release created it.
+    """
+    connection.execute("DROP TABLE IF EXISTS bare_metal_accepted_site_generations")
+
+
+FLOOR_IDS: tuple[str, ...] = (
+    "20260604_000_listing_resource_timestamps",
+    "20260604_004_negotiation_amount_text_columns",
+    "20260604_005_escrows_and_listings",
+    "20260722_001_capacity_holds_reservation_id",
+    "20260810_003_negotiation_provision_terms",
+    "20260811_001_marketplace_principals_v2",
+    "20260811_002_replay_attempt_leases",
+    "20260815_001_storefront_domain_bindings",
+    "20260911_001_listing_resource_column",
+    "20260923_001_listing_binding_capacity_backing",
+    "20260923_002_listing_binding_capacity_backing_required",
+    "20260923_003_listing_closed_by",
+    "20261001_001_listing_rate_structure",
+    "20260810_001_settlement_obligation_lifecycle",
+    "20260810_002_settlement_servicing_runtime",
+    "20260811_003_settlement_principal_authorization",
+    "20260815_004_settlement_mechanism_materialization_params",
+    "20261028_005_settlement_operation_awaiting_delivery",
+    "20260815_006_contact_introductions",
+    "20261001_007_contact_introduction_tombstones",
+    "20261027_008_contact_introduction_seller_dispatch_claims",
+    "20260925_001_pool_overrides",
+    "20261001_001_pool_override_asking_rates",
+    "bare-metal-storefront-0009-refuse-retired-listing-kind",
+    "bare-metal-storefront-0001-agreement-payloads",
+    "bare-metal-storefront-0002-derived-publications",
+    "bare-metal-storefront-0003-operator-state",
+    "bare-metal-storefront-0004-selected-site-bindings",
+    "bare-metal-storefront-0005-fulfillment-lifecycle",
+    "bare-metal-storefront-0006-common-domain-bindings",
+    "bare-metal-storefront-0007-selected-site-immutability",
+    "bare-metal-storefront-0008-settlement-records",
+    "bare-metal-storefront-0010-drop-derived-publications",
+    "bare-metal-storefront-0012-retire-storefront-negotiation",
+    "bare-metal-storefront-0013-alkahest-lease-ready-evidence",
+    "bare-metal-storefront-0014-refuse-reservations-without-their-peer",
+    "bare-metal-storefront-0015-opening-listings",
 )
+"""Every ID the v0.3.0 release's bare-metal storefront chain recorded."""
+
+CHAIN: Chain[sqlite3.Connection] = Chain(
+    service="the bare-metal storefront",
+    command=MIGRATION_COMMAND,
+    baselines=(
+        core_migrations.BASELINE,
+        settlement_migrations.BASELINE,
+        contact_exchange_migrations.BASELINE,
+        pool_override_migrations.BASELINE,
+        BASELINE,
+    ),
+    migrations=(
+        Migration("bare-metal-storefront-0016-delivery-activation", _add_delivery_activation),
+        Migration("bare-metal-storefront-0017-store-open-tables", _create_store_open_tables),
+        Migration(
+            "bare-metal-storefront-0018-drop-accepted-site-generations",
+            _drop_accepted_site_generations,
+        ),
+    ),
+    floor_ids=FLOOR_IDS,
+)
+
+
+def migrate_storefront_database(db_path: str | Path) -> MigrateReport:
+    """Apply :data:`CHAIN` to the database at ``db_path``, creating it if absent.
+
+    Refuses an ahead or unsupported database applying nothing
+    (``MigrationRefused``); a failing migration leaves the ones before it
+    recorded (``MigrationFailed``).
+    """
+    path = Path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        return migrate(CHAIN, SqliteMigrationConnection(connection))
+    finally:
+        connection.close()
+
+
+class IncompatibleStorefrontDatabase(RuntimeError):
+    """The database is not exactly at the chain this image carries."""
+
+    def __init__(self, result: CheckResult) -> None:
+        super().__init__(
+            refusal_message(result, service=CHAIN.service, command=CHAIN.command)
+        )
+        self.result = result
+
+
+def check_storefront_database(db_path: str | Path) -> CheckResult:
+    """The database's state against :data:`CHAIN`, read without changing it.
+
+    The file is opened read-only, so a missing database is *absent* and is not
+    created.
+    """
+    return check_sqlite_file(CHAIN, db_path)
+
+
+def require_compatible_storefront_database(db_path: str | Path) -> None:
+    """Refuse to serve a database not exactly at :data:`CHAIN`, naming the command."""
+    result = check_storefront_database(db_path)
+    if not result.compatible:
+        raise IncompatibleStorefrontDatabase(result)

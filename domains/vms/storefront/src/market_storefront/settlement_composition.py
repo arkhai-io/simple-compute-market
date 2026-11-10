@@ -745,10 +745,7 @@ def build_vm_settlement_composition(
         )
     registry_owner.registration_for_contract(domain)
 
-    repository = SettlementSQLiteRepository(
-        sqlite_client.db_path,
-        apply_migrations=False,
-    )
+    repository = SettlementSQLiteRepository(sqlite_client.db_path)
     registry = build_storefront_settlement_registry()
     settlement_config = registry.resolve(
         storefront_config.settlement_config_mapping(),

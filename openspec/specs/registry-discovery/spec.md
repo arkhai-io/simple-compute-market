@@ -32,7 +32,7 @@ The registry MUST authorize listing ownership through complete canonical `{schem
 - **THEN** the registry lazily creates or resolves the stable publisher and binds listing ownership without requiring an EVM wallet
 
 ### Requirement: Stable publisher-chosen listing identity
-Every publication MUST carry a non-empty publisher-chosen `listing_id` inside the signed canonical body. The registry MUST retain that value unchanged as the listing resource identity; a repeated publication by the same publisher MAY update the existing listing, while another publisher MUST NOT claim it. Publisher credential rotation and supported legacy identity migration MUST preserve publisher and listing identifiers.
+Every publication MUST carry a non-empty publisher-chosen `listing_id` inside the signed canonical body. The registry MUST retain that value unchanged as the listing resource identity; a repeated publication by the same publisher MAY update the existing listing, while another publisher MUST NOT claim it. Publisher credential rotation MUST preserve publisher and listing identifiers.
 
 #### Scenario: Publisher republishes a known listing
 - **WHEN** the owning publisher publishes a changed schema-valid body with an existing `listing_id`
@@ -119,20 +119,6 @@ The registry MUST rotate a stable publisher only from a canonical intent that na
 
 - **WHEN** the same valid rotation intent is submitted again with its publisher nonce
 - **THEN** the registry returns the recorded rotation state without creating another binding
-
-### Requirement: Publisher identity migration preserves ownership
-
-A registry database upgrade from a supported legacy address-owned population MUST validate and atomically convert every owner to a canonical `eip191` principal before the version 2 identity schema is served. It MUST preserve publisher IDs, publisher-to-listing ownership relations, and listing IDs, and retire the legacy ownership columns in the same schema boundary. Malformed or ambiguous identities, duplicate canonical or active bindings, partial prior conversion, conflicting ownership metadata, or referential gaps MUST abort and roll back the complete migration.
-
-#### Scenario: Existing publisher is migrated
-
-- **WHEN** a valid address-owned listing population is upgraded
-- **THEN** each address becomes an `eip191` principal and the same publisher retains authority over the same stable listing identifiers
-
-#### Scenario: Legacy ownership is inconsistent
-
-- **WHEN** any legacy listing lacks its publisher or two legacy identities canonicalize to a conflicting active binding
-- **THEN** no publisher or listing ownership row is partially migrated
 
 ### Requirement: Resource query compilation preserves filter-spec authority
 
@@ -573,7 +559,6 @@ A registry's descriptor MAY list recommended dispute authorities in preference o
 - Declarative filtering and stale `If-Match`: `core/registry/tests/unit/test_filter_eval.py` and `core/registry/tests/integration/test_listings_filtering.py`.
 - Injected dual-scheme publisher identity, stable listing ownership, body-bound requests, signed responses, and replay behavior: `core/registry/tests/integration/test_identity_publish.py`, `core/registry/tests/integration/test_listings.py`, `core/registry/tests/unit/test_publisher_auth.py`, and `core/registry-client/tests/test_auth.py`.
 - Publisher rotation and stable-subject ownership: `core/registry/tests/integration/test_publisher_rotation.py`.
-- Atomic canonical-principal migration and rollback: `core/registry/tests/unit/test_principal_migrations.py`.
 - Strict descriptor carriers, startup derivation, access posture, signed reads, and durable replay: `core/tests/unit/test_registry_descriptor.py`, `core/registry/tests/unit/test_registry_descriptor.py`, and `core/registry/tests/integration/test_registry_descriptor.py`.
 - Helm descriptor configuration and Secret separation: `helm/scripts/test-render.sh`.
 - Published capacity backing and its filter: `core/registry/tests/integration/test_capacity_backing_filter.py` and `core/registry/tests/unit/test_filter_eval.py`.

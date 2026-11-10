@@ -1,7 +1,7 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
 
-.PHONY: help init reinit build test clean
+.PHONY: help init reinit migrate build test clean
 
 .DEFAULT_GOAL := help
 
@@ -15,6 +15,9 @@ init: reinit ## Install dependencies from public indexes and internal wheels
 
 reinit: ## Upgrade and reinstall changed internal wheel dependencies
 	python3 ../../../scripts/uv_project.py reinit
+
+migrate: ## Apply the storefront's database migrations; serve refuses a database without them
+	uv run --find-links $(DIST_DIR) bare-metal-storefront-migrate
 
 test: reinit ## Run the storefront package tests
 	uv run --find-links $(DIST_DIR) pytest tests -q

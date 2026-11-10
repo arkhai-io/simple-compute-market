@@ -1,0 +1,2806 @@
+{
+  "tables": {
+    "ansible_jobs": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "params",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "host_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "result",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "logs",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "error",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "execution_handle",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "retry_count",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "max_retries",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "next_retry_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_reservation_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "offering_mode",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "action_kind",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "executor_action",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "idempotency_key",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_reservation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_ansible_jobs_allocation_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_reservation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_ansible_jobs_capacity_reservation_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "host_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_ansible_jobs_host_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_reservation_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "action_kind",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "idempotency_key",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "uq_ansible_jobs_contract_idempotency",
+          "origin": "c",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "ansible_pool_configs": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "pool_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "playbook_path",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "'vm_management_v1'",
+          "hidden": 0,
+          "name": "requirement_delegate",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "extra_vars",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "default_vm_ram",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "default_vm_vcpus",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "default_vm_disk_size",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "pool_id"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "id"
+          ],
+          "table": "resource_pools"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "pool_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "capacity_buckets": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_bucket_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "backing_resource_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "pool_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "host_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "resource_type",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "resource_subtype",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "total_units",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "attributes",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "enabled",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_bucket_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "backing_resource_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "host_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "backing_resource_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_capacity_buckets_backing_resource_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "pool_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_capacity_buckets_pool_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "host_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "uq_capacity_buckets_host_id",
+          "origin": "c",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "capacity_events": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "version",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "kind",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "dimensions",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "claim_attributes",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "occurred_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "resource_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_capacity_events_resource_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "capacity_release_callback_outbox": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "'0'",
+          "hidden": 0,
+          "name": "attempt_count",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "last_error",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "last_attempted_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "delivered_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_reservation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "capacity_reservation_debits": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_bucket_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "dimensions",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "capacity_bucket_id"
+          ],
+          "match": "NONE",
+          "on_delete": "RESTRICT",
+          "on_update": "NO ACTION",
+          "references": [
+            "capacity_bucket_id"
+          ],
+          "table": "capacity_buckets"
+        },
+        {
+          "columns": [
+            "capacity_reservation_id"
+          ],
+          "match": "NONE",
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION",
+          "references": [
+            "capacity_reservation_id"
+          ],
+          "table": "capacity_reservations"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_reservation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_bucket_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_capacity_reservation_debits_capacity_bucket_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "capacity_reservations": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "settlement_resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "units",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "dimensions",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "claim_attributes",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "deal_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "escrow_uid",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "hold_expires_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "offering_mode",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "executor_target",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "release_job_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "executor_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "lease_start_utc",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "lease_end_utc",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "create_job_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "failure_reason",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "failure_message",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "released_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "release_requested_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "activated_at_utc",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_reservation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "escrow_uid",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_capacity_reservations_escrow_uid",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "settlement_resource_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_capacity_reservations_settlement_resource_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "state",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_capacity_reservations_state",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "credentials": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "job_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "envelope",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "job_id"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "id"
+          ],
+          "table": "ansible_jobs"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "job_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_credentials_job_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "definition_document_imports": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "document_kind",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "digest",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "imported_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "document_kind",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "hosts": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "host_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "connection_kind",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "'1'",
+          "hidden": 0,
+          "name": "connection_version",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "connection_public",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "connection_protected",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "enabled",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "BOOLEAN"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "pool_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "pool_id"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "id"
+          ],
+          "table": "resource_pools"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "host_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "lease_end_report_outbox": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "event_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "peer",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "report",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'0'",
+          "hidden": 0,
+          "name": "parked",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "'0'",
+          "hidden": 0,
+          "name": "attempt_count",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "last_error",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "last_attempted_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "delivered_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "event_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_reservation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_lease_end_report_outbox_capacity_reservation_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "pool_relays": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "pool_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "relay_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "relay_id"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "id"
+          ],
+          "table": "relays"
+        },
+        {
+          "columns": [
+            "pool_id"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "id"
+          ],
+          "table": "resource_pools"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "pool_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "relay_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_pool_relays_relay_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "provisioned_resources": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "provisioned_resource_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "fulfillment_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "capacity_reservation_id"
+          ],
+          "match": "NONE",
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION",
+          "references": [
+            "capacity_reservation_id"
+          ],
+          "table": "settlement_records"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "provisioned_resource_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_reservation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_provisioned_resources_capacity_reservation_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "fulfillment_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_provisioned_resources_fulfillment_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "provisioning_identity_rotation_audit": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "nonce",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "role",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "current_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "current_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "replacement_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "replacement_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "overlap_seconds",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "intent_expires_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "applied_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "nonce",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "provisioning_replay_reservations": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_scheme",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_identifier",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "request_id",
+          "not_null": true,
+          "primary_key": 3,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "request_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "dispatch_lease_expires_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "'1'",
+          "hidden": 0,
+          "name": "dispatch_attempt_count",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "response_status",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "response_body",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": "'0'",
+          "hidden": 0,
+          "name": "response_body_empty",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "BOOLEAN"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "response_media_type",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "completed_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "principal_scheme",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "principal_identifier",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "request_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "provisioning_trusted_principals": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "role",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_scheme",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "principal_identifier",
+          "not_null": true,
+          "primary_key": 3,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "generation",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "valid_until",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "role",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "principal_scheme",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "principal_identifier",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "relay_port_leases": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "relay_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "remote_port",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "host_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "pool_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "owner_kind",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "owner_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "released_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "grant_expires_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "grant_key_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "relay_id"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "id"
+          ],
+          "table": "relays"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "relay_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "remote_port",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "owner_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_relay_port_leases_owner_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "relay_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_relay_port_leases_relay_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "owner_kind",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "owner_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "uq_relay_port_leases_active_owner",
+          "origin": "c",
+          "unique": true,
+          "where": "released_at IS NULL"
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "relay_retired_grant_keys": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "relay_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "key_id",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "retired_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "relay_id"
+          ],
+          "match": "NONE",
+          "on_delete": "NO ACTION",
+          "on_update": "NO ACTION",
+          "references": [
+            "id"
+          ],
+          "table": "relays"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "relay_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "key_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "relays": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "label",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "relay_addr",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "relay_port",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "vm_port_range_start",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "vm_port_range_count",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "relay_token_encrypted",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "grant_key_encrypted",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "grant_key_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "grant_key_public",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "grant_key_activated_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "staged_grant_key_encrypted",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "staged_grant_key_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "staged_grant_key_public",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "1",
+          "hidden": 0,
+          "name": "enabled",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "relay_addr",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "relay_port",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "resource_pools": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "label",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "provider",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "enabled",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "BOOLEAN"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "policy_tags",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "scheduling_cursors": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "resource_kind",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "last_pool_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "last_resource_by_pool",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "resource_kind",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "settlement_records": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "fulfillment_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "market",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "scheduling_requirements",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "resource_id_constraint",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "settlement_resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "pool_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "provider",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "resource_attributes",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "resource_host_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "fulfillment_request",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "prepared_create_operation",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "prepared_teardown_operation",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "provider_metadata",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "teardown_provider_metadata",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "failure_reason",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "failure_message",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "claimed_by",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "claim_expires_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "attempt_count",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "hidden": 0,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_reservation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "fulfillment_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_settlement_records_fulfillment_id",
+          "origin": "c",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "settlement_resource_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_settlement_records_settlement_resource_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    },
+    "site_lease_ended_events": {
+      "autoincrement": false,
+      "checks": [],
+      "columns": [
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "event_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "transition_key",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "hidden": 0,
+          "name": "payload",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "event_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "pk",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_reservation_id",
+              "descending": false
+            },
+            {
+              "collation": "BINARY",
+              "column": "transition_key",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": null,
+          "origin": "u",
+          "unique": true,
+          "where": null
+        },
+        {
+          "columns": [
+            {
+              "collation": "BINARY",
+              "column": "capacity_reservation_id",
+              "descending": false
+            }
+          ],
+          "expression": null,
+          "name": "ix_site_lease_ended_events_capacity_reservation_id",
+          "origin": "c",
+          "unique": false,
+          "where": null
+        }
+      ],
+      "strict": false,
+      "without_rowid": false
+    }
+  },
+  "triggers": {},
+  "views": {}
+}

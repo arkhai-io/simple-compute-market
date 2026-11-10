@@ -24,6 +24,7 @@ from core_storefront.sqlite_client import (
     SQLiteClient,
     write_listing_update,
 )
+from core_database import core_database
 
 _SELLER = Identity(
     scheme=IdentityScheme.ED25519,
@@ -85,7 +86,7 @@ async def _persist(
 
 @pytest.fixture
 def client(tmp_path) -> SQLiteClient:
-    return SQLiteClient(str(tmp_path / "storefront.db"))
+    return SQLiteClient(core_database(tmp_path / "storefront.db"))
 
 
 async def test_close_requires_a_reason_and_the_listing_reports_it(client):

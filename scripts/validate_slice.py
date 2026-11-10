@@ -65,11 +65,13 @@ MCW-2lzw, MCW-fnuh, MCW-a0hu, MCW-notv, MCW-7bia, MCW-epkd, and MCW-7ts3.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tomllib
@@ -77,7 +79,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Iterator, Sequence
 
 import change_namespace
 import ci_evidence
@@ -773,11 +775,22 @@ def validate_helm(validation: Validation, *, change: str | None = None,
                   credentials: CredentialProbe = _credential_helper_warning,
                   capacity: Path | None = None,
                   sample_interval: float = SAMPLE_SECONDS) -> Summary:
-    run = HelmRun.of(change)
-    validation.summary.namespace = run.namespace
-    if not validation.clean("clean before") or not _helm_preflight(validation, context,
-                                                                   credentials):
+    validation.summary.namespace = HelmRun.of(change).namespace
+    if not validation.clean("clean before"):
         return validation.finish()
+    with _pinned_context(validation, context) as pinned:
+        if not pinned or not _helm_preflight(validation, credentials):
+            return validation.finish()
+        return _validate_helm(validation, change=change, scenarios=scenarios, sleep=sleep,
+                              volume_wait=volume_wait, capacity=capacity,
+                              sample_interval=sample_interval)
+
+
+def _validate_helm(validation: Validation, *, change: str | None,
+                   scenarios: Sequence[str] | None, sleep: Callable[[float], None],
+                   volume_wait: float, capacity: Path | None,
+                   sample_interval: float) -> Summary:
+    run = HelmRun.of(change)
     try:
         run.release = _helm_setting(validation, run, "RELEASE")
         run.test_volumes = tuple(_helm_setting(validation, run, "TEST_VOLUMES").split())
@@ -878,19 +891,50 @@ def _scale_to_zero(validation: Validation, run: HelmRun, name: str,
                                   "--replicas=0", *(w.name for w in workloads)])
 
 
-def _helm_preflight(validation: Validation, context: str,
-                    credentials: CredentialProbe) -> bool:
+@contextlib.contextmanager
+def _pinned_context(validation: Validation, context: str) -> Iterator[bool]:
+    """Point every kubectl and helm the part runs at ``context`` alone.
+
+    The part deploys unattended, so it never follows the context the machine has
+    selected, which may be a production cluster: it writes a kubeconfig holding
+    ``context`` only to a private temporary file and sets ``KUBECONFIG`` to it for
+    the part's commands, which inherit the environment. The file is removed and
+    ``KUBECONFIG`` restored when the part ends.
+    """
     try:
-        current = validation.read(["kubectl", "config", "current-context"]).strip()
+        known = validation.read(["kubectl", "config", "get-contexts", "--output", "name"]).split()
+        if context not in known:
+            validation.fail("kube context",
+                            f"the kubeconfig has no context {context!r}; the Helm part "
+                            "deploys unattended, so it runs only against HELM_CONTEXT")
+            yield False
+            return
+        selected = validation.read(["kubectl", "config", "current-context"]).strip()
+        config = validation.read(["kubectl", "config", "view", "--raw", "--minify",
+                                  "--flatten", "--context", context])
     except ValidationError as exc:
         validation.fail("kube context", str(exc))
-        return False
-    if current != context:
-        validation.fail("kube context",
-                        f"the current kube context is {current!r}, not {context!r}; the Helm "
-                        "part deploys unattended, so it runs only against HELM_CONTEXT")
-        return False
-    validation.note("kube context", current)
+        yield False
+        return
+    descriptor, name = tempfile.mkstemp(prefix="validate-helm-", suffix=".kubeconfig")
+    earlier = os.environ.get("KUBECONFIG")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(config)
+        os.environ["KUBECONFIG"] = name
+        validation.note("kube context", context if selected == context else
+                        f"{context}, pinned for this part; the selected context, "
+                        f"{selected!r}, is left alone")
+        yield True
+    finally:
+        if earlier is None:
+            os.environ.pop("KUBECONFIG", None)
+        else:
+            os.environ["KUBECONFIG"] = earlier
+        Path(name).unlink(missing_ok=True)
+
+
+def _helm_preflight(validation: Validation, credentials: CredentialProbe) -> bool:
     for step, project, target in LOADER_ENVIRONMENTS:
         python = Path(project, ".venv/bin/python")
         if not os.access(validation.root / python, os.X_OK):

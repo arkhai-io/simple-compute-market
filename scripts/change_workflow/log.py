@@ -64,8 +64,8 @@ from typing import IO, Any, Callable, Collection, Mapping, Sequence
 from .common import CHANGES, FORMAT, ORCHESTRATOR, Clock, Entry, StepError, utc_now
 from .find import (ARCHIVE, ChangeNotFound, change_directory, change_name, find_records,
                    landing_branch)
-from .graph import (LATE_MERGE, NODES, ROUND, STEPS, Node, Standing, TargetError,
-                    entry_refusal, node_of, review_phase, section_ids)
+from .graph import (IMPLEMENTATION_TRIAGE, LATE_MERGE, NODES, ROUND, STEPS, Node, Standing,
+                    TargetError, entry_refusal, node_of, review_phase, section_ids)
 from .index import index_rows
 from .outcome import outcome_problems, triage_outcome_problems
 from .records import (NUMBERED, git_contains, git_remotes, git_resolve, has_records,
@@ -609,6 +609,13 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     round recorded after the fact, whose records already exist. `commit` is `HEAD`
     as the round starts, the base its round view shows the round against: commits
     landing between rounds, a design revision among them, are not the round's.
+
+    A round recorded while the latest round is still open — no implementation
+    triage has finished or returned since it — over sections that round already
+    names continues it: an owner's direction, or a plan amended mid-round, names
+    only the sections left, and the round's reading, validation, and review must
+    still cover the sections already done. Such a line keeps the open round's
+    `after` and `commit` and names it as `continues`.
     """
     if not section_ids(sections):
         raise StepError("a round names one or more sessions, each a non-empty list of "
@@ -618,10 +625,33 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     if after is not None and (isinstance(after, bool) or not isinstance(after, int)
                               or after < 0):
         raise StepError(f"a round's after is a record number; got {after!r}")
+    continued = _open_round(path, sections) if after is None else None
+    if continued is not None:
+        return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
+                                   "sections": sections, "by": by,
+                                   "after": continued["after"],
+                                   **({"commit": continued["commit"]}
+                                      if continued.get("commit") else {}),
+                                   "continues": continued["seq"]}, clock)
     return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
                                "sections": sections, "by": by,
                                "after": next_number(path.parent) - 1 if after is None
                                else after, **({"commit": commit} if commit else {})}, clock)
+
+
+def _open_round(path: Path, sections: Any) -> Entry | None:
+    """The latest round, when it is still open and names every section in
+    `sections`; otherwise None."""
+    entries = read_log(path) if path.exists() else []
+    latest = next((e for e in reversed(entries) if e.get("outcome") == "round"), None)
+    if latest is None or not isinstance(latest.get("after"), int):
+        return None
+    if any(e["seq"] > latest["seq"] and e.get("outcome") in ("finished", "returned")
+           and ran(IMPLEMENTATION_TRIAGE, e, entries) for e in entries):
+        return None
+    named = {str(s) for session in latest.get("sections") or () for s in session}
+    wanted = {str(s) for session in sections for s in session}
+    return latest if wanted <= named else None
 
 
 def _row_archived(directory: Path) -> bool:

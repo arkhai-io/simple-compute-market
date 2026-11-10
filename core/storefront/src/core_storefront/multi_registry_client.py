@@ -15,7 +15,8 @@ keyword-only publication arguments:
   * **Reads** (``list_listings``, ``get_listing``) fan in across every
     configured registry concurrently. Per-registry failures are swallowed
     with a warning so one dead registry doesn't gate the whole discovery
-    pass.
+    pass. ``list_publisher_listings_per_registry`` and ``get_descriptors``
+    instead keep each registry's answer apart, a failure included.
 
   * **Writes** (``publish_listing``, ``update_listing``,
     ``delete_listing``) fan out concurrently. The call succeeds when
@@ -30,12 +31,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
 from market_core import RegistryDescriptor
-from market_identity import Signer, TrustedIdentitySet
+from market_identity import Identity, Signer, TrustedIdentitySet
 
 
 from registry_client import (
@@ -82,6 +83,29 @@ class PublishResult(TypedDict):
     registry_assigned_id: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class RegistryListings:
+    """One registry's answer to a per-registry listing read.
+
+    ``listings`` holds every listing the registry returned, across every page,
+    or is ``None`` when the registry could not be read to the end: a failure on
+    any page leaves an incomplete set, from which nothing about the listings
+    the registry does not hold may be concluded.
+    """
+
+    registry_url: str
+    listings: tuple[ListingSummary, ...] | None
+    error: str | None = None
+
+    @property
+    def reachable(self) -> bool:
+        return self.listings is not None
+
+
+#: The largest page the registry's listing query serves.
+REGISTRY_PAGE_LIMIT = 200
+
+
 class MultiRegistryClient:
     """Async context manager that fans calls out over N RegistryClients."""
 
@@ -94,7 +118,13 @@ class MultiRegistryClient:
         expected_registries: Mapping[str, RegistryAuthorityTrust],
         timeout: float | None = None,
         auth: dict[str, str] | None = None,
+        client_factory: Callable[..., Any] | None = None,
     ) -> None:
+        """``client_factory`` builds each registry's client, called as
+        :class:`RegistryClient` is, with the registry's URL and the keyword
+        arguments this wrapper resolves for it; unset, it is
+        :class:`RegistryClient`. A test supplies another to stand in for the
+        registries."""
         # Preserve order for log readability and deterministic dedupe
         # tiebreaks (first-seen wins).
         self._urls: list[str] = list(urls)
@@ -145,6 +175,7 @@ class MultiRegistryClient:
             )
         self._caller_role = caller_role
         self._expected_registries = normalized_expected
+        self._client_factory = client_factory
 
     @property
     def urls(self) -> list[str]:
@@ -157,7 +188,7 @@ class MultiRegistryClient:
         )
         for url in self._urls:
             trust = self._expected_registries[normalize_registry_url(url)]
-            client = RegistryClient(
+            client = (self._client_factory or RegistryClient)(
                 url,
                 api_key=lookup_registry_auth(self._auth, url),
                 signer=self._signer,
@@ -213,6 +244,52 @@ class MultiRegistryClient:
             else:
                 descriptors[url] = result
         return descriptors
+
+    async def list_publisher_listings_per_registry(
+        self,
+        principal: Identity,
+        *,
+        status: str = "open",
+        page_size: int = REGISTRY_PAGE_LIMIT,
+    ) -> list[RegistryListings]:
+        """Every listing each registry holds under ``principal``, per registry.
+
+        One :class:`RegistryListings` per configured registry, in configured
+        order. Each registry is paged to completion, so its result is the whole
+        set it held when read; a registry that fails on any page, the first or a
+        later one, is returned unreachable rather than as the pages it answered.
+        Registries are read concurrently, and the configured per-call deadline
+        bounds each registry's whole read.
+        """
+        if page_size < 1:
+            raise ValueError("page_size must be at least 1")
+        results = await asyncio.gather(
+            *(
+                self._bound(
+                    _read_every_page(
+                        client, principal, status=status, page_size=page_size
+                    )
+                )
+                for client in self._clients
+            ),
+            return_exceptions=True,
+        )
+        per_registry: list[RegistryListings] = []
+        for url, result in zip(self._urls, results):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "[MULTI_REGISTRY] %s publisher listing read failed: %s", url, result
+                )
+                per_registry.append(
+                    RegistryListings(
+                        registry_url=url,
+                        listings=None,
+                        error=str(result) or type(result).__name__,
+                    )
+                )
+            else:
+                per_registry.append(RegistryListings(registry_url=url, listings=result))
+        return per_registry
 
     async def list_listings(self, **kwargs: Any) -> ListingListResponse:
         """Concurrent ``list_listings`` over every registry; merged and
@@ -450,6 +527,30 @@ class MultiRegistryClient:
                     )
 
         return results
+
+
+async def _read_every_page(
+    client: Any,
+    principal: Identity,
+    *,
+    status: str,
+    page_size: int,
+) -> tuple[ListingSummary, ...]:
+    """Every listing one registry returns under ``principal``, page by page.
+
+    A page shorter than ``page_size`` is the last. A failure on any page
+    propagates, so a caller never mistakes the pages before it for the whole.
+    """
+    listings: list[ListingSummary] = []
+    offset = 0
+    while True:
+        page = await client.list_listings_for_publisher(
+            principal, status=status, limit=page_size, offset=offset
+        )
+        listings.extend(page.listings)
+        if len(page.listings) < page_size:
+            return tuple(listings)
+        offset += len(page.listings)
 
 
 def _payload_to_dict(payload: Any) -> dict | None:

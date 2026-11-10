@@ -8,10 +8,6 @@ See ``openspec/specs/fulfillment/spec.md``.
 """
 
 from .backoff import Backoff
-from .backfill import (
-    LegacyBackfillValidationError,
-    LegacyFulfillmentBackfillDraft,
-)
 from .db import (
     Base as FulfillmentBase,
     ProvisionedResource,
@@ -126,8 +122,6 @@ __all__ = [
     "FULFILLMENT_RESULT_KIND",
     "FULFILLMENT_RESULT_SCHEMA_VERSION",
     "InvalidSettlementTransitionError",
-    "LegacyBackfillValidationError",
-    "LegacyFulfillmentBackfillDraft",
     "ProviderConfigInvalidError",
     "ProviderNotFoundError",
     "ProviderOperationState",

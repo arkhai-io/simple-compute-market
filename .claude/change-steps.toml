@@ -139,6 +139,7 @@ allow = [
   "Bash(make check-*)",
   "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)", "Bash(make dist*)",
   "Bash(make reinit*)", "Bash(uv run pytest *)",
+  "Bash(make -C * reinit*)", "Bash(uv run --directory * pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(git rm *)", "Bash(scripts/change-workflow push)",
   "Bash(git pull --ff-only workspace *)",
@@ -162,6 +163,15 @@ allow = [
   "Bash(git pull --ff-only workspace *)",
   "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
   "Bash(make build-*)", "Bash(make -C * e2e-*-down)", "Bash(make -C e2e-tests e2e-*-logs)",
+  # One package's environment rebuilt, and one package's tests run directly,
+  # in the forms sessions reach for besides `cd <package> && uv run pytest`.
+  "Bash(make -C * reinit*)",
+  # A new package's first lock, before `make lock` knows the package.
+  "Bash(uv lock --directory *)",
+  # A section's local bring-up: a service's migrate target, its image run once,
+  # and a Compose stack under a project name of the session's own, so it never
+  # touches another change's stack or a validation namespace.
+  "Bash(make -C * migrate*)", "Bash(docker run --rm *)",
 ]
 deny = ["Bash(make run-e2e*)"]
 
@@ -194,6 +204,7 @@ allow = [
   "Bash(git merge --no-edit origin/*)", "Bash(git merge --no-edit workspace/*)",
   "Bash(make check-*)", "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)",
   "Bash(make dist*)", "Bash(make -C * dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
+  "Bash(make -C * reinit*)", "Bash(uv run --directory * pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
   "Bash(make typecheck*)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",

@@ -42,6 +42,7 @@ def _publication(runtime: BareMetalStorefrontRuntime) -> PublicationRuntime[dict
         registries.client_factory(runtime.marketplace_signer),
         registry_urls=registries.urls,
         storefront_url=runtime.storefront_url,
+        publisher=runtime.marketplace_signer.identity,
     )
 
 

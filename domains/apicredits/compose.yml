@@ -32,6 +32,9 @@ services:
   # deployment's registry profile through REGISTRY_FILTER_SPEC_PATH.
   api-credits-registry:
     image: arkhai:registry
+    # The migration before the application, which refuses a database it has
+    # not migrated.
+    command: ["sh", "-c", "registry-migrate && exec uvicorn core_registry.main:app --host 0.0.0.0 --port 8080"]
     depends_on:
       anvil:
         condition: service_healthy
@@ -58,6 +61,9 @@ services:
   # quota ledger. Admin-gated (X-Admin-Key); no chain dependency.
   credits-service:
     image: arkhai:apicredits-service
+    # The migration command runs before the application, which refuses a
+    # database it has not migrated.
+    command: ["sh", "-c", "apicredits-service-migrate && exec uvicorn apicredits_service.main:app --host 0.0.0.0 --port 8082"]
     ports:
       - "8092:8082"
     environment:
@@ -146,6 +152,9 @@ services:
   credits-storefront:
     image: arkhai:apicredits-storefront
     platform: linux/amd64
+    # The migration command runs before the storefront, which refuses a
+    # database it has not migrated.
+    command: ["sh", "-c", "apicredits-storefront-migrate && exec apicredits-storefront serve --host 0.0.0.0 --port 8000"]
     depends_on:
       anvil:
         condition: service_healthy

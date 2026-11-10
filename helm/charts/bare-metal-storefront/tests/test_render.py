@@ -141,7 +141,8 @@ def _lines(document: str) -> set[str]:
 
 def _environment(deployment: str) -> list[str]:
     """The names of the storefront container's environment variables."""
-    section = deployment.split("          env:\n", 1)[1].split("          ports:\n", 1)[0]
+    application = _pod_containers(deployment)[1]
+    section = application.split("          env:\n", 1)[1].split("          ports:\n", 1)[0]
     return [line.strip().removeprefix("- name: ") for line in section.splitlines() if line.strip().startswith("- name: ")]
 
 
@@ -213,19 +214,56 @@ def test_production_values_render_mount_and_derive_together() -> None:
     assert "wait-for-" not in manifest
 
 
+def _pod_containers(deployment: str) -> tuple[str, str]:
+    """The Deployment's rendered init containers and containers, each block whole."""
+    init = re.search(r"\n      initContainers:\n(.*?)\n      containers:\n", deployment, re.S)
+    assert init, "no initContainers precede the containers"
+    main = re.search(r"\n      containers:\n(.*?)\n      volumes:\n", deployment, re.S)
+    assert main, "no containers"
+    return init.group(1), main.group(1)
+
+
+def _container_field(container: str, key: str) -> list[str]:
+    """The lines of one of a container's fields, its key line and everything under it."""
+    lines = container.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(f"          {key}:"))
+    end = next(
+        (i for i in range(start + 1, len(lines)) if not lines[i].startswith("           ")),
+        len(lines),
+    )
+    return lines[start:end]
+
+
 def test_no_release_waits_on_a_dependency_and_the_pod_has_a_startup_probe() -> None:
-    """The storefront starts while its registry, chain, or sites are unreachable
-    and reports them degraded, so no init container waits on one; the startup
-    probe holds the liveness and readiness probes off a slow start instead."""
+    """Spec scenario "A storefront chart renders". The storefront starts while
+    its registry, chain, or sites are unreachable and reports them degraded, so
+    no init container waits on one; its one init container is its own
+    migration, from the application's image, with the application's
+    environment, configuration mounts and data volume, ahead of the
+    application. The startup probe holds the liveness and readiness probes off
+    a slow start."""
     for label, rendered in (
         ("example", _render()),
         ("defaults", _render(values=None)),
         ("umbrella release", _render_umbrella()),
     ):
         deployment = _source(_ok(rendered), "deployment.yaml")
-        assert "initContainers" not in deployment, label
         assert "wait-for-" not in deployment, label
-        probe = re.search(r"\n( +)startupProbe:\n\1  httpGet:\n\1    path: /health\n\1    port: http\n", deployment)
+        init, main = _pod_containers(deployment)
+        assert len(re.findall(r"^        - name: ", init, re.M)) == 1, label
+        assert "        - name: migrate" in init, label
+        assert _container_field(init, "command") == [
+            "          command:",
+            "            - bare-metal-storefront-migrate",
+        ], label
+        assert _container_field(init, "image") == _container_field(main, "image"), label
+        assert _container_field(init, "env") == _container_field(main, "env"), label
+        mounts = _container_field(init, "volumeMounts")
+        assert mounts == _container_field(main, "volumeMounts"), label
+        assert "            - name: data" in mounts, label
+        assert '              mountPath: "/var/lib/arkhai"' in mounts, label
+        assert any("storefront.json" in line for line in mounts), label
+        probe = re.search(r"\n( +)startupProbe:\n\1  httpGet:\n\1    path: /health\n\1    port: http\n", main)
         assert probe, f"{label}: no startupProbe on /health"
         assert "initialDelaySeconds" not in deployment, label
 
@@ -289,7 +327,8 @@ def test_the_pod_environment_carries_only_the_configuration_directory_and_the_cr
     # layer would read for a Service named storefront-anything.
     assert "enableServiceLinks: false" in lines
     # The port reaches the storefront through its configuration, not its command.
-    command = deployment.split("          command:\n", 1)[1].split("          env:\n", 1)[0]
+    application = _pod_containers(deployment)[1]
+    command = application.split("          command:\n", 1)[1].split("          env:\n", 1)[0]
     assert [line.strip() for line in command.splitlines()] == ["- bare-metal-storefront", "- serve"]
     assert "BARE_METAL_STOREFRONT" not in deployment
 
@@ -711,10 +750,11 @@ def test_a_storefront_offering_only_payments_renders_its_payments_access_and_not
 
 def test_the_payments_check_pod_runs_the_command_with_the_deployments_payments_access() -> None:
     """The pod's environment, configuration mounts, and their volumes are the
-    Deployment's, less the data volume; it runs the CLI with no probes, and
-    carries no workload selector."""
+    Deployment's application container's, less the data volume; it runs the
+    CLI with no probes, and carries no workload selector."""
     manifest = _ok(_render(_payments_access()))
     deployment = _source(manifest, "deployment.yaml")
+    application = _pod_containers(deployment)[1]
     pod = _source(manifest, "tests/payments-check-test.yaml")
     lines = _lines(pod)
 
@@ -723,10 +763,10 @@ def test_the_payments_check_pod_runs_the_command_with_the_deployments_payments_a
         "- bare-metal-storefront", "- check-payments", "- --account", f'- "{SELLER_ACCOUNT}"'
     ]
     assert re.search(r"^ +image: (\S+)$", pod, re.MULTILINE).group(1) == re.search(
-        r"^ +image: (\S+)$", deployment, re.MULTILINE
+        r"^ +image: (\S+)$", application, re.MULTILINE
     ).group(1)
-    assert _yaml_block(pod, "env") == _yaml_block(deployment, "env")
-    deployment_mounts = _items(_yaml_block(deployment, "volumeMounts"))
+    assert _yaml_block(pod, "env") == _yaml_block(application, "env")
+    deployment_mounts = _items(_yaml_block(application, "volumeMounts"))
     deployment_volumes = _items(_yaml_block(deployment, "volumes"))
     assert "data" in deployment_mounts and "data" in deployment_volumes
     assert _items(_yaml_block(pod, "volumeMounts")) == {name: item for name, item in deployment_mounts.items() if name != "data"}

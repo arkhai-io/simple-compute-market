@@ -1,4 +1,4 @@
-"""The durable pool override store, its migrations, and its reader.
+"""The durable pool override store and its reader.
 
 One row per override, keyed by site, pool, and offering mode. Pool identifiers
 are site-local, so a key without the site could apply one site's terms to
@@ -16,61 +16,16 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from market_pool_overrides.records import PoolOverrideAddress, PoolOverrideRecord
 
 POOL_OVERRIDES_TABLE = "pool_overrides"
-POOL_OVERRIDES_MIGRATION_ID = "20260925_001_pool_overrides"
-POOL_OVERRIDE_ASKING_RATES_MIGRATION_ID = "20261001_001_pool_override_asking_rates"
 
 _ADDRESS = ("site_id", "pool_id", "offering_mode")
 _JSON_COLUMNS = ("listing_shapes", "settlements", "asking_rates", "terms")
 _COLUMNS = (*_ADDRESS, *_JSON_COLUMNS, "created_at", "updated_at")
-
-
-@dataclass(frozen=True)
-class PoolOverrideMigration:
-    """One migration, in the shape a storefront's migration runner applies."""
-
-    id: str
-    apply: Callable[[sqlite3.Connection], None]
-
-
-def _create_pool_overrides(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {POOL_OVERRIDES_TABLE} (
-          site_id TEXT NOT NULL,
-          pool_id TEXT NOT NULL,
-          offering_mode TEXT NOT NULL,
-          listing_shapes TEXT,
-          settlements TEXT,
-          terms TEXT,
-          created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          PRIMARY KEY (site_id, pool_id, offering_mode)
-        )
-        """
-    )
-
-
-def _add_asking_rates(conn: sqlite3.Connection) -> None:
-    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({POOL_OVERRIDES_TABLE})")}
-    if "asking_rates" not in columns:
-        conn.execute(f"ALTER TABLE {POOL_OVERRIDES_TABLE} ADD COLUMN asking_rates TEXT")
-
-
-def pool_override_migrations() -> tuple[PoolOverrideMigration, ...]:
-    """The store's migrations, in order, for a storefront to compose into its
-    own chain. Each is additive: an existing override gains a column it states
-    nothing in."""
-    return (
-        PoolOverrideMigration(POOL_OVERRIDES_MIGRATION_ID, _create_pool_overrides),
-        PoolOverrideMigration(POOL_OVERRIDE_ASKING_RATES_MIGRATION_ID, _add_asking_rates),
-    )
 
 
 @dataclass(frozen=True)
@@ -240,12 +195,8 @@ class SQLitePoolOverrideStore:
 
 
 __all__ = [
-    "POOL_OVERRIDE_ASKING_RATES_MIGRATION_ID",
-    "POOL_OVERRIDES_MIGRATION_ID",
     "POOL_OVERRIDES_TABLE",
-    "PoolOverrideMigration",
     "SQLitePoolOverrideStore",
     "StoredPoolOverride",
-    "pool_override_migrations",
     "read_pool_overrides",
 ]

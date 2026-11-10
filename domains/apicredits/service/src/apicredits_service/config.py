@@ -1,18 +1,10 @@
 """
-Centralised dynaconf configuration loader.
+The application's configuration: the layered settings, with its secrets resolved.
 
-Resolution order (highest priority wins):
-  1. APICREDITS_* environment variables
-  2. config-<profile>.yml files (in CONFIG_DIRECTORY, one per ACTIVE_PROFILES entry)
-  3. config.yml  (in CONFIG_DIRECTORY)
-  4. storefront-TOML fallback for `storefront_admin_key` (see below)
-  5. settings.toml  (committed defaults / schema documentation)
-
-Profile selection works exactly like the VM provisioning service: set
-CONFIG_DIRECTORY to the directory containing config YAML files and
-ACTIVE_PROFILES to a comma-separated list of profile names. All
-includes are optional — a fresh checkout with neither set loads only
-settings.toml.
+The settings resolve as ``apicredits_service.settings_source`` describes; a
+mounted storefront TOML is a further fallback for `storefront_admin_key`, below
+every configured source (see below). Everything here resolves at import, so an
+unreadable secret fails while an operator is watching.
 
 storefront_admin_key resolution:
   ``storefront_admin_key_file`` selects one exact role-scoped secret file.
@@ -31,30 +23,9 @@ from typing import List
 
 from dynaconf import Dynaconf
 
-_SRC_DIR = Path(__file__).parent
-_CONFIG_DIR = Path(os.environ.get("CONFIG_DIRECTORY", str(_SRC_DIR / "config")))
+from apicredits_service.settings_source import load_settings_source
 
-_raw_profiles: str = os.environ.get("ACTIVE_PROFILES", "")
-_active_profiles: List[str] = [p.strip() for p in _raw_profiles.split(",") if p.strip()]
-
-# Only include files that exist on disk — every include is optional.
-_includes: List[str] = []
-for _candidate in [_CONFIG_DIR / "config.yml"] + [
-    _CONFIG_DIR / f"config-{p}.yml" for p in _active_profiles
-]:
-    if _candidate.exists():
-        _includes.append(str(_candidate))
-
-_dynaconf = Dynaconf(
-    settings_file=[str(_SRC_DIR / "settings.toml")],
-    includes=_includes,
-    envvar_prefix="APICREDITS",
-    load_dotenv=True,
-    dotenv_files=[".env", ".env.local"],
-    envvar_separator="__",
-    environments=False,   # profiles are used instead of dynaconf environments
-    merge_enabled=True,
-)
+_dynaconf = load_settings_source()
 
 
 def _resolve_storefront_admin_key_from_mount() -> str:

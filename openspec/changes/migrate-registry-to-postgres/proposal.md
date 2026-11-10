@@ -4,8 +4,6 @@ The registry has a PostgreSQL engine seam and partial Alembic history, but produ
 
 ## What Changes
 
-- Repair Alembic so blank and representative existing databases reach the complete current registry schema without `create_all` assumptions.
-- Add a packaged registry migration command and read-only runtime schema guard.
 - Preserve publishers, listings, demands, API keys/scopes, and sequence/identity state during SQLite-to-PostgreSQL cutover.
 - Add Secret-backed PostgreSQL configuration and a pre-rollout migration Job.
 - Remove SQLite PVC, `Recreate`, and in-process bootstrap assumptions from PostgreSQL deployments and prove rolling old/new pod coexistence where compatible.
@@ -24,7 +22,7 @@ None.
 ## Dependencies and Related Changes
 
 - Follows `separate-marketplace-registry` so PostgreSQL targets the independently operated registry role.
-- Uses migration-command/runtime-guard conventions from `add-database-migration-commands` while retaining Alembic ownership in the registry.
+- Builds on what `add-database-migration-commands` delivered for the registry, which this change therefore no longer does: a blank database reaches the complete registry schema through one Alembic baseline revision, `v0_3_0_baseline`, with no `create_all`, and a v0.3.0 database is adopted at it; `registry-migrate` is the packaged migration command, with `--check`; and the application's startup check is read-only. The registry keeps Alembic, so this change adds PostgreSQL behind the same command and check.
 - `index-registry-filters` remains deferred until PostgreSQL is stable and measured query latency crosses its trigger.
 - Cloud SQL instance, IAM, networking, backup, and secret provisioning are external prerequisites.
 

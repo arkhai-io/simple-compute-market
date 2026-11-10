@@ -23,6 +23,7 @@ from core_registry.config import load_settings
 pytestmark = pytest.mark.asyncio
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
+_COMPUTE_SPEC = _REPO_ROOT / "core/registry/src/core_registry/filter-spec.yaml"
 _API_CREDITS_SPEC = _REPO_ROOT / "domains/apicredits/registry/filter-spec.yaml"
 _INTRODUCTIONS_SPEC = (
     _REPO_ROOT / "core/registry/filter-spec.introductions.yaml"
@@ -162,7 +163,7 @@ class TestAllThreeSpecificationsAgree:
         specification left behind would mean the same field had two names
         depending on which registry served it."""
         for path in (
-            _REPO_ROOT / "core/registry/filter-spec.yaml",
+            _COMPUTE_SPEC,
             _API_CREDITS_SPEC,
             _INTRODUCTIONS_SPEC,
         ):
@@ -176,7 +177,7 @@ class TestAllThreeSpecificationsAgree:
         identities = {
             served_spec(path).schema_identity.id
             for path in (
-                _REPO_ROOT / "core/registry/filter-spec.yaml",
+                _COMPUTE_SPEC,
                 _API_CREDITS_SPEC,
                 _INTRODUCTIONS_SPEC,
             )

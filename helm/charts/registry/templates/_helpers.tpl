@@ -138,6 +138,37 @@ when one is named, which therefore overrides a setting both state.
 {{- end }}
 
 {{/*
+The pod variables of the registry and its migration: only the resolver
+variables, since every setting is in a profile file under the configuration
+directory and a pod variable would override it.
+*/}}
+{{- define "registry.resolverEnv" -}}
+- name: CONFIG_DIRECTORY
+  value: "/app/config"
+- name: ACTIVE_PROFILES
+  value: {{ include "registry.activeProfiles" . | quote }}
+{{- end }}
+
+{{/*
+The profile files the registry and its migration read: the rendered profile,
+and the secretProfile's when one is named.
+*/}}
+{{- define "registry.profileMounts" -}}
+- name: config
+  mountPath: /app/config/config-production.env
+  subPath: config-production.env
+  readOnly: true
+{{- $secretProfile := .Values.secretProfile | default dict }}
+{{- if $secretProfile.secretName }}
+{{- $profile := include "registry.secretProfileName" . }}
+- name: secret-profile
+  mountPath: {{ printf "/app/config/config-%s.env" $profile | quote }}
+  subPath: {{ printf "config-%s.env" $profile | quote }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{/*
 The secretProfile's profile name, required with its secretName. `production`
 is the rendered profile's, which a Secret's file would replace at the same path.
 */}}

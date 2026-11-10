@@ -9,7 +9,9 @@ from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
 from market_deal_lifecycle.adapters import DisputeAdapterTable, PaymentAdapterTable, PaymentSelector
 from market_deal_lifecycle.terms import DisputeAuthority
-from market_deal_servicing import DealWatch, DeliveryRecord, EndSession, SellerDeal, SellerServicing, SellerSession
+from market_deal_servicing import (
+    DealWatch, DeliveryRecord, EndSession, SellerDeal, SellerServicing, SellerSession, create_schema,
+)
 from market_deal_servicing.evidence import transaction
 from market_deal_servicing.journal import Classification, FinalRequest
 from pydantic import SecretStr
@@ -49,6 +51,8 @@ def test_unresolved_original_remains_retryable_until_both_callers_adopt(tmp_path
                 )
 
             with transaction(path) as conn:
+                # The storefront chain's migration, which a session does not run.
+                create_schema(conn)
                 end = EndSession(conn)
                 end.register(DeliveryRecord(
                     negotiation_id="deal", seller=SELLER.identity, commitment_ref=fixture["transaction"],

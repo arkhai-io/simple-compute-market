@@ -37,7 +37,7 @@ Provider-neutral scheduling and provider execution contracts live together in th
 
 ### Requirement: Dependency boundary
 
-`market_fulfillment` is a higher kit layer than the site and resource-pool authorities. It may depend on `market_site`, `market_resource_pools` and its wire contracts `market_resource_pools_contracts`, and the core carrier package `market_core`, which provides `VersionedEnvelope`. Those lower layers MUST NOT import `market_fulfillment`, including under `TYPE_CHECKING`.
+`market_fulfillment` is a higher kit layer than the site and resource-pool authorities. It may depend on `market_site`, `market_resource_pools` and its wire contracts `market_resource_pools_contracts`, the core carrier package `market_core`, which provides `VersionedEnvelope`, and the foundation migration kit `market_schema_migrations`, through which it exports its schema's migrations. Those lower layers MUST NOT import `market_fulfillment`, including under `TYPE_CHECKING`.
 
 Carrier modules for IDs, envelopes, requests, requirements, resources, and provider protocols MUST remain independent of concrete service implementations. Scheduler modules MAY depend on site and resource-pool service interfaces required to enumerate and bind eligible resources.
 
@@ -610,29 +610,6 @@ For the bare-metal provider, the live domain result MAY additionally carry the b
 - **WHEN** either read is called with a `fulfillment_id` not present in this provisioning service's database
 - **THEN** it is rejected as a not-found error
 
-### Requirement: Existing lease continuity during fulfillment cutover
-
-A database cutover that converts legacy VM leases into fulfillment aggregates SHALL enumerate nonterminal legacy leases as the authoritative candidate set and SHALL preserve every known in-flight provider operation.
-
-- A legacy `provisioning` lease with a known create job becomes `dispatching` and continues observing that job.
-- An active lease becomes `active` with its provisioned VM recorded as a `ProvisionedResource`.
-- A releasing lease becomes `tearing_down` when a teardown job is already known, otherwise `teardown_dispatch_pending`.
-- A failed release becomes `teardown_failed`.
-- Terminal or expired legacy leases do not create fulfillment aggregates.
-
-The cutover SHALL NOT submit a replacement create operation merely because an existing provider job cannot be identified. A known failed job may subsequently follow the provider's normal retry behavior. Equivalent target rows make the cutover idempotent; conflicting rows cause the cutover to fail without overwriting them. Equivalence SHALL compare every field a provider operation depends on for correctness — resource attributes, provider metadata (including the tracked create job), teardown provider metadata (including the active teardown job), the prepared teardown envelope, and the corresponding `ProvisionedResource` population — not only placement fields such as state, resource, pool, and provider; a row that matches on placement alone but differs in tracked job identity or provisioned-resource population is a conflict. A candidate with a live target (active or tearing down) but no known create job identity is rejected rather than backfilled without one, since a teardown operation must be able to record which create job produced the resource it tears down.
-
-#### Scenario: Legacy lease population is backfilled atomically
-
-- **WHEN** the cutover enumerates a population of nonterminal legacy leases and one candidate fails validation
-- **THEN** no candidate's settlement or provisioned-resource rows are committed, and a rerun against the same unmodified population is idempotent
-
-#### Scenario: Legacy lease table predates teardown-job tracking
-
-- **GIVEN** a legacy lease table has no teardown-job column
-- **WHEN** the fulfillment cutover runs
-- **THEN** the missing optional field is normalized as no known teardown operation before candidate enumeration, and the cutover continues under the same state-mapping and validation rules
-
 ### Requirement: Fulfillment teardown is available through the provisioning client
 
 The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfillment_id)` over `POST /fulfillment/{fulfillment_id}/begin-teardown`. Repeated requests for an already-started or completed teardown SHALL return the durable aggregate acceptance without creating a second teardown operation. Unknown identifiers and conflicting aggregate states SHALL retain the endpoint's documented HTTP error classification.
@@ -659,7 +636,3 @@ The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfill
 - Session-scoped ledger entry points consumed by cross-package transactions: `kit/site/tests/unit/test_settlement_assignment.py`.
 - Durable, atomic `schedule_resource` (equivalent/conflicting retry, explicit-resource cursor bypass, full-transaction rollback) and resource_kind-scoped cursor durability/isolation: `kit/fulfillment/tests/integration/test_scheduler.py`. `POST /fulfillment/schedule`'s HTTP contract (assignment, idempotent retry, unknown-reservation rejection, and schedule-then-begin using the assigned resource): `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestScheduleEndpoint`.
 - Status/result read paths (no-provider-call status reads, active-only provisioned-resource and credential projection, empty outputs/credentials across all non-active states, unknown-identifier rejection, live credential-fetch failure isolation): `kit/fulfillment/tests/unit/test_fulfillment.py`. `fulfillment.result.v1` envelope shape and round-trip: `kit/fulfillment/tests/unit/test_results.py`. End-to-end HTTP coverage against a real SQLite-backed repository and a real `AnsibleFulfillmentProvider.fetch_credentials` read: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
-
-- Legacy lease state derivation, provider-envelope preparation, and per-candidate validation: `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py`.
-- Cross-candidate enumeration, conflict rejection, idempotent rerun, and whole-migration atomicity: `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py`.
-- Convergence observing and progressing backfilled rows: `provisioning/compute/service/tests/integration/test_fulfillment_convergence_after_legacy_backfill.py`.

@@ -545,6 +545,15 @@ incomplete section MUST ask the owner, once per round.
 - **THEN** the round is recorded naming the last record before it, and the
   computation reads the records above that number as the round's
 
+#### Scenario: A round recorded mid-round continues the open round
+
+- **WHEN** a round naming sections 1 to 4 is open, no implementation triage has
+  finished since it, and the owner's direction or an amended plan records a round
+  naming only section 4
+- **THEN** the new round line keeps the open round's last record and starting
+  commit and names the line it continues, so the round's reading, validation, and
+  review still cover sections 1 to 4
+
 ### Requirement: CW-tc82 Each section is checked, handed off, and committed alone
 
 Each section MUST be checked, handed off, and committed on its own. Anything a

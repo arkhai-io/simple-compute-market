@@ -30,66 +30,6 @@ class VmSettlementEvidenceConflict(ValueError):
     """An accepted negotiation or established reference cannot be retargeted."""
 
 
-def add_vm_settlement_records(conn: Any) -> None:
-    if conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vm_payment_records'"
-    ).fetchone():
-        raise RuntimeError("VM settlement schema requires an explicit database reset")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS vm_settlement_evidence (
-            negotiation_id TEXT PRIMARY KEY,
-            mechanism TEXT NOT NULL,
-            agreement_sha256 TEXT NOT NULL,
-            settlement_ref TEXT UNIQUE,
-            status TEXT NOT NULL
-                CHECK (status IN ('pending', 'verified', 'refunding', 'refunded')),
-            evidence_json TEXT NOT NULL
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS vm_delivery_records (
-            negotiation_id TEXT PRIMARY KEY REFERENCES vm_settlement_evidence(negotiation_id),
-            status TEXT NOT NULL,
-            fulfillment_uid TEXT,
-            provisioning_job_id TEXT,
-            connection_details TEXT,
-            tenant_credentials TEXT,
-            reason TEXT,
-            capacity_reservation_id TEXT,
-            settlement_resource_id TEXT,
-            fulfillment_id TEXT,
-            fulfillment_context TEXT,
-            fulfillment_phase TEXT,
-            processing_owner TEXT,
-            processing_lease_until TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-    """)
-
-
-def add_vm_delivery_activation(conn: Any) -> None:
-    """Add the site's activation instant, and read a provider-ready phase as ``ready``.
-
-    ``activated_at_utc`` is the instant the site returned when it activated the
-    lease; a null records no activation, which is all it means for a delivery
-    that became available without one. The phase ``ready`` is the provider
-    reporting the VM active, and ``activate`` names only the site's transition
-    of the lease, so a row whose phase records readiness as ``activate`` is
-    rewritten to ``ready``.
-    """
-    if not conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vm_delivery_records'"
-    ).fetchone():
-        return
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(vm_delivery_records)")}
-    if "activated_at_utc" not in columns:
-        conn.execute("ALTER TABLE vm_delivery_records ADD COLUMN activated_at_utc INTEGER")
-    conn.execute(
-        "UPDATE vm_delivery_records SET fulfillment_phase='ready' WHERE fulfillment_phase='activate'"
-    )
-
-
 def _json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 

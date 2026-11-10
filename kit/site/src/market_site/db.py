@@ -3,8 +3,9 @@
 Extracted from the VM provisioning service as the shared site-authority
 scaffold (docs/development/ARCHITECTURE.md, "Capacity and the Site
 Authority"): any service hosting a site ledger mounts these tables on
-its own engine. The mounting service is responsible for
-``Base.metadata.create_all`` (or equivalent migrations) on its engine.
+its own engine. The tables' schema is ``market_site.migrations``, which a
+migration chain holding the ledger composes, so these mappings are read against
+that schema and a column added here needs a migration there.
 """
 
 from __future__ import annotations

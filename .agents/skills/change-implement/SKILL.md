@@ -63,6 +63,20 @@ the session, and every turn ends with an outcome matching
   <a checkout>`: `-C` names only a subdirectory a skill names, such as `make -C
   helm test-render`. Remove a tracked file with
   `git rm`; no rule allows `rm`, which would also reach files Git cannot restore.
+  Spell every command relative to the checkout's root, never with its absolute
+  path: the rules match the relative forms only.
+- **Commands in the forms the rules name.** Run one package's tests with `make -C
+  <package> test`, `cd <package> && uv run pytest …`, or `uv run --directory
+  <package> pytest …`, never a virtual environment's `pytest` or `python -m pytest`
+  directly. Never redirect a command's output to a file or chain a read after it:
+  run a long command with `run_in_background` and wait on its output file as below.
+  A section's local bring-up runs a service's `make -C <package> migrate`, its image
+  once with `docker run --rm`, or a Compose stack with `docker compose -p
+  <change>-local …`, and takes the stack down before the turn ends.
+- **Helpers carry these rules.** A subagent you start does not load this skill, so
+  its prompt states the rules above that bear on its work: commands relative to the
+  checkout, Git and Make without `-C <a checkout>`, tests in the forms named here,
+  no redirects. A helper that breaks one is denied, as you would be.
 - **A turn's end is its outcome.** Never end a turn with work still running: the
   wrapper logs that turn's report as the run's end, and what the work later finds
   reaches nobody. Run the fresh-context check's subagent in the foreground, never
@@ -116,6 +130,14 @@ session writes as a round starts. Interactively you write it: when
 names it, before implementing — `scripts/change-workflow note <change> round
 --sections '<its sessions, as 1,2;3>' --by <its by>` — and implement its
 first session. When it names `implement`, the round is recorded already.
+
+## The owner's direction
+
+Invoked with sections and an argument after the change, the argument is the owner's
+direction to those sections, relayed by the orchestrating session, with any routing
+note of its own marked as such. Follow it as the owner's word wherever it bears on
+the sections; where it conflicts with the plan or a written rule, stop and ask
+rather than choose.
 
 ## Resolving a merge's conflicts
 

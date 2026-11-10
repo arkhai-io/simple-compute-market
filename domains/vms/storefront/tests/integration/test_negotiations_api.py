@@ -36,6 +36,7 @@ from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import stage_event
 
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from storefront_client.client import StorefrontClient, StorefrontClientError
@@ -77,6 +78,7 @@ def _capacity_runtime() -> CapacityRuntime:
 async def db(tmp_path) -> SQLiteClient:
     domain = build_vm_storefront_domain()
     registry = build_vm_storefront_registry(domain)
+    migrate_storefront_database(tmp_path / "neg_test.db")
     return SQLiteClient(
         db_path=str(tmp_path / "neg_test.db"),
         registry=registry,

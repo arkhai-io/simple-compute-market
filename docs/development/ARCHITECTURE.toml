@@ -37,6 +37,7 @@ foundation = [
     "kit/identity", "kit/config", "kit/policy", "kit/capability-shape",
     "kit/capability-pricing", "kit/capability-admissibility",
     "kit/negotiation-runtime", "kit/settlement-runtime", "kit/deal-lifecycle",
+    "kit/schema-migrations",
 ]
 buyer = ["kit/deal-lifecycle-buyer"]
 

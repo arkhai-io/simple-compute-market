@@ -19,24 +19,12 @@ from .evidence import EvidenceSession, RetentionObservation, in_transaction, tra
 from .journal import Classification, EndSession, FinalRequest, atomic, stable_ref
 
 
-def create_schema(conn) -> None:
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS servicing_watch (
-            negotiation_id TEXT NOT NULL, record_ref TEXT NOT NULL,
-            sequence INTEGER NOT NULL, view TEXT NOT NULL,
-            PRIMARY KEY (negotiation_id,record_ref)
-        )"""
-    )
-    conn.execute("""CREATE TABLE IF NOT EXISTS servicing_observations (
-        negotiation_id TEXT NOT NULL, record_ref TEXT NOT NULL, view TEXT NOT NULL,
-        PRIMARY KEY (negotiation_id,record_ref)
-    )""")
-
-
 class WatchSession:
+    """Watch cursors over the caller's connection; it issues no DDL, its tables
+    being the storefront chain's (``market_deal_servicing.schema``)."""
+
     def __init__(self, conn):
         self.conn = conn
-        create_schema(conn)
 
     def cursor(self, negotiation_id: str, record_ref: str) -> int:
         row = self.conn.execute(

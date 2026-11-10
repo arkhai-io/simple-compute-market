@@ -36,6 +36,7 @@ from apicredits_storefront.services.fulfillment_service import build_api_credit_
 from apicredits_storefront.services.payment_settlement_service import (
     ApiCreditPaymentSettlementService,
 )
+from apicredits_storefront.utils.migrations import migrate_storefront_database
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
 from tests._settings_overrides import settings_overrides
@@ -154,6 +155,7 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage):
 @pytest.fixture
 async def harness(tmp_path):
     async def build(*, actions=("emit_event",), enabled=True):
+        migrate_storefront_database(tmp_path / "credits.db")
         db = SQLiteClient(db_path=str(tmp_path / "credits.db"))
         payments = FakePaymentsClient()
         config = ArkhaiPaymentsConfig(

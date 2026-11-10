@@ -1,18 +1,7 @@
-from core_registry.db.database import get_db, init_db
-from core_registry.db.models import (
-    Listing,
-    Publisher,
-    PublisherIdentity,
-    PublisherIdentityRotation,
-    PublisherReplayReservation,
-)
+"""The registry's persistence: its models, sessions, and migrations.
 
-__all__ = [
-    "get_db",
-    "init_db",
-    "Listing",
-    "Publisher",
-    "PublisherIdentity",
-    "PublisherIdentityRotation",
-    "PublisherReplayReservation",
-]
+Importing this package loads nothing else: the migration command and the
+Alembic environment import ``core_registry.db.models`` and
+``core_registry.db.migrations`` without the application's settings, which
+``core_registry.db.database`` reads to build its engine.
+"""

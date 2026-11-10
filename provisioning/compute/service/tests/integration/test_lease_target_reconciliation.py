@@ -21,7 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from compute_provisioning_service.db.database import run_migrations
+from compute_provisioning_service.db.database import migrate_database
 from compute_provisioning_service.services.fulfillment_convergence import (
     FulfillmentConvergenceWatchdog,
 )
@@ -45,7 +45,7 @@ def world():
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
-    run_migrations(engine)
+    migrate_database(engine)
     factory = sessionmaker(bind=engine)
     with factory() as db, db.begin():
         db.add(ResourcePool(

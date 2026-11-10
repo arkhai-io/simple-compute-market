@@ -562,3 +562,91 @@ at render, naming `secretProfile`. To move off them:
 
 A bootstrap key seeds a key only into an empty table, so moving an existing
 registry changes no key it already holds.
+
+## Upgrading a deployment
+
+Every stateful service — compute provisioning, the VM, bare-metal and API-credit
+storefronts, the API-credit service, and the registry — migrates its database
+through its own command before its application starts, and its application
+refuses a database its command has not migrated
+(["Migrations at startup"](development/DEPLOYMENT_AND_CONFIG.md#migrations-at-startup)
+names each command and where it runs). A release can therefore fail to start a
+service; it never starts one on a database it does not understand.
+
+### Supported databases
+
+A database the marketplace v0.3.0 release built, or one a later release
+migrated, is upgraded in place: compute provisioning's, the VM and bare-metal
+storefronts', and the registry's. A database from before v0.3.0 is refused as
+unsupported, and so is every existing API-credit storefront or service database:
+those services start from a fresh database, and the state in the old one is not
+carried. An image older than the database's last migration refuses it as ahead.
+
+### The procedure
+
+For each service, in its own deployment:
+
+1. **Back up its database.** The backup is the only rollback: a migrated database
+   cannot be served by the image it was migrated from.
+2. **Preview the upgrade** with the new image's command and `--check`, over the
+   backup or the live database, for example
+   `compute-provisioning-migrate --check`. It changes nothing, exits 0 only for a
+   database already compatible, and lists what the upgrade will do: the pending
+   migration IDs, a v0.3.0 baseline to be adopted, or why the database is refused.
+   A database it reports as unsupported will not start under the new release;
+   decide before deploying whether that service starts fresh.
+3. **Deploy.** Under Helm the init container runs the command before the
+   application; under Compose the service's command runs it before the
+   application. A v0.3.0 database is adopted — its v0.3.0 records are replaced by
+   the baseline's, without running the baselines — and the migrations after the
+   baseline are applied. If the migration fails, the application does not start;
+   the init container's or the container's log names the migration that failed,
+   and the migrations before it stay applied.
+4. **Verify** with `--check`, which now exits 0, and the service's health.
+
+To roll back, deploy the earlier image over the backup taken in step 1, never
+over the migrated database.
+
+### What the upgrade from v0.3.0 changes
+
+- **Host connections.** Compute provisioning rewrites every host's `ssh`
+  connection stored at version 1 — which v0.3.0 itself wrote, and refuses, so that
+  every job dispatched to such a host failed before any playbook ran — to version
+  2, with the same address, user, port and key. A host whose stored fields version
+  2 refuses fails the migration naming it, and nothing is rewritten: correct that
+  host from the backup's values, or remove it, then upgrade again. After the
+  upgrade a host submission must state its connection's `version`; one stating
+  none is refused, as is version 1.
+- **Leases left `release_failed` on a version-1 host.** The migration repairs the
+  host, not a release that already failed on it: a fulfillment's teardown is one
+  job, and retry-release re-observes that failed job rather than running another.
+  A teardown that failed this way never ran, so the deal's guest or tenant account
+  is still on the host, and a force-release alone would return the capacity while
+  that workload still runs. For each provisioning lease `release_failed` at the
+  upgrade:
+  1. List the service's leases (`GET /api/v1/contract/leases`, with the `admin`
+     role) and read the lease's teardown job and its error. A job refused for its
+     host's connection version failed before any playbook ran.
+  2. Remove from the host what the domain's teardown would have removed: for a VM
+     lease the deal's guest and the artifacts and port forwards it created, for a
+     bare-metal lease the tenant's account and its working data.
+  3. Force-release the lease
+     (`POST /api/v1/contract/leases/<reservation>/force-release`) with a `reason`
+     and `evidence` saying what you removed and how you checked.
+
+  A create that failed on a version-1 host never ran either, so its compensating
+  teardown, which failed the same way, left nothing to remove: check the host
+  holds nothing of the deal, then force-release it.
+- **Registry listings.** Each storefront's publication pass closes, at every
+  configured registry it reaches, an open listing under its own principal and of
+  an offering mode it serves that it does not hold open — such as a superseded
+  listing an earlier release left open. A listing it holds open, including one
+  held while its site is unreachable, is never closed.
+- **Option identifiers.** The option envelope is a forward-only wire boundary: an
+  option's identifier is not stable across a release that changes the envelope.
+  Buyers re-read listings after such an upgrade; a closed listing at a registry
+  keeps its older shape as history, and nothing rewrites it.
+- **Storefront tables.** A storefront creates the tables v0.3.0 created only when
+  a store first opened, where they are absent, and drops the inventory tables
+  v0.3.0 kept frozen, with their rows; inventory is declared at provisioning
+  ([`seller-quickstart.md`, "Upgrading from CSV inventory"](seller-quickstart.md#upgrading-from-csv-inventory)).

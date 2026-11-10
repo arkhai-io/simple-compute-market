@@ -60,10 +60,11 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-pool-overrides"
-version = "0.2.1"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-schema-migrations" },
     { name = "arkhai-kit-site-client" },
     { name = "pydantic" },
 ]
@@ -77,6 +78,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
+    { name = "arkhai-kit-schema-migrations", specifier = ">=0.1.0" },
     { name = "arkhai-kit-site-client" },
     { name = "pydantic", specifier = ">=2.7" },
 ]
@@ -98,6 +100,14 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_resource_pools_contracts-0.3.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-schema-migrations"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+wheels = [
+    { path = "arkhai_kit_schema_migrations-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

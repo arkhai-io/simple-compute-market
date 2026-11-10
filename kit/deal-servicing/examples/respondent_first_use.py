@@ -16,10 +16,9 @@ from pydantic import SecretStr
 
 from market_deal_servicing import (
     Classification, DeliveryRecord, EndSession, FinalRequest, RespondentPoller,
-    SellerDeal, SellerSession,
+    SellerDeal, SellerSession, create_schema,
 )
 from market_deal_servicing.evidence import transaction
-from market_deal_servicing.journal import create_schema
 
 
 async def main():

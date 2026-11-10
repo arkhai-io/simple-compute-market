@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sqlite3
 from contextlib import ExitStack
 from dataclasses import replace
 from datetime import datetime
@@ -18,6 +17,7 @@ from apicredits_storefront import settlement_stages
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 from apicredits_storefront.settlement_stages import AlkahestSellerStage, SettlementRefusal
 from apicredits_storefront.utils import config as config_module
+from apicredits_storefront.utils.migrations import migrate_storefront_database
 from market_core import SettlementEvidence
 from market_identity import Ed25519Signer
 
@@ -103,11 +103,9 @@ def _private_results(tmp_path):
     from apicredits_storefront.services.issuance_evidence import (
         ApiCreditPrivateResultRepository,
     )
-    from apicredits_storefront.utils.migrations import _migrate_issuance_evidence
 
     db_path = tmp_path / "hosted-private-results.db"
-    with sqlite3.connect(db_path) as connection:
-        _migrate_issuance_evidence(connection)
+    migrate_storefront_database(db_path)
     return ApiCreditPrivateResultRepository(db_path)
 
 
@@ -205,7 +203,6 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch, tmp_path):
     from apicredits_storefront.services.issuance_evidence import (
         ApiCreditsIssuanceEvidenceService, IssuanceEvidenceRepository,
     )
-    from apicredits_storefront.utils.migrations import _migrate_issuance_evidence
     from market_identity import TrustedIdentitySet
 
     async def fake_issue(self, request):
@@ -221,8 +218,7 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch, tmp_path):
     monkeypatch.setattr(CreditsServiceClient, "rollback_issuance", fake_rollback)
     signer = Ed25519Signer(bytes.fromhex("22"*32))
     path = tmp_path / "evidence.db"
-    with sqlite3.connect(path) as connection:
-        _migrate_issuance_evidence(connection)
+    migrate_storefront_database(path)
     evidence_service = ApiCreditsIssuanceEvidenceService(
         IssuanceEvidenceRepository(path), signer=signer,
         trusted_issuers=TrustedIdentitySet(identities=(signer.identity,)),
@@ -444,6 +440,7 @@ async def test_payment_refusal_releases_hold_using_negotiation_not_transaction(
     from apicredits_storefront.services import fulfillment_service
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
+    migrate_storefront_database(tmp_path / "failure.db")
     db = SQLiteClient(str(tmp_path / "failure.db"))
     now = datetime.now().isoformat()
     await upsert_bound_listing(
@@ -551,6 +548,7 @@ async def settled_db(tmp_path, monkeypatch, request):
     # Released whatever the setup below does, so the setting never leaks.
     request.addfinalizer(held.close)
     held.enter_context(replaced_setting("settlement", settlement))
+    migrate_storefront_database(tmp_path / "settle.db")
     client = SQLiteClient(db_path=str(tmp_path / "settle.db"))
     thread_module._thread_store = None
     get_thread_store(
@@ -655,7 +653,7 @@ def _build_settlement_composition(db, *, on_completion=None):
         async def collect(self, _obligation, **_kwargs):
             return EffectOutcome(receipt={"tx": "collected"})
 
-    repository = SettlementSQLiteRepository(db.db_path, apply_migrations=False)
+    repository = SettlementSQLiteRepository(db.db_path)
     runtime = SettlementRuntime(
         repository,
         {"alkahest.v1": ReadyEscrowClient()},

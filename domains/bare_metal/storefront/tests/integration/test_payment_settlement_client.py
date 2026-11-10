@@ -48,6 +48,7 @@ from arkhai_bare_metal_storefront.delivery_ports import (
 )
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.fulfillment_service import BareMetalFulfillmentError
+from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
@@ -272,6 +273,7 @@ async def harness(tmp_path, enabled):
     payments = FakePaymentsClient()
     domain = get_market_domain_contract()
     provisioning = Provisioning()
+    migrate_storefront_database(tmp_path / "storefront.db")
     runtime = BareMetalStorefrontRuntime(
         db=SQLiteClient(str(tmp_path / "storefront.db"), domain=domain),
         domain=domain,
@@ -513,6 +515,7 @@ def _runtime(tmp_path, payments: FakePaymentsClient) -> tuple[BareMetalStorefron
     """
     domain = get_market_domain_contract()
     provisioning = Provisioning()
+    migrate_storefront_database(tmp_path / "storefront.db")
     runtime = BareMetalStorefrontRuntime(
         db=SQLiteClient(str(tmp_path / "storefront.db"), domain=domain),
         domain=domain,

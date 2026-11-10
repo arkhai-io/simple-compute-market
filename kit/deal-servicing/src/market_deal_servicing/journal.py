@@ -17,7 +17,7 @@ from market_deal_lifecycle_contracts.models import (
 from market_identity import Identity, frame_fields
 from pydantic import Field, model_validator
 
-from .evidence import EvidenceSession, create_schema as create_evidence_schema
+from .evidence import EvidenceSession
 
 Revision = Annotated[int, Field(strict=True, ge=0)]
 ClassificationKind = Literal[
@@ -123,50 +123,15 @@ def atomic(conn: sqlite3.Connection) -> Iterator[None]:
         conn.execute(f"RELEASE {name}")
 
 
-def create_schema(conn: sqlite3.Connection) -> None:
-    create_evidence_schema(conn)
-    for statement in (
-        """CREATE TABLE IF NOT EXISTS servicing_delivery (
-            negotiation_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, record TEXT NOT NULL
-        )""",
-        """CREATE TABLE IF NOT EXISTS servicing_final_requests (
-            negotiation_id TEXT NOT NULL, source_ref TEXT NOT NULL, ended_at INTEGER NOT NULL,
-            request TEXT NOT NULL, classification TEXT, correction_basis INTEGER NOT NULL,
-            PRIMARY KEY (negotiation_id,source_ref)
-        )""",
-        """CREATE TABLE IF NOT EXISTS servicing_intents (
-            intent_ref TEXT PRIMARY KEY, negotiation_id TEXT NOT NULL,
-            kind TEXT NOT NULL, operation_key TEXT NOT NULL, intent TEXT NOT NULL,
-            UNIQUE (negotiation_id,kind,operation_key)
-        )""",
-        """CREATE UNIQUE INDEX IF NOT EXISTS servicing_one_billing_intent
-            ON servicing_intents(negotiation_id) WHERE kind='billing'""",
-        """CREATE TABLE IF NOT EXISTS servicing_end_receipts (
-            negotiation_id TEXT NOT NULL, operation_key TEXT NOT NULL,
-            request_digest TEXT NOT NULL, receipt_at INTEGER NOT NULL,
-            PRIMARY KEY (negotiation_id,operation_key)
-        )""",
-        """CREATE TABLE IF NOT EXISTS servicing_receipt_claims (
-            negotiation_id TEXT NOT NULL, operation_key TEXT NOT NULL, claim TEXT NOT NULL,
-            PRIMARY KEY (negotiation_id,operation_key)
-        )""",
-        """CREATE TABLE IF NOT EXISTS servicing_seller_deals (
-            negotiation_id TEXT PRIMARY KEY, deal TEXT NOT NULL
-        )""",
-        """CREATE TABLE IF NOT EXISTS servicing_operations (
-            negotiation_id TEXT NOT NULL, operation_key TEXT NOT NULL, digest TEXT NOT NULL,
-            PRIMARY KEY (negotiation_id,operation_key)
-        )""",
-    ):
-        conn.execute(statement)
-
-
 class EndSession:
-    """All ordering writes share the caller's delivery/Agreement transaction."""
+    """All ordering writes share the caller's delivery/Agreement transaction.
+
+    The session issues no DDL: its tables are the storefront chain's
+    (``market_deal_servicing.schema``).
+    """
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
-        create_schema(conn)
 
     def register(self, record: DeliveryRecord) -> None:
         with atomic(self.conn):

@@ -98,6 +98,7 @@ jobs:
             kit-capability-shape: ['kit/capability-shape/**', '.github/workflows/publish-pypi.yml']
             kit-capability-admissibility: ['kit/capability-admissibility/**', '.github/workflows/publish-pypi.yml']
             kit-capability-pricing: ['kit/capability-pricing/**', '.github/workflows/publish-pypi.yml']
+            kit-schema-migrations: ['kit/schema-migrations/**', '.github/workflows/publish-pypi.yml']
             kit-capacity-publication: ['kit/capacity-publication/**', '.github/workflows/publish-pypi.yml']
             kit-contact-exchange: ['kit/contact-exchange/**', '.github/workflows/publish-pypi.yml']
             kit-delivery: ['kit/delivery/**', '.github/workflows/publish-pypi.yml']
@@ -167,6 +168,7 @@ jobs:
             {"key": "kit-capability-shape",   "path": "kit/capability-shape",             "dist": "arkhai-kit-capability-shape"},
             {"key": "kit-capability-admissibility", "path": "kit/capability-admissibility", "dist": "arkhai-kit-capability-admissibility"},
             {"key": "kit-capability-pricing", "path": "kit/capability-pricing",           "dist": "arkhai-kit-capability-pricing"},
+            {"key": "kit-schema-migrations",  "path": "kit/schema-migrations",            "dist": "arkhai-kit-schema-migrations"},
             {"key": "kit-capacity-publication", "path": "kit/capacity-publication",       "dist": "arkhai-kit-capacity-publication"},
             {"key": "kit-contact-exchange",   "path": "kit/contact-exchange",             "dist": "arkhai-kit-contact-exchange"},
             {"key": "kit-delivery",           "path": "kit/delivery",                     "dist": "arkhai-kit-delivery"},

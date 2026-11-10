@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-core-registry"
-version = "0.5.0"
+version = "0.6.0"
 license = "MIT"
 description = "Listing discovery/index service (registry role)"
 requires-python = ">=3.12"
@@ -20,7 +20,11 @@ dependencies = [
     "arkhai-core==0.5.0",
     "arkhai-kit-identity==0.4.0",
     "arkhai-kit-deal-lifecycle>=0.1.0",
+    "arkhai-kit-schema-migrations>=0.1.0",
 ]
+
+[project.scripts]
+registry-migrate = "core_registry.migrate:main"
 
 [build-system]
 requires = ["hatchling"]
