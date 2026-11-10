@@ -175,6 +175,11 @@ service. Once the storefront runs, `market-storefront check-payments --account
 <YOUR_PAYEE_ACCOUNT>` reads that account's balance with exactly the client the
 storefront builds, and reports the first step that failed (see
 [settlement consumer configuration](development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover)).
+A seller holding a `[[DisputeCredential]]` in the same overlay — with its own
+`ca_bundle_path` when the authority's certificate chains to a private CA — runs
+`market-storefront check-mediation --origin <the authority's origin>` the same
+way: one authenticated read at that authority with exactly the credential the
+storefront would use.
 
 The full schema is at
 [`domains/vms/storefront/src/market_storefront/settings.toml`](../domains/vms/storefront/src/market_storefront/settings.toml).

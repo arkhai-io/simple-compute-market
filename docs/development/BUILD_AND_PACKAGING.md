@@ -37,7 +37,8 @@ Internal distributions are built as wheels into the repository wheelhouse, `.dis
 `make dist`, and every project consumes them from there. A project never resolves a
 sibling through a source path, and never declares the wheelhouse itself: the tools that
 sync and lock pass it, relative to the project, so every lock records the same registry
-path.
+path. `make dist` builds the lanes' superset of the release set `make dist-release`
+builds, adding the wheels only tests depend on ([`RELEASING.md`](RELEASING.md)).
 
 A package is *internal* to a project when the project's `uv.lock` resolves it from the
 wheelhouse. A lock that resolves anything from another local directory is an error.

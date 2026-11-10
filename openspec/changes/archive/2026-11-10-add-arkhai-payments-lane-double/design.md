@@ -830,6 +830,72 @@ markers and their `E2E_MODULE` entries.
 - **One module of six test sequences.** It keeps the clock advance's ordering
   constraint, and "scenario" would name both the module and its parts.
 
+## Settled during implementation
+
+Choices made inside the decisions above while implementing them, kept here so the
+task notes can stay short:
+
+- **An abandoned response (D4).** It is started with `content-length: 1` and never
+  finished, so the closed connection cannot read as a complete empty answer
+  whatever framing uvicorn picks. A fault is observable only through a real
+  server — httpx's `ASGITransport` asserts on an unfinished response rather than
+  raising a transport error — so every fault test serves its app under uvicorn on
+  loopback.
+- **Where matching and counting live (D4).** The middleware hands each request to
+  the double's classifier, which matches and counts it, since only the double
+  knows its accounts and rules; each API handler counts a refusal itself, so a
+  call meets one rule and is counted once. The mediation classifier reads an
+  unseen transaction's parties from payments, outside the service's lock and only
+  while a rule matches on `filer`. With payments unreadable at classification the
+  middleware sees no `filer` while the service later reads it, so the two layers
+  can take different first rules for that one call; left as it is, since no
+  scenario installs a filer-scoped fault while payments is down.
+- **One perceived clock implementation (D2).** `PerceivedClock` lives in
+  `lane_double_controls.clock`, which both doubles import, rather than a copy per
+  double.
+- **An unusable dispute credential (D8).** A CA bundle the client cannot load
+  raises at client construction. Each storefront's `credential_available` builds
+  and caches the client, so an unloadable bundle, an unresolvable token or an
+  origin the client refuses reads the deal `repair required`, rather than failing
+  the VM storefront's whole servicing cycle, whose respondent poller builds its
+  adapter outside the per-deal `try`; it logs a warning naming the authority, the
+  exception's type and the configured path, never the exception's message (77
+  F3). The repair reason stays `deal-servicing`'s fixed "Agreement authority
+  credential is missing". Each buyer's mediation port answers the construction
+  failure as a `MediationTransportError`, as it answers an unresolvable
+  credential.
+- **`check-mediation`'s extra `configuration` cases (D11).** More than one
+  mediation credential at the origin, an identity the contract refuses, and plain
+  HTTP off loopback are each `configuration`, since building the client would
+  otherwise raise out of the check. The authority is built with empty `params`,
+  which the contract admits; the respondent read sends none.
+- **The mediation-check pod renders on `tests.mediationOrigin` alone (D11).** The
+  chart never reads the runtime Secret's overlay, so naming the origin is what
+  states the agent holds a credential; a missing one fails at `configuration`.
+- **The buyer's filing (D14).** `file_as_buyer` submits through the
+  deal-lifecycle kit's `submit_dispute`, the path `BuyerLifecycle.submit` takes,
+  without its courtesy hint to the storefront, which would be a second side
+  effect; the storefront learns of the case by respondent discovery at its next
+  servicing step.
+- **The ruled end's two servicing steps (D15).** A servicing step reads the
+  site's lease before its authority watch records the ruled end and begins
+  teardown, so the site's signed end report is read only on the next step; the
+  ruled-end scenario's stage `05` stores the end and stage `05b` runs that second
+  step and reads the report. Validation 71 found the scenario relying on a report
+  pushed within the first step, which did not arrive in that run.
+- **The deal's ending (D17).** The storefront dispatches a journaled filing only
+  at a servicing step or an operator end, and a lease-ended site report can
+  journal one, so `DisputeStageZ_NoFurtherCase` steps servicing once before
+  reading the case listing, and also reads the lifecycle read's `filings`, since
+  the adapter refuses a second delivery-end filing without sending it.
+- **The hold passed in two advances (D18).** The hosted part's hold is
+  `afterStop`, and a once part stops only at its terms end, which the lease's
+  ending does not move, so its snapshot states no `releaseAt` until then. The
+  scenario advances both doubles past the terms end, then past `releaseAt`.
+- **The lost filing's retry (D18).** Every servicing watch dispatches the deal's
+  pending filings first, so the storefront retries the filing itself and the
+  adoption is read at a servicing step, the design's second branch.
+
 ## Effects on other changes
 
 - **`converge-ongoing-compute-leases`:** its lane-time paragraph (real UTC, bounded
