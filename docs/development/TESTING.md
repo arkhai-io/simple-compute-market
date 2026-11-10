@@ -1690,26 +1690,17 @@ client's handling of a decision, not the decision's arithmetic, which stays the
 producer's to qualify.
 
 **The lane doubles' controls.** Both lane doubles serve one typed control
-contract, `tools/lane-double-controls` (its [README](../../tools/lane-double-controls/README.md)
-lists the routes and refusals), which the doubles and the end-to-end harness
-import: when→then rules (a refusal with a published code, a transport fault —
-*drop after commit* or *unavailable* — and, at the mediation double, a filing
-answer or a ruling with an optional gate before its effects), the mediation
-double's operator decision, close and case listing, the payments double's
-funding and receipt-signer rotation, rule listings with matched and waiting
-counts, and the perceived clock's advance and reset. The control routes sit
-under `/test/` on each double's lane-private port behind a fixture control
-token, and the transport faults, shared ASGI middleware in each double, never
-apply to them or to `/health`, so a finaliser can always remove the rule that
-caused a fault. A fault starts the response and abandons it, so SCM's clients
-see a transport error, as they would a lost response, never an HTTP error
-status. Every control is a deterministic step: nothing delays, races or runs in
-the background. A scenario installs its rules through the `lane_double_rules`
-fixture (`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`), whose finaliser
-deletes them and fails naming any rule a case still waited on. Each control the
-VM dispute scenarios do not exercise — funding, rotation, a refusal with a
-published code, the filing-answer override, close without ruling and the rule
-listing — is proven by its double's own suite through the typed client.
+contract, `tools/lane-double-controls`, which the doubles and the end-to-end
+harness import; its [README](../../tools/lane-double-controls/README.md) lists
+the rules, routes and refusals. Every control is a deterministic step: nothing
+delays, races or runs in the background. A transport fault never applies to a
+control route or `/health`, so a finaliser can always remove the rule that
+caused it, and it abandons a started response, so SCM's clients see a transport
+error, as they would a lost response, never an HTTP error status. A scenario
+installs its rules through the `lane_double_rules` fixture
+(`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`), whose finaliser deletes
+them and fails naming any rule a case still waited on. A control no scenario
+exercises is proven by its double's own suite through the typed client.
 
 **The lanes' payments target.** Every end-to-end lane runs the payments double,
 `tools/payments-lane-double`: an HTTPS service at `https://payments-double:8443`
@@ -1734,13 +1725,11 @@ failed check fails lane setup by name before any scenario.
 
 **The lanes' mediation target.** Every lane also runs the mediation double,
 `tools/mediation-lane-double`, at `https://mediation-double:8443` under the same
-lane CA: it reproduces the dispute authority's API mechanics — authentication,
-idempotency, the filing's admission checks, the signed per-Agreement record and
-its cursors, the respondent listing, protection by real `extend` calls at the
-payments double as the authority's own account, and a programmed ruling's
-`reverse` effects and lift — and rules a case only when a rule says so (its
-[README](../../tools/mediation-lane-double/README.md) states its deviation from
-its producer). The lanes' registries recommend its identity, which sellers and
+lane CA: it reproduces the dispute authority's API mechanics and rules a case
+only when a rule says so
+([test-compatibility, "The in-lane mediation double"](../../openspec/specs/test-compatibility/architecture.md#the-in-lane-mediation-double);
+its [README](../../tools/mediation-lane-double/README.md) states its deviation
+from its producer). The lanes' registries recommend its identity, which sellers and
 buyers take from the registry rather than from a `[[Dispute]]` entry of their
 own. `config-payments-lane.yml`'s `mediation` section holds the target, its
 identity, `lane_owned: true`, the CA bundle path, the buyer's token, the

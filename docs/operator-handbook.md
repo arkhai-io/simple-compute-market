@@ -533,8 +533,10 @@ pod:
 kubectl exec deploy/<storefront deployment> -- market-storefront check-mediation --origin <authority origin>
 ```
 
-It prints one JSON line and exits 0 when the read succeeded, whatever the listing
-held; it never prints the token:
+It prints one JSON line, `{"check": "mediation", "outcome": …, "origin": …}`, and
+exits 0 when the read succeeded, whatever the listing held; 1 when a step failed,
+the line naming the `step` and a fixed-text `detail`; and 2 on a malformed origin.
+It files, rules and changes nothing, and never prints the token:
 
 | `step` | What failed | Look at |
 |---|---|---|

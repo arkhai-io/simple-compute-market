@@ -84,8 +84,10 @@ setting that names an environment variable holding the secret is a second, weake
 channel beside the one a cluster already writes, so a service's configuration
 does not name one, and trust follows the same rule: a private CA is a configured
 bundle path the one client that needs it reads (such as
-`[Settlement.arkhai_payments].ca_bundle_path`), never `SSL_CERT_FILE`, which would
-replace the whole process's public trust. The one secret outside the rule is the
+`[Settlement.arkhai_payments].ca_bundle_path`, or a `[[DisputeCredential]]`'s
+`ca_bundle_path` for that authority's client), never `SSL_CERT_FILE`, which would
+replace the whole process's public trust; a client naming none uses the default
+trust store. The one secret outside the rule is the
 signing credential `ARKHAI_IDENTITY_CREDENTIAL`, which the identity specification
 keeps from the loader, so it reaches a service as a variable sourced from a Secret.
 A buyer's `api_key_env`, in its payments section or a `[[DisputeCredential]]`, is
@@ -198,6 +200,19 @@ one init container does — the storefront's migration command from the
 application's image over its data volume — and that the `startupProbe` does; the
 provisioning and registry charts' render tests assert their migration init
 container the same way.
+
+**A private CA is mounted once, and each client names it.** A chart mounts a
+deployment-supplied CA bundle from a ConfigMap or Secret key at one fixed path,
+and every client that trusts that CA names the file as its own `ca_bundle_path`;
+one CA that issues several services' certificates is one mount, however many
+clients name it. Where the chart renders the setting, it derives the path from the
+mount rather than taking it as a value beside the mount, so the two cannot
+disagree. Where the setting lives in a Secret overlay the chart never renders, the
+chart cannot derive it: whoever writes that Secret states the chart's mount path,
+and a Helm test running the client's access check from the Deployment's own mounts
+proves the two agree. A client loads its bundle when it is built, so a bundle that
+cannot be loaded fails the access check at its configuration step, before any
+request.
 
 **Toggling a mock/test profile:** A boolean chart value (for example
 `mockMode`) can conditionally append a profile name to
@@ -341,14 +356,14 @@ pod on another node could not attach, and the `/health` probes, and the VM pod
 the ZeroTier capabilities and device. The check is described under "Settlement
 consumer configuration and cutover".
 
-Where a VM agent's `tests.mediationOrigin` names a dispute authority's origin, the
-chart renders a second test pod, `<agent>-mediation-check`, running
-`market-storefront check-mediation --origin <origin>` from the same helpers and
-with the same absences. The chart never reads the runtime Secret's overlay where
-the agent's `[[DisputeCredential]]` lives, so naming the origin is what states the
-agent holds a credential for it; a missing credential fails the check at its
-`configuration` step. The local release names Bob's as the mediation double's,
-`https://mediation-double:8443`.
+A chart renders a check of a setting it cannot see only where a value names the
+check's target, and that value is the release's statement that the setting exists.
+The VM chart's `<agent>-mediation-check` pod, from the same helpers and with the
+same absences, is rendered this way, where the agent's `tests.mediationOrigin`
+names a dispute authority, since the agent's `[[DisputeCredential]]` lives in the
+runtime Secret's overlay
+([deployment-state, "A storefront checks its mediation configuration from its own container"](../../openspec/specs/deployment-state/spec.md#requirement-a-storefront-checks-its-mediation-configuration-from-its-own-container);
+the operator handbook's ["Payments access"](../operator-handbook.md#payments-access)).
 
 The chart defaults enable no settlement mechanism, so a release from them alone is
 refused at startup, as intended: Alkahest needs a chain and a wallet a production
@@ -904,15 +919,14 @@ and its storefront reaches release 1's double by that name. Beside it runs the
 mediation lane double, the `mediation-lane-double` subchart, enabled the same way
 and in release 1 alone, behind the Service `mediation-double`; it needs no
 configuration in the cluster, reaching the payments double by its Service name
-under the lane CA its image carries. A restart loses every case, so nothing
-restarts it. Release 1's registry recommends the mediation double's identity, and
-Bob's overlay carries his `[[DisputeCredential]]` for it, as the VM lane's does,
-with its `ca_bundle_path` naming the storefront chart's CA file; release 2's
-storefront carries none, as the bare-metal lane's does. The `payments-ca-bundle`
-ConfigMap holds the lane CA, which issues both doubles' certificates, so one CA
-mount serves both. Each storefront's payments check test pod reads the double's
-seller account, and Bob's mediation check test pod reads the mediation double's
-respondent listing. The release serves no payment or dispute scenario.
+under the lane CA its image carries. Release 1's registry recommends the
+mediation double's identity, and Bob's overlay carries his `[[DisputeCredential]]`
+for it, as the VM lane's does, with its `ca_bundle_path` naming the storefront
+chart's CA file; release 2's storefront carries none, as the bare-metal lane's
+does. The `payments-ca-bundle` ConfigMap holds the lane CA, which issues both
+doubles' certificates. Each storefront's payments check test pod reads the
+double's seller account, and Bob's mediation check test pod reads the mediation
+double's respondent listing. The release serves no payment or dispute scenario.
 
 - `make helm-topology-secrets` creates or replaces, idempotently, every Secret both
   releases read, and the `payments-ca-bundle` ConfigMap, in its namespace, which it
@@ -928,10 +942,10 @@ respondent listing. The release serves no payment or dispute scenario.
   overlay, `dev-env/identities/bob.storefront.secrets.toml`, so both stacks hold one
   value, but for each copied entry's `ca_bundle_path`, which names the Compose
   mount and so is rewritten to the storefront chart's CA file
-  (`STOREFRONT_CA_BUNDLE_FILE`, `/etc/arkhai/ca/ca-bundle.pem`); an entry stating
-  none keeps none. The chart cannot derive it, as it derives the payments
-  section's, because the credential lives in the runtime Secret the chart never
-  renders. `helm/scripts/topology-secrets.sh` says what each Secret holds. It also
+  (`STOREFRONT_CA_BUNDLE_FILE`, `/etc/arkhai/ca/ca-bundle.pem`), as "A private
+  CA is mounted once, and each client names it" requires of a setting in a Secret
+  the chart never renders; an entry stating none keeps none.
+  `helm/scripts/topology-secrets.sh` says what each Secret holds. It also
   creates, if absent, the deal test's buyer-profile volume, `arkhai-buyer-profiles`,
   which no chart creates, and leaves an existing claim as it is.
 - `make helm-topology-up` installs or upgrades release 1, then release 2, each with
@@ -1675,28 +1689,6 @@ pass-through configuration"); the operator handbook's
 ["Payments access"](../operator-handbook.md#payments-access) gives the
 deployment's procedure.
 
-**The storefront mediation check.** The VM storefront builds its mediation client
-lazily, at a payment deal's first dispute servicing, so it proves its access to a
-dispute authority the same way, from its own process: `market-storefront
-check-mediation --origin <authority origin>`. It loads the configuration as `serve`
-does, selects the `arkhai.mediation.v1` `[[DisputeCredential]]` whose `origin` is
-exactly the one given, resolves its token, builds the mediation client with its
-`ca_bundle_path`, and makes one authenticated read of the authority's respondent
-listing (`GET /respondent`). It asserts nothing about the answer, an empty
-listing and a full one alike, and files, rules and changes nothing. It prints one
-JSON line, `{"check": "mediation", "outcome", "origin"}`, with no credential in it,
-and exits 0 on `ok`, 1 on a failed step, and 2 on a malformed origin. A failure
-names its `step` and a fixed-text `detail`: `configuration` (no credential for the
-origin, more than one, an identity or origin the contract refuses, a configuration
-the storefront cannot read, or a `ca_bundle_path` that cannot be loaded, each
-before any request), `credential` (an unresolvable token, before any request),
-`transport` (an untrusted certificate, an unreachable origin, or an answer
-outside the contract), or `refused`, with the authority's error `code`. The
-mediation kit holds the check (`market_arkhai_mediation.access_check`). The lanes do
-not run it, since their scenarios exercise the storefront's mediation access; a
-storefront chart runs it as a Helm test pod ("Storefront agents: pass-through
-configuration").
-
 `livemode` in a buyer's or storefront's Arkhai payments settings — `[Settlement.arkhai_payments]`,
 or `[bare_metal.arkhai_payments]` in the bare-metal buyer's configuration file — is
 the service mode whose receipts that process accepts. Receipts sign `livemode`, true only from a live payments service, and a
@@ -1994,19 +1986,14 @@ token, one with surrounding whitespace, or one containing a line break, at
 construction. Duplicate bindings for an
 identity are refused at lookup.
 
-A credential may also name `ca_bundle_path`, the CA bundle its mediation client
-verifies that authority against, alone; it is refused empty or blank, and with
-none the client uses the default trust store. No process trust store changes:
-`SSL_CERT_FILE` would displace public trust for the whole process, and the
-credential carries the bundle because it is identity-bound and present in every
-role that talks to an authority, while a lane takes its authority from the
-registry and has no `[[Dispute]]` entry. The lanes' credentials name the lane CA
-(`ca_bundle_path = "/run/lane-doubles/lane-ca.pem"`). A bundle the client cannot
-load is no usable credential: a storefront logs a warning naming the authority,
-the exception's type and the configured path, and reports the deal
-`repair_required`, and a buyer's filing reads the authority as unreachable. The
-storefront's `check-mediation` names a bundle it cannot load at its
-`configuration` step. The Agreement pins origin/record key for the
+A credential may also name `ca_bundle_path`, under the private-CA rule in
+"Profile-based configuration"; the
+[settlement-configuration specification](../../openspec/specs/settlement-configuration/spec.md#requirement-dispute-credentials-are-bound-by-identity-and-no-template-ships-an-authority)
+states its rules, and its
+[architecture](../../openspec/specs/settlement-configuration/architecture.md#precedence-and-secret-boundaries)
+why the credential carries the bundle and what an unloadable one does.
+
+The Agreement pins origin/record key for the
 deal's potentially unbounded case life: preference edits affect only new deals,
 and credentials must still serve accepted identities. Dispute adapters follow no
 mid-deal origin redirect or record-key rotation. Payment receipt identity overlap
