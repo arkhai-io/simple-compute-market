@@ -1,6 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Hosted rate parameters are explicit and unit-safe
+> **Owned by `derive-rate-parts-in-the-payments-kit`.** The paired rate parameters, fixed units, finite term and whole-second starts; setup_amount stays here, and end treatment is checked against the servicing declaration's list of qualified treatments rather than vendored capability, since every treatment is published; kept until that change's design writes its delta.
 SCM MUST admit period and reserve_ahead_seconds together or neither and require positive fixed-unit values. Rate options MUST have a finite maximum term. Materialization MUST reject fractional Agreement starts. Optional setup_amount MUST be a disclosed positive minor-unit amount in the selected asset; omission MUST mean no setup part. Approval expiry and dispute holds MUST remain separate.
 
 #### Scenario: Only one rate parameter is set
@@ -27,6 +28,7 @@ SCM MUST admit period and reserve_ahead_seconds together or neither and require 
 - **AND** neither compute domain requires a minimum spend
 
 ### Requirement: Rate materialization requires a servicing contract declaration
+> **Owned by `derive-rate-parts-in-the-payments-kit`.** The materialization gate and declaration withdrawal; the lane's test-mode declaration is `serve-running-rate-deals-on-vm`'s, and the proposed-identity scenario is stale because the archived lane double defines no proposed declaration; kept until that change's design writes its delta.
 SCM MUST refuse rate mandate materialization without a composition's rate-servicing declaration validated under the recurring-servicing declaration contract. This gate MUST also apply to accepted-but-unmaterialized work. Removing publication enablement MUST NOT abandon already materialized deals.
 
 #### Scenario: An accepted option outlives its declaration

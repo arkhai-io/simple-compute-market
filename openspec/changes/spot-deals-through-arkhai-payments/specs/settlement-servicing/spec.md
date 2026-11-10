@@ -1,6 +1,7 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
-### Requirement: The payments mandate is derived exactly from the Agreement
+### Requirement: A setup part is an ordinary once part before the rate
+> **Stale.** Its once-only clauses restate the permanent "The mandate binds the deal and its parties", "Mandate holds and approval follow the option's timing" and "A once-only mandate authorizes the seller and the dispute authority"; only its setup and rate clauses and the mixed-mandate scenario are this change's.
 
 The mandate MUST be derived only from the exact accepted Agreement, binding its JCS hash, deterministic transaction ID, parties, asset, amounts, part shapes, authorities, holds, caps and approval window. Buyer and seller MUST derive the same mandate under the selected mechanism's vendored contract; unsupported bonds or terms MUST refuse.
 
@@ -28,9 +29,8 @@ The mandate MUST be derived only from the exact accepted Agreement, binding its 
 - **THEN** setup once precedes rate, each with per-part authorities and maxHoldExtension
 - **AND** setup's encoded end is Agreement start, effectively clamped to approval if later, both holds are afterStop plus dispute window, and approval expiry still uses approval_window
 
-## ADDED Requirements
-
 ### Requirement: Hosted rate mandates are derived from the selected option
+> **Owned by `derive-rate-parts-in-the-payments-kit`.** Rate-part derivation through the accessor and codec and the buyer's check under charged treatment; the setup, spot-entry, no-preemption and late-start scenarios stay here, and the 'returned-capable' wording is stale since every treatment is published; kept until that change's design writes its delta.
 SCM MUST derive time rate parts through the agreed-price accessor and lifecycle codec, using the selected Agreement's asset, period, reservation lead, absolute term end, adjudication hold and cap. The buyer MUST independently check all parts and authorities before approval, including any disclosed setup once part.
 
 #### Scenario: A mixed setup and rate option is selected
@@ -75,6 +75,7 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **AND** its own partialPeriod determines the final period's charge, not a rounded-down term
 
 ### Requirement: Hosted rate commands preserve part identity and uncertain outcomes
+> **Owned by `derive-rate-parts-in-the-payments-kit`.** Per-part command translation, operation-derived identities, envelope consumption and unknown-outcome resolution; kept until that change's design writes its delta.
 The hosted adapter MUST translate lifecycle commands into explicit per-part events with stable operation-derived request identities. It MUST require the deal-lifecycle versioned activated-delivery envelope for rate start and compare new descriptors against the caller-supplied journaled descriptor/digest. The caller MUST reject changed-content key reuse before I/O. Unknown outcomes MUST resolve by verified read before another monetary delta.
 
 #### Scenario: A start response is lost
@@ -99,6 +100,7 @@ The hosted adapter MUST translate lifecycle commands into explicit per-part even
 - **AND** it never reports a later local timestamp as the authority's end
 
 ### Requirement: Rate stops consume authority-priced period treatment
+> **Stale.** The scenario 'The contract has no partialPeriod field yet' rests on an interim contract that does not exist (`kit/arkhai-payments/schema/SOURCE.md`), the buyer-policy clauses restate the terms change's policy, and 'delivery_end is human-ruled' contradicts the foundation's payee-agreement rule; returned, prorated and chosen observation stays here.
 The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping and capability refusal rules. It MUST observe the winning authority entry rather than compute cooperative end-price corrections. Seller delivery_end MUST instead be filed through the dispute adapter, with no seller-side stop or reverse for that filing.
 
 #### Scenario: The contract has no partialPeriod field yet
@@ -171,6 +173,7 @@ The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping a
 - **THEN** the adapter refuses start before contacting the payment authority
 
 ### Requirement: Absolute rate ends preserve the accepted capacity bound
+> **Stale.** The scenario 'Only charged absolute ends are expressible' rests on the nonexistent interim contract; a composition's servicing declaration, not contract capability, limits treatments. The late-start returned end stays here.
 The rate adapter MUST derive end.partialPeriod only from early_termination.settles_through under deal-lifecycle's “Term ends carry their own partial-period treatment”, preserving start_utc plus duration_seconds as its instant. Late activation MUST NOT shorten or extend that accepted bound.
 
 #### Scenario: A late start leaves an incomplete final period
@@ -185,6 +188,7 @@ The rate adapter MUST derive end.partialPeriod only from early_termination.settl
 - **AND** an option requesting returned or prorated refuses publication and acceptance
 
 ### Requirement: Rate delivery authorization is pure and phase-specific
+> **Owned by `derive-rate-parts-in-the-payments-kit`.** The pure `authorize` hook for commit, dispatch, start and disclose; kept until that change's design writes its delta.
 The hosted rate adapter MUST implement authorize(phase, evidence) for commit, dispatch, start and disclose without mutation. Results MUST carry allow/refuse/pending, reason, operation identity and verified evidence references. Missing or unverified state MUST NOT allow work. The neutral servicing composition MUST NOT inspect hosted part fields.
 
 #### Scenario: Commit is authorized
@@ -236,6 +240,7 @@ The hosted payment adapter MUST expose no exceptional-end operation and MUST NOT
 - **THEN** qualification reports the missing dependency without a seller-side stop/reverse substitute
 
 ### Requirement: Rate observations require verified authority state
+> **Owned by `derive-rate-parts-in-the-payments-kit`.** Verified start, pending stop, stop and funding observations; extension refs, releaseAt and held money under extensions stay here; kept until that change's design writes its delta.
 The hosted adapter MUST consume the verified snapshot interface before interpreting start, funding, pending stop, stop, extensions, releaseAt or event sequence. It MUST expose per-part changes to lifecycle read/watch without treating a courtesy hint or a missing funding field as an authoritative stop.
 
 #### Scenario: A pending stop survives the storefront

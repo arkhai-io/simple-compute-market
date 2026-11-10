@@ -1,6 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Rate mechanics qualification consumes the shared lane contract
+> **Stale.** It cites "Lane qualification identifies readiness and evidence class" and a proposed-contract class, neither of which exists: the archived lane double labels evidence lane-double or live. The interim-fixture scenario rests on the nonexistent interim contract. The vector-absence and engine-only kit scenarios stay here.
 Rate mechanics qualification MUST follow "Lane qualification identifies readiness and evidence class". It MUST retain kit/vector and re-anchoring evidence production, while convergence owns rate-lane time and consuming scenarios. It MUST NOT redefine evidence classes or claim live behavior from a double.
 
 #### Scenario: Mechanics run against a proposed contract

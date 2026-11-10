@@ -2,6 +2,10 @@
 
 ### Requirement: Class discovery uses public billing and release projections
 
+> **Owned by `offer-per-period-vm-terms`.** The Arkhai payments billing-kind projection, through `arkhai_payments.period`; kept until that change's design writes its delta. The Alkahest release eligibility and the class compiler stay here.
+>
+> **Stale.** "`arkhai_payments.approval_window`": the registration names the approval window `arkhai_payments.window` (design D2).
+
 Mechanism registrations used for compute class discovery MUST expose the public
 billing-kind and release-condition eligibility needed to distinguish prepaid,
 recurring and legacy prepaid-interruptible options. The shared class compiler MUST

@@ -11,6 +11,8 @@ The shared storefront servicing loop MUST live in kit/deal-servicing, receive pa
 
 ### Requirement: Accepted rate commitments retain their servicing composition
 
+> **Owned by `serve-running-rate-deals-on-vm`.** VM startup coherence and declaration withdrawal; kept until that change's design writes its delta. Bare metal stays here. Its last sentence is stale: no proposed contract exists; per-period servicing is declared on in lanes and off elsewhere until a hosted switch-on qualifies it.
+
 A storefront with accepted rate-part commitments MUST refuse startup if its servicing loop is absent. Withdrawal of new publication MUST NOT remove servicing from existing commitments. An authority outage alone MUST NOT cause this local-coherence refusal. Proposed-contract declarations MUST remain lane-only until production activation qualifies the hosted contract deployment.
 
 #### Scenario: Servicing is removed with active commitments

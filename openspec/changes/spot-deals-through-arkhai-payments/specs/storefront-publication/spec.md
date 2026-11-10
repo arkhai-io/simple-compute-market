@@ -1,6 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Setup-bearing presets require the claim revision
+> **Stale.** The foundation has vendored the delivery_end revision; the gate is deal-lifecycle's "Setup returns by delivered for either cause": setup-bearing presets stay disabled until a hosted dispute authority is qualified on that revision.
 
 The helper MUST refuse setup-bearing presets until foundation 12.1 vendors the mediation delivery_end revision, canonical payload/concurrence mapping and signature vectors. It MUST NOT require another payments wire change or activation-anchored end. Explicit setup opt-out MUST allow otherwise valid rate-only presets.
 
@@ -10,6 +11,7 @@ The helper MUST refuse setup-bearing presets until foundation 12.1 vendors the m
 - **THEN** the helper refuses it with the missing mediation revision named, while a valid setup-free preset can be built
 
 ### Requirement: Compute rate preset helpers disclose setup pricing
+> **Stale.** "The VM preset MAY default it to zero" is superseded: VM presets carry no setup part by default and add one only with a configured price, and bare metal requires a seller-priced setup part. The scenario 'Accepted pricing survives publication changes' applies only to the multiplier reading, which `negotiation-driven-capacity-resize` owns as an accessor input.
 The hosted preset helper for both compute domains MUST construct presets from parts and lifecycle terms, not runtime classes. Setup MUST be explicitly priced with seller opt-out and no minimum-spend gate; the bare-metal preset MUST ship no setup default, and the VM preset MAY default it to zero.
 
 #### Scenario: The compute publication adapter consumes presets

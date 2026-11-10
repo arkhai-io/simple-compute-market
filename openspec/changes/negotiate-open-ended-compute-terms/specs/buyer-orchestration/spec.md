@@ -2,6 +2,10 @@
 
 ### Requirement: Buyers approve explicit compute price and end terms
 
+> **Owned by `offer-per-period-vm-terms`.** The VM buyer's pre-approval display of the class, the per-period price, the reserve, the latest end, each party's notice and the charged started period; kept until that change's design writes its delta. Bare metal, setup, penalty, payout hold, returned treatment and adjudication/retention stay here.
+>
+> **Stale.** "Interim" in the scenario "Payee treatment is displayed faithfully": charged spot treatment is a declared composition treatment, not an interim one (design D3, D6).
+
 Both compute buyers MUST display the derived product class, quote with unit,
 separate setup once charge, initial reserve, maximum term/end, selected horizon,
 the delivery deadline as seconds after approval within which the resource is available to the buyer,
@@ -45,6 +49,8 @@ The buyer's acceptance policy MUST by default refuse an option whose payee entit
 
 ### Requirement: Default acceptance requires an on-demand seller penalty
 
+> **Stale.** The default buyer never requires a premature-stop penalty (design D3, revising round 8), and the default refusal of a compute option without `delivery_deadline_seconds` is already the permanent `deal-lifecycle` requirement "The delivery deadline is the site's availability term"; the display of the penalty as a ceiling and of the setup charge stands. The scenario "The full policy is enforced" restates the requirement as its outcome.
+
 Buyer acceptance policy SHOULD refuse an on-demand option without positive early_termination.premature_stop_penalty and a compute option whose mechanism has a lifecycle adapter without `delivery_deadline_seconds`, and SHOULD expose explicit buyer opt-out for each; an option without a lifecycle adapter MUST be shown as making no delivery promise rather than refused for lacking one.
 
 #### Scenario: The full policy is enforced
@@ -58,6 +64,8 @@ Buyer acceptance policy SHOULD refuse an on-demand option without positive early
 - **THEN** selection refuses it by name rather than claiming the mandate prevents preemption
 
 ### Requirement: Recurring purchase may omit a horizon
+
+> **Owned by `offer-per-period-vm-terms`.** The VM buyer's optional per-period duration and required reserved duration; kept until that change's design writes its delta. Bare metal and the absence of a minimum-spend term stay here.
 
 Compute buyers MUST permit omitted duration for recurring selections and use the
 seller-bound horizon returned in the final accepted terms. Reserved selections

@@ -15,6 +15,8 @@ lease end. A later publication MUST NOT extend an accepted Agreement.
 
 ### Requirement: Compute product classes are derived options
 
+> **Owned by `offer-per-period-vm-terms`.** Separately priced VM on-demand and spot options on one listing with derived classes; kept until that change's design writes its delta. Bare metal, reserved coexistence and the splitter stay here.
+
 Publication MUST retain existing capacity/shape listing identity while offering
 separately priced billing/entitlement combinations. Reserved, on-demand and spot
 MUST NOT be stored class fields. Recurring options MUST use shared early-termination
@@ -44,6 +46,8 @@ Terms publication MUST resolve the penalty preset default and seller override be
 
 ### Requirement: Unbounded recurring candidates close independently
 
+> **Owned by `offer-per-period-vm-terms`.** Omitting unbounded per-period VM candidates; kept until that change's design writes its delta. Bare metal stays here.
+
 A recurring candidate with no positive finite seller bound MUST yield no recurring
 option and a derivation diagnostic. This absence alone MUST NOT hold a readable
 pool or suppress a valid reserved candidate. Bare metal's existing reserved-bound
@@ -55,6 +59,10 @@ admission rule MUST remain intact.
 - **THEN** recurring options are omitted with a close reason and the reserved option remains
 
 ### Requirement: Recurring publication checks servicing
+
+> **Owned by `offer-per-period-vm-terms`.** VM publication under the declared list `[charged]`; kept until that change's design writes its delta. Bare metal and the minimum-spend rule stay here.
+>
+> **Stale.** "Setup-bearing presets MUST also wait for the vendored delivery_end mediation revision": it is vendored; a production composition declares setup-bearing presets once the hosted mediation service runs it (design D3).
 
 Publication MUST omit recurring candidates when composition does not declare
 compatible rate servicing. It MUST derive the declaration from composition, not
