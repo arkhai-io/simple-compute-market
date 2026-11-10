@@ -14,6 +14,9 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-nfdb](spec.md#requirement-cw-nfdb-a-phase-ends-only-when-its-reviews-triage-advances-it) — design, implementation, and closeout end only when their review's triage names a next-phase exit.
 - [CW-hdxi](spec.md#requirement-cw-hdxi-the-merge-brings-in-the-branch-the-change-lands-on) — after pre-closeout, a merge brings in the landing branch and reconciles the change's code with it.
 - [CW-a6ow](spec.md#requirement-cw-a6ow-closeout-waits-for-a-validation-of-the-merged-head) — closeout waits for a passed validation of the merged `HEAD`; another review or a waiver needs the owner.
+- [CW-m4qe](spec.md#requirement-cw-m4qe-an-archived-changes-branch-merges-its-landing-branch-again) — after archive cleanup, a merge after the archive brings in the landing branch again, entered while the row says `archived` by the owner's direction or cleanup's first exit, with no return; a merge run after cleanup is its run, but an older one by hand recording no `landing`.
+- [CW-x9tb](spec.md#requirement-cw-x9tb-the-merge-after-the-archive-judges-its-review) — the merge after the archive judges, on written criteria, whether a merge review is needed; its exit is followed without asking, and a waiver of its validation directs that exit.
+- [CW-g3zn](spec.md#requirement-cw-g3zn-a-merge-after-the-archive-keeps-the-change-archived) — a merge after the archive keeps the row `archived`, releases dependents the landing branch brought, and appends to the drafts.
 - [CW-9pbk](spec.md#requirement-cw-9pbk-the-owner-is-consulted-at-fixed-touchpoints) — the owner answers design questions, round notes, discussed findings' dispositions, and another round when recommended; advancing is taken without asking.
 
 ### Closeout and the archive
@@ -21,7 +24,10 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-ksnu](spec.md#requirement-cw-ksnu-closeout-archives-the-change-before-its-review) — closeout archives the change first, so the closeout review reads it and the specifications as archived.
 - [CW-trdu](spec.md#requirement-cw-trdu-archive-cleanup-waits-on-the-closeout-reviews-triage) — cleanup waits on the closeout triage advancing, and a passed validation when a path outside the inert paths changed since, unless waived.
 - [CW-pkug](spec.md#requirement-cw-pkug-closeout-changes-documentation-only) — closeout edits documentation only; needing a code change returns the change to implementation.
-- [CW-1iaz](spec.md#requirement-cw-1iaz-steps-after-the-archive-find-a-change-by-name) — post-archive steps find an archived change by name; design, planning, and implementation refuse it.
+- [CW-r2hu](spec.md#requirement-cw-r2hu-a-merge-review-reads-what-a-merge-after-the-archive-did) — a `merge` review reads a merge after the archive's resolutions; its triage advances to archive cleanup or another merge review.
+- [CW-5vkd](spec.md#requirement-cw-5vkd-archive-cleanups-first-exit-waits-for-the-landing-branch) — each finished merge records the remote, landing branch, and commit it fetched, and a later merge defaults to that branch; cleanup fetches that source, stopping when the fetch fails, its finished line refused without the record or with one other than what it fetched, and its first exit to `done` names the merge after the archive when the logged commit is not contained.
+- [CW-p8fy](spec.md#requirement-cw-p8fy-archive-cleanup-run-again-cleans-up-and-copies-only) — cleanup run again on an `archived` row cleans up validation, commits, pushes, and copies the history only.
+- [CW-1iaz](spec.md#requirement-cw-1iaz-steps-after-the-archive-find-a-change-by-name) — post-archive steps, the merge after the archive and the merge review included, find an archived change by name; design, planning, and implementation refuse it.
 - [CW-z83w](spec.md#requirement-cw-z83w-a-design-decision-after-the-design-review-returns-to-design) — a design decision after the design review returns to design; the owner may waive another review.
 
 ### The change index
@@ -204,15 +210,16 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-8tdv](spec.md#requirement-cw-8tdv-an-unmet-exit-guard-names-the-step-that-satisfies-it) — an unmet exit guard names its satisfying step carrying the exit, or goes to the owner when none can.
 - [CW-nkys](spec.md#requirement-cw-nkys-validation-is-always-named-with-a-target) — validation is always named with a target, whose guards are checked again on validation's exit.
 - [CW-izj1](spec.md#requirement-cw-izj1-a-confirmed-return-starts-its-work-afresh) — a confirmed return releases the returned review, so its work is a fresh round; declined returns go to the owner.
-- [CW-tnp6](spec.md#requirement-cw-tnp6-a-round-and-the-merge-advance-only-on-a-passed-validation) — a round and the merge advance only on a passed validation of their commit; a failed merge validation repeats the merge.
+- [CW-tnp6](spec.md#requirement-cw-tnp6-a-round-and-the-merge-advance-only-on-a-passed-validation) — a round and either merge advance only on a passed validation of their commit; a failed merge validation repeats that merge.
+- [CW-j7wp](spec.md#requirement-cw-j7wp-the-computation-answers-done-from-the-route) — an archived change is `done` only while its route ends at cleanup's exit, computed in its clone first and answered before any branch or row check; an older merge by hand after cleanup routes nothing.
 
 ### The graph
 
 - [CW-ak1z](spec.md#requirement-cw-ak1z-the-workflow-graph-is-one-table-in-code) — the graph is one table in code of nodes, exits, joins, and guards, changed only by an OpenSpec change.
 - [CW-sd34](spec.md#requirement-cw-sd34-exit-guards-bind-steps-and-entry-guards-bind-every-entry) — exit guards bind step exits, not directions; entry guards bind every entry, waivable ones yielding to directions.
-- [CW-xo82](spec.md#requirement-cw-xo82-the-archive-guards-both-sides-of-closeout) — the archive's presence or absence guards the steps on each side of closeout; closeout is entered only from the merge.
+- [CW-xo82](spec.md#requirement-cw-xo82-the-archive-guards-both-sides-of-closeout) — the archive's presence or absence guards the steps on each side of closeout, the merge after the archive and its review included; closeout is entered only from the merge before it.
 - [CW-iaeh](spec.md#requirement-cw-iaeh-a-triage-needs-a-record-to-triage-and-a-validation-a-target) — a triage needs an untriaged record of its kind; validation needs a target, checked on its exit.
-- [CW-9tzd](spec.md#requirement-cw-9tzd-archive-cleanup-ends-at-the-terminal-node) — archive cleanup exits to the terminal node `done`, which has no exits or step and no direction reaches.
+- [CW-9tzd](spec.md#requirement-cw-9tzd-archive-cleanup-ends-at-the-terminal-node) — archive cleanup exits to the terminal node `done`, which has no exits or step and no direction reaches; the merge after the archive leaves it.
 - [CW-66kx](spec.md#requirement-cw-66kx-the-graph-diagram-is-held-to-the-table) — `check graph` holds the diagram's source and embedded copy to the table's structure, whatever its layout.
 
 ### Permissions
@@ -255,7 +262,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-yib2](spec.md#requirement-cw-yib2-a-change-may-be-worked-in-a-clone-of-its-own) — a change may be worked in its own clone or the workspace; clones never disturb each other.
 - [CW-4x66](spec.md#requirement-cw-4x66-the-computation-names-a-changes-clone-or-brings-workspace-records-to-the-owner) — the computation names a missing clone's creation, but brings a change with workspace records to the owner.
 - [CW-8jyb](spec.md#requirement-cw-8jyb-creating-a-clone-is-safe-to-repeat) — clone creation is repeatable, finishing an incomplete clone and refusing a foreign or dirty directory, deleting nothing; its remotes come from Git's record in the workspace.
-- [CW-s3ju](spec.md#requirement-cw-s3ju-the-branch-a-change-lands-on-is-recorded-where-its-orchestration-began) — the clone records the branch the change lands on, the workspace's or `--from`, printed as `find --json`'s `base`; an argument overrides it.
+- [CW-s3ju](spec.md#requirement-cw-s3ju-the-branch-a-change-lands-on-is-recorded-where-its-orchestration-began) — the clone records the branch the change lands on, the workspace's or `--from`, printed as `find --json`'s `base`; a merge given no branch brings in the last finished merge's recorded branch before it, and an argument overrides both.
 - [CW-8npg](spec.md#requirement-cw-8npg-a-clones-bootstrap-gates-implementation-and-validation) — implementation and validation wait on the clone's `post-clone` bootstrap succeeding, its state recording its command; a failure goes to the owner.
 - [CW-hak6](spec.md#requirement-cw-hak6-archive-cleanup-copies-a-changes-history-into-the-workspace) — archive cleanup last copies the change's records and evidence into the workspace, repeated after its outcome.
 - [CW-rf50](spec.md#requirement-cw-rf50-copying-a-changes-history-overwrites-nothing) — the history copy is repeatable, extends prefix files, and refuses to overwrite a differing file.

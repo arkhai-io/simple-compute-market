@@ -186,8 +186,9 @@ workflow's default checks — the change index, the task list, the skills, and t
 strict OpenSpec validation through `scripts/openspec`, which runs the pinned
 validator through `bunx`, else `npx --yes` — then this repository's `pre-commit`,
 `make check-repository` (`scripts/check_change.py`), and, before a commit changing a
-path outside `openspec/` and `docs/`, the relock and then the wheelhouse cleared, the
-packaging check, and every suite first (MCW-r4tx). The owner's complete closing
+path outside the inert paths `.agents/workflow.toml` declares (`openspec/`, `docs/`,
+and every `README.md`), the relock and then the wheelhouse cleared, the packaging
+check, and every suite first (MCW-r4tx). The owner's complete closing
 check stays `make check-change CHANGE=<change>`, which runs the same `run
 pre-commit`, so no check runs twice and the familiar target is never partial.
 

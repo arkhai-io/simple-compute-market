@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import diagram, graph
+from change_workflow import cli, diagram, graph
 from change_workflow.diagram import DIAGRAMS, EXPORT, SOURCE, drawn
 from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT_TRIAGE, DESIGN, NODES, OWNER, STEPS,
                                    TABLE, WAIT, Node)
@@ -181,12 +181,104 @@ def test_the_merge_follows_the_pre_closeout_triage_and_leads_to_closeout() -> No
     assert graph.NOT_ARCHIVED in graph.NODES[graph.MERGE].entry
 
 
+def test_the_merge_after_the_archive_runs_the_merge_step_once_cleanup_has_run() -> None:
+    late = NODES[graph.LATE_MERGE]
+    exits = {exit_.target: exit_ for exit_ in late.exits}
+
+    assert late.runs == "merge" and late.phases == ("closeout",)
+    assert _entry(graph.LATE_MERGE) == ["the change is archived", "archive cleanup has run",
+                                        "the change's index row says archived"]
+    assert set(exits) == {ARCHIVE_CLEANUP, graph.MERGE_REVIEW}
+    assert exits[ARCHIVE_CLEANUP].when == graph.ADVANCE
+    assert exits[ARCHIVE_CLEANUP].guards == (graph.LATE_MERGE_VALIDATED,)
+    assert exits[graph.MERGE_REVIEW].guards == (graph.LATE_MERGE_REVIEW_VALIDATED,)
+    # A failed validation of the merged HEAD names the merge after the archive.
+    for guard in (graph.LATE_MERGE_VALIDATED, graph.LATE_MERGE_REVIEW_VALIDATED):
+        assert (guard.remedy, guard.otherwise) == (graph.VALIDATE,
+                                                   graph.LATE_MERGE_VALIDATION_FAILED)
+    assert graph.LATE_MERGE_VALIDATED.condition.endswith("inert paths exempt")
+    assert graph.LATE_MERGE_REVIEW_VALIDATED.condition.endswith("records exempt")
+    assert graph.node_of({"step": "late-merge"}) == graph.LATE_MERGE
+    # The merge before closeout takes only an active change, by its four exits.
+    assert graph.NOT_ARCHIVED in NODES[graph.MERGE].entry
+    assert len(NODES[graph.MERGE].exits) == 4
+
+
+def test_the_merge_review_and_its_triage_follow_the_archive_and_return_nowhere() -> None:
+    assert "merge" in graph.KINDS
+    assert _entry(graph.MERGE_REVIEW) == ["the change is archived"]
+    assert [e.target for e in NODES[graph.MERGE_REVIEW].exits] == [graph.MERGE_TRIAGE]
+    awaits = "a review of its kind, or a validation after it, awaits triage"
+    assert _entry(graph.MERGE_TRIAGE) == ["the change is archived", awaits]
+    triage = {exit_.when: exit_ for exit_ in NODES[graph.MERGE_TRIAGE].exits}
+    assert set(triage) == {graph.ADVANCE, graph.ANOTHER_ROUND}
+    assert triage[graph.ADVANCE].target == ARCHIVE_CLEANUP
+    assert triage[graph.ANOTHER_ROUND].target == graph.MERGE_REVIEW
+    for exit_ in triage.values():
+        assert exit_.guards == (graph.DOCUMENTED_FIX_VALIDATED,)
+    # No node after the archive declares a return.
+    for node in (graph.LATE_MERGE, graph.MERGE_REVIEW, graph.MERGE_TRIAGE):
+        assert not [e for e in NODES[node].exits if e.when == graph.RETURN]
+
+
+def test_the_merge_after_the_archive_adds_no_step() -> None:
+    assert STEPS.count("merge") == 1
+    assert "late-merge" not in STEPS
+    assert "merge" not in cli.ACTIVE_ONLY and "merge" not in cli.ARCHIVED_ONLY
+
+
+@pytest.mark.parametrize("standing,refused", [
+    (graph.Standing(archived=False, awaiting=frozenset()), "the change is not archived"),
+    (graph.Standing(archived=True, awaiting=frozenset(), row_archived=True),
+     "no archive cleanup run has finished"),
+    (graph.Standing(archived=True, awaiting=frozenset(), cleaned_up=True),
+     "restore the row as archive cleanup left it"),
+    (graph.Standing(archived=True, awaiting=frozenset(), cleaned_up=True, row_archived=True),
+     None),
+], ids=["active", "before cleanup", "row pruned", "entered"])
+def test_the_merge_after_the_archive_is_entered_once_cleaned_up_with_its_row(
+        standing: graph.Standing, refused: str | None) -> None:
+    found = graph.entry_refusal({"step": "late-merge"}, standing, directed=True)
+
+    assert (found is None) if refused is None else (refused in (found or ""))
+
+
+class _Landing:
+    """Readings answering only whether an archive cleanup run's landing moved."""
+
+    def __init__(self, moved: bool) -> None:
+        self.moved = moved
+
+    def landing_moved(self, run) -> bool:
+        return self.moved
+
+
+@pytest.mark.parametrize("moved", [False, True], ids=["checked", "moved"])
+def test_archive_cleanups_exit_to_done_waits_for_the_landing_branch(moved: bool) -> None:
+    (exit_,) = NODES[ARCHIVE_CLEANUP].exits
+    (guard,) = exit_.guards
+    run = {"seq": 9, "step": "archive-cleanup",
+           "landing": {"remote": "origin", "branch": "main", "commit": "a" * 40}}
+
+    found = guard.check(_Landing(moved), {"run": run})
+
+    assert (exit_.target, guard.remedy) == (graph.DONE, graph.LATE_MERGE)
+    if moved:
+        # The merge step runs the node, which the reason names.
+        assert found["step"] == "merge" and found["reason"].startswith("late-merge: ")
+        assert "seq 9 fetched main" in found["reason"]
+    else:
+        assert found is None
+
+
 def test_the_phases_read_from_the_table() -> None:
     assert graph.phase_steps("planning") == ("plan",)
     assert "merge" in graph.phase_steps("implementation")
+    # The merge after the archive runs the merge step in closeout.
     assert set(graph.phase_steps("closeout")) == {"closeout", "review", "triage", "validate",
-                                                   "archive-cleanup"}
+                                                   "archive-cleanup", "merge"}
     assert graph.review_phase("pre-closeout") == "implementation"
+    assert graph.review_phase("merge") == "closeout"
     assert graph.review_phase("owner") is None
 
 

@@ -92,6 +92,13 @@ def is_archived(root: Path, directory: Path) -> bool:
     return directory.parent == root / ARCHIVE
 
 
+def change_name(directory: Path) -> str:
+    """The name of the change whose directory is `directory`: an archived one's
+    without the date its archive prefixed."""
+    match = _ARCHIVED.match(directory.name) if directory.parent.name == ARCHIVE.name else None
+    return match.group("name") if match else directory.name
+
+
 def records_directory(root: Path, name: str) -> Path | None:
     """The `reviews/` directory of the change called `name` in the checkout at
     `root`, active or archived; None when the checkout holds no records of it.

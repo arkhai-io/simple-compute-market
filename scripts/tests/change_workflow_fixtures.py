@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+from change_workflow.log import Checkout
 from change_workflow.steps import Model
 from change_workflow.wrapper import Wrapper
 
@@ -31,6 +32,13 @@ VALID = {
     "stopped": {"outcome": "stopped", "message": "Denied make lock.", "reason": "denied",
                 "denials": [{"tool_name": "Bash", "tool_input": {"command": "make lock"}}]},
 }
+
+# The landing branch a finished merge or archive cleanup records it fetched, and a
+# checkout that names a clone's remotes, contains every commit, and holds that commit
+# at every ref, for a test that is not about the landing record.
+LANDED = {"remote": "origin", "branch": "dev", "commit": HEAD}
+ACCEPTING = Checkout(remotes=lambda: {"origin", "workspace"}, contains=lambda *_: True,
+                     base=lambda: None, resolve=lambda _: HEAD)
 
 OPUS = Model("claude", "claude-opus-5-5", "high")
 SONNET = Model("claude", "claude-sonnet-5-5", "medium")
@@ -133,7 +141,7 @@ def make_wrapper(tmp_path: Path, claude: FakeClaude) -> Wrapper:
     return Wrapper(root=tmp_path, runner=claude, head=lambda _: COMMIT, clock=clock,
                    echo=None,
                    conversation=lambda _, session: conversations(tmp_path) / f"{session}.jsonl",
-                   runs=lambda _: None)
+                   runs=lambda _: None, checkout=lambda *_: ACCEPTING)
 
 
 def option(command: list[str], flag: str) -> str:

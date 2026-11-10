@@ -240,5 +240,7 @@ allow = [
   "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
   "Bash(scripts/change-workflow history*)", "Bash(scripts/change-workflow run *)",
   "Bash(make helm-values-schema)",
+  # Archive cleanup fetches the branch the change's last merge brought in, to record it.
+  "Bash(git fetch origin *)", "Bash(git fetch workspace *)",
 ]
 deny = ["Bash(gh pr create*)"]

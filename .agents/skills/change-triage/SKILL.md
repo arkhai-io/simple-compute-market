@@ -176,8 +176,8 @@ to be resumed, or its outcome recorded with the command above.
 
 The change's directory is what `scripts/change-workflow find <change>` prints:
 `openspec/changes/<change>/`, or, once closeout has archived it, its dated
-directory under `openspec/changes/archive/` — a closeout review is always of an
-archived change. The reviews to triage are its numbered records in `reviews/` —
+directory under `openspec/changes/archive/` — a closeout review and a merge review
+are always of an archived change. The reviews to triage are its numbered records in `reviews/` —
 `NN-<kind>.md` — that have no `NN-<kind>.triage.md` beside them. Never read
 `reviews/transcripts/`: those are raw reviewer sessions, not records.
 
@@ -566,6 +566,15 @@ acceptances' outcomes are carried out with the rest.
   the archived change, before archive cleanup. Once it is validated, suggest
   a review of the fix's diff — an external one, or `make review KIND=implementation`
   — and say why; whether to have it is the owner's call, and nothing requires it.
+- **fix, at a merge review's triage:** the change is archived and its archive
+  cleaned up, and the merge after the archive may have changed its code, so a
+  finding whose fix needs code is fixed here, by the steps below, as any fix is: no
+  exit returns the change to implementation. The fix commit is validated before
+  archive cleanup or another merge review, by the guard on either exit, when it
+  changes a path outside the repository's inert paths. Keep the change's row
+  `archived`; the change documents the dispositions edit are its archived
+  directory's. Append to `reviews/pull-request.md` what the fix changed, never
+  rewriting it.
 - **fix:** once every finding has a disposition or is accepted by default, make
   the accepted fixes, as `change-implement` makes a section's changes: the change
   and the decision it rests on, and no more, an out-of-scope defect's fix (step 2)
@@ -596,11 +605,11 @@ acceptances' outcomes are carried out with the rest.
   with `scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it refuses, stop
   and report its reasons. The fix commit is validated next (`make validate
   CHANGE=<change>`), which dispatches the pipeline — unless, after a pre-closeout
-  review, it changes only the repository's inert paths (step 6).
+  or a merge review, it changes only the repository's inert paths (step 6).
 
 Then run `scripts/change-workflow run pre-commit <change>` and report the result.
 Its default OpenSpec check validates an active change with `validate <change>
---strict`, and an archived one — a closeout triage — with `validate --specs
+--strict`, and an archived one — a closeout or merge triage — with `validate --specs
 --strict`, since its deltas are merged and the permanent specifications are what
 its fixes touched.
 
@@ -629,6 +638,7 @@ one of those the triage's node declares:
 | an implementation round | the plan's next round, `{"step": "round"}`; once every section before closeout is checked, `{"step": "review", "kind": "pre-closeout"}` | `{"step": "review", "kind": "implementation"}` | `{"step": "plan"}` or `{"step": "design"}` |
 | a pre-closeout review | the merge of the branch the change lands on, `{"step": "merge"}` | `{"step": "review", "kind": "pre-closeout"}` | `{"step": "plan"}` or `{"step": "design"}` |
 | a closeout review | `{"step": "archive-cleanup"}` | `{"step": "review", "kind": "closeout"}` | none: an archived change has no earlier phase |
+| a merge review, of a merge after the archive | `{"step": "archive-cleanup"}` | `{"step": "review", "kind": "merge"}` | none: an archived change has no earlier phase |
 
 An implementation round's triage may instead name sections out of the plan's order,
 `{"step": "implement", "sections": [["5"]]}`, sessions as `rounds` lists them,
@@ -654,7 +664,9 @@ own exits validate the
 merged `HEAD`, the triage's fixes with it, before closeout or a review of the
 merge; after a closeout
 review, archive cleanup, after a validation of `HEAD` when a path outside the
-repository's inert paths changed since the commit it reviewed. Another review of the
+repository's inert paths changed since the commit it reviewed; after a merge review,
+archive cleanup run again, or another merge review, each after a validation of a fix
+the triage committed outside the inert paths. Another review of the
 same kind follows the fix commit's validation for an implementation or
 pre-closeout review — for a pre-closeout one, only when the fix changed a path
 outside the inert paths; for an implementation one, once the owner has read
@@ -679,6 +691,7 @@ contradict its status misleads every agent that reads the index — then run
 | `implementation` | unchanged — implementation reviews after a section do not close the phase |
 | `pre-closeout` | unchanged — the merge before closeout follows, and sets `ready for closeout` as it advances |
 | `closeout` | unchanged — `in closeout` until archive cleanup writes `archived` |
+| `merge` | unchanged — `archived`, which no step after the archive changes |
 
 Whichever exit it names, a triage of any kind then commits what it changed
 and no fix commit (step 5) already holds — the change's documents its
@@ -694,9 +707,10 @@ only changes' ledgers and reviews.
 
 A closeout triage that advances ends triage. Do not release dependents, set the row
 to `archived`, or draft the merge yourself: that is archive cleanup's, in a fresh
-session. Tell the owner archive cleanup is next, and end `finished`. With another
-review of the same kind as its exit, leave the status, and say what that review
-reads.
+session. Tell the owner archive cleanup is next, and end `finished`. A merge
+review's triage that advances ends the same way, archive cleanup running again on
+the archived row. With another review of the same kind as its exit, leave the
+status, and say what that review reads.
 
 ## 7. A revisit after the triage finished
 

@@ -25,8 +25,8 @@ from change_workflow import (clone, cli, config, cost_report, diagram, find, his
                              next_step, push, round_view, skills, tasks)
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
-from change_workflow_fixtures import (CHANGE, CONFIGURED, VALID, FakeClaude, configured,
-                                      event_lines, make_wrapper, option_rules)
+from change_workflow_fixtures import (CHANGE, CONFIGURED, LANDED, VALID, FakeClaude,
+                                      configured, event_lines, make_wrapper, option_rules)
 
 REPO = Path(__file__).resolve().parents[2]
 FRAGMENT = REPO / "scripts" / "change_workflow" / "workflow.mk"
@@ -241,7 +241,7 @@ def test_a_failed_push_exits_1_whatever_git_returned(
 
 # `start`: the make targets' entry logic.
 
-@pytest.mark.parametrize("step", ["design", "plan", "implement", "merge"])
+@pytest.mark.parametrize("step", ["design", "plan", "implement"])
 def test_start_refuses_an_archived_change_for_a_step_taking_an_active_one(
         tmp_path: Path, capsys: pytest.CaptureFixture[str], step: str) -> None:
     root = _repository(tmp_path / "workspace")
@@ -268,6 +268,20 @@ def test_start_takes_an_archived_change_for_a_step_that_may_follow_the_archive(
 
     assert cli.main(["start", step, CHANGE], root=root, launch=launched) == 0
     assert launched.commands[0][-1] == f"/change-{step} {CHANGE}"
+
+
+def test_start_takes_an_archived_change_for_the_merge_after_the_archive(
+        tmp_path: Path) -> None:
+    """One node of the merge step, the merge after the archive, enters an archived
+    change, so `start` takes it; the merge's route check refuses a run the
+    computation does not name."""
+    root = _repository(tmp_path / "workspace")
+    _archive(root)
+    launched = Launched()
+
+    assert cli.main(["start", "merge", CHANGE, "--arguments", "from dev"], root=root,
+                    launch=launched) == 0
+    assert launched.commands[0][-1] == f"/change-merge {CHANGE} from dev"
 
 
 def test_start_takes_only_an_archived_change_for_archive_cleanup(
@@ -456,7 +470,7 @@ def test_a_session_that_cannot_be_started_is_a_refusal(
 
 def test_an_unattended_start_runs_the_step_through_the_wrapper(tmp_path: Path) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
-    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    claude = FakeClaude((event_lines({**VALID["finished"], "landing": LANDED}), 0))
     launched = Launched()
 
     assert cli.main(["start", "merge", CHANGE, "--arguments", "from dev", "--unattended",

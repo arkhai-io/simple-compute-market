@@ -105,6 +105,26 @@ def git_head(root: Path) -> str | None:
     return head.stdout.strip() if head.returncode == 0 else None
 
 
+def git_remotes(root: Path) -> frozenset[str]:
+    """The remotes the checkout at `root` names; none where Git cannot list them."""
+    listed = subprocess.run(["git", "remote"], cwd=root, capture_output=True, text=True)
+    return frozenset(listed.stdout.split()) if listed.returncode == 0 else frozenset()
+
+
+def git_resolve(root: Path, ref: str) -> str | None:
+    """The commit `ref` names in the checkout at `root`; None where it names none."""
+    resolved = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                              cwd=root, capture_output=True, text=True)
+    return resolved.stdout.strip() if resolved.returncode == 0 else None
+
+
+def git_contains(root: Path, commit: str, ancestor: str) -> bool:
+    """Whether `commit` contains `ancestor`, in the checkout at `root`: false too when
+    either is no commit the checkout holds, since nothing then shows it does."""
+    return subprocess.run(["git", "merge-base", "--is-ancestor", ancestor, commit], cwd=root,
+                          capture_output=True).returncode == 0
+
+
 def changed_since(root: Path, commit: str, head: str) -> list[str] | None:
     if subprocess.run(["git", "merge-base", "--is-ancestor", commit, head], cwd=root,
                       capture_output=True).returncode != 0:

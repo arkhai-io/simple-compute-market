@@ -10,7 +10,7 @@ import pytest
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import record_outcome
 from change_workflow.outcome import harness_schema, load_schema, outcome_problems, schema_format
-from change_workflow_fixtures import COMMIT, VALID, clock, log_file
+from change_workflow_fixtures import COMMIT, LANDED, VALID, clock, log_file
 
 # Step outcomes as a workflow log carries them, without the fields the wrapper adds
 # around them.
@@ -172,6 +172,41 @@ def test_a_triage_names_the_records_it_triaged_as_strings() -> None:
     assert outcome_problems(triaged) == []
     assert outcome_problems({**triaged, "triaged": [13]}) == [
         "outcome.triaged[0] is not of type string"]
+
+
+@pytest.mark.parametrize("kind", sorted(VALID))
+def test_a_well_formed_landing_is_accepted_on_any_outcome(kind: str) -> None:
+    assert outcome_problems({**VALID[kind], "landing": LANDED}) == []
+    assert outcome_problems({**VALID[kind], "landing": {**LANDED, "commit": "a" * 64}}) == []
+    assert outcome_problems({**VALID[kind], "landing": {**LANDED, "remote": "."}}) == []
+
+
+@pytest.mark.parametrize("landing,problem", [
+    ({key: value for key, value in LANDED.items() if key != "remote"},
+     "outcome.landing has no remote"),
+    ({key: value for key, value in LANDED.items() if key != "branch"},
+     "outcome.landing has no branch"),
+    ({key: value for key, value in LANDED.items() if key != "commit"},
+     "outcome.landing has no commit"),
+    ({**LANDED, "remote": ""}, "outcome.landing.remote is shorter than 1"),
+    ({**LANDED, "branch": ""}, "outcome.landing.branch is shorter than 1"),
+    ({**LANDED, "branch": 3}, "outcome.landing.branch is not of type string"),
+    ({**LANDED, "commit": "7f3c6e90"}, "outcome.landing.commit is '7f3c6e90', not a commit's "
+                                       "full hexadecimal object name"),
+    ({**LANDED, "commit": "G" * 40}, "outcome.landing.commit is"),
+    ({**LANDED, "fetched": True}, "outcome.landing has fetched, which the schema does not "
+                                  "define"),
+    ("origin/dev", "outcome.landing is not of type object"),
+], ids=lambda value: str(value))
+def test_a_malformed_landing_is_refused_naming_the_field(landing, problem: str) -> None:
+    problems = outcome_problems({**VALID["finished"], "landing": landing})
+
+    assert len(problems) == 1 and problems[0].startswith(problem), problems
+
+
+def test_an_outcome_without_landing_is_accepted() -> None:
+    assert "landing" not in VALID["finished"]
+    assert outcome_problems(VALID["finished"]) == []
 
 
 def test_the_schemas_id_states_the_record_sets_format() -> None:

@@ -21,6 +21,12 @@ them, the command it resolved to, its exit status, when it started, and how long
 took. The field is optional, so a line without it reads as before and the record
 set's format does not move.
 
+A finished merge's or archive cleanup's outcome carries `landing`, the remote,
+branch, and commit the run fetched, which the writer checks against the checkout
+the run ran in before the line is written (`landing_problems`), recording on
+cleanup's line whether its commit contains the one fetched (`CONTAINED`). A line
+written before the record existed has neither, and keeps its meaning.
+
 The log holds only what the change's files cannot: session ids, the owner's round
 agreements, and the last outcome. Where the log and the files disagree, the files
 win. It lives in the change's untracked `reviews/` directory and moves with the
@@ -50,22 +56,35 @@ import fcntl
 import json
 import os
 import tempfile
+from dataclasses import dataclass
 from datetime import timezone
 from pathlib import Path
-from typing import IO, Any, Callable, Mapping, Sequence
+from typing import IO, Any, Callable, Collection, Mapping, Sequence
 
-from .common import FORMAT, ORCHESTRATOR, Clock, Entry, StepError, utc_now
-from .find import ARCHIVE, ChangeNotFound, change_directory, find_records
-from .graph import (IMPLEMENTATION_TRIAGE, NODES, ROUND, STEPS, Node, Standing, TargetError,
-                    entry_refusal, node_of, review_phase, section_ids)
+from .common import CHANGES, FORMAT, ORCHESTRATOR, Clock, Entry, StepError, utc_now
+from .find import (ARCHIVE, ChangeNotFound, change_directory, change_name, find_records,
+                   landing_branch)
+from .graph import (IMPLEMENTATION_TRIAGE, LATE_MERGE, NODES, ROUND, STEPS, Node, Standing,
+                    TargetError, entry_refusal, node_of, review_phase, section_ids)
+from .index import index_rows
 from .outcome import outcome_problems, triage_outcome_problems
-from .records import NUMBERED, has_records, next_number
+from .records import (NUMBERED, git_contains, git_remotes, git_resolve, has_records,
+                      latest_validation, next_number, validation_result)
 
 LOG = "workflow.jsonl"
 # The lines no step's run writes: the conversion's, and the one `start` opens a
 # step with. Neither names an exit, and nothing routes on either.
 CONVERSION = "convert"
 OPENING = "start"
+# The steps whose finished outcome records, as `landing`, the landing branch the
+# run fetched: the merge, before closeout and after the archive, and archive cleanup.
+MERGE = "merge"
+CLEANUP = "archive-cleanup"
+# On a finished archive cleanup line carrying `landing`: whether the run's commit
+# contains the commit it fetched, decided as the line is written, in the checkout
+# that fetched it. Archive cleanup's first exit to `done` reads only this, so no
+# later fetch, by anyone, changes where that exit leads.
+CONTAINED = "landing_contained"
 
 
 class LogError(StepError):
@@ -334,16 +353,184 @@ def _write_over(path: Path, lines: Sequence[Entry], mode: int,
         written.unlink(missing_ok=True)
 
 
+@dataclass(frozen=True)
+class Checkout:
+    """What the log's writer reads of the checkout a run ran in, to check the landing
+    record on a merge's or archive cleanup's line: the remotes it names, whether one
+    commit contains another (`contains(commit, ancestor)`), the branch the change's
+    clone recorded as the one it lands on, and the commit a full ref name names
+    (`resolve(ref)`, None for none)."""
+
+    remotes: Callable[[], Collection[str]]
+    contains: Callable[[str, str], bool]
+    base: Callable[[], str | None]
+    resolve: Callable[[str], str | None]
+
+
+def git_checkout(root: Path, change: str) -> Checkout:
+    """The checkout at `root`, read through Git, for `change`."""
+    return Checkout(remotes=lambda: git_remotes(root),
+                    contains=lambda commit, ancestor: git_contains(root, commit, ancestor),
+                    base=lambda: landing_branch(root, change),
+                    resolve=lambda ref: git_resolve(root, ref))
+
+
+def landing_ref(remote: str, branch: str) -> str:
+    """The ref a fetch of `branch` from `remote` leaves the fetched commit at: the
+    remote-tracking branch, or, for `.`, the branch the checkout holds itself."""
+    return f"refs/heads/{branch}" if remote == "." else f"refs/remotes/{remote}/{branch}"
+
+
+def _finished_merges(entries: Sequence[Entry]) -> list[Entry]:
+    return [entry for entry in entries
+            if entry.get("step") == MERGE and entry.get("outcome") == "finished"]
+
+
+def recorded_landing(entries: Sequence[Entry]) -> Mapping[str, Any] | None:
+    """The `landing` the last finished merge recorded; None when no finished merge
+    recorded one, as in a log written before the record existed."""
+    return next((entry["landing"] for entry in reversed(_finished_merges(entries))
+                 if isinstance(entry.get("landing"), Mapping)), None)
+
+
+def landing_source(entries: Sequence[Entry],
+                   base: Callable[[], str | None]) -> tuple[str | None, str] | None:
+    """The remote and branch archive cleanup fetches: those the last finished merge
+    recorded, else the branch the change's clone recorded, with no remote, which
+    cleanup chooses as the merge would; None with neither, for an older log's merge
+    of a change worked in place."""
+    if (landing := recorded_landing(entries)) is not None:
+        return landing["remote"], landing["branch"]
+    recorded = base()
+    return (None, recorded) if recorded else None
+
+
+def _repairs_unrecorded(entries: Sequence[Entry], reviews: Path) -> bool:
+    """Whether a finished merge may omit `landing`: a repair of a failed validation of
+    the merged `HEAD`, the change's latest validation failed, where no finished merge
+    before it recorded one, so the repair has none to carry. Never once archive
+    cleanup ran: the merge after the archive records one, and a repair carries it, so
+    a merge after cleanup without one is only an older line (`unrouted_merge`)."""
+    merges = _finished_merges(entries)
+    if not merges or any(isinstance(entry.get("landing"), Mapping) for entry in merges) \
+            or any(entry.get("step") == CLEANUP for entry in entries):
+        return False
+    record = latest_validation(reviews)
+    return record is not None and validation_result(record) == "failed"
+
+
+def landing_problems(entries: Sequence[Entry], step: str, outcome: Entry, commit: str | None,
+                     checkout: Checkout, reviews: Path) -> list[str]:
+    """Why the log's writer refuses the landing record of `step`'s outcome, a run whose
+    commit is `commit`, to follow `entries`; empty when it does not, or when nothing
+    is required of it.
+
+    Only a finished merge or archive cleanup is checked: a merge that asks at a
+    conflict holds the fetched commit in `MERGE_HEAD`, not `HEAD`, and one that
+    stops before its fetch has none. A merge's record names one of the checkout's
+    remotes, or `.` for a branch the checkout holds, and a commit `HEAD` contains,
+    which shows the merge brought it in; a repair of a merge logged before the
+    record existed may omit it (`_repairs_unrecorded`). Archive cleanup records
+    one whenever a source resolves (`landing_source`), on every run, so a fetch that
+    failed never passes for a check, and it must be what cleanup fetched from that
+    source (`_cleanup_landing_problems`); whether `HEAD` contains it is recorded, not
+    refused (`CONTAINED`).
+    """
+    if step not in (MERGE, CLEANUP) or outcome.get("outcome") != "finished":
+        return []
+    landing = outcome.get("landing")
+    if not isinstance(landing, Mapping):
+        if step == MERGE:
+            return [] if _repairs_unrecorded(entries, reviews) else [
+                "its finished outcome records no landing, the remote, branch, and commit it "
+                "fetched, which every finished merge records but a repair of a merge logged "
+                "before the record existed"]
+        if (source := landing_source(entries, checkout.base)) is None:
+            return []
+        remote, branch = source
+        return [f"its finished outcome records no landing, and it fetches {branch}"
+                + (f" from {remote}" if remote else "") + ": a fetch that fails ends it "
+                "stopped, never finished"]
+    if not commit:
+        return ["the run's commit could not be read, so its landing cannot be checked"]
+    if step == CLEANUP:
+        return _cleanup_landing_problems(landing, landing_source(entries, checkout.base),
+                                         checkout)
+    problems = []
+    if landing["remote"] != "." and landing["remote"] not in checkout.remotes():
+        problems.append(f"its landing.remote {landing['remote']!r} is none of the checkout's "
+                        "remotes, nor . for a branch the checkout holds")
+    if not checkout.contains(commit, landing["commit"]):
+        problems.append(f"its landing.commit {landing['commit'][:12]} is not contained in the "
+                        f"run's commit {commit[:12]}, so the merge did not bring it in")
+    return problems
+
+
+def _cleanup_landing_problems(landing: Mapping[str, Any], source: tuple[str | None, str] | None,
+                              checkout: Checkout) -> list[str]:
+    """Why a finished archive cleanup's `landing` is not what it fetched from `source`.
+
+    The first exit's guard trusts the containment recorded from this line, so a line
+    naming another branch, or a commit other than the one the fetch left, would let
+    a moved landing branch pass for a contained one. The branch is the source's. The
+    remote is the source's where that remote is `.` or one of the checkout's; a
+    source from the clone's recorded branch names none, and a recorded remote the
+    checkout lacks is replaced on the owner's word, so there it is any of the
+    checkout's or `.`. The commit is the one the fetch left at the ref for that remote
+    and branch, compared for equality: an older commit of the right branch, which
+    `HEAD` may well contain, is exactly the record the guard must not accept. A fetch
+    in the checkout between cleanup's and this write makes the line refused, and the
+    rerun fetches again.
+    """
+    problems = []
+    remote, branch = landing["remote"], landing["branch"]
+    if source is not None and branch != source[1]:
+        problems.append(f"its landing.branch {branch!r} is not {source[1]!r}, the branch "
+                        "cleanup fetches")
+    allowed = {".", *checkout.remotes()}
+    if source is not None and source[0] in allowed:
+        if remote != source[0]:
+            problems.append(f"its landing.remote {remote!r} is not {source[0]!r}, the remote "
+                            "cleanup fetches from")
+    elif remote not in allowed:
+        problems.append(f"its landing.remote {remote!r} is none of the checkout's remotes, "
+                        "nor . for a branch the checkout holds")
+    if not problems:
+        ref = landing_ref(remote, branch)
+        fetched = checkout.resolve(ref)
+        if fetched != landing["commit"]:
+            problems.append(f"its landing.commit {landing['commit'][:12]} is not the commit "
+                            f"{ref} names, "
+                            + (fetched[:12] if fetched else "none")
+                            + ", so it is not what the fetch left")
+    return problems
+
+
 def record_outcome(path: Path, step: str, outcome: Entry, *, session: str | None,
                    commit: str | None, extra: Entry | None = None,
-                   schema: dict[str, Any] | None = None, clock: Clock = utc_now) -> Entry:
-    """Append a step's outcome, refusing one that does not conform to the schema."""
+                   schema: dict[str, Any] | None = None, checkout: Checkout | None = None,
+                   clock: Clock = utc_now) -> Entry:
+    """Append a step's outcome, refusing one that does not conform to the schema, or,
+    for a finished merge or archive cleanup, whose landing record the `checkout` the
+    run ran in refuses (`landing_problems`); a finished archive cleanup line carrying
+    one is recorded with whether its commit contains it (`CONTAINED`)."""
     if step not in STEPS:
         raise StepError(f"unknown step {step!r}; expected one of {', '.join(STEPS)}")
     if problems := outcome_problems(outcome, schema):
         raise StepError(f"the {step} outcome does not conform to the schema: "
                         + "; ".join(problems))
-    run = {"step": step, "session": session, "commit": commit}
+    run: Entry = {"step": step, "session": session, "commit": commit}
+    if step in (MERGE, CLEANUP) and outcome.get("outcome") == "finished":
+        if checkout is None:
+            raise StepError(f"a finished {step} run's landing is checked in the checkout it "
+                            "ran in, and none was given")
+        if problems := landing_problems(read_log(path), step, outcome, commit, checkout,
+                                        path.parent):
+            raise StepError(f"the {step} outcome is refused: " + "; ".join(problems))
+        # A line carrying `landing` has a commit, which `landing_problems` requires.
+        if step == CLEANUP and commit and isinstance(landing := outcome.get("landing"),
+                                                     Mapping):
+            run[CONTAINED] = checkout.contains(commit, landing["commit"])
     if clash := (extra or {}).keys() & (run.keys() | outcome.keys()):
         raise StepError(f"the {step} run's fields {', '.join(sorted(clash))} are recorded "
                         "twice")
@@ -357,10 +544,11 @@ def record_outcome(path: Path, step: str, outcome: Entry, *, session: str | None
 
 def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
                        commit: str | None, invoked: Sequence[Entry] = (),
-                       clock: Clock = utc_now) -> Entry:
+                       checkout: Checkout | None = None, clock: Clock = utc_now) -> Entry:
     """Append the outcome of a step the owner ran interactively, which records its
-    own: checked as the wrapper checks an unattended run's, and marked
-    `interactive`, with what the session `invoked`, when it invoked anything.
+    own: checked as the wrapper checks an unattended run's, a finished merge's or
+    archive cleanup's landing record against the `checkout` it ran in included, and
+    marked `interactive`, with what the session `invoked`, when it invoked anything.
 
     A triage's finished or returned outcome is refused unless it names the records
     it triaged (`triage_outcome_problems`), as the wrapper records such a run
@@ -379,7 +567,7 @@ def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
     return record_outcome(path, step, outcome, session=session, commit=commit,
                           extra={"interactive": True,
                                  **({"invoked": list(invoked)} if invoked else {})},
-                          clock=clock)
+                          checkout=checkout, clock=clock)
 
 
 def open_log(path: Path, change: str, step: str, *, interactive: bool,
@@ -459,16 +647,26 @@ def _open_round(path: Path, sections: Any) -> Entry | None:
     if latest is None or not isinstance(latest.get("after"), int):
         return None
     if any(e["seq"] > latest["seq"] and e.get("outcome") in ("finished", "returned")
-           and ran(IMPLEMENTATION_TRIAGE, e) for e in entries):
+           and ran(IMPLEMENTATION_TRIAGE, e, entries) for e in entries):
         return None
     named = {str(s) for session in latest.get("sections") or () for s in session}
     wanted = {str(s) for session in sections for s in session}
     return latest if wanted <= named else None
 
 
+def _row_archived(directory: Path) -> bool:
+    """Whether the change index of the repository holding the change `directory` has
+    a row for it saying `archived`."""
+    archived = directory.parent.as_posix().endswith(ARCHIVE.as_posix())
+    root = directory.parents[len(ARCHIVE.parts) if archived else len(CHANGES.parts)]
+    name = change_name(directory)
+    return any(row.name == name and row.status == "archived" for row in index_rows(root))
+
+
 def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
     """What the entry guards read of the change whose log is at `path`: whether its
-    directory is under the archive, and the kinds of review awaiting triage.
+    directory is under the archive, the kinds of review awaiting triage, whether an
+    archive cleanup run has finished, and whether its index row says `archived`.
 
     A review — a numbered record of a review kind, `-external` included — awaits
     triage until a triage's finished or returned outcome, or a conversion line,
@@ -508,7 +706,10 @@ def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
                                                             for number in validations):
         awaiting.add(latest[1])
     return Standing(archived=directory.parent.as_posix().endswith(ARCHIVE.as_posix()),
-                    awaiting=frozenset(awaiting))
+                    awaiting=frozenset(awaiting),
+                    cleaned_up=any(entry.get("step") == CLEANUP
+                                   and entry.get("outcome") == "finished" for entry in entries),
+                    row_archived=_row_archived(directory))
 
 
 def direction(next_step: str, kind: str | None = None,
@@ -675,14 +876,44 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
     return line
 
 
-def ran(node: Node, entry: Entry) -> bool:
-    """Whether `entry` is a run of `node`: a review of its kind; a triage naming a
-    review of its kind among the records it triaged; for the round, the line
-    recording it starting, or an implementation session."""
+def after_cleanup(entry: Entry, entries: Sequence[Entry]) -> bool:
+    """Whether an archive cleanup run is logged before `entry` among `entries`: a
+    merge run so logged is the merge after the archive, since nothing returns an
+    archived change to the phase of the merge before closeout."""
+    return any(other.get("step") == CLEANUP and other["seq"] < entry["seq"]
+               for other in entries)
+
+
+def unrouted_merge(entry: Entry, entries: Sequence[Entry]) -> bool:
+    """Whether `entry` is a merge run by hand on an archived change before the merge
+    after the archive was a node: a finished merge after an archive cleanup run that
+    records no `landing`, where no finished merge before it recorded one. Every
+    finished merge since records `landing`, and a repair may omit it only before
+    archive cleanup (`_repairs_unrecorded`), so only an older line has this shape;
+    it is a run of neither
+    merge node, and routes nothing, since the exit it named, often `done`, is one
+    neither declares."""
+    if entry.get("step") != MERGE or entry.get("outcome") != "finished" \
+            or isinstance(entry.get("landing"), Mapping) or not after_cleanup(entry, entries):
+        return False
+    return not any(isinstance(other.get("landing"), Mapping)
+                   for other in _finished_merges(entries) if other["seq"] < entry["seq"])
+
+
+def ran(node: Node, entry: Entry, entries: Sequence[Entry]) -> bool:
+    """Whether `entry`, a line of the log whose lines are `entries`, is a run of
+    `node`: a review of its kind; a triage naming a review of its kind among the
+    records it triaged; for the round, the line recording it starting, or an
+    implementation session; for the merge before closeout or after the archive, a
+    merge run before or after an archive cleanup run (`after_cleanup`), but an older
+    merge after it that neither node ran (`unrouted_merge`)."""
     if node == ROUND and entry.get("outcome") == "round":
         return True
     if entry.get("step") != NODES[node].runs:
         return False
+    if NODES[node].runs == MERGE:
+        return not unrouted_merge(entry, entries) \
+            and (node == LATE_MERGE) == after_cleanup(entry, entries)
     if node.step == "review":
         return entry.get("kind") == node.kind
     if node.step == "triage":
@@ -708,7 +939,7 @@ def unused_direction(entries: Sequence[Entry]) -> Entry | None:
         node = node_of(direction_["next"])
     except TargetError:
         return None
-    return None if any(entry["seq"] > direction_["seq"] and ran(node, entry)
+    return None if any(entry["seq"] > direction_["seq"] and ran(node, entry, entries)
                        and entry.get("outcome") in ("finished", "returned", "round")
                        for entry in entries) else direction_
 

@@ -20,6 +20,9 @@ from .graph import TargetError, node_of, review_phase
 SCHEMA = Path(".agents/change-outcome.schema.json")
 # The schema's `$id` names the record-set format its outcomes belong to.
 _SCHEMA_ID = re.compile(r":format:(\d+)$")
+# A commit's full object name, SHA-1 or SHA-256, as `git rev-parse` prints it: an
+# abbreviation could name another commit once the repository grows.
+OBJECT_NAME = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
 def schema_format(schema: dict[str, Any]) -> int | None:
@@ -122,7 +125,9 @@ def outcome_problems(outcome: Any, schema: dict[str, Any] | None = None) -> list
     """Why `outcome` is not a step outcome; empty when it is.
 
     The schema holds a target's shape; whether it names a node of the workflow
-    graph, a review with a kind the graph knows say, is the graph's to answer.
+    graph, a review with a kind the graph knows say, is the graph's to answer. It
+    holds the landing record's shape too; that its commit is a full object name is
+    checked here, since the schema's keywords include no pattern.
     """
     problems = schema_problems(outcome, schema if schema is not None else load_schema())
     target = outcome.get("next") if isinstance(outcome, dict) else None
@@ -131,6 +136,11 @@ def outcome_problems(outcome: Any, schema: dict[str, Any] | None = None) -> list
             node_of(target)
         except TargetError as exc:
             problems.append(f"outcome.next names no node: {exc}")
+    landing = outcome.get("landing") if isinstance(outcome, dict) else None
+    commit = landing.get("commit") if isinstance(landing, dict) else None
+    if isinstance(commit, str) and commit and not OBJECT_NAME.fullmatch(commit):
+        problems.append(f"outcome.landing.commit is {commit!r}, not a commit's full "
+                        "hexadecimal object name")
     return problems
 
 

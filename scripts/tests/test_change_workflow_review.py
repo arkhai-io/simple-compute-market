@@ -339,6 +339,31 @@ def test_a_closeout_review_of_an_active_change_is_refused(tmp_path: Path) -> Non
     assert not (reviews_of(root) / "transcripts").exists()
 
 
+def test_a_merge_review_of_an_active_change_is_refused(tmp_path: Path) -> None:
+    """CW-xo82: the review of a merge after the archive needs the archive, read from
+    its node's entry guard."""
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+
+    with pytest.raises(ReviewError, match="not archived; a merge review"):
+        run_review(CHANGE, "merge", base=BASE, root=root, head=lambda _: HEAD,
+                   runner=writing(review_text("merge"), calls=calls))
+
+    assert calls == []
+
+
+def test_a_merge_review_of_an_archived_change_is_recorded_in_the_archive(
+        tmp_path: Path) -> None:
+    archived = tmp_path / "openspec/changes/archive" / f"2026-10-14-{CHANGE}"
+    archived.mkdir(parents=True)
+    configured(tmp_path)
+
+    path = run_review(CHANGE, "merge", base=BASE, root=tmp_path,
+                      runner=writing(review_text("merge")), head=lambda _: HEAD)
+
+    assert path == archived / "reviews" / "01-merge.md"
+
+
 def test_a_later_review_continues_the_last_reviewer_read_only(tmp_path: Path) -> None:
     root = repository(tmp_path)
     run_review(CHANGE, "design", root=root, runner=writing(review_text(), session="first"),
