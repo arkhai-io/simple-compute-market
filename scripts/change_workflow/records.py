@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Sequence
 
 from .common import CHANGES
@@ -41,11 +41,22 @@ def is_record(path: str) -> bool:
 
 
 def inert(path: str, inert_paths: Sequence[str] | None) -> bool:
-    """Whether `path`, relative to the root, lies under one of the inert paths: an
-    entry names a directory or a file, matched whole, so `docs/` covers `docs/a.md`
-    and not `docsite/a.md`. With none declared, no path is inert."""
-    return any(path == entry.rstrip("/") or path.startswith(entry.rstrip("/") + "/")
-               for entry in inert_paths or ())
+    """Whether `path`, relative to the root, lies under one of the inert paths. An
+    entry without a glob character names a directory or a file, matched whole, so
+    `docs/` covers `docs/a.md` and not `docsite/a.md`. An entry with one is a glob
+    pattern matched against the whole path, where `**` spans any number of
+    directories, so `**/README.md` covers every README, the root's included. With
+    none declared, no path is inert."""
+    return any(_matches(path, entry) for entry in inert_paths or ())
+
+
+_GLOB = re.compile(r"[*?\[]")
+
+
+def _matches(path: str, entry: str) -> bool:
+    if _GLOB.search(entry):
+        return PurePosixPath(path).full_match(entry)
+    return path == entry.rstrip("/") or path.startswith(entry.rstrip("/") + "/")
 
 
 def exempting(inert_paths: Sequence[str] | None) -> Callable[[str], bool]:

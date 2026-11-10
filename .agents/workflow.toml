@@ -8,8 +8,9 @@
 protected-branches = ["main", "dev"]
 # Engine, next-step computation: after a pre-closeout review, a commit changing only
 # these paths or a change's records needs no new validation. Engine, `run
-# pre-commit`: a commit changing only these runs only `pre-commit`.
-inert-paths = ["openspec/", "docs/"]
+# pre-commit`: a commit changing only these runs only `pre-commit`. An entry with a
+# glob character is a pattern over the whole path; `**` spans directories.
+inert-paths = ["openspec/", "docs/", "**/README.md"]
 
 [hooks]
 # Engine, `run pre-commit` and `run after-functional-change`, for change-implement,

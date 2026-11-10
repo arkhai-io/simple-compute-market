@@ -93,8 +93,8 @@ an interactive session, `make check-change` included, is unrestricted — and en
 each with one
 closing line naming the hook, the commit, the result, and each failed command with
 its exit status. Before each commit a step runs `run pre-commit <change>`: when the
-worktree changes a path outside the configuration's inert paths (here `openspec/`
-and `docs/`), it runs `after-functional-change` (here `make lock`), then
+worktree changes a path outside the configuration's inert paths (here `openspec/`,
+`docs/`, and every `README.md`), it runs `after-functional-change` (here `make lock`), then
 `pre-commit-functional` (`make dist-clean`, `make check-packaging`, `make test`),
 then `pre-commit`; otherwise `pre-commit` alone. The step stages what the hooks rebuilt. Closeout runs
 `run pre-archive <change>` (`make check-packaging`, `make check-architecture-change`)
