@@ -3013,15 +3013,26 @@ worktree, so that a review MAY run it.
 ### Requirement: CW-n7ra The repository's inert paths
 
 The repository's inert paths, `repository.inert-paths`, MUST name the paths a change
-to which alters nothing validation or a code check would prove. The engine MUST read
-no inert path of its own; with none declared, no path is inert and only changes'
-records are exempt where a requirement exempts them.
+to which alters nothing validation or a code check would prove, other than a test
+that checks a document for currency, which the next full run of the suites reads
+again. An entry without a
+glob character MUST match a directory or a file whole; an entry with one MUST match
+as a pattern over the whole path, `**` spanning any number of directories. The engine
+MUST read no inert path of its own; with none declared, no path is inert and only
+changes' records are exempt where a requirement exempts them.
 
 #### Scenario: A repository marks images inert
 
 - **WHEN** a repository declares `inert-paths = ["docs/", "assets/"]` and a commit
   after a pre-closeout review changes only `assets/logo.svg`
 - **THEN** the computation accepts it without a new validation
+
+#### Scenario: A repository marks every README inert
+
+- **WHEN** a repository declares `inert-paths = ["docs/", "**/README.md"]` and a
+  commit changes only `tools/README.md` and `README.md`
+- **THEN** `run pre-commit` runs `pre-commit` alone, and after a pre-closeout review
+  the computation accepts the commit without a new validation
 
 ### Requirement: CW-e1sg A commit's hooks follow from the paths it changes
 

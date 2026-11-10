@@ -330,6 +330,14 @@ def test_an_inert_path_is_matched_whole(path: str, inert: bool) -> None:
     assert records.inert(path, ["docs/", "README.md"]) == inert
 
 
+@pytest.mark.parametrize("path,inert", [("README.md", True), ("tools/x/README.md", True),
+                                        ("docs/a.md", True), ("tools/x/READMEs.md", False),
+                                        ("tools/README.md/x.py", False),
+                                        ("tools/x/readme.md", False)])
+def test_an_inert_pattern_is_matched_against_the_whole_path(path: str, inert: bool) -> None:
+    assert records.inert(path, ["docs/", "**/README.md"]) == inert
+
+
 def test_check_change_runs_the_defaults_alone(tmp_path: Path) -> None:
     shell, in_process = Shell(), InProcess()
     runner = _hooks(tmp_path, "[hooks]\npre-commit = 'make lint'\n", shell=shell,
@@ -939,13 +947,13 @@ def test_invocations_that_cannot_be_read_never_stop_a_line(tmp_path: Path) -> No
     kept = tmp_path / "kept"
     kept.mkdir()
     (kept / f"{SESSION}.jsonl").write_text(
-        'torn {"change"\n{"change": "' + CHANGE + '", "command": "a b"}\n', "utf-8")
+        'torn {"change"\n{"change": "' + CHANGE + '", "command": "a\u2028b"}\n', "utf-8")
     wrapper = make_wrapper(tmp_path, FakeClaude((event_lines(VALID["finished"]), 0)))
     wrapper.invocations = lambda _: kept
 
     line = wrapper.run("design", CHANGE)
 
-    assert line["invoked"] == [{"change": CHANGE, "command": "a b"}]
+    assert line["invoked"] == [{"change": CHANGE, "command": "a\u2028b"}]
     assert (kept / f"{SESSION}.jsonl").read_text("utf-8") == 'torn {"change"\n'
 
 

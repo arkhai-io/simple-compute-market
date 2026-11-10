@@ -1757,8 +1757,13 @@ the archive to commit one measured figure would cost far more than it proves.
 `repository.inert-paths` names the paths a change to which alters nothing validation
 or a code check would prove — documentation, and in another repository images or
 metadata. They tier the pre-commit hooks, and after a pre-closeout review a commit
-changing only inert paths or changes' records needs no new validation. A path
-belongs in the list only where the closing checks cover what it can break. With none
+changing only inert paths or changes' records needs no new validation. An entry
+names a directory or file whole, or, with a glob character, is a pattern over the
+whole path, as `**/README.md` marks every README. A path belongs in the list only
+where the closing checks cover what it can break. A document a test checks for
+currency, such as the run instructions `e2e-tests/README.md` must name, stays inert:
+a commit to it alone skips `make test`, and the next full run of the suites catches
+what it broke. With none
 declared, no path is inert, and only changes' records are exempt where a requirement
 exempts them.
 
