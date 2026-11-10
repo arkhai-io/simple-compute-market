@@ -7,11 +7,13 @@ credential for the deal's authority, as the harness itself replaces the
 composition. A mediation client loads its CA bundle when it is built, so a
 credential naming a bundle that does not exist is one no client can be built
 from: the deal, read through the canonical lifecycle client as a buyer reads it,
-is reported for repair, as for a missing credential. The same credential naming
+is reported for repair, as for a missing credential, and the storefront logs why
+the credential is unusable. The same credential naming
 no bundle builds the deal's client. That a client given a bundle verifies the
 authority under it alone is the mediation kit's TLS test.
 """
 
+import logging
 from dataclasses import replace
 
 import httpx
@@ -46,12 +48,14 @@ def _deal_with_credential(h, **trust):
 
 @pytest.mark.asyncio
 async def test_a_credential_whose_ca_bundle_cannot_be_loaded_reports_the_deal_for_repair(
-    harness, tmp_path,
+    harness, tmp_path, caplog,
 ):
+    caplog.set_level(logging.WARNING, logger="arkhai_bare_metal_storefront.lifecycle")
     h = harness
     h.serve()
     await h.settle()
-    lifecycle, _ = _deal_with_credential(h, ca_bundle_path=str(tmp_path / "absent" / "ca.pem"))
+    path = str(tmp_path / "absent" / "ca.pem")
+    lifecycle, _ = _deal_with_credential(h, ca_bundle_path=path)
 
     async with LifecycleClient(
         "http://test", BUYER, TrustedIdentitySet(identities=(SELLER.identity,)),
@@ -62,12 +66,19 @@ async def test_a_credential_whose_ca_bundle_cannot_be_loaded_reports_the_deal_fo
     assert isinstance(view.authority.outcome, Rejected), view
     assert view.authority.outcome.reason.startswith("repair required"), view
     assert lifecycle.clients == {}
+    # The repair reason names the credential missing; the log says why it is
+    # unusable, without the credential.
+    unusable = [record.getMessage() for record in caplog.records
+                if "is unusable" in record.getMessage()]
+    assert unusable and all("FileNotFoundError" in message and path in message
+                            and CREDENTIAL not in message for message in unusable), unusable
 
 
 @pytest.mark.asyncio
-async def test_a_credential_naming_no_ca_bundle_builds_the_deals_client(harness):
+async def test_a_credential_naming_no_ca_bundle_builds_the_deals_client(harness, caplog):
     # The composition's dispute port, built for the deal's binding: no request is
     # sent, since the authority's origin is the harness's and nothing answers it.
+    caplog.set_level(logging.WARNING, logger="arkhai_bare_metal_storefront.lifecycle")
     h = harness
     h.serve()
     await h.settle()
@@ -77,4 +88,5 @@ async def test_a_credential_naming_no_ca_bundle_builds_the_deals_client(harness)
 
     [client] = lifecycle.clients.values()
     assert client.authority.identity == deal.dispute.identity
+    assert not [record for record in caplog.records if "is unusable" in record.getMessage()]
     await client.close()

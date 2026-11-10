@@ -149,11 +149,18 @@ class BareMetalLifecycle:
             return False
         # Usable means a client can be built from it: its token resolves and its
         # CA bundle loads. One that cannot reports the deal for repair, as a
-        # missing one does, rather than failing the servicing that reaches it.
+        # missing one does, rather than failing the servicing that reaches it. The
+        # deal's repair reason names the credential missing, so the log names why
+        # it is unusable: the exception's type, not its message, so no part of
+        # the credential reaches the log.
         try:
             self._client(authority, credential)
             return True
-        except (ValueError, OSError):
+        except (ValueError, OSError) as exc:
+            logger.warning(
+                "Dispute credential for authority %s is unusable (%s); its CA bundle path is %r",
+                authority.identity, type(exc).__name__, credential.ca_bundle_path,
+            )
             return False
 
     def _client(self, authority, credential):

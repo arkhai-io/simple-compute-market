@@ -794,6 +794,16 @@ set, which both `dist` and `dist-release` build, and only `dist` adds the contro
 wheel. A release-tooling test holds that `dist-release` excludes it and `dist`
 includes it.
 
+The same holds for `arkhai-apicredits-sample-app`, the demo API the end-to-end
+harness drives, which `RELEASING.md` already leaves unpublished (77 F1, settled with
+the owner at the pre-closeout triage): `domains/Makefile`'s release aggregate omits
+it, `dist` and `dist-ci` add it beside the controls wheel, since the API-credit
+lane's sample-app image installs it from `.dist`, and the release-tooling test holds
+that the two are exactly what `dist` builds beyond the release set. The principle is
+stated, with the release set's composition, in `RELEASING.md`, the owner's choice;
+`BUILD_AND_PACKAGING.md`, "The wheelhouse", says in one sentence that `make dist`
+builds the lanes' superset of the release set `make dist-release` builds.
+
 **Rejected:**
 
 - **Leaving the wheel in the release.** An official release would ship a wheel no

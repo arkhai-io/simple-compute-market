@@ -11,13 +11,15 @@ the deal is read through the canonical lifecycle client, as a buyer reads it.
 
 A mediation client loads its CA bundle when it is built, so a credential naming a
 bundle that does not exist is one no client can be built from: the storefront
-reports the deal for repair, as for a missing credential, and never contacts the
-authority. The same credential naming no bundle reaches the authority. That a
-client given a bundle verifies the authority under it alone is the mediation kit's
-TLS test.
+reports the deal for repair, as for a missing credential, logs why the credential
+is unusable, and never contacts the authority. The same credential naming no
+bundle reaches the authority. That a client given a bundle verifies the authority
+under it alone is the mediation kit's TLS test.
 """
 
 from __future__ import annotations
+
+import logging
 
 import httpx
 import pytest
@@ -45,9 +47,11 @@ CREDENTIAL = "dev-vm-dispute-trust-credential"
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bundle", ["none", "missing"])
 async def test_the_authority_outcome_follows_whether_the_credentials_ca_bundle_loads(
-    make, tmp_path, bundle,
+    make, tmp_path, bundle, caplog,
 ):
-    trust = {} if bundle == "none" else {"ca_bundle_path": str(tmp_path / "absent" / "ca.pem")}
+    caplog.set_level(logging.WARNING, logger="market_storefront.deal_lifecycle")
+    path = str(tmp_path / "absent" / "ca.pem")
+    trust = {} if bundle == "none" else {"ca_bundle_path": path}
     attempts: list[str] = []
 
     def unresolvable(request: httpx.Request) -> httpx.Response:
@@ -71,10 +75,17 @@ async def test_the_authority_outcome_follows_whether_the_credentials_ca_bundle_l
     ) as buyer:
         view = await buyer.read(NEGOTIATION)
 
+    unusable = [record.getMessage() for record in caplog.records
+                if "is unusable" in record.getMessage()]
     if bundle == "none":
         assert attempts, "a credential naming no bundle reaches the authority"
         assert isinstance(view.authority.outcome, Unknown), view
+        assert unusable == []
     else:
         assert attempts == []
         assert isinstance(view.authority.outcome, Rejected), view
         assert view.authority.outcome.reason.startswith("repair required"), view
+        # The repair reason names the credential missing; the log says why it is
+        # unusable, without the credential.
+        assert unusable and all("FileNotFoundError" in message and path in message
+                                and CREDENTIAL not in message for message in unusable), unusable

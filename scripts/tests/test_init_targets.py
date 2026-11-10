@@ -103,19 +103,20 @@ def test_each_init_target_builds_every_wheel_its_lock_installs(tmp_path: Path, t
     assert not missing, f"{target} builds no wheel for {', '.join(missing)}"
 
 
-def test_the_release_set_builds_every_wheel_dist_does_but_the_lane_controls(
+def test_the_release_set_builds_every_wheel_dist_does_but_those_only_tests_depend_on(
         tmp_path: Path) -> None:
     """`dist-release`, which the release workflow tars as the marketplace
-    wheelhouse, builds every wheel `dist` builds but the lane doubles' control
-    contract, which only the lane doubles and the end-to-end harness install;
-    `dist`, whose wheels the lanes' images install, and `dist-ci`, which CI's
-    suites build before they run, still build it."""
+    wheelhouse, builds every wheel `dist` builds but the two only tests depend
+    on: the lane doubles' control contract, which only the lane doubles and the
+    end-to-end harness install, and the API-credit sample app, the demo API the
+    harness drives. `dist`, whose wheels the lanes' images install, and
+    `dist-ci`, which CI's suites build before they run, still build both."""
     projects = _projects()
-    controls = projects["lane-double-controls"]
+    test_only = {projects["lane-double-controls"], projects["arkhai-apicredits-sample-app"]}
     release, full, ci = (_built(target, tmp_path / "dist")
                          for target in ("dist-release", "dist", "dist-ci"))
 
-    assert controls in full and controls in ci
-    assert full - release == {controls}
+    assert test_only <= full and test_only <= ci
+    assert full - release == test_only
     assert release <= full
     assert {projects["arkhai-kit-identity"], projects["arkhai-core"]} <= release

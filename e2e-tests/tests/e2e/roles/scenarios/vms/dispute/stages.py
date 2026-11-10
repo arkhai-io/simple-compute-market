@@ -12,8 +12,8 @@ end delivery on a ruling not yet applied.
 
 A deal still delivering when its scenario's own stages end is ended by the lease
 expiry the shared stages of ``compute_deal_stages.py`` run, from
-``Stage09c2_ArmTeardownGate`` to ``Stage11b_TeardownCompletion``, which no
-scenario of the design files for. ``DisputeStageZ_NoFurtherCase`` then steps the
+``Stage09c2_ArmTeardownGate`` to ``Stage11b_TeardownCompletion``, an ending for
+which the storefront files no dispute case. ``DisputeStageZ_NoFurtherCase`` then steps the
 storefront's servicing once, which dispatches any filing the storefront
 journaled for that end, and holds the deal to the scenario's own cases and to no
 filing of the storefront's, so neither this module nor a later one's servicing

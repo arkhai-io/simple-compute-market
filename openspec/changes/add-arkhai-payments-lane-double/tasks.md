@@ -357,7 +357,16 @@ passed by all four lifecycle compositions (D8). Requirement: settlement-configur
       The repair reason is `deal-servicing`'s fixed "Agreement authority credential is
       missing", which misnames a present credential with an unloadable bundle, and the
       `OSError` is not logged: left as it is, since rewording the kit's text is outside
-      this section, and section 7's `check-mediation` names the failing step. Versions, minor because each role
+      this section, and section 7's `check-mediation` names the failing step.
+      Pre-closeout fix (77 F3, the owner agreeing): both storefronts'
+      `credential_available` now log a warning when a present credential is
+      unusable, for `ValueError` and `OSError` alike, naming the authority's
+      identity, the exception's type (not its message, so no part of the credential
+      is logged) and the configured `ca_bundle_path`; the kit's repair text is
+      unchanged and no gap is recorded. Each storefront's
+      `test_lifecycle_mediation_trust.py` asserts the warning for a missing bundle,
+      without the credential, and none for a credential naming no bundle. Evidence
+      under 9.2. Versions, minor because each role
       honours a new setting: VM storefront and bare-metal storefront 0.28.0 (the VM
       storefront's exact pin on the bare-metal storefront moved), VM buyer 0.11.0,
       bare-metal buyer 0.8.0; each raises its lower bounds on the two kits to 0.3.0.
@@ -1092,6 +1101,10 @@ gate (D15). Each module holds the loops it depends on through the fixtures
       on reading their code; two fresh-context checks read them against the
       storefront's servicing, the adapter, both doubles and the shared stages,
       and their corrections are in these notes.
+      Pre-closeout fix (77 F2, accepted by default): the module docstring's clause
+      on the lease-expiry ending cited "the design"; it now states the invariant
+      `DisputeStageZ_NoFurtherCase` checks, an ending for which the storefront
+      files no dispute case. Evidence with the round's fix, under 9.2.
 - [x] 6.4 `dispute/test_ruled_delivery_end.py` (D15): commit; install through
       `lane_double_rules` a mediation rule matching `{"operation": "file",
       "transaction": <the deal's>}` with a ruling (a `RulingBasis` for a payer-filed
@@ -1609,6 +1622,40 @@ Files: the root `Makefile`, `scripts/tests/`.
       Owed by validation: confirmed — `tests.yml`, job `test ·
       test-deployment-packaging`. The release workflow itself is not run by
       any validation part.
+      Pre-closeout fix (77 F1, the owner choosing to keep D20's firm form): the
+      sample app found under 9.1 leaves the release set too. `domains/Makefile`
+      has a `dist-release` aggregate, every domains wheel but
+      `dist-apicredits-sample-app`, and its `dist` is that plus the sample app; the
+      root `dist-domains` builds the domains' `dist-release`, a root
+      `dist-apicredits-sample-app` delegates to the domains target, and `dist` and
+      `dist-ci` build it beside `dist-lane-double-controls`, so the lanes, CI and
+      the sample-app image's `.dist` hold what they held. The release-tooling case,
+      renamed `test_the_release_set_builds_every_wheel_dist_does_but_those_only_tests_depend_on`,
+      holds that `dist` and `dist-ci` build both wheels and that `dist` builds
+      exactly those two beyond the release set. The 10.9 D20 text adds the sample
+      app and a sentence in `BUILD_AND_PACKAGING.md`, "The wheelhouse".
+      Evidence for the pre-closeout fix (77 F1, F2, F3): unit, `make
+      test-release-tooling` — 2698 passed; application integration and unit,
+      `make -C domains/bare_metal/storefront test` — 598 passed; `make -C
+      domains/vms/storefront test` — 1174 passed, 1 skipped (unit) and 551 passed
+      (integration), both `test_lifecycle_mediation_trust.py` cases among them.
+      A fresh-context check of the diff found three defects, all fixed: a missing
+      space in `domains/Makefile`'s `.PHONY` joining `dist-compute` and
+      `dist-compute-delivery`, its header comment still naming `dist` as the
+      target the root aggregate invokes, and the bare-metal no-bundle case not yet
+      asserting that nothing is logged. It confirmed every image-building, lock
+      and push target builds `dist`, and `init-*` and `tests.yml` `dist-ci`, so
+      none loses the sample-app wheel. Declined, as nits: the log is unthrottled,
+      one warning per servicing step for each affected deal, as the triage
+      accepted; the "no credential in the message" assertion is weak for a
+      missing file, whose message never holds one. Observed, not changed:
+      `manifests/published-distributions.json` lists the sample app for
+      `push-wheels`' registry push, which runs after `make dist`; only the PyPI
+      path omits it. `scripts/change-workflow run pre-commit`, over the final
+      diff: `after-functional-change`, `pre-commit-functional` (`make
+      check-packaging`, then every suite, both storefronts' among them) and
+      `pre-commit` (the index, tasks, skills and strict OpenSpec checks, then
+      `check-repository`) all passed, exit 0.
 
 ## 10. Closeout
 
@@ -1623,7 +1670,8 @@ implementation. In the order of `openspec/README.md#plan-closeout-requirements`:
       placement rules — the doubles' behaviour in `test-compatibility`, configuration in
       `settlement-configuration` and `deployment-state`, tooling in `tools/`, the
       controls scenarios in `e2e-tests/README.md`, the release wheelhouse in
-      `docs/development/RELEASING.md`, and no future state in permanent documents (the
+      `docs/development/RELEASING.md` (with one sentence in `BUILD_AND_PACKAGING.md`),
+      and no future state in permanent documents (the
       lane-wide clock, the buyer filing command and the meaning of a prepared delivery
       end belong to the roadmap).
 - [ ] 10.4 Narrative compression: shorten completed task notes to final behaviour,
@@ -1726,7 +1774,11 @@ implementation. In the order of `openspec/README.md#plan-closeout-requirements`:
       - D20: `docs/development/RELEASING.md`, its introduction, beside the packages
         that are not published: the release workflow's `marketplace-wheelhouse.tar.gz`
         is what `make dist-release` builds, which carries no distribution only tests
-        depend on, while `make dist` adds `lane-double-controls` for the lanes and CI.
+        depend on, while `make dist` adds `lane-double-controls` and
+        `arkhai-apicredits-sample-app` for the lanes and CI;
+        `docs/development/BUILD_AND_PACKAGING.md`, "The wheelhouse", one sentence:
+        `make dist` builds the lanes' superset of the release set `make dist-release`
+        builds (77 F1).
       - D21: `e2e-tests/README.md`, "VM dispute controls" (one module per scenario,
         and why no order among them is needed).
       - The three deltas (`test-compatibility`, `settlement-configuration`,
