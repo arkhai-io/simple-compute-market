@@ -15,7 +15,7 @@ reinit: ## Sync this environment, refreshing the internal wheels its lock instal
 
 # The lane CA and the double's certificate are the controls project's, whose own
 # make test holds them to their generator.
-test: reinit test-unit ## Run every gate: the unit and library integration suite
+test: reinit test-unit ## Run every gate: the unit and application integration suite
 
-test-unit: ## Run the unit and library integration suite
+test-unit: ## Run the unit and application integration suite
 	uv run --find-links $(DIST_DIR) pytest tests -q

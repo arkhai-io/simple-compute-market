@@ -1043,6 +1043,32 @@ implementation. In the order of `openspec/README.md#plan-closeout-requirements`:
       index, tasks and skills checks, `openspec validate … --strict` ("valid"), and
       `make check-repository` (comment hygiene, documentation citations, decision
       destinations, history wording, local imports and the rest).
+      Closeout triage (86 F1, F2): the patch is applied, with the Edit tool hunk by
+      hunk, since `git apply` was denied here. The per-file line counts match the
+      patch's, and `e2e-tests/README.md#vm-dispute-controls` now resolves for the
+      three permanent citations. Under 86 F2, the controls package's suites are
+      labelled "integration" (it owns no storage, so `TESTING.md`'s library
+      integration does not fit) in its README, the patch's `tools/README.md` bullet
+      and its Makefile help strings. The doubles' Makefile help strings and the
+      root `Makefile` comments on the three test targets now say "application
+      integration" to match the doubles' READMEs. The fresh-context check of the
+      diff found two sentences of the patch's `e2e-tests/README.md` text
+      overstating the code, and they are corrected: only the hold-passed module
+      takes `lane_double_clock`, and the purchase stage asserts the case accepted
+      with every part held, not that no ruling exists. It also flagged
+      `e2e-tests/pyproject.toml`'s `e2e_vm_dispute_lost_filing` marker
+      description, which is recorded as unowned in `openspec/changes/README.md`
+      and not fixed here, since the owner's waiver covers only READMEs and
+      Makefile comments. Evidence: `make test-e2e-unit` (unit) 896 passed and 1
+      skipped, including `test_qualification_modules.py`, which reads the e2e
+      README; `make test-lane-double-controls` (unit and integration) 120 passed;
+      `make test-payments-lane-double` (unit and application integration) 84
+      passed; `make test-mediation-lane-double` 73 passed; `scripts/change-workflow
+      run pre-commit`: "after-functional-change … passed, exit 0",
+      "pre-commit-functional … passed, exit 0", "pre-commit … passed, exit 0",
+      rebuilding no file. The owner waived
+      validation before archive cleanup, since only READMEs and Makefile help
+      comments change (intervention ledger, last two lines).
 - [x] 10.11 Archival: `scripts/change-workflow openspec archive add-arkhai-payments-lane-double -y`,
       merging the three deltas, and link the index row to the archived directory.
       Done: archived as `openspec/changes/archive/2026-11-10-add-arkhai-payments-lane-double/`,

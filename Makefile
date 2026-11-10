@@ -224,16 +224,16 @@ test-frp-grant-admission-floor: ## Run the frps admission plugin's unit tests wi
 	$(MAKE) -C tools/frp-grant-admission test-floor
 
 # The lane doubles' control contract under tools/: the committed lane CA and leaves,
-# its type check, then its unit and library integration suite.
+# its type check, then its unit and integration suite.
 test-lane-double-controls:
 	$(MAKE) -C tools/lane-double-controls test
 
-# The lanes' payments double under tools/: its unit and in-process library
+# The lanes' payments double under tools/: its unit and in-process application
 # integration suite.
 test-payments-lane-double:
 	$(MAKE) -C tools/payments-lane-double test
 
-# The lanes' mediation double under tools/: its unit and in-process library
+# The lanes' mediation double under tools/: its unit and in-process application
 # integration suite.
 test-mediation-lane-double:
 	$(MAKE) -C tools/mediation-lane-double test

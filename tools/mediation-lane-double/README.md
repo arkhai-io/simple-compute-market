@@ -82,7 +82,11 @@ record and never sent to payments. With `close`, the case's own extensions are
 lifted and the case closes with every effect `applied`; without it, a second
 ruled entry attests the effects applied, when the first left any `prepared`, and
 the case stays open. A rule's `pause_before_effects` holds the ruling before any
-effect, its delivery end included, until the rule is resumed (`POST /test/rules/{id}/resume`). A payments failure, a refusal or a lost
+effect, its delivery end included, until the rule is resumed (`POST /test/rules/{id}/resume`):
+the ruled entry then records the delivery end `prepared`. The marketplace's
+watch records an end from a delivery-end effect whatever its applied state, so
+the gate holds the delivery end only in this double's record, and a scenario
+steps no storefront servicing while a ruling waits at its gate. A payments failure, a refusal or a lost
 answer alike, stops the application where it is, the case `applying` and waiting
 on its rule; resuming the rule continues it without applying an effect twice.
 
@@ -159,7 +163,7 @@ the lane CA. Outside the image, `MEDIATION_LANE_DOUBLE_FIXTURES`,
 and `MEDIATION_LANE_DOUBLE_PORT` say where to find them; then
 `python -m mediation_lane_double`.
 
-`make test` runs the unit and library integration suite: the kit's real
+`make test` runs the unit and application integration suite: the kit's real
 `MediationClient` against the app in process, with the payments kit's
 `FakePaymentsClient` over its shared engine as the payments peer and one clock for
 both, and the transport faults under uvicorn on loopback.

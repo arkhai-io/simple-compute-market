@@ -244,7 +244,7 @@ each restatement to its fixture:
 | the seller's bearer token | `[Settlement.arkhai_payments].api_key` in `bob.storefront.secrets.toml`, `bare-metal.storefront.secrets.toml` and `api-credits.storefront.secrets.toml` | each lane storefront's payments key at the payments double |
 | the dispute authority | `dev-env/registry/config-payments-lane.env` | the lanes' registries' recommended dispute authorities, one JSON line, the mediation double's identity |
 | the dispute authority's payments token | `[accounts.dispute_authority].token` in `tools/payments-lane-double/fixtures/accounts.toml` | the token the mediation double extends, reverses and lifts with at the payments double |
-| the seller's mediation token | `[[DisputeCredential]]` in `bob.storefront.secrets.toml`, which `helm/scripts/topology-secrets.sh` copies into the local Helm release's `arkhai-bob-runtime` | Bob's credential toward the mediation double, bound to its identity, with the lane CA's path as its `ca_bundle_path` |
+| the seller's mediation token | `[[DisputeCredential]]` in `bob.storefront.secrets.toml`, which `helm/scripts/topology-secrets.sh` copies into the local Helm release's `arkhai-bob-runtime`, rewriting its `ca_bundle_path` to the storefront chart's CA file | Bob's credential toward the mediation double, bound to its identity, with the lane CA's path as its `ca_bundle_path` |
 | the lane CA's path | `ca_bundle_path` in each lane storefront configuration and in Bob's dispute credential | where each lane overlay binds `tools/lane-double-controls/tls/lane-ca.pem` |
 
 The test runner reads the lanes' payments and mediation settings from committed

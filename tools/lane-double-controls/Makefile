@@ -17,9 +17,9 @@ init: reinit ## Create or update the environment
 reinit: ## Sync this environment, refreshing the internal wheels its lock installs. Run make dist first.
 	python3 ../../scripts/uv_project.py reinit
 
-test: reinit check-tls typecheck test-unit ## Run every gate: the committed TLS files, the type check, then the unit and library integration suite
+test: reinit check-tls typecheck test-unit ## Run every gate: the committed TLS files, the type check, then the unit and integration suite
 
-test-unit: ## Run the unit and library integration suite
+test-unit: ## Run the unit and integration suite
 	uv run --find-links $(DIST_DIR) pytest tests -q
 
 typecheck: ## Type-check the package

@@ -190,7 +190,7 @@ copied there under those names.
   registry's recommended authority to the mediation double's. It serves no
   payment scenario there; each storefront's `helm test`
   payments check reads the seller's balance.
-- `make test` (here) runs the unit and library integration suite: the kit's real
+- `make test` (here) runs the unit and application integration suite: the kit's real
   `PaymentsClient` and the controls' typed client against the app through an
   in-process transport, with an injected wall clock, and the transport faults
   against the app served by uvicorn on loopback, since only a real server

@@ -40,7 +40,11 @@ A rule (`Rule`) names a `rule_id`, a `match`, and exactly one action:
 - `filing_answer` answers a matching mediation filing `pending`, `error` with a
   contract failure code, or `rejected` with a contract refusal reason;
 - `ruling` `{basis, delivery_end, effects, close}` rules a matching mediation
-  case, optionally held at `pause_before_effects` until resumed.
+  case, optionally held at `pause_before_effects` until resumed. The gate holds
+  the delivery end with the other effects, recorded `prepared`; since the
+  marketplace's watch records an end from a delivery-end effect whatever its
+  applied state, a scenario steps no storefront servicing while a ruling waits
+  at its gate.
 
 A call matches when every `match` entry equals the call's property of that name.
 `match` is always stated: `{}` is every call of the double, and a rule without
@@ -114,7 +118,7 @@ by replacing a process trust store.
 
 - `make test` (here) checks the committed certificates (`check-tls`
   regenerates them into a temporary directory and fails unless they are
-  identical), type-checks the package, and runs the unit and library integration
+  identical), type-checks the package, and runs the unit and integration
   suite. The fault cases, and the client's case trusting the lane CA, serve a
   small app under uvicorn on loopback, because an abandoned response is a
   server's behaviour, which an in-process transport does not have; the
@@ -124,4 +128,5 @@ by replacing a process trust store.
 - From the repository root, `make test-lane-double-controls` runs `make test`,
   as part of `make test` and the Tests workflow's matrix, and `make dist` and
   `make dist-ci` build the wheel into the repository wheelhouse, from which a
-  project declaring it installs it through its lock.
+  project declaring it installs it through its lock. The release wheelhouse,
+  `make dist-release`, does not carry it, since only tests depend on it.
