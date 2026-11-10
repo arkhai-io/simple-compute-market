@@ -5,9 +5,10 @@ deal's filing and held at its gate, then files as the buyer, so each side effect
 has its own stage: the filing (the case filed, its part held, the ruling
 recorded and waiting), the resume (the reverse at the payments double, the
 extension lifted, the case closed), and only then a storefront servicing step,
-which records the end with cause ``ruling`` and begins teardown. No servicing
-step runs while the ruling waits at its gate. The deal is released through the
-mock teardown gate, as ``lifecycle_deal.py``'s release stage proves it.
+which records the end with cause ``ruling`` and begins teardown, and a second,
+which reads the site's signed end report. No servicing step runs while the
+ruling waits at its gate. The deal is released through the mock teardown gate,
+as ``lifecycle_deal.py``'s release stage proves it.
 """
 
 from __future__ import annotations
@@ -179,12 +180,33 @@ class TestStage05_ServicingRecordsTheRuledEnd:
         assert view.delivery.recorded_end is not None, view
         assert view.delivery.recorded_end.cause == "ruling", view
         assert view.delivery.progress == "tearing_down", view
-        assert view.delivery.site_reports, view
         purchase = deal_state.lifecycle_purchase
         purchase.receipt = {"selected_end": view.delivery.recorded_end.model_dump(mode="json")}
-        purchase.reports = [item.model_dump(mode="json") for item in view.delivery.site_reports]
         log.info("[05] Deal %s ended by ruling at %s; tearing down",
                  deal.negotiation_id, view.delivery.recorded_end.ended_at)
+
+
+class TestStage05b_ServicingReadsTheSiteReport:
+    def test_05b_the_next_servicing_step_reads_the_site_s_signed_end_report(
+        self, storefront_admin_client, deal_state, dispute,
+    ):
+        """The next servicing step ingests the site's signed end report, with
+        teardown still held and the end as recorded. A servicing step reads the
+        site's lease before its authority watch, so the step that recorded the
+        ruled end read the lease before teardown began; the report the site
+        pushes as teardown begins is not relied on to arrive within that step."""
+        require_state(dispute, "case_refs", "amounts")
+        purchase = deal_state.lifecycle_purchase
+        assert purchase.receipt, "the servicing step did not record the ruled end"
+        servicing_step(storefront_admin_client)
+        view = lifecycle_read(dispute.deal.negotiation_id)
+        assert view.delivery.progress == "tearing_down", view
+        assert view.delivery.recorded_end is not None, view
+        assert view.delivery.recorded_end.model_dump(mode="json") == (
+            purchase.receipt["selected_end"]), view
+        assert view.delivery.site_reports, view
+        purchase.reports = [item.model_dump(mode="json") for item in view.delivery.site_reports]
+        log.info("[05b] Site end report read for deal %s", dispute.deal.negotiation_id)
 
 
 class TestStage06_CapacityReleasedOnce(Stage12c_CapacityReleasedOnce):

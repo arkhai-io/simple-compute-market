@@ -1111,6 +1111,29 @@ gate (D15). Each module holds the loops it depends on through the fixtures
       arms the mock teardown gate before the servicing step, which records the
       end and site reports into `lifecycle_purchase` for `Stage12c`. Not run
       (6.3's note).
+      Fixed for validation 71's V1: at `6b5fd36e4` stage 05 found the ruled
+      end recorded and delivery `tearing_down` but no site report, so
+      `Stage12c` failed before resuming the remove gate, and the held job timed
+      out every later VM scenario's drain (13 failures, one cause). A servicing
+      step reads the site's lease (`recover_site_reports`) before its authority
+      watch records the ruled end and begins teardown, so its read of the
+      site's signed end report comes only on the next step; the report the site
+      pushes as teardown begins did not arrive within the step in that run, and
+      the scenario does not rely on it. Stage 05 now stores the end
+      alone, and stage `05b` runs that second servicing step, asserts the end
+      unchanged, delivery still `tearing_down` and a site report, and stores
+      the reports for `Stage12c`. The lost-filing and VM payment scenarios
+      already read the report on a step after the end.
+      Evidence: unit, `make test-e2e-unit`: 833 passed, 1 skipped (the
+      source checks over scenario modules included). `scripts/change-workflow
+      run pre-commit`: `after-functional-change`, `pre-commit-functional` and
+      `pre-commit` each passed, exit 0. The fresh-context check of the diff
+      confirmed the order of the servicing loop and that `Stage12c`'s inputs
+      are set. It noted that provisioning also pushes the report while
+      teardown begins, so the docstring and this note now rely only on the
+      pull; it also added the stage's `require_state` guard. End-to-end: not
+      run here; the fix commit's validation runs `e2e_vm_dispute_ruled_end`
+      and the VM scenarios that failed after it.
 - [x] 6.5 `dispute/test_operator_discount.py` (D6, D17): commit; the buyer files
       with no rule — each part held; a servicing step — the storefront's answer on
       the record (an `appended` entry by the seller, a contest, since no surrender
