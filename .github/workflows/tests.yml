@@ -53,7 +53,9 @@ jobs:
           - test-e2e-unit
           - test-deployment-packaging
           - test-frp-grant-admission
+          - test-lane-double-controls
           - test-payments-lane-double
+          - test-mediation-lane-double
     steps:
       - uses: actions/checkout@v4
       - name: Use the repository's declared Python version

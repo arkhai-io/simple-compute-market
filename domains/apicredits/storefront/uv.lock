@@ -328,7 +328,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-mediation"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle" },
@@ -339,7 +339,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_mediation-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_mediation-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -410,7 +410,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle-contracts" },
@@ -418,7 +418,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]

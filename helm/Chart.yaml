@@ -43,3 +43,7 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/payments-lane-double"
     condition: payments-lane-double.enabled
+  - name: mediation-lane-double
+    version: "0.1.0"
+    repository: "file://charts/mediation-lane-double"
+    condition: mediation-lane-double.enabled

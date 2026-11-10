@@ -71,6 +71,13 @@ E2E_DYNAMIC_HOST = "kvm-dynamic"
 E2E_FUNGIBLE_HOSTS = ("kvm-fungible-a", "kvm-fungible-b")
 E2E_LISTING_SHAPES_HOST = "kvm-shapes"
 E2E_LISTING_SHAPES_CPU_HOST = "kvm-shapes-cpu"
+#: The VM dispute scenarios, each on its own deal and so its own executor.
+E2E_DISPUTE_RULED_END_HOST = "kvm-dispute-ruled-end"
+E2E_DISPUTE_DISCOUNT_HOST = "kvm-dispute-discount"
+E2E_DISPUTE_LOST_FILING_HOST = "kvm-dispute-lost-filing"
+E2E_DISPUTE_MEDIATION_UNAVAILABLE_HOST = "kvm-dispute-mediation-unavailable"
+E2E_DISPUTE_PAYMENTS_HOLD_HOST = "kvm-dispute-payments-hold"
+E2E_DISPUTE_HOLD_PASSED_HOST = "kvm-dispute-hold-passed"
 
 #: One pool per scenario, for the same reason as one executor per scenario: a
 #: pool's `listing_mode` is resolved per pool, and its structural default flips to
@@ -85,6 +92,21 @@ E2E_MULTI_REGISTRY_POOL_ID = "compute-e2e-multi-pool"
 E2E_NON_ERC20_POOL_ID = "compute-e2e-non-erc20-pool"
 E2E_LISTING_SHAPES_POOL_ID = "compute-e2e-listing-shapes-pool"
 E2E_LISTING_SHAPES_CPU_POOL_ID = "compute-e2e-listing-shapes-cpu-pool"
+E2E_DISPUTE_RULED_END_POOL_ID = "compute-e2e-dispute-ruled-end-pool"
+E2E_DISPUTE_DISCOUNT_POOL_ID = "compute-e2e-dispute-discount-pool"
+E2E_DISPUTE_LOST_FILING_POOL_ID = "compute-e2e-dispute-lost-filing-pool"
+E2E_DISPUTE_MEDIATION_UNAVAILABLE_POOL_ID = "compute-e2e-dispute-mediation-unavailable-pool"
+E2E_DISPUTE_PAYMENTS_HOLD_POOL_ID = "compute-e2e-dispute-payments-hold-pool"
+E2E_DISPUTE_HOLD_PASSED_POOL_ID = "compute-e2e-dispute-hold-passed-pool"
+
+#: The resource each VM dispute scenario lists. A listing's binding to its
+#: resource outlives the listing, so no two scenarios on one stack list the same.
+E2E_DISPUTE_RULED_END_RESOURCE_ID = "compute-e2e-dispute-ruled-end-001"
+E2E_DISPUTE_DISCOUNT_RESOURCE_ID = "compute-e2e-dispute-discount-001"
+E2E_DISPUTE_LOST_FILING_RESOURCE_ID = "compute-e2e-dispute-lost-filing-001"
+E2E_DISPUTE_MEDIATION_UNAVAILABLE_RESOURCE_ID = "compute-e2e-dispute-mediation-unavailable-001"
+E2E_DISPUTE_PAYMENTS_HOLD_RESOURCE_ID = "compute-e2e-dispute-payments-hold-001"
+E2E_DISPUTE_HOLD_PASSED_RESOURCE_ID = "compute-e2e-dispute-hold-passed-001"
 
 
 def resource_gpus(resource: dict[str, Any]) -> tuple[int, str] | None:

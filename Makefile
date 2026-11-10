@@ -16,8 +16,8 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
-.PHONY: test-payments-lane-double build-payments-lane-double
-.PHONY: dist-arkhai-core-registry
+.PHONY: test-lane-double-controls dist-lane-double-controls test-payments-lane-double test-mediation-lane-double build-tools
+.PHONY: dist-arkhai-core-registry dist-release-set dist-apicredits-sample-app
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
@@ -37,15 +37,30 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
 # The wheel set a publishing path builds; publishing workflows call this name.
+# It is the release set alone: the release workflow tars .dist as the
+# marketplace wheelhouse, which carries no distribution only tests depend on —
+# neither the lane doubles' control contract nor the API-credit sample app —
+# since no operator installs one.
 dist-release: ## Build the wheel set for a publishing path.
-	$(MAKE) dist
+	$(MAKE) dist-release-set
 
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client
+# Every internal wheel but the lane doubles' control contract and the API-credit
+# sample app.
+dist-release-set:dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client
 
-dist-ci: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client ## Build repository-owned Python wheels without fetching separately released artifacts.
+# The release set and the two wheels only tests depend on, which the lanes'
+# images install from .dist: the lane doubles' control contract, for the e2e
+# runner image and both lane doubles' images, and the API-credit sample app, for
+# its image in the API-credit lane.
+dist: dist-release-set dist-lane-double-controls dist-apicredits-sample-app
 
-dist-domains: dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-storefront-client dist-registry-client dist-ci-kits dist-compute-provisioning dist-compute-provisioning-ansible ## Build every domains-scoped wheel through the domain aggregate
-	cd domains && $(MAKE) dist DIST_DIR=$(DIST_DIR)
+dist-ci: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client dist-lane-double-controls dist-apicredits-sample-app ## Build repository-owned Python wheels without fetching separately released artifacts.
+
+dist-domains: dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-storefront-client dist-registry-client dist-ci-kits dist-compute-provisioning dist-compute-provisioning-ansible ## Build every domains-scoped wheel the release set carries through the domain aggregate
+	cd domains && $(MAKE) dist-release DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-sample-app: ## Build the API-credit sample app's wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-sample-app DIST_DIR=$(DIST_DIR)
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -145,6 +160,12 @@ dist-config: ## Build arkhai-kit-config wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_kit_config-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-config produced a platform-specific wheel — must build inside Docker" && exit 1)
 
+dist-lane-double-controls: ## Build the lane doubles' control-contract wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd tools/lane-double-controls && $(MAKE) build DIST_DIR=$(DIST_DIR)
+	@ls $(DIST_DIR)/lane_double_controls-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: lane-double-controls produced a platform-specific wheel" && exit 1)
+
 dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 	helm package helm/ --destination $(DIST_DIR)
 
@@ -159,7 +180,7 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-domains test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-e2e-unit test-deployment-packaging test-frp-grant-admission test-payments-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
+test: test-domains test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-e2e-unit test-deployment-packaging test-frp-grant-admission test-lane-double-controls test-payments-lane-double test-mediation-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
 
 test-domains:
 	$(MAKE) -C domains test
@@ -202,10 +223,20 @@ test-frp-grant-admission-frp: ## Run the frps admission plugin against the real 
 test-frp-grant-admission-floor: ## Run the frps admission plugin's unit tests with its runtime dependencies at their declared floors
 	$(MAKE) -C tools/frp-grant-admission test-floor
 
-# The lanes' payments double under tools/: its committed TLS files, then its unit
-# and in-process library integration suite.
+# The lane doubles' control contract under tools/: the committed lane CA and leaves,
+# its type check, then its unit and integration suite.
+test-lane-double-controls:
+	$(MAKE) -C tools/lane-double-controls test
+
+# The lanes' payments double under tools/: its unit and in-process application
+# integration suite.
 test-payments-lane-double:
 	$(MAKE) -C tools/payments-lane-double test
+
+# The lanes' mediation double under tools/: its unit and in-process application
+# integration suite.
+test-mediation-lane-double:
+	$(MAKE) -C tools/mediation-lane-double test
 
 # The e2e project's unit tests; its scenarios need the docker-compose stack.
 test-e2e-unit:
@@ -241,11 +272,11 @@ build: ## Build the wheels, the buyer CLI binary, and every runtime image
 	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
 	$(MAKE) -j4 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-frp-grant-admission
 
-build-dev: ## Build everything `build` does, the dev chain image, the test image, and the payments double
+build-dev: ## Build everything `build` does, the dev chain image, the test image, and the lane doubles
 	$(MAKE) build
 	$(MAKE) build-dev-env
 	$(MAKE) build-test-image
-	$(MAKE) build-payments-lane-double
+	$(MAKE) build-tools
 
 # One end-to-end lane's images: the wheels, the dev chain with its baked state,
 # the test image (which installs `market` from the wheels, so no lane needs
@@ -260,13 +291,13 @@ build-e2e-base:
 	$(MAKE) build-test-image
 
 build-e2e-vm: build-e2e-base ## Build the VM end-to-end lane's images
-	$(MAKE) -j4 build-registry build-storefront build-provisioning build-payments-lane-double
+	$(MAKE) -j4 build-registry build-storefront build-provisioning build-tools
 
 build-e2e-bare-metal: build-e2e-base ## Build the bare-metal end-to-end lane's images
-	$(MAKE) -j4 build-registry build-provisioning build-bare-metal-storefront build-payments-lane-double
+	$(MAKE) -j4 build-registry build-provisioning build-bare-metal-storefront build-tools
 
 build-e2e-apicredits: build-e2e-base ## Build the API-credit end-to-end lane's images
-	$(MAKE) -j5 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-payments-lane-double
+	$(MAKE) -j5 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-tools
 
 # The native Ansible gate's image: only the provisioning image and the wheels it
 # installs, since the gate composes no stack, so no dev chain and no test image.
@@ -377,13 +408,10 @@ build-frp-grant-admission: ## Build the frps admission plugin's image
 build-test-image:
 	cd e2e-tests && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
-# The lanes' payments double, built from the repository root so its Dockerfile can
-# copy the wheelhouse its lock resolves from. Lanes and the local release run it;
-# it is never pushed.
-build-payments-lane-double: ## Build the payments double's image
-	docker build --ulimit nofile=65536:65536 \
-		-f tools/payments-lane-double/Dockerfile \
-		-t arkhai:payments-lane-double$(IMAGE_SUFFIX) .
+# The lane doubles' images, which lanes and the local release run and nothing
+# pushes; each is built by its own target in tools/Makefile.
+build-tools: ## Build the lane doubles' images
+	cd tools && $(MAKE) build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.

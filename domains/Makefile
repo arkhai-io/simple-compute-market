@@ -1,7 +1,7 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../.python-version 2>/dev/null),$(error ../.python-version not found))
 
-.PHONY: test dist dist-compute dist-compute-delivery dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
+.PHONY: test dist dist-release dist-compute dist-compute-delivery dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
 	dist-bare-metal-storefront dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
@@ -11,11 +11,15 @@ export UV_PYTHON := $(or $(shell cat ../.python-version 2>/dev/null),$(error ../
 DIST_DIR ?= $(abspath ../.dist)
 
 
-dist: dist-compute dist-compute-delivery dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
+# The domains' part of the release set: every domains-scoped wheel but the API-credit
+# sample app, the demo API the end-to-end harness drives, which no operator installs.
+dist-release: dist-compute dist-compute-delivery dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
 	dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
-	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
-	dist-buyer ## Build every domains-scoped wheel
+	dist-apicredits-middleware dist-apicredits-buyer \
+	dist-buyer ## Build every domains-scoped wheel the release set carries
+
+dist: dist-release dist-apicredits-sample-app ## Build every domains-scoped wheel
 
 test: test-storefront test-bare-metal test-compute test-compute-delivery test-vms-domain test-vms-buyer test-apicredits test-provisioning-adapter test-provisioning-iac
 
@@ -25,8 +29,10 @@ test: test-storefront test-bare-metal test-compute test-compute-delivery test-vm
 # (e.g. kit/ wheels, provisioning/compute's wheel) are NOT expressed here --
 # this Makefile has no business knowing about siblings outside domains/;
 # they are declared on the root Makefile's `dist-domains` aggregate, which
-# builds them before invoking this directory's `dist` target. Only prerequisites between two
-# targets both defined in this file are expressed here.
+# builds them before invoking this directory's `dist-release` target; the root
+# `dist-apicredits-sample-app` invokes that leaf alone, as it needs no sibling's
+# wheel to build. Only prerequisites between two targets both defined in this
+# file are expressed here.
 # ---------------------------------------------------------------------------
 
 # The compute-family vocabulary every compute domain binds; built first so a

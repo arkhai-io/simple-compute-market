@@ -90,6 +90,35 @@ def test_the_token_never_appears_in_a_repr_or_a_dump():
     assert DisputeCredential.model_fields["api_key"].json_schema_extra == {"secret": True}
 
 
+def test_a_credential_names_no_ca_bundle_unless_it_states_one():
+    assert credential(api_key=TOKEN).ca_bundle_path is None
+    assert credential(api_key=TOKEN, ca_bundle_path="/run/lane-ca.pem").ca_bundle_path == "/run/lane-ca.pem"
+
+
+@pytest.mark.parametrize("path", ["", "  "], ids=["empty", "blank"])
+def test_an_empty_ca_bundle_path_is_refused_rather_than_read_as_the_default_store(path):
+    with pytest.raises(ValidationError, match="ca_bundle_path must name a file"):
+        credential(api_key=TOKEN, ca_bundle_path=path)
+
+
+def test_the_credential_an_authority_resolves_to_carries_its_ca_bundle():
+    document = tomllib.loads(
+        f"""
+        [[DisputeCredential]]
+        interface = "{IDENTITY['interface']}"
+        origin = "{IDENTITY['origin']}"
+        account = "{IDENTITY['account']}"
+        record_key = "{IDENTITY['record_key']}"
+        api_key = "{TOKEN}"
+        ca_bundle_path = "/run/lane-ca.pem"
+        """
+    )
+    config = dispute_config(document, role="seller")
+    resolved = config.credential_for(credential(api_key_env=VARIABLE))
+    assert resolved is not None
+    assert resolved.ca_bundle_path == "/run/lane-ca.pem"
+
+
 def test_an_api_key_entry_loads_from_toml_text():
     document = tomllib.loads(
         f"""

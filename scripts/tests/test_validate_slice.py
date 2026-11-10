@@ -31,6 +31,7 @@ NAMESPACE = "validate-pilot"
 RELEASE = "arkhai-node-operator"
 POD = f"{RELEASE}-e2e-tests-e2e-scenarios"
 PAYMENTS_POD = f"{RELEASE}-storefront-bob-payments-check"
+MEDIATION_POD = f"{RELEASE}-storefront-bob-mediation-check"
 GIB = 2**30
 NOW = datetime(2026, 10, 22, 7, 0, tzinfo=timezone.utc)
 
@@ -54,11 +55,16 @@ class Fake:
                  samples_during_scenarios: int = 0, test_volume_lingers: int = 0,
                  broken_read: str | None = None, failing_read: str | None = None,
                  payments_pods: Sequence[str] = (PAYMENTS_POD,),
-                 payments_exit: str = "0") -> None:
+                 payments_exit: str = "0",
+                 mediation_pods: Sequence[str] = (MEDIATION_POD,),
+                 mediation_exit: str = "0") -> None:
         self.fail = set(fail)
-        # The payments-check pods the release's hooks render, and their exit status.
+        # The payments- and mediation-check pods the release's hooks render, and
+        # each kind's exit status.
         self.payments_pods = list(payments_pods)
         self.payments_exit = payments_exit
+        self.mediation_pods = list(mediation_pods)
+        self.mediation_exit = mediation_exit
         self.output = output or {}
         self.dirty_after = dirty_after
         # The step after which HEAD moves, as a commit or branch switch would.
@@ -207,9 +213,11 @@ class Fake:
         if command[:3] == ["kubectl", "get", "pod"]:
             if command[3].endswith(validator.PAYMENTS_CHECK_SUFFIX):
                 return self.payments_exit
+            if command[3].endswith(validator.MEDIATION_CHECK_SUFFIX):
+                return self.mediation_exit
             return self.exit_code
         if command[:3] == ["helm", "get", "hooks"]:
-            return _hooks(POD, *self.payments_pods)
+            return _hooks(POD, *self.payments_pods, *self.mediation_pods)
         if command[:2] == ["make", "-s"]:
             name = command[command.index("--eval") + 2].removeprefix("print-")
             settings = {"RELEASE": RELEASE, "TEST_VOLUMES": "arkhai-buyer-profiles"}
@@ -437,6 +445,8 @@ def test_helm_runs_every_step_for_a_change_in_its_namespace(tmp_path: Path) -> N
         f"kubectl logs --namespace {NAMESPACE} {POD}",
         f"helm test {RELEASE} --namespace {NAMESPACE} --filter name={PAYMENTS_POD} --timeout 5m",
         f"kubectl logs --namespace {NAMESPACE} {PAYMENTS_POD}",
+        f"helm test {RELEASE} --namespace {NAMESPACE} --filter name={MEDIATION_POD} --timeout 5m",
+        f"kubectl logs --namespace {NAMESPACE} {MEDIATION_POD}",
         f"kubectl logs --namespace {NAMESPACE} {RELEASE}-registry-1 --all-containers --prefix",
         f"kubectl logs --namespace {NAMESPACE} {POD} --all-containers --prefix",
         f"kubectl get pods --namespace {NAMESPACE} --selector "
@@ -745,8 +755,10 @@ def test_hooks_that_cannot_be_read_fail_the_payments_check(tmp_path: Path) -> No
     assert set(fake.workloads[NAMESPACE].values()) == {0}
 
 
-def test_only_payments_check_pods_are_read_from_the_hooks() -> None:
-    assert validator.payments_check_pods(_hooks(POD, PAYMENTS_POD)) == [PAYMENTS_POD]
+def test_only_each_kinds_pods_are_read_from_the_hooks() -> None:
+    hooks = _hooks(POD, PAYMENTS_POD, MEDIATION_POD)
+    assert validator.check_pods(hooks, validator.PAYMENTS_CHECK_SUFFIX) == [PAYMENTS_POD]
+    assert validator.check_pods(hooks, validator.MEDIATION_CHECK_SUFFIX) == [MEDIATION_POD]
 
 
 def test_the_payments_check_suffix_is_the_one_both_storefront_charts_render() -> None:
@@ -754,6 +766,68 @@ def test_the_payments_check_suffix_is_the_one_both_storefront_charts_render() ->
     for chart in ("storefront", "bare-metal-storefront"):
         template = (root / "helm/charts" / chart / "templates/tests/payments-check-test.yaml")
         assert f"}}}}{validator.PAYMENTS_CHECK_SUFFIX}\n" in template.read_text("utf-8")
+
+
+def test_the_mediation_check_suffix_is_the_one_the_storefront_chart_renders() -> None:
+    root = Path(__file__).resolve().parents[2]
+    template = root / "helm/charts/storefront/templates/tests/mediation-check-test.yaml"
+    assert f"}}}}{validator.MEDIATION_CHECK_SUFFIX}\n" in template.read_text("utf-8")
+
+
+def test_each_mediation_check_pod_runs_after_the_payments_checks_and_keeps_its_evidence(
+        tmp_path: Path) -> None:
+    fake = Fake(output={MEDIATION_POD: '{"check": "mediation", "outcome": "ok"}\n'})
+    summary = _helm(tmp_path, fake)
+
+    logs = _attempt(tmp_path)
+    assert summary.passed, validator.render(summary)
+    assert _results(summary)[f"mediation check {MEDIATION_POD}"] == "passed"
+    assert summary.evidence["mediation_checks"] == [
+        {"pod": MEDIATION_POD, "log": str((logs / f"{MEDIATION_POD}.log").relative_to(tmp_path)),
+         "exit_code": 0}]
+    assert fake.events.index(f"payments check {PAYMENTS_POD}") < fake.events.index(
+        f"mediation check {MEDIATION_POD}")
+    assert (logs / f"{MEDIATION_POD}.log").read_text("utf-8").endswith('"outcome": "ok"}\n')
+    assert f"mediation check pod {MEDIATION_POD}: exit 0" in validator.render(summary)
+
+
+def test_a_mediation_check_that_exited_non_zero_fails_the_part(tmp_path: Path) -> None:
+    fake = Fake(mediation_exit="1")
+    summary = _helm(tmp_path, fake)
+
+    assert not summary.passed
+    assert _step(summary, f"mediation check {MEDIATION_POD}").detail == f"{MEDIATION_POD} exited 1"
+    assert _results(summary)[f"payments check {PAYMENTS_POD}"] == "passed"
+    assert set(fake.workloads[NAMESPACE].values()) == {0}
+
+
+def test_a_passed_mediation_check_with_no_exit_status_fails_and_is_stopped(tmp_path: Path) -> None:
+    # `helm test` passes when its filter matches no test pod.
+    fake = Fake(mediation_exit="")
+    summary = _helm(tmp_path, fake)
+
+    assert not summary.passed
+    assert _step(summary, f"mediation check {MEDIATION_POD}").detail == (
+        f"{MEDIATION_POD} has no exit status, so its check is not shown to have run")
+    assert (f"kubectl delete pod {MEDIATION_POD} --namespace {NAMESPACE} --ignore-not-found "
+            "--wait=false") in fake.ran()
+
+
+def test_a_commit_during_a_payments_check_runs_no_mediation_check(tmp_path: Path) -> None:
+    fake = Fake(head_after=f"payments check {PAYMENTS_POD}")
+    summary = _helm(tmp_path, fake)
+
+    assert not summary.passed
+    assert "mediation_checks" not in summary.evidence
+    assert not any(MEDIATION_POD in command for command in fake.ran())
+
+
+def test_a_release_rendering_no_mediation_check_is_warned_not_passed(tmp_path: Path) -> None:
+    summary = _helm(tmp_path, Fake(mediation_pods=()))
+
+    assert summary.passed
+    assert _results(summary)["mediation check"] == "warning"
+    assert summary.evidence["mediation_checks"] == []
 
 
 def test_a_failed_read_of_one_piece_of_evidence_keeps_the_others(tmp_path: Path) -> None:

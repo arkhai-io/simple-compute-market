@@ -105,13 +105,14 @@ def target_ready(
     ca_bundle: str | None = None,
     get: Callable[..., Any] = httpx.get,
 ) -> bool:
-    """Whether the payments service at `url` reports itself ready.
+    """Whether the service at `url`, a payments or mediation target, reports
+    itself ready.
 
     Environment proxies are never used: the probe asks the target itself. A CA
-    bundle, such as a lane's CA for its payments double, is the only trust the
-    probe has, just as the payments client trusts it alone. A bundle that cannot
-    be loaded leaves the target not ready, as the payments client could not
-    reach it either.
+    bundle, such as a lane's CA for its doubles, is the only trust the probe
+    has, just as the service's client trusts it alone. A bundle that cannot be
+    loaded leaves the target not ready, as the client could not reach it
+    either.
     """
     try:
         # ssl.SSLError, a malformed bundle, is an OSError like a missing one.

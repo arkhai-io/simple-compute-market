@@ -14,7 +14,8 @@ from core_registry.config import load_settings, profile_env_files
 
 # Anvil's well-known development account 3; never use it on a public network.
 IDENTIFIER = "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
-AUTHORITIES = [{"account": "00000000-0000-4000-8000-0000000000d1", "origin": "https://dispute.invalid"}]
+# The lanes' mediation double's account and origin, public development values.
+AUTHORITIES = [{"account": "00000000-0000-4000-8000-0000000000d1", "origin": "https://mediation-double:8443"}]
 
 
 @pytest.fixture(autouse=True)

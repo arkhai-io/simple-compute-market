@@ -145,23 +145,37 @@ class BareMetalLifecycle:
         credential = composition.disputes.config.credential_for(authority) if composition else None
         if credential is None:
             return False
+        # Usable means a client can be built from it: its token resolves and its
+        # CA bundle loads. One that cannot reports the deal for repair, as a
+        # missing one does, rather than failing the servicing that reaches it. The
+        # deal's repair reason names the credential missing, so the log names why
+        # it is unusable: the exception's type, not its message, so no part of
+        # the credential reaches the log.
         try:
-            credential.resolve()
+            self._client(authority, credential)
             return True
-        except ValueError:
+        except (ValueError, OSError) as exc:
+            logger.warning(
+                "Dispute credential for authority %s is unusable (%s); its CA bundle path is %r",
+                authority.identity, type(exc).__name__, credential.ca_bundle_path,
+            )
             return False
+
+    def _client(self, authority, credential):
+        key = authority.model_dump_json()
+        if key not in self.clients:
+            self.clients[key] = MediationClient(
+                authority,
+                MediationCredential(authority.identity, token=credential.resolve()),
+                ca_bundle=credential.ca_bundle_path,
+            )
+        return self.clients[key]
 
     def dispute(self, binding):
         client = None
         if self.credential_available(binding.authority):
             credential = self.runtime.settlement_composition.disputes.config.credential_for(binding.authority)
-            key = binding.authority.model_dump_json()
-            if key not in self.clients:
-                self.clients[key] = MediationClient(
-                    binding.authority,
-                    MediationCredential(binding.authority.identity, token=credential.resolve()),
-                )
-            client = self.clients[key]
+            client = self._client(binding.authority, credential)
         return MediationAdapter(binding, json.loads(self.agreement_bytes(binding.negotiation_id)), client, clock=self.clock)
 
     def watch(self, deal, payment, dispute):

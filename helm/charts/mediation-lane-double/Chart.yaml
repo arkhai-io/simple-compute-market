@@ -1,0 +1,6 @@
+apiVersion: v2
+name: mediation-lane-double
+description: Double of the arkhai.mediation.v1 dispute authority answering from programmed rules, for local releases only (dev / CI)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -518,6 +518,33 @@ It prints one JSON line and exits 0 when the read succeeded:
 
 The line never contains the key.
 
+**A dispute authority is proven with `check-mediation`.** A VM storefront's
+`[[DisputeCredential]]` for an authority whose certificate chains to a private CA
+names the bundle as `ca_bundle_path`, a file the pod mounts; the chart's CA mount,
+`/etc/arkhai/ca/ca-bundle.pem`, serves when the same bundle covers it. Set the
+agent's `tests.mediationOrigin` to the authority's origin, and `helm test
+<release>` runs the agent's `<agent>-mediation-check` pod: `market-storefront
+check-mediation --origin <origin>`, one authenticated read of the authority's
+respondent listing with the credential whose `origin` is exactly that one. Rerun
+it after any change to the credential or its bundle, or run it in the running
+pod:
+
+```console
+kubectl exec deploy/<storefront deployment> -- market-storefront check-mediation --origin <authority origin>
+```
+
+It prints one JSON line, `{"check": "mediation", "outcome": …, "origin": …}`, and
+exits 0 when the read succeeded, whatever the listing held; 1 when a step failed,
+the line naming the `step` and a fixed-text `detail`; and 2 on a malformed origin.
+It files, rules and changes nothing, and never prints the token:
+
+| `step` | What failed | Look at |
+|---|---|---|
+| `configuration` | no credential, or more than one, names the origin; its identity or origin is refused; or its CA bundle cannot be loaded | the overlay's `[[DisputeCredential]]`, its `ca_bundle_path`, the pod's mounts |
+| `credential` | the variable a buyer-style `api_key_env` names is unset or empty | the overlay: a storefront states `api_key` |
+| `transport` | the authority could not be reached over a trusted connection, or answered outside its contract | the origin, the network path, the CA bundle |
+| `refused` | the authority refused the read; `code` is its error code | the token |
+
 ## Registry secret profile
 
 The registry chart takes the registry's secret settings — the bootstrap key

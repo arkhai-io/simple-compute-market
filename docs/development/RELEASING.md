@@ -9,7 +9,18 @@ install and run independently. Each of them is published, along with the
 libraries and SDK clients they build on. Three other packages are not
 published: the end-to-end test harness (`arkhai-e2e-tests`),
 the demo API it drives (`arkhai-apicredits-sample-app`), and the
-issue-discovery development tool (`scm-issue-discovery`).
+issue-discovery development tool (`scm-issue-discovery`). Nor is the lane
+doubles' control contract (`lane-double-controls`), which only the end-to-end
+harness and the lane doubles import.
+
+The release workflow (`.github/workflows/release.yml`) also attaches a
+wheelhouse archive, `marketplace-wheelhouse.tar.gz`, built by `make
+dist-release`. The release wheelhouse carries no distribution only tests
+depend on: `make dist-release` builds every internal wheel but
+`lane-double-controls` and `arkhai-apicredits-sample-app`, and `make dist`
+adds those two for the lanes, CI and validation, whose images install them
+from `.dist`. `scripts/tests/test_init_targets.py` holds that they are
+exactly what `make dist` builds beyond the release set.
 
 Distribution names are prefixed `arkhai-`. PyPI does not namespace
 distribution names by organization, so the prefix is the project's

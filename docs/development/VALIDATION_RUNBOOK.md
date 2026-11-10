@@ -1116,7 +1116,12 @@ Before them, the deployment supplies what they cannot:
 Then run each storefront chart's `helm test`, whose payments-check pod runs
 `check-payments` from the storefront's own image, mounts and secret overlay. A
 failed check is a cause outside the scenarios: fix the deployment, and run no
-module until it passes. Then run the modules, observation 6 after the other two
+module until it passes. A VM storefront whose dispute credential names an
+authority that answers can be checked the same way, its chart's
+mediation-check pod running `check-mediation --origin` where the agent's
+`tests.mediationOrigin` names it ([operator handbook, "Payments access"](../operator-handbook.md#payments-access));
+the qualification needs no such check, since nothing need answer at the pinned
+authority's origin. Then run the modules, observation 6 after the other two
 on the same stack:
 
 ```bash

@@ -28,6 +28,11 @@ from storefront_client import SyncStorefrontClient
 
 from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
+from tests.e2e.roles.helpers.mediation import (
+    buyer_dispute_credential_toml,
+    buyer_mediation_environment,
+    mediation_if_configured,
+)
 from tests.e2e.roles.helpers.payments import (
     buyer_payments_environment,
     dispute_window_seconds,
@@ -53,8 +58,11 @@ PAYMENT_TIMEOUT_SECONDS = 300
 
 def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path) -> BuyerCli:
     """A profiled Ed25519 buyer with no wallet (``PAYMENTS``'s buyer), under
-    ``base``, buying through Arkhai payments. Each profile keeps its own run
-    logs, so a purchase's compensation finds that purchase alone."""
+    ``base``, buying through Arkhai payments, with its dispute credential for
+    the run's mediation target when the run names one, which its teardown files
+    with. Each profile keeps its own run logs, so a purchase's compensation
+    finds that purchase alone."""
+    mediation = mediation_if_configured()
     url = lane_setting("registry_url")
     scheme = lane_setting("registry_scheme")
     identifier = lane_setting("registry_identifier")
@@ -68,6 +76,8 @@ def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path) -> Bu
         f"payer_account = {_toml_quote(str(payment_setting('BUYER_ACCOUNT')))}",
         "",
         *payment_config_toml(payments_config, table="bare_metal.arkhai_payments"),
+        "",
+        *buyer_dispute_credential_toml(mediation),
     )
     return create_profiled_buyer_cli(
         binary=binary,
@@ -78,7 +88,10 @@ def bare_metal_purchase_cli(payments_config: Any, binary: Any, base: Path) -> Bu
         registries=(url,),
         registry_authorities={url: {"authority": authority,
                                    "identities": [{"scheme": scheme, "identifier": identifier}]}},
-        credential_environment=buyer_payments_environment(payments_config),
+        credential_environment={
+            **buyer_payments_environment(payments_config),
+            **buyer_mediation_environment(mediation),
+        },
         toml_sections=sections,
     )
 

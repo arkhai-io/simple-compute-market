@@ -46,9 +46,15 @@ class _MediationPort:
             try:
                 self.client = MediationClient(self.authority, MediationCredential(
                     self.authority.identity, token=self.credential.resolve(),
-                ))
+                ), ca_bundle=self.credential.ca_bundle_path)
             except ValueError as exc:
                 raise MediationTransportError("Agreement authority credential is unavailable") from exc
+            except OSError as exc:
+                # The client loads its CA bundle when built; one it cannot load
+                # is answered as unreachable, like a missing credential.
+                raise MediationTransportError(
+                    "the CA bundle the Agreement authority's credential names could not be loaded"
+                ) from exc
         return await getattr(self.client, method)(*args, **kwargs)
 
     async def file(self, *args, **kwargs):

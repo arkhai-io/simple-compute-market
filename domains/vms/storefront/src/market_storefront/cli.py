@@ -16,6 +16,9 @@ Subcommands:
     check-payments
                  Read one account's balance from the payments service with the
                  storefront's own configuration, credential and trust.
+    check-mediation
+                 Read a dispute authority's respondent listing with the
+                 storefront's own dispute credential and trust.
     network      Join the operator's ZeroTier network and list peers.
     config       Inspect or edit the user config.toml.
 """
@@ -28,7 +31,9 @@ from typing import Any
 
 import httpx
 import typer
+from market_arkhai_mediation.access_check import check_configured_mediation_access
 from market_arkhai_payments import check_configured_payments_access
+from market_deal_lifecycle.configuration import DisputeCredential, dispute_config
 
 from .cli_logs import logs_app
 from .cli_publish import register as register_publish_command
@@ -158,6 +163,59 @@ def check_payments_cmd(
         )
     except ValueError as exc:
         raise typer.BadParameter("not a payments account id", param_hint="--account") from exc
+    typer.echo(outcome.json_line())
+    if not outcome.ok:
+        raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# check-mediation — prove the storefront's dispute authority access from its
+# own process
+# ---------------------------------------------------------------------------
+
+
+def dispute_credentials() -> list[DisputeCredential]:
+    """The storefront's ``[[DisputeCredential]]`` entries, read from the
+    configuration ``serve`` reads, its secret overlay included.
+
+    A configuration that cannot be read raises ``ValueError``.
+    """
+    # Imported when the command runs, after the root `--config` option: the
+    # storefront's settings resolve when its config module is first imported.
+    from market_storefront.utils.config import settings
+
+    return list(dispute_config(settings.as_dict(), role="seller").credentials)
+
+
+def mediation_transport() -> httpx.AsyncBaseTransport | None:
+    """The transport the check reaches the authority through; ``None`` gives
+    the mediation client its own."""
+    return None
+
+
+@app.command("check-mediation")
+def check_mediation_cmd(
+    origin: str = typer.Option(
+        ...,
+        "--origin",
+        help="The dispute authority's origin, as the storefront's dispute "
+        "credential for it names it.",
+    ),
+) -> None:
+    """Read the authority's respondent listing with the storefront's credential.
+
+    Prints one JSON outcome, which never carries the credential, and exits 1
+    naming the failing step: configuration, credential, transport, or the
+    authority's refusal. The read changes nothing at the authority, and its
+    answer is not judged: any listing is access. Starts no server, opens no
+    database, and contacts nothing but the authority.
+    """
+    try:
+        outcome = check_configured_mediation_access(
+            dispute_credentials, origin, transport=mediation_transport()
+        )
+    except ValueError as exc:
+        raise typer.BadParameter("not an authority origin", param_hint="--origin") from exc
     typer.echo(outcome.json_line())
     if not outcome.ok:
         raise typer.Exit(code=1)

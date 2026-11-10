@@ -153,6 +153,19 @@ the entry resolved rather than reading the environment itself. Because readiness
 never contacts the payments service, each storefront CLI's `check-payments` reads
 the seller's own balance from the storefront's container, proving its CA mount,
 key and service URL together; the storefront charts render it as a Helm test.
+For the same reason — the VM storefront builds its mediation client only at a
+payment deal's first dispute servicing — its `check-mediation --origin` makes one
+authenticated respondent read at a named dispute authority with the credential
+the storefront would use, its `ca_bundle_path` included, from its own container,
+asserting nothing about the answer; the VM storefront chart renders it as a Helm
+test where an agent names the authority to check. A dispute credential names its
+own CA bundle, trusted by that authority's mediation client alone. The local
+release copies Bob's credential from his Compose overlay into a runtime Secret
+the chart never renders, so the out-of-band step that writes the Secret rewrites
+the copy's `ca_bundle_path` to the chart's CA file, and the Helm test proves the
+rewrite, the Service name, the certificate's name and the token together. The
+payments and mediation lane doubles run only where the local release's values
+enable their subcharts; release values never do.
 Signed registry descriptors may recommend authorities; buyers explicitly opt in,
 local identity vetoes prevail and recommendations stay registry-specific. WorkOS user-scoped API keys reach only the owning process, separately from marketplace signer Secrets. HTTPS is required outside loopback. Generated public config and images contain no resolved API key, provider object, or payment-service persistence.
 

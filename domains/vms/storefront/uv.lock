@@ -393,7 +393,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-mediation"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle" },
@@ -404,7 +404,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_mediation-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_mediation-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -502,7 +502,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle-contracts" },
@@ -510,7 +510,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -783,7 +783,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-buyer"
-version = "0.10.3"
+version = "0.11.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -811,7 +811,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_vms_buyer-0.10.3-py3-none-any.whl" },
+    { path = "arkhai_vms_buyer-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -963,13 +963,13 @@ requires-dist = [
     { name = "arkhai-core-storefront", specifier = ">=0.18.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.27.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.11.0" },
-    { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.3.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.6.0" },
     { name = "arkhai-kit-capability-admissibility", specifier = ">=0.1.0" },
     { name = "arkhai-kit-capacity-publication", specifier = "==0.12.0" },
     { name = "arkhai-kit-config", specifier = ">=0.5.0" },
     { name = "arkhai-kit-contact-exchange", specifier = "==0.5.0" },
-    { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.3.0" },
     { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.1.0" },
     { name = "arkhai-kit-deal-servicing", specifier = ">=0.2.0" },
     { name = "arkhai-kit-delivery", specifier = "==0.2.1" },
