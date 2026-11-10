@@ -162,6 +162,10 @@ records them as `granted`, and the step's next run is held to its table again.
 Always start a fresh run through its target, never the script directly: the target
 checks the change, refuses while a round view is open, and passes `SECTIONS`,
 `FRESH`, `SESSION_ID`, and `HELM_ALL_SCENARIOS` on.
+An implementation run's `ARGUMENTS` carries a merge's conflicts to resolve or the
+owner's direction to its sections, in their words, with any routing note beside it
+marked as yours (where a stopped session's work waits, the path a granted rule
+names); the same direction goes in the log through `note` as well.
 Each implementation run starts a fresh session unless the owner directs the work to
 an earlier implementation session: the next section to a session they judge small
 enough, or a fix to the session that made the edits. Then pass that run's `session`
@@ -187,9 +191,11 @@ run inside an ordinary command — `( make … & )`, `nohup`, `setsid`, or a tra
 opening the round view together: the call returns at once, the harness has
 nothing left to track, and a run that finishes is never reported, so the change
 waits on a step that ended long ago. Run the round view, and each of a pair of
-side-by-side runs, in calls of their own. Give each run's background command the
-harness's longest timeout: an implementation session can outlast the default, and
-a run killed at it stops mid-step with its work uncommitted.
+side-by-side runs, in calls of their own. Pass a background step run no timeout at
+all, not even the harness's longest: an implementation session can outlast any
+limit, and a run killed at one stops mid-step with its work uncommitted and its
+denials lost. Where the harness would impose a limit shorter than the step may
+need, tell the owner before starting the run.
 
 For `round`, record the round the computation names, as it names it, just before
 starting its first session — copying the list is routing, not a reading of the
@@ -555,7 +561,11 @@ scripts/change-workflow note <change> round --sections '1,2;3' --by owner
 For a round recorded after the fact add `--after <highest-record-before-round>`;
 do not count that round's own records as preceding it. Recompute and run its
 sessions without another question about them. A round noted as it starts records
-`HEAD` on its line, and `make round-view` shows the round against that commit.
+`HEAD` on its line, and `make round-view` shows the round against that commit. A
+round recorded while the latest round is open, over sections it already names —
+a resumed or redirected session, a plan amended mid-round — continues it: the
+line keeps the open round's base and names it as `continues`, so the round's
+reading and review still cover its finished sections.
 
 No step may edit `.claude/`, so a task the plan gives you — an edit of the step
 table or the project's Claude Code settings — is yours: before starting the

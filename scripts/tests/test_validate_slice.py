@@ -44,6 +44,7 @@ class Fake:
 
     def __init__(self, *, fail: Sequence[str] = (), output: dict[str, str] | None = None,
                  dirty_after: str | None = None, context: str = "docker-desktop",
+                 contexts: Sequence[str] = ("docker-desktop",),
                  markers: dict[str, str] | None = None, nodes: str = "docker-desktop=True\n",
                  docker_up: bool = True, cast: bool = True, metrics: bool = True,
                  allocatable: str = "16Gi", workloads: dict[str, dict[str, int]] | None = None,
@@ -63,7 +64,11 @@ class Fake:
         # The step after which HEAD moves, as a commit or branch switch would.
         self.head_after = head_after
         self.head = COMMIT
+        # The selected context, and every context the kubeconfig names.
         self.context = context
+        self.contexts = list(contexts)
+        # KUBECONFIG as each command ran, and the file's content then.
+        self.kubeconfigs: list[tuple[str | None, str | None]] = []
         self.markers = markers or {"E2E_MODULE": VM_MARKERS,
                                    "E2E_BARE_METAL_MODULE": BARE_METAL_MARKERS,
                                    "E2E_APICREDITS_MODULE": APICREDITS_MARKERS}
@@ -104,6 +109,9 @@ class Fake:
     def run(self, command: Sequence[str], log: Path) -> int:
         command = list(command)
         self.commands.append(command)
+        kubeconfig = os.environ.get("KUBECONFIG")
+        self.kubeconfigs.append((kubeconfig, Path(kubeconfig).read_text("utf-8")
+                                 if kubeconfig and Path(kubeconfig).is_file() else None))
         name = log.stem
         self.events.append(name)
         log.parent.mkdir(parents=True, exist_ok=True)
@@ -160,6 +168,10 @@ class Fake:
             return "\n".join(self.dirty)
         if command == ["kubectl", "config", "current-context"]:
             return self.context + "\n"
+        if command == ["kubectl", "config", "get-contexts", "--output", "name"]:
+            return "\n".join(self.contexts) + "\n"
+        if command[:4] == ["kubectl", "config", "view", "--raw"]:
+            return f"current-context: {command[-1]}\n"
         if command[:2] == ["docker", "info"]:
             if not self.docker_up:
                 raise validator.ValidationError("docker info failed: cannot connect")
@@ -466,7 +478,7 @@ def test_no_namespace_but_the_changes_is_scaled_deleted_or_deployed(tmp_path: Pa
         if command[:3] == ["make", "-C", "helm"]:
             assert "CHANGE=pilot" in command, command
     for read in fake.reads:
-        if read[0] == "kubectl" and read[1:3] != ["config", "current-context"]:
+        if read[0] == "kubectl" and read[1] != "config":
             if "--namespace" in read:
                 assert read[read.index("--namespace") + 1] == NAMESPACE, read
             else:
@@ -900,13 +912,27 @@ def test_a_skipped_render_check_fails_validation(tmp_path: Path) -> None:
 
 # --- Helm part: preflights ----------------------------------------------------
 
-def test_helm_refuses_a_kube_context_other_than_the_one_named(tmp_path: Path) -> None:
-    fake = Fake(context="production-cluster")
+def test_helm_refuses_a_kubeconfig_without_the_context_named(tmp_path: Path) -> None:
+    fake = Fake(context="production-cluster", contexts=("production-cluster",))
     summary = _helm(tmp_path, fake)
 
     assert not summary.passed
     assert fake.commands == []
-    assert "production-cluster" in summary.steps[-1].detail
+    assert "'docker-desktop'" in summary.steps[-1].detail
+
+
+def test_helm_pins_the_context_named_whatever_context_is_selected(tmp_path: Path) -> None:
+    fake = Fake(context="production-cluster", contexts=("production-cluster", "docker-desktop"))
+    earlier = os.environ.get("KUBECONFIG")
+    summary = _helm(tmp_path, fake)
+
+    assert summary.passed, validator.render(summary)
+    assert "production-cluster" in _step(summary, "kube context").detail
+    pinned = {path for path, _content in fake.kubeconfigs}
+    assert len(pinned) == 1 and None not in pinned
+    assert {content for _path, content in fake.kubeconfigs} == {"current-context: docker-desktop\n"}
+    assert not Path(pinned.pop()).exists()
+    assert os.environ.get("KUBECONFIG") == earlier
 
 
 @pytest.mark.parametrize(("missing", "step", "target"), [
