@@ -1864,6 +1864,21 @@ Per `openspec/README.md#plan-closeout-requirements`.
       by name) and carried seven `deployment-state` requirements as MODIFIED deltas;
       `openspec/specs/README.md` needed no change. `resource-pool-management` joins the
       capabilities the archive writes (11.3).
+      Corrected at the closeout triage, passages the promotion missed:
+      `openspec/specs/storefront-publication/architecture.md`'s opening paragraph and
+      its override-status paragraph, and `docs/development/ARCHITECTURE.md`'s host-naming
+      passage, which kept the VM inventory tables and bare metal's accepted generations
+      frozen, now say the chains drop them (63 F1); and
+      `openspec/specs/negotiation-protocol/architecture.md`'s "Principal-bound history"
+      no longer describes the deleted identity conversion, stating instead that a
+      supported database already holds canonical principals and the recovery rule
+      (63 F2). Documentation only. `scripts/change-workflow run pre-commit
+      add-database-migration-commands` — `validate --specs --strict` 27 passed, every
+      repository check passed, "passed, exit 0". The fresh-context check of the diff
+      found the negotiation passage placing the conversion before the floor rather
+      than in it, as `deployment-state/architecture.md` and the floor's IDs have it;
+      corrected. It found no other passage still keeping the tables or describing the
+      conversion.
 - [x] 11.10 **Documentation citations.** Run
       `make check-doc-citations CHANGE=add-database-migration-commands` and resolve every
       match, then `scripts/change-workflow openspec validate add-database-migration-commands --strict`.

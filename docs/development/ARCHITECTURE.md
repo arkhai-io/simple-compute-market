@@ -881,8 +881,7 @@ registry's key, a capacity declaration's host link, a reservation's
 `executor_ref`, fulfillment metadata, job parameters, lease APIs, playbook
 variables, and the bare-metal listing. The VM listing model still accepts a
 `vm_host` field so older payloads parse, but no storefront sets it: which host
-serves a slice is provisioning's, and a VM storefront database written before
-that boundary keeps `vm_host` only in its frozen inventory tables. The address the provisioner connects to is the host's
+serves a slice is provisioning's. The address the provisioner connects to is the host's
 `ssh_host`. `physical_host_id` is a different concept and keeps its own name: the
 stable identity of a physical machine across hosts. A host belongs to at most one
 Resource Pool, so one machine offered both as VM slices and as a whole host is

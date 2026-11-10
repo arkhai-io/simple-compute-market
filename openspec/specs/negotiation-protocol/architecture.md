@@ -48,7 +48,7 @@ Every protocol-visible message records the complete principal and explicit role 
 
 The principal credential remains distinct from the durable negotiation subject. A completed two-proof rotation can authorize a replacement principal to continue the same thread; an unrelated valid signer cannot append, terminate, or derive Terms from it.
 
-The service-local schema migration validates the complete identity-bearing population before converting address-shaped parties and message authors to canonical `eip191` principals. It preserves negotiation, message, listing, option, settlement-plan, and operation identities in one transaction. Malformed values, checksum or representation conflicts, incomplete party sets, and ambiguous ownership abort the transaction rather than leaving a mixed authorization boundary. A migrated nonterminal thread continues from its stored canonical history without replaying policy decisions.
+A supported database already holds canonical parties and authors: the conversion of address-shaped values is part of the service's v0.3.0 floor, and a database from before it is refused as unsupported ([deployment state](../deployment-state/architecture.md#transactional-identity-cutover)). A nonterminal thread recovered after a restart continues from its stored canonical history without replaying policy decisions, and only its recorded buyer or a replacement principal bound by a completed rotation may continue it.
 
 ## Record-bound domain dispatch
 
