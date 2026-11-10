@@ -556,6 +556,22 @@ format, so an error or a truncated answer never becomes history, while narration
 before the title is left to the transcript; a run that published nothing is a
 failed run however many earlier records exist.
 
+A reviewer that finishes with a draft the format check refuses is sent the problems
+in its own session, on the same model, and its answer is checked again — once,
+unless `review.format-retries` says otherwise. Refusing outright would lose a whole
+review, the costliest run of a round, to a defect of form such as an empty field,
+and the rerun would start from nothing; a send-back costs one turn of a session
+that still holds the review. Only a format refusal goes back: an unavailable reviewer, a
+network failure, or a non-zero exit says nothing a correction could fix. The run's
+line records each send-back's problems and its message says the review was sent
+back, which the owner is told without being asked anything. A refusal that survives
+keeps its draft under `transcripts/`, where no triage reads it, and its line records
+the reviewer's session and the problems, so the next review of the kind continues
+that session with them rather than starting again; a fresh review starts anew. The
+reviewer runs the same check before it answers, `check review <kind> <change>` on
+its draft piped on standard input, since it writes no file; the command and the
+publisher call the one check, so they cannot disagree.
+
 Every finding states its alternatives: each option a reasonable owner might choose,
 with its trade-off, or `none` and why the fix is evident (CW-a2lf). "None" is a
 statement, not an omission, and the publishing check refuses a finding without the
@@ -1678,6 +1694,7 @@ comment as the step table does; its keys are kebab-case, as Git's hook names are
 | `[openspec]` | `command` | the default validation, closeout's archive, `openspec` |
 | `[load]` | `common`, and a key per step | `config load`, every skill, the post-compaction hook |
 | `[models]` | `orchestrator`, and a key per step, each an ordered list of a harness, a model, and an effort | `start orchestrate`, the wrapper, the review |
+| `[review]` | `format-retries`: how many times a draft the format check refuses is sent back to its reviewer, 1 when absent, 0 never | the review |
 | `[validation]` | `preflight`; `parts.<name>` with `run`, or `start` and `collect`, and `owed`, `after`, `evidence`, `cleanup`; at least one part required | `config parts`, `run validation`, `run cleanup`, history |
 
 A field is required or optional. A required field's absence refuses the steps that

@@ -1012,8 +1012,56 @@ earlier record MUST NOT count as its result.
 
 - **WHEN** the reviewing agent's final output is an error message rather than a
   review
-- **THEN** no review record is published, and the output is kept beside the
-  transcript
+- **THEN** it is sent back to the reviewer for correction (CW-r8fb), and when the
+  answer is still not a review, no review record is published, and the output is
+  kept beside the transcript
+
+### Requirement: CW-r8fb A review the format check refuses is sent back to its reviewer
+
+When a reviewer finishes with a draft the review format check refuses, the run MUST
+send the draft back to that reviewer's session, on the same harness and model, with
+the problems the check found, and check the answer again, as many times as the
+configuration's `review.format-retries` says: once when it is absent, never when it
+is 0. Only a reviewer that finished with a draft SHALL be sent back; one that was
+unavailable, could not be reached, or exited non-zero MUST NOT be. The run's line
+MUST record the problems of each send-back, and its message MUST say that the review
+was sent back for correction and whether it then passed; nothing waits on the
+owner's answer. A refusal that survives its send-backs MUST keep its draft beside the
+transcript, never as a record a triage reads, and its stopped line MUST record the
+reviewer's session and the problems; the next review of the same kind MUST continue
+that session, telling it the problems, unless it is started fresh.
+
+#### Scenario: A reviewer leaves a field empty
+
+- **WHEN** a design review's draft has a finding whose `Evidence` line is empty, its
+  evidence in a nested list beneath it
+- **THEN** the run sends the draft back to the same reviewer session, naming `F1 has
+  no Evidence`, publishes the corrected review, and its line and message say the
+  review was sent back for correction
+
+#### Scenario: A refusal survives its send-back
+
+- **WHEN** the corrected draft is refused again
+- **THEN** nothing is published, the draft is kept as
+  `transcripts/NN-design.rejected.md`, the stopped line records the reviewer's
+  session and the problems, the next-step computation names the design review again
+  once the stop is recovered, never its triage, and the next design review continues
+  that session with the problems
+
+### Requirement: CW-c4rv A reviewer runs the publishing check before it answers
+
+The engine MUST offer the review format check alone, `check review <kind> <change>`,
+on a review given on standard input, applying the very check a review passes before
+it is published, printing each problem it finds and failing when there is any. The
+reviewer MUST be allowed to run it and SHOULD run it on its review before its final
+message, without writing a file.
+
+#### Scenario: A reviewer checks its draft
+
+- **WHEN** a reviewer pipes a draft whose finding has no `Evidence` value to
+  `scripts/change-workflow check review design <change>`
+- **THEN** it prints `F1 has no Evidence` and fails, and the same draft passed to
+  the review would be refused for the same problem
 
 ### Requirement: CW-5sc1 A finding's lens and basis
 

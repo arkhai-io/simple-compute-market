@@ -165,7 +165,9 @@ before closeout brings in and reviews read the change against. Nothing here make
 
 The configuration names each step's models (`[models]`): Opus at high effort for the
 steps that judge, Sonnet at medium for validation and archive cleanup, and Codex
-first for the review, falling back to Claude.
+first for the review, falling back to Claude. It sends a review's refused draft back
+to its reviewer once (`[review]`'s `format-retries`), the workflow's default, stated
+so a reader of the file finds it.
 
 A clone's bootstrap is `make init` (MCW-uqlq), the configuration's `post-clone`, run
 in the clone as it is made. Its
@@ -319,7 +321,7 @@ from the configuration's commands, or when the two documents' roles differ.
 | The remote a change's branch is pushed to, its upstream's, from which the pipeline runs | `origin`, this repository on GitHub, which every branch of the workspace tracks, so a change's clone gives its branch an upstream there |
 | The branch a change lands on, merged before closeout and reviewed against | the clone's `--from`, or else the branch the workspace had checked out when the change's clone was made, `dev` for most changes, which the clone records |
 | The clone's bootstrap: one command that readies a fresh clone | the configuration's `post-clone`, `make init` |
-| The make fragment's targets, included by the repository's `Makefile` | `Makefile` includes `scripts/change_workflow/workflow.mk`, giving `make design`, `make plan`, `make implement`, `make review`, `make triage`, `make validate`, `make merge`, `make closeout`, `make archive-cleanup`, `make orchestrate`, `make change-next`, `make change-clone`, `make change-clone-remove`, `make round-view`, `make round-done` (`make round-done*`), `make round-view-closed`, `make change-watch`, `make change-cost`, `make change-history`, `make check-change-index`, `make check-tasks` (`make check-tasks*`), `make check-agent-skills`, `make check-push-ready`, `make push-branch`, and `make change-graph`; run in a change's clone as `make -C <clone> implement`, `make -C <clone> push-branch`, and `make -C <clone> change-history` |
+| The make fragment's targets, included by the repository's `Makefile` | `Makefile` includes `scripts/change_workflow/workflow.mk`, giving `make design`, `make plan`, `make implement`, `make review`, `make triage`, `make validate`, `make merge`, `make closeout`, `make archive-cleanup`, `make orchestrate`, `make change-next`, `make change-clone`, `make change-clone-remove`, `make round-view`, `make round-done` (`make round-done*`), `make round-view-closed`, `make change-watch`, `make change-cost`, `make change-history`, `make check-change-index`, `make check-tasks` (`make check-tasks*`), `make check-agent-skills`, `make check-review` (`make check-review*`), `make check-push-ready`, `make push-branch`, and `make change-graph`; run in a change's clone as `make -C <clone> implement`, `make -C <clone> push-branch`, and `make -C <clone> change-history` |
 
 ### The engine's own assumptions
 

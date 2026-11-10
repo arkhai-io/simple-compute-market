@@ -184,6 +184,16 @@ waiting runs distinct. Never advance with a
 process still running or bypass a guard that refuses. A failed review has no
 published result; an earlier record does not count.
 
+A review whose draft the format check refused was sent back to its reviewer
+automatically, and its line's `sent_back` lists the problems of each send-back.
+When it then passed, tell the owner it was sent back for correction, as its
+`message` says, and go on to its triage: nothing waits on their answer. When the
+refusal survived the send-back, the run stopped with `refused` naming the problems
+and the draft kept as its `rejected`, never a record its triage reads: relay the
+stop, and rerun the review with `make review CHANGE=<change> KIND=<kind>`, which
+continues the refused session with those problems and supersedes the stop, unless
+the owner says otherwise. If that rerun is refused again, wait for the owner.
+
 Start every step run as its own background command of the harness, one run per
 call, so the harness tracks the run and tells you when it exits. Never detach a
 run inside an ordinary command — `( make … & )`, `nohup`, `setsid`, or a trailing
@@ -450,7 +460,7 @@ outcome it reached, routed as any. Recover a stop as the owner says, as any stop
 ("Read every denial before advancing"): resume a stopped step's `seq` with their
 words, rerun it fresh, or resolve it with `--resolves` and direct the change
 elsewhere. A stop commits nothing, and an interrupted review published nothing and
-is rerun, never resumed.
+is rerun, never resumed; a review the format check refused is rerun as above.
 
 The owner may revisit a finding a triage accepted by default, or the advancing exit
 it took (`docs/agents/change-workflow.md`, "Revisiting a default acceptance").

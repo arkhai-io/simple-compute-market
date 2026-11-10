@@ -317,20 +317,19 @@ Cite evidence as repository-relative `path:line`, in backticks — never absolut
 paths and never Markdown links. Reviews are exported and read outside this
 checkout.
 
-Then check the review you are about to send against the publishing check, line by
-line, and fix every failure before you finish. A review that fails it is not
-published: the run is lost and the review is rerun from nothing.
+Then, before your final message, run the format check the review is published
+under on the complete review, piped on standard input — you write no file:
 
-- The first line is `# <Kind> review — <change>`, naming this review's kind and change.
-- `## Summary`, `## Assessment`, `## Questions`, `## Findings`, and `## Readiness`
-  each appear, once, in that order.
-- Every finding heading is `### F<n> — <claim>`, and under it each of `Lens`,
-  `Basis`, `Severity`, `Evidence`, and `Alternatives` is a line `- **<Field>:** <value>`
-  with its value on that same line. A field whose value is a nested list under an
-  empty field line counts as missing: put several items on the one line, separated
-  by `; `.
-- `Lens`, `Basis`, and `Severity` take only the values section 4 and the format
-  below list.
+```text
+scripts/change-workflow check review <kind> <change> <<'REVIEW'
+<the complete review, exactly as you will send it>
+REVIEW
+```
+
+It prints each problem it finds, one per line, and fails; fix every one and run it
+again until it passes. A review that fails it is sent back to you with its
+problems, once unless the repository's configuration says otherwise, and is
+otherwise not published.
 
 ## 6. The review format
 

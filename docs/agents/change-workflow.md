@@ -743,7 +743,16 @@ name the reviewer's harness and model. It captures the reviewer's final message,
 checks that it is a review of the kind and change asked for — its sections in
 order, and every finding carrying a lens, a basis, a severity, evidence, and its
 alternatives — and
-only then publishes it under the next number. A review continues the previous
+only then publishes it under the next number. A draft the check refuses goes back to
+the reviewer's session with its problems, once unless the configuration's
+`review.format-retries` says otherwise, and the corrected answer is checked again;
+the run's line lists each send-back's problems as `sent_back`, and its message tells
+you the review was sent back, asking nothing. The reviewer runs the same check on its
+draft before it answers: `scripts/change-workflow check review <kind> <change>`, or
+`make check-review KIND=<kind> CHANGE=<change>`, reading the review on standard
+input. A refusal that survives the send-back stops with the problems as `refused`
+and its draft kept, and the next `make review` of that kind continues the refused
+session with those problems. A review continues the previous
 reviewer's session of the same kind on the same harness, so a second design review
 knows what the first asked; `FRESH=1` starts a new one. `REVIEW_BASE` is the branch
 the diff is taken against, by default the one the change's clone recorded as its
@@ -864,8 +873,8 @@ openspec/changes/<change>/reviews/
 ```
 
 Files are numbered in the order they were produced, so the directory reads as the
-change's history; no file is overwritten, and a run whose answer was not a review
-publishes nothing and is kept beside its transcript as
+change's history; no file is overwritten, and a run whose answer was still not a
+review after its send-back publishes nothing and is kept beside its transcript as
 `transcripts/NN-<kind>.rejected.md`. A numbered review is the
 only record of its findings. Transcripts are kept for the owner's export of the
 change's history, and no review or triage step reads them. Archive cleanup leaves

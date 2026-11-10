@@ -91,6 +91,10 @@ def _checked(text: str) -> config.Configuration:
     ("[openspec]\ncommand = 'bunx openspec@{change}'\n",
      "openspec.command names {change}, which is not available there"),
     ("[hooks\n", "is not TOML"),
+    ("[review]\nformat-retries = -1\n", "review.format-retries must be a whole number"),
+    ("[review]\nformat-retries = true\n", "review.format-retries must be a whole number"),
+    ("[review]\nformat-retries = '1'\n", "review.format-retries must be a whole number"),
+    ("[review]\nretries = 1\n", "review.retries is no field the workflow defines"),
 ])
 def test_a_malformed_configuration_is_refused_naming_the_field(text: str, named: str) -> None:
     with pytest.raises(ConfigError) as refused:
@@ -335,6 +339,14 @@ cleanup = ["make teardown"]
     assert fields["validation.parts.helm.cleanup"]["value"] == ["make teardown"]
     assert fields["validation.parts.helm.after"]["status"] == "absent"
     assert fields["models.implement"]["status"] == "absent"
+    assert fields["review.format-retries"] == {"field": "review.format-retries",
+                                               "status": "default", "value": 1}
+
+
+def test_a_review_may_send_a_refused_draft_back_never() -> None:
+    checked = _checked("[review]\nformat-retries = 0\n")
+
+    assert checked.review_format_retries() == 0
 
 
 def test_a_disabled_default_is_listed_with_its_reason(

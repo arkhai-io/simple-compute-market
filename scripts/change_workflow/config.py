@@ -28,11 +28,16 @@ are held to the workflow's model policy as they are read: no step names two mode
 of one vendor, and only the review names a Codex model. No model is forbidden: a
 repository that never wants one does not list it.
 
+A review's draft the format check refuses is sent back to the reviewer that wrote
+it, for correction, as many times as `review.format-retries` says: once when the
+field is absent, never when it is 0.
+
 `config` lists every field and how it resolved, `config load <step>` the documents
 a step's skill reads, and `config parts <change>` validation's plan for the change.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-f3qk, CW-w8ne, CW-t5hz,
-CW-v2dq, CW-l7hn, CW-o6kc, CW-g4oz, CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, and CW-w2ld.
+CW-v2dq, CW-l7hn, CW-o6kc, CW-g4oz, CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, CW-w2ld, and
+CW-r8fb.
 """
 
 from __future__ import annotations
@@ -65,6 +70,8 @@ DEFAULT_CHECKS = ("index", "tasks", "skills", "openspec")
 DEFAULT_OPENSPEC = "openspec"
 # The documents every session reads as it starts, which a step's own add to.
 COMMON_DOCUMENTS = "common"
+# The send-backs a review's refused draft is given when the configuration names none.
+DEFAULT_FORMAT_RETRIES = 1
 _PART_KEYS = ("run", "start", "collect", "owed", "after", "evidence", "cleanup")
 _TABLES: dict[str, tuple[str, ...]] = {
     "repository": ("protected-branches", "inert-paths"),
@@ -74,6 +81,7 @@ _TABLES: dict[str, tuple[str, ...]] = {
     "load": (COMMON_DOCUMENTS, *STEPS),
     "models": (ORCHESTRATOR, *STEPS),
     "validation": ("preflight", "parts"),
+    "review": ("format-retries",),
 }
 # The placeholders every command may use, but `pre-push`'s: the guarded push pushes a
 # branch, not a change, so it has the remote alone to give.
@@ -148,6 +156,7 @@ class Configuration:
     models: Mapping[str, Any] = field(default_factory=dict)
     preflight: tuple[str, ...] | None = None
     parts: tuple[Part, ...] | None = None
+    format_retries: int | None = None
 
     def hook(self, name: str) -> tuple[str, ...] | None:
         """The hook's commands, or None when it is not declared."""
@@ -160,6 +169,11 @@ class Configuration:
         declared = ", ".join(part.name for part in self.parts or ()) or "none"
         raise ConfigError(f"{self.shown} declares no validation part {name!r}; its parts: "
                           f"{declared}")
+
+    def review_format_retries(self) -> int:
+        """How many times a review's draft the format check refuses is sent back to
+        its reviewer for correction."""
+        return DEFAULT_FORMAT_RETRIES if self.format_retries is None else self.format_retries
 
     def openspec_command(self) -> str:
         return self.openspec if self.openspec is not None else DEFAULT_OPENSPEC
@@ -225,6 +239,13 @@ def _strings(where: str, value: Any) -> tuple[str, ...]:
 def _string(where: str, value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{where} must be a non-empty string; got {value!r}")
+    return value
+
+
+def _count(where: str, value: Any) -> int:
+    """A whole number, zero or more; TOML's `true` is no number here."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigError(f"{where} must be a whole number, zero or more; got {value!r}")
     return value
 
 
@@ -396,6 +417,8 @@ def check(text: str, path: Path) -> Configuration:
         preflight=(_commands("validation.preflight", validation["preflight"], _EVERYWHERE)
                    if "preflight" in validation else None),
         parts=_parts(validation["parts"]) if "parts" in validation else None,
+        format_retries=(_count("review.format-retries", tables["review"]["format-retries"])
+                        if "format-retries" in tables.get("review", {}) else None),
     )
 
 
@@ -518,6 +541,8 @@ def resolution(configuration: Configuration) -> list[dict[str, Any]]:
         add(f"models.{key}", ABSENT if models is None else DECLARED, models)
     add("validation.preflight", ABSENT if configuration.preflight is None else DECLARED,
         None if configuration.preflight is None else list(configuration.preflight))
+    add("review.format-retries", DEFAULT if configuration.format_retries is None else DECLARED,
+        configuration.review_format_retries())
     if not configuration.parts:
         add(PARTS, ABSENT)
     for part in configuration.parts or ():

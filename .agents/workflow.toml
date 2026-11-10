@@ -68,6 +68,11 @@ merge           = [{ harness = "claude", model = "claude-opus-5-5",   effort = "
 closeout        = [{ harness = "claude", model = "claude-opus-5-5",   effort = "high" }]
 archive-cleanup = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
 
+[review]
+# Engine, the review: how many times a reviewer's draft the format check refuses is
+# sent back to the reviewer's session for correction before the run stops; 0 never.
+format-retries = 1
+
 [validation]
 # Engine, `run validation <change> preflight`, for change-validate: before any part,
 # a failure ending validation as environmental.

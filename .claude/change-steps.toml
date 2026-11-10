@@ -91,7 +91,10 @@ deny = [
 skill = "change-review"
 allow = ["Bash(make check-doc-citations*)", "Bash(make check-comment-hygiene)",
          "Bash(make check-tasks*)", "Bash(make check-architecture)",
-         "Bash(make check-agent-skills)", "Bash(scripts/change-workflow run *)"]
+         "Bash(make check-agent-skills)", "Bash(scripts/change-workflow run *)",
+         # The reviewer checks its draft with the format check the review is
+         # published under, piping it on standard input, since it writes no file.
+         "Bash(scripts/change-workflow check review *)", "Bash(make check-review*)"]
 deny = ["Edit"]
 
 [steps.design]

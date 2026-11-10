@@ -15,8 +15,8 @@ import pytest
 
 from change_workflow import config, find
 from change_workflow.log import log_path, note_orchestrator, read_log
-from change_workflow.review import (ReviewError, claim_record, prior_session, review_and_log,
-                                    review_models, run_review)
+from change_workflow.review import (ReviewError, check_review, claim_record, prior_session,
+                                    review_and_log, review_models, run_review)
 from change_workflow.running import Terminated, live_runs
 from change_workflow.steps import Model, load_steps
 from change_workflow_fixtures import (ALTERNATIVES, CHANGE, CONFIGURED, FINDING, HEAD, MODELS,
@@ -807,10 +807,13 @@ def test_a_failed_claude_reviews_denials_are_on_its_stopped_line(tmp_path: Path)
     denied = [{"tool_name": "Edit", "tool_use_id": "t1", "tool_input": {}}]
 
     line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=codex_missing,
-                          claude=claude_review("not a review", denials=denied),
+                          claude=claude_review("not a review", denials=denied,
+                                               then=["still not a review"]),
                           head=lambda _: HEAD, echo=None)
 
-    assert line["outcome"] == "stopped"
+    assert (line["outcome"], line["refused"]) == ("stopped", [
+        f"the first line is not the title of a design review of {CHANGE}: "
+        "'still not a review'"])
     assert (line["denials"], line["transcript"]) == (denied, "transcripts/01-design.log")
     assert line["unavailable"][0]["harness"] == "codex"
 
@@ -1050,3 +1053,195 @@ def test_a_review_is_recorded_in_progress_while_it_runs_and_forgotten_after(
     assert all([(run.step, run.change) for run in live] == [("review", CHANGE)]
                for live in seen)
     assert list(runs.iterdir()) == []
+
+
+# A draft the format check refuses is sent back to its reviewer.
+
+# The kind of the reviews below.
+KIND = "design"
+NO_EVIDENCE = review_text().replace("- **Evidence:** `kit/pool-overrides/records.py:43`",
+                                    "- **Evidence:**")
+
+
+def writing_each(*texts: str, calls: list[list[str]] | None = None, session: str = "s-1"):
+    """Codex answering each run with the next of `texts`, its transcript appended to
+    as the real runner appends it."""
+    answers = list(texts)
+
+    def runner(command: Sequence[str], log: Path) -> int:
+        if calls is not None:
+            calls.append(list(command))
+        with log.open("a", encoding="utf-8") as stream:
+            stream.write(f"--------\nsession id: {session}\n--------\nattempt {len(answers)}\n")
+        Path(command[command.index("--output-last-message") + 1]).write_text(
+            answers.pop(0), "utf-8")
+        return 0
+    return runner
+
+
+def test_a_refused_draft_is_sent_back_to_its_reviewer_and_published_corrected(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing_each(NO_EVIDENCE, review_text(), calls=calls),
+                          head=lambda _: HEAD)
+
+    assert calls[0][:3] == ["codex", "exec", "--sandbox"]
+    assert calls[1][:4] == ["codex", "exec", "resume", "s-1"]
+    assert calls[1][calls[1].index("--model") + 1] == "gpt-6-sol"
+    assert "- F1 has no Evidence" in calls[1][-1]
+    assert f"check review design {CHANGE}" in calls[1][-1]
+    assert (line["outcome"], line["record"], line["session"]) == (
+        "finished", f"01-{KIND}.md", "codex:s-1")
+    assert line["sent_back"] == [["F1 has no Evidence"]]
+    assert "failed the format check and was sent back" in line["message"]
+    assert "F1 has no Evidence" in line["message"]
+    assert "corrected review passed" in line["message"]
+    transcript = (reviews_of(root) / "transcripts" / "01-design.log").read_text("utf-8")
+    assert transcript.count("session id: s-1") == 2
+    assert not (reviews_of(root) / "transcripts" / "01-design.rejected.md").exists()
+
+
+def test_a_claude_reviewers_refused_draft_is_sent_back_to_its_session(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    claude = claude_review(NO_EVIDENCE, then=[review_text()])
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=codex_missing,
+                          claude=claude, head=lambda _: HEAD, echo=None)
+
+    assert option(claude.commands[1], "--resume") == "c-1"
+    assert option(claude.commands[1], "--model") == "claude-opus-5-5"
+    assert "- F1 has no Evidence" in claude.commands[1][2]
+    assert (line["outcome"], line["session"], line["sent_back"]) == (
+        "finished", "claude:c-1", [["F1 has no Evidence"]])
+
+
+def test_a_refusal_that_survives_its_send_back_is_kept_and_marked(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    still = NO_EVIDENCE.replace("blocking", "urgent")
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing_each(NO_EVIDENCE, still, calls=calls),
+                          head=lambda _: HEAD)
+
+    assert len(calls) == 2
+    assert line["outcome"] == "stopped"
+    assert line["session"] == "codex:s-1"
+    assert line["sent_back"] == [["F1 has no Evidence"]]
+    assert line["refused"] == [
+        "F1 has Severity 'urgent', not one of blocking, minor, should", "F1 has no Evidence"]
+    assert line["rejected"] == "transcripts/01-design.rejected.md"
+    assert "after 1 send-back for correction" in line["reason"]
+    assert "continues the refused session" in line["reason"]
+    assert (reviews_of(root) / "transcripts" / "01-design.rejected.md").read_text(
+        "utf-8") == still
+    assert not list(reviews_of(root).glob("*.md"))
+
+
+@pytest.mark.parametrize("retries,runs", [(0, 1), (2, 3)])
+def test_the_configuration_sets_how_often_a_draft_is_sent_back(
+        tmp_path: Path, retries: int, runs: int) -> None:
+    root = configured(repository(tmp_path),
+                      CONFIGURED + f"\n[review]\nformat-retries = {retries}\n")
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing_each(*[NO_EVIDENCE] * runs, calls=calls),
+                          head=lambda _: HEAD)
+
+    assert len(calls) == runs
+    assert line["outcome"] == "stopped" and line["refused"] == ["F1 has no Evidence"]
+    assert line.get("sent_back", []) == [["F1 has no Evidence"]] * retries
+    assert ("send-back" in line["reason"]) == bool(retries)
+
+
+def test_a_reviewer_that_exited_non_zero_is_never_sent_back(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing(NO_EVIDENCE, 1, calls=calls), head=lambda _: HEAD)
+
+    assert len(calls) == 1
+    assert line["outcome"] == "stopped"
+    assert "refused" not in line and "sent_back" not in line
+
+
+def test_the_next_review_continues_the_refused_session_with_its_problems(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    review_and_log(CHANGE, "design", root=root, clock=clock,
+                   runner=writing_each(NO_EVIDENCE, NO_EVIDENCE, session="refused"),
+                   head=lambda _: HEAD)
+    calls: list[list[str]] = []
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=writing_each(review_text(), calls=calls, session="refused"),
+                          head=lambda _: HEAD)
+
+    assert calls[0][:4] == ["codex", "exec", "resume", "refused"]
+    assert "was not published" in calls[0][-1] and "- F1 has no Evidence" in calls[0][-1]
+    assert (line["outcome"], line["record"]) == ("finished", f"02-{KIND}.md")
+    assert prior_session(reviews_of(root), "design") == ("codex", "refused", "02-design")
+
+
+def test_fresh_starts_a_new_reviewer_after_a_refusal(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    review_and_log(CHANGE, "design", root=root, clock=clock,
+                   runner=writing_each(NO_EVIDENCE, NO_EVIDENCE, session="refused"),
+                   head=lambda _: HEAD)
+    calls: list[list[str]] = []
+
+    review_and_log(CHANGE, "design", fresh=True, root=root, clock=clock,
+                   runner=writing_each(review_text(), calls=calls, session="new"),
+                   head=lambda _: HEAD)
+
+    assert calls[0][:3] == ["codex", "exec", "--sandbox"]
+
+
+def test_a_refusal_of_another_kind_is_not_continued(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    review_and_log(CHANGE, "design", root=root, clock=clock,
+                   runner=writing_each(NO_EVIDENCE, NO_EVIDENCE, session="refused"),
+                   head=lambda _: HEAD)
+    calls: list[list[str]] = []
+
+    review_and_log(CHANGE, "implementation", base=BASE, root=root, clock=clock,
+                   runner=writing_each(review_text("implementation"), calls=calls),
+                   head=lambda _: HEAD)
+
+    assert calls[0][:3] == ["codex", "exec", "--sandbox"]
+
+
+# The format check a reviewer runs before it answers is the one before publishing.
+
+def test_the_review_check_passes_a_review(capsys: pytest.CaptureFixture[str]) -> None:
+    assert check_review("Some narration first.\n\n" + review_text(), "design", CHANGE) == 0
+
+    out, err = capsys.readouterr()
+    assert out == f"OK: the design review of {CHANGE} passes the format check.\n"
+    assert err == ""
+
+
+@pytest.mark.parametrize("text,problems", [
+    (NO_EVIDENCE, ["F1 has no Evidence"]),
+    # Evidence given as a nested list under an empty field states none.
+    (review_text().replace("- **Evidence:** `kit/pool-overrides/records.py:43`",
+                           "- **Evidence:**\n  - `kit/pool-overrides/records.py:43`\n"
+                           "  - `kit/pool-overrides/schema.py:12`"),
+     ["F1 has no Evidence"]),
+    (review_text().replace("## Questions", "## Notes").replace("blocking", "urgent"),
+     ["missing section '## Questions'"]),
+    (review_text("implementation"),
+     [f"the first line is not the title of a design review of {CHANGE}: "
+      f"'# Implementation review — {CHANGE}'"]),
+])
+def test_the_review_check_reports_each_problem_on_its_own_line(
+        capsys: pytest.CaptureFixture[str], text: str, problems: list[str]) -> None:
+    assert check_review(text, "design", CHANGE) == 1
+
+    out, err = capsys.readouterr()
+    assert (out, err.splitlines()) == ("", problems)

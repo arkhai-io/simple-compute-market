@@ -2134,6 +2134,31 @@ def test_a_stopped_run_waits_until_a_decision_resolves_it(tmp_path: Path) -> Non
     assert (decided["step"], decided["kind"]) == ("review", "implementation")
 
 
+def test_a_review_the_format_check_refused_is_named_again_never_its_triage(
+        tmp_path: Path) -> None:
+    """A refused draft is kept under transcripts/, where nothing reads it as a
+    record: once its stop is decided, the review is named again, not a triage."""
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root, "01-implementation-owner.md", "02-validation.md")
+    transcripts = _reviews(root) / "transcripts"
+    transcripts.mkdir()
+    (transcripts / "03-implementation.rejected.md").write_text(
+        "# Implementation review — x\n", "utf-8")
+    refusal = {"outcome": "stopped", "message": "refused", "reason": "refused",
+               "denials": []}
+    refused = {"kind": "implementation", "refused": ["F1 has no Evidence"],
+               "rejected": "transcripts/03-implementation.rejected.md"}
+    run = record_outcome(log_path(root, CHANGE), "review", refusal, session="codex:s-1",
+                         commit=HEAD, extra=refused)
+
+    stopped = _next(root)
+    _decide(root, "rerun the review", resolves=run["seq"])
+    decided = _next(root)
+
+    assert stopped["step"] == "owner"
+    assert (decided["step"], decided["kind"]) == ("review", "implementation")
+
+
 def test_a_decision_about_one_run_leaves_another_steps_question_waiting(
         tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")

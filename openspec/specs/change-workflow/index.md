@@ -106,6 +106,8 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-ovuj](spec.md#requirement-cw-ovuj-review-records-are-untracked-and-their-durable-content-is-promoted) — `reviews/` is untracked and uncited by permanent documents; durable content is promoted at closeout.
 - [CW-5e24](spec.md#requirement-cw-5e24-a-reviews-transcript-is-kept-and-never-read-as-a-record) — a review's raw transcript may be kept, untracked, but no review or triage step reads it.
 - [CW-r9d2](spec.md#requirement-cw-r9d2-a-reviewers-output-is-published-only-as-a-review) — reviewer output is published only once format-checked; a run publishing nothing is recorded as stopped.
+- [CW-r8fb](spec.md#requirement-cw-r8fb-a-review-the-format-check-refuses-is-sent-back-to-its-reviewer) — a draft the format check refuses is sent back to its reviewer's session, `review.format-retries` times (once by default), the line and message saying so; a surviving refusal keeps its draft and session, which the next review of the kind continues.
+- [CW-c4rv](spec.md#requirement-cw-c4rv-a-reviewer-runs-the-publishing-check-before-it-answers) — `check review <kind> <change>` runs the publishing check on a review on standard input, which the reviewer runs before it answers.
 - [CW-a2lf](spec.md#requirement-cw-a2lf-each-finding-states-its-alternatives) — each finding states its alternatives with their trade-offs, or none and why; a finding without them is not published.
 
 ### Lens, basis, and severity

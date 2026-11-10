@@ -10,6 +10,7 @@ unattended run's harness are injected.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -25,6 +26,7 @@ from change_workflow import (clone, cli, config, cost_report, diagram, find, his
                              next_step, push, round_view, skills, tasks)
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
+from change_workflow.review import check_review
 from change_workflow_fixtures import (CHANGE, CONFIGURED, LANDED, VALID, FakeClaude,
                                       configured, event_lines, make_wrapper, option_rules)
 
@@ -126,6 +128,26 @@ def test_a_subcommand_does_what_its_modules_command_line_does(
     expected = _printed(capsys, lambda: module(root))
     assert _printed(capsys, lambda: cli.main(subcommand, root=root)) == expected
     assert expected[0] in (0, 1)
+
+
+@pytest.mark.parametrize("text,status", [
+    ("# Design review — c\n\n## Summary\n\nWhat.\n\n## Assessment\n\nSound.\n\n"
+     "## Questions\n\nNone.\n\n## Findings\n\nNone.\n\n## Readiness\n\nReady.\n", 0),
+    ("Not a review.\n", 1),
+])
+def test_check_review_reads_the_review_on_standard_input(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+        text: str, status: int) -> None:
+    expected = _printed(capsys, lambda: check_review(text, "design", "c"))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(text))
+
+    assert _printed(capsys, lambda: cli.main(["check", "review", "design", "c"],
+                                             root=tmp_path)) == expected
+    assert expected[0] == status
+
+
+def test_check_review_refuses_an_unknown_kind(tmp_path: Path) -> None:
+    assert cli.main(["check", "review", "kindly", "c"], root=tmp_path) == 2
 
 
 @pytest.mark.parametrize("subcommand,module,arguments", [

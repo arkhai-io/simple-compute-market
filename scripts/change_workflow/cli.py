@@ -31,9 +31,10 @@ documents, or with `common` those every session reads, and `config parts`
 validation's plan for a change, `run` and `openspec`
 the repository's hooks and its OpenSpec command (`hooks`), `check` the
 configuration's, index, task-list, push, skill, and round-view checks, a change's
-default checks (`check change`), and the graph diagram's comparison with the graph
-table, `hook post-compaction` the post-compaction hook, and `wait` the bounded wait
-on a background command's output. `check graph` is internal: it maintains the
+default checks (`check change`), a review's format check on standard input (`check
+review`), and the graph diagram's comparison with the graph table, `hook
+post-compaction` the post-compaction hook, and `wait` the bounded wait on a
+background command's output. `check graph` is internal: it maintains the
 engine's own diagram, and no repository or runner relies on it.
 
 Before a step starts, `start` checks the configuration whole and refuses a step
@@ -72,7 +73,7 @@ from .log import (Checkout, branch_decisions, direction, git_checkout, history_l
                   last_entries, log_path, note_orchestrator, note_round, open_log, read_log,
                   record_interactive, recorded_landing)
 from .records import git_head
-from .review import review_and_log
+from .review import check_review, review_and_log
 from .running import drop_invocations, invocations_directory, kept_invocations, stop
 from .watch import denial_report, watch
 from .wrapper import Wrapper
@@ -409,6 +410,10 @@ def _parser() -> argparse.ArgumentParser:
     checks.add_parser("skills", help="every agent skill loaded from its one source")
     checks.add_parser("round-view", help="fail while a round view is open")
     checks.add_parser("graph", help="where the graph's diagram departs from the graph table")
+    review_ = checks.add_parser(
+        "review", help="a review on standard input, checked as it is before it is published")
+    review_.add_argument("kind", choices=KINDS)
+    review_.add_argument("change")
     waiting = commands.add_parser(
         "wait", help="block until a file holds a line matching a pattern, within a bound")
     waiting.add_argument("file", type=Path)
@@ -709,6 +714,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         except ChangeNotFound as exc:
             raise StepError(str(exc)) from exc
         return 0 if hooks.Hooks(root, configuration, environ).check_change(args.change) else 1
+    if args.command == "check" and args.check == "review":
+        return check_review(sys.stdin.read(), args.kind, args.change)
     if args.command == "wait":
         return _wait(args)
     if (reached := delegated(args)) is not None:

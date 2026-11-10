@@ -10,8 +10,14 @@ and the transcript keeps it. The rest is checked for the review format before it
 is published as the change's next numbered
 `reviews/NN-<kind>.md`, the only authoritative record of its findings; the session
 goes to `reviews/transcripts/NN-<kind>.log`, a transcript no review or triage step
-reads. A run whose output is not a review publishes nothing, and its output is kept
-beside the transcript as `NN-<kind>.rejected.md`. A review takes its number when it
+reads. A draft the format check refuses, from a reviewer that finished, is sent
+back to that reviewer's session with the problems the check found, and checked
+again, as many times as the configuration's `review.format-retries` says; the
+transcript keeps every attempt, and the run's line records each send-back. A run
+whose output is still not a review publishes nothing, and its output is kept beside
+the transcript as `NN-<kind>.rejected.md`; when the format check refused it, its
+line records the reviewer's session and the problems, and the next review of the
+same kind continues that session with them. A review takes its number when it
 is published, so a record written beside it meanwhile is numbered first; the name is
 claimed with an exclusive create, so no record is overwritten. Each published review
 ends with the reviewer's session, tagged with its harness, which the next review of
@@ -27,6 +33,9 @@ it. Every review but the design's reads the change against the branch it lands o
 outcome is `finished`,
 naming the record this run published and, as its exit, the triage of its kind, or
 `stopped` with the runner's reason; an earlier record never counts.
+
+Contract: openspec/specs/change-workflow/spec.md, CW-p2b2, CW-2nb2, CW-5e24, CW-r9d2,
+CW-r8fb, CW-clhl, CW-d1sm, and CW-gqav.
 """
 
 from __future__ import annotations
@@ -189,6 +198,54 @@ def review_problems(text: str, kind: str, change: str) -> list[str]:
     return problems
 
 
+def checked_review(text: str, kind: str, change: str) -> tuple[str, list[str]]:
+    """`text` as it would be published, from its title, and why it is not a review
+    in the `change-review` format: the check a review passes before it is published,
+    and the one `check review` runs for a reviewer before it answers."""
+    review = from_title(text, kind, change)
+    return review, review_problems(review, kind, change)
+
+
+def check_review(text: str, kind: str, change: str) -> int:
+    """`check review <kind> <change>`: the format check a review passes before it is
+    published, run on `text` for the reviewer before it answers. Each problem goes
+    to standard error, one per line, and the status is 1; with none, an OK line and
+    0."""
+    problems = checked_review(text, kind, change)[1]
+    for problem in problems:
+        print(problem, file=sys.stderr)
+    if not problems:
+        print(f"OK: the {kind} review of {change} passes the format check.")
+    return 1 if problems else 0
+
+
+def _problem_list(problems: Sequence[str]) -> str:
+    return "".join(f"\n- {problem}" for problem in problems)
+
+
+def correction_prompt(kind: str, change: str, problems: Sequence[str]) -> str:
+    """What a reviewer whose draft the format check refused is sent back with."""
+    return (f"Your {kind} review of {change} was not published: the review format check "
+            f"refused it, finding:{_problem_list(problems)}\n\nWrite the complete review again, "
+            "in the change-review skill's format, correcting every problem listed; your final "
+            "message is the review and nothing else. Before you answer, pipe it through "
+            f"`scripts/change-workflow check review {kind} {change}` until it passes.")
+
+
+def refusal_prompt(kind: str, change: str, base: str | None, problems: Sequence[str]) -> str:
+    """What the next review continuing a refused reviewer's session is told."""
+    prompt = (f"Your last {kind} review of {change} was not published: the review format check "
+              f"refused it, finding:{_problem_list(problems)}\n\nRe-read the change-review "
+              "skill, which may have changed, and whatever in the change has changed since you "
+              "read it. Then write the "
+              f"complete {kind} review again in the skill's format, correcting every problem "
+              "listed; before you answer, pipe it through "
+              f"`scripts/change-workflow check review {kind} {change}` until it passes.")
+    if kind != "design":
+        prompt += f" Base: {base}."
+    return prompt
+
+
 def review_prompt(kind: str, change: str, base: str | None) -> str:
     prompt = f"Use the change-review skill. Review kind: {kind}. Change: {change}."
     if kind != "design":
@@ -234,6 +291,26 @@ def prior_session(reviews: Path, kind: str) -> tuple[str, str, str] | None:
         if sessions := _SESSION_MARKER.findall(record.read_text("utf-8")):
             return (*tagged_session(sessions[-1]), record.stem)
     return None
+
+
+def refused_session(reviews: Path, kind: str) -> tuple[str, str, list[str]] | None:
+    """The reviewer's harness and session, and the problems the format check found,
+    when the latest review run of `kind` in the change's log stopped on a draft the
+    check refused; None otherwise.
+
+    A refused draft is no record, so it is found from the run's line, which records
+    the session that wrote it and why it was refused. Any later run of the kind,
+    published or not, is the one the next review follows instead.
+    """
+    runs = [entry for entry in read_log(reviews / LOG)
+            if entry.get("step") == "review" and entry.get("kind") == kind]
+    if not runs:
+        return None
+    latest = runs[-1]
+    refused, session = latest.get("refused"), latest.get("session")
+    if latest.get("outcome") != "stopped" or not refused or not isinstance(session, str):
+        return None
+    return (*tagged_session(session), [str(problem) for problem in refused])
 
 
 def review_models(models: Sequence[Model], model: str | None = None,
@@ -353,11 +430,18 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
                clock: Clock = utc_now,
                echo: Callable[[str], None] | None = lambda shown: print(
                    shown, file=sys.stderr, flush=True),
-               interrupted: Callable[[Entry], None] = lambda _: None) -> Path:
+               interrupted: Callable[[Entry], None] = lambda _: None,
+               sent_back: Callable[[list[str]], None] = lambda _: None) -> Path:
     """Run the review on the first available of its models, and publish it.
 
     A review continues the previous reviewer's session only on the same harness,
-    since a session cannot move between harnesses; on another it starts fresh. The
+    since a session cannot move between harnesses; on another it starts fresh. A
+    reviewer whose last run of the kind the format check refused is continued in
+    preference to the last published record's, with the problems it was refused
+    for. A draft the format check refuses is sent back to the reviewer's session,
+    up to the configuration's `review.format-retries` times, `sent_back` given the
+    problems each time; only a reviewer that finished and wrote a draft is sent
+    back, never one that was unavailable, unreachable, or exited non-zero. The
     record names the reviewer's harness and model, and each model passed over. The
     change and the step table are the repository's the command runs in, unless
     `root` and `steps_path` name others. A reviewer interrupted, or whose runner
@@ -383,6 +467,7 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
     try:
         configuration = config.load(root)
         models = configuration.step_models("review")
+        retries = configuration.review_format_retries()
     except config.ConfigError as exc:
         raise ReviewError(str(exc)) from exc
     # Every review but the design's reads the change against the branch it lands
@@ -419,6 +504,7 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
     log = transcripts / f"{provisional}.log"
     draft = transcripts / f"{provisional}.rejected.md"
     prior = None if fresh else prior_session(reviews, kind)
+    refused = None if fresh else refused_session(reviews, kind)
     status: int | None = None
     reached: Reached = None
     session: str | None = None
@@ -427,32 +513,57 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
     claude_ran = False
     finished = False
     interruption: BaseException | None = None
+    sent: list[list[str]] = []
     # Where the latest attempt's output starts in the transcript.
     attempt_start = 0
+
+    def attempt(model: Model, prompt: str, continuing: str | None
+                ) -> tuple[int | None, Reached, str | None]:
+        """One run of the reviewer on `model`, retried on a network error."""
+        nonlocal attempt_start, claude_ran
+        result: tuple[int | None, Reached, str | None] = (None, None, None)
+        for _ in range(NETWORK_RETRIES + 1):
+            draft.unlink(missing_ok=True)
+            attempt_start = log.stat().st_size if log.is_file() else 0
+            if model.harness == "codex":
+                result = _codex_attempt(model, prompt, continuing, draft, log, root, runner)
+            else:
+                claude_ran = True
+                result = _claude_attempt(model, prompt, continuing, draft, log, root,
+                                         steps["review"], claude, clock, echo)
+            if result[1] is None or result[1][0] != "network":
+                break
+        return result
+
     try:
         # A stop's SIGTERM ends the review as an interrupt does while a reviewer
         # runs (each attempt's runner call): the reviewer's process is ended, and
         # nothing is published.
         for ran in review_models(models, model, effort):
-            continuing = prior[1] if prior and prior[0] == ran.harness else None
-            prompt = (continuation_prompt(kind, change, base, prior[2]) if prior and continuing
-                      else review_prompt(kind, change, base))
-            for attempt in range(NETWORK_RETRIES + 1):
-                draft.unlink(missing_ok=True)
-                attempt_start = log.stat().st_size if log.is_file() else 0
-                if ran.harness == "codex":
-                    status, reached, session = _codex_attempt(ran, prompt, continuing, draft, log,
-                                                              root, runner)
-                else:
-                    claude_ran = True
-                    status, reached, session = _claude_attempt(
-                        ran, prompt, continuing, draft, log, root, steps["review"], claude,
-                        clock, echo)
-                if reached is None or reached[0] != "network":
-                    break
+            if refused and refused[0] == ran.harness:
+                continuing: str | None = refused[1]
+                prompt = refusal_prompt(kind, change, base, refused[2])
+            elif prior and prior[0] == ran.harness:
+                continuing = prior[1]
+                prompt = continuation_prompt(kind, change, base, prior[2])
+            else:
+                continuing, prompt = None, review_prompt(kind, change, base)
+            status, reached, session = attempt(ran, prompt, continuing)
             if reached is None or reached[0] != "unavailable":
                 break
             passed_over.append({**ran.entry(), "reason": reached[1]})
+        # A reviewer that finished with a draft the format check refuses is sent
+        # back to correct it, in the session that wrote it, on the same model.
+        while (ran is not None and reached is None and status == 0 and session
+               and draft.is_file() and len(sent) < retries):
+            problems = checked_review(draft.read_text("utf-8"), kind, change)[1]
+            if not problems:
+                break
+            sent.append(problems)
+            sent_back(problems)
+            status, reached, resumed = attempt(ran, correction_prompt(kind, change, problems),
+                                               session)
+            session = resumed or session
         finished = True
     except BaseException as exc:
         interruption = exc
@@ -482,7 +593,11 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
             interrupted({})
         raise interruption
     text = draft.read_text("utf-8") if draft.is_file() else ""
-    if reached is not None and reached[0] == "unavailable":
+    format_refused = False
+    if reached is not None and reached[0] == "unavailable" and sent:
+        problems = [f"{ran.model if ran else 'the reviewer'} became unavailable when its review "
+                    f"was sent back for correction: {reached[1]}"]
+    elif reached is not None and reached[0] == "unavailable":
         problems = ["no reviewer is available: " + "; ".join(
             f"{entry['harness']} {entry['model']}: {entry['reason']}" for entry in passed_over)]
     elif reached is not None:
@@ -492,16 +607,28 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
         problems = [f"the reviewer exited {status}"]
     else:
         # The review starts at its title; a rejected run's draft keeps everything.
-        text = from_title(text, kind, change)
-        problems = review_problems(text, kind, change)
+        text, problems = checked_review(text, kind, change)
+        format_refused = bool(problems)
     if problems or ran is None:
         output.unlink()
         if not text.strip():
             draft.unlink(missing_ok=True)
         record = _unpublished_record(log, reviews, ran, session, passed_over, claude_ran,
                                      reached is None or reached[0] == "network", started)
-        raise ReviewError("the reviewer produced no review: " + "; ".join(problems)
-                          + (f"; see {log.relative_to(root)}" if log.is_file() else ""),
+        reason = "the reviewer produced no review: " + "; ".join(problems)
+        if format_refused:
+            # Marks the stop as the format check's refusal, which the next review of
+            # the kind continues, in the session that wrote the draft.
+            record["refused"] = problems
+            reason += (f" (the format check refused it after {len(sent)} send-back"
+                       f"{'s' if len(sent) != 1 else ''} for correction)" if sent
+                       else " (the format check refused it)")
+            if draft.is_file():
+                record["rejected"] = draft.relative_to(reviews).as_posix()
+                reason += f"; its draft is kept as {draft.relative_to(root)}"
+            if "session" in record:
+                reason += "; the next review of this kind continues the refused session"
+        raise ReviewError(reason + (f"; see {log.relative_to(root)}" if log.is_file() else ""),
                           record)
     markers = [f"<!-- reviewer-session: {ran.harness}:{session} -->"] if session else []
     markers.append(f"<!-- reviewer: {ran.harness} {ran.model}"
@@ -556,6 +683,10 @@ def review_outcome(path: Path, kind: str) -> tuple[Entry, str | None, str | None
     return outcome, session, commits[-1] if commits else None, extra
 
 
+def _times(count: int) -> str:
+    return "once" if count == 1 else f"{count} times"
+
+
 def review_and_log(change: str, kind: str, *, root: Path | None = None,
                    clock: Clock = utc_now, **options: Any) -> Entry:
     """Run a review and log its outcome, recorded as in progress in the checkout
@@ -608,22 +739,33 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
                        "denials": denials}, session, commit, {"kind": kind, **record})
 
     interrupted: list[Entry] = []
+    # The problems of each draft sent back for correction, recorded however the run
+    # ends, so the owner is told of every send-back.
+    sent: list[list[str]] = []
     try:
         path = run_review(change, kind, root=root, clock=clock,
-                          interrupted=interrupted.append, **options)
+                          interrupted=interrupted.append, sent_back=sent.append, **options)
     except ReviewError as exc:
-        return stopped(str(exc), exc.record)
+        return stopped(str(exc), {**exc.record, **({"sent_back": sent} if sent else {})})
     except BaseException as exc:
         # A reviewer that could not start, or was interrupted, still ends with a
         # line, recording what the reviewer had reported; an interrupt is passed
         # on once it is written.
         line = stopped(f"the review did not finish: {type(exc).__name__}"
                        + (f": {exc}" if str(exc) else ""),
-                       interrupted[0] if interrupted else None)
+                       {**(interrupted[0] if interrupted else {}),
+                        **({"sent_back": sent} if sent else {})})
         if not isinstance(exc, Exception):
             raise
         return line
     outcome, session, commit, reviewer = review_outcome(path, kind)
+    if sent:
+        reviewer["sent_back"] = sent
+        outcome["message"] += (
+            f" The review failed the format check and was sent back to its reviewer for "
+            f"correction {_times(len(sent))} ("
+            + "; ".join(", ".join(problems) for problems in sent)
+            + "); the corrected review passed.")
     reviewer.update(review_cost(path.parent / TRANSCRIPTS / path.with_suffix(".log").name,
                                 log, session, reviewer.get("harness"), started))
     return logged(outcome, session, commit, {"kind": kind, "record": path.name, **reviewer})
