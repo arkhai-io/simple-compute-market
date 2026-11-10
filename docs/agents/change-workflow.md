@@ -36,10 +36,11 @@ memory.
 | Validation | `change-validate` | `make validate CHANGE=<change>` | `reviews/NN-validation.md`; pushes `HEAD`, then runs the preflight and each part of the plan `scripts/change-workflow config parts <change>` prints through `scripts/change-workflow run validation` — here the uv version check, the pipeline, each CI workflow the change's complete sections owe, the local part, and the Helm part |
 | Triage | `change-triage` | `make triage CHANGE=<change>` | `reviews/NN-<kind>.triage.md` ending with `## Next`, the exit it chose in prose; an outcome naming that exit and the records it triaged; `interventions.jsonl`, accepted fixes in one commit, the index row when a phase-closing review's triage advances the change; whatever it edited that no fix commit holds, in one commit of its own |
 | Pre-closeout review | `change-review` | `make review CHANGE=<change> KIND=pre-closeout` | `reviews/NN-pre-closeout.md` |
-| Merge | `change-merge` | `make merge CHANGE=<change> [FROM=<branch>]`, once the pre-closeout triage advances the change | the branch the change lands on — the one its clone recorded, unless `FROM` names another — merged into the change's branch, its conflicts resolved and the change's code reconciled with it, in the merge commit or one after it; the index row (`ready for closeout`) when it advances with `HEAD` validated |
+| Merge | `change-merge` | `make merge CHANGE=<change> [FROM=<branch>]`, once the pre-closeout triage advances the change, and again after the archive when the computation names it | the branch the change lands on — `FROM`, else the one the last finished merge recorded, else the one its clone recorded — merged into the change's branch, its conflicts resolved and the change's code reconciled with it, in the merge commit or one after it; the branch, remote, and commit it fetched as its outcome's `landing`; the index row (`ready for closeout`) when it advances with `HEAD` validated before closeout; after the archive, the row kept `archived` and a note appended to `reviews/pull-request.md` |
 | Closeout | `change-closeout` | `make closeout CHANGE=<change>` | permanent documents, the promotion record, the archived change, one commit |
 | Closeout review | `change-review` | `make review CHANGE=<change> KIND=closeout` | `reviews/NN-closeout.md` |
-| Archive cleanup | `change-archive-cleanup` | `make archive-cleanup CHANGE=<change>` | the index (dependents released, row `archived`), any waiver as a ledger line, one commit, `reviews/pull-request.md`; runs every validation part's cleanup (`scripts/change-workflow run cleanup <change>`) — here recording the capacity the latest validation measured, then tearing down the change's validation namespace and images — and commits any tracked file it wrote, here the capacity figure, on its own; then, for a change worked in its own clone, copies its history into your workspace (`make change-history`) |
+| Merge review | `change-review` | `make review CHANGE=<change> KIND=merge`, when the merge after the archive names it | `reviews/NN-merge.md` |
+| Archive cleanup | `change-archive-cleanup` | `make archive-cleanup CHANGE=<change>` | the index (dependents released, row `archived`), any waiver as a ledger line, one commit, `reviews/pull-request.md`; fetches the branch the last finished merge recorded, recording it as its outcome's `landing`; runs every validation part's cleanup (`scripts/change-workflow run cleanup <change>`) — here recording the capacity the latest validation measured, then tearing down the change's validation namespace and images — and commits any tracked file it wrote, here the capacity figure, on its own; then, for a change worked in its own clone, copies its history into your workspace (`make change-history`). Run again after a merge after the archive, it releases nothing, leaves the row, and appends to `reviews/pull-request.md` rather than redrafting it |
 | Orchestration | `change-orchestrate` | `make orchestrate CHANGE=<change>` | the change's clone and branch, `orchestrator` and `round` lines in the workflow log — your directions among them, on your word — the conversion of a change's records on your word, the owner's notes on a round, the ledger line of a waived design review, or of a recommended waiver of one you declined, workflow commits on your word, its own observations of the tooling |
 
 Every step but the review opens an interactive Claude Code session. With
@@ -136,7 +137,9 @@ review's triage advances the change; planning; then, per implementation round,
 implementation, its review beside validation of the same commit, and one triage of
 both; a pre-closeout review and its triage; the merge of the branch the change
 lands on; closeout; the
-closeout review and its triage; archive cleanup. A review is not a gate: its triage names its exit among
+closeout review and its triage; archive cleanup; and, when the landing branch moves
+again, the merge after the archive, a merge review and its triage when the merge
+names one, and archive cleanup again. A review is not a gate: its triage names its exit among
 those its node declares — the step that advances the change, the plan's next round
 after an implementation round; another review of the same kind; or, before
 closeout, a return to design or planning. When it recommends advancing it takes
@@ -165,9 +168,10 @@ to you.
 A step that finds the change in the wrong state refuses and says why. Design and
 implementation take only an active change. Closeout archives the change as its last
 step, so every step after it — the closeout review, its triage, validation, archive
-cleanup — finds the change under `openspec/changes/archive/` by its name
-(`scripts/change-workflow find <change>`). `make review KIND=closeout` refuses a
-change that is not archived, and `make archive-cleanup` one that is not. Planning,
+cleanup, the merge after the archive, the merge review and its triage — finds the
+change under `openspec/changes/archive/` by its name
+(`scripts/change-workflow find <change>`). `make review KIND=closeout` and `KIND=merge`
+refuse a change that is not archived, and `make archive-cleanup` one that is not. Planning,
 the merge, closeout, and archive cleanup ask the next-step computation as they
 start, and go on only when it names them — archive cleanup also when it names a validation
 before it, which it then checks for your waiver.
@@ -373,11 +377,24 @@ the directed step until a run of it is logged, and the step sets its own status.
 direction checks no exit guard on its way, so its reason says what it skips; it is
 refused, naming the guard, while an unwaivable entry guard of a node it names is
 not met — design, planning, or implementation of an archived change, the closeout
-review, its triage, or archive cleanup of one not archived, a triage with nothing
+review, its triage, archive cleanup, the merge review, or its triage of one not
+archived, the merge after the archive before archive cleanup has run or while the
+change index has no row for the change saying `archived`, a triage with nothing
 awaiting it, a validation naming no target, and `done`, which only archive cleanup
 reaches. The waivers of another design review
 and of archive cleanup's validation are such directions ("Waivers", below). The orchestrating session
 never directs a step of its own accord, and never records a step's exit for it.
+
+Once archive cleanup has reached `done`, the change's branch merges its landing
+branch again only on your word: tell the orchestrating session to merge it again,
+and it records your direction to the merge after the archive, `late-merge`:
+
+```text
+scripts/change-workflow note <change> orchestrator --by owner --next late-merge --decision "merge the landing branch after the archive" --reason "<your words>"
+```
+
+The computation then names the merge, its reason beginning `late-merge:`. A row you
+pruned is restored as archive cleanup left it before you direct the merge.
 
 **Interrupting a running step.** The orchestrating session stays free while a step
 runs, so you can reach it mid-step, and on your word it stops the run:
@@ -503,9 +520,14 @@ are.
 **The merge before closeout.** Once the pre-closeout triage advances the change,
 the merge step (`change-merge`) brings the branch the change lands on into the
 change's branch, so the validation before closeout tests the change as it will
-land. That is the branch its clone recorded: `make merge` merges it unless
-`FROM=<branch>` names another, and refuses a change with neither, such as one worked
-in your workspace with no clone, naming `FROM`. It resolves every conflict, and reconciles the
+land. `make merge` merges `FROM=<branch>` when given, else the branch the change's
+last finished merge recorded, else the one its clone recorded, and refuses a change
+with none, such as one worked in your workspace with no clone and no merge yet,
+naming `FROM`; so a branch you name once is merged again by every later merge of the
+change. Its finished outcome records what it fetched as `landing` — the remote, `.`
+for a branch the checkout holds, the branch, and the commit — which the log's writer
+checks, refusing a finished merge without it; a repair carries the record of the
+merge it repairs. It resolves every conflict, and reconciles the
 change's own code — its end-to-end scenarios above all, which no local suite runs —
 with what that branch renamed or removed, which merges
 without a conflict and fails only when it runs. Then it judges what the merge
@@ -517,6 +539,32 @@ validation of the merged `HEAD` sends the change back to the merge, which repair
 what it found; an inconclusive one comes to you. After a review of the merge, its
 triage advances to the merge again, which merges what the branch gained meanwhile, if
 anything, and otherwise advances.
+
+**The merge after the archive.** Archive cleanup fetches the branch the last finished
+merge recorded, else the clone's, and records what it fetched; when that commit is
+not in the change's branch, its first exit to `done` names the merge after the
+archive (`late-merge`), which the orchestrating session runs without asking. After
+the pull request opens, nothing detects a moved landing branch, and the merge runs
+only on your direction ("Directing a change", above). It is the merge step, through
+`make merge`, merging and reconciling as before closeout, and it keeps the change
+archived: its index row stays `archived`, with every other row from the landing
+branch, and a row the landing branch brought that depends on the change released as
+archive cleanup releases one; its archived directory as its branch has it; both
+sides in `openspec/specs/`, each `index.md`, and the permanent documents, every id
+unique; the capacity figure measured later; and a note appended to
+`reviews/pull-request.md` on what it merged and how its `HEAD` is to be validated,
+never a redraft. It judges for itself whether its resolutions need a merge review — a
+conflict outside the mechanical files, a reconciliation of the change's code or
+scenarios, a file outside the mechanical files both sides changed since the merge
+base, or a contract the landing branch changed in meaning — and names that review or
+archive cleanup without asking you. The merged `HEAD` is validated before either; a
+failed validation names the merge again, which repairs it. A merge review's triage
+advances to archive cleanup or names another merge review, fixing and validating a
+code finding itself. Nothing after the archive returns the change to an earlier
+phase: where both sides cannot hold, or the landing branch has invalidated the
+change's design, the merge asks you, leaving the merge in progress, and you resolve
+it as you direct, land the change and follow up in a new change, or take it off the
+workflow.
 
 **Merging `dev` at other times.** On your word, the orchestrating session merges
 `dev` into the change's branch between steps — never while a round view is open, nor between a
@@ -648,7 +696,10 @@ cleaned-up change, and a session working another change finds it with
 then in your workspace. The copy is safe to run again: it copies what is missing,
 leaves what is the same, extends a file the clone has since grown — the workflow log
 and transcripts only grow — and refuses, naming it and overwriting nothing, any file
-that differs otherwise. Once the change has merged, remove its clone with `make
+that differs otherwise. Archive cleanup run again after a merge after the archive
+cleans up validation, commits what that wrote, pushes, copies the history again, and
+appends to `reviews/pull-request.md`, so the workspace's copy grows with it. Once
+the change has merged, remove its clone with `make
 change-clone-remove CHANGE=<change>` in your workspace. It refuses at once while a
 run is in progress in the clone or its bootstrap is still running, and for a clone
 whose record names no landing branch when no `BASE=<branch>` names one. Otherwise
@@ -849,7 +900,18 @@ before its validation. A step that commits nothing leaves the line to one that
 does: triage writes a validation's in a round, and archive cleanup the line of a
 validation no triage read. The merge before closeout
 judges whether its own validation may be waived, as "The merge before closeout"
-above says. For the others, a waiver may be recommended when:
+above says. The merge after the archive recommends waiving the validation of its
+merged `HEAD` only on the criteria below, and never after reconciling the change's
+own code; your waiver is your direction to the exit the merge named, so a merge
+review it chose is not skipped with the validation, and skipping both is a direction
+to archive cleanup whose reason says so:
+
+```text
+scripts/change-workflow note <change> orchestrator --by owner --resolves <merge-seq> --next review --kind merge --decision "the merge review without validating the merged HEAD" --reason "<your words>"
+```
+
+with `--next archive-cleanup` and no `--kind` when the merge named archive cleanup.
+For the others, a waiver may be recommended when:
 
 - the commits the guard would validate differ from validated ones only in paths no
   part of validation exercises — `openspec/`, `docs/`, the change's records — naming

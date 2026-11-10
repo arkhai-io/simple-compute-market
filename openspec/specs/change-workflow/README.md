@@ -80,8 +80,9 @@ even a rework of the returned round's own sections, which under the returned rou
 would reach the next round unread and unreviewed. A declined return is the owner's
 to settle, since the triage it ended no longer says what follows. A triage with
 nothing to discuss that recommends advancing advances without asking the owner
-anything. An implementation round, and the
-merge before closeout, advance only on a `passed` validation of their final commit,
+anything. An implementation round, the merge
+before closeout, and the merge after the archive advance only on a `passed`
+validation of their final commit,
 and after a closeout review a correction
 outside the repository's inert paths is validated before archive cleanup, so a code
 correction reaches the merge validated unless the owner waives it. The owner's own look at the pull request before merging is outside
@@ -124,11 +125,26 @@ so a guidance review can count them by criterion, the evidence a later change wo
 need to take a criterion's waivers by default. The criteria themselves are in the
 workflow's guide, under "Waivers".
 
+A step's judgement of the exit it takes is followed without the owner's
+confirmation unless the exit needs a waiver. A confirmation of a judgement the owner
+almost always shares is a stop with a foregone answer; a waiver skips evidence, and
+so stays the owner's. The merge after the archive judges whether its resolutions
+need a review on written criteria and takes that exit without asking; the merge
+before closeout still asks the owner to confirm another pre-closeout review, until
+the workflow's use shows whether it should change too.
+
 The archive is the boundary no direction crosses. An archived change's deltas are
 already merged into `openspec/specs/`, so design, planning, and implementation
-refuse it; the closeout review, its triage, and archive cleanup need the archive,
-and archive cleanup would otherwise mark `archived` a change whose deltas were never
-merged.
+refuse it; the closeout review, its triage, archive cleanup, the merge after the
+archive, the merge review, and its triage need the archive, and archive cleanup
+would otherwise mark `archived` a change whose deltas were never merged. No step
+after the archive returns the change to an earlier phase either: once the landing
+branch's changes are interleaved with the archived deltas, the archive's merge of
+them cannot be undone, and archive cleanup's release of dependents would be left
+wrong. Where a merge after the archive cannot resolve a conflict so that both sides
+hold, or the landing branch has invalidated the change's design, the merge asks the
+owner and leaves the merge in progress; the owner resolves it as they direct, lands
+the change and follows up in a new change, or takes it off the workflow.
 
 ### The merge before closeout
 
@@ -164,19 +180,102 @@ which finds the branch merged, or merges what it gained meanwhile.
 Which branch a change lands on is recorded with its clone: the branch the workspace
 had checked out when the orchestrating session made the clone, or the clone's
 `--from` (["A change is worked in its own clone"](#a-change-is-worked-in-its-own-clone)).
-`start merge` adds that branch to the merge's invocation, and the skill merges the
-branch its invocation names and assumes none. The owner names another for one run,
-`FROM=<branch>` through the make fragment; a change worked in place, which has no
-clone and so no recorded branch, is merged only from a branch given, and the merge
+Each finished merge records in its outcome the branch it brought in, as `landing`
+with the remote it fetched from and the commit (["The log, its format, and the
+conversion"](#the-log-its-format-and-the-conversion)). `start merge` adds to the
+merge's invocation the branch it is given, else the branch the change's last
+finished merge recorded, else the clone's, and the skill merges the branch its
+invocation names and assumes none. The owner names another, `FROM=<branch>` through
+the make fragment, and every later merge of the change — a repair, the merge
+repeated after its review, a merge after the archive — brings that branch in again
+without the orchestrating session having to remember it: with the clone's branch
+first, the merge repeated after its review would bring in a branch other than the
+one reviewed whenever the argument was forgotten. A change worked in place, with no
+clone and no merge recorded yet, is merged only from a branch given, and the merge
 refuses without one. No repository default stands in: a default would be right for
-most changes and silently wrong for one branched from elsewhere.
+most changes and silently wrong for one branched from elsewhere. The record takes
+the branch name alone into `start merge`, never the remote: a merge after the
+archive may run in the workspace once the clone is gone, whose remotes are named
+otherwise, and it chooses its remote afresh where it runs and records it.
 
-The merge sits in the implementation phase, since it may change code, and sets
-`ready for closeout` as it advances only when the merged `HEAD` is already
-validated; closeout accepts a row still `in implementation` once the computation
-names it, as it did when a triage advanced before its fix was validated. A merge of
-the branch at any other time stays the owner's intervention, and does not replace this
-one.
+The merge before closeout sits in the implementation phase, since it may change
+code, and sets `ready for closeout` as it advances only when the merged `HEAD` is
+already validated; closeout accepts a row still `in implementation` once the
+computation names it, as it did when a triage advanced before its fix was validated.
+A merge of the branch at any other time before the archive stays the owner's
+intervention, and does not replace this one.
+
+#### The merge after the archive
+
+The landing branch keeps moving after the merge before closeout: while closeout, its
+review, and archive cleanup run, and while the pull request waits. When the
+change's branch then conflicts with it or falls behind it, the change is merged
+again through the merge after the archive, `late-merge`: a node of its own whose run
+is the merge step, with the same skill, mechanics, permissions, and target, as
+`round` runs implementation. A new step would have copied the merge's permissions
+into a second row of the step table, with a target, hook rights, and a model entry of
+its own, and had the owner leave the orchestrating session to run it; a `merge`
+qualified by a kind would have needed a permanent rule that a kindless merge is the
+one before closeout; and one `merge` node with both sets of exits would declare exits
+wrong in every state it can be in. Un-archiving the change into a new round was
+rejected for the reasons the archive boundary gives
+([The owner is interrupted only for
+judgement](#the-owner-is-interrupted-only-for-judgement)), and because the common,
+mostly mechanical merge would go through a dozen steps whose resolution the merge has
+already made.
+
+It is entered only once archive cleanup has run and while the change's index row
+says `archived`: the merge keeps that row, and archive cleanup run again tells itself
+from a first run by it, so a change whose row was pruned has the row restored before
+the owner directs the merge. It resolves as the merge before closeout does, and also
+keeps the change archived. The change's own row stays `archived` and its archived
+directory as its branch has them. `openspec/specs/`, each `index.md`, and the
+permanent documents keep both sides — every requirement saying what each change
+meant, every id unique — since the change's deltas are already merged there and no
+later step reads them. A row the landing branch brought that depends on the change
+is released as archive cleanup releases a dependent, since archive cleanup run again
+releases nothing. The capacity figure kept is the one measured later. The pull
+request's drafts are appended to, never redrafted, since the history copy refuses a
+file that changed other than by growing.
+
+The merge judges whether its resolutions need a review of their own, a review of kind
+`merge`, on criteria its skill writes: a conflict resolved outside the mechanical
+files — the change index, other changes' documents, files the hooks rebuild,
+version-only bumps, and files a validation part's cleanup writes; a reconciliation
+of the change's own code or scenarios; a file outside the mechanical files that both
+sides changed since the merge base, since two changes' edits to one specification can
+merge cleanly into contradiction; and a contract the landing branch changed in
+meaning. Several changes on one goal run in parallel and promote into the same
+specifications, so such a review is often warranted, and a confirmation of it would
+be a foregone stop: the merge names the review or archive cleanup and the
+orchestrating session follows it. Always reviewing would spend a review and a triage
+on a merge whose only conflict was an index row.
+
+The merged `HEAD` is validated before the review or archive cleanup, as before
+closeout, and a failed validation names the merge after the archive again, which
+repairs what it found; the end-to-end pipeline is the only check that finds a stale
+call in a scenario. Only the owner waives that validation, and the waiver is the
+owner's direction to the exit the merge named, so a review the merge chose is not
+skipped with the validation; skipping both is a direction to archive cleanup whose
+reason says so. A direction checks no exit guard, so a waiver always directed to
+archive cleanup would have skipped a chosen review silently. The merge review's
+triage advances to archive cleanup, which runs again on the archived row and ends at
+`done`, or names another merge review; it does not return to the merge. The owner
+reviews the branch before merging the pull request and directs another merge after
+the archive when the landing branch has moved again: a loop ending only when the
+landing branch gained nothing would go round until the branch paused.
+
+Detection runs by itself only where nothing it moves is under the owner's review.
+Archive cleanup fetches the branch the last finished merge recorded, or else the
+clone's, and records what it fetched; its first exit to `done`, before the pull
+request opens, names the merge after the archive when that commit is not in the
+branch, and the orchestrating session runs it without asking. A long closeout is
+when the landing branch gains the other changes on the owner's goal, and the check
+costs one fetch. After the pull request opens, nothing detects that the landing
+branch moved: nothing runs after `done`, a poller or a trigger on pushes would need
+infrastructure the workflow lacks, and a merge started by itself would move the
+branch the owner is reviewing. The owner then starts the merge by telling the
+orchestrating session, which records the direction.
 
 ### Closeout and archival
 
@@ -463,6 +562,20 @@ statement, not an omission, and the publishing check refuses a finding without t
 field, since an absent line cannot tell "none" from "not considered". The field gives
 default acceptance's weakest condition — that no alternative exists — a reading
 independent of the triaging agent's, usually by another model, at no cost of a run.
+
+Each review is of a kind — design, implementation, pre-closeout, closeout, or merge
+— and each kind asks its own questions and has its own triage, with the exits that
+kind's place in the graph allows. The review of the merge before closeout is the
+pre-closeout review asking one question more, since its triage's exits — the merge
+again, planning, design — are the right ones there. After the archive they are all
+wrong, so the merge after the archive has a kind of its own, `merge`: it reads each
+resolution against both parents and every commit since the merge's first parent,
+each specification and index the merge touched for what both changes meant with no
+id duplicated or dropped, and the change's code and end-to-end scenarios against what
+the landing branch renamed, removed, moved, or changed in meaning. The closeout
+review with those questions added was rejected: built to read documentation, since
+closeout edits no code, it would gain a duty to read code, its own questions would
+mostly not apply, and its records would mean two things.
 
 `reviews/` is untracked: it is working history, and anything durable in it reaches
 permanent documentation through promotion. It moves with the change into the
@@ -798,6 +911,12 @@ included, was reached. The harness's own stop of a background command was reject
 since a SIGKILL leaves no log line, and delivering words into a running session is
 not something a headless run accepts.
 
+The owner instructs the orchestrating session rather than leaving it to run a
+separate target: a transition the owner starts, such as a merge after the archive,
+is the owner's direction, which the session records on their word, and the session
+then runs whatever the computation names. A step of its own that the owner ran by
+hand would bypass the log, the validation, and the review the session carries.
+
 What only the orchestrating session sees is still reported. Misbehaviour of the
 workflow's tooling that shows across steps — an answer delivered to the wrong
 session, a denial missing from a line, a table rule several steps trip — it writes
@@ -939,6 +1058,32 @@ steps. How the format is versioned, and what a reader does with a newer one, is 
 of the public surface ([A change's records carry one format
 version](#a-changes-records-carry-one-format-version)).
 
+A merge's finished outcome, and archive cleanup's, records the landing branch the run
+fetched as `landing`: the remote as the run's checkout names it, or `.` for a branch
+the checkout holds itself, the branch, and the commit, recorded whether or not
+anything merged. The branch alone would not say which of two different commits a
+merge brought in, since a clone fetches a branch only the workspace holds from its
+`workspace` remote. The engine checks it in code rather than leaving it to the
+skills. The outcome check refuses a malformed record. The log's writer, which reads
+the log, refuses a finished merge without one or naming a remote the checkout lacks
+or a commit `HEAD` does not contain, and a finished archive cleanup without the
+record whenever a source resolves, or with one other than what it fetched from that
+source: its branch, its remote, and the commit the checkout's ref names as the line
+is written, since an older commit of the right branch is what `HEAD` would contain
+while the branch moved. A merge's question, stop, or return need not carry it: at a
+conflict left for the owner the fetched commit is in `MERGE_HEAD`, not `HEAD`. A
+repair after a failed validation fetches nothing and carries the record of the merge
+it repairs; only a repair, before archive cleanup, of a merge logged before the
+record existed omits it. On archive cleanup's line the writer also records whether the
+run's commit contains the fetched commit, decided in the checkout that fetched it,
+so the guard that reads it needs neither a ref nor the network. A refusal is logged
+as the run stopping, its message kept, since a run must leave a line; the rerun
+fetches again. The engine never fetches itself, which would put network Git in the
+engine: a cleanup that skips its fetch while the ref has not moved since the merge
+still passes, and the skill's text governs that. Reading the record is compatible,
+since a line without it keeps its meaning; writing it is not, since a skill that does
+not record it can no longer finish a merge.
+
 ### Routing is code, with the model as backstop
 
 Where a change stands, and what runs next, is computed by
@@ -988,6 +1133,41 @@ passed validation clears the guard and a failed one names the owner. The target'
 entry guards are checked on validation's exit rather than its entry: a round's
 validation starts beside the review its target triages, before that review is
 published.
+
+The graph declares no exit that is wrong in a state its node can be in. Where one
+step runs in two places with different exits, as the merge does before closeout and
+after the archive, the table has a node for each, and the computation tells which a
+run was from the log alone: a `merge` run logged after an archive cleanup run is a
+run of the merge after the archive, which holds because nothing returns an archived
+change to an earlier phase. A finished merge after archive cleanup that records no
+`landing`, with no finished merge before it recording one, routes nothing: it can
+only be a merge run by hand before the merge after the archive was a node, and its
+change stays where archive cleanup left it. A result for the merge after the archive
+names the step to run, `{"step": "merge"}`, with the node in its reason, so the
+orchestrating session's target and the merge skill's own route check need nothing
+added.
+
+For an archived change the computation reads the route rather than answering `done`
+from the row, so a direction or a guard's remedy after archive cleanup is followed:
+`done` is answered while the route ends at archive cleanup's exit to `done`, or the
+change has no log. It answers in an order that keeps `done` cheap and correct. A
+newer log and an undeclared line are refused first. A change with a live clone is
+computed in that clone, where its log is current and the owner's direction is
+written, rather than answered `done` from the workspace's copy. Then `done` is
+answered before any check of the branch checked out, since an archived change
+without a clone has landed and its branch is rarely checked out; only a route with a
+step to run goes on to those checks and to the index row, so a directed merge names
+the owner until the change's branch is checked out, and one for a change with no row
+names the owner as for any change the index does not list.
+
+The guard on archive cleanup's first exit to `done` reads only what the log's writer
+recorded on the run's line, never a ref. A guard reading the fetched ref whenever the
+route is computed would make the same exit name a merge the owner never asked for
+after any later fetch, and would send every change archived before the record
+existed, its landing branch long moved on, to a merge. A later archive cleanup run's
+exit is not guarded, and a cleanup line with no `landing` reads as checked: the same
+check on every exit to `done` would merge again until the landing branch paused,
+and stopping it would need a waiver of a node no direction reaches.
 
 A durable change to the workflow is an OpenSpec change, so the table is code,
 reviewed as code; a data file of nodes and named guards would trade a code edit for
@@ -1302,6 +1482,17 @@ removal runs it first, so the last copy always follows the last record. Teaching
 wrapper to copy after recording cleanup's outcome would make a generic wrapper learn
 one step's special case, and later lines would still need the prefix rule. Reports
 of a cleaned-up change's log and cost read the history wherever it is.
+
+Archive cleanup runs again after a merge after the archive, on a row already
+`archived`. It releases no dependent, leaves the row, and drafts no second pull
+request; it runs the cleanup of every validation part, since the merge's validation
+recreated what the first run removed, commits what that cleanup wrote, pushes,
+copies the history, and appends what its cleanup reported to the pull request's
+drafts. `done` is still reached only by archive cleanup's exit: a merge that cleaned
+up and copied itself would duplicate cleanup's steps and need its hook. Records
+written after the first copy — the merge's notes, its review, the rerun's own —
+reach the workspace by the same synchronization, which is why the drafts are only
+appended to.
 
 A clone is removed only on the owner's command, after the merge: archive cleanup
 does not, since the pull request may need another round. Removal refuses, deleting
@@ -1671,7 +1862,13 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
   archive, and a step reverting the archive commit is not built, since it raises
   questions of its own — which commit to revert once later commits touched the same
   specifications, what becomes of the closeout review's records. A closeout triage
-  that needs a code correction stops for the owner.
+  that needs a code correction stops for the owner. An archived change's branch
+  merges its landing branch again through the merge after the archive, whose
+  unresolvable conflicts are the owner's.
+- Nothing notices that the landing branch moved while the pull request is open: the
+  owner directs the merge after the archive then. A poller or a trigger on pushes to
+  the landing branch is infrastructure a hosted runner would supply
+  ([`host-change-workflow-runner`](../../changes/host-change-workflow-runner/proposal.md)).
 - A direction may name a node that makes no sense from where the change stands;
   only its unwaivable entry guards and the owner hold it.
 - `scripts/change-workflow convert` and the computation's detection of a

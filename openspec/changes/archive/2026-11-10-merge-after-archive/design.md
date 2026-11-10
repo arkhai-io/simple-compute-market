@@ -444,6 +444,53 @@ Rejected:
   `from <branch>`. An interactive merge has no wrapper line, so its branch would be
   lost.
 
+## Settled in implementation
+
+Implementation decided these within the decisions above; closeout moved them here
+from the task notes.
+
+- **A refused landing is logged `stopped`** (D10). The wrapper logs a finished merge
+  or archive cleanup whose `landing` the writer refuses as `stopped`, keeping the
+  step's message, as it logs a triage naming no records: a refusal raised inside the
+  writer would otherwise leave the run without a line (CW-1a4d).
+- **A repair, read by the writer** (D10). A finished merge without `landing` is a
+  repair the writer exempts only when an earlier finished merge exists, none
+  recorded `landing`, the change's latest validation record failed, and no archive
+  cleanup has run. The writer requires a repair's `landing` but does not compare it
+  with the repaired merge's; the skill says which to carry.
+- **The full object name is checked in code** (D10). The schema holds `landing`'s
+  shape, closed, three non-empty strings; the 40- or 64-character commit is checked by
+  the outcome check, since the schema checker understands no `pattern`.
+- **The first archive cleanup run is the first to finish** (D5). A run that stopped,
+  as on a failed fetch, took no exit, so the rerun that finishes is the first, and its
+  exit is the one guarded. A finished line carrying `landing` but no recorded
+  containment reads as checked.
+- **The merge has no one phase** (D1). Since the merge runs in two phases, the
+  computation's step-to-phase map leaves it out, as it does reviews and triages, so a
+  status set back by hand is never compared with a merge line. Every caller of the
+  run rule passes the log, so none reads every merge as the merge before closeout by
+  leaving it out.
+- **A validation's exit to archive cleanup keeps the closeout triage's guard** (D6).
+  The validation node keeps the first exit per target and label, as for every target
+  several nodes exit to.
+- **`done` for an archived change** (D5). An archived change whose log is of an older
+  format goes to the conversion's owner result, as any change does; one whose clone
+  was left unfinished is still named to the clone's creation.
+- **The step that runs `late-merge` is named by hand** (D1). Beside the table's
+  `runs="merge"`, a map of nodes named for no step of their own gives the step a
+  result names; deriving it would need a rule telling `late-merge` from the round,
+  whose result names `round`, not `implement`.
+
+Declined in implementation:
+
+- **A closeout direction for an archived change refused by the log's writer.**
+  Closeout carries no entry guard, since it is the step that archives; the closeout
+  skill refuses an archived change itself, and guarding the table there is outside
+  this change.
+- **One helper for the two `rev-parse` reads** of a ref, in the records module and the
+  clone module: a merge of two modules' helpers outside this change.
+- **The engine performing archive cleanup's fetch** (34 F1, recorded under D10).
+
 ## Implementation cadence
 
 One round, one session, covering everything D9 lists, then closeout.
@@ -465,6 +512,29 @@ Stated by the owner and recorded in no permanent document, for promotion to the
   separate target.
 - The graph declares no exit that is wrong in a state its node can be in.
 - Detection runs by itself only where nothing it moves is under the owner's review.
+
+## Design promotion record
+
+The `change-workflow` `spec.md` requirements are written by the archive from this
+change's deltas; `index.md` holds each one's entry.
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 — the merge after the archive, a node running the merge step; its run rule and entry guards | `openspec/specs/change-workflow/spec.md` CW-m4qe, CW-1iaz, CW-j7wp (run rule's exception); `index.md`; `README.md#the-merge-after-the-archive`, `README.md#routing-is-code-with-the-model-as-backstop`; the graph diagram; `docs/agents/change-workflow.md` (Skills table, "Directing a change", "The merge after the archive") |
+| D2 — the `merge` review kind and its triage | `spec.md` CW-r2hu, CW-xo82; `index.md`; `README.md#reviews-are-files`; the graph diagram; `docs/agents/change-workflow.md` (Skills table) |
+| D3 — the merge judges its review, followed without confirmation; the principle that a step's judgement of its exit is followed unless the exit needs a waiver | `spec.md` CW-x9tb; `README.md#the-owner-is-interrupted-only-for-judgement`, `README.md#the-merge-after-the-archive`; `docs/agents/change-workflow.md` ("The merge after the archive") |
+| D4 — the merge review's triage advances to archive cleanup's rerun, which ends at `done` | `spec.md` CW-r2hu, CW-p8fy, CW-9tzd; `README.md#the-merge-after-the-archive`, `README.md#history-lives-in-the-owners-workspace`; `docs/agents/change-workflow.md` (Skills table, "History and removal") |
+| D5 — archive cleanup's first exit detects a moved landing branch; `done` from the route; the guard reads only the log; the principle that detection runs by itself only where nothing it moves is under the owner's review | `spec.md` CW-5vkd, CW-j7wp, CW-9tzd; `README.md#the-merge-after-the-archive`, `README.md#routing-is-code-with-the-model-as-backstop`, `README.md#current-limits`; `docs/agents/change-workflow.md` ("Directing a change", "The merge after the archive") |
+| D6 — the merged `HEAD` validated, the waiver a direction to the exit named | `spec.md` CW-tnp6, CW-x9tb; `README.md#the-merge-after-the-archive`; `docs/agents/change-workflow.md` ("Waivers") |
+| D7 — the archived change's files resolved so it stays archived | `spec.md` CW-g3zn; `README.md#the-merge-after-the-archive`; `docs/agents/change-workflow.md` ("The merge after the archive") |
+| D8 — no return crosses the archive | `spec.md` CW-xo82; `README.md#the-owner-is-interrupted-only-for-judgement`, `README.md#current-limits`; `docs/agents/change-workflow.md` ("The merge after the archive") |
+| D9 — implementation cadence | None: this change's history |
+| D10 — the merges and archive cleanup record the landing branch they fetched; `start merge`'s branch | `spec.md` CW-5vkd, CW-s3ju; `index.md`; `README.md#the-merge-before-closeout`, `README.md#the-log-its-format-and-the-conversion`; `docs/agents/change-workflow.md` (Skills table, "The merge before closeout") |
+| The owner instructs the orchestrating session (principle) | `README.md#the-orchestrator-relays-and-routes` |
+| The graph declares no exit wrong in a state its node can be in (principle) | `README.md#routing-is-code-with-the-model-as-backstop` |
+| Settled in implementation (above) | Code and its tests; the refused landing logged `stopped` in `README.md#the-log-its-format-and-the-conversion` |
+| Roadmap currency | None: `docs/development/ROADMAP.md` names neither this change nor the change workflow's area, and the change closes no gap row there |
+| Campaign index currency | `openspec/changes/README.md`, "Independent active changes": the row `in closeout`, linking the archived directory; no campaign graph entry and no dependents |
 
 ## Open Questions
 
