@@ -3140,6 +3140,38 @@ def test_a_change_archived_before_the_record_existed(tmp_path: Path) -> None:
     assert _next(_archived(tmp_path, landing=False)) == {"step": "done", "reason": "archived"}
 
 
+def _merged_by_hand(root: Path) -> dict:
+    """A merge run by hand after archive cleanup and recorded naming `done`, as the
+    older tooling wrote it: no `landing`, and no writer check of its exit."""
+    return append_entry(log_path(root, CHANGE), {
+        "step": "merge", "session": "s", "commit": HEAD, "interactive": True,
+        "outcome": "finished", "message": "Merged.", "next": _to("done")})
+
+
+def test_a_merge_run_by_hand_after_archive_cleanup_before_the_record_existed(
+        tmp_path: Path) -> None:
+    """CW-j7wp, "A merge was run by hand after archive cleanup before the merge after
+    the archive was a node": it routes nothing, and the change is done."""
+    root = _archived(tmp_path, landing=False)
+    _merged_by_hand(root)
+
+    assert nxt.route_of(read_log(log_path(root, CHANGE))).source == graph.ARCHIVE_CLEANUP
+    assert _next(root) == {"step": "done", "reason": "archived"}
+
+
+def test_a_merge_recording_no_landing_after_one_that_did_is_the_merge_after_the_archive(
+        tmp_path: Path) -> None:
+    """Only a merge with no finished merge before it recording `landing` is read as
+    older: one after the merge after the archive recorded it routes as that node."""
+    root = _archived(tmp_path)
+    _merged_after(root, _to("archive-cleanup"))
+    late = _merged_by_hand(root)
+    route = nxt.route_of(read_log(log_path(root, CHANGE)))
+
+    assert (route.source, route.line) == (graph.LATE_MERGE, late)
+    assert _next(root)["step"] == "owner"
+
+
 def test_the_landing_branch_moved_after_a_merge_after_the_archive(tmp_path: Path) -> None:
     """CW-5vkd, "The landing branch moved after a merge after the archive": only the
     first archive cleanup's exit is guarded."""

@@ -113,7 +113,7 @@ from .graph import (ARCHIVE_CLEANUP, CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE,
 from .graph import owner as _owner
 from .index import INDEX, Row, index_rows
 from .log import (CONTAINED, LOG, NewerFormat, after_cleanup, branch_decisions, log_path,
-                  older, ran, read_log, refuse_newer, standing, undeclared)
+                  older, ran, read_log, refuse_newer, standing, undeclared, unrouted_merge)
 from .records import (RECORD as _RECORD_FILE, ChangedSince, changed_since, exempting, is_record,
                       latest_validation, validation_problem, validation_result)
 from .round_view import RoundError, View, open_view
@@ -521,7 +521,9 @@ def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
     remedied are checked again; one directed by the owner leads to its target once
     it passed. The conversion line names no exit, and routes nothing. Nor does the
     owner's direction to revisit a finished triage: the triage, resumed, ends again,
-    and that later outcome is the exit the change takes for the reviews it names.
+    and that later outcome is the exit the change takes for the reviews it names. Nor
+    does a merge run by hand on an archived change before the merge after the archive
+    was a node (`unrouted_merge`), so such a change stays at archive cleanup's exit.
     """
     route: Route | None = None
     for entry in log:
@@ -532,7 +534,7 @@ def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
             elif entry.get("by") == "owner" and isinstance(entry.get("next"), Mapping):
                 route = Route(DIRECTED, entry, entry["next"])
             continue
-        if step not in STEPS:
+        if step not in STEPS or unrouted_merge(entry, log):
             continue
         if route is not None and route.how == DIRECTED and route.node is not None \
                 and graph.NODES[route.node].runs and not ran(route.node, entry, log):

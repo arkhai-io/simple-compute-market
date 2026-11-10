@@ -1032,6 +1032,29 @@ def test_a_merge_run_is_the_merge_after_the_archive_once_archive_cleanup_ran(
     assert ran(graph.LATE_MERGE, after, entries) and not ran(graph.MERGE, after, entries)
 
 
+@pytest.mark.parametrize("landed_before,late", [(False, False), (True, True)],
+                         ids=["older line", "after a merge recording landing"])
+def test_a_finished_merge_after_cleanup_without_landing_is_neither_merge_unless_one_landed(
+        tmp_path: Path, landed_before: bool, late: bool) -> None:
+    """A merge run by hand after archive cleanup before the merge after the archive
+    was a node — finished, no `landing`, no merge before it recording one — is a run
+    of neither merge node; once a merge recorded `landing`, such a line is
+    `late-merge`'s."""
+    log = log_file(tmp_path)
+    merged = {"step": "merge", "session": "s", "commit": COMMIT, "outcome": "finished",
+              "message": "Merged.", "next": {"step": "done"}}
+    append_entry(log, {"step": "archive-cleanup", "session": "s", "commit": COMMIT,
+                       "outcome": "finished", "message": "Done.", "next": {"step": "done"}})
+    if landed_before:
+        append_entry(log, {**merged, "landing": {"remote": "origin", "branch": "dev",
+                                                 "commit": COMMIT}})
+    entry = append_entry(log, merged)
+    entries = read_log(log)
+
+    assert ran(graph.LATE_MERGE, entry, entries) is late
+    assert not ran(graph.MERGE, entry, entries)
+
+
 def test_a_direction_to_any_other_step_is_used_by_its_run_taking_an_exit(
         tmp_path: Path) -> None:
     log = log_file(tmp_path)
@@ -1192,6 +1215,20 @@ def test_a_repair_of_a_merge_logged_before_the_record_existed(tmp_path: Path) ->
     assert landing_source(read_log(log), lambda: "dev") == (None, "dev")
     assert landing_source(read_log(log), lambda: None) is None
     assert _cleanup(log)["outcome"] == "finished"
+
+
+def test_a_merge_after_archive_cleanup_is_never_a_repair_without_landing(
+        tmp_path: Path) -> None:
+    """CW-5vkd: a repair may omit `landing` only before archive cleanup, so a merge
+    after it that records none is only an older line."""
+    log = log_file(tmp_path)
+    append_entry(log, {"step": "merge", "session": "s", "commit": MERGE_HEAD, **MERGED})
+    append_entry(log, {"step": "archive-cleanup", "session": "s", "commit": MERGE_HEAD,
+                       "outcome": "finished", "message": "Done.", "next": {"step": "done"}})
+    _failed_validation(log)
+
+    with pytest.raises(StepError, match="records no landing"):
+        _merge(log, MERGED)
 
 
 def test_a_first_merge_finished_without_landing_is_no_repair(tmp_path: Path) -> None:

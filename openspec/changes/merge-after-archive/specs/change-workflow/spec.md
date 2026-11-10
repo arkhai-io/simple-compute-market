@@ -7,7 +7,8 @@ owner names, into an archived change's branch, resolving and reconciling as the 
 before closeout does (CW-hdxi). It MUST be entered only once archive cleanup has run
 and while the change's index row says `archived`, by the owner's direction or archive
 cleanup's exit guard (CW-5vkd), and MUST declare no return. A `merge` run logged after
-an `archive-cleanup` run MUST be read as its run.
+an `archive-cleanup` run MUST be read as its run, other than a finished merge
+recording no `landing` where no finished merge before it recorded one (CW-j7wp).
 
 #### Scenario: The owner directs a merge after the archive
 
@@ -41,8 +42,9 @@ an `archive-cleanup` run MUST be read as its run.
 
 The merge after the archive MUST judge whether its resolutions need a merge review,
 against written criteria: a conflict resolved outside the mechanical files, a
-reconciliation of the change's code or scenarios, a file both sides changed since the
-merge base, or a contract the landing branch changed in meaning. It MUST name the
+reconciliation of the change's code or scenarios, a file outside the mechanical files
+that both sides changed since the merge base, or a contract the landing branch changed
+in meaning. It MUST name the
 merge review or archive cleanup as its exit, which the orchestrating session MUST
 follow without asking the owner. The owner's waiver of the merged `HEAD`'s validation
 MUST be a direction to the exit the merge named, so that a merge review it named is
@@ -98,8 +100,8 @@ Each merge's `finished` outcome, before closeout and after the archive, MUST rec
 as `landing` the remote it fetched from, as its checkout names it or `.` for a branch
 the checkout holds, the branch it fetched, and the commit it fetched; a repair of a
 failed validation of the merged `HEAD`, which fetches nothing, MUST record the
-`landing` of the merge it repairs, and MAY omit it only when no finished merge in the
-log recorded one. The log's writer MUST refuse a finished merge's line whose `landing`
+`landing` of the merge it repairs, and MAY omit it only before archive cleanup, when
+no finished merge in the log recorded one. The log's writer MUST refuse a finished merge's line whose `landing`
 is absent, other than for that repair, or malformed, names a remote that is neither one
 of the checkout's remotes nor `.`, or names a commit the run's `HEAD` does not contain,
 and MUST NOT require `landing` on a merge's `question`, `stopped`, or `returned`
@@ -252,7 +254,15 @@ after it MUST be followed. A change worked in its own clone MUST be named to its
 before `done` is answered. `done` MUST be answered before any check of which branch
 this checkout has checked out, and only a route with a step to run MUST go on to those
 checks and to the change's index row, naming the owner when the index has no row for
-the change.
+the change. A finished merge logged after archive cleanup that records no `landing`,
+where no finished merge before it recorded one, MUST route nothing: it was run by hand
+before the merge after the archive was a node, and is a run of neither merge.
+
+#### Scenario: A merge was run by hand after archive cleanup before the merge after the archive was a node
+
+- **WHEN** archive cleanup's run named `done` and recorded no `landing`, and a later
+  finished `merge` line naming `done` records no `landing` either
+- **THEN** the computation names `done`, not the owner
 
 #### Scenario: The owner's direction follows done
 
@@ -302,6 +312,20 @@ rewriting them.
   `ready for design`
 
 ## MODIFIED Requirements
+
+### Requirement: CW-1iaz Steps after the archive find a change by name
+
+The steps that follow the archive (the closeout review and its triage, validation,
+the round view, the scoped citation check, archive cleanup, the merge after the
+archive, and the merge review and its triage) MUST find an archived change by its
+name. Design, planning, and implementation MUST refuse a change that is archived,
+naming its archived directory.
+
+#### Scenario: An archived change is given to implementation
+
+- **WHEN** the owner asks to implement a change whose directory is under the
+  archive
+- **THEN** the request is refused, naming the archived directory
 
 ### Requirement: CW-s3ju The branch a change lands on is recorded where its orchestration began
 

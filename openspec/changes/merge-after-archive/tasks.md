@@ -375,6 +375,33 @@ rule), CW-5vkd (the guard's reading), and CW-9tzd. Touches
   (a question does not spend it) pass. `ran`'s use through `in_progress` and
   `convert`'s proposal is exercised only by their existing tests, with no merge
   after the archive in them.
+  Fix (42 F1, the owner chose (A)): a merge run by hand on an archived change before
+  `late-merge` existed — finished after archive cleanup, no `landing`, no finished
+  merge before it recording one, as the owner's workspace holds — was read as an
+  undeclared `late-merge` exit to `done`, so its change named the owner.
+  `log.unrouted_merge` reads such a line as a run of neither merge node: `route_of`
+  skips it, so the route stays at archive cleanup's exit, and `ran` matches it to
+  neither node. `log._repairs_unrecorded` no longer exempts a merge once archive
+  cleanup ran, so only an older line has that shape. D1, CW-m4qe's run rule, CW-j7wp
+  (with the scenario "A merge was run by hand after archive cleanup before the merge
+  after the archive was a node"), and CW-5vkd's "MAY omit" say so. Unit:
+  `test_change_next_step.py::test_a_merge_run_by_hand_after_archive_cleanup_before_the_record_existed`
+  (`done`) and
+  `::test_a_merge_recording_no_landing_after_one_that_did_is_the_merge_after_the_archive`;
+  `test_change_workflow_log.py::test_a_finished_merge_after_cleanup_without_landing_is_neither_merge_unless_one_landed`
+  ×2 and `::test_a_merge_after_archive_cleanup_is_never_a_repair_without_landing`.
+  `test_change_workflow_log.py`, `test_change_next_step.py`,
+  `test_change_workflow_wrapper.py`, `test_change_workflow_cli.py`,
+  `test_change_workflow_cli_steps.py`, `test_change_workflow_outcome.py`,
+  `test_change_workflow_convert.py`, `test_change_workflow_graph.py`: 948 passed.
+  `scripts/change-workflow run pre-commit merge-after-archive`: "after-functional-change
+  … passed, exit 0", "pre-commit-functional … passed, exit 0" (`make test` and the
+  packaging check), "pre-commit … passed, exit 0"; no hook rebuilt a file.
+  Fresh-context check against `4f07bf898`: fixed — CW-m4qe's run rule contradicted the
+  new CW-j7wp sentence; the writer's repair exemption could still admit a landing-less
+  merge after archive cleanup; three over-long lines in `design.md` and `tasks.md`.
+  Nothing declined. End-to-end: none; no scenario exercises the workflow tooling.
+  Owed by validation: the fix commit's, before the merge.
 - [x] 3.2 Answer `done` for an archived change from the route, in this order (D5,
   CW-j7wp; 11 F3, 18 F2): a newer log and an undeclared line refused first; then a
   change with a live clone named to its clone, or, in that clone, computed there;
@@ -488,8 +515,8 @@ and CW-g3zn. Touches `.agents/skills/change-merge/SKILL.md`, `change-review/SKIL
   passes. The D3 criterion "a file both sides changed since the merge base" is
   written outside the mechanical files, since a conflicted index row is changed by
   both sides and the delta's scenario "Only the change index conflicted" names
-  archive cleanup; CW-x9tb's own wording lacks that exception, which closeout's
-  promotion (5.9) carries into the index summary and README.
+  archive cleanup. The pre-closeout triage gave CW-x9tb and D3 the same exception
+  (42 F2); closeout's promotion (5.9) confirms the index summary and README match.
 - [x] 4.2 Give `change-review` the `merge` kind (D2, CW-r2hu): its description and kind
   list name it, and a section asks what a merge after the archive did — each
   resolution against both parents (`git show --remerge-diff`) and every commit since
@@ -593,10 +620,11 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
   the stack still builds and runs.
 - [ ] 5.9 Promotion: write the permanent documents and the design-promotion record:
   - `openspec/specs/change-workflow/index.md`: its entries for CW-m4qe, CW-x9tb,
-    CW-g3zn, CW-r2hu, CW-5vkd, CW-p8fy, and CW-j7wp, and its summaries of CW-s3ju,
-    CW-tnp6, CW-xo82, and CW-9tzd, written with the design: check each against the
-    requirement as implemented and revise it where it no longer holds; no id is
-    retired.
+    CW-g3zn, CW-r2hu, CW-5vkd, CW-p8fy, and CW-j7wp, and its summaries of CW-1iaz
+    (42 F3), CW-s3ju, CW-tnp6, CW-xo82, and CW-9tzd, written with the design: check
+    each against the requirement as implemented and revise it where it no longer
+    holds, CW-m4qe's and CW-j7wp's with the older hand-run merge that routes nothing
+    (42 F1); no id is retired.
   - `openspec/specs/change-workflow/README.md`: "The owner is interrupted only for
     judgement" — the archive boundary paragraph (D8) and the principle that a step's
     judgement of its exit is followed unless the exit needs a waiver (D3); "The merge

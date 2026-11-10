@@ -54,8 +54,13 @@ The graph gains `late-merge`, a node whose run is logged as the `merge` step, as
 its Make target, its `from <branch>` argument, and its hook rights, unchanged. A
 `merge` run logged after an `archive-cleanup` run is a run of `late-merge`: the rule
 reads only the log, and holds because nothing returns an archived change to an
-earlier phase. Since one node of the `merge` step no longer carries `NOT_ARCHIVED`,
-`start` stops refusing `merge` for an archived change by itself; the skill's own
+earlier phase. A merge run by hand on an archived change before this node existed,
+and recorded naming `done`, is the exception (42 F1): a finished merge after archive
+cleanup that records no `landing`, with no finished merge before it recording one,
+routes nothing, so its change stays at archive cleanup's exit to `done`. Every
+finished merge since records `landing`, and a repair omits it only before archive
+cleanup while no merge recorded one, so only an older line has that shape. Since one
+node of the `merge` step no longer carries `NOT_ARCHIVED`, `start` stops refusing `merge` for an archived change by itself; the skill's own
 route check refuses a run the computation does not name. The node's entry guards are
 the archive, that archive cleanup has run, and that the change's index row says
 `archived` (18 F2): the merge keeps that row and archive cleanup's rerun tells itself
@@ -120,9 +125,10 @@ asking the owner, as it follows any exit. The skill writes the criteria the judg
 weighs: a conflict resolved outside the mechanical files — the change index, other
 changes' documents, files the repository's hooks rebuild, version-only bumps, and a
 file a validation part's cleanup writes; a reconciliation of the change's own code or
-scenarios; a file both sides changed since the merge base, even where Git merged it
-cleanly, since two changes' edits to one specification can merge into contradiction;
-and a contract the landing branch changed in meaning.
+scenarios; a file outside the mechanical files that both sides changed since the
+merge base (42 F2), even where Git merged it cleanly, since two changes' edits to
+one specification can merge into contradiction; and a contract the landing branch
+changed in meaning.
 
 Rejected:
 

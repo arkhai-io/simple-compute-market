@@ -408,9 +408,12 @@ def landing_source(entries: Sequence[Entry],
 def _repairs_unrecorded(entries: Sequence[Entry], reviews: Path) -> bool:
     """Whether a finished merge may omit `landing`: a repair of a failed validation of
     the merged `HEAD`, the change's latest validation failed, where no finished merge
-    before it recorded one, so the repair has none to carry."""
+    before it recorded one, so the repair has none to carry. Never once archive
+    cleanup ran: the merge after the archive records one, and a repair carries it, so
+    a merge after cleanup without one is only an older line (`unrouted_merge`)."""
     merges = _finished_merges(entries)
-    if not merges or any(isinstance(entry.get("landing"), Mapping) for entry in merges):
+    if not merges or any(isinstance(entry.get("landing"), Mapping) for entry in merges) \
+            or any(entry.get("step") == CLEANUP for entry in entries):
         return False
     record = latest_validation(reviews)
     return record is not None and validation_result(record) == "failed"
@@ -851,18 +854,36 @@ def after_cleanup(entry: Entry, entries: Sequence[Entry]) -> bool:
                for other in entries)
 
 
+def unrouted_merge(entry: Entry, entries: Sequence[Entry]) -> bool:
+    """Whether `entry` is a merge run by hand on an archived change before the merge
+    after the archive was a node: a finished merge after an archive cleanup run that
+    records no `landing`, where no finished merge before it recorded one. Every
+    finished merge since records `landing`, and a repair may omit it only before
+    archive cleanup (`_repairs_unrecorded`), so only an older line has this shape;
+    it is a run of neither
+    merge node, and routes nothing, since the exit it named, often `done`, is one
+    neither declares."""
+    if entry.get("step") != MERGE or entry.get("outcome") != "finished" \
+            or isinstance(entry.get("landing"), Mapping) or not after_cleanup(entry, entries):
+        return False
+    return not any(isinstance(other.get("landing"), Mapping)
+                   for other in _finished_merges(entries) if other["seq"] < entry["seq"])
+
+
 def ran(node: Node, entry: Entry, entries: Sequence[Entry]) -> bool:
     """Whether `entry`, a line of the log whose lines are `entries`, is a run of
     `node`: a review of its kind; a triage naming a review of its kind among the
     records it triaged; for the round, the line recording it starting, or an
     implementation session; for the merge before closeout or after the archive, a
-    merge run before or after an archive cleanup run (`after_cleanup`)."""
+    merge run before or after an archive cleanup run (`after_cleanup`), but an older
+    merge after it that neither node ran (`unrouted_merge`)."""
     if node == ROUND and entry.get("outcome") == "round":
         return True
     if entry.get("step") != NODES[node].runs:
         return False
     if NODES[node].runs == MERGE:
-        return (node == LATE_MERGE) == after_cleanup(entry, entries)
+        return not unrouted_merge(entry, entries) \
+            and (node == LATE_MERGE) == after_cleanup(entry, entries)
     if node.step == "review":
         return entry.get("kind") == node.kind
     if node.step == "triage":
