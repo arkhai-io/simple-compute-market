@@ -610,7 +610,8 @@ the harness's list prices.
 
 **Completing names.** Source `scripts/completions/make-change.bash` from your
 `~/.bashrc`, after bash-completion, to complete `CHANGE=` with the active changes —
-the archived ones after `archive-cleanup` — and `KIND=` with the review kinds.
+the archived ones after `archive-cleanup`, and both after `merge` — and `KIND=`
+with the review kinds.
 
 ## A change in its own clone
 

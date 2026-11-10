@@ -406,6 +406,23 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
   compatibility; the `merge` review kind's acceptance by `make review` is the graph's
   vocabulary (CW-9fbu), and the containment on cleanup's line is named under
   `landing`. The documents agree with the code and skills as read for promotion.
+  Closeout triage (52 F1, owner-directed, outside the plan): the `make` help strings
+  for `review`, `merge`, and `archive-cleanup` and the shell completion had not taken
+  the `merge` review kind or the runs after the archive; `workflow.mk` and
+  `scripts/completions/make-change.bash` now name them, the completion offering
+  archived and active changes for `make merge`, and the guide's sentence on
+  completion with them. Library integration (real Bash and bash-completion):
+  `test_make_change_completion.py`, with a `make merge` case, 14 passed. `run
+  pre-commit`: "after-functional-change … passed, exit 0", "pre-commit-functional …
+  passed, exit 0", "pre-commit … passed, exit 0". The fresh-context check found the help strings matching CW-m4qe and CW-p8fy and no
+  other stale copy of the kinds; declined, as outside the owner's direction, its
+  note that `make review KIND=merge CHANGE=` completes active names only, as `KIND=closeout`,
+  `triage`, and `validate` already did for an archived change. 52 F2: the
+  graph's SVG is re-rendered from its `.drawio` source, not hand-edited, by
+  `render-diagrams-from-source`, which owns the repository's rendering support; a
+  render in a pinned `drawio-desktop-headless` container drew the labels as PNG
+  images (59 KB to 1.9 MB) and was not committed, so the hand-kept export stands
+  until then.
 - [x] 5.4 Narrative compression: shorten completed task notes to final behaviour,
   material evidence, and destinations; move anything implementation settled or declined
   into `design.md` first.

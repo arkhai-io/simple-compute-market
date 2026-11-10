@@ -83,10 +83,16 @@ def test_archive_cleanup_after_assignment(repository: Path) -> None:
                          "old-change", "older-change"]
 
 
+def test_merge_offers_active_and_archived_names(repository: Path) -> None:
+    assert _complete(repository, "make merge CHANGE=o",
+                     ["make", "merge", "CHANGE", "=", "o"]) == [
+                         "old-change", "older-change", "orch-one", "orch-two", "other"]
+
+
 def test_review_kinds(repository: Path) -> None:
     assert _complete(repository, "make review KIND=",
                      ["make", "review", "KIND", "=", ""]) == [
-                         "closeout", "design", "implementation", "pre-closeout"]
+                         "closeout", "design", "implementation", "merge", "pre-closeout"]
     assert _complete(repository, "make review KIND=pre",
                      ["make", "review", "KIND", "=", "pre"]) == ["pre-closeout"]
 
