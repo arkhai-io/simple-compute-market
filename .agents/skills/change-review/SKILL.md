@@ -317,6 +317,21 @@ Cite evidence as repository-relative `path:line`, in backticks — never absolut
 paths and never Markdown links. Reviews are exported and read outside this
 checkout.
 
+Then check the review you are about to send against the publishing check, line by
+line, and fix every failure before you finish. A review that fails it is not
+published: the run is lost and the review is rerun from nothing.
+
+- The first line is `# <Kind> review — <change>`, naming this review's kind and change.
+- `## Summary`, `## Assessment`, `## Questions`, `## Findings`, and `## Readiness`
+  each appear, once, in that order.
+- Every finding heading is `### F<n> — <claim>`, and under it each of `Lens`,
+  `Basis`, `Severity`, `Evidence`, and `Alternatives` is a line `- **<Field>:** <value>`
+  with its value on that same line. A field whose value is a nested list under an
+  empty field line counts as missing: put several items on the one line, separated
+  by `; `.
+- `Lens`, `Basis`, and `Severity` take only the values section 4 and the format
+  below list.
+
 ## 6. The review format
 
 Your final message is exactly this, with no text before or after:
