@@ -23,8 +23,8 @@ from market_identity import IdentityScheme
 from tests.e2e.roles.buyer_cli import create_profiled_buyer_cli
 from tests.e2e.roles.helpers import payments
 
-# The payments lane double's CA, a public development certificate.
-_LANE_CA = Path(__file__).resolve().parents[3] / "tools/payments-lane-double/tls/lane-ca.pem"
+# The lane doubles' CA, a public development certificate.
+_LANE_CA = Path(__file__).resolve().parents[3] / "tools/lane-double-controls/tls/lane-ca.pem"
 
 Failed = pytest.fail.Exception
 Skipped = pytest.skip.Exception

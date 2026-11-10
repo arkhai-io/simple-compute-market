@@ -6,7 +6,7 @@ import httpx
 
 from market_deal_lifecycle.adapters import DeliveryEndIntent
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
-from test_adapter import Scenario
+from .test_adapter import Scenario
 
 
 def test_online_recovery_and_reconstructed_caller_adopt_one_semantic_case():

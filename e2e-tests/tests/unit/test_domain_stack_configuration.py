@@ -14,7 +14,7 @@ from e2e_harness import settings as settings_module
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DOUBLE = _REPO_ROOT / "tools/payments-lane-double"
 _PAYMENTS = "arkhai.payments.v1"
-_CA_MOUNT = "/run/payments-lane-double/lane-ca.pem"
+_CA_MOUNT = "/run/lane-doubles/lane-ca.pem"
 
 
 def _toml(relative: str | Path) -> dict:
@@ -180,9 +180,9 @@ def test_bare_metal_stack_keeps_role_credentials_and_state_separate():
 #
 # Each lane's payment storefront settles against the lane's payments double. The
 # double's committed fixtures (tools/payments-lane-double/fixtures) are the one
-# source of the receipt identity, the accounts and the pinned dispute authority;
-# a storefront configuration is a static file, so these checks hold its copies to
-# the fixtures. Every value is a public development value.
+# source of the receipt identity and the accounts; a storefront configuration is
+# a static file, so these checks hold its copies to the fixtures. Every value is
+# a public development value.
 
 # (lane configuration, its settlement table's key, the overlay that wires the
 # lane's storefront and that storefront's service, the stack profile it extends)
@@ -273,7 +273,7 @@ def test_each_lane_overlay_wires_its_storefront_to_the_double(lane, overlay, ser
 
     assert storefront["depends_on"]["payments-double"] == {"condition": "service_healthy"}
     assert not set(_environment(storefront)) & _PAYMENTS_VARIABLES
-    assert f"./tools/payments-lane-double/tls/lane-ca.pem:{_CA_MOUNT}:ro" in storefront["volumes"]
+    assert f"./tools/lane-double-controls/tls/lane-ca.pem:{_CA_MOUNT}:ro" in storefront["volumes"]
     assert f"./{lane}:/etc/arkhai/storefront.toml:ro" in storefront["volumes"]
 
 

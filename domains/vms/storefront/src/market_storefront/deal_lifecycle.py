@@ -175,10 +175,20 @@ class VmDealLifecycle:
         credential = self.dispute_config.credential_for(authority)
         if credential is None:
             return False
+        # Usable means a client can be built from it: its token resolves and its
+        # CA bundle loads. One that cannot reports the deal for repair, as a
+        # missing one does, rather than failing every deal's servicing cycle. The
+        # deal's repair reason names the credential missing, so the log names why
+        # it is unusable: the exception's type, not its message, so no part of
+        # the credential reaches the log.
         try:
-            credential.resolve()
+            self.client(authority)
             return True
-        except ValueError:
+        except (ValueError, OSError) as exc:
+            logger.warning(
+                "Dispute credential for authority %s is unusable (%s); its CA bundle path is %r",
+                authority.identity, type(exc).__name__, credential.ca_bundle_path,
+            )
             return False
 
     def client(self, authority):
@@ -189,7 +199,7 @@ class VmDealLifecycle:
                 raise ValueError("Agreement authority credential is missing")
             self.clients[key] = MediationClient(
                 authority, MediationCredential(authority.identity, token=credential.resolve()),
-                transport=self.mediation_transport,
+                transport=self.mediation_transport, ca_bundle=credential.ca_bundle_path,
             )
         return self.clients[key]
 

@@ -1,9 +1,11 @@
-"""`make init` bootstraps a checkout whose `.dist` holds nothing.
+"""`make init` bootstraps a checkout whose `.dist` holds nothing, and the wheel
+targets build the sets their consumers install.
 
 Each role's environment installs every internal package its lock names from
 `.dist`, so each `init-*` target must build a wheel for each of them first. A
 workspace's `.dist` is filled by earlier builds and hides a missing one; a fresh
-clone's bootstrap does not. Read through `make -n` over the real Makefiles: a
+clone's bootstrap does not. The release set is the one wheel target whose set
+differs from `dist`'s. Read through `make -n` over the real Makefiles: a
 recursive `$(MAKE)` still runs under `-n`, printing the commands of the targets it
 reaches, so every wheel build the target would make is printed.
 """
@@ -99,3 +101,22 @@ def test_each_init_target_builds_every_wheel_its_lock_installs(tmp_path: Path, t
 
     missing = sorted(name for name in needed if projects.get(name) not in built)
     assert not missing, f"{target} builds no wheel for {', '.join(missing)}"
+
+
+def test_the_release_set_builds_every_wheel_dist_does_but_those_only_tests_depend_on(
+        tmp_path: Path) -> None:
+    """`dist-release`, which the release workflow tars as the marketplace
+    wheelhouse, builds every wheel `dist` builds but the two only tests depend
+    on: the lane doubles' control contract, which only the lane doubles and the
+    end-to-end harness install, and the API-credit sample app, the demo API the
+    harness drives. `dist`, whose wheels the lanes' images install, and
+    `dist-ci`, which CI's suites build before they run, still build both."""
+    projects = _projects()
+    test_only = {projects["lane-double-controls"], projects["arkhai-apicredits-sample-app"]}
+    release, full, ci = (_built(target, tmp_path / "dist")
+                         for target in ("dist-release", "dist", "dist-ci"))
+
+    assert test_only <= full and test_only <= ci
+    assert full - release == test_only
+    assert release <= full
+    assert {projects["arkhai-kit-identity"], projects["arkhai-core"]} <= release

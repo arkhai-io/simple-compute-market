@@ -33,6 +33,9 @@ lane_env = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(lane_env)
 
 _REPO = Path(__file__).resolve().parents[4]
+# The double's leaf certificate, which the lane CA's generator in the controls
+# project writes and the image serves.
+_LEAF = _REPO / "tools" / "lane-double-controls" / "tls" / "payments-double.pem"
 _RUNNER_PROFILES = _REPO / "e2e-tests" / "config"
 _IDENTITIES = _REPO / "dev-env" / "identities"
 # Each lane's runner profile and the identity file its payment storefront signs
@@ -84,7 +87,7 @@ def test_run_isolated_it_prints_the_seller_account_and_token() -> None:
 
 
 def test_the_service_url_is_a_name_the_certificate_covers_at_the_port_the_double_serves() -> None:
-    leaf = x509.load_pem_x509_certificate((lane_env.PROJECT / "tls" / "double.pem").read_bytes())
+    leaf = x509.load_pem_x509_certificate(_LEAF.read_bytes())
     names = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
     url = urlsplit(lane_env.SERVICE_URL)
 
@@ -108,7 +111,9 @@ def test_the_shared_runner_profile_restates_the_double_fixtures() -> None:
     # The variable the harness hands the key over under, never one the runner's
     # own settings loader reads.
     assert not payments["api_key_env"].startswith("ARKHAI_")
-    assert payments["ca_bundle_path"] == "/run/payments-lane-double/lane-ca.pem"
+    assert payments["ca_bundle_path"] == "/run/lane-doubles/lane-ca.pem"
+    # The harness reads the double's status with it.
+    assert payments["control_token"] == directory.control_token
 
 
 def test_each_lane_profile_states_its_storefront_signing_key_alone() -> None:

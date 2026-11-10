@@ -99,8 +99,14 @@ BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 # `e2e_non_erc20_settlement` settles native-token and ERC1155 escrows against
 # the dev chain's own deployments. `e2e_vm_real_provisioning` is in no lane: it
 # provisions on a real KVM host an operator provides, which the pipeline never
-# has, and runs from the operator's machine through `test-module`.
+# has, and runs from the operator's machine through `test-module`. The six
+# `e2e_vm_dispute_*` scenarios each run on a deal of their own, and each removes
+# its rules from the lane's doubles and resets their clocks when it ends, so
+# they need no order among themselves.
 E2E_MODULE ?= e2e_vm_payment_deal or e2e_vm_payment_purchase or e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
+              or e2e_vm_dispute_ruled_end or e2e_vm_dispute_discount or e2e_vm_dispute_lost_filing \
+              or e2e_vm_dispute_mediation_unavailable or e2e_vm_dispute_payments_hold \
+              or e2e_vm_dispute_hold_passed \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
               or e2e_alkahest_trusted_oracle \
               or e2e_listing_shapes or e2e_vm_introduction \
@@ -116,10 +122,11 @@ E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication or e2e_bare_metal_introducti
 
 # The runner's profiles, from config/: each lane target layers the shared
 # payments profile and its own, `docker,payments-lane,<lane>-lane`, so the
-# payment scenarios reach the lane's payments double; unset, the runner has no
-# payments target, as a run against none does. A rerun against a lane's stack
-# passes that lane's list. The lane CA is mounted where config-payments-lane.yml's
-# ca_bundle_path names it; nothing else reaches the runner's environment.
+# payment scenarios reach the lane's payments and mediation doubles; unset, the
+# runner has neither target, as a run against none does. A rerun against a lane's
+# stack passes that lane's list. The lane CA, which issues both doubles'
+# certificates, is mounted where config-payments-lane.yml's ca_bundle_paths name
+# it; nothing else reaches the runner's environment.
 RUNNER_PROFILES ?= docker
 
 test-buyer-machine:
@@ -127,7 +134,7 @@ test-buyer-machine:
 		--network=$(NETWORK) \
 		-e ACTIVE_PROFILES=$(RUNNER_PROFILES) \
 		-e CONFIG_DIRECTORY=/app/config \
-		-v $(abspath $(CURDIR)/../tools/payments-lane-double/tls/lane-ca.pem):/run/payments-lane-double/lane-ca.pem:ro \
+		-v $(abspath $(CURDIR)/../tools/lane-double-controls/tls/lane-ca.pem):/run/lane-doubles/lane-ca.pem:ro \
 		-v $(CURDIR)/tests:/app/tests:ro \
 		-v $(CURDIR)/src:/app/src:ro \
 		-v $(CURDIR)/config:/app/config:ro \

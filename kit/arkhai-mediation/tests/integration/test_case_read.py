@@ -8,7 +8,7 @@ import pytest
 
 from market_arkhai_mediation.client import MediationProtocolError
 from market_arkhai_mediation.contract import wire
-from test_adapter import Scenario
+from .test_adapter import Scenario
 
 
 def test_case_read_accepts_the_authority_outcome_envelope():

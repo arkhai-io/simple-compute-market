@@ -90,7 +90,7 @@ pytestmark = [
         "payments_config", "storefront_loops_held", "alice_loops_held",
         "fulfillment_convergence_held", "lease_watchdog_held",
         "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
-        "purchase_cleanup",
+        "purchase_cleanup", "lane_doubles_evidence",
     ),
     pytest.mark.e2e_vm_payment_purchase,
 ]

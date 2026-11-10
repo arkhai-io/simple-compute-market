@@ -97,8 +97,14 @@ image:
 #       # with `market-storefront check-payments --account`: the seller's payee
 #       # account. The pod renders only when config has
 #       # [Settlement.arkhai_payments] and this names an account.
+#       # mediationOrigin is the dispute authority the agent's mediation check
+#       # test pod reads, with `market-storefront check-mediation --origin`, using
+#       # the agent's [[DisputeCredential]] for it from its runtime secret
+#       # overlay. The chart never sees that overlay, so naming an origin is
+#       # what states the agent holds such a credential.
 #       tests:
 #         paymentsAccount: ""
+#         mediationOrigin: ""
 #       config:
 #         agent_id: bob
 #         Identity:

@@ -13,6 +13,14 @@ fee_bps = 250
 # the payments service identity. The double refuses to start if they disagree.
 receipt_seed = "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d"
 
+# The second receipt-signing seed, which the signer-rotation control switches the
+# double to; no lane pins the identity it yields.
+rotation_seed = "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e"
+
+# The bearer token of the double's control routes under /test/, on its
+# lane-private port.
+control_token = "payments-lane-double-control-public-development-token"
+
 [receipt_identity]
 scheme = "ed25519"
 identifier = "kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo"
@@ -29,7 +37,10 @@ funding = "1000000000000"
 account = "00000000-0000-4000-8000-0000000000b2"
 token = "payments-lane-double-seller-public-development-token"
 
-# The pinned dispute authority's account (fixtures/dispute-authority.toml). It has
-# no token: nothing can authenticate at the double as the dispute authority.
+# The account of the dispute authority every lane's registries recommend, the
+# mediation lane double, which extends, reverses and lifts as it with this token.
+# Its fixture, tools/mediation-lane-double/fixtures/authority.toml, restates both,
+# and a repository test holds them equal.
 [accounts.dispute_authority]
 account = "00000000-0000-4000-8000-0000000000d1"
+token = "payments-lane-double-dispute-authority-public-development-token"

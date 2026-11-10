@@ -84,8 +84,10 @@ setting that names an environment variable holding the secret is a second, weake
 channel beside the one a cluster already writes, so a service's configuration
 does not name one, and trust follows the same rule: a private CA is a configured
 bundle path the one client that needs it reads (such as
-`[Settlement.arkhai_payments].ca_bundle_path`), never `SSL_CERT_FILE`, which would
-replace the whole process's public trust. The one secret outside the rule is the
+`[Settlement.arkhai_payments].ca_bundle_path`, or a `[[DisputeCredential]]`'s
+`ca_bundle_path` for that authority's client), never `SSL_CERT_FILE`, which would
+replace the whole process's public trust; a client naming none uses the default
+trust store. The one secret outside the rule is the
 signing credential `ARKHAI_IDENTITY_CREDENTIAL`, which the identity specification
 keeps from the loader, so it reaches a service as a variable sourced from a Secret.
 A buyer's `api_key_env`, in its payments section or a `[[DisputeCredential]]`, is
@@ -198,6 +200,19 @@ one init container does — the storefront's migration command from the
 application's image over its data volume — and that the `startupProbe` does; the
 provisioning and registry charts' render tests assert their migration init
 container the same way.
+
+**A private CA is mounted once, and each client names it.** A chart mounts a
+deployment-supplied CA bundle from a ConfigMap or Secret key at one fixed path,
+and every client that trusts that CA names the file as its own `ca_bundle_path`;
+one CA that issues several services' certificates is one mount, however many
+clients name it. Where the chart renders the setting, it derives the path from the
+mount rather than taking it as a value beside the mount, so the two cannot
+disagree. Where the setting lives in a Secret overlay the chart never renders, the
+chart cannot derive it: whoever writes that Secret states the chart's mount path,
+and a Helm test running the client's access check from the Deployment's own mounts
+proves the two agree. A client loads its bundle when it is built, so a bundle that
+cannot be loaded fails the access check at its configuration step, before any
+request.
 
 **Toggling a mock/test profile:** A boolean chart value (for example
 `mockMode`) can conditionally append a profile name to
@@ -340,6 +355,15 @@ fails the check too. It leaves out the data volume, whose ReadWriteOnce claim a
 pod on another node could not attach, and the `/health` probes, and the VM pod
 the ZeroTier capabilities and device. The check is described under "Settlement
 consumer configuration and cutover".
+
+A chart renders a check of a setting it cannot see only where a value names the
+check's target, and that value is the release's statement that the setting exists.
+The VM chart's `<agent>-mediation-check` pod, from the same helpers and with the
+same absences, is rendered this way, where the agent's `tests.mediationOrigin`
+names a dispute authority, since the agent's `[[DisputeCredential]]` lives in the
+runtime Secret's overlay
+([deployment-state, "A storefront checks its mediation configuration from its own container"](../../openspec/specs/deployment-state/spec.md#requirement-a-storefront-checks-its-mediation-configuration-from-its-own-container);
+the operator handbook's ["Payments access"](../operator-handbook.md#payments-access)).
 
 The chart defaults enable no settlement mechanism, so a release from them alone is
 refused at startup, as intended: Alkahest needs a chain and a wallet a production
@@ -891,11 +915,18 @@ Secret's overlay, never `development_auth`. The double is the `payments-lane-dou
 subchart, which `helm/local-values.yaml` enables and no release values do. Its
 Service is named `payments-double`, the name its certificate is issued for, in
 every release, so a namespace runs one: release 2's values disable the subchart,
-and its storefront reaches release 1's double by that name. Release 1's registry
-recommends the double's pinned dispute authority, and Bob's overlay carries his
-`[[DisputeCredential]]` for it, as the VM lane's does; release 2's storefront
-carries none, as the bare-metal lane's does. Each storefront's payments check test
-pod reads the double's seller account. The release serves no payment scenario.
+and its storefront reaches release 1's double by that name. Beside it runs the
+mediation lane double, the `mediation-lane-double` subchart, enabled the same way
+and in release 1 alone, behind the Service `mediation-double`; it needs no
+configuration in the cluster, reaching the payments double by its Service name
+under the lane CA its image carries. Release 1's registry recommends the
+mediation double's identity, and Bob's overlay carries his `[[DisputeCredential]]`
+for it, as the VM lane's does, with its `ca_bundle_path` naming the storefront
+chart's CA file; release 2's storefront carries none, as the bare-metal lane's
+does. The `payments-ca-bundle` ConfigMap holds the lane CA, which issues both
+doubles' certificates. Each storefront's payments check test pod reads the
+double's seller account, and Bob's mediation check test pod reads the mediation
+double's respondent listing. The release serves no payment or dispute scenario.
 
 - `make helm-topology-secrets` creates or replaces, idempotently, every Secret both
   releases read, and the `payments-ca-bundle` ConfigMap, in its namespace, which it
@@ -903,12 +934,18 @@ pod reads the double's seller account. The release serves no payment scenario.
   change's validation namespace), deriving each key with `cast` from Foundry's
   default development mnemonic at `helm/Makefile`'s `DEV_ACCOUNT_*` indices
   (development values only); provisioning's SSH key is the committed mock
-  placeholder, `PROVISIONING_SSH_KEY_FILE`. From the payments lane double's committed
-  fixtures it takes the lane CA for the ConfigMap and the seller's token, which it
+  placeholder, `PROVISIONING_SSH_KEY_FILE`. It takes the committed lane CA, from
+  `tools/lane-double-controls/tls/`, for the ConfigMap, and from the payments lane
+  double's committed fixtures the seller's token, which it
   writes as `[Settlement.arkhai_payments] api_key` into both storefronts' runtime
   overlays, and it copies Bob's `[[DisputeCredential]]` from his Compose secret
   overlay, `dev-env/identities/bob.storefront.secrets.toml`, so both stacks hold one
-  value. `helm/scripts/topology-secrets.sh` says what each Secret holds. It also
+  value, but for each copied entry's `ca_bundle_path`, which names the Compose
+  mount and so is rewritten to the storefront chart's CA file
+  (`STOREFRONT_CA_BUNDLE_FILE`, `/etc/arkhai/ca/ca-bundle.pem`), as "A private
+  CA is mounted once, and each client names it" requires of a setting in a Secret
+  the chart never renders; an entry stating none keeps none.
+  `helm/scripts/topology-secrets.sh` says what each Secret holds. It also
   creates, if absent, the deal test's buyer-profile volume, `arkhai-buyer-profiles`,
   which no chart creates, and leaves an existing claim as it is.
 - `make helm-topology-up` installs or upgrades release 1, then release 2, each with
@@ -917,11 +954,11 @@ pod reads the double's seller account. The release serves no payment scenario.
   images keep bare tags, so an upgrade alone leaves every pod on its old image. It
   never restarts `dev-env`: its Anvil reloads its state file, so the contracts
   survive, but a restart loses every transaction since start-up that the other
-  services' volumes still refer to. Nor does it restart the payments double, which
-  keeps every payment in memory, so a restart would lose each transaction the
-  storefronts' databases refer to.
+  services' volumes still refer to. Nor does it restart the payments or the
+  mediation double, which keep every payment and case in memory, so a restart would
+  lose each transaction and case the storefronts' databases refer to.
 - `make helm-topology-check` runs both releases' `helm test`, each storefront's
-  payments check among them, and `make helm-topology-down` removes release 2, then
+  payments check and Bob's mediation check among them, and `make helm-topology-down` removes release 2, then
   release 1. The topology targets refuse an overridden release name, whose Services
   the overlay would not name.
 - `check-local-secrets`, which `deploy-local`, the topology targets and the
@@ -1947,7 +1984,16 @@ mediation client receives the resolved token, never a variable name:
 `MediationCredential(identity, *, token)` takes a `SecretStr` and refuses an empty
 token, one with surrounding whitespace, or one containing a line break, at
 construction. Duplicate bindings for an
-identity are refused at lookup. The Agreement pins origin/record key for the
+identity are refused at lookup.
+
+A credential may also name `ca_bundle_path`, under the private-CA rule in
+"Profile-based configuration"; the
+[settlement-configuration specification](../../openspec/specs/settlement-configuration/spec.md#requirement-dispute-credentials-are-bound-by-identity-and-no-template-ships-an-authority)
+states its rules, and its
+[architecture](../../openspec/specs/settlement-configuration/architecture.md#precedence-and-secret-boundaries)
+why the credential carries the bundle and what an unloadable one does.
+
+The Agreement pins origin/record key for the
 deal's potentially unbounded case life: preference edits affect only new deals,
 and credentials must still serve accepted identities. Dispute adapters follow no
 mid-deal origin redirect or record-key rotation. Payment receipt identity overlap

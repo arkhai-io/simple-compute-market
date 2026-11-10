@@ -1,0 +1,54 @@
+{{/*
+Helm test pod, one per agent whose tests.mediationOrigin names a dispute
+authority: `market-storefront check-mediation`, one authenticated respondent read
+at that authority with the agent's [[DisputeCredential]] for it, from the agent's
+own image, configuration, Secret overlay holding that credential, identity
+credential, and CA bundle. Those come from the helpers the agent's Deployment
+renders them with, so a mount or variable the storefront lacks fails here too.
+The credential lives in the Secret overlay, which the chart never reads, so the
+origin is what states the agent holds one; a credential missing from the overlay
+fails the check at its configuration step.
+
+It runs the command directly, not through the image's entrypoint, and leaves out
+what the command does not use: the data volume, whose ReadWriteOnce claim a pod
+on another node could not attach while the storefront holds it; the /health
+probes, since no server starts; and the ZeroTier capabilities and device.
+*/}}
+{{- $agents := dict }}
+{{- include "storefront.agents" (dict "root" . "into" $agents) }}
+{{- range $name, $entry := $agents }}
+{{- $agent := mergeOverwrite (dict "secret" (dict)) $entry (dict "name" $name) }}
+{{- $origin := (($agent.tests | default dict).mediationOrigin) | default "" }}
+{{- if $origin }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "storefront.agentFullname" (dict "root" $ "agent" $agent) }}-mediation-check
+  labels:
+    {{- include "storefront.testLabels" $ | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  # As the Deployment: Service-link variables named for a Service beginning
+  # `storefront` would land in the loader's STOREFRONT_ override layer.
+  enableServiceLinks: false
+  containers:
+    - name: mediation-check
+      image: {{ include "storefront.image" $ }}
+      imagePullPolicy: {{ $.Values.image.pullPolicy }}
+      command:
+        - market-storefront
+        - check-mediation
+        - --origin
+        - {{ $origin | quote }}
+      env:
+        {{- include "storefront.agentEnv" (dict "root" $ "agent" $agent) | nindent 8 }}
+      volumeMounts:
+        {{- include "storefront.agentConfigMounts" (dict "root" $ "agent" $agent) | nindent 8 }}
+  volumes:
+    {{- include "storefront.agentConfigVolumes" (dict "root" $ "agent" $agent) | nindent 4 }}
+---
+{{- end }}
+{{- end }}

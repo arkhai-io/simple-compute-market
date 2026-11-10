@@ -100,6 +100,14 @@
         }
       }
     },
+    "mediation-lane-double": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
     "provisioning": {
       "type": "object",
       "required": [
@@ -666,6 +674,12 @@
           "additionalProperties": false,
           "properties": {
             "paymentsAccount": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "mediationOrigin": {
               "type": [
                 "string",
                 "null"

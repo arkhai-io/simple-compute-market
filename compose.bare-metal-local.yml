@@ -1,7 +1,8 @@
 # Development overlay for the bare-metal end-to-end lane.
 #
 # Layered over compose.bare-metal.yml, compose.dev.yml, which supplies the dev
-# chain, and compose.payments-double.yml, which supplies the payments lane double:
+# chain, and compose.payments-double.yml, which supplies the payments and mediation
+# lane doubles:
 #
 #     docker compose -p simple-market-bare-metal \
 #       -f compose.bare-metal.yml -f compose.dev.yml \
@@ -20,7 +21,7 @@
 # sink. The storefront waits for the dev chain, Mailpit and the payments double,
 # mounts the dev chain's Alkahest address book where its storefront.toml names
 # it, and the lane CA at the ca_bundle_path it names; the registry layers the
-# lane's profile recommending its pinned dispute authority. Whether the site
+# lane's profile recommending its mediation double. Whether the site
 # provisions through its mock profile is the run's choice, not this overlay's:
 # PROVISIONING_MODE, `mock` unless the run says `real`, is the site's last
 # profile.
@@ -74,7 +75,7 @@ services:
       - ./kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
       # The lane CA, at the ca_bundle_path the storefront's configuration names:
       # the only authority its payments client trusts for the double.
-      - ./tools/payments-lane-double/tls/lane-ca.pem:/run/payments-lane-double/lane-ca.pem:ro
+      - ./tools/lane-double-controls/tls/lane-ca.pem:/run/lane-doubles/lane-ca.pem:ro
 
   # A one-shot buyer in the `buyer` profile, which the lane never starts: the
   # lane's scenarios drive the buyer through typed clients from the test runner.

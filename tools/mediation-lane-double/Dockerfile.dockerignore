@@ -1,0 +1,32 @@
+# The image's own ignore file, which replaces the root .dockerignore for it. Deny
+# everything, then admit what the build reads: the wheelhouse, the shared uv entry
+# point, the double's project, source and fixtures, and the lane CA's certificates
+# and generator from the controls project. No environment, cache or build output
+# of either project enters the context, nor a leaf key `make tls` wrote locally:
+# the build generates its own.
+
+*
+
+!.dist/
+
+!scripts/
+scripts/*
+!scripts/uv_project.py
+
+!tools/
+tools/*
+!tools/mediation-lane-double/
+tools/mediation-lane-double/*
+!tools/mediation-lane-double/pyproject.toml
+!tools/mediation-lane-double/uv.lock
+!tools/mediation-lane-double/README.md
+!tools/mediation-lane-double/src/
+!tools/mediation-lane-double/fixtures/
+
+!tools/lane-double-controls/
+tools/lane-double-controls/*
+!tools/lane-double-controls/tls/
+tools/lane-double-controls/tls/*.key.pem
+
+**/__pycache__
+**/*.pyc

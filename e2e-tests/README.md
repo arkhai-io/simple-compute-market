@@ -75,6 +75,18 @@ payments-helper setting; configure the seller and the buyer's registry
 accordingly. The shared buyer profile writer explicitly opts into registry
 recommendations.
 
+The `MEDIATION` section (environment prefix `ARKHAI_MEDIATION__`), read through
+`tests/e2e/roles/helpers/mediation.py`, names the run's dispute authority for the
+buyer: SERVICE_URL its origin, ACCOUNT and RECORD_KEY its identity, API_KEY_ENV
+the variable the buyer's `[[DisputeCredential]]` names its token by, BUYER_API_KEY
+that token, CA_BUNDLE_PATH the bundle it is trusted under, and, for a lane's own
+target, LANE_OWNED and CONTROL_TOKEN. With SERVICE_URL set, the purchase drivers
+write the buyer's credential and hand the token to each `market` process under
+API_KEY_ENV; a missing required setting fails the scenario by name, an unready
+lane-owned target fails setup by name, and an unready external one reports
+`blocked`. With it blank, the scenarios that need an authority report `blocked`,
+and a purchase writes no credential.
+
 Each end-to-end lane configures its own target, the payments lane double
 ([`tools/payments-lane-double`](../tools/payments-lane-double/README.md)), which
 the lane runs beside its storefronts at `https://payments-double:8443`, and
@@ -234,7 +246,9 @@ builds its images, and runs its scenarios against it: `make test-e2e-vm`, `make
 test-e2e-bare-metal`, and `make test-e2e-apicredits`. Each leaves its stack
 running; `make e2e-<lane>-down` takes it down. `make test-e2e` runs all three in
 turn, taking each stack down before the next. The compute lanes' provisioning
-services run the mock profile unless `PROVISIONING_MODE=real`.
+services run the mock profile unless `PROVISIONING_MODE=real`. Every lane runs
+the payments and mediation lane doubles, and the VM lane's scenarios include the
+six [VM dispute controls](#vm-dispute-controls) modules.
 
 ### Hosted VM servicing
 
@@ -246,18 +260,18 @@ gated. Finally, a seller refund reverses the held payment, separately from
 callback-proven capacity return. The mock executor proves the service wiring, not
 a real guest or SSH access.
 
-The commit and servicing stages (1–2) run against the VM lane's payments double.
-The lane's two registries recommend a dispute authority under `.invalid` that can
-never answer, and Bob's secret overlay
+Every stage runs against the VM lane's doubles. The lane's two registries
+recommend the mediation lane double
+([`tools/mediation-lane-double`](../tools/mediation-lane-double/README.md)) as
+the dispute authority, and Bob's secret overlay
 (`dev-env/identities/bob.storefront.secrets.toml`) holds an identity-bound
-`[[DisputeCredential]]` for it, whose `api_key` is a public development value. With a usable credential the servicing stage reads the
-deal's authority view `running`; without one it reads `repair_required`. Bob's
-storefront logs "VM respondent discovery awaits recovery" at ERROR on every
-servicing cycle while that authority cannot be reached, which is expected in the
-lane. The operator-end and refund stages (3–4) need a dispute authority that
-accepts a filed case, MEDIATION.SERVICE_URL, blank by default, and report a
-blocked skip naming it; no lane runs one. The held payment stays in the double
-until the lane ends, and the module's resource release frees the capacity.
+`[[DisputeCredential]]` for it, whose `api_key` is a public development value and
+whose `ca_bundle_path` names the lane CA. No rule is installed, so the
+operator-end stage's filing is accepted and each part is held by a real
+extension at the payments double, nothing is ruled, and the storefront's
+lifecycle read lists one open extension per part, bound to the case; the refund
+stage then reverses the held money. The module's resource release frees the
+capacity.
 
 Against an external deployment, supply healthy payment and mediation
 authorities, set MEDIATION.SERVICE_URL to the mediation authority's URL — the
@@ -277,6 +291,53 @@ provide the direct entry point and observed stages; the gate reads the mediation
 origin it checks as `PAYMENTS.MEDIATION_URL`, apart from the scenario's
 MEDIATION.SERVICE_URL, so an external run sets both. Without a configured payment
 target all four stages report blocked skips; no Alkahest fallback is used.
+
+### VM dispute controls
+
+Six scenarios in the VM lane prove the lane's dispute wiring — the lane CA, the
+storefront's dispute adapter and servicing, and both doubles' controls together.
+Each is a module of its own under `tests/e2e/roles/scenarios/vms/dispute/`, with
+its own marker, on its own once-only deal over its own executor, pool and
+resource; a deal a buyer filed on cannot take a second delivery-end filing, so no
+scenario shares another's deal.
+
+| Marker | Module | What it proves |
+|---|---|---|
+| `e2e_vm_dispute_ruled_end` | `test_ruled_delivery_end.py` | a rule's ruling, held at its gate on the buyer's filing, applies its reverse only on resume; the storefront's next servicing step records the end with cause `ruling` and tears delivery down |
+| `e2e_vm_dispute_discount` | `test_operator_discount.py` | the storefront answers the buyer's case as respondent; an operator decision reverses part of the held money with no delivery end and closes the case, and delivery stays active |
+| `e2e_vm_dispute_lost_filing` | `test_lost_filing_answer.py` | the answer to the storefront's operator-end filing is dropped after commit; the storefront's servicing retries the filing and its adapter adopts the one case |
+| `e2e_vm_dispute_mediation_unavailable` | `test_mediation_unavailable.py` | with the mediation double unavailable, servicing reads the authority's outcome `unknown` while delivery stays active, and reads the case again once the outage is removed |
+| `e2e_vm_dispute_payments_hold` | `test_payments_hold_a_ruling.py` | payments loses its answer to the first of two reverses and is then unavailable while the decision is repeated; the storefront shows the ruling unapplied, and the decision repeated once payments answers completes it with exactly one reverse per effect |
+| `e2e_vm_dispute_hold_passed` | `test_hold_passed.py` | after the deal ends, both doubles' clocks advance past the part's terms end and then its release instant; the snapshot shows the payout, and the buyer's filing reports the part `not_held`, `paid_out`, and is dismissed with nothing held |
+
+Every stage advances one side effect through the services' typed clients, the
+doubles' `ControlClient`, or the mediation kit's dispute adapter, never a raw
+HTTP call. SCM files a case only as it ends delivery — the storefront's operator
+end, the buyer's `market end` after a surrender — and no SCM command files one
+on a running deal, so where a scenario needs a case on a delivering deal the
+harness files as the buyer: `file_as_buyer` (`tests/e2e/roles/helpers/mediation.py`)
+submits a delivery-end claim through the mediation kit's `MediationAdapter` and
+the deal-lifecycle kit's `submit_dispute`, with the buyer's token and the lane CA
+from the runner's `mediation` section and a file evidence store of the module's
+own. The storefront meets what a real buyer's filing gives it: no matching
+surrender, so it answers with a contest. The lost-filing scenario's filer is the
+storefront's operator end instead, since the buyer's retry is a same-key replay,
+not the adapter's adoption.
+
+The storefront's watch records an end from a delivery-end effect whatever its
+applied state, so no stage steps the storefront's servicing while a ruling waits
+at its gate. The payments-hold scenario's two reverses on one part are
+indistinguishable to a payments rule and an outage cannot be scoped, so it stops
+the ruling with a dropped answer on the first reverse, then an outage while the
+decision is repeated. In the hold-passed scenario no storefront step follows the
+clock advance, since the storefront reads wall time.
+
+The modules run in any order: each removes its rules through `lane_double_rules`,
+and the hold-passed module, the only one that advances the clocks, resets both
+doubles' clocks through `lane_double_clock`, whatever its outcome. A deal still delivering when its scenario's stages end is ended by the
+shared lease-expiry stages, for which the storefront files no case;
+`DisputeStageZ_NoFurtherCase` then steps servicing once and holds the deal to the
+scenario's own cases.
 
 ### VM buyer purchase
 
@@ -492,9 +553,11 @@ The scenario runs the shared buyer-purchase stages
 deal's stages from fulfillment onwards, inserting its own. Its supply stage
 declares a distinct backed whole host and its publication stage publishes only a
 USD 1.00/hour option for a one-hour term. The registry recommends the lane's
-pinned dispute authority, which the option names but which never answers; the
-buyer's teardown files a delivery-end case with it, whose `Unknown` outcome the
-scenario neither fails on nor reads as evidence. The option includes a
+mediation double, which the option names as its dispute authority; the buyer's
+teardown files a delivery-end case with it, and, where the run names a mediation
+target, the scenario asserts the case accepted with every part held — with no
+rule installed, nothing is ruled — and does not read the filing as refund
+evidence. The option includes a
 300-second delivery deadline, a 15-day dispute window (PAYMENTS.DISPUTE_WINDOW_SECONDS's
 default) and an unbounded case hold. The dispute window covers the delivery deadline
 plus the authority's minimum filing window; the payment `window=P7D` is a separate input.

@@ -4,6 +4,12 @@ The double mirrors the service's routes, bearer authentication, approval admissi
 read authorization, idempotency and error codes, and serves whatever the engine
 serves. All state is the engine's, in this process's memory; a restart loses it,
 since a run lives only as long as its lane.
+
+Beside the API it serves the lane doubles' control routes under ``/test/``,
+authenticated by the fixture control token: rules programming refusals and
+transport faults, the perceived clock the engine reads, funding, signer rotation
+and status. The transport-fault middleware wraps the whole app and leaves the
+control and health routes alone.
 """
 
 from __future__ import annotations
@@ -11,16 +17,29 @@ from __future__ import annotations
 import json
 import re
 import threading
-import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from lane_double_controls import routes as controls
+from lane_double_controls.clock import PerceivedClock, WallClock, wall_clock
+from lane_double_controls.middleware import FaultRequest, TransportFaultMiddleware
+from lane_double_controls.models import (
+    ClockAdvance,
+    ClockView,
+    ControlError,
+    Funded,
+    Funding,
+    Rule,
+    SignerIdentity,
+    Status,
+)
 from market_arkhai_payments.canonical import jcs_sha256, wire_json
+from market_arkhai_payments.contracts import get_contract
 from market_arkhai_payments.errors import PaymentsAPIError
 from market_arkhai_payments.fixtures import PaymentsAuthority
 from market_arkhai_payments.models import (
@@ -33,18 +52,15 @@ from market_arkhai_payments.models import (
 )
 from market_arkhai_payments.receipts import transaction_id
 
-from payments_lane_double.accounts import AccountDirectory
+from payments_lane_double.accounts import AccountDirectory, bearer_token
 from payments_lane_double.admission import admit
+from payments_lane_double.rules import RuleBook
 
 _TRANSACTION_ID = re.compile(r"^[0-9a-f]{64}$")
-# The scheme name is case-insensitive (RFC 7235); a token never holds whitespace,
-# which the account fixture refuses.
-_BEARER = re.compile(r"^bearer (\S+)$", re.IGNORECASE)
 Clock = Callable[[], int]
-
-
-def wall_clock() -> int:
-    return int(time.time())
+# The installed contract resources status reports, by their path in the kit wheel.
+_SCHEMA = "schema/payments.schema.json"
+_VECTORS = "test-vectors/payments.json"
 
 
 class PaymentsDouble:
@@ -70,11 +86,30 @@ class PaymentsDouble:
         self._mandates: dict[str, Mandate] = {}
 
     def authenticate(self, authorization: str | None) -> str:
-        match = _BEARER.fullmatch(authorization or "")
-        account = self.directory.account_for_token(match.group(1)) if match else None
+        token = bearer_token(authorization)
+        account = self.directory.account_for_token(token) if token else None
         if account is None:
             raise PaymentsAPIError(401, "authentication_required")
         return account
+
+    def fund(self, funding: Funding) -> Funded:
+        """Credit an account in the directory, as the funding control does."""
+
+        if not self.directory.knows(funding.account):
+            raise ControlError(404, "account_not_found",
+                               f"{funding.account} is not in the double's account directory")
+        with self._lock:
+            self.engine.fund(funding.account, self.directory.asset, int(funding.amount))
+        return Funded(account=funding.account, amount=funding.amount)
+
+    def rotate_signer(self) -> SignerIdentity:
+        """Sign every later receipt and snapshot with the fixture's second key."""
+
+        signer = self.directory.rotated_signer()
+        with self._lock:
+            self.engine.signer = signer
+        return SignerIdentity(scheme=signer.identity.scheme.value,
+                              identifier=signer.identity.identifier)
 
     def approve(self, account: str, request: ApprovalRequest) -> Any:
         mandate = request.mandate
@@ -174,29 +209,60 @@ def _transaction(value: str) -> str:
     return value
 
 
-def create_app(directory: AccountDirectory, *, clock: Clock = wall_clock) -> FastAPI:
-    """The double's ASGI app over a fresh engine funded from ``directory``."""
+async def _fault_request(request: Request) -> FaultRequest:
+    return FaultRequest(method=request.method, path=request.url.path,
+                        headers={name.lower(): value for name, value in request.headers.items()},
+                        body=await request.body())
 
-    double = PaymentsDouble(directory, clock=clock)
+
+async def _control_body(request: Request, model: type[BaseModel]) -> Any:
+    try:
+        return model.model_validate(json.loads(await request.body()))
+    except ValueError as error:
+        # A ValidationError is a ValueError, so a body the model refuses lands here too.
+        raise ControlError(422, "invalid_request", str(error)) from None
+
+
+def create_app(directory: AccountDirectory, *, clock: WallClock = wall_clock) -> FastAPI:
+    """The double's ASGI app over a fresh engine funded from ``directory``.
+
+    ``clock`` is the wall clock the perceived clock adds its offset to.
+    """
+
+    perceived = PerceivedClock(clock)
+    double = PaymentsDouble(directory, clock=perceived)
+    rules = RuleBook(directory)
     app = FastAPI(title="payments lane double", docs_url=None, redoc_url=None,
                   openapi_url=None)
     app.state.double = double
+    app.state.clock = perceived
+    app.state.rules = rules
+    app.add_middleware(TransportFaultMiddleware, classify=rules.fault_for)
 
     @app.exception_handler(PaymentsAPIError)
     async def payments_error(_: Request, exc: PaymentsAPIError) -> JSONResponse:
         return _error(exc.status_code, exc.code)
 
+    @app.exception_handler(ControlError)
+    async def control_error(_: Request, exc: ControlError) -> JSONResponse:
+        return JSONResponse(exc.body(), status_code=exc.status)
+
     @app.exception_handler(StarletteHTTPException)
-    async def unmatched(_: Request, exc: StarletteHTTPException) -> JSONResponse:
-        # An unknown path or method still answers with the published error body.
+    async def unmatched(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        # An unknown path or method still answers with its surface's error body.
+        if controls.is_control_path(request.url.path):
+            return await control_error(request, ControlError(
+                exc.status_code, "invalid_request", "no such control route"))
         return _error(exc.status_code, "invalid_request")
 
     @app.exception_handler(Exception)
     async def unexpected(_: Request, __: Exception) -> JSONResponse:
         return _error(500, "internal_error")
 
-    def caller(request: Request) -> str:
-        return double.authenticate(request.headers.get("authorization"))
+    async def caller(request: Request) -> str:
+        account = double.authenticate(request.headers.get("authorization"))
+        rules.refuse_if_programmed(await _fault_request(request))
+        return account
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -204,28 +270,28 @@ def create_app(directory: AccountDirectory, *, clock: Clock = wall_clock) -> Fas
 
     @app.post("/transactions")
     async def approve(request: Request) -> Any:
-        account = caller(request)
+        account = await caller(request)
         return double.approve(account, await _body(request, ApprovalRequest))
 
     @app.get("/transactions/{transaction}")
     async def snapshot(transaction: str, request: Request) -> Any:
-        account = caller(request)
+        account = await caller(request)
         return double.snapshot(account, _transaction(transaction))
 
     @app.get("/transactions/{transaction}/mandate")
     async def mandate(transaction: str, request: Request) -> Any:
-        account = caller(request)
+        account = await caller(request)
         return double.mandate(account, _transaction(transaction))
 
     @app.post("/transactions/{transaction}/attachments")
     async def attach(transaction: str, request: Request) -> Any:
-        account = caller(request)
+        account = await caller(request)
         identifier = _transaction(transaction)
         return double.attach(account, identifier, await _body(request, DealAttachment))
 
     @app.post("/transactions/{transaction}/events")
     async def submit(transaction: str, request: Request) -> Any:
-        account = caller(request)
+        account = await caller(request)
         identifier = _transaction(transaction)
         try:
             request_id = RequestId.model_validate(request.headers.get("idempotency-key")).root
@@ -236,11 +302,72 @@ def create_app(directory: AccountDirectory, *, clock: Clock = wall_clock) -> Fas
 
     @app.get("/balances/{account}")
     async def balance(account: str, request: Request) -> Any:
-        authenticated = caller(request)
+        authenticated = await caller(request)
         try:
             identifier = AccountId.model_validate(account).root
         except ValidationError:
             raise PaymentsAPIError(400, "invalid_request") from None
         return double.balance(authenticated, identifier)
 
+    _add_controls(app, directory, double, perceived, rules)
     return app
+
+
+def _add_controls(app: FastAPI, directory: AccountDirectory, double: PaymentsDouble,
+                  perceived: PerceivedClock, rules: RuleBook) -> None:
+    """Register a handler for each control route the payments double serves."""
+
+    def clock_view() -> ClockView:
+        return ClockView(perceived_now=perceived(), offset_seconds=perceived.offset)
+
+    async def install(request: Request) -> Response:
+        view = rules.install(await _control_body(request, Rule))
+        return JSONResponse(view.model_dump(mode="json", exclude_none=True), status_code=201)
+
+    async def listing(request: Request) -> Any:
+        return rules.listing().model_dump(mode="json", exclude_none=True)
+
+    async def delete(request: Request) -> Response:
+        rules.delete(request.path_params["rule_id"])
+        return Response(status_code=204)
+
+    async def advance(request: Request) -> Any:
+        perceived.advance((await _control_body(request, ClockAdvance)).seconds)
+        return clock_view().model_dump(mode="json")
+
+    async def reset(request: Request) -> Any:
+        perceived.reset()
+        return clock_view().model_dump(mode="json")
+
+    async def status(request: Request) -> Any:
+        metadata = get_contract().metadata
+        return Status(perceived_now=perceived(), offset_seconds=perceived.offset, contracts={
+            _SCHEMA: metadata["schema_sha256"], _VECTORS: metadata["vectors_sha256"],
+        }).model_dump(mode="json")
+
+    async def fund(request: Request) -> Any:
+        return double.fund(await _control_body(request, Funding)).model_dump(mode="json")
+
+    async def rotate(request: Request) -> Any:
+        return double.rotate_signer().model_dump(mode="json")
+
+    handlers: dict[controls.ControlRoute, Callable[[Request], Awaitable[Any]]] = {
+        controls.RULES: install, controls.RULE_LIST: listing, controls.RULE_DELETE: delete,
+        controls.CLOCK_ADVANCE: advance, controls.CLOCK_RESET: reset, controls.STATUS: status,
+        controls.FUNDING: fund, controls.SIGNER_ROTATE: rotate,
+    }
+    # Every control route the contract gives the payments double has its handler,
+    # so a route the contract adds cannot go unserved.
+    if set(handlers) != set(controls.routes_for("payments")):
+        raise RuntimeError("the payments double serves a different set of control routes "
+                           "than the control contract gives it")
+
+    def authorized(handler: Callable[[Request], Awaitable[Any]]
+                   ) -> Callable[[Request], Awaitable[Any]]:
+        async def endpoint(request: Request) -> Any:
+            controls.authorize(request.headers.get("authorization"), directory.control_token)
+            return await handler(request)
+        return endpoint
+
+    for route, handler in handlers.items():
+        app.add_api_route(route.path, authorized(handler), methods=[route.method])

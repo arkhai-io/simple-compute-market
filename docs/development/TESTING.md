@@ -384,9 +384,16 @@ move through the route's evaluate twin or the loop's dry run, advances exactly
 one side effect, and measures that effect against expectations through typed
 clients, with no sleeps: the only wait is on a request the stage made, or for
 an instant the deal's Agreement fixes, such as its start, since no control
-moves the wall clock (`wait_until` in
+moves the storefronts', sites' or buyer's clock (`wait_until` in
 `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`); a stage waiting
-for an instant then advances what acts on it explicitly. What a
+for an instant then advances what acts on it explicitly. A decision a service
+derives from a record and a timestamp is driven by moving that service's
+perceived clock through a control instead. Today only the lane doubles have
+one: each reads wall time plus an offset that a control moves forward, a
+scenario advances both doubles together through the `lane_double_clock` fixture
+(`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`), whose finaliser resets
+both to wall time whatever the module's outcome, and no storefront step follows
+an advance within its module, since the storefront still reads wall time. What a
 stage produced goes into the shared deal state for the stages that depend on
 it, and whatever happened, the fixture's finaliser resumes the loops.
 
@@ -621,9 +628,14 @@ project of its own:
   service call on a key known to be exhausted, is proven by the middleware
   conformance trace.
 
-Each lane also runs the payments double (`compose.payments-double.yml`), which
-its payment storefront — Bob, the bare-metal storefront, the credits storefront
-— settles against; see [Private Service Dependencies](#private-service-dependencies).
+Each lane also runs the payments double and the mediation double
+(`compose.payments-double.yml`): its payment storefront — Bob, the bare-metal
+storefront, the credits storefront — settles against the first, and the lane's
+registries recommend the second as the dispute authority every payment deal
+names; see [Private Service Dependencies](#private-service-dependencies). The
+VM lane also runs six dispute controls scenarios, each on its own deal, that
+program both doubles through their controls
+([`e2e-tests/README.md`, "VM dispute controls"](../../e2e-tests/README.md#vm-dispute-controls)).
 A lane target names only its Compose files, its project, and the run's
 provisioning mode: every value its stack reads is in a committed overlay,
 registry or site profile, or secret overlay, and the runner takes the lane's
@@ -678,13 +690,19 @@ reported as not run against Helm.
 
 After the scenario pod, validation runs every storefront payments-check test pod
 the release's hooks render (`helm get hooks`, each pod named
-`<release>-…-payments-check`), each as its own step and likewise counted as
+`<release>-…-payments-check`), then every mediation-check test pod
+(`<release>-…-mediation-check`), each as its own step and likewise counted as
 passed only on its own exit status of 0; a pod with no exit status is stopped.
 Each pod's log is kept as evidence beside the scenario pod's, and a release
-that renders no check pod is warned, never passed. The check pod runs the
-storefront's `check-payments` against the release's payments double, so it
-shows the storefront's CA mount, derived `ca_bundle_path`, overlay key and
-service URL working together; the release serves no payment scenario.
+that renders no check pod of a kind is warned, never passed. The payments-check
+pod runs the storefront's `check-payments` against the release's payments
+double, so it shows the storefront's CA mount, derived `ca_bundle_path`, overlay
+key and service URL working together. The mediation-check pod runs the VM
+storefront's `check-mediation --origin` against the release's mediation double,
+so it shows the dispute credential copied into the runtime overlay, its
+rewritten `ca_bundle_path`, the Service name and the token working together; it
+asserts nothing about the read's answer. The release serves no payment or
+dispute scenario.
 
 A mock-provisioned deal proves the services compose into a working deal, not
 that a real resource was delivered. Bare metal's release-qualified deal
@@ -1561,11 +1579,16 @@ passing render is not deployment evidence, just as it is not deal evidence.
   storefront rendering with nothing for its removed settings; and the
   payments-check test pod running the storefront's own command with the
   Deployment's image, environment, and configuration mounts but no data volume,
-  probes, or ZeroTier device, rendered only with payments and an account.
-  `helm/charts/payments-lane-double/tests/test_render.py` asserts the double is
-  off by default, runs once behind the Service `payments-double` in the local
-  release and not at all in the bare-metal release, and serves a named TLS
-  Secret over the image's files.
+  probes, or ZeroTier device, rendered only with payments and an account. The
+  VM storefront chart's render test asserts the same of the mediation-check test
+  pod, which runs `market-storefront check-mediation --origin` with the CA mount
+  and the Secret overlay present and renders only when `tests.mediationOrigin`
+  names an origin; in the local release Bob's names the mediation double's.
+  `helm/charts/payments-lane-double/tests/test_render.py` and
+  `helm/charts/mediation-lane-double/tests/test_render.py` assert each double is
+  off by default, runs once behind its Service (`payments-double`,
+  `mediation-double`) in the local release and not at all in the bare-metal
+  release, and serves a named TLS Secret over the image's files.
 - `helm/tests/test_release_topology.py` also holds the local release's payments
   values to the double's committed fixtures, and asserts the registry chart
   renders its settings as the profile `config-production.env`, sets only
@@ -1577,7 +1600,9 @@ passing render is not deployment evidence, just as it is not deal evidence.
 - Release tooling (`make test-release-tooling`) reads back the secret overlays
   `topology-secrets` writes: the seller payments key in each storefront's
   runtime overlay, and Bob's `[[DisputeCredential]]` equal to his Compose
-  secret overlay's (`scripts/tests/test_change_build_and_helm_targets.py`).
+  secret overlay's but for its `ca_bundle_path`, which names the storefront
+  chart's CA file (`storefront.caBundleFile`) rather than the Compose mount
+  (`scripts/tests/test_change_build_and_helm_targets.py`).
 
 **How to write one:**
 
@@ -1656,7 +1681,26 @@ authentication, admission, read authorization, idempotency and error codes —
 unless there is a compelling reason to deviate, and states the deviation; a
 double that answers differently proves only that the client agrees with the
 double. Where it wraps a kit's engine it serves what that engine serves, and it
-narrows its claims rather than its behaviour.
+narrows its claims rather than its behaviour. A double takes its producer's
+decisions — a dispute authority's rulings, say — as scenario-programmed answers,
+as mock provisioning takes a job's outcome, and never re-implements the
+producer's decision logic: a rules engine held to the producer's traces would
+drift whenever the producer revises its rules, and a lane result proves the
+client's handling of a decision, not the decision's arithmetic, which stays the
+producer's to qualify.
+
+**The lane doubles' controls.** Both lane doubles serve one typed control
+contract, `tools/lane-double-controls`, which the doubles and the end-to-end
+harness import; its [README](../../tools/lane-double-controls/README.md) lists
+the rules, routes and refusals. Every control is a deterministic step: nothing
+delays, races or runs in the background. A transport fault never applies to a
+control route or `/health`, so a finaliser can always remove the rule that
+caused it, and it abandons a started response, so SCM's clients see a transport
+error, as they would a lost response, never an HTTP error status. A scenario
+installs its rules through the `lane_double_rules` fixture
+(`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`), whose finaliser deletes
+them and fails naming any rule a case still waited on. A control no scenario
+exercises is proven by its double's own suite through the typed client.
 
 **The lanes' payments target.** Every end-to-end lane runs the payments double,
 `tools/payments-lane-double`: an HTTPS service at `https://payments-double:8443`
@@ -1679,13 +1723,32 @@ runs its payment storefront's `check-payments` from the storefront's own
 container, an authenticated read of the seller's balance at the double, and a
 failed check fails lane setup by name before any scenario.
 
-The lanes' registries recommend one pinned dispute authority nobody can answer —
-its origin under `.invalid`, its record key without a usable private half, its
-account without a token at the double — which sellers and buyers take from the
-registry rather than from a `[[Dispute]]` entry of their own. The VM payment
-scenario's case and refund stages need an authority that accepts a filed case,
-`MEDIATION.SERVICE_URL`, blank by default, and report a blocked skip naming it;
-its commit and servicing stages run against the double.
+**The lanes' mediation target.** Every lane also runs the mediation double,
+`tools/mediation-lane-double`, at `https://mediation-double:8443` under the same
+lane CA: it reproduces the dispute authority's API mechanics and rules a case
+only when a rule says so
+([test-compatibility, "The in-lane mediation double"](../../openspec/specs/test-compatibility/architecture.md#the-in-lane-mediation-double);
+its [README](../../tools/mediation-lane-double/README.md) states its deviation
+from its producer). The lanes' registries recommend its identity, which sellers and
+buyers take from the registry rather than from a `[[Dispute]]` entry of their
+own. `config-payments-lane.yml`'s `mediation` section holds the target, its
+identity, `lane_owned: true`, the CA bundle path, the buyer's token, the
+variable the buyer's credential names it by, and the control token;
+`e2e-tests/tests/e2e/roles/helpers/mediation.py` fails setup by name on an
+unready lane-owned target and reports a blocked skip for an unready external
+one, as the payments helper does. The harness writes the buyer's
+`[[DisputeCredential]]`, with its `api_key_env` and `ca_bundle_path`, and hands
+the buyer's token to each `market` process under that variable, never into the
+runner's environment. Bob's storefront holds his dispute credential, with the
+lane CA as its `ca_bundle_path`, in his secret overlay. The lanes run no
+`check-mediation`: the VM payment scenario's case stages and the VM dispute
+scenarios prove the storefront's mediation access, and the local release's Helm
+test runs the check (["Chart Render Tests"](#chart-render-tests)).
+
+A payment scenario run against both lane-owned doubles logs the label *lane
+doubles* with each double's installed contract hashes, read from its status
+through the typed control client (the `lane_doubles_evidence` fixture); only a
+hosted target yields live evidence.
 
 **The payments helper.** Payment scenarios read their payments policy through
 `e2e-tests/tests/e2e/roles/helpers/payments.py`. A blank PAYMENTS.SERVICE_URL

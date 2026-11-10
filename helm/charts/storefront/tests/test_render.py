@@ -1303,6 +1303,64 @@ def test_the_payments_check_pod_renders_only_with_payments_and_an_account() -> N
     assert not _payments_check_pods(_ok(removed))
 
 
+def _mediation_check_pods(manifest: str) -> list[str]:
+    return _documents(manifest, "tests/mediation-check-test.yaml")
+
+
+def test_the_mediation_check_pod_runs_the_command_with_the_deployments_mediation_access() -> None:
+    """The pod's environment, configuration mounts, and their volumes are the
+    Deployment's application container's, less the data volume and the ZeroTier
+    device; it runs the CLI directly with the local release's origin, with no
+    probes or capabilities, and carries no workload selector. That the origin is
+    the mediation double's Service is the umbrella's topology test."""
+    manifest = _ok(_render_local())
+    deployment = _source(manifest, "deployment.yaml")
+    application = _pod_containers(deployment)[1]
+    (pod,) = _mediation_check_pods(manifest)
+    lines = {line.strip() for line in pod.splitlines()}
+
+    assert f"name: {LOCAL_RELEASE}-storefront-bob-mediation-check" in lines
+    assert _yaml_block(pod, "command").splitlines() == [
+        "- market-storefront", "- check-mediation", "- --origin", '- "https://mediation-double:8443"'
+    ]
+    assert re.search(r"^ +image: (\S+)$", pod, re.MULTILINE).group(1) == re.search(
+        r"^ +image: (\S+)$", application, re.MULTILINE
+    ).group(1)
+    assert _yaml_block(pod, "env") == _yaml_block(application, "env")
+    unshared = {"tun-device", "arkhai-data"}
+    deployment_mounts = _items(_yaml_block(application, "volumeMounts"))
+    deployment_volumes = _items(_yaml_block(deployment, "volumes"))
+    assert unshared <= set(deployment_mounts) and unshared <= set(deployment_volumes)
+    assert _items(_yaml_block(pod, "volumeMounts")) == {
+        name: item for name, item in deployment_mounts.items() if name not in unshared
+    }
+    assert _items(_yaml_block(pod, "volumes")) == {
+        name: item for name, item in deployment_volumes.items() if name not in unshared
+    }
+    assert "persistentVolumeClaim" in deployment and "persistentVolumeClaim" not in pod
+    assert "/var/lib/arkhai" not in pod
+    for absent in ("Probe", "NET_ADMIN", "SYS_MODULE", "/dev/net/tun", "entrypoint.sh", "securityContext"):
+        assert absent not in pod, absent
+    assert {'"helm.sh/hook": test', "app.kubernetes.io/component: test", "enableServiceLinks: false"} <= lines
+    assert not any(line.startswith("app.kubernetes.io/name:") for line in lines)
+    # Every piece the check reads is present, so the comparison above is not
+    # between two empty lists: the CA bundle mount at the chart's CA file, which
+    # topology-secrets writes as the copied dispute credential's ca_bundle_path,
+    # the Secret overlay holding that credential, and the configuration.
+    assert _ca_bundle(pod, _config(manifest)) == ("configMap", "payments-ca-bundle", "ca-bundle.pem")
+    assert {"arkhai-config", "arkhai-secrets"} <= set(_items(_yaml_block(pod, "volumes")))
+
+
+def test_the_mediation_check_pod_renders_only_with_an_origin() -> None:
+    assert not _mediation_check_pods(_ok(_render()))
+    (pod,) = _mediation_check_pods(
+        _ok(_render(agent=_agent(tests={"mediationOrigin": "https://mediation.example"})))
+    )
+    assert '- "https://mediation.example"' in pod
+    removed = _render_layers(_bob(tests={"mediationOrigin": None}), files=(UMBRELLA / "local-values.yaml",), release=LOCAL_RELEASE)
+    assert not _mediation_check_pods(_ok(removed))
+
+
 _PROBE = """
 import json, warnings; warnings.simplefilter('ignore')
 from market_storefront.startup_refusal import StorefrontStartupError, require_publishable_storefront
