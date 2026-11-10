@@ -42,8 +42,13 @@ mechanical seller-fault remedy, and no identity rotation.
   monetary call.
 - **The authorization hook.** A pure hook answering whether commit, dispatch,
   billing start and disclosure may proceed from verified authority evidence.
-- **The materialization gate.** A rate mandate is never materialized unless the
-  composition declares per-period servicing.
+- **The materialization gate.** A rate mandate is never materialized with a
+  treatment the composition's servicing declaration does not list; the MVP's
+  list is `[charged]`.
+- **A bound fallback, if needed.** If the hosted service cannot execute `chosen`
+  on the dispute stop entry, the entry carries `charged` and that treatment is
+  bound into the option's settlement parameters, so a later restoration of
+  `chosen` changes new options' IDs rather than running deals' derivation.
 - **Conformance.** The rate vectors replay through the kit; the adapter is proven
   against the in-process engine and the payments double.
 
@@ -91,6 +96,6 @@ None.
 ### Knowledge to promote
 
 - D1: `settlement-servicing`'s spec and architecture companion — rate derivation and the adapter's command and observation surface.
-- D2: `settlement-servicing`'s spec — charged treatment as the only supported rate treatment, and refusal of the others.
-- D3: `settlement-servicing/architecture.md` — the dispute stop entry as the operator's lever, and the fallback if the hosted service cannot execute `chosen`.
+- D2: `settlement-servicing`'s spec — derivation limited to declared treatments, and refusal of the others.
+- D3: `settlement-servicing/architecture.md` — the dispute stop entry as the operator's lever, and the bound `charged` fallback if the hosted service cannot execute `chosen`.
 - D4: `deal-lifecycle/architecture.md`'s accepted limitations — earnings held until the stop plus the window — and Goal 8's accepted limitations in `docs/development/ROADMAP.md`.

@@ -31,8 +31,8 @@ operator runbooks. Turning the MVP on does not complete Goal 8.
 - **Live runs.** A complete on-demand deal, the buyer's stop, funds running out
   and spot preemption, against the hosted target, recorded as live evidence apart
   from lane-double evidence.
-- **The production declaration.** Per-period servicing is declared in the VM
-  production composition only after the hosted checks pass, with startup and
+- **The production declaration.** The VM production composition declares
+  `charged` servicing only after the hosted checks pass, with startup and
   withdrawal requalified under it, and a recorded rollback.
 - **The dispute authority's policy.** Arkhai operators are the MVP's dispute
   authority; a published policy states key retention for the life of a deal,
@@ -59,7 +59,7 @@ None.
 
 ## Non-Goals
 
-- Bare metal, `returned` or `prorated` treatment, and the default buyer taking a `returned` on-demand deal, which remains Goal 8's completion bar.
+- Bare metal, `returned` or `prorated` treatment, and Goal 8's completion bar (an unconfigured buyer taking on-demand and spot live under the shipped presets, with a live preemption returning the unstarted remainder), which stays with `activate-per-period-compute-servicing`.
 - The hosted mediation `delivery_end` revision and every mechanical ruling; filings that reach the hosted mediation service are triaged by hand.
 - Convergence's full matrix in both domains.
 - A site-enforced delivery deadline (`renewable-compute-lease-deadlines`); the runbook covers abandoned leases until it lands.

@@ -2,6 +2,8 @@
 
 ### Requirement: One rate-servicing matrix qualifies both compute lanes
 
+> **Owned by `serve-running-rate-deals-on-vm`.** Rows 0, 6, 7 and 9 in their reduced VM form and the scenario "A notice outlives servicing" in VM; kept until that change's design writes its delta. Stale in part: "Lane qualification identifies readiness and evidence class" names no landed requirement — runs are labelled lane-double evidence under "The in-lane payments double mirrors the service and proves its engine's surface"; the scenario "Interim spot needs explicit buyer policy" rests on an interim revision that does not exist, and rows 7 and 9 record the buyer policy the terms change ships.
+
 VM and bare-metal lanes MUST execute the rate-servicing matrix against the runnable payment and mediation doubles, including spot's prepared entry points. Each row MUST record physical progress, financial work and kept evidence separately. Reports MUST follow "Lane qualification identifies readiness and evidence class"; no double run MUST be labelled live.
 
 #### Scenario: The full matrix runs
@@ -23,6 +25,8 @@ VM and bare-metal lanes MUST execute the rate-servicing matrix against the runna
 
 ### Requirement: Lane interruption is not durable restart evidence
 
+> **Owned by `serve-running-rate-deals-on-vm`.** The VM production-application rebuild; kept until that change's design writes its delta. The bare-metal rebuild stays here.
+
 Lane scenarios MUST use pause/resume and uncertain-response controls for cross-service convergence. Durable restart MUST be proven at integration level by rebuilding the production application over the same database in both compute domains. Pause/resume MUST NOT be reported as process restart; bare-metal lanes MUST retain their no-service-restart boundary.
 
 #### Scenario: A filing response is lost
@@ -36,6 +40,8 @@ Lane scenarios MUST use pause/resume and uncertain-response controls for cross-s
 - **THEN** the original operations/cursors and completion history recover without duplicate effects
 
 ### Requirement: Rate lanes use coherent real time
+
+> **Stale.** It contradicts `docs/development/TESTING.md`'s scenario discipline, the landed "Each lane double reads a perceived clock the scenario advances", and the absence of any due-work barrier. Replacement rule: a row waits only for its own request's effect or an Agreement-fixed instant, and elapsed time is driven by advancing every perceived clock — both doubles' and the storefront's — together through the lane's joint clock fixture, which resets them whatever the module's outcome.
 
 Cross-service rate scenarios MUST run the doubles in wall-clock mode with short fixture periods/deadlines and bounded readiness/event waits. Setup MUST check clock skew and wait budgets and fail on incoherence before scenarios. Double clock jumps MUST NOT outrun storefront/site clocks. Deterministic injected-clock expiry/race permutations MUST remain library-integration evidence, not a new lane clock API.
 

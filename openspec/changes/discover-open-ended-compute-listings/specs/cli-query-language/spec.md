@@ -2,6 +2,10 @@
 
 ### Requirement: Compute discovery consumes common lifecycle projections
 
+> **Owned by `offer-per-period-vm-terms`.** The registered `arkhai_payments.period` projection; kept until that change's design writes its delta.
+>
+> **Stale.** The common lifecycle projections, their missing-notice and malformed-term rules, and their same-option evaluation are the permanent `cli-query-language` requirement "Common settlement fields include the lifecycle projections" and the `deal-lifecycle` codec requirements, implemented by the archived foundation.
+
 Compute discovery MUST consume the shared codec's common
 `early_termination.payer`, `early_termination.payee`,
 `early_termination.payee.notice_seconds`, `early_termination.premature_stop_penalty`, `adjudication.dispute.interface` and
@@ -21,6 +25,8 @@ mechanism params or depend on the final placement of common terms.
 - **THEN** the option fails validation rather than being classified by missing-field fallback
 
 ### Requirement: Penalty projection is asset-correlated
+
+> **Stale.** Already permanent: `cli-query-language`'s scenario "An option omits the premature-stop penalty" and the registry filter's co-required option asset (`core/registry/src/core_registry/filter-spec.yaml`).
 
 Compute discovery MUST consume the foundation-owned premature_stop_penalty projection under cli-query-language's “Settlement fields have common and mechanism-owned namespaces”. Penalty predicates MUST correlate with asset and every other predicate on that same option. A positive match MUST NOT replace buyer acceptance policy or claim money remains held.
 

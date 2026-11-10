@@ -1,6 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Seller notice uses lifecycle submit and authority-hosted stop
+> **Owned by `serve-running-rate-deals-on-vm`.** The negotiation-keyed notice command, the authority-hosted pending stop and its read; naming delivery_end in the on-demand refusal stays here, after the exceptional-end observation is qualified; kept until that change's design writes its delta.
 The seller half MUST admit a negotiation-keyed notice command only under the accepted payee entitlement. It MUST use the lifecycle submit command contract, submit stop immediately through the payment adapter, and return authority status rather than claim a locally scheduled payment end.
 
 #### Scenario: A seller preempts an accepted spot deal
@@ -28,6 +29,7 @@ The seller half MUST admit a negotiation-keyed notice command only under the acc
 - **AND** the response identifies delivery_end as the dispute-filing path for a seller-caused failure
 
 ### Requirement: Compute operator preemption delegates through the typed lifecycle client
+> **Owned by `serve-running-rate-deals-on-vm`.** VM's `deals preempt`; bare metal's stays here; kept until that change's design writes its delta.
 Both compute storefront operator CLIs MUST provide deals preempt by negotiation ID, using the lifecycle client's notice method and seller authentication. The command MUST preserve its operation key and optional at and display the authority's status and effective time without claiming a local timestamp is authoritative.
 
 #### Scenario: An operator requests a future stop
@@ -36,6 +38,7 @@ Both compute storefront operator CLIs MUST provide deals preempt by negotiation 
 - **AND** displays pending, unknown or accepted authority state without bypassing notice
 
 ### Requirement: Canonical rate buyer end preserves service during notice
+> **Owned by `serve-running-rate-deals-on-vm`.** The buyer half's stop-then-hint rate end and VM's canonical end verb; bare metal's verb stays here; kept until that change's design writes its delta.
 The buyer half MUST normally submit rate stop at the payment authority and send hint, allowing delivery until effective stop reaches end service through watch. It MUST reserve end_delivery for explicit immediate surrender or the unreachable-payment-authority delivery_end(cause=payer) case path. Immediate surrender MUST disclose that paid notice may outlast service.
 
 #### Scenario: A payer has nonzero notice

@@ -2,6 +2,8 @@
 
 ### Requirement: Agreed compute prices carry their unit
 
+> **Owned by `offer-per-period-vm-terms`.** The accessor and its absolute reading; kept until that change's design writes its delta. The negotiated multiplier's reading, rounding and repriced recovery are `negotiation-driven-capacity-resize`'s (design D2); the amount-read guard stays here.
+
 Compute price consumers MUST use one core accessor returning the agreed quote and
 its unit, `total` or `per_period`, with the selected period available for display.
 It MUST preserve negotiated rate-multiplier semantics, upward rounding and asset
@@ -30,6 +32,10 @@ explicit raw negotiation hooks MUST fail the repository check.
 - **THEN** the repository check fails rather than accepting an unclassified reader
 
 ### Requirement: Compute horizons bind both seller bounds
+
+> **Owned by `offer-per-period-vm-terms`.** The VM default horizon from `max_duration_seconds`; kept until that change's design writes its delta. The absolute bound, the runway and bare metal stay here.
+>
+> **Stale.** The term-end treatment "fails closed until vendored": the contract is vendored, and the term end names a treatment the composition declares (design D5, D6). "Max term" in the scenarios and "the final identity-bound option … bind 10 hours": the option carries no maximum term (the next requirement). The scenario "The full policy is enforced" restates the requirement as its outcome.
 
 Reserved duration MUST be positive and fit both bounds.
 
@@ -68,6 +74,8 @@ Reserved duration MUST be positive and fit both bounds.
 
 ### Requirement: The horizon is the Agreement's, and the option is unchanged by it
 
+> **Owned by `offer-per-period-vm-terms`.** VM horizon resolution into `duration_seconds` with the advertised option unchanged; kept until that change's design writes its delta. The check against `available_until_utc` and bare metal stay here.
+
 A recurring selection MUST resolve its horizon into `Agreement.duration_seconds` at acceptance — the buyer's stated horizon, else the earliest listing bound at the agreed start — and the seller's signed acceptance MUST carry the advertised option unchanged, with its advertised ID. The option MUST NOT carry a maximum term of its own. The buyer MUST check `duration_seconds` against both listing bounds at `start_utc` before committing.
 
 #### Scenario: Two buyers accept one option
@@ -82,6 +90,8 @@ A recurring selection MUST resolve its horizon into `Agreement.duration_seconds`
 
 ### Requirement: Recurring starts resolve before signature
 
+> **Owned by `offer-per-period-vm-terms`.** Whole-second recurring starts on VM; kept until that change's design writes its delta. Bare metal stays here.
+
 The terms runtime MUST resolve recurring start_utc to whole-second precision before the final signature, with bound/horizon and canonical option identity fixed. It MUST reject a fractional rate start rather than round accepted bytes. Once-only timestamp handling MUST remain unchanged.
 
 #### Scenario: A recurring start is fractional
@@ -90,6 +100,10 @@ The terms runtime MUST resolve recurring start_utc to whole-second precision bef
 - **THEN** acceptance refuses before signature rather than silently shifting the window
 
 ### Requirement: Acceptance checks current rate servicing
+
+> **Owned by `offer-per-period-vm-terms`.** VM acceptance refusal under the declared list `[charged]`; kept until that change's design writes its delta. Bare metal stays here.
+>
+> **Stale.** "Compatible servicing" is now the declared treatment list: acceptance refuses an option naming a treatment the composition does not declare (design D6).
 
 Seller acceptance MUST refuse recurring selections if the composition no longer
 declares compatible servicing, even if a cached advertised option carries recurring

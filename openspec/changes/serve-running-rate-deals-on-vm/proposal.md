@@ -20,7 +20,7 @@ records, so the storefront keeps no funding timer of its own.
 
 This change is one of Goal 8's MVP changes (see `offer-per-period-vm-terms`'s
 design for the set). It composes the rate servicing in the VM storefront, adds
-the seller's and buyer's commands, turns on the composition flag in the lanes,
+the seller's and buyer's commands, declares `charged` servicing in the lanes,
 and qualifies the MVP's four lane rows against the payments and mediation doubles.
 
 ## What Changes
@@ -31,9 +31,19 @@ and qualifies the MVP's four lane rows against the payments and mediation double
 - **Stop causes classified.** The payment watch maps each verified stop cause —
   the buyer's stop, the seller's entitled notice, funding exhaustion, the term end
   and the dispute authority's stop — to the lawful end it is.
-- **The physical completion fact and one operator signal.** A deal records its
-  physical release; a deal physically ended while its rate still runs at the
-  authority is shown to the operator, which is what manual triage acts on.
+- **What *ended* means.** A deal records its physical release, and the seller's
+  lifecycle list calls it *ended* only when it is physically released, every
+  payment part has a verified authority stop or end, and no end-related case is
+  open; otherwise it is *ending* with its reason, such as "rate still running at
+  the authority", which is what manual triage acts on.
+- **One owner of the servicing step order.** The per-deal step order and its error
+  isolation move into a `kit/deal-servicing` helper both storefronts' cycles call;
+  the loop registers through `kit/storefront`; the VM cycle's cursor becomes
+  durable. Bare metal adopting the helper fixes a defect in its cycle, where a
+  physical failure skips that deal's payment and dispute reads.
+- **The loop's journal allowance.** `settlement-servicing` states that a neutral
+  lifecycle loop may journal observations and injected-adapter effects, never
+  balances.
 - **Spot preemption.** The seller's `deals preempt` submits a stop with notice
   against the accepted payee entitlement; the authority holds the pending stop
   and the storefront tears down when it takes effect. The VM admin route
@@ -56,8 +66,9 @@ and qualifies the MVP's four lane rows against the payments and mediation double
 
 ### Modified Capabilities
 
-- `market-composition`: rate servicing in the VM composition; startup coherence and withdrawal.
-- `deal-lifecycle`: stop-cause classification for rate parts; the seller's notice; the buyer's rate end.
+- `market-composition`: rate servicing in the VM composition; startup coherence and withdrawal; loop registration through `kit/storefront`.
+- `settlement-servicing`: the neutral lifecycle loop's journal allowance.
+- `deal-lifecycle`: stop-cause classification for rate parts; the seller's notice; the buyer's rate end; the kit-owned per-deal step order; what *ended* means in the seller's list.
 - `vm-storefront-fulfillment`: `deals preempt`, the admin route's notice, and the operator signal.
 - `buyer-orchestration`: the buyer's rate end with same-key stop retry.
 - `test-compatibility`: the four MVP lane rows and their evidence labels.
@@ -68,7 +79,8 @@ None.
 
 ## Non-Goals
 
-- A storefront funding timer, revision netting, and the second, financial completion fact (convergence tasks 2.1 and 2.3 beyond the physical fact).
+- The opt-in seller funding timer, revision netting, and the financial completion fact's revision scoping, pending and unknown operations and manual acknowledgement (convergence tasks 2.1 and 2.3 beyond what this change takes).
+- One kit loop with whole-page passes (convergence task 2.2).
 - Self-penalty filings and mechanical rulings on rate parts (convergence 3.2), and execution of a ruling's `stop` or `penalty` effects in the mediation double.
 - The stateless recovery runner and evidence export (convergence 3.4).
 - Convergence's matrix rows 1–5, 8 and 10–13, and the extra windows and races of its task 4.2.
@@ -77,7 +89,7 @@ None.
 
 ## Impact
 
-- Composition: the VM storefront gains a rate adapter and its configuration; the per-period flag is on in the lanes and off elsewhere until `switch-on-hosted-per-period-vm`.
+- Composition: the VM storefront gains a rate adapter and its configuration; the servicing declaration lists `charged` in the lanes and nothing elsewhere until `switch-on-hosted-per-period-vm`.
 - CLI: a new seller verb, `deals preempt`; the buyer's end stops a running rate.
 - No database migration is expected beyond the physical completion fact, if the existing journal does not already record it.
 
@@ -86,7 +98,7 @@ None.
 - Depends on `offer-per-period-vm-terms` and `derive-rate-parts-in-the-payments-kit`. Its funds-exhausted row depends on `drive-the-storefront-clock-in-lanes`; its other rows do not.
 - `switch-on-hosted-per-period-vm` follows it.
 - Parts taken from `spot-deals-through-arkhai-payments` (task numbers in its `tasks.md`): 4.1–4.3 (notice, pending stop in lifecycle read, `deals preempt`), 4.4 (first-use fixtures, without opt-in variants), 4.5 (the buyer's rate end), 4.6 (the admin route, notice only), 5.1 (the lane's test-mode declaration).
-- Parts taken from `converge-ongoing-compute-leases`: 1.3 (composition), 2.1 (the physical fact only), 2.3 (stop-cause classification, without timers), 2.4 (one operator signal), 2.5 (stop to teardown, authority outage, restart), 3.1 (the rate delivery binding), 3.5 (startup coherence and withdrawal, without rotation), 4.1 (matrix rows 0, 6, 7 and 9, reduced to their MVP form, VM only), 4.3 (evidence labels).
+- Parts taken from `converge-ongoing-compute-leases`: 1.3 (composition), 2.1 (the physical fact, and the simple financial fact *ended* reads), 2.2's per-deal step order as a helper (not the whole-page loop), 2.3 (stop-cause classification, without timers), 2.4 (one operator signal), 2.5 (stop to teardown, authority outage, restart), 3.1 (the rate delivery binding), 3.5 (startup coherence and withdrawal, without rotation), 4.1 (matrix rows 0, 6, 7 and 9, reduced to their MVP form, VM only), 4.3 (evidence labels), and the loop-journal allowance in its `settlement-servicing` delta.
 
 ## Permanent documentation impact
 
@@ -100,3 +112,6 @@ None.
 - D1: `deal-lifecycle`'s spec and architecture companion — authority-recorded stops as the only end source for a running rate.
 - D2: `deal-lifecycle`'s spec — stop-cause classification.
 - D3: `test-compatibility`'s spec and `docs/development/TESTING.md` — the MVP lane rows.
+- D4: `deal-lifecycle`'s spec and architecture companion — the kit-owned per-deal step order and its isolation.
+- D5: `deal-lifecycle`'s spec — what *ended* and *ending* mean in the seller's list.
+- D6: `settlement-servicing`'s spec — the loop's journal allowance.

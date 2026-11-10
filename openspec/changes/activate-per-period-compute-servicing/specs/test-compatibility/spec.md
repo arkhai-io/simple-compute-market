@@ -2,6 +2,10 @@
 
 ### Requirement: Rate activation evidence identifies the real authority boundary
 
+> **Owned by `switch-on-hosted-per-period-vm`.** Live evidence recorded apart from lane-double evidence for the MVP's VM rows, and the scenarios "Double passes all scenarios" and "Required live target is unavailable" for those rows; kept until that change's design writes its delta.
+
+> **Stale.** The cited requirement "Lane qualification identifies readiness and evidence class" does not exist; the evidence classes are lane-double evidence and live evidence (test-compatibility's lane-double requirement). The scenario "Producer vectors are missing" and its proposed-contract class are moot: the vectors are vendored and no proposed contract exists (`kit/arkhai-payments/schema/SOURCE.md`).
+
 Reports MUST follow "Lane qualification identifies readiness and evidence class" per scenario. Both compute lanes MUST pass published qualification against both doubles. Activation MUST also record both-domain live complete deals and required hosted rate/stop/hold/case effects; missing live evidence MUST block completion, never count as a passing double run.
 
 #### Scenario: Producer vectors are missing

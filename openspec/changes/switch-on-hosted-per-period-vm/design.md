@@ -8,7 +8,9 @@ payments deployment.
 
 `activate-per-period-compute-servicing` designs the full switch-on: both compute
 domains, the consolidated matrix run hosted, the mediation `delivery_end`
-revision, and a default buyer taking a `returned` on-demand deal live. The MVP
+revision, and Goal 8's completion bar: an unconfigured buyer taking on-demand and
+spot live under the shipped presets, with a live preemption returning the unstarted
+remainder. The MVP
 switches on VM with charged treatment and operator-handled disputes; the rest
 stays with that change.
 
@@ -16,8 +18,9 @@ stays with that change.
 
 ### D1 — The declaration follows hosted evidence, and is withdrawn without reinterpreting deals
 
-Per-period servicing is declared in the VM production composition only after the
-hosted revision is confirmed and the live runs pass. Withdrawing it stops new
+The VM production composition declares `charged` servicing only after the hosted
+revision is confirmed and the live runs pass; `activate-per-period-compute-servicing`
+extends the list as further treatments are qualified hosted. Withdrawing it stops new
 per-period deals and leaves existing deals on the authorities they were made
 under.
 

@@ -38,6 +38,14 @@ One fixture advances the storefront's and both doubles' clocks by the same amoun
 and resets them together, so a stop the payments double records at an advanced
 instant is not in the storefront's future.
 
+### D3 — The mechanism is shareable by both storefronts
+
+Only the VM storefront composes the clock source here, because the MVP is VM-only.
+The mechanism lives where the bare-metal storefront can compose it unchanged:
+`converge-ongoing-compute-leases` adds it to bare metal (its task 4.1a) when
+bare-metal per-period deals arrive, as a composition change and an extension of
+the joint fixture.
+
 ## Open Questions
 
 - **The site's clock.** Teardown at a stop's effective time reaches the site,
@@ -47,9 +55,10 @@ instant is not in the storefront's future.
 - **Reach.** Whether the override covers only the deal lifecycle's clock, which
   makes the servicing decisions the MVP rows exercise, or every storefront module
   that reads time.
-- **Where the perceived clock lives.** In a production kit the storefront already
-  depends on, or by promoting the clock module of `tools/lane-double-controls` to a
-  production distribution the doubles then share.
+- **Where the perceived clock lives.** In a production kit both storefronts
+  already depend on, or by promoting the clock module of `tools/lane-double-controls`
+  to a production distribution the doubles then share; either way it must satisfy
+  D3.
 - **Monotonicity.** Whether reset may move the storefront's clock backwards while
   deals are journaled at advanced instants, or the fixture must instead discard
   the module's deals.

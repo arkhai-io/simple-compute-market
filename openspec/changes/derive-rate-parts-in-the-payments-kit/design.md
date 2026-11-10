@@ -34,11 +34,14 @@ publication's mandates are refused by current models. The kit therefore derives
 the vendored contract's rate part, and the MVP uses the subset of it listed in
 D2.
 
-### D2 — Charged treatment only
+### D2 — Only declared treatments are derived; the MVP declares `charged`
 
-Every stop entry and the part end carry `partialPeriod: charged`. A rate mandate
-or option asking for `returned` or `prorated` is refused at derivation, so no
-deal depends on a treatment the MVP has not qualified. The MVP's use of the
+Derivation and materialization read the composition's servicing declaration, the
+list of started-period treatments it has qualified (`offer-per-period-vm-terms`).
+A rate mandate or option asking for an undeclared treatment is refused, so no deal
+depends on a treatment its composition has not qualified. The MVP's declaration is
+`[charged]`, so every stop entry and the part end carry `partialPeriod: charged`;
+`spot-deals-through-arkhai-payments` adds the others as compositions declare them. The MVP's use of the
 contract is then: rate approval, payee `start`, payer and payee `stop` with
 notice, reserve-ahead refill and exhaustion at funded-through, the term `end`,
 `reverse` while held, and signed snapshots.
@@ -52,6 +55,14 @@ and the payments service's `reverse`. If the hosted service cannot execute
 `chosen` treatment on that entry, the entry carries fixed `charged` treatment
 instead; which one ships is settled with the payments team (`switch-on-hosted-per-period-vm`).
 
+If the fallback ships, the dispute entry's treatment is bound into the option's
+settlement parameters from the first deal, so it is part of the option ID. The
+buyer's exact check re-derives the mandate from the Agreement and the option; a
+derivation rule that later changed from `charged` to `chosen` would make every
+running deal re-derive differently. With the treatment bound, MVP-era options keep
+re-deriving as `charged`, and `spot-deals-through-arkhai-payments`' restoration of
+`chosen` gives new options new IDs.
+
 Rejected: a zero-notice seller stop on on-demand, which changes the product's
 terms; and an administrative stop outside the deal's terms, which the deal's
 signed authorities would not record.
@@ -60,9 +71,11 @@ signed authorities would not record.
 
 The derivation keeps the `afterStop` hold. A seller is paid for a running deal
 only after its part stops and the window passes. This is an accepted MVP
-limitation: early deals are expected to last less than a day. A `for` hold, which
-releases each period's earnings a window after it is earned, is the remedy if
-long deals become common.
+limitation: early deals are expected to last less than a day. In the full product
+the hold becomes a seller-chosen option term the buyer sees: a shorter `for` hold
+releases earnings sooner and is displayed as reduced buyer protection, since a
+case can reach only money still held (`negotiate-open-ended-compute-terms` owns
+the term, `spot-deals-through-arkhai-payments` its derivation).
 
 ## Open Questions
 

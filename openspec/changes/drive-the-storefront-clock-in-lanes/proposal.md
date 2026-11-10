@@ -53,7 +53,7 @@ None.
 ## Non-Goals
 
 - A perceived clock in the site, the buyer, or the registry, unless the design finds an MVP lane row that cannot run without one.
-- The bare-metal storefront; it follows when bare metal's per-period deals do.
+- Composing the clock in the bare-metal storefront; `converge-ongoing-compute-leases` adds it (its task 4.1a), so this change keeps the mechanism composable by both storefronts.
 - Writing the funds-exhausted scenario itself, which is `serve-running-rate-deals-on-vm`'s.
 - Any clock behaviour in a production deployment other than wall time.
 
@@ -81,3 +81,4 @@ None.
 
 - D1: `market-composition`'s spec — the clock source, its default and its production refusal; `docs/development/DEPLOYMENT_AND_CONFIG.md` — the setting.
 - D2: `test-compatibility`'s spec and `docs/development/TESTING.md` — the storefront as a service with a perceived clock, and the joint fixture.
+- D3: `market-composition/architecture.md` — the clock mechanism as composable by every storefront.
