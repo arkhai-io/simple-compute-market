@@ -22,7 +22,7 @@ zerotier_network = ""
 # Persist by default: this is the path the seller compose mounts a named
 # volume at (compose/seller.yml -> .../data/storefront) and the one the
 # quickstart documents, so a config that omits db_path still survives a
-# container recreate. The parent dir is auto-created on first start. An
+# container recreate. `market-storefront-migrate` creates the parent dir. An
 # ephemeral default (e.g. /tmp) silently loses all listing/deal state on
 # restart. Operators running outside the container should set an absolute
 # db_path in storefront.toml.

@@ -24,10 +24,10 @@ from market_core.schemas import SettlementOption
 from storefront_client import StorefrontClientError
 
 from tests.e2e.roles.helpers.ssh_access import SshEndpoint
+from tests.e2e.roles.scenarios.vms.host_registry import refresh_storefront_projections
 from tests.e2e.roles.scenarios.vms.purchase_driver import VmPurchaseParts
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
     REAL_REGION,
-    REAL_RESOURCE_ID,
     RealVmComputeDealDriver,
     RealVmDealState,
     delivered_endpoint,
@@ -72,13 +72,27 @@ class RealVmPurchaseDriver(VmPurchaseParts, RealVmComputeDealDriver):
     def resource_query(self) -> str:
         return f'region="{REAL_REGION}"'
 
+    def discover(self, listing_id: str) -> Any:
+        refresh_storefront_projections(self.storefront_admin_client)
+        # The CLI discovers by region, which must select this resource alone
+        # before it can approve a payment. Resource identifiers are not part
+        # of the registry's query vocabulary.
+        matches = self.purchase_registry.list_listings(region=REAL_REGION, limit=2).listings
+        assert len(matches) == 1 and str(matches[0].id) == listing_id, (
+            "real VM purchase discovery is ambiguous or selects another listing",
+            [str(item.id) for item in matches], listing_id,
+        )
+        listing = self.purchase_registry.get_listing(listing_id)
+        assert listing.listing_resource.get("resource_id") == self.reserved_resource_id, listing
+        return listing
+
     def second_purchase(self, buyer_public_key: str) -> RealVmPurchaseDriver:
         """This driver for a second purchase made while this one's guest runs."""
         return dataclasses.replace(self, buyer_public_key=buyer_public_key, guests_once_delivered=2)
 
     def check_purchase_option(self, listing: Any, option: SettlementOption) -> None:
         resource = listing.listing_resource
-        assert resource.get("resource_id") == REAL_RESOURCE_ID, resource
+        assert resource.get("resource_id") == self.reserved_resource_id, resource
         assert resource.get("region") == REAL_REGION, resource
         assert not any(resource.get(key) for key in ("gpu_model", "gpu_count")), (
             "the target sells no GPU, but its listing states one", resource,
@@ -120,7 +134,7 @@ class RealVmPurchaseDriver(VmPurchaseParts, RealVmComputeDealDriver):
         """Reserve one guest's shape of the resource: what a released guest
         returns while another still holds its own slice."""
         return storefront_admin_client.admin_reserve_capacity(
-            required_attributes={"resource_id": REAL_RESOURCE_ID,
+            required_attributes={"resource_id": self.reserved_resource_id,
                                  "dimensions": self.target.listing_shape.model_dump()},
             listing_id=listing_id,
             escrow_uid=escrow_uid,

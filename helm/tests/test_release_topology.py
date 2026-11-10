@@ -846,8 +846,12 @@ def test_one_release_running_both_storefronts_on_its_provisioning_service_is_ref
 
 
 def _resolver_environment(deployment: str) -> dict[str, str]:
-    """The registry container's whole ``env`` block, as name and value."""
-    block = deployment.split("          env:\n", 1)[1].split("          volumeMounts:\n", 1)[0]
+    """The registry container's whole ``env`` block, as name and value.
+
+    The application container's, after the migration init container's, which
+    the registry chart's own render test holds equal to it."""
+    application = deployment.split("\n      containers:\n", 1)[1]
+    block = application.split("          env:\n", 1)[1].split("          volumeMounts:\n", 1)[0]
     pairs = re.findall(r'- name: (\S+)\n\s+value: "?([^"\n]*)"?', block)
     assert len(pairs) == block.count("- name: "), f"an env entry is not a plain value: {block}"
     return dict(pairs)
@@ -1013,8 +1017,11 @@ def test_the_registry_posture_checks_refuse_a_mismatched_descriptor() -> None:
 _REGISTRY_PROBE = """
 import json, sys
 from core_registry.config import load_settings
-settings = load_settings({"CONFIG_DIRECTORY": sys.argv[1], "ACTIVE_PROFILES": sys.argv[2]})
-print(json.dumps(settings.model_dump(mode="json")))
+from core_registry.settings_source import load_database_settings
+resolver = {"CONFIG_DIRECTORY": sys.argv[1], "ACTIVE_PROFILES": sys.argv[2]}
+settings = load_settings(resolver).model_dump(mode="json")
+settings["migration"] = load_database_settings(resolver).model_dump(mode="json")
+print(json.dumps(settings))
 """
 
 
@@ -1025,7 +1032,8 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
     and the sequences a single-quoted dotenv value decodes, a backslash pair and
     a backslashed quote. Each value arrives as given, the dispute authorities as
     the list, and the secret profile both adds a key and overrides one the
-    rendered profile states."""
+    rendered profile states. The migration's loader reads the same database URL
+    and log level from them."""
     python = os.environ.get("REGISTRY_PYTHON")
     if not python:
         print("skip: REGISTRY_PYTHON unset; the registry loader check did not run")
@@ -1080,6 +1088,9 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
     # on the setting both state.
     assert profile["LOG_LEVEL"] == "debug" and settings["log_level"] == "warning"
     assert settings["admin_api_key"] == "placeholder-admin-key"
+    # The migration init container reads the same profiles through its own
+    # loader, and finds the database the application serves.
+    assert settings["migration"] == {"database_url": profile["DATABASE_URL"], "log_level": "warning"}
 
 
 # --- the storefront's own loader -----------------------------------------

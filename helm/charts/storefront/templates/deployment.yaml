@@ -70,17 +70,33 @@ spec:
       # whether the volume is a PVC or emptyDir.
       securityContext:
         fsGroup: 1000
-      # No init container waits on the registry, a chain, or a site: the
-      # storefront starts while they are unreachable, reports them degraded in
-      # its system status, and its loops retry until they answer. A wait here
-      # would hold the pod back on a dependency the process already tolerates.
+      # The one init container is the storefront's own migration, which acts
+      # on its own database: the application refuses a database the migration
+      # has not brought to its chain. It runs without entrypoint.sh, which
+      # only starts ZeroTier. No init container waits on the registry, a chain,
+      # or a site: the storefront starts while they are unreachable, reports
+      # them degraded in its system status, and its loops retry until they
+      # answer. A wait here would hold the pod back on a dependency the process
+      # already tolerates.
+      initContainers:
+        - name: migrate
+          image: {{ include "storefront.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command:
+            - market-storefront-migrate
+          env:
+            {{- include "storefront.agentEnv" (dict "root" $ "agent" $agent) | nindent 12 }}
+          volumeMounts:
+            {{- include "storefront.agentConfigMounts" (dict "root" $ "agent" $agent) | nindent 12 }}
+            - name: arkhai-data
+              mountPath: {{ $.Values.persistence.mountPath | quote }}
       containers:
         - name: market-storefront-{{ $agent.name }}
           image: {{ include "storefront.image" $ }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           # entrypoint.sh starts the ZeroTier daemon then execs the
           # CLI verb. Registration and heartbeating are handled inside
-          # `serve` at startup — no separate init container needed.
+          # `serve` at startup, not by an init container.
           command:
             - ./entrypoint.sh
             - market-storefront

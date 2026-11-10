@@ -110,6 +110,7 @@ def test_flags_written_as_text_parse_as_booleans(configure, flag, text, expected
     if flag == "DEVELOPMENT_AUTH" and not expected:
         # Without development authentication, the run names its API key instead.
         values["API_KEY_ENV"] = "ARKHAI_PAYMENTS_API_KEY"
+        values["BUYER_API_KEY"] = "payments-helper-test-buyer-key"
     configure(**values)
     config = payments.configured_payments(ready=lambda _url: True)
     assert getattr(config, flag.lower()) is expected
@@ -264,7 +265,6 @@ def test_the_buyer_key_reaches_the_market_process_environment(configure, tmp_pat
 
 
 @pytest.mark.parametrize("values", [
-    {"BUYER_API_KEY": ""},
     {"DEVELOPMENT_AUTH": True, "API_KEY_ENV": ""},
 ])
 def test_no_key_is_handed_over_without_one_or_with_development_authentication(
@@ -335,3 +335,19 @@ def test_a_flag_that_is_not_a_boolean_fails(configure, flag) -> None:
     outcome = _outcome(ready=lambda _url: True)
     assert isinstance(outcome, Failed)
     assert f"PAYMENTS.{flag} must be true or false" in str(outcome)
+
+
+@pytest.mark.parametrize("token", [None, "", " ", "public-test-token\n", "public\rtest-token"])
+def test_an_unusable_buyer_token_fails_before_readiness_without_exposing_it(configure, token) -> None:
+    configure(**{**_KEYED, "BUYER_API_KEY": token})
+    outcome = _outcome(ready=_never_asked)
+    assert isinstance(outcome, Failed)
+    assert "PAYMENTS.BUYER_API_KEY" in str(outcome)
+    assert "public-test-token" not in str(outcome)
+    assert "public\rtest-token" not in str(outcome)
+
+
+def test_development_authentication_needs_no_buyer_token(configure) -> None:
+    configure(**{**_COMPLETE, "BUYER_API_KEY": "", "API_KEY_ENV": ""})
+    config = payments.configured_payments(ready=lambda _url: True)
+    assert payments.buyer_payments_environment(config) == {}

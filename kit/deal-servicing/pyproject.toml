@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-deal-servicing"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Seller evidence, delivery-end journals and lifecycle observation."
 requires-python = ">=3.12"

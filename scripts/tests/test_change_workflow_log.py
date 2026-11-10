@@ -886,6 +886,43 @@ def test_a_round_recorded_after_the_fact_is_given_its_last_record_before_it(
         note_round(log, [[1]], "owner", after=-1)
 
 
+def test_a_round_over_the_open_rounds_sections_continues_it(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    (log.parent / "transcripts").mkdir(parents=True)
+    (log.parent / "transcripts" / "04-review.log").write_text("x", "utf-8")
+    first = note_round(log, [[1, 2], [3, 4]], "plan", clock=clock, commit="base")
+    (log.parent / "transcripts" / "09-implement.jsonl").write_text("x", "utf-8")
+
+    resumed = note_round(log, [[4]], "owner", clock=clock, commit="later")
+
+    assert (resumed["after"], resumed["commit"], resumed["continues"]) == (4, "base",
+                                                                             first["seq"])
+
+
+def test_a_round_after_the_open_rounds_triage_starts_a_new_round(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    log.parent.mkdir()
+    note_round(log, [[1, 2], [3, 4]], "plan", clock=clock, commit="base")
+    append_entry(log, {"step": "triage", "outcome": "finished",
+                       "triaged": ["05-implementation"]}, clock)
+    (log.parent / "06-validation.md").write_text("x", "utf-8")
+
+    later = note_round(log, [[4]], "owner", clock=clock, commit="later")
+
+    assert (later["after"], later["commit"]) == (6, "later") and "continues" not in later
+
+
+def test_a_round_naming_a_section_the_open_round_lacks_starts_a_new_round(
+        tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    log.parent.mkdir()
+    note_round(log, [[1, 2]], "plan", clock=clock, commit="base")
+
+    later = note_round(log, [[2, 3]], "owner", clock=clock, commit="later")
+
+    assert later["commit"] == "later" and "continues" not in later
+
+
 # The owner's waiver of another design review is a plain direction to planning.
 
 def test_the_owner_waives_another_design_review_by_a_direction(tmp_path: Path) -> None:

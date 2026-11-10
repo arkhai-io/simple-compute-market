@@ -4,8 +4,11 @@ A cycle derives candidates from every configured site's projection, publishes ne
 ones, refreshes the terms of open ones, closes those whose source no longer
 supports them, holds those whose source cannot be read, and reopens those
 reconciliation closed when their source supports them again. It never touches a
-listing its seller closed. See openspec/specs/storefront-publication/spec.md,
-"Publication runs as a controllable storefront lifecycle loop".
+listing its seller closed. It ends by converging each registry on the
+storefront's listings and closing at each registry any open listing of the
+storefront's that it does not hold open. See
+openspec/specs/storefront-publication/spec.md, "Publication runs as a
+controllable storefront lifecycle loop".
 
 The capacity-publication kit's cycle driver runs the synchronous core
 publication runner in a worker thread and returns each callback to the event
@@ -53,6 +56,7 @@ from market_capacity_publication import (
     SiteDerivationLog,
     SiteProjectionState,
     converge_registries,
+    retire_unheld_listings,
 )
 from market_resource_pools_contracts.backing import capacity_backing
 
@@ -257,12 +261,15 @@ class VmPublicationCycle:
         return self._report()
 
     async def _converge_registries(self) -> None:
-        """Repair every registry that missed a publish, close, or reopen.
+        """Repair every registry that missed a publish, close, or reopen, then
+        close at each registry the listings the storefront does not hold open.
 
         Runs after derivation so it sees this cycle's own outcomes; a dry run
-        reports what it would resend without sending it.
+        reports what it would resend and close without sending either.
         """
-        await converge_registries(self._runtime(), self.report)
+        runtime = self._runtime()
+        await converge_registries(runtime, self.report)
+        await retire_unheld_listings(runtime, self.report)
 
     def _report(self) -> dict[str, Any]:
         return {"loop": "publication", **self.report.as_dict()}

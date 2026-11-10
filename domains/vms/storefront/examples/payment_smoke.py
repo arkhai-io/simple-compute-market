@@ -53,6 +53,7 @@ from market_storefront.domain_runtime import (
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 PAYER = "00000000-0000-4000-8000-000000000011"
@@ -129,7 +130,9 @@ async def main(*, end_before_delivery=False):
     settlement_data = stage.settlement_data(json.loads(raw)).to_wire()
 
     with tempfile.TemporaryDirectory(prefix="vm-payment-demo-") as directory:
-        db = SQLiteClient(str(Path(directory) / "storefront.db"), registry=registry)
+        db_path = Path(directory) / "storefront.db"
+        migrate_storefront_database(db_path)
+        db = SQLiteClient(str(db_path), registry=registry)
         binding = prepare_vm_listing_binding(
             listing_id="vm-demo",
             candidate={

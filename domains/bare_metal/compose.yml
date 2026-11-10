@@ -16,6 +16,9 @@
 services:
   bare-metal-registry:
     image: arkhai:registry
+    # The migration before the application, which refuses a database it has
+    # not migrated.
+    command: ["sh", "-c", "registry-migrate && exec uvicorn core_registry.main:app --host 0.0.0.0 --port 8080"]
     ports:
       - "${BARE_METAL_REGISTRY_PORT:-8080}:8080"
     env_file:
@@ -81,6 +84,10 @@ services:
 
   bare-metal-storefront:
     image: ${BARE_METAL_STOREFRONT_IMAGE:-arkhai:bare-metal-storefront}
+    # The migration command runs before the storefront, which refuses a
+    # database it has not migrated. Setting the entrypoint drops the image's
+    # `serve` command, which this line restates.
+    entrypoint: ["sh", "-c", "bare-metal-storefront-migrate && exec bare-metal-storefront serve"]
     depends_on:
       bare-metal-registry:
         condition: service_healthy

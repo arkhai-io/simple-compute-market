@@ -1,9 +1,9 @@
 """Integration tests for arkhai_vms_listings.reconciler against SQLite.
 
-External boundary: a real sqlite3 file DB with a minimal hand-built schema
-(not the full SQLiteClient migration chain) -- reconciler.py is itself plain
-synchronous sqlite3 code with no async dependencies, so a minimal schema
-exercising exactly the tables it reads/writes is the right level.
+External boundary: a real sqlite3 file DB migrated by the storefront's chain,
+seeded through plain SQL -- reconciler.py is itself plain synchronous sqlite3
+code with no async dependencies, so rows written directly to the tables it
+reads are the right level.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from arkhai_vms_listings.reconciler import ReconciliationScope
 import json
 import sqlite3
 import pytest
-from core_storefront.sqlite_migrations import migrate_storefront_domain_bindings_schema
 from arkhai_vms_listings.pricing_resolution import GpuPricingFields
 from arkhai_vms_listings.reconciler import (
     POOL_SHAPES_REQUIRED_MESSAGE,
@@ -35,9 +34,6 @@ from tests._reconciler_cases import (
     _BIG,
     _SMALL_SHAPE,
     _UNBACKED,
-    _VM_BINDING,
-    _VM_DOMAIN,
-    _VM_REGISTRY,
     _available_vm_slices,
     _declared_pool,
     _gpu_key,
@@ -97,32 +93,11 @@ class TestAvailableComputeSlices:
         slices = _available_vm_slices(db_path, site_pool_projection={"site-a": []},)
         assert slices == []
 
-    def test_a_home_site_pool_without_an_override_ignores_a_retained_legacy_row(
+    def test_a_pool_without_an_override_resolves_its_hint_then_the_configured_default(
         self, db_path,
     ):
-        """An upgraded database may still hold a pool-keyed legacy override row
-        for the storefront's first site. Nothing reads it: each commercial
-        field resolves from the pool's hint, then the configured default."""
-        conn = sqlite3.connect(db_path)
-        try:
-            conn.execute(
-                """
-                CREATE TABLE compute_capacity_pools (
-                  pool_id TEXT PRIMARY KEY, resource_type TEXT, gpu_model TEXT,
-                  region TEXT, sla REAL, total_gpu_count INTEGER, status TEXT,
-                  min_price TEXT, token TEXT, max_duration_seconds INTEGER,
-                  accepted_escrows TEXT, settlements TEXT
-                )
-                """
-            )
-            conn.execute(
-                "INSERT INTO compute_capacity_pools VALUES "
-                "('gpu-pool', 'compute.gpu', 'H100', 'legacy-region', 99.9, 4, "
-                "'active', '10', '0xtoken', 7200, '[]', NULL)"
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        """Each commercial field of a pool with no override resolves from the
+        pool's hint, then the configured default."""
         projection = {
             "site-a": [
                 {
@@ -469,44 +444,26 @@ class TestClosedAvailableListingIds:
 
 
 class TestSchema:
-    def test_domain_binding_schema_migration_is_idempotent(self, db_path):
+    def test_fresh_storefront_database_has_no_legacy_mapping_table(self, db_path):
+        """The common listing binding is the only VM listing mapping: the
+        migrated database holds ``storefront_listing_bindings`` and no
+        ``derived_compute_listings``."""
         conn = sqlite3.connect(db_path)
         try:
-            migrate_storefront_domain_bindings_schema(conn)
-            migrate_storefront_domain_bindings_schema(conn)
             columns = {
                 row[1]
                 for row in conn.execute(
                     "PRAGMA table_info(storefront_listing_bindings)"
                 )
             }
-        finally:
-            conn.close()
-        assert {
-            "listing_id",
-            "site_id",
-            "offering_mode",
-            "domain_identity",
-            "contract_major",
-            "contract_minor",
-        } <= columns
-
-    def test_fresh_storefront_database_has_no_legacy_mapping_table(self, tmp_path):
-        """The common listing binding is the only VM listing mapping.
-
-        A fresh database never creates ``derived_compute_listings``; only a
-        database written before the binding existed still carries it, for the
-        storefront-domain migration tool to read.
-        """
-        from market_storefront.utils.sqlite_client import SQLiteClient
-
-        client = SQLiteClient(
-            db_path=str(tmp_path / "sqlite-client.db"),
-            registry=_VM_REGISTRY,
-        )
-        assert client.domain_registry.resolve(_VM_BINDING) is _VM_DOMAIN
-        conn = sqlite3.connect(client.db_path)
-        try:
+            assert {
+                "listing_id",
+                "site_id",
+                "offering_mode",
+                "domain_identity",
+                "contract_major",
+                "contract_minor",
+            } <= columns
             assert conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE name='derived_compute_listings'"
             ).fetchone() is None

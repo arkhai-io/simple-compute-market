@@ -44,7 +44,7 @@ For compute provisioning and e2e, deterministic profile parsing, ordered
 base/profile include resolution, and Dynaconf construction live in
 `arkhai-kit-config`. Their composition roots still read `CONFIG_DIRECTORY`
 and `ACTIVE_PROFILES` from the process environment and pass those values
-explicitly to the shared loader. They also retain role-specific policy: settings
+explicitly to the shared loader. They also retain service-specific policy: settings
 and secret files, environment prefix, dotenv location/discovery, missing-include
 handling, wrappers, validators, and exported helpers. This boundary is scoped
 to those migrated consumers; other services may still have separate loaders
@@ -87,7 +87,7 @@ bundle path the one client that needs it reads (such as
 `[Settlement.arkhai_payments].ca_bundle_path`), never `SSL_CERT_FILE`, which would
 replace the whole process's public trust. The one secret outside the rule is the
 signing credential `ARKHAI_IDENTITY_CREDENTIAL`, which the identity specification
-keeps from the loader, so it reaches a role as a variable sourced from a Secret.
+keeps from the loader, so it reaches a service as a variable sourced from a Secret.
 A buyer's `api_key_env`, in its payments section or a `[[DisputeCredential]]`, is
 not a service's configuration but the buyer's own exact named-variable provider,
 beside its keyring and secret-file providers (see "Marketplace identity
@@ -184,15 +184,20 @@ waits for one in process either. The service starts with its dependencies
 unreachable, reports each one it cannot reach in its system status as degraded,
 and its own loops retry it; a misaddressed dependency is indistinguishable at
 start from one that is down, so it is reported the same way rather than refused.
-The one init container a chart runs is the provisioning service's migration,
-which acts on the service's own state (see "Migrations at startup"). What stops a
+The one init container a chart runs for a service is that service's own
+migration — the provisioning service's, each storefront agent's, the bare-metal
+storefront's, and each registry instance's — which acts on the service's own
+state (see "Migrations at startup"). What stops a
 service is its own configuration or stored state being incoherent (see
 "Storefront startup and site trust"), since waiting does not repair either. Both
 storefront charts give their container a `startupProbe` on `/health`, so a slow
 start holds the liveness and readiness probes off rather than being judged by
-them; `/health` is a process check that calls no dependency. Each chart's render
-tests assert that no `wait-for-` container and no init container renders for a
-storefront, and that the `startupProbe` does.
+them; `/health` is a process check that calls no dependency. Each storefront
+chart's render tests assert that no `wait-for-` container renders, that exactly
+one init container does — the storefront's migration command from the
+application's image over its data volume — and that the `startupProbe` does; the
+provisioning and registry charts' render tests assert their migration init
+container the same way.
 
 **Toggling a mock/test profile:** A boolean chart value (for example
 `mockMode`) can conditionally append a profile name to
@@ -599,8 +604,8 @@ administrator's signed read (`admin_system_status`), as VM's and bare metal's ar
 
 ## Marketplace identity configuration
 
-Service roles configure canonical public principals and trust pins in ordinary
-configuration, with role-owned credentials supplied through their Secret
+Services configure canonical public principals and trust pins in ordinary
+configuration, with service-owned credentials supplied through their Secret
 boundary. Buyers are different because they require durable local lifecycle:
 public buyer TOML references `[BuyerProfile].store_path`, while the versioned
 XDG data store holds stable profile UUIDs, canonical principal history,
@@ -623,8 +628,8 @@ resolved signing value.
 
 ## Registry descriptor configuration
 
-The registry is a Pydantic-settings service rather than a Dynaconf role, but it
-takes the profile resolver variables the Dynaconf roles take. Each setting is
+The registry is a Pydantic-settings service rather than a Dynaconf service, but it
+takes the profile resolver variables the Dynaconf services take. Each setting is
 read by its variable name from, a later source winning on a key both state: the
 dotenv files `.env.local`, `.env` and `/app/shared-env/.env`, each skipped when
 absent; then `<CONFIG_DIRECTORY>/config-<profile>.env` for each entry of
@@ -665,7 +670,7 @@ descriptor's authority principal from the credential-backed active signer and
 derives its schema identity from the loaded filter specification. Helm keeps
 the descriptor values in ordinary values while mounting the signer credential
 from a Secret. Compose profiles likewise carry public descriptor values beside
-public identity pins, and the overlays keep signer credentials in role-owned
+public identity pins, and the overlays keep signer credentials in service-owned
 file mounts.
 
 An operator may also supply `REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES`
@@ -783,7 +788,7 @@ their respective authorities. `compose.vms-local.yml` supplies deterministic
 development credentials.
 
 The bare-metal wrapper extends each service from `domains/bare_metal/compose.yml`
-to merge role bindings with the domain topology, and declares the named volumes
+to merge each service's bindings with the domain topology, and declares the named volumes
 those services use. Service extension preserves the domain file's relative mount
 paths. An `include` cannot be used to import a service and redefine it in the same
 wrapper.
@@ -795,7 +800,7 @@ and bare-metal SQLite/queue/registry stores occupy separate named volumes.
 Stack files carry public URLs, canonical principals, explicit Resource Pool
 offering modes, and exact selected-site bindings. Signer, API-admin,
 provisioning SSH, payment account, and buyer credentials are independent
-role-scoped file references with no committed fallback. Missing identity,
+service-scoped file references with no committed fallback. Missing identity,
 inventory, pool declaration, site authority, or credential blocks startup or
 scenario preflight; it never selects a test signer, default site, payload-
 guessed domain, direct executor, or provider simulator.
@@ -1024,32 +1029,18 @@ written (see "Storefront agents: pass-through configuration").
 
 `storefront_domains` is public routing metadata only. Signing credentials,
 provider settings, SSH material, tenant credentials, payment-provider objects,
-and private domain results remain in role-owned Secret channels and never enter
+and private domain results remain in service-owned Secret channels and never enter
 ConfigMaps, command arguments, images, listing bindings, or migration reports.
 Startup rejects missing wheels, duplicate modes/identities, assertion mismatch,
 unsupported versions, incomplete capabilities, or recoverable bindings that
 the frozen registry cannot resolve.
 
-Before enabling the combined image over an existing database, quiesce effects
-and run `market-storefront migrate-storefront-domains --contribution <id>` in
-check mode. Write mode requires the same explicit contribution and creates a
-restrictive same-directory backup before fsync and atomic replacement.
-Mixed/ambiguous rows, missing site or pool/resource provenance, public-mode
-conflicts, orphan relationships, and derivation collisions fail without
-mutating the source. Once accepted effects use common bindings, rollback is
-forward recovery under those bindings, not restoration of an unbound schema.
-
 Each listing binding records its capacity backing, and each closed listing records
 whether its seller or reconciliation closed it. Both columns are enforced by
-triggers rather than by rebuilding the tables, so rolling the storefront back to
-code that predates them means dropping the triggers and leaving the columns, which
-the older code ignores: the required-backing insert trigger
+triggers: the required-backing insert trigger
 `storefront_listing_binding_backing_required`, and the two closure-reason triggers
 `listing_closed_by_consistent_insert` and `listing_closed_by_consistent_update`.
-Dropping the required-backing trigger is safe only while no unbacked listing has
-been published, because older code reads every listing as backed and would attempt
-reservations its site refuses. A registry that already publishes the backing field
-keeps it; an older reader ignores it.
+A registry that publishes the backing field keeps it; an older reader ignores it.
 
 The combined storefront's publication loop publishes VM; bare-metal publication
 runs in the dedicated bare-metal storefront's own loop. Storefront-wide terms of sale are configuration — `[pricing].settlements` and the per-model
@@ -1184,7 +1175,7 @@ the API is one relay, not two.
 
 A capacity declaration absent from the document is **retained**, as a relay is.
 An unnamed declaration may have been registered through the API, derived from a
-host's inventory by the upgrade migration, or be backing a live reservation, and
+host's inventory by a migration of the v0.3.0 floor, or be backing a live reservation, and
 none of those is what an operator editing an unrelated entry means to switch off. A capacity document
 therefore adds and updates declarations and never removes one; disabling is an
 explicit `enabled: false`, in the document or through the API.
@@ -1261,136 +1252,128 @@ are service settings, not pool fields or buyer inputs.
 
 ## Migrations at startup
 
-A deployed service applies its pending migrations before serving
-requests, and the specific mechanism depends on the service's own
-deployment topology:
+Every stateful service applies its migrations in a deployment phase before its
+application starts, through its own packaged command, and its application only
+checks the database; the rules are `deployment-state`'s
+["Service-owned migration history"](../../openspec/specs/deployment-state/spec.md#requirement-service-owned-migration-history)
+and the requirements beside it, and the design is its companion's
+["Migration and initialization boundary"](../../openspec/specs/deployment-state/architecture.md#migration-and-initialization-boundary).
 
-- A service with a Kubernetes init container applies migrations there,
-  before the application container starts, and the application's own
-  startup path rejects schema drift rather than applying migrations
-  in-process — see `openspec/specs/deployment-state/spec.md`'s
-  "Service-owned migration history" for the full requirement, including
-  the exception for a service without that deployment topology yet.
-- A service without a separate deployment step for migrations applies
-  its own ordered migration chain in-process at application startup,
-  before serving requests — a valid instantiation of the same
-  requirement for a service that doesn't yet have the first option's
-  topology, not an exception to it.
+| Service | Command | Deployment phase |
+|---|---|---|
+| Compute provisioning | `compute-provisioning-migrate` | init container in `helm/charts/provisioning`; before the service under Compose |
+| VM storefront | `market-storefront-migrate` | init container per agent in `helm/charts/storefront`; before the storefront under Compose |
+| Bare-metal storefront | `bare-metal-storefront-migrate` | init container in `helm/charts/bare-metal-storefront`; before the storefront under Compose |
+| API-credit storefront | `apicredits-storefront-migrate` | before the storefront under Compose |
+| API-credit service | `apicredits-service-migrate` | before the service under Compose, and in its image's command |
+| Registry | `registry-migrate` | init container in `helm/charts/registry`, for each instance; before the registry under Compose, and in its image's command |
 
-See `docs/development/TESTING.md` for how migration behavior itself is
-validated (fresh bootstrap, idempotent rerun, drift detection).
+Each service's `Makefile` has a `migrate` target running its command. Under
+Helm the init container runs from the application's image with the
+application's environment, configuration mounts and data volume — the VM
+storefront's without `entrypoint.sh`, which only starts ZeroTier — and is the
+only init container a chart renders for a service (see "Kubernetes: ConfigMap
+and Secret mounting"). Under Compose the service's command is
+`sh -c "<service>-migrate && exec <service command>"`, so the application starts
+only once the migration succeeds; the VM storefront runs it through
+`./entrypoint.sh`, and the bare-metal storefront, whose image's entrypoint is its
+CLI, states it as its `entrypoint`. The registry chart's application container
+states its own `uvicorn` command, since the image's command migrates first for
+Compose.
 
-The compute provisioning migration reads no operational configuration:
-`compute-provisioning-migrate` reads only its database URL and log level, so
-one database migrates to the same schema and rows under any profile. What a
-site configures — its pools, their seed, its playbooks — is applied by the
-service's own startup, after migration. Migration therefore creates no pool. A
-database whose hosts predate resource pools and that holds no `default` pool is
-refused by the resource-pool migration with a schema-drift error saying what to
-create; every live database is past that migration. A job recorded before job
-envelopes takes its host only from evidence naming its physical host — the
-row's `host_id`, then its `host_id` parameter, then, for a bare-metal job alone,
-its `executor_target` — never from a VM job's guest target; a job with none
-keeps no host, is logged by ID at WARNING, and if still queued fails at
-execution as naming no host.
+A migration command reads only its database location and log level — the
+bare-metal storefront's only its `db_path`, logging at INFO — from the
+service's layered settings, without resolving anything else, so it needs no
+secret mounted and one database migrates to the same schema and rows under any
+profile. What a deployment configures — a site's pools, their seed, its
+playbooks, the API-credit service's `default` pool — is applied by the
+service's startup after its check passes. Migration creates no pool.
 
-The migrations that make a host's pool and a VM pool's playbook optional
-rebuild `hosts` and `ansible_pool_configs` in place, keeping every row's
-values, and drop the unread `ansible_pool_configs.inventory_group`. An older
-image writes that column, so recovery after these migrations rolls forward.
+The application's startup opens its database read-only, issues no DDL, and
+refuses any database but a compatible one, naming the command and every
+migration ID that differs. `<service>-migrate --check` prints the same result
+and changes nothing: it exits 0 only for a compatible database, and otherwise
+lists the pending IDs, the unknown IDs, or the baseline to be adopted, so an
+operator can preview an upgrade or verify a restored backup.
 
-The VM provider is named `vm.ansible`. A provisioning database with pools or
-fulfillment records under the historical name `ansible` is migrated to the
-canonical name, and only the provider column changes: pool IDs, configuration,
-host membership, lifecycle state, job identity and accepted operation envelopes
-keep their values. The service has no alias for the historical name, so a pool
-document or API caller still naming `ansible` must be updated to `vm.ansible`;
-`docs/seller-quickstart.md` describes the operator's side.
+| Result | Meaning | Remedy |
+|---|---|---|
+| compatible | the database records exactly the chain's migrations | none |
+| behind | migrations are pending, or a v0.3.0 database awaits adoption | run the command |
+| ahead | the database records a migration this image does not list | restore the pre-upgrade backup, or deploy the image that wrote it |
+| unsupported | tables the chain did not build, part of the floor, or a database older than v0.3.0 | start from a fresh database |
+| absent | no file, or no table but an empty ledger | run the command |
 
-A frozen storefront table is never dropped. Fresh databases stop creating
-it, existing databases keep it as it is, and no code writes to it. A
-migration whose only effect is on a frozen table leaves the storefront's
-migration chain rather than staying as a function that does nothing. Its ID
-stays recorded wherever it was applied, because the migration engine skips
-recorded IDs it no longer lists. The ID is never reused. A database that had
-not yet applied it never does, so the frozen table keeps whichever shape it
-already had. The VM storefront's `compute_allocations` table is frozen this
-way, as are its retired inventory tables: `resources`, `hosts`,
-`resource_transition_events`, `compute_pool_members`, and
-`compute_capacity_pools` (or `compute_inventory_pools`, on a database that
-never applied the rename). Their rows stay as an operator's input for
-declaring the same inventory at provisioning; the storefront neither reads nor
-writes them. The bare-metal storefront's `bare_metal_accepted_site_generations`,
-where earlier publication runs recorded the generations they accepted, is frozen
-the same way: override status reads the projection the storefront holds, and the
-migration that created the table (`bare-metal-storefront-0011`) has left the
-chain.
+The command refuses an ahead or unsupported database and applies nothing. Each
+in-house service's chain begins at baselines reproducing its v0.3.0 schema; the
+command adopts a database recording every migration ID the v0.3.0 chain
+recorded by recording the baselines in their place, in one transaction and
+without running them, then applies the later migrations. Compute provisioning,
+the VM and bare-metal storefronts, and the registry (at Alembic revision
+`018_listing_resource_column`, adopted as `v0_3_0_baseline`) adopt their v0.3.0
+databases; the API-credit storefront and service have no floor, so any existing
+API-credit database is refused as unsupported. A database from before v0.3.0 is
+refused the same way. Each in-house migration commits with its record, so a
+failure leaves the migrations before it applied and recorded; under Alembic,
+SQLite DDL is not transactional, so a fresh registry database whose migration
+fails partway is unsupported and is replaced by a fresh one. An image rolled back
+over a migrated database is refused as ahead: take a database backup before every
+upgrade, and roll back by restoring it. The operator handbook's
+["Upgrading a deployment"](../operator-handbook.md#upgrading-a-deployment) is the
+procedure.
 
-The compute delivery path's columns arrive by additive migrations, so an
-existing database upgrades in place and in-flight deals continue on their rows.
-Both services hosting the site ledger add the unique reservation placement key
-and its recorded request (`20261106_002_reservation_placement_key` in compute
-provisioning, `20261106_008_reservation_placement_key` in API credits), with no
-backfill, since no earlier reserve carried a key. The VM storefront adds
-`vm_delivery_records.activated_at_utc` and renames the stored phase `activate`
-to `ready` (`20261106_001_vm_delivery_activation`); the bare-metal storefront
-adds `bare_metal_fulfillment_lifecycle.activated_at_utc` and marks a delivery
-left with its request saved but no fulfillment as dispatched
-(`bare-metal-storefront-0016-delivery-activation`). A deal available before the
-upgrade is never activated retroactively; its null activation means only that
-none is recorded.
+See [`TESTING.md`, "Migration Tests"](TESTING.md#migration-tests) for how the
+chains are proven: each against its floor fixture, adoption, the store-open
+test, and each service's migration suite.
 
-The same storefront migrations clear stored access material. Core's
-`auth_replay_reservations` records no route, so each storefront clears its
-access shape from every recorded body: VM removes the `tenant_credentials`
-member, and bare metal removes `host`, `port` and `username` from a body whose
-`method` is `ssh`; no other route's body has those fields. A stripped body is
-still a recorded body, so the record stays completed and an exact retry still
-resolves to its operation. VM also clears `tenant_credentials` from its delivery
-records and escrows and deletes core `credentials` rows for listings no other
-offering mode binds (`20261106_002_vm_credentials_cleared`). The live credential
-read ships with the clearing, so no running deal is left unreadable. A bare-metal
-database whose core replay table does not exist yet is left to core's own
-migration.
+The migrations after the v0.3.0 baseline, which an adopted database applies:
 
-Upgrading a VM storefront past storefront-held inventory is fail-forward:
-there is no supported downgrade, because the release that drops local
-inventory also stops creating and migrating its tables. The retained tables
-stay, unread, as an operator's extraction input until a later change drops
-them; `docs/seller-quickstart.md`'s "Upgrading from CSV inventory" describes
-declaring their contents at provisioning.
+- Both services hosting the site ledger add the unique reservation placement key
+  and its recorded request (`20261106_002_reservation_placement_key`, which
+  `kit/site` exports to both chains), with no backfill, since no earlier reserve
+  carried a key.
+- Compute provisioning rewrites every host's `ssh` connection stored at version 1
+  to version 2 with the same public fields and ciphertext
+  (`20261108_001_ssh_connections_version_2`), failing, naming every refused host
+  and rewriting nothing, where the version-2 codec refuses one. A host submission
+  must state its connection's version.
+- Each compute storefront creates the tables v0.3.0 created only when a store
+  opened — deal servicing's, and the bare-metal lifecycle cursor — with
+  `IF NOT EXISTS`, leaving any present as they are
+  (`20261109_001_vm_store_open_tables`, `bare-metal-storefront-0017-store-open-tables`).
+- The storefronts drop the tables v0.3.0 kept frozen: the VM storefront's
+  `compute_allocations`, `resources`, `hosts`, `resource_transition_events`,
+  `compute_pool_members`, and `compute_capacity_pools` or
+  `compute_inventory_pools` (`20261109_002_vm_frozen_inventory_dropped`), and the
+  bare-metal storefront's `bare_metal_accepted_site_generations`
+  (`bare-metal-storefront-0018-drop-accepted-site-generations`). Their rows are
+  discarded; inventory is declared at provisioning.
+- The VM storefront adds `vm_delivery_records.activated_at_utc` and renames the
+  stored phase `activate` to `ready` (`20261106_001_vm_delivery_activation`); the
+  bare-metal storefront adds `bare_metal_fulfillment_lifecycle.activated_at_utc`
+  and marks a delivery left with its request saved but no fulfillment as
+  dispatched (`bare-metal-storefront-0016-delivery-activation`). A deal available
+  before the upgrade is never activated retroactively; its null activation means
+  only that none is recorded.
+- The same storefront migrations clear stored access material. Core's
+  `auth_replay_reservations` records no route, so each storefront clears its
+  access shape from every recorded body: VM removes the `tenant_credentials`
+  member, and bare metal removes `host`, `port` and `username` from a body whose
+  `method` is `ssh`; no other route's body has those fields. A stripped body is
+  still a recorded body, so the record stays completed and an exact retry still
+  resolves to its operation. VM also clears `tenant_credentials` from its
+  delivery records and escrows and deletes core `credentials` rows for listings
+  no other offering mode binds (`20261106_002_vm_credentials_cleared`).
 
-Upgrading the compute provisioning service past the drop of `hosts.gpu_count`
-and `hosts.gpu_model` is fail-forward too. The migration rebuilds `hosts` from
-its model, keeping every other column of every row, and discards the two
-values without logging them: a host's hardware is stated only by its capacity
-declaration, and the one derivation of declarations from those columns ran
-earlier in the chain. An older provisioner maps both columns and cannot read
-the rebuilt table, and the migration is recorded as applied, so rolling the
-service back past it means restoring the database backup taken before the
-upgrade; take one first. The drop departs from
-[`ARCHITECTURE.md`](ARCHITECTURE.md#build-packaging-and-initialization)'s
-expand/contract rule, which protects old and new readers sharing a database
-and a rollback after a failed deployment. No two provisioner versions share
-one: the chart deploys the service with `strategy: Recreate` over one
-ReadWriteOnce volume, and one operator upgrades sites and storefronts together
-([`ARCHITECTURE.md`, "Operators"](ARCHITECTURE.md#operators)). Rollback is what
-remains, and the pre-upgrade backup answers it.
+These migrations are fail-forward: an older image cannot serve the migrated
+schema and refuses it as ahead, and rolling back means restoring the backup taken
+before the upgrade. No two versions of a service share a database: each chart
+deploys its service with `strategy: Recreate` over one ReadWriteOnce volume.
 
-Upgrading the compute provisioning service past the migration that moves pool
-relay references from `ansible_pool_configs.relay_id` to `pool_relays` is also
-fail-forward. The migration copies each reference and drops the old column; an
-older provisioner still reads that column and cannot serve the new schema. Take
-a database backup before upgrading. Rolling back past this migration requires
-restoring that pre-upgrade backup or rolling forward; do not run old and new
-provisioner versions against the same database.
-
-Identity-bearing database migrations validate the complete service-owned
-population and commit canonical principals, replay state, and ownership
-history transactionally while preserving public cross-service and operation
-identifiers. Malformed or conflicting owners, partial relationships, schema
-drift, and old signature versions fail closed. Versioned buyer run logs have
-their own explicit migration before recovery.
+Every supported database already holds canonical principals, since each
+service's v0.3.0 floor converted its identity-bearing rows; authorities still
+reject old schema, old signature versions, drift, and partially migrated state.
+Versioned buyer run logs have their own explicit migration before recovery.
 
 For an identity-contract cutover, authenticated mutations remain quiesced
 until every participating registry, storefront, service peer, and exact client reports the pinned version and capabilities.
@@ -1633,7 +1616,7 @@ selects the configuration contract, `priority` orders mechanism IDs, and peer
 `[Settlement.alkahest]`, `[Settlement.arkhai_payments]`, and `[Settlement.contact]` tables contain only
 mechanism-owned consumer settings. Arkhai payments resolves trusted service origin, Ed25519 receipt identity, fee policy, an optional `ca_bundle_path`, and the API key through the shared kit's `settlement_config.py`. The key is stated in exactly one form: a storefront states it as `api_key`, a secret setting in its Secret overlay (`storefront.secrets.toml`, or the API-credit storefront's secret layer), never in public configuration; a buyer states `api_key_env`, naming the variable its own provider holds the key in. One resolution — `api_key`, otherwise the variable `api_key_env` names — serves the client builder, readiness and the payments check alike. `ca_bundle_path` names a PEM bundle the payments client alone verifies the service under, leaving the process's trust store as it is; a bundle that cannot be loaded fails when the client is built. The owner-scoped WorkOS credential reaches only its consuming process; HTTPS is required outside loopback. Buyer `payer_account` is separate domain input (`[vms].payer_account` or `[apicredits].payer_account`), carried in selection params and the accepted Agreement, not inferred from marketplace identity. API-credit sellers supply `payee_account` and `asset` in each payment publication clause; the accepted option determines the seller client's owner. Local development may use `development_auth = true` with a loopback service origin instead of a key; it is mutually exclusive with `api_key` and `api_key_env`, which are mutually exclusive with each other. A Compose or cluster service name is not loopback, so a stack's payments double is reached with a bearer key and a configured CA, as a deployment's service is. Buyer marketplace identity comes only from
 the selected durable profile referenced by `[BuyerProfile]`; storefront and
-service-role principals retain their role-owned public identity configuration.
+service-role principals retain their own public identity configuration.
 EVM credentials and networks remain in `[Wallet]` and `[Chains]`.
 Generated TOML, ConfigMaps, status output, and run logs contain only public
 configuration projections.
@@ -1670,11 +1653,11 @@ pass-through configuration"); the operator handbook's
 ["Payments access"](../operator-handbook.md#payments-access) gives the
 deployment's procedure.
 
-`livemode` in a role's Arkhai payments settings — `[Settlement.arkhai_payments]`,
+`livemode` in a buyer's or storefront's Arkhai payments settings — `[Settlement.arkhai_payments]`,
 or `[bare_metal.arkhai_payments]` in the bare-metal buyer's configuration file — is
-the service mode whose receipts the role accepts. Receipts sign `livemode`, true only from a live payments service, and a
-receipt verifies only when its signed mode equals the role's setting. The default,
-`false`, accepts only test-mode receipts, so a role against a live service refuses
+the service mode whose receipts that process accepts. Receipts sign `livemode`, true only from a live payments service, and a
+receipt verifies only when its signed mode equals the process's setting. The default,
+`false`, accepts only test-mode receipts, so a process against a live service refuses
 every receipt until it sets `livemode = true`; set it on both buyer and storefront
 in the same release that points them at a live service. Mode, service origin, and
 receipt identity change together, and changing them is a cutover: each receipt
@@ -2107,10 +2090,10 @@ The selected-site authority owns inventory, executor routing, provisioning crede
 
 This document describes the pattern as implemented for services with
 their own Deployment and profile-resolved settings. A service without a
-Kubernetes deployment topology (no Helm chart) does not yet have an
-equivalent deployment-config story — see the "Migrations at startup"
-section above and the relevant subsystem's `architecture.md` for how
-such a service currently starts up instead.
+Kubernetes deployment topology (no Helm chart), such as the API-credit
+storefront and service, runs only under Compose: it migrates through the same
+command before its application (see "Migrations at startup"), but has no
+equivalent of a chart's configuration delivery.
 
 ### Artifact publishing destination
 

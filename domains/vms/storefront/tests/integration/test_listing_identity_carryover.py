@@ -20,6 +20,7 @@ from market_storefront.services.listing_identity_carryover import (
     carry_over_seller_state,
     carryover_report,
 )
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
 from tests.fake_site import TEST_MARKETPLACE_SIGNER
@@ -31,6 +32,7 @@ _REGISTRY_URL = "http://registry.test"
 
 @pytest.fixture
 def repository(tmp_path):
+    migrate_storefront_database(tmp_path / "carryover.db")
     return SQLiteClient(
         db_path=str(tmp_path / "carryover.db"),
         registry=build_vm_storefront_registry(build_vm_storefront_domain()),

@@ -1,14 +1,22 @@
-import os
 from collections.abc import Mapping
-from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# The dotenv files every registry reads first. A later file overrides an earlier
-# one on a key both state, and the process environment overrides every file, so
-# `.env.local` is the lowest-priority file, not an override.
-DEFAULT_ENV_FILES: tuple[str, ...] = (".env.local", ".env", "/app/shared-env/.env")
+from core_registry.settings_source import (
+    DEFAULT_DATABASE_URL,
+    DEFAULT_ENV_FILES,
+    profile_env_files,
+    settings_env_files,
+)
+
+__all__ = [
+    "DEFAULT_ENV_FILES",
+    "Settings",
+    "load_settings",
+    "profile_env_files",
+    "settings",
+]
 
 
 class Settings(BaseSettings):
@@ -21,7 +29,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = "sqlite:///./indexer.db"
+    database_url: str = DEFAULT_DATABASE_URL
 
     # Server Configuration
     port: int = 8080
@@ -127,23 +135,6 @@ class Settings(BaseSettings):
         return self.database_url.startswith("sqlite://")
 
 
-def profile_env_files(environment: Mapping[str, str]) -> tuple[Path, ...]:
-    """The profile env files the resolver variables select, in layering order.
-
-    ``ACTIVE_PROFILES`` is a comma-separated list of profile names, each loaded
-    as ``config-<profile>.env`` from ``CONFIG_DIRECTORY`` (the working directory
-    when unset), a later profile overriding an earlier one. Neither variable is a
-    setting: they choose which files configure the registry.
-    """
-    directory = Path(environment.get("CONFIG_DIRECTORY") or ".")
-    profiles = (
-        profile.strip()
-        for profile in environment.get("ACTIVE_PROFILES", "").split(",")
-        if profile.strip()
-    )
-    return tuple(directory / f"config-{profile}.env" for profile in profiles)
-
-
 def load_settings(environment: Mapping[str, str] | None = None) -> Settings:
     """Build the registry's settings from its dotenv files and selected profiles.
 
@@ -153,8 +144,7 @@ def load_settings(environment: Mapping[str, str] | None = None) -> Settings:
     skipped, as a missing default file is. ``environment`` supplies only the
     resolver variables, the process environment by default.
     """
-    source = os.environ if environment is None else environment
-    return Settings(_env_file=(*DEFAULT_ENV_FILES, *profile_env_files(source)))
+    return Settings(_env_file=settings_env_files(environment))
 
 
 settings = load_settings()

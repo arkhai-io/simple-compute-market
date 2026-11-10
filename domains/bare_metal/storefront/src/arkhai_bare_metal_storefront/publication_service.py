@@ -11,10 +11,11 @@ listing's local status".
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from arkhai_bare_metal import BARE_METAL_OFFERING_MODE
 from core_storefront.multi_registry_client import (
     MultiRegistryClient,
     RegistryAuthorityTrust,
@@ -26,7 +27,7 @@ from market_capacity_publication import (
     PublicationRuntime,
 )
 from market_config.registry_url import lookup_registry_auth
-from market_identity import Signer
+from market_identity import Identity, Signer
 from registry_client import (
     ListingRequest,
     RegistryClient,
@@ -47,10 +48,20 @@ def _listing_resource(listing: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 class BareMetalPublicationHooks:
-    """Bare-metal candidate check and durable binding lookup for the kit runtime."""
+    """Bare-metal candidate check, durable binding lookup, and the publisher
+    and offering mode the kit runtime's registry sweep reads."""
 
-    def __init__(self, sqlite_client: SQLiteClient) -> None:
+    def __init__(self, sqlite_client: SQLiteClient, *, publisher: Identity) -> None:
         self._db = sqlite_client
+        self._publisher = publisher
+
+    def registry_publisher(self) -> Identity:
+        return self._publisher
+
+    def served_offering_modes(self) -> Collection[str]:
+        """The dedicated bare-metal storefront publishes bare-metal listings
+        alone, so a listing of another mode under its principal is left open."""
+        return (BARE_METAL_OFFERING_MODE,)
 
     def validate_candidate(
         self, candidate: PublicationCandidate[dict[str, Any]]
@@ -86,11 +97,15 @@ def build_publication_runtime(
     *,
     registry_urls: Sequence[str],
     storefront_url: str,
+    publisher: Identity,
 ) -> PublicationRuntime[dict[str, Any]]:
-    """Compose the bare-metal hooks with the injected registry transport."""
+    """Compose the bare-metal hooks with the injected registry transport.
+
+    ``publisher`` is the principal the storefront signs its publications with.
+    """
     return PublicationRuntime(
         repository=sqlite_client,
-        hooks=BareMetalPublicationHooks(sqlite_client),
+        hooks=BareMetalPublicationHooks(sqlite_client, publisher=publisher),
         enabled=True,
         registry_urls=tuple(registry_urls),
         registry_client_factory=registry_client_factory,

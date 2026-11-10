@@ -8,6 +8,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.fulfillment_fixtures import vm_delivery_evidence, seed_delivery_admission
 
@@ -24,6 +25,7 @@ from tests.fulfillment_fixtures import vm_delivery_evidence, seed_delivery_admis
     {"delivery": {"kind": "vm.delivery-facts", "schema_version": 1}},
 ])
 async def test_invalid_verified_evidence_cannot_poison_pending_or_fresh_state(tmp_path, patch):
+    migrate_storefront_database(tmp_path / "evidence.db")
     db = SQLiteClient(
         str(tmp_path / "evidence.db"),
         registry=build_vm_storefront_registry(build_vm_storefront_domain()),

@@ -64,6 +64,8 @@ def service(path, dispute=None, *, delivered=True):
             payment=payment, dispute=adapter, dispute_binding=deal.dispute_binding,
             seller_account="seller-account", actor=lambda _: SELLER.identity, clock=lambda: 120))
     with transaction(path) as conn:
+        # The storefront chain's migration, which a session does not run.
+        create_schema(conn)
         EndSession(conn).register(DeliveryRecord(negotiation_id="deal", seller=SELLER.identity,
             commitment_ref="commitment", start_at=100, term_end=1000, committed_at=100,
             available_at=101 if delivered else None))

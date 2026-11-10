@@ -47,7 +47,6 @@ from market_pool_overrides.store import (
     POOL_OVERRIDES_TABLE,
     SQLitePoolOverrideStore,
     StoredPoolOverride,
-    pool_override_migrations,
     read_pool_overrides,
 )
 
@@ -80,7 +79,6 @@ __all__ = [
     "SyncPoolOverrideClient",
     "override_state",
     "pool_override_contract",
-    "pool_override_migrations",
     "pool_override_statuses",
     "read_pool_overrides",
 ]

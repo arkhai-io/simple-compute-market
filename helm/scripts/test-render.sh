@@ -219,7 +219,7 @@ expect_absent "$DEFAULT_RENDERED" 'api-credits-registry' "default render omits t
 expect_present "$DEFAULT_PROVISIONING_CONFIGMAP" '"identifier": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"' "provisioning keeps EIP-191 identifiers as strings"
 expect_present "$DEFAULT_TEST_CONFIG" '"identifier": "0x90f79bf6eb2c4f870365e785982e1f101e93b906"' "smoke-test profile keeps EIP-191 identifiers as strings"
 
-expect_present "$CHART_DIR/../core/registry/filter-spec.yaml" 'id: +compute\.market' "compute filter specification declares compute.market"
+expect_present "$CHART_DIR/../core/registry/src/core_registry/filter-spec.yaml" 'id: +compute\.market' "compute filter specification declares compute.market"
 expect_present "$CHART_DIR/../domains/apicredits/registry/filter-spec.yaml" 'id: +api_credits' "API-credits filter specification declares api_credits"
 expect_present "$TWO_REGISTRIES_COMPUTE_DEPLOYMENT" 'name: +'"$RELEASE"'-registries-registry' "dual render names the compute workload independently"
 expect_present "$TWO_REGISTRIES_COMPUTE" "^ +REGISTRY_FILTER_SPEC_PATH='/app/filter-spec\.yaml'$" "dual render selects the compute filter specification"

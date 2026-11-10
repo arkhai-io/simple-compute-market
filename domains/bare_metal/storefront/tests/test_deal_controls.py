@@ -569,4 +569,3 @@ async def test_a_reserve_and_a_release_refresh_no_held_projection(tmp_path) -> N
     assert released["state"] == "released"
     assert site.calls == loaded
     assert after == confirmed
-

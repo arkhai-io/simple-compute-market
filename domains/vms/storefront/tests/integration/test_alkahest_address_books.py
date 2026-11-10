@@ -28,6 +28,7 @@ from market_storefront.domain_runtime import (
 )
 from market_storefront.utils import config as storefront_config
 from market_storefront.utils import sqlite_client as sqlite_module
+from market_storefront.utils.migrations import migrate_storefront_database
 from tests._settings_overrides import replaced_setting
 from tests.integration.test_degraded_startup import (
     _CONFIGURATION,
@@ -99,6 +100,7 @@ async def test_a_seller_trading_on_two_chains_uses_each_chains_own_book(
         },
         "db_path": str(tmp_path / "storefront.db"),
     }
+    migrate_storefront_database(configuration["db_path"])
     with ExitStack() as stack:
         for key, value in configuration.items():
             stack.enter_context(replaced_setting(key, value))

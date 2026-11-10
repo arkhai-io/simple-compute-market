@@ -62,7 +62,7 @@ None. The shared lifecycle codec/projections are owned by the foundation change.
 
 ## Impact
 
-`core/registry/filter-spec.yaml` and carrier/filter code, `core/src/market_core/query_dsl.py`,
+`core/registry/src/core_registry/filter-spec.yaml` and carrier/filter code, `core/src/market_core/query_dsl.py`,
 buyer discovery/selection, `kit/settlement-runtime` projections and both compute
 buyer CLIs. No new listing-level lifecycle-policy copy or stored class is added.
 

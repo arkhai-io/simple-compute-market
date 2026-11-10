@@ -839,10 +839,12 @@ keeps its clock synchronized with the stack's to within a second.
 
 A rerun against the same stack reconciles rather than duplicates. The host's
 connection is replaced where it differs and the declaration rewritten, and the
-open listing an earlier run left on the scenario's resource is adopted, paused,
-rather than created, since a publication source backs one listing for good,
-whether it is open or closed. Several listings, a closed one, or one of another
-shape fail naming them, for an operator to recover. The settle stage waits for
+sole open listing on the scenario's resource is adopted, paused, rather than
+created. Closed historical listings retain their bindings and are preserved.
+Closed listings with no open one, several open listings, a listing of unknown
+status, or an open listing of another shape fail naming them, for an operator to
+recover; a closed binding does not authorize creating a replacement. The settle
+stage waits for
 the deal's own `job_submitted` event, filtered by its negotiation and counted
 from a mark taken before settling, because an adopted listing's event log holds
 earlier deals' events.
@@ -881,9 +883,10 @@ without its target it skips before any holds or supply writes. Unit and mock
 pipeline results do not substitute for this physical qualification.
 
 The real-provisioning modules and the qualification modules below share the
-target's resource, and a capacity source backs one listing for good. So the
-resource's listing offers a settlement option for each deal mechanism the
-storefront composes and reports ready, Alkahest and Arkhai payments. On VM
+target's resource and adopt its sole compatible open listing, retaining closed
+historical bindings. That listing offers a settlement option for each deal
+mechanism the storefront composes and reports ready, Alkahest and Arkhai
+payments. On VM
 every module creates or adopts it through one helper
 (`e2e-tests/tests/e2e/roles/scenarios/vms/composed_listing.py`); bare metal's
 published options already are the composed mechanisms. Contact exchange settles
@@ -898,6 +901,15 @@ buyer purchases; the third, observation 6's, makes no deal and runs after them o
 the stack their purchases populated. The payments target is the runner's
 `PAYMENTS` section, with `LANE_OWNED` unset so an unready target is a blocked skip. Without
 either target they report a blocked skip before any hold or write.
+
+VM payments listings take their declared delivery allowance from
+`PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS`, a positive integer number of seconds
+(or a decimal integer string), defaulting to 300. Listing composition and the
+purchase's option check use the same value; the buyer CLI waits at least that
+long. Set the allowance before publishing an offer, with
+`PAYMENTS.DISPUTE_WINDOW_SECONDS` covering it plus the authority's minimum filing
+window. Existing immutable terms must match the run's inputs. This does not
+extend an accepted Agreement, move a clock, or accept late delivery.
 
 - `e2e_vm_qualification` (observation 2) buys two CPU-only guests through
   `market buy`, keeps an SSH heartbeat on the first across the second's create
@@ -915,7 +927,9 @@ either target they report a blocked skip before any hold or write.
   since the service's state guards keep that site's convergence and watchdog
   from restoring anything a faulty reapply removed. Relay-port reconciliation
   runs ungated on both sites, so it compares each quarantined relay lease's whole
-  record, release time included.
+  record, release time included. The listing baseline includes closed history:
+  every identity, state and pause must remain exactly as before, with no added
+  or removed listing, rather than requiring that history contain only one row.
 
 A module failing after the buyer approved a payment refunds it as the seller,
 unless the module had begun ending that purchase, ends a delivered guest or host
@@ -1024,6 +1038,62 @@ split into `unit/` (its own helper logic), `smoke/`, and `e2e/`. A Helm
 chart's render tests live in its own `tests/` directory (see "Chart Render
 Tests").
 
+## Migration Tests
+
+Each stateful service's migration chain is proven at the lowest level that can
+show it, against real SQLite files and never a mocked connection
+([`deployment-state`, "Migration and initialization boundary"](../../openspec/specs/deployment-state/architecture.md#migration-and-initialization-boundary)):
+
+- **The engine.** `kit/schema-migrations`' unit tests classify every result from
+  tables and recorded IDs and render each refusal; its library integration tests
+  run the engine over real files through both adapters — a fresh chain, a rerun,
+  adoption without running the baselines, ahead and unsupported databases refused
+  unchanged, a migration failing after DDL leaving no trace under every
+  transaction control, the read-only check creating no file — and prove that
+  `schema_snapshot` sees what a schema comparison must and ignores how a column
+  was added.
+- **The floor fixture.** Each service whose chain adopts a release's databases
+  commits that release's schema under its `tests/fixtures/v0_3_0_floor/`:
+  `schema.json` (the snapshot), the release's recorded IDs or revision, and
+  `ddl.sql`, generated by running the release's published packages on a fresh
+  database, as each fixture's README states. A fixture is regenerated only to
+  correct it against its release, or for a new floor
+  ([`RELEASING.md`](RELEASING.md#cutting-a-release)).
+- **The chain.** Each service's `tests/integration/test_migration_chain.py` (the
+  registry's `test_migrations.py`) shows that the baselines alone reproduce the
+  fixture's snapshot exactly; that a database built from `ddl.sql` with the floor
+  IDs is adopted, applying exactly the later migrations and keeping its rows, and
+  ends with the same snapshot and ledger as a fresh database; that a rerun changes
+  no byte; that a database missing a floor ID, or holding tables with no ledger,
+  is refused unchanged; and each later migration's rewrite. A test of a single
+  later migration starts from a `ddl.sql` database, the real upgrade path.
+- **The command and the startup check.** Each service's command is driven
+  through its entry point with its settings in the loader's environment layer:
+  `--check` exits unsuccessfully on a behind or missing database, listing what
+  differs and changing nothing; the command refuses an ahead database; two
+  configurations differing in anything but the database location and log level
+  give one schema and one set of rows; and the command imports none of the
+  application's configuration. The startup check is proven at the function the
+  application's startup calls, refusing each state with the command's name, and
+  through the application's own startup for an absent database.
+- **The store-open test.** Each storefront's `tests/integration/test_store_open.py`
+  starts the real application over a database its chain migrated, opens every
+  store it composes, and asserts the `schema_snapshot` before and after are
+  equal, so a table created when a store opens fails it.
+- **The init containers.** Each chart's render test asserts its one migration
+  init container ("Chart Render Tests").
+
+A service's migration test with no application — a real component against real
+storage — is library integration in the sense of the Integration Tests section,
+though the component is a service's chain rather than a kit library. A test that
+needs a migrated database for another subject migrates it through the service's
+chain, or, in a kit, through the kit's own baseline; a test that builds its
+tables with `create_all` instead proves nothing about the chain's schema.
+The end-to-end lanes start every service through its migration phase on a fresh
+database, so a passing pipeline shows each chain builds a schema its service runs
+on; adoption of a release's databases is proven only by the chain tests, since no
+lane holds one.
+
 ## Pool Offering-Mode Enforcement
 
 Pool offering-mode coverage follows the lowest-meaningful-level rule while
@@ -1042,10 +1112,6 @@ proving that no execution layer relies on another layer's earlier decision:
 - `kit/fulfillment` scheduler tests withdraw a declaration after reservation;
   orchestration tests withdraw it after provider input is prepared and assert
   no provider dispatch occurs.
-- Provisioning migration tests cover fresh bootstrap, a `default` pool stored
-  before offering modes (migration creates none), exact derivation from provider/playbook/delegate configuration,
-  idempotent rerun, narrowing, INFO evidence, malformed drift, single-proof
-  backfill, conflicting proof, unproved active rows, and terminal rows.
 - Advertisement and backing declarations follow the same split.
   `kit/resource-pools-contracts` unit tests own declaration shape, both cross-tag
   rules, the pool models' refusal to build an invalid write, and the resolver's
@@ -1055,9 +1121,8 @@ proving that no execution layer relies on another layer's earlier decision:
   stored-declaration check.
   Provisioning integration tests own server-side refusal through the typed
   client — status and stored state only, per the rejection-path rule — plus the
-  upgrade migration, the startup refusal, and every projected pool carrying both
-  declarations. The API-credits service's integration suite owns its own
-  migration and startup refusal.
+  startup refusal and every projected pool carrying both declarations. The
+  API-credits service's integration suite owns its own startup refusal.
 - Provider and backing immutability follow the same split. `kit/resource-pools`
   unit tests own the pure stored-versus-proposed comparison; no database is
   needed to prove it. Its library integration suite owns preserved state on
@@ -1065,9 +1130,8 @@ proving that no execution layer relies on another layer's earlier decision:
   real persistence and a recording handler. Provisioning integration tests own
   the HTTP 400 and HTTP 422 statuses through the typed client — rejection-path
   bodies for malformed hints — and, against file-backed SQLite with the real
-  importer, a refused startup document leaving its digest unchanged, the
-  document-created default, interrupted first migration, and the VM provider
-  identity upgrade. No deployed scenario is owed for these single-authority
+  importer, a refused startup document leaving its digest unchanged and the
+  document-created default. No deployed scenario is owed for these single-authority
   transactions.
 - The deployed `e2e_pool_declared_modes` scenario sends an unsupported explicit
   mode for a real matching capacity resource and observes HTTP 409 plus no
@@ -1164,8 +1228,7 @@ scenarios at every level:
   dispatch;
 - VM storefront tests cover installed contribution wiring, exact public
   `offering_mode`, configured source selection, negotiation/settlement
-  adapters, selected-site capacity calls, restart recovery, and transactional
-  legacy migration;
+  adapters, selected-site capacity calls, and restart recovery;
 - bare-metal domain/storefront tests own only bare-metal codecs, publication
   semantics, and the production lifecycle hook supplied by that package;
 - deployment tests render one combined image/command/database, both explicit
@@ -1179,8 +1242,7 @@ scenarios at every level:
 Every cross-swap test asserts the unselected policy, repository mutation,
 capacity/provider call, result decoder, and teardown spy remain untouched.
 Restart fixtures route from recorded bindings even when current publication
-configuration changes. Migration tests compare source bytes on failed check or
-write and prove the successful rerun idempotent.
+configuration changes.
 
 ## Marketplace Identity Verification
 
@@ -1218,11 +1280,8 @@ manifest must fail startup rather than admit mixed identity precedence.
   site pins are enforced, signed responses are verified, and no body address,
   administrator key, private-key field, or missing-header fallback reaches a
   state mutation.
-- Migration tests cover populated legacy state as well as fresh bootstrap and
-  idempotent rerun. They assert stable publisher, listing, negotiation,
-  obligation, fulfillment, and operation identifiers, explicit buyer run-log
-  migration, complete rollback on malformed or conflicting owners, and
-  startup/readiness rejection of drift or mixed signature versions.
+- Migration tests cover explicit buyer run-log migration and startup/readiness
+  rejection of drift or mixed signature versions.
 - Composition tests exercise an Ed25519 Arkhai payment path with wallet, chain,
   RPC, balance, and gas configuration absent, and separately prove that a
   selected EVM effect resolves and validates only its adapter-owned inputs.
@@ -1468,11 +1527,24 @@ passing render is not deployment evidence, just as it is not deal evidence.
   those environments, so in CI these checks do not run; run them locally before a
   change to a chart or a loader is reviewed.
 - `helm/charts/storefront/tests/test_render.py` also asserts, over the defaults,
-  the local release, every rendering fixture, and a second agent, that no VM
-  storefront Deployment renders an init container or a `wait-for-` container and
-  that each carries a `startupProbe` on `/health`, as the bare-metal chart's does:
-  the storefront starts with its dependencies unreachable and reports them
-  degraded.
+  the local release, every rendering fixture, and a second agent, that each VM
+  storefront Deployment renders exactly one init container — `migrate`, running
+  `market-storefront-migrate` alone from the application's image and environment
+  over the data volume, without `entrypoint.sh` or ZeroTier — and no `wait-for-`
+  container, and that each carries a `startupProbe` on `/health`, as the
+  bare-metal chart's test asserts of `bare-metal-storefront-migrate`: the
+  storefront migrates its own database first, then starts with its dependencies
+  unreachable and reports them degraded.
+- `helm/charts/registry/tests/test_render.py` asserts, over the defaults, with
+  persistence disabled, with another mount path, and with a secret profile, that
+  the registry Deployment renders exactly one init container running
+  `registry-migrate` from the application's image, with its environment and
+  profile mounts but not its signer credential, over the application's data
+  volume, and that the application container states its own command; in the
+  umbrella with the `api-credits-registry` alias enabled both instances render the
+  same, and with it disabled nothing of the alias renders.
+  `helm/charts/provisioning/tests/test_render.py` asserts the same of
+  `compute-provisioning-migrate`.
 - `helm/tests/test_release_topology.py` asserts, over both topology releases,
   that no Pod annotated `helm.sh/hook: test` carries all of any Deployment's
   `matchLabels` or any Service's selector — every test pod carries

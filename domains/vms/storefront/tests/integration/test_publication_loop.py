@@ -29,6 +29,7 @@ from market_alkahest.dev_chain import anvil_address_book_path
 from market_pool_overrides import PoolOverrideClient
 from market_settlement_runtime import ReadinessBlocker
 
+import market_storefront.container as container
 from market_storefront import lifecycle
 from market_storefront.startup import _start_lifecycle_loops
 from market_storefront.utils import config as storefront_config
@@ -892,6 +893,81 @@ async def test_a_registry_that_missed_a_close_is_repaired_by_the_next_cycle(
         ("update", registry_b, {"status": "closed"})
     ]
     assert (await _cycle(world))["counts"] == {}
+
+
+async def test_a_cycle_closes_registry_listings_the_storefront_does_not_hold(
+    registry_world,
+):
+    """Each registry is read under the storefront's own principal. A VM listing
+    the storefront does not hold open is closed at each registry holding it; a
+    listing it holds open stays open, and so does a bare-metal listing under the
+    same principal, which the bare-metal storefront publishes though this one
+    composes the domain; a preview closes nothing."""
+    world = registry_world
+    world.pools.append(pool("broker-a", backing="unbacked"))
+    await _cycle(world)
+    (held,) = await _listings(world)
+    registry_a, registry_b = world.registries.urls
+    world.registries.plant(registry_a, "unknown-vm", offering_mode="vm")
+    world.registries.plant(registry_b, "unknown-vm", offering_mode="vm")
+    world.registries.plant(registry_b, "bare-metal-1", offering_mode="bare_metal")
+    world.registries.plant(registry_a, held, offering_mode="vm")
+    world.registries.sent.clear()
+
+    preview = await _cycle(world, dry_run=True)
+
+    swept = [
+        (a["listing_id"], a["registry"])
+        for a in preview["actions"]
+        if a["action"] == "close" and a["reason"] == "not_held"
+    ]
+    assert sorted(swept) == [("unknown-vm", registry_a), ("unknown-vm", registry_b)]
+    assert world.registries.sent == []
+
+    result = await _cycle(world)
+
+    assert result["counts"] == {"close": 2}
+    assert [(op, url, listing, body) for op, url, listing, body in world.registries.sent] == [
+        ("update", registry_a, "unknown-vm", {"status": "closed"}),
+        ("update", registry_b, "unknown-vm", {"status": "closed"}),
+    ]
+    assert [item.id for item in world.registries.planted[registry_a]] == [held]
+    assert [item.id for item in world.registries.planted[registry_b]] == ["bare-metal-1"]
+    assert world.registries.publisher_reads[-1] == (
+        container.resolved_marketplace_signer.identity
+    )
+    assert (await _listing(world, held))["status"] == "open"
+    assert (await _cycle(world))["counts"] == {}
+
+
+async def test_a_listing_held_through_a_site_outage_stays_open_at_the_registry(tmp_path):
+    """Restarted while its site cannot be reached, the storefront holds the
+    site's listing open with no projection to read; the sweep leaves that
+    listing open at the registry and still closes one it does not hold."""
+    async with publication_app(
+        tmp_path, mechanism_fulfillment=_UNBACKED_PUBLISHABLE
+    ) as world:
+        world.pools.append(pool("broker-a", backing="unbacked"))
+        await _cycle(world)
+        (held,) = await _listings(world)
+
+    async with publication_app(
+        tmp_path, mechanism_fulfillment=_UNBACKED_PUBLISHABLE, unreachable_sites=(SITE,)
+    ) as world:
+        registry_a, _registry_b = world.registries.urls
+        world.registries.plant(registry_a, held, offering_mode="vm")
+        world.registries.plant(registry_a, "unknown-vm", offering_mode="vm")
+
+        result = await _cycle(world)
+
+        assert {
+            (a.get("site_id"), a.get("reason")) for a in result["actions"] if a["action"] == "hold"
+        } == {(SITE, "site_projection_unknown")}
+        assert [(op, listing) for op, _url, listing, _ in world.registries.sent] == [
+            ("update", "unknown-vm")
+        ]
+        assert [item.id for item in world.registries.planted[registry_a]] == [held]
+        assert (await _listing(world, held))["status"] == "open"
 
 
 async def test_a_listing_every_registry_refused_is_published_once_they_answer(registry_world):

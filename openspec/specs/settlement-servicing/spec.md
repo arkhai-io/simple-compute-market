@@ -646,9 +646,9 @@ resolves to no settlement MUST be treated as a poll that found nothing terminal.
 
 - Plan envelopes and lifecycle-universal fields:
   `core/src/market_core/schemas.py` and `kit/alkahest/tests/unit/test_plans.py`.
-- Stable obligation identity, operation journals, migration/backfill, work
-  leases, compare-and-swap transitions, and aggregate status:
-  `core/storefront/src/core_storefront/{settlement_lifecycle,settlement_runtime,sqlite_client,sqlite_migrations}.py`.
+- Stable obligation identity, operation journals, work leases,
+  compare-and-swap transitions, and aggregate status:
+  `core/storefront/src/core_storefront/{settlement_lifecycle,settlement_runtime,sqlite_client,migrations}.py`.
 - Restart, uncertain acknowledgement, payer/claimant direction, partial
   outcomes, and collect/reclaim exclusion:
   `core/storefront/tests/unit/test_settlement_{runtime,obligation_persistence}.py`.

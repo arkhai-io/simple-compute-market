@@ -167,7 +167,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-registry"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -175,6 +175,7 @@ dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-schema-migrations" },
     { name = "fastapi" },
     { name = "jsonpath-ng" },
     { name = "jsonschema" },
@@ -204,6 +205,7 @@ requires-dist = [
     { name = "arkhai-core", specifier = "==0.5.0" },
     { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.1.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
+    { name = "arkhai-kit-schema-migrations", specifier = ">=0.1.0" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "jsonpath-ng", specifier = ">=1.6" },
     { name = "jsonschema", specifier = ">=4.20" },
@@ -277,6 +279,14 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-schema-migrations"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+wheels = [
+    { path = "arkhai_kit_schema_migrations-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

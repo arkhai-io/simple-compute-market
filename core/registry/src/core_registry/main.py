@@ -12,7 +12,7 @@ from core_registry.api.publisher_auth import (
     signed_response,
 )
 from core_registry.config import settings
-from core_registry.db.database import init_db
+from core_registry.db.migrations import require_compatible_database
 from core_registry.api.filter_spec import get_loaded_spec
 from core_registry.registry_descriptor import build_registry_descriptor
 
@@ -34,7 +34,9 @@ async def lifespan(app: FastAPI):
     """
     logger.info("Starting listing registry service...")
 
-    init_db()
+    # Before anything opens the database: the application issues no DDL, and
+    # serves only a database `registry-migrate` brought to its script head.
+    require_compatible_database(settings.database_url)
     if not (
         settings.registry_authority_id
         and settings.registry_authority_scheme
@@ -72,7 +74,7 @@ async def lifespan(app: FastAPI):
             settings.registry_descriptor_recommended_dispute_authorities
         ),
     )
-    logger.info("Database initialized")
+    logger.info("Database compatible with the registry's migrations")
 
     # Bootstrap a single API key from env if configured AND the table
     # is empty. Lets a private registry start with a known operator

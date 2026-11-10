@@ -28,7 +28,7 @@ approval. No tests are added by this reconciliation.
 
 ## 2. Bound filters and correlated option discovery
 
-- [ ] 2.1 In `core/registry/filter-spec.yaml` and its carrier/filter code, declare UTC
+- [ ] 2.1 In `core/registry/src/core_registry/filter-spec.yaml` and its carrier/filter code, declare UTC
   availability and lower-bound filters for both capacity bounds. Preserve ETag
   preconditions and the dependency's opaque carrier policy. Unit targets:
   `core/registry/tests/unit/test_filter_spec.py`, `test_filter_eval.py`; app-integration

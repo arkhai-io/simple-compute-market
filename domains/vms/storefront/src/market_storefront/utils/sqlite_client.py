@@ -3,9 +3,10 @@
 Domain-neutral market-state persistence (listings, negotiations,
 escrows, claims, publications, …) lives in
 ``core_storefront.sqlite_client``; this subclass adds the VM domain's
-settlement records, migrations, and listing-source reads, plus the
-settings-bound module factory. It holds no physical inventory: that is
-read from site projections.
+settlement records and listing-source reads, plus the settings-bound
+module factory. The schema is the VM storefront's chain
+(``market_storefront.utils.migrations``). It holds no physical inventory:
+that is read from site projections.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ import asyncio
 import json
 import logging
 import sqlite3
-from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -22,20 +22,10 @@ from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.sqlite_client import (
     SQLiteClient as CoreSQLiteClient,
 )
-from core_storefront.sqlite_migrations import MigrationLike
-from market_contact_exchange import CONTACT_EXCHANGE_MIGRATIONS
-from market_pool_overrides import pool_override_migrations
-from market_settlement_runtime import settlement_migrations
-from market_identity import Identity
 
-from market_storefront.payment_repository import VmSettlementRepository, add_vm_settlement_records
+from market_storefront.payment_repository import VmSettlementRepository
 
-from .config import BASE_URL_OVERRIDE, resolve_marketplace_signer, settings
-from .migrations import (  # noqa: F401 — re-exported (tests import via here)
-    VM_LEGACY_MIGRATION_INPUTS,
-    VM_MIGRATIONS,
-    synthesize_accepted_escrows_from_demand,
-)
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -48,20 +38,11 @@ class SQLiteClient(VmSettlementRepository, CoreSQLiteClient):
         db_path: str,
         *,
         registry: StorefrontDomainRegistry,
-        local_listing_principal: Identity | None = None,
-        expected_legacy_sellers: Collection[str] = (),
-        extra_migrations: Sequence[MigrationLike] = (),
     ) -> None:
         if not isinstance(registry, StorefrontDomainRegistry):
             raise TypeError("registry must be a StorefrontDomainRegistry")
         self._domain_registry = registry
-        super().__init__(
-            db_path,
-            local_listing_principal=local_listing_principal,
-            expected_legacy_sellers=expected_legacy_sellers,
-            extra_migrations=extra_migrations,
-            legacy_migration_inputs=VM_LEGACY_MIGRATION_INPUTS,
-        )
+        super().__init__(db_path)
 
     @property
     def domain_registry(self) -> StorefrontDomainRegistry:
@@ -74,22 +55,6 @@ class SQLiteClient(VmSettlementRepository, CoreSQLiteClient):
         "obligation_ref",
         "obligation_index",
     )
-
-    def _domain_migrations(self) -> tuple[MigrationLike, ...]:
-        return (
-            *settlement_migrations(),
-            *CONTACT_EXCHANGE_MIGRATIONS,
-            *pool_override_migrations(),
-            *VM_MIGRATIONS,
-        )
-
-    def _ensure_domain_tables(self, cur: sqlite3.Cursor) -> None:
-        # The storefront holds no physical inventory. A database an older
-        # storefront created may still hold its retired inventory tables; they
-        # are frozen as retained data, so nothing here creates, alters, or
-        # re-triggers them. See docs/development/DEPLOYMENT_AND_CONFIG.md,
-        # "Migrations at startup".
-        add_vm_settlement_records(cur)
 
     async def list_listing_source_envelopes(
         self, *, offering_mode: str
@@ -193,13 +158,7 @@ def get_sqlite_client(*, registry: StorefrontDomainRegistry) -> SQLiteClient:
     if not isinstance(registry, StorefrontDomainRegistry):
         raise TypeError("registry must be a StorefrontDomainRegistry")
     if _sqlite_client is None:
-        signer = resolve_marketplace_signer()
-        _sqlite_client = SQLiteClient(
-            db_path=settings.db_path,
-            registry=registry,
-            local_listing_principal=signer.identity,
-            expected_legacy_sellers=(BASE_URL_OVERRIDE,),
-        )
+        _sqlite_client = SQLiteClient(db_path=settings.db_path, registry=registry)
     elif _sqlite_client.domain_registry is not registry:
         raise RuntimeError(
             "SQLite client is already bound to a different storefront "

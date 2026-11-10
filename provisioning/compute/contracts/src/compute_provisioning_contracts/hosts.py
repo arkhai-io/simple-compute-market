@@ -14,9 +14,9 @@ accepted with them ignored.
 
 A host definitions document declares hosts in bulk, with the same field names:
 a top-level ``hosts`` list of ``HostDefinition`` entries. Unlike the request
-models, an entry refuses any field it does not define, requires its
-connection's ``version``, and carries no secret, since the document is
-configuration rather than a credential store.
+models, an entry refuses any field it does not define and carries no secret,
+since the document is configuration rather than a credential store. A
+connection states its ``version`` in both.
 """
 
 from __future__ import annotations
@@ -29,10 +29,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ConnectionSubmission(BaseModel):
-    """A connection as an operator submits it."""
+    """A connection as an operator submits it.
+
+    ``version`` is required: a submission's meaning must not depend on a
+    default, and the service refuses a version its kind's codec does not serve.
+    """
 
     kind: str = Field(min_length=1, description="The connection kind, e.g. 'ssh'.")
-    version: int = Field(default=1, ge=1, description="The kind's payload version.")
+    version: int = Field(ge=1, description="The kind's payload version.")
     public: dict[str, Any] = Field(
         default_factory=dict, description="The kind's non-secret fields."
     )

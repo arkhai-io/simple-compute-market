@@ -1,4 +1,4 @@
-"""The store and its migration on a real SQLite database."""
+"""The store on a real SQLite database holding its baseline's table."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from market_pool_overrides import (
     PoolOverrideAddress,
     PoolOverrideRecord,
     SQLitePoolOverrideStore,
-    pool_override_migrations,
 )
+from market_pool_overrides.migrations import BASELINE
 
 SHAPE = {"gpu": {"count": 1, "model": "H100"}}
 
@@ -19,8 +19,7 @@ SHAPE = {"gpu": {"count": 1, "model": "H100"}}
 def _migrated(path) -> SQLitePoolOverrideStore:
     conn = sqlite3.connect(path)
     try:
-        for migration in pool_override_migrations():
-            migration.apply(conn)
+        BASELINE.apply(conn)
         conn.commit()
     finally:
         conn.close()
@@ -37,9 +36,8 @@ def store(tmp_path) -> SQLitePoolOverrideStore:
     return _migrated(tmp_path / "store.db")
 
 
-def test_the_migration_creates_the_table_and_a_rerun_changes_nothing(tmp_path):
-    path = tmp_path / "rerun.db"
-    _migrated(path)
+def test_the_store_is_keyed_by_site_pool_and_mode(tmp_path):
+    path = tmp_path / "keyed.db"
     store = _migrated(path)
 
     conn = sqlite3.connect(path)

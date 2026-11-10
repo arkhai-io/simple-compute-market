@@ -112,7 +112,6 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     step_listing_reconciliation,
 )
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
-    REAL_RESOURCE_ID,
     JobWatch,
     RealVmComputeDealDriver,
     RealVmDealState,
@@ -689,7 +688,7 @@ class TestStage09m_SecondGuestReleased:
         # Reserve only the returned guest shape: the first guest still owns its
         # slice, so asking for the whole host would incorrectly report failure.
         capacity = storefront_admin_client.admin_reserve_capacity(
-            required_attributes={"resource_id": REAL_RESOURCE_ID,
+            required_attributes={"resource_id": deal_driver.reserved_resource_id,
                                  "dimensions": deal_driver.target.listing_shape.model_dump()},
             listing_id=deal_state.seller_listing_id,
             escrow_uid=f"{deal_state.second_escrow_uid}-reuse",

@@ -7,8 +7,8 @@ reach VM derivation, and asking rates resolve, hold, and refresh as the
 precedence rules say. No application runs, so under docs/development/TESTING.md
 they are focused evidence for derivation's own rules rather than integration
 evidence. The storefront's integration evidence for the same paths drives the
-real app through its typed clients, in test_pool_overrides_api.py. The database
-fixture and seeding helpers are the reconciler unit module's.
+real app through its typed clients, in test_pool_overrides_api.py. The migrated
+database fixture and seeding helpers are tests/_reconciler_cases.py's.
 """
 
 from __future__ import annotations
@@ -31,11 +31,7 @@ from arkhai_vms_listings.reconciler import (
     stored_listing_key,
 )
 from market_storefront.publication_binding import prepare_vm_listing_binding
-from market_pool_overrides import (
-    PoolOverrideRecord,
-    SQLitePoolOverrideStore,
-    pool_override_migrations,
-)
+from market_pool_overrides import PoolOverrideRecord, SQLitePoolOverrideStore
 
 from tests._reconciler_cases import (  # noqa: F401  (db_path is a fixture)
     _BIG,
@@ -81,13 +77,6 @@ def test_an_unknown_sites_listing_is_held_while_an_empty_known_sites_is_stale(db
 
 
 def test_another_modes_stored_override_does_not_reach_vm_derivation(db_path):
-    conn = sqlite3.connect(db_path)
-    try:
-        for migration in pool_override_migrations():
-            migration.apply(conn)
-        conn.commit()
-    finally:
-        conn.close()
     asyncio.run(
         SQLitePoolOverrideStore(db_path).replace(
             PoolOverrideRecord(
@@ -107,8 +96,6 @@ def test_another_modes_stored_override_does_not_reach_vm_derivation(db_path):
 def test_an_undecodable_stored_override_holds_its_pool(db_path):
     conn = sqlite3.connect(db_path)
     try:
-        for migration in pool_override_migrations():
-            migration.apply(conn)
         with conn:
             conn.execute(
                 "INSERT INTO pool_overrides (site_id, pool_id, offering_mode, terms) "
@@ -150,13 +137,6 @@ def _priced_pool(rates, *, shapes=(_SMALL_SHAPE, _LARGE_SHAPE)):
 
 
 def _store_override(db_path, **stated):
-    conn = sqlite3.connect(db_path)
-    try:
-        for migration in pool_override_migrations():
-            migration.apply(conn)
-        conn.commit()
-    finally:
-        conn.close()
     asyncio.run(
         SQLitePoolOverrideStore(db_path).replace(
             PoolOverrideRecord(offering_mode="vm", **stated)
@@ -269,8 +249,6 @@ def test_an_unreadable_override_holds_its_pool_rather_than_falling_through(db_pa
     declaration is below it, and must not speak for it."""
     conn = sqlite3.connect(db_path)
     try:
-        for migration in pool_override_migrations():
-            migration.apply(conn)
         with conn:
             conn.execute(
                 "INSERT INTO pool_overrides (site_id, pool_id, offering_mode, asking_rates) "

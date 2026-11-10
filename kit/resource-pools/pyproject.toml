@@ -1,11 +1,13 @@
 [project]
 name = "arkhai-kit-resource-pools"
-version = "0.9.0"
+version = "0.10.0"
 license = "MIT"
 description = "Provider-neutral resource-pool administration: persistence, YAML reconciliation, and the pool-config handler protocol."
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-kit-resource-pools-contracts>=0.2.0",
+    # The migration type the table's baseline is exported as.
+    "arkhai-kit-schema-migrations>=0.1.0",
     "pydantic>=2.7",
     "sqlalchemy>=2.0",
     "pyyaml>=6.0",

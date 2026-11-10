@@ -21,6 +21,9 @@ services:
   # 1. Registry/Indexer service (vms.compute filter-spec — the image default).
   registry:
     image: arkhai:registry
+    # The migration before the application, which refuses a database it has
+    # not migrated.
+    command: ["sh", "-c", "registry-migrate && exec uvicorn core_registry.main:app --host 0.0.0.0 --port 8080"]
     ports:
       - "8080:8080"
     env_file:
@@ -45,6 +48,7 @@ services:
   # one, exercising authenticated multi-registry publication and discovery.
   registry-b:
     image: arkhai:registry
+    command: ["sh", "-c", "registry-migrate && exec uvicorn core_registry.main:app --host 0.0.0.0 --port 8080"]
     ports:
       - "8082:8080"
     # Its read and write gates, admin key and bootstrap key are the deployment's,
@@ -74,6 +78,9 @@ services:
   bob-storefront:
     image: arkhai:storefront
     platform: linux/amd64
+    # entrypoint.sh starts ZeroTier, then the migration command runs before
+    # the storefront, which refuses a database it has not migrated.
+    command: ["./entrypoint.sh", "sh", "-c", "market-storefront-migrate && exec market-storefront serve"]
     depends_on:
       registry:
         condition: service_healthy
@@ -132,6 +139,8 @@ services:
   alice-storefront:
     image: arkhai:storefront
     platform: linux/amd64
+    # As Bob's: ZeroTier, then the migration command, then the storefront.
+    command: ["./entrypoint.sh", "sh", "-c", "market-storefront-migrate && exec market-storefront serve"]
     depends_on:
       registry:
         condition: service_healthy

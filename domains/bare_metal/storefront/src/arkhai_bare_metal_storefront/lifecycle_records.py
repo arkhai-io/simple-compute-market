@@ -9,7 +9,7 @@ from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, PaymentSettlementD
 from market_core.schemas import Agreement
 from market_deal_lifecycle.adapters import PaymentSelector
 from market_deal_lifecycle.terms import decode_terms
-from market_deal_servicing import DeliveryRecord, EndSession, EvidenceSession, SellerDeal, SellerSession, create_schema
+from market_deal_servicing import DeliveryRecord, EndSession, EvidenceSession, SellerDeal, SellerSession
 from market_identity import CapturedEnvelope, Identity, canonical_json
 
 
@@ -43,7 +43,6 @@ def register_agreement(conn, agreement_bytes: bytes, settlement_data=None, *, ca
     if option.settlement_schema == ARKHAI_PAYMENTS_MECHANISM:
         expiry = PaymentSettlementData.parse(settlement_data).mandate.expires
     start = int(datetime.fromisoformat(agreement.start_utc.replace("Z", "+00:00")).timestamp())
-    create_schema(conn)
     captured = acceptance_envelope.get() if capture else None
     if captured is not None:
         envelope = captured.envelope

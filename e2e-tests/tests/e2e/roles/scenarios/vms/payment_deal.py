@@ -32,9 +32,8 @@ from e2e_harness.settings import settings
 from tests.e2e.roles.helpers.compute_deal import (
     DealLease, advance_fulfillment_to, wait_for_stage_event,
 )
-from tests.e2e.roles.helpers.payments import (
-    buyer_payments_client, dispute_window_seconds, payment_setting,
-)
+from tests.e2e.roles.helpers.payments import buyer_payments_client, payment_setting
+from tests.e2e.roles.scenarios.vms.composed_listing import payments_settlement
 from tests.e2e.roles.scenarios.vms.conftest import (
     _publisher_trust, _signer, capacity_source_for,
 )
@@ -105,15 +104,10 @@ def commit_hosted_deal(
     listing_id = storefront_seller_client.create_listing(
         listing_resource=resource, capacity_source=capacity_source_for(resource),
         max_duration_seconds=3600,
-        settlements=[{
-            "mechanism": "arkhai.payments.v1", "asset": "USD/6", "rate": "1.00", "per": "hour",
-            "mechanism_input": {
-                "payee_account": str(payment_setting("SELLER_ACCOUNT")), "asset": "USD/6",
-                "window": str(payment_setting("DISPUTE_WINDOW", "P7D")),
-                "delivery_deadline_seconds": 300,
-                "dispute_window_seconds": dispute_window_seconds(delivery_deadline_seconds=300),
-            },
-        }],
+        settlements=[payments_settlement(
+            seller_account=str(payment_setting("SELLER_ACCOUNT")),
+            dispute_window=str(payment_setting("DISPUTE_WINDOW", "P7D")),
+        )],
     ).listing_id
     published = registry_client.get_listing(listing_id)
     assert len(published.settlement_options) == 1

@@ -32,10 +32,11 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.9.0"
+version = "0.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-resource-pools-contracts" },
+    { name = "arkhai-kit-schema-migrations" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
@@ -49,6 +50,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-schema-migrations", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "sqlalchemy", specifier = ">=2.0" },
@@ -68,6 +70,14 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_resource_pools_contracts-0.3.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-schema-migrations"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+wheels = [
+    { path = "arkhai_kit_schema_migrations-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

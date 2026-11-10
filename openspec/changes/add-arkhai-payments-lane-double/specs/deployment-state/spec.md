@@ -42,7 +42,7 @@ The Arkhai payments API key MUST reach only its owning buyer or seller process. 
 
 #### Scenario: A non-loopback origin is plain HTTP
 
-- **WHEN** a role's `[Settlement.arkhai_payments]` names an `http://` service origin on a non-loopback host
+- **WHEN** a buyer or seller process's `[Settlement.arkhai_payments]` names an `http://` service origin on a non-loopback host
 - **THEN** its configuration is refused, naming the HTTPS requirement
 
 #### Scenario: A release is rendered from release values

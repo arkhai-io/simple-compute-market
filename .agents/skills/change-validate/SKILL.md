@@ -272,7 +272,9 @@ built from this commit rather than left in `.dist` by another branch.
    a short hash), which its summary names, with every pipeline scenario when the
    owner's environment sets `HELM_ALL_SCENARIOS=1`. Preflights first,
    before anything slow: the kube context (`HELM_CONTEXT`, `docker-desktop` unless
-   the owner's environment names another), the VM and bare-metal storefront environments the
+   the owner's environment names another), which the kubeconfig must hold and which
+   the part pins for its own commands, leaving the machine's selected context
+   alone, so a production context selected there is never deployed to, the VM and bare-metal storefront environments the
    chart-to-loader checks run in (`make init` creates both), the Docker daemon, a
    `Ready` node, Foundry's `cast`, which derives the namespace's Secrets, a
    warning if the Docker credential helper does not answer, and the capacity

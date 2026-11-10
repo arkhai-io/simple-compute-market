@@ -20,13 +20,13 @@ buyer-side escrow requirements.
 
 - Docker/Podman with Compose v2.24 or later on a Linux host.
 - The staged internal wheels and the images built from this checkout.
-- Canonical marketplace principals and matching role-scoped signer files for
+- Canonical marketplace principals and matching service-scoped signer files for
   the registry, storefront, and selected-site provisioning authority.
 - A host definitions document declaring a real whole-host SSH target, and a
   dedicated provisioning SSH private-key file.
 - A Resource Pool document that explicitly declares `bare_metal`; absence is
   not a permissive default.
-- One strict shared settlement configuration, the `[Settlement]` section of the storefront's configuration. Alkahest roles require chain configuration and the wallet key in the storefront's Secret overlay, whose account, funded, is the public seller address. Payments-only roles use public service, account, and receipt-trust settings without wallet or RPC inputs. Never put a wallet private key, payment credential, or provider object in Compose, the public configuration file, or this document.
+- One strict shared settlement configuration, the `[Settlement]` section of the storefront's configuration. A storefront settling through Alkahest requires chain configuration and the wallet key in its Secret overlay, whose account, funded, is the public seller address. A payments-only storefront uses public service, account, and receipt-trust settings without wallet or RPC inputs. Never put a wallet private key, payment credential, or provider object in Compose, the public configuration file, or this document.
 
 The installed `arkhai-bare-metal-buyer` contribution supplies `market bare-metal` discovery, negotiation, contact introduction, and physical lifecycle commands. A running seller stack is not end-to-end evidence until the public path also observes authenticated access, teardown, and access revocation against a disposable host.
 
@@ -187,7 +187,7 @@ The pool declaration is authoritative. Do not add `vm` merely to make a
 request pass; add it only if the same pool and executor can actually deliver
 that mode.
 
-## Prepare role credentials
+## Prepare service credentials
 
 Use separate owner-readable files:
 
@@ -204,7 +204,7 @@ Use separate owner-readable files:
 - the Ansible key for the selected host. It is not a marketplace credential.
 
 The files must be regular owner-readable files. Do not reuse one principal or
-credential across roles, and do not commit credential values.
+credential across services, and do not commit credential values.
 
 ## Configure public bindings
 
@@ -604,7 +604,7 @@ remove the bare-metal deployment and install it fresh:
    so a lease left active there is orphaned rather than removed.
 2. `helm uninstall` the bare-metal release and delete its persistent volume
    claims. Its registry listings go with it only if the registry belongs to
-   that release. A registry shared with other roles keeps them, and nothing in
+   that release. A registry shared with other services keeps them, and nothing in
    a fresh storefront knows their listing ids; before uninstalling, disable the
    bare-metal capacity declarations at the provisioning service and let one
    publication cycle run (or run `bare-metal-storefront publish`) after the

@@ -1,7 +1,7 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
 
-.PHONY: help install reinit test serve build clean
+.PHONY: help install reinit test migrate serve build clean
 
 .DEFAULT_GOAL := help
 
@@ -18,6 +18,9 @@ reinit: ## Sync this environment, refreshing the internal wheels its lock instal
 
 test: reinit ## Run the test suite
 	uv run --find-links $(DIST_DIR) pytest tests -q
+
+migrate: ## Apply the service's database migrations; serve refuses a database without them
+	uv run --find-links $(DIST_DIR) apicredits-service-migrate
 
 serve: ## Run the service locally (reload)
 	uv run --find-links $(DIST_DIR) python -m apicredits_service.main

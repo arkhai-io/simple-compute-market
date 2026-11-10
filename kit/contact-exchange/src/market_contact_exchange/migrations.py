@@ -16,17 +16,9 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
-from market_settlement_runtime import SettlementMigration
+from market_schema_migrations import Migration
 
 from .introduction_routes import IntroductionPayloadsDeletedError, IntroductionRecord
-
-CONTACT_EXCHANGE_INTRODUCTIONS_MIGRATION_ID = "20260815_006_contact_introductions"
-CONTACT_EXCHANGE_TOMBSTONES_MIGRATION_ID = (
-    "20261001_007_contact_introduction_tombstones"
-)
-CONTACT_EXCHANGE_SELLER_DISPATCH_CLAIMS_MIGRATION_ID = (
-    "20261027_008_contact_introduction_seller_dispatch_claims"
-)
 
 #: The text form of every timestamp in ``contact_introductions``: UTC, second
 #: precision, as SQLite's ``strftime('%Y-%m-%dT%H:%M:%SZ','now')`` writes
@@ -39,111 +31,91 @@ _TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _REDACTED_CONTACT = "{}"
 
 
-def _add_contact_introductions(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS contact_introductions (
-            obligation_ref TEXT PRIMARY KEY,
-            agreement_ref TEXT NOT NULL,
-            buyer_contact TEXT NOT NULL,
-            seller_contact TEXT NOT NULL,
-            introduction_package TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-        )
-        """
+_BASELINE_DDL: tuple[str, ...] = (
+    """
+    CREATE TABLE contact_introductions (
+        obligation_ref TEXT PRIMARY KEY,
+        agreement_ref TEXT NOT NULL,
+        buyer_contact TEXT NOT NULL,
+        seller_contact TEXT NOT NULL,
+        introduction_package TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+        payloads_deleted_at TEXT
     )
-
-
-def _add_introduction_tombstones(conn: sqlite3.Connection) -> None:
-    columns = {
-        str(row[1]) for row in conn.execute("PRAGMA table_info(contact_introductions)")
-    }
-    if "payloads_deleted_at" not in columns:
-        conn.execute(
-            "ALTER TABLE contact_introductions ADD COLUMN payloads_deleted_at TEXT"
-        )
+    """,
     # A row is written once at reveal and changed at most once afterwards, by
-    # the one-way redaction. Enforced here rather than by callers so that no
-    # code path can restore a payload, rewrite the agreed context, or clear a
-    # tombstone and let the introduction be revealed again.
-    conn.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS contact_introductions_redaction_only
-        BEFORE UPDATE ON contact_introductions
-        WHEN NOT (
-            OLD.payloads_deleted_at IS NULL
-            AND NEW.payloads_deleted_at IS NOT NULL
-            AND NEW.payloads_deleted_at <> ''
-            AND NEW.buyer_contact = '{}'
-            AND NEW.seller_contact = '{}'
-            AND NEW.obligation_ref IS OLD.obligation_ref
-            AND NEW.agreement_ref IS OLD.agreement_ref
-            AND NEW.introduction_package IS OLD.introduction_package
-            AND NEW.created_at IS OLD.created_at
-        )
-        BEGIN
-            SELECT RAISE(
-                ABORT,
-                'a contact introduction changes only by one-way payload redaction'
-            );
-        END
-        """
+    # the one-way redaction. Enforced by the database rather than by callers so
+    # that no code path can restore a payload, rewrite the agreed context, or
+    # clear a tombstone and let the introduction be revealed again.
+    """
+    CREATE TRIGGER contact_introductions_redaction_only
+    BEFORE UPDATE ON contact_introductions
+    WHEN NOT (
+        OLD.payloads_deleted_at IS NULL
+        AND NEW.payloads_deleted_at IS NOT NULL
+        AND NEW.payloads_deleted_at <> ''
+        AND NEW.buyer_contact = '{}'
+        AND NEW.seller_contact = '{}'
+        AND NEW.obligation_ref IS OLD.obligation_ref
+        AND NEW.agreement_ref IS OLD.agreement_ref
+        AND NEW.introduction_package IS OLD.introduction_package
+        AND NEW.created_at IS OLD.created_at
     )
+    BEGIN
+        SELECT RAISE(
+            ABORT,
+            'a contact introduction changes only by one-way payload redaction'
+        );
+    END
+    """,
     # Removing an unredacted row would erase both its payloads and the fact
     # that it was revealed. A tombstone may be removed: that is how its growth
     # is eventually bounded, once its deal can no longer be revealed again.
-    conn.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS contact_introductions_keep_unredacted
-        BEFORE DELETE ON contact_introductions
-        WHEN OLD.payloads_deleted_at IS NULL
-        BEGIN
-            SELECT RAISE(
-                ABORT,
-                'an unredacted contact introduction cannot be removed'
-            );
-        END
-        """
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS contact_introductions_retention "
-        "ON contact_introductions (created_at) WHERE payloads_deleted_at IS NULL"
-    )
-
-
-def _add_seller_dispatch_claims(conn: sqlite3.Connection) -> None:
+    """
+    CREATE TRIGGER contact_introductions_keep_unredacted
+    BEFORE DELETE ON contact_introductions
+    WHEN OLD.payloads_deleted_at IS NULL
+    BEGIN
+        SELECT RAISE(
+            ABORT,
+            'an unredacted contact introduction cannot be removed'
+        );
+    END
+    """,
+    "CREATE INDEX contact_introductions_retention"
+    " ON contact_introductions (created_at) WHERE payloads_deleted_at IS NULL",
     # One row per introduction whose seller-side delivery has been claimed by
     # the start that completed its reveal. A table of its own, not a column on
     # contact_introductions: that row's trigger admits no update but the
     # one-way redaction, which is what keeps a revealed row from being
-    # rewritten. Created empty, which is correct only because no deployment
-    # holds an introduction revealed before the table exists: such an
-    # introduction would hold no claim, and the next start for it would
-    # announce it to its seller again.
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS contact_introduction_seller_dispatches (
-            obligation_ref TEXT NOT NULL PRIMARY KEY,
-            claimed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-        )
-        """
+    # rewritten.
+    """
+    CREATE TABLE contact_introduction_seller_dispatches (
+        obligation_ref TEXT NOT NULL PRIMARY KEY,
+        claimed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
     )
-
-
-CONTACT_EXCHANGE_MIGRATIONS = (
-    SettlementMigration(
-        CONTACT_EXCHANGE_INTRODUCTIONS_MIGRATION_ID,
-        _add_contact_introductions,
-    ),
-    SettlementMigration(
-        CONTACT_EXCHANGE_TOMBSTONES_MIGRATION_ID,
-        _add_introduction_tombstones,
-    ),
-    SettlementMigration(
-        CONTACT_EXCHANGE_SELLER_DISPATCH_CLAIMS_MIGRATION_ID,
-        _add_seller_dispatch_claims,
-    ),
+    """,
 )
+
+BASELINE_TABLES: frozenset[str] = frozenset(
+    {"contact_introductions", "contact_introduction_seller_dispatches"}
+)
+"""The tables :data:`BASELINE` creates."""
+
+
+def _create_baseline(conn: sqlite3.Connection) -> None:
+    for statement in _BASELINE_DDL:
+        conn.execute(statement)
+
+
+BASELINE: Migration[sqlite3.Connection] = Migration(
+    "v0_3_0_baseline_contact_exchange", _create_baseline
+)
+"""The introduction tables as the marketplace v0.3.0 release's storefronts built
+them, for a storefront chain to compose after core storefront's baseline. A later
+change to them is a migration after it, never an edit to it, since an adopted
+v0.3.0 database records the baseline without running it.
+See openspec/specs/deployment-state/spec.md."""
 
 
 def format_introduction_timestamp(value: datetime) -> str:
@@ -283,10 +255,8 @@ def select_expired_introductions(
 
 
 __all__ = [
-    "CONTACT_EXCHANGE_INTRODUCTIONS_MIGRATION_ID",
-    "CONTACT_EXCHANGE_MIGRATIONS",
-    "CONTACT_EXCHANGE_SELLER_DISPATCH_CLAIMS_MIGRATION_ID",
-    "CONTACT_EXCHANGE_TOMBSTONES_MIGRATION_ID",
+    "BASELINE",
+    "BASELINE_TABLES",
     "claim_seller_dispatch",
     "delete_introduction_payloads",
     "format_introduction_timestamp",

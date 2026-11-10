@@ -65,6 +65,7 @@ from market_storefront.middleware.admin_identity import (
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.services.fulfillment_resume_runtime import resume_incomplete_fulfillments_once
+from market_storefront.utils.migrations import migrate_storefront_database
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.delivery_fakes import DeliveryProvisioning, DeliverySite
 from tests.fulfillment_fixtures import BUYER_PRINCIPAL, make_vm_lifecycle_fixture
@@ -115,6 +116,7 @@ async def payment_rig(tmp_path):
     async def build(*, start: datetime | None = None, hold: bool = False):
         domain = build_vm_storefront_domain()
         registry = build_vm_storefront_registry(domain)
+        migrate_storefront_database(tmp_path / "storefront.db")
         db = SQLiteClient(str(tmp_path / "storefront.db"), registry=registry)
         payments = FakePaymentsClient()
         stage = PaymentSellerStage(_config(), client_for_owner=payments)
@@ -350,7 +352,7 @@ async def test_a_storefront_upgrading_with_recorded_credentials_clears_every_cop
         )
         conn.execute("DELETE FROM schema_migrations WHERE id='20261106_002_vm_credentials_cleared'")
 
-    SQLiteClient(rig.db.db_path, registry=rig.db.domain_registry)
+    migrate_storefront_database(rig.db.db_path)
 
     with sqlite3.connect(rig.db.db_path) as conn:
         status, body = conn.execute(

@@ -477,54 +477,37 @@ and receive the connection details of a VM created on one of your hosts.
 
 ## Upgrading from CSV inventory
 
-Earlier storefronts could hold their own inventory: a resource CSV seeded at
-startup (`resources_csv_path`, `resources_csv_inline`, or a file at
-`/app/resources.csv`) or imported through
-`POST /api/v1/admin/portfolio/resources/import`, with per-row prices drawn from
-`[escrow_templates]`. A storefront now reads inventory only from its sites'
-provisioning services, and nothing warns when the old source is still
-configured: an unmigrated storefront starts, finds no pools, and publishes
-nothing. The upgrade is one-way; there is no supported downgrade.
+A storefront reads inventory only from its sites' provisioning services; it
+holds no inventory of its own, and no setting replaces the retired resource CSV
+(`resources_csv_path`, `resources_csv_inline`), its pricing templates
+(`[escrow_templates]`), or `capacity.use_site_projection_for_listings`. Remove
+them from every storefront configuration file, and the chart's
+`secret.resourcesCsvInline` value: the chart refuses to render with any of them,
+and `market-storefront config set` refuses to write them. A storefront that
+still states them starts, finds no pools, and publishes nothing.
 
-Before upgrading, declare at provisioning everything the CSV described:
+Declare at provisioning what such a CSV described:
 
 1. **Hosts and capacity.** Register each host with the provisioning service, in
    its host definitions document or through the host API, and declare what it
-   sells as capacity, as "Declaring
-   capacity" above describes. A CSV row's `attribute.vm_host` names the host,
-   and its `value` and `attribute.vcpu_count`, `ram_gb`, and `disk_gb` become
-   the declaration's `capacity`.
+   sells as capacity, as "Declaring capacity" above describes. A CSV row's
+   `attribute.vm_host` names the host, and its `value` and
+   `attribute.vcpu_count`, `ram_gb`, and `disk_gb` become the declaration's
+   `capacity`.
 2. **Pools and their terms.** Put each resource in a pool, and declare the
    pool's `region` in its `policy_tags`, with its `listing_shapes` and
    `asking_rates` where you state them. Region can only be declared there, and
-   a pool without it is held until it states one. A
-   pool's `sla` hint is read only by a storefront with
-   `[pricing].accept_pool_declared_sla` on; otherwise state the SLA as an
-   override term.
-3. **Storefront terms.** Re-enter, with `market-storefront pool-override set`,
-   any pool term the storefront itself supplied. System status on the release
-   you are upgrading from lists, under `publication_derivation`, each field a
-   pool still took from the storefront's own pool record
-   (`legacy_overrides_in_effect`): `sla`, `max_duration_seconds`, and pricing
-   left there fall through to the pool's hint and then to the configured
-   default once you upgrade. A per-row `accepted_escrows` value has no
-   equivalent; state the clauses it priced as a `settlements` clause list in
-   the override or in `[pricing].settlements`.
-4. **Configuration.** Remove `resources_csv_path`, `resources_csv_inline`,
-   `[escrow_templates]`, and `capacity.use_site_projection_for_listings` from
-   every storefront configuration file, and the chart's
-   `secret.resourcesCsvInline` value. The chart refuses to render with any of
-   them, and `market-storefront config set` refuses to write them.
+   a pool without it is held until it states one. A pool's `sla` hint is read
+   only by a storefront with `[pricing].accept_pool_declared_sla` on; otherwise
+   state the SLA as an override term.
+3. **Storefront terms.** State, with `market-storefront pool-override set`, any
+   pool term the storefront itself supplies. A per-row `accepted_escrows` value
+   has no equivalent; state the clauses it priced as a `settlements` clause list
+   in the override or in `[pricing].settlements`.
 
-After upgrading, the storefront's database keeps the tables the old inventory
-lived in (`resources`, `hosts`, `resource_transition_events`,
-`compute_capacity_pools`, and `compute_pool_members`) exactly as they were. The
-storefront never reads or writes them again; they remain so you can extract
-anything you did not declare beforehand. Their rows are history, not current
-state: reconcile each against what the provisioning service already holds
-before declaring it there, through the provisioning service's own
-administration API or definition documents. Nothing copies them across
-automatically, and nothing should overwrite a declaration that is already live.
+The storefront's database keeps none of the tables a storefront-held inventory
+lived in: the migration after its v0.3.0 baseline drops them
+([operator handbook, "Upgrading a deployment"](operator-handbook.md#upgrading-a-deployment)).
 
 ## Common pitfalls
 

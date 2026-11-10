@@ -4,7 +4,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Any, Generic, Protocol, TypeVar
 
@@ -88,6 +88,7 @@ class PublicationRepository(Protocol):
         registry_assigned_id: str | None,
         last_error: str | None,
     ) -> Any: ...
+    async def open_listing_ids(self) -> Collection[str]: ...
 
 
 class PublicationDomainHooks(Protocol[PayloadT]):
@@ -99,6 +100,14 @@ class PublicationDomainHooks(Protocol[PayloadT]):
         self, listing_id: str
     ) -> PublicationBinding | None: ...
 
+    def registry_publisher(self) -> Any:
+        """The principal the storefront publishes under at every registry."""
+        ...
+
+    def served_offering_modes(self) -> Collection[str]:
+        """Every offering mode the storefront publishes listings of."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class RegistryDivergence:
@@ -107,6 +116,28 @@ class RegistryDivergence:
     listing_id: str
     listing_status: str
     registry_urls: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class UnheldListingClose:
+    """One registry listing the storefront does not hold open, and its close.
+
+    ``status`` is ``planned`` in a preview, ``closed`` once the registry took
+    the close, and ``failed`` when it did not, with the registry's ``error``.
+    """
+
+    listing_id: str
+    registry_url: str
+    status: str
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RegistrySweep:
+    """What one sweep closed, or would close, and which registries it could not read."""
+
+    closes: tuple[UnheldListingClose, ...] = ()
+    unreachable: tuple[str, ...] = ()
 
 
 RegistryClientFactory = Callable[[], Any]
@@ -409,6 +440,78 @@ class PublicationRuntime(Generic[PayloadT]):
                 d.listing_id for d in divergences if d.listing_id in remaining
             ),
         }
+
+    async def retire_unheld(self, *, dry_run: bool = False) -> RegistrySweep:
+        """Close at each registry the listings this storefront does not hold open.
+
+        Convergence repairs only listings with a publication record at a
+        registry, so a listing open at a registry with none -- its record lost,
+        published before records were kept, or recorded against another URL for
+        the registry -- stays open there however the storefront closed it, or
+        though it never knew it. This sweep reads, at every configured registry,
+        the open listings published under the storefront's principal and closes
+        each of an offering mode it serves that it does not hold open. A listing
+        of another offering mode is left alone, so two storefronts of different
+        modes may share a principal.
+
+        A registry is read to its last page before anything there is closed,
+        since closing while paging by offset would shift the pages still to be
+        read; one that cannot be read to the end is reported unreachable and
+        nothing is closed there until a later sweep reads it. Closes go through
+        the per-registry update and are not recorded as publications, so a close
+        that fails is simply found again by the next sweep. A ``dry_run``
+        reports each close it would make and makes none.
+        """
+        if not self._enabled:
+            return RegistrySweep()
+        publisher = self._hooks.registry_publisher()
+        modes = frozenset(self._hooks.served_offering_modes())
+        async with self._open_registry_client() as client:
+            reads = await client.list_publisher_listings_per_registry(publisher)
+            # Read after the registries, never before: a listing is recorded open
+            # locally before any registry is told of it, so a listing this
+            # storefront published that a read found is already in this set.
+            held = frozenset(await self._repository.open_listing_ids())
+            unreachable: list[str] = []
+            targets: dict[str, list[str]] = {}
+            for read in reads:
+                if read.listings is None:
+                    unreachable.append(read.registry_url)
+                    continue
+                for listing in read.listings:
+                    listing_id = "" if listing.id is None else str(listing.id)
+                    if not listing_id or listing_id in held:
+                        continue
+                    resource = listing.listing_resource or {}
+                    if resource.get("offering_mode") not in modes:
+                        continue
+                    urls = targets.setdefault(listing_id, [])
+                    if read.registry_url not in urls:
+                        urls.append(read.registry_url)
+            closes: list[UnheldListingClose] = []
+            for listing_id, urls in targets.items():
+                if dry_run:
+                    closes.extend(
+                        UnheldListingClose(listing_id, url, "planned") for url in urls
+                    )
+                    continue
+                request = self._update_listing_request_factory(
+                    updates={"status": "closed"}
+                )
+                results = await client.update_listing_per_registry(
+                    listing_id=listing_id,
+                    payloads={url: request for url in urls},
+                )
+                for result in results:
+                    closes.append(
+                        UnheldListingClose(
+                            listing_id,
+                            result["registry_url"],
+                            "closed" if result.get("success") else "failed",
+                            None if result.get("success") else result.get("error"),
+                        )
+                    )
+        return RegistrySweep(closes=tuple(closes), unreachable=tuple(unreachable))
 
     async def _converge_one(self, divergence: RegistryDivergence) -> None:
         targets = frozenset(divergence.registry_urls)

@@ -129,7 +129,9 @@ class FilterSpec(BaseModel):
 # Loader
 # ---------------------------------------------------------------------------
 
-_DEFAULT_SPEC_PATH = Path(__file__).resolve().parents[3] / "filter-spec.yaml"
+# Packaged beside the code, so the default resolves the same way from a
+# source checkout and from the installed wheel the image runs.
+_DEFAULT_SPEC_PATH = Path(__file__).resolve().parents[1] / "filter-spec.yaml"
 
 
 def resolve_spec_path(settings: Settings | None = None) -> Path:

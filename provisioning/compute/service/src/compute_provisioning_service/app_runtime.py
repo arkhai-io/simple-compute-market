@@ -14,7 +14,7 @@ from compute_provisioning.startup import (
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.container import container
-from compute_provisioning_service.db.migrations import check_schema_version
+from compute_provisioning_service.db.database import require_compatible_database
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning_service.services.definition_documents import (
     DefinitionDocumentImporter,
@@ -62,13 +62,15 @@ def initialise_container_resources() -> None:
     openspec/specs/deployment-state/spec.md, "Service-owned migration history")
     — they must be applied ahead of time via the Helm init container,
     ``compute-provisioning-migrate``, or ``make migrate``. This step only
-    checks the schema version and fails fast with an actionable message if
-    it's behind, so a missed migration surfaces as an obvious startup error
-    rather than a query hitting a missing column later.
+    checks, issuing no DDL, that the database records exactly the migrations
+    this image carries, and refuses any other database with the migration
+    command and the migration IDs that differ, so a missed migration or a
+    rolled-back image surfaces as an obvious startup error rather than a query
+    hitting a missing column later.
     """
     container.identity_context()
     container.init_resources()
-    check_schema_version(container.db_engine())
+    require_compatible_database(container.db_engine())
     logger.info("Database schema check passed")
 
 

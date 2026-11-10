@@ -19,67 +19,6 @@ A settlement request MUST name the accepted negotiation and carry only what nego
 - **WHEN** a buyer's settlement request carries an SSH public key or a chain name, matching the accepted terms or not
 - **THEN** the storefront refuses it before any settlement lookup
 
-### Requirement: Storefront holds no physical-resource authority
-
-A storefront MUST NOT actively maintain physical-resource inventory, host
-inventory, or physical-allocation state. Authoritative physical state belongs to the site
-authority and the provisioning service, and a storefront obtains it only through
-projections. A storefront MAY persist commercial state — pricing, accepted
-settlement terms, seller policy, and listing derivation records — including
-per-pool commercial values keyed by a projected pool identity.
-
-Fresh storefront databases MUST NOT create the retired local inventory or
-physical-allocation tables, columns, triggers, or indexes. An upgraded database
-MAY retain pre-existing schema and rows as inert historical data an operator
-can extract into provisioning. The retirement MUST NOT drop that schema or
-delete or rewrite its retained rows. Current storefront
-code MUST NOT read or write the retired data, including during startup,
-publication, negotiation, diagnostics, or reservation cleanup.
-
-Retained rows MUST NOT be treated as current physical truth. An operator MAY
-use them to prepare host inventory, pool definitions, and capacity declarations
-for provisioning's supported administration surfaces; that use MUST NOT restore
-a storefront inventory read path or overwrite live site state automatically.
-
-#### Scenario: A fresh storefront database is initialized
-
-- **WHEN** a storefront bootstraps a new database
-- **THEN** it creates no retired local physical-inventory or allocation schema,
-  while commercial and listing-derivation persistence remains
-
-#### Scenario: A populated legacy database is upgraded
-
-- **WHEN** retirement is applied to a database containing retired local schema
-  and rows, including resource-transition history
-- **THEN** that schema and those rows are retained unchanged and current
-  storefront code neither reads nor writes them
-
-#### Scenario: An operator uses retained inventory to seed provisioning
-
-- **WHEN** an operator prepares provisioning inventory from retained legacy rows
-- **THEN** authoritative declarations enter through provisioning's supported
-  administration surfaces, without automatic overwrite of live site state or
-  reactivating storefront-local inventory
-
-#### Scenario: Physical state changes after the cutover
-
-- **WHEN** provisioning's physical state changes while historical storefront
-  rows remain in the database
-- **THEN** the historical rows remain unchanged and cannot be used as evidence
-  of current availability when seeding provisioning
-
-#### Scenario: Provisioning reports a physical lifecycle transition
-
-- **WHEN** a physical resource is released or its lifecycle state changes
-- **THEN** the authoritative record changes at the site authority and the
-  storefront does not maintain a parallel physical state record to be updated
-
-#### Scenario: Publication needs physical facts
-
-- **WHEN** a storefront derives publishable listing candidates
-- **THEN** the physical facts come from site projections, and no local physical
-  inventory is consulted or retained as an alternative source
-
 ### Requirement: Operator-visible acceptance and projection state
 
 The storefront MUST expose enough operator state to distinguish global
@@ -531,20 +470,6 @@ Publication and negotiation MAY use one configured seller principal. Each market
 
 - **WHEN** the seller publishes `arkhai.payments.v1`
 - **THEN** the option carries only public payee and payment policy while marketplace proof and payment credentials remain separate
-
-### Requirement: Storefront identity state migrates atomically
-
-Storefront databases MUST validate and migrate buyer, seller, administrator, service-peer, negotiation-message, heartbeat, claim, settlement, replay, stage-event, and audit identities to canonical principal form in one service-local transaction. Migration MUST preserve listing, negotiation, obligation, fulfillment, service-peer, rotation, and operation identities; prove listing ownership and cross-record party consistency; and retire authoritative address-only identity columns. A malformed or partial principal, ownership conflict, duplicate active binding, missing party relation, or other unsafe population MUST roll back completely.
-
-#### Scenario: Active escrow obligation is migrated
-
-- **WHEN** a storefront with a funded nonterminal obligation upgrades from address-only identity rows
-- **THEN** the obligation retains its authoritative lifecycle and operation journal while its parties become canonical `eip191` principals
-
-#### Scenario: Persisted listing ownership conflicts with local identity
-
-- **WHEN** a populated listing cannot be proven to belong to the configured storefront principal and expected storefront URL
-- **THEN** the migration aborts without leaving any identity table or embedded event partially converted
 
 ### Requirement: Publication derives all ready settlement options
 
@@ -3242,14 +3167,103 @@ declare its new minimum version.
 - **THEN** fields remain `protocol`, `seller_principal`, `evidence`, and `proof`,
   with no new bytes field or wire wrapper
 
+### Requirement: A storefront retires registry listings it does not hold open
+
+This requirement governs VM, API-credit, and bare-metal publication, beside the convergence of the listings a storefront records.
+
+Every publication pass MUST list, at each configured registry it can reach, the open listings published under the storefront's own publisher principal for the offering modes it serves, and MUST close at that registry each one the storefront does not hold open locally, whether it is closed locally or unknown to the storefront. Listings of an offering mode the storefront does not serve MUST be left as they are. The pass MUST read every page of a registry's listings before closing any listing there, and MUST treat a registry it cannot reach, or whose read fails on any page, as unreachable: it closes nothing there and a later pass sweeps it. A listing the storefront holds open locally, including one held while its site's projection is unavailable, MUST NOT be closed. A preview pass MUST report each such close without making it.
+
+#### Scenario: A registry holds an open listing the storefront has no record of
+
+- **WHEN** a registry holds an open listing published under the storefront's principal, for an offering mode it serves, that the storefront does not record
+- **THEN** the next publication pass closes it at that registry and reports the close with the reason that the storefront does not hold it
+
+#### Scenario: A listing closed locally is still open at a registry the storefront no longer records
+
+- **WHEN** a listing the storefront closed locally is open at a configured registry for which the storefront holds no publication record
+- **THEN** the next publication pass closes it at that registry
+
+#### Scenario: Another storefront's offering mode under the same principal
+
+- **WHEN** the VM storefront and the bare-metal storefront publish under one principal and the VM storefront's pass finds an open bare-metal listing it does not record
+- **THEN** it leaves that listing open
+
+#### Scenario: A preview pass finds a listing it does not hold
+
+- **WHEN** a preview publication pass finds an open registry listing the storefront does not hold open
+- **THEN** it reports the close it would make and changes nothing at the registry
+
+#### Scenario: A registry is unreachable during the sweep
+
+- **WHEN** a configured registry cannot be reached during a publication pass
+- **THEN** the pass sweeps the other registries and that registry is swept by a later pass
+
+#### Scenario: A registry holds more open listings than one page
+
+- **WHEN** a registry holds more open listings under the storefront's principal than one page of its listing query returns
+- **THEN** the pass reads every page before closing, and closes each listing on any page that the storefront does not hold open
+
+#### Scenario: A registry's listing read fails partway through
+
+- **WHEN** a registry answers the first page of the sweep's listing read and fails on a later one
+- **THEN** the pass closes nothing at that registry, and a later pass sweeps it
+
+#### Scenario: A listing is held open during a site outage
+
+- **WHEN** the storefront holds a listing open while its site's projection is unavailable, and a registry holds that listing open
+- **THEN** the sweep leaves it open at that registry
+
+### Requirement: Storefront holds no physical-resource authority or inventory
+
+A storefront MUST NOT actively maintain physical-resource inventory, host
+inventory, or physical-allocation state. Authoritative physical state belongs to the site
+authority and the provisioning service, and a storefront obtains it only through
+projections. A storefront MAY persist commercial state — pricing, accepted
+settlement terms, seller policy, and listing derivation records — including
+per-pool commercial values keyed by a projected pool identity.
+
+Fresh storefront databases MUST NOT create the retired local inventory or
+physical-allocation tables, columns, triggers, or indexes. The VM storefront's
+migration chain MUST drop the retired inventory tables — `compute_allocations`,
+`resources`, `hosts`, `resource_transition_events`, `compute_pool_members`,
+`compute_capacity_pools`, and `compute_inventory_pools` — with their rows from a
+database it adopts that holds them, so that a storefront's database holds no
+physical-resource tables. Storefront code MUST NOT read or write any retired table,
+including during startup, publication, negotiation, diagnostics, or reservation
+cleanup.
+
+#### Scenario: A fresh storefront database is initialized
+
+- **WHEN** a storefront bootstraps a new database
+- **THEN** it creates no retired local physical-inventory or allocation schema,
+  while commercial and listing-derivation persistence remains
+
+#### Scenario: An adopted VM storefront database holds the retired inventory tables
+
+- **WHEN** the VM storefront's migration command runs against a database it adopts
+  that holds retired inventory tables and their rows
+- **THEN** those tables and their rows are gone, and the storefront reads and writes
+  no physical-resource state
+
+#### Scenario: Provisioning reports a physical lifecycle transition
+
+- **WHEN** a physical resource is released or its lifecycle state changes
+- **THEN** the authoritative record changes at the site authority and the
+  storefront does not maintain a parallel physical state record to be updated
+
+#### Scenario: Publication needs physical facts
+
+- **WHEN** a storefront derives publishable listing candidates
+- **THEN** the physical facts come from site projections, and no local physical
+  inventory is consulted or retained as an alternative source
+
 ## Evidence
 
-- Canonical listing, negotiation, settlement, fulfillment, and stage-log principals: `core/storefront/tests/unit/test_identity_migrations.py`, `test_settle_identity_models.py`, `test_sqlite_client_escrow_fulfillment_identity.py`, and `test_stage_log_identity.py`.
+- Canonical listing, negotiation, settlement, fulfillment, and stage-log principals: `core/storefront/tests/unit/test_settle_identity_models.py`, `test_sqlite_client_escrow_fulfillment_identity.py`, and `test_stage_log_identity.py`.
 - Version 2 body binding, durable replay classification, exact-retry outcome recovery, and signed responses: `core/storefront/tests/unit/test_auth.py`, `domains/vms/storefront/tests/unit/test_service_peer_identity.py`, and `domains/vms/storefront/tests/integration/test_admin_api.py`.
-- Durable administrator/service-peer ownership and two-proof rotation lifecycle: `core/storefront/tests/unit/test_identity_authority.py`, `test_identity_lifecycle.py`, and `domains/vms/storefront/tests/unit/test_identity_dispatch.py`.
-- Transactional storefront principal migration, conflict rejection, and legacy-column retirement: `core/storefront/tests/unit/test_identity_migrations.py`.
+- Durable administrator/service-peer ownership and two-proof rotation lifecycle: `core/storefront/tests/integration/test_identity_authority.py`, `test_identity_lifecycle.py`, and `domains/vms/storefront/tests/unit/test_identity_dispatch.py`.
 - Projection-backed candidate derivation is the only path, with no setting that selects another: `domains/vms/storefront/tests/unit/test_config_loader.py::test_settings_toml_provides_baseline_defaults`, `domains/vms/storefront/tests/integration/test_reconciler_projection.py`, and `test_reconciler_derivation.py`.
-- The storefront holds no physical-resource authority — no physical-resource route, no local inventory read by status or publication, fresh databases without the retired schema, and retained inventory left unchanged across every initialization, including a pending core timestamp migration: `domains/vms/storefront/tests/unit/test_server_app_composition.py::test_the_storefront_mounts_no_physical_resource_route`, `domains/vms/storefront/tests/unit/test_migrations.py`, `domains/vms/storefront/tests/integration/test_inventory_freeze.py`, and `test_compute_allocations_freeze.py`; retired settings refused at render and edit: `helm/charts/storefront/tests/test_render.py` and `domains/vms/storefront/tests/unit/cli/test_config.py`.
+- The storefront holds no physical-resource authority — no physical-resource route, no local inventory read by status or publication, and the retired inventory tables dropped by the chain: `domains/vms/storefront/tests/unit/test_server_app_composition.py::test_the_storefront_mounts_no_physical_resource_route` and `domains/vms/storefront/tests/integration/test_migration_chain.py`; retired settings refused at render and edit: `helm/charts/storefront/tests/test_render.py` and `domains/vms/storefront/tests/unit/cli/test_config.py`.
 - Generic publication source, runner, and plugin discovery: `core/storefront/tests/unit/test_publication_sources.py`, `test_publication_runner.py`, and `test_publication_plugins.py`.
 - Registry fan-out and publication persistence: `core/storefront/tests/unit/test_registry_publication.py` and `domains/vms/storefront/tests/unit/test_publications_wiring.py`.
 - Domain-runtime bundle and VM wiring: `core/storefront/tests/unit/test_domain_runtime.py` and `domains/vms/storefront/tests/unit/test_domain_runtime_wiring.py`.
@@ -3275,7 +3289,8 @@ declare its new minimum version.
 - The configured default parsed once and refused at startup when malformed: `domains/vms/storefront/tests/unit/test_startup_admissibility_default.py` and `test_admissibility_default_composition.py`; reaching a publication cycle, withholding and closing listings, and its reports in system status, through the storefront app: `domains/vms/storefront/tests/integration/test_publication_loop.py`.
 - The VM override write check: `domains/vms/storefront/tests/unit/test_vm_pool_override_contribution.py`; refusals and a constrained override stored and publishing its base shape, through the typed client: `domains/vms/storefront/tests/integration/test_pool_overrides_api.py`.
 
-- Common multi-domain listing bindings, collision-safe derivation, frozen publication sources, and exact public mode: `core/storefront/tests/integration/test_domain_binding_migrations.py`, `core/storefront/tests/unit/test_publication_runner.py`, `test_publication_plugins.py`, and `domains/vms/storefront/tests/unit/test_publication_wiring.py`.
+- Common multi-domain listing bindings, collision-safe derivation, frozen publication sources, and exact public mode: `core/storefront/tests/integration/test_domain_bindings.py`, `core/storefront/tests/unit/test_publication_runner.py`, `test_publication_plugins.py`, and `domains/vms/storefront/tests/unit/test_publication_wiring.py`.
+- Retiring registry listings a storefront does not hold open — the cross-registry client's paged per-registry read and its per-registry failure: `core/storefront/tests/unit/test_multi_registry_publisher_listings.py`; the held set: `core/storefront/tests/integration/test_open_listing_ids.py`; the sweep's decisions, preview, unreachable registry, and refused close: `kit/capacity-publication/tests/unit/test_registry_sweep.py`; each storefront's pass, a held listing and another offering mode's left open: `domains/vms/storefront/tests/integration/test_publication_loop.py` (`test_a_cycle_closes_registry_listings_the_storefront_does_not_hold`, `test_a_listing_held_through_a_site_outage_stays_open_at_the_registry`), `domains/bare_metal/storefront/tests/test_publication_cycle.py`, and `domains/apicredits/storefront/tests/integration/test_publish_reconcile.py`; the registry paging a publisher's open listings by offset, each stating its offering mode: `core/registry/tests/integration/test_listings.py::TestListPublisherListings::test_open_listings_page_by_offset_to_the_end`.
 - Publication through the storefront app — the loop's cycle, dry run, and pause; unbacked and backed derivation; refresh, close, hold, and reopen; the two-domain registry; backed-only capacity events; publish-then-negotiate; round zero's inventory guard; and each registry's outcome and convergence: `domains/vms/storefront/tests/integration/test_publication_loop.py`, with the app in `domains/vms/storefront/tests/publication_app.py`.
 - Joint per-generation reading of pool declarations, including the older-producer rule and an empty generation: `kit/resource-pools/tests/unit/test_site_declarations.py`. The projection's shape on both sides of the site boundary: `kit/site-client/src/market_site_client/fixtures/resource_pools.py`, validated in `provisioning/compute/service/tests/integration/test_capacity_api.py` and built by the storefront's publication tests.
 - Listing identity, the reconciliation comparison, and availability reconciliation of backed listings only: `domains/vms/storefront/tests/unit/test_listing_comparison.py` and `test_reconciler.py`.
