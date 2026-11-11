@@ -25,22 +25,21 @@ branches. No pre-rebase tag was changed.
 Registry scratch E2E run:
 https://github.com/arkhai-io/simple-compute-market/actions/runs/42996260999
 
-The API-credit and bare-metal lanes have passed. VM and the native gate are still
-running at this checkpoint. Existing capacity-publication tests and the focused
+All four jobs passed: VM, API credits, bare metal and the native Ansible gate. Existing capacity-publication tests and the focused
 VM publication suites passed (92 VM tests). `make check-packaging` and
 `make check-comment-hygiene` passed on the registry, resize and terms scratch
 branches. The release-matrix suite passed on resize and terms (302 tests each).
 
-## Remaining gate
+## Reserved-purchase scenario boundary
 
 The published deadline absence follows terms D3 and its frozen dependency
-contract: the effective pool-facts port is not injected in either deployed
-composition. A raw clause deadline cannot stand in for it. The old canonical
-payment purchase scenario expects that raw value to be promised and defaults to
-requiring protection. See the terms design's reserved-purchase E2E deadline gate.
-No scenario assertion or buyer policy has been changed pending that choice.
+contract: the effective pool-facts port, `delivery_deadline_for_pool`, is not
+injected in either deployed composition. A raw clause deadline cannot stand in
+for it. The reserved-payment scenarios explicitly pass
+`--allow-unprotected-terms` and assert that no deadline is promised, retaining
+dispute coverage, payment, fulfillment and release checks. A reserved-payment
+purchase from these sellers therefore requires that opt-out. Whether a
+seller-configured deadline should be the interim source remains open; the terms
+design records the hole without changing D3.
 
-After resolving the gate: finish terms, carry it to spot, run scratch E2E as
-needed, publish all four PR refs atomically with explicit leases, dispatch all
-four final E2E runs, and wait for those runs and every PR check. The public refs
-have not been rewritten.
+Final branch qualification and publication are recorded in the repair handoff.

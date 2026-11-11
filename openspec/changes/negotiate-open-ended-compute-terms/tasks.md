@@ -551,6 +551,13 @@ option is shown as making no delivery promise, not refused for lacking one (D3).
 - **Restart at section 5's gate.** `scripts/change-workflow next negotiate-open-ended-compute-terms` currently returns `step: clone`, expecting `feat/negotiate-open-ended-compute-terms`, rather than recognizing the owner-requested `open-ended-terms` PR/worktree. The closeout skill requires the route to name closeout and pre-closeout review/triage (or a recorded owner direction) before starting; neither an archived change nor a passing review is claimed. Reconcile that workflow branch/route with the existing PR, without opening a new PR. Complete pre-closeout review/triage, then section 5 in order; leave promotion after review as requested, and mark #351 ready only at the intended boundary. All section-5 boxes remain unchecked rather than certifying closeout from implementation checks alone.
 - Task 4.3 is checked for the required attempt/disclosure, not E2E success. 5.8 must retain the explicit readiness/pipeline blocker in the packet. Keep installed recurring servicing disabled. PR #351 stays draft at this clean checkpoint.
 
+- [x] 4.4 Align the canonical VM and bare-metal reserved-payment purchase drivers
+  with the absent effective pool deadline: explicitly opt into unprotected terms,
+  assert no published delivery promise, and retain dispute/payment/delivery/release
+  checks. Update the existing dispute-coverage fixture and run its focused suite,
+  packaging, comment hygiene and E2E qualification. The open pool-facts-port hole
+  and unresolved interim source remain in `design.md`; D3 is unchanged.
+
 ## 5. Closeout
 
 Documentation-only, in `openspec/README.md#plan-closeout-requirements` order;
