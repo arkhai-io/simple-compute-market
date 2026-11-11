@@ -515,6 +515,39 @@ VM codec's schema validation of the revised shape is that check.
 - **The pin over-refuses on any rate change** (D9) → accepted while live
   repricing is rare.
 
+## Findings during implementation
+
+Kept from the task notes, which closeout compressed; each review's findings and
+dispositions are in its triage record under `reviews/`.
+
+- **Consumers of the scalar.** Driving the real buyer against the served storefront
+  found two consumers that read the scalar as money: a materialized escrow proposal
+  overwrote the scalar `proposal` in the terminal response, and hosted-payment
+  settlement compared the Agreement's amount with the basis-point scalar (D6, D14).
+  Accepting a revised counter found the buyer echoing its revision instruction
+  (D6). These are why task 2.8 was an audit of consumers rather than a rename.
+- **A registry record is not a storefront listing.** A shape-priced `market buy`
+  failed before reaching the seller because the buyer validated its registry record
+  as a storefront `Listing`, which requires `seller_principal`, a field a registry's
+  discovery record never carries (validation 07 V2). The quote now reads the
+  selected option's rate directly, and the buyer's test fixture is registry-shaped.
+- **A stale wheel cache.** API-credit wheel-install tests installed a wheel uv had
+  cached weeks earlier under the same find-links path and filename; installs now
+  pass `--refresh` (validation 07 V1).
+- **The release guard keeps delivered reservations.** Stage 08b's restated shape
+  was judged against available capacity and found none, because releasing the
+  holds of delivered deals frees nothing: the site's release guard frees only a
+  torn-down or undispatched reservation. The scenario declares a third GPU instead
+  (validation 21 V1).
+- **Partial first refresh after the upgrade.** With no retained payload backfilled,
+  a refresh one registry accepted and another refused let the seller price from the
+  accepting registry alone; a registry with a publication row and no retained
+  payload now counts as divergent (27 F1, D9).
+- **Local compose.** No stack started locally during implementation: Docker was
+  absent and Podman Compose resolved included environment-file paths against the
+  wrong directory. The deployed evidence comes from the pipeline (task 2.15, 3.8);
+  the local Podman failure is out of this change's scope.
+
 ## Migration Plan
 
 1. Revised-terms field, kit hook widening, evaluation order, guard retirement.
@@ -529,18 +562,21 @@ roll back only by restoring the pre-upgrade backup with the earlier image.
 | Accepted decision | Permanent location |
 |---|---|
 | A buyer-requested round-0 VM shape differing from the listing is rejected outright until a round can carry a shape | Temporary; lifted by Section 2 (D10). Never promoted |
-| D1: revised terms are a child of `proposal`; core reuses `ProvisionTerms`; durable seller-quoted terms survive continuation and acceptance | `openspec/specs/negotiation-protocol/spec.md` — "A round may revise the capacity shape" |
-| D2, D3: the negotiated quantity is a multiplier in basis points; the ratio rule; amounts stay exact and round up once | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation"; rationale in this `design.md` |
-| D4: the seller's multiplier floor, at most 10,000 | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
-| D5: a schema-opaque buyer amount codec keeps transcript scalars separate from monetary outcomes; bounds against the opening shape; the ceiling check; derived prices for the opening shape | `docs/development/ARCHITECTURE.md` — buyer negotiation composition; `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
-| D6: legacy flat and hidden-reserve paths; the payment, not the scalar, enters settlement | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
-| D7, D8: registry listing-level rate carrier, the buyer's lift, and the retained seller proof | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation"; registry storage and proof belong to `store-registry-listings-as-published` |
-| D9: the pin, from the seller's last successful publication | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation"; `openspec/specs/storefront-publication/spec.md` — "The storefront keeps each registry's last successful publication" |
-| D10: evaluation order, distinct refusals, the advertised-shape cap, shape-fixed listings | `openspec/specs/negotiation-protocol/spec.md` — "Seller feasibility precedes pricing", "A round may revise the capacity shape" |
-| D11: the agreed shape is what the claim reserves | `openspec/specs/vm-storefront-fulfillment/spec.md` — "The agreed shape is reserved" |
-| D12: `resize_reservation` is not wired here | This `design.md`; `negotiation-time-capacity-hold` owns its first call |
-| D13: the negotiated quantity is `negotiated_scalar` | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
-| D14: settlement reads money only from the Agreement and its mandate | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
-| D15: one-way release; drain before upgrading | `docs/operator-handbook.md` — "What the upgrade from v0.3.0 changes" |
-| D16: VM import guard follows the package layers | `docs/development/ARCHITECTURE.md` — "Package and dependency layers" (already states the rule) |
-| D17: content validation lives in the domain codec | This `design.md` |
+| D1: revised terms are a child of `proposal`; core reuses `ProvisionTerms`; durable seller-quoted terms survive continuation and acceptance | `openspec/specs/negotiation-protocol/spec.md#requirement-a-round-may-revise-the-capacity-shape` (archive merge); rationale in `openspec/specs/negotiation-protocol/architecture.md#negotiating-a-shape`; `docs/development/ARCHITECTURE.md#discovery-and-negotiation` |
+| D2, D3: the negotiated quantity is a multiplier in basis points; the ratio rule; amounts stay exact and round up once | `openspec/specs/negotiation-protocol/spec.md#requirement-rate-multiplier-negotiation` (archive merge); why, and the rejected models, in `openspec/specs/negotiation-protocol/architecture.md#why-the-negotiated-quantity-is-a-multiplier`; `docs/development/ARCHITECTURE.md#discovery-and-negotiation` |
+| D4: the seller's multiplier floor, at most 10,000 | `openspec/specs/negotiation-protocol/spec.md#requirement-rate-multiplier-negotiation`; `openspec/specs/negotiation-protocol/architecture.md#why-the-negotiated-quantity-is-a-multiplier` |
+| D5: a schema-opaque buyer amount codec keeps transcript scalars separate from monetary outcomes; bounds against the opening shape; the ceiling check; derived prices for the opening shape | `docs/development/ARCHITECTURE.md#discovery-and-negotiation`; `openspec/specs/negotiation-protocol/spec.md#requirement-rate-multiplier-negotiation`; `openspec/specs/negotiation-protocol/architecture.md#why-the-negotiated-quantity-is-a-multiplier` |
+| D6: legacy flat and hidden-reserve paths; the payment, not the scalar, enters settlement | `openspec/specs/negotiation-protocol/spec.md#requirement-rate-multiplier-negotiation`; `docs/development/ARCHITECTURE.md#discovery-and-negotiation` |
+| D7, D8: registry listing-level rate carrier, the buyer's lift, and the retained seller proof | `openspec/specs/negotiation-protocol/spec.md#requirement-rate-multiplier-negotiation`; registry storage and proof are `registry-discovery`'s, landed with `store-registry-listings-as-published` |
+| D9: the pin, from the seller's last successful publication; divergence; the over-refusal trade-off | `openspec/specs/negotiation-protocol/spec.md#requirement-rate-multiplier-negotiation`; `openspec/specs/storefront-publication/spec.md#requirement-the-storefront-keeps-each-registrys-last-successful-publication` (archive merges); `openspec/specs/negotiation-protocol/architecture.md#the-rates-a-negotiation-is-held-to`; `openspec/specs/storefront-publication/architecture.md` (shape-resolvable rates paragraph) |
+| D10: evaluation order, distinct refusals, the advertised-shape cap, shape-fixed listings | `openspec/specs/negotiation-protocol/spec.md#requirement-seller-feasibility-precedes-pricing` and `#requirement-a-round-may-revise-the-capacity-shape`; `openspec/specs/negotiation-protocol/architecture.md#evaluation-order` |
+| D11: the agreed shape is what the claim reserves | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-the-agreed-shape-is-reserved` (archive merge); `docs/development/ARCHITECTURE.md#discovery-and-negotiation` |
+| D12: `resize_reservation` is not wired here | `docs/development/ARCHITECTURE.md#capacity-reservation`; `docs/development/ROADMAP.md#goal-2--negotiate-full-compute-capability-not-gpu-count-alone`; `negotiation-time-capacity-hold` owns its first call |
+| D13: the negotiated quantity is `negotiated_scalar` | `openspec/specs/negotiation-protocol/spec.md#requirement-rate-multiplier-negotiation`; `openspec/specs/negotiation-protocol/architecture.md#why-the-negotiated-quantity-is-a-multiplier` |
+| D14: settlement reads money only from the Agreement and its mandate | `openspec/specs/negotiation-protocol/spec.md#requirement-rate-multiplier-negotiation` |
+| D15: one-way release; drain before upgrading | `docs/operator-handbook.md#what-the-upgrade-from-v030-changes` |
+| D16: VM import guard follows the package layers | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` (already states the rule) |
+| D17: content validation lives in the domain codec | `openspec/specs/negotiation-protocol/architecture.md#negotiating-a-shape` |
+| Current limits: the advertised-shape cap, the settlement-option repricing lag, no buyer-named digest | `openspec/specs/negotiation-protocol/architecture.md#current-limits`; the two unowned gaps in `docs/development/ROADMAP.md` Goal 2 and `openspec/changes/README.md` |
+| Roadmap currency: Goal 2's current state now describes shape negotiation; this change's gap row is removed, the probe's row names the larger-shape limit, and the two unowned gaps are added | `docs/development/ROADMAP.md#goal-2--negotiate-full-compute-capability-not-gpu-count-alone` |
+| Campaign index currency: the row is `in closeout`, its Notes rewritten and its link pointing at the archive; the campaign graphs are unchanged | `openspec/changes/README.md#roadmap-goal--negotiate-full-compute-capability-not-gpu-count-alone` |
