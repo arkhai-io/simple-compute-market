@@ -16,7 +16,7 @@ From a clean checkout of this branch:
 ```sh
 make dist
 make -C core/registry reinit
-(cd core/registry && uv run --find-links ../../.dist python ../../openspec/changes/store-registry-listings-as-published/first-use.py)
+(cd core/registry && uv run --find-links ../../.dist python ../../openspec/changes/archive/2026-11-11-store-registry-listings-as-published/first-use.py)
 ```
 
 The last command is the directly runnable story surface: a local in-process

@@ -169,8 +169,11 @@ other unnamed term until it upgrades; no publisher reads a registry's
 specification, and checking it would be a new interface across every domain.
 Conversely a version 8 storefront's rated listings are refused by a version 9
 registry until the storefront upgrades: the failure is visible, which is the
-point, so registries and storefronts upgrade together. Closeout decides whether
-`docs/operator-handbook.md` needs that upgrade note. Reads of a top-level
+point, so registries and storefronts upgrade together. Closeout put whether
+`docs/operator-handbook.md` needs that upgrade note to the owner, who chose to
+add it: the supported topology deploys storefronts in releases apart from their
+registry's, so a split upgrade is possible and its only symptom would otherwise
+be refused publications. Reads of a top-level
 `rate_structure` and retained pricing records up the stack move to
 `pricing.rate_structure` in those changes; the stack merges together.
 
@@ -234,18 +237,46 @@ section implements D3's `pricing` move and the permanent tests at the levels
 part against each fixed `HEAD`, end-to-end included. Post-review closeout
 performs promotion and archival.
 
+## Alternatives declined during implementation
+
+Suggestions from the fresh-context compliance checks and reviews that were
+declined, with the reason, so a later reader does not reopen them unknowingly:
+
+- A test of the publication revision's refusing downgrade: the baseline's
+  refusal has none either, and the refusal is one statement.
+- Taking each registry's schema into publisher tests through a packaged
+  dependency: the API-credit specification is packaged nowhere, and installing a
+  registry into a storefront's test environment to read one file is heavier than
+  reading it by checkout path, as the registry's own tests do.
+- Asserting the registry's reserved and retired names in publisher tests: those
+  are the registry's own tested contract.
+- Naming the replacement in the dry run's error for a retired price location:
+  the dry run reports jsonschema's message, as it does for version 6's retired
+  names; publication's refusal names it.
+- A unit test of a prohibition clause without a `description`: it needs a
+  hot-swapped specification to reach a fallback string.
+- Retitling "Seller publication evidence is independently verifiable": it reads
+  as verifiable apart from the registry's signature, which is what it requires.
+- Recasting the storefront delta's "buyers can verify them" as "consumers": it
+  states a capability, not an obligation.
+
 ## Design promotion record
 
-| Accepted decision | Permanent location (post-review) |
+| Accepted decision | Permanent location |
 |---|---|
-| D1 retained documents, replacement, reserved names, schema admission, legacy rebuild, filter parity | `openspec/specs/registry-discovery/spec.md`; `openspec/specs/registry-discovery/architecture.md` (including that a refused republication leaves the last stored listing) |
-| D2 seller evidence wire contract and trust anchor | `openspec/specs/registry-discovery/spec.md` (the `publisher_publication` / `publisher_updates` shape as a normative contract); `openspec/specs/registry-discovery/architecture.md` (why bytes, historical verification, rotation) |
-| D3 listing pricing object | `openspec/specs/registry-discovery/spec.md`; `openspec/specs/storefront-publication/spec.md` and `architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
-| D4 verified registry carrier for resize | `openspec/specs/registry-discovery/architecture.md`, as the carrier and evidence the resize change's buyer reads, not as current buyer behaviour (no buyer verifies it on this branch); downstream resize design gate |
-| D5 migration ordering | No permanent destination — sequencing only, unless closeout finds a line for `openspec/specs/registry-discovery/architecture.md` |
-| D6 repair through the domain candidate | `openspec/specs/storefront-publication/spec.md` and `architecture.md` |
-| D6 API-credit settlement option shape | No permanent destination — a schema correction in `domains/apicredits/registry/filter-spec.yaml`, guarded by the per-publisher schema tests (task 3.5) |
-| D3/D4 correction | `docs/development/ARCHITECTURE.md`, "Discovery and negotiation": its statement that resolved family rates never reach a registry is replaced by their publication in `pricing.rate_structure` |
+| D1 retained documents, replacement, reserved names, schema admission, legacy rebuild, filter parity | `openspec/specs/registry-discovery/spec.md` ("Accepted listing content is retained", "Legacy listing reads do not invent seller evidence", "Schema-driven listing validation", by the archive); `openspec/specs/registry-discovery/architecture.md#retained-publication-documents`, including that a refused republication leaves the last stored listing and the default deployment's open write admission as a current limit |
+| D2 seller evidence wire contract and trust anchor | `openspec/specs/registry-discovery/spec.md` ("Seller publication evidence is independently verifiable", by the archive); `openspec/specs/registry-discovery/architecture.md#seller-publication-evidence` (the `publisher_publication` / `publisher_updates` shape, why bytes, historical verification, rotation) |
+| D3 listing pricing object | `openspec/specs/registry-discovery/spec.md` ("The compute schema carries a listing's asking rate"), `openspec/specs/storefront-publication/spec.md` ("A listing's listing-level prices are published in one pricing object", "A listing's asking rate is declared per shape", "A shape-priced listing records the rates that could price a revised shape"), `openspec/specs/resource-pool-management/spec.md` ("Asking-rate hint validation"), all by the archive; `openspec/specs/registry-discovery/architecture.md#listing-pricing-and-the-resize-carrier` (refusal of the earlier locations, upgrade gaps); `openspec/specs/storefront-publication/architecture.md#asking-rates` and `#shape-pricing` |
+| D4 verified registry carrier for resize | `openspec/specs/registry-discovery/architecture.md#listing-pricing-and-the-resize-carrier`, as the carrier and evidence a buyer can read, not as current buyer behaviour; the buyer obligation stays with the resize change's gate 2.1a |
+| D5 migration ordering | `openspec/specs/registry-discovery/architecture.md#retained-publication-documents`: one sentence on why the revision's downgrade refuses and that rollback is the backup; the ordering itself is sequencing only |
+| D6 repair through the domain candidate | `openspec/specs/storefront-publication/spec.md` ("Registry repair republishes the domain's candidate", by the archive); `openspec/specs/storefront-publication/architecture.md#registry-convergence` |
+| D6 API-credit settlement option shape | No permanent destination — a schema correction in `domains/apicredits/registry/filter-spec.yaml`, guarded by the per-publisher schema tests (task 3.5); its registry test is cited in the registry specification's evidence |
+| D3/D4 correction | `docs/development/ARCHITECTURE.md#discovery-and-negotiation`: resolved family rates are published in `pricing.rate_structure` rather than never reaching a registry |
+| Closeout corrections to statements the change made false | Delta MODIFIED requirements, merged by the archive: `registry-discovery` "The filter grammar can compare exact decimal values" (a non-finite stored value reads as no value because rebuilt legacy rows were never validated, not because publication skips validation); `storefront-publication` "A shape-priced listing records the rates that could price a revised shape" (publication now carries `pricing.rate_structure`, not "no additional listing-level field") |
+| Evidence | The evidence sections of `openspec/specs/registry-discovery/spec.md` and `openspec/specs/storefront-publication/spec.md` |
+| D3 upgrade gaps, for operators | `docs/operator-handbook.md#what-the-upgrade-from-v030-changes`, "Registries and storefronts upgrade together" (owner's decision at closeout) |
+| Roadmap currency | `docs/development/ROADMAP.md`, "Negotiate full compute capability" current state: family rates are published in `pricing` |
+| Campaign index currency | `openspec/changes/README.md`, the change's row in "Registry productionization"; its graphs unchanged |
 
 No principle is promoted to `docs/development/ARCHITECTURE.md`; the one edit
 there corrects a statement this change makes false.

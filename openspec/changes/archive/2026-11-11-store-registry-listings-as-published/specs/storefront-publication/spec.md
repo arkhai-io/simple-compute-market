@@ -53,6 +53,37 @@ unrepaired at that registry and is reported, rather than republished.
 
 ## MODIFIED Requirements
 
+### Requirement: A shape-priced listing records the rates that could price a revised shape
+
+A shape-priced listing MUST record, on the storefront's generic listing record, every family's
+resolved rate list for the listing — including families its own shape omits — and the storefront's
+listing read MUST return it; a flat-priced listing records none. The record is a term of sale: a
+change MUST refresh the listing in place, and the record MUST NOT be hashed into the listing's
+identity, its shape digest, or any settlement option's identity. A settlement option's identity
+MUST continue to cover its rates, so a change that alters a listing's composed rate changes that
+option's identity while the listing's identity is unchanged. Publication to a registry MUST carry
+each settlement option's composed rate for the listing's own shape in its option, and the recorded
+rates as the listing's `pricing.rate_structure`, under the requirement that a listing's
+listing-level prices are published in one pricing object.
+
+#### Scenario: A family rate changes
+
+- **WHEN** a shape-priced listing's composed rate changes while its shape and source do not
+- **THEN** the listing keeps its identity, its options carry the new composed rate under new
+  option identities, and its storefront listing read returns the new rates
+
+#### Scenario: A rate changes for a family the listing's shape omits
+
+- **WHEN** a GPU-only shape-priced listing's resolved memory rate changes
+- **THEN** the listing is refreshed in place with the new recorded rate, and its composed rate and
+  option identities are unchanged
+
+#### Scenario: A listing is published to a registry
+
+- **WHEN** a shape-priced listing is published
+- **THEN** the registry receives the listing's settlement options with their composed rates in the
+  existing option fields, and every recorded family's rates in `pricing.rate_structure`
+
 ### Requirement: A listing's asking rate is declared per shape
 
 A compute listing MAY publish the rate its seller is asking for the listing's shape,

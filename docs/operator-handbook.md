@@ -669,6 +669,20 @@ over the migrated database.
   an offering mode it serves that it does not hold open — such as a superseded
   listing an earlier release left open. A listing it holds open, including one
   held while its site is unreachable, is never closed.
+- **Registries and storefronts upgrade together.** A registry keeps each
+  listing's whole published document with the seller's signed publication,
+  validates every publication against its listing schema, and takes a compute
+  listing's prices only in its top-level `pricing` object: it refuses a
+  storefront that still publishes an asking rate in the listing's capacity
+  description, or a rate structure beside `pricing`, naming the field's place in
+  `pricing`. A registry of an earlier release keeps only the fields it names, so
+  it drops a newer storefront's `pricing`. Upgrade a registry and every
+  storefront that publishes to it in the same window, wherever their releases
+  are deployed. A listing the registry already holds stays readable from its
+  earlier fields, with no seller publication evidence and outside every
+  asking-rate filter, until its storefront republishes it. The registry's
+  migration cannot be downgraded; roll back from the backup, as for every
+  service.
 - **Option identifiers.** The option envelope is a forward-only wire boundary: an
   option's identifier is not stable across a release that changes the envelope.
   Buyers re-read listings after such an upgrade; a closed listing at a registry

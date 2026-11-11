@@ -39,7 +39,7 @@ First use (run from the repository root):
 ```sh
 make dist
 make -C core/registry reinit
-(cd core/registry && uv run --frozen --no-sync python ../../openspec/changes/store-registry-listings-as-published/first-use.py)
+(cd core/registry && uv run --frozen --no-sync python ../../openspec/changes/archive/2026-11-11-store-registry-listings-as-published/first-use.py)
 ```
 
 Observed health 200, verified seller proof, one search result, and whole-document

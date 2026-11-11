@@ -88,6 +88,72 @@ before changing listing content or publisher state.
 - **WHEN** an authenticated publication violates the configured listing shape
 - **THEN** it fails with field-path errors and leaves prior listing content unchanged
 
+### Requirement: The filter grammar can compare exact decimal values
+
+The filter specification MUST support a declared value type whose wire and stored
+representation is a decimal-text string and whose comparison domain is finite
+exact decimal. Range bounds declared under it MUST be parsed as exact decimals,
+resolved listing values MUST be accepted when they are decimal text, and comparison
+MUST NOT pass through a binary floating-point representation at any point.
+
+Only finite values are decimal values of this type. A query bound that parses as a
+non-number or an infinity MUST be refused as an invalid parameter, never evaluated.
+A listing value that does MUST be treated as no value, so `on_missing` decides it:
+a listing rebuilt from its legacy carriers was never validated against the full
+listing shape, and a malformed stored listing must not be able to fail a query.
+
+The type is domain-neutral: it names no market, field, or unit, and any
+specification may declare it for any decimal quantity.
+
+The existing JSON-number value type MUST be left unchanged. Retyping its
+comparison domain would alter the meaning of filters that other deployments'
+specifications already declare, so exact decimal comparison MUST be a distinct
+declared type that a specification opts into.
+
+A registry MUST refuse to load a filter specification declaring a value type it
+does not implement, rather than ignoring the declaration. A specification whose
+comparison semantics the engine cannot honour MUST NOT be served, because a
+silently-ignored type would evaluate every query under semantics the operator did
+not declare.
+
+A buyer resource-query compiler MUST render a bound of this type without loss and
+MUST resolve its type from the specification like any other.
+
+#### Scenario: A bound compares against a high-precision listing value
+
+- **WHEN** a buyer bounds a query against a decimal-text field and a listing's
+  value carries more significant digits than a binary double represents exactly
+- **THEN** the comparison is exact and the listing matches or is excluded on its
+  true value
+
+#### Scenario: A decimal-text value is compared at the bound
+
+- **WHEN** a listing's decimal-text value equals an inclusive bound exactly
+- **THEN** it matches, and it does not match an exclusive bound of the same value
+
+#### Scenario: A query bound is not finite
+
+- **WHEN** a request bounds a decimal-text filter by a non-number or an infinity
+- **THEN** the registry refuses the parameter rather than evaluating the query
+
+#### Scenario: A stored listing value is not finite
+
+- **WHEN** a listing's decimal-text value is a non-number or an infinity and a query
+  bounds that field
+- **THEN** the listing is treated as publishing no value, and the query completes
+
+#### Scenario: A registry is given a specification it cannot honour
+
+- **WHEN** a registry configured with an engine that does not implement a declared
+  value type loads that filter specification
+- **THEN** it refuses the specification rather than serving queries under
+  substituted semantics
+
+#### Scenario: The existing number type is unaffected
+
+- **WHEN** a filter declared under the JSON-number value type is evaluated
+- **THEN** its behaviour is unchanged by the presence of the decimal type
+
 ### Requirement: The compute schema carries a listing's asking rate
 
 The compute filter specification MUST describe an optional top-level `pricing` object
