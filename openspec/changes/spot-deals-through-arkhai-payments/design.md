@@ -122,7 +122,7 @@ carry the entitled party's `notice_seconds` and the `partialPeriod` mapped from 
 payment privilege: the seller files a dispute and mediation acts under its own
 entry; there is no additional seller restitution entry and no multiple-entry
 dependency. On the returned-capable revision every rate stop entry and rate end
-carries an explicit `partialPeriod`, `once` ends carry none, and the dispute
+carries an explicit `partialPeriod`; the installed schema also requires the foundation's inert `returned` field on `once` ends, and the dispute
 authority's rate stop entry is `{account, notice: PT0S, partialPeriod: chosen}`,
 under which a stop carries its own charged, returned or prorated treatment. On the
 interim revision these fields are absent and the vector-qualified fixed charged
@@ -603,6 +603,12 @@ Strict OpenSpec validation passes on the pinned 1.14.0; `make check-change` pass
 apart from the citation of `openspec/specs/deal-lifecycle/architecture.md`, which
 the foundation's closeout creates. No implementation, deployment or product
 qualification is claimed.
+
+## Implementation slice (sections 1–3)
+
+The dependency checkpoint in `dependency-contracts.md` reconciles the draft with the installed foundation and terms contracts, including the published schema's required, inert once-end partialPeriod. This slice leaves declarations absent in deployed compositions, does not implement seller notice or re-anchoring, and does not claim full qualification or closeout. Maintainer design review remains pending on the stacked PR.
+
+The public projection decision is `arkhai_payments.billing_kind = total | per_period`; setup beside rate stays per_period. `arkhai_payments.period` returns text or the existing typed missing value None, with the existing DSL missing-value rule rather than new presence syntax. `approval_window` is the public rate-preset field; once window remains readable. `PaymentOperation` stores canonical event JSON and exposes a digest, never mutable event state. A supplied journaled billing-start result paired with its operation key can definitively refuse disclosure; otherwise a missing verified start is pending. Neutral `AuthorityView.parts` carries verified rate bounds and pending/final stops. Raw `stop_request` events never end delivery; notice maturity can reuse its original sequence, so watch observes its final per-part record outside the event cursor. These interface details promote with D4/D7 to settlement-servicing and settlement-configuration; no journal owner or continuation is added here.
 
 ## Design promotion record
 

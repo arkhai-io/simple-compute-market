@@ -86,13 +86,31 @@ class PaymentsOptionParams(BaseModel):
     payee_account: str = Field(pattern=_ACCOUNT_ID)
     window: str = DEFAULT_WINDOW
     deposit_agreement: bool = False
+    approval_window: str | None = None
+    period: str | None = None
+    reserve_ahead_seconds: int | None = Field(default=None, gt=0, le=MAX_SAFE_INTEGER)
+    setup_amount: str | None = Field(default=None, pattern=r"^[1-9][0-9]{0,37}$")
+
+    @property
+    def approval_seconds(self) -> int:
+        return duration_seconds(self.approval_window or self.window)
 
     @model_validator(mode="after")
     def window_is_fixed(self) -> PaymentsOptionParams:
         try:
             duration_seconds(self.window)
+            if self.approval_window is not None and self.window != DEFAULT_WINDOW and self.window != self.approval_window:
+                raise ValueError("window and approval_window conflict")
+            if self.approval_seconds <= 0:
+                raise ValueError("approval window must be positive")
+            if (self.period is None) != (self.reserve_ahead_seconds is None):
+                raise ValueError("period and reserve_ahead_seconds must appear together")
+            if self.period is not None and duration_seconds(self.period) <= 0:
+                raise ValueError("period must be positive")
+            if self.setup_amount is not None and self.period is None:
+                raise ValueError("setup_amount requires a rate part")
         except ValueError as exc:
-            raise ValueError("window must be a fixed-unit ISO 8601 duration") from exc
+            raise ValueError(f"invalid payments timing: {exc}") from exc
         return self
 
 
@@ -178,32 +196,50 @@ def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Man
 
     if not isinstance(agreement_json, dict):
         raise MandatePolicyError("agreement must be a JSON object")
-    if policy.lifecycle.early_termination is not None:
+    rate = policy.option.period is not None
+    if rate:
+        if policy.lifecycle.early_termination is None or policy.duration_seconds <= 0:
+            raise MandatePolicyError("rate requires early_termination and a finite positive term")
+    elif policy.lifecycle.early_termination is not None:
         raise MandatePolicyError("early_termination requires a stoppable part")
     try:
         accepted_at = _utc_seconds(policy.accepted_at, "accepted_at")
         start_utc = _utc_seconds(policy.start_utc, "start_utc")
-        window = duration_seconds(policy.option.window)
+        window = policy.option.approval_seconds
+        if rate and start_utc != floor(start_utc):
+            raise ValueError("rate start_utc must be whole seconds")
         amount = _amount_text(policy.amount)
     except (TypeError, ValueError) as exc:
         raise MandatePolicyError(str(exc)) from exc
-    if start_utc < accepted_at:
+    if start_utc < (floor(accepted_at) if rate else accepted_at):
         raise MandatePolicyError("start_utc precedes accepted_at")
     expires = floor(accepted_at) + window
     if expires <= accepted_at or expires > MAX_SAFE_INTEGER:
         raise MandatePolicyError("mandate expiry must follow acceptance and fit the wire range")
 
+    if rate:
+        assert policy.option.period is not None
+        period_seconds = duration_seconds(policy.option.period)
+        if start_utc + policy.duration_seconds < expires + (policy.lifecycle.delivery_deadline_seconds or 0) + period_seconds:
+            raise MandatePolicyError("rate term leaves insufficient approval and delivery runway")
+    parts: list[dict[str, Any]] = []
+    if rate:
+        if policy.option.setup_amount is not None:
+            parts.append({"kind": "once", "asset": policy.asset,
+                          "amount": policy.option.setup_amount,
+                          **derive_part_terms(policy, kind="once", setup=True)})
+        assert policy.option.reserve_ahead_seconds is not None
+        parts.append({"kind": "rate", "asset": policy.asset, "amount": amount,
+                      "period": policy.option.period,
+                      "reserveAhead": format_duration(policy.option.reserve_ahead_seconds),
+                      **derive_part_terms(policy, kind="rate")})
+    else:
+        parts.append({"kind": "once", "asset": policy.asset, "amount": amount,
+                      **derive_part_terms(policy, kind="once")})
     mandate = {
         "from": policy.buyer_account,
         "to": policy.option.payee_account,
-        "parts": [
-            {
-                "kind": "once",
-                "asset": policy.asset,
-                "amount": amount,
-                **derive_part_terms(policy, kind="once"),
-            }
-        ],
+        "parts": parts,
         "deal": agreement_hash(agreement_json),
         "fee": {"bps": policy.fee_bps},
         "nonce": PAYMENTS_NONCE,
