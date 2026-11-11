@@ -12,7 +12,7 @@
 # registries whose declared id matches; registries without the header match
 # any domain for compatibility with pre-identity deployments.
 
-version: 8
+version: 9
 
 schema:
   id: compute.market
@@ -29,8 +29,9 @@ listing_shape:
   #
   # v6: the retired spellings of the published shape are refused outright.
   # `additionalProperties` stays true, so a seller may carry any attribute
-  # this schema does not name -- the prohibition is exactly the two retired
-  # names, not a closed shape.
+  # this schema does not name -- the prohibitions name only retired names
+  # and locations, not a closed shape. Each prohibition is a clause requiring
+  # one name.
   #
   # Refused rather than ignored because this is the boundary whose skew is
   # invisible: the offering-mode field is optional, so a listing carrying the
@@ -45,11 +46,19 @@ listing_shape:
   # resource. The GPU filters keep `on_missing: fail`, so such a listing is
   # excluded from every query bounding a GPU field and appears in queries that
   # bound none.
+  #
+  # v9: a listing's listing-level prices are published in the top-level
+  # `pricing` object. `listing_resource.asking_rate` and a top-level
+  # `rate_structure` are retired locations, refused for the reason v6 gives: a
+  # rate there would publish, store, and match no rate bound. Each
+  # prohibition's `description` names its replacement, which the publication
+  # refusal quotes.
   required: [listing_id, listing_resource, storefront_url]
   not:
     anyOf:
-      - required: [offer_resource]
-      - required: [offer]
+      - {required: [offer_resource], description: "the published shape is `listing_resource`"}
+      - {required: [offer], description: "the published shape is `listing_resource`"}
+      - {required: [rate_structure], description: "family rates are published as `pricing.rate_structure`"}
   anyOf:
     - properties:
         accepted_escrows: {type: array, minItems: 1}
@@ -65,8 +74,11 @@ listing_shape:
       required: [region]
       additionalProperties: true
       # v6: `virtualization_type` is the retired spelling of `offering_mode`.
+      # v9: the capacity description carries no price.
       not:
-        required: [virtualization_type]
+        anyOf:
+          - {required: [virtualization_type], description: "the offering-mode field is `offering_mode`"}
+          - {required: [asking_rate], description: "the asking rate is published as `pricing.asking_rate`"}
       properties:
         gpu_model:
           type: string
@@ -157,6 +169,15 @@ listing_shape:
         internet_download_mbps: {type: integer, minimum: 0}
         internet_upload_mbps: {type: integer, minimum: 0}
         open_ports_count: {type: integer, minimum: 0}
+    # v9: the listing-level prices -- the asking rate and the resolved family
+    # rates -- travel in one top-level object. A settlement option's price
+    # stays with the option it prices, and the capacity description, which
+    # describes what is sold, carries no price. Closed, so a misspelt pricing
+    # term is refused rather than stored where no filter reads it.
+    pricing:
+      type: object
+      additionalProperties: false
+      properties:
         # A seller's asking price for this listing's whole shape. A listing
         # attribute, not a settlement option rate: nothing is constructed
         # from it, and it need not agree with any mechanism rate. The three
@@ -170,6 +191,21 @@ listing_shape:
             amount: {type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
             asset: {type: string, minLength: 1}
             period: {type: string, enum: [hour]}
+        # The resolved per-family rates the seller prices shapes from, keyed
+        # by family. The schema names no family: which families a listing's
+        # domain prices, and what a rate is per, are the domain's.
+        rate_structure:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [asset, rate, per]
+              properties:
+                asset: {type: string, minLength: 1}
+                rate: {type: string, pattern: '^[0-9]+([.][0-9]+)?$'}
+                per: {type: string, minLength: 1}
     accepted_escrows:
       type: array
       minItems: 0
@@ -281,10 +317,10 @@ filters:
   # above is searched from below: a bare name follows the direction a buyer
   # searches that field in, not a fixed bound position. A listing publishing
   # no rate has not shown it is within a buyer's bound (`on_missing: fail`).
-  - {name: asking_rate_max,    query_name: asking_rate, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, alias_kind: upper_bound, on_missing: fail, requires: [asking_rate_asset, asking_rate_period]}
-  - {name: asking_rate_min,                             path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, alias_kind: lower_bound, on_missing: fail, requires: [asking_rate_asset, asking_rate_period]}
-  - {name: asking_rate_asset,                           path: $.listing_resource.asking_rate.asset,  op: in,    value_type: string,       on_missing: fail}
-  - {name: asking_rate_period,                          path: $.listing_resource.asking_rate.period, op: in,    value_type: string,       on_missing: fail}
+  - {name: asking_rate_max,    query_name: asking_rate, path: $.pricing.asking_rate.amount, op: range, value_type: decimal_text, alias_kind: upper_bound, on_missing: fail, requires: [asking_rate_asset, asking_rate_period]}
+  - {name: asking_rate_min,                             path: $.pricing.asking_rate.amount, op: range, value_type: decimal_text, alias_kind: lower_bound, on_missing: fail, requires: [asking_rate_asset, asking_rate_period]}
+  - {name: asking_rate_asset,                           path: $.pricing.asking_rate.asset,  op: in,    value_type: string,       on_missing: fail}
+  - {name: asking_rate_period,                          path: $.pricing.asking_rate.period, op: in,    value_type: string,       on_missing: fail}
 
   # Payment-token filter: array projection over accepted_escrows[*].literal_fields.token.
   # `on_missing: pass` is underreport-friendly — a seller advertising no

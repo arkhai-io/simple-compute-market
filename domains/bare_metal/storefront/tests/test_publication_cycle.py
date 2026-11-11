@@ -1390,16 +1390,27 @@ async def test_a_priced_machine_publishes_its_asking_rate(db):
 
     await storefront.run()
 
-    body = storefront.registries.sent[0][3]["listing_resource"]
-    assert body["asking_rate"] == {"amount": "12.50", "asset": "usd", "period": "hour"}
+    body = storefront.registries.sent[0][3]
+    # A price is a term of sale: published in the listing's pricing, never in
+    # the machine's description, though the storefront stores it beside the
+    # shape it prices.
+    assert body["pricing"] == {
+        "asking_rate": {"amount": "12.50", "asset": "usd", "period": "hour"},
+    }
+    assert "asking_rate" not in body["listing_resource"]
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    stored = await db.load_listing(listing_id=listing_id)
+    assert json.loads(stored["listing_resource"])["asking_rate"]["amount"] == "12.50"
 
 
-async def test_an_unpriced_machine_publishes_no_rate_field(db):
+async def test_an_unpriced_machine_publishes_no_pricing(db):
     storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
 
     await storefront.run()
 
-    assert "asking_rate" not in storefront.registries.sent[0][3]["listing_resource"]
+    body = storefront.registries.sent[0][3]
+    assert "pricing" not in body
+    assert "asking_rate" not in body["listing_resource"]
 
 
 async def test_a_rate_change_or_removal_refreshes_in_place(db):
@@ -1410,16 +1421,18 @@ async def test_a_rate_change_or_removal_refreshes_in_place(db):
 
     site.serve(_priced(_rate("11.00")))
     changed = await storefront.run()
-    changed_body = storefront.registries.sent[0][3]["listing_resource"]
+    changed_body = storefront.registries.sent[0][3]
     site.serve(pool("pool-1", member("r1", "pool-1")))
     removed = await storefront.run()
-    removed_body = storefront.registries.sent[0][3]["listing_resource"]
+    removed_body = storefront.registries.sent[0][3]
 
     assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
     assert [item["fields"] for item in actions(changed, "refresh")] == [["asking_rate"]]
     assert [item["fields"] for item in actions(removed, "refresh")] == [["asking_rate"]]
-    assert changed_body["asking_rate"]["amount"] == "11.00"
-    assert "asking_rate" not in removed_body
+    assert changed_body["pricing"]["asking_rate"]["amount"] == "11.00"
+    # The republication replaces the document whole, so the withdrawn price is
+    # gone rather than kept by a merge.
+    assert "pricing" not in removed_body
 
 
 async def test_an_unreadable_rate_holds_the_pool_and_keeps_its_listing(db):
@@ -1474,9 +1487,9 @@ async def test_an_override_rate_and_bound_reach_the_published_listing(db):
     report = await storefront.run()
 
     assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
-    body = storefront.registries.sent[0][3]["listing_resource"]
-    assert body["asking_rate"]["amount"] == "9.00"
-    assert body["min_duration_seconds"] == 3600
+    body = storefront.registries.sent[0][3]
+    assert body["pricing"]["asking_rate"]["amount"] == "9.00"
+    assert body["listing_resource"]["min_duration_seconds"] == 3600
     assert sorted(actions(report, "refresh")[0]["fields"]) == [
         "asking_rate", "min_duration_seconds",
     ]

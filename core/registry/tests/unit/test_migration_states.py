@@ -30,7 +30,7 @@ def test_the_packaged_script_holds_the_environment_and_the_baseline() -> None:
     assert (alembic / "env.py").is_file()
     assert (alembic / "script.py.mako").is_file()
     assert (alembic / "versions" / "v0_3_0_baseline.py").is_file()
-    assert script_revisions() == ("v0_3_0_baseline",)
+    assert script_revisions() == ("v0_3_0_baseline", "20261106_001_registry_retained_publications")
 
 
 def test_no_database_or_no_tables_is_absent() -> None:

@@ -100,6 +100,19 @@ class PublicationDomainHooks(Protocol[PayloadT]):
         self, listing_id: str
     ) -> PublicationBinding | None: ...
 
+    async def publication_candidate(
+        self, listing: dict[str, Any]
+    ) -> PublicationCandidate[PayloadT]:
+        """The stored ``listing`` as the domain publishes it, with its binding.
+
+        Registry repair republishes this rather than the stored row: a stored
+        view may hold local-only fields or lack derived listing terms, and
+        republication replaces a registry's whole document, so a repair built
+        any other way would publish different terms from the listing's first
+        publication.
+        """
+        ...
+
     def registry_publisher(self) -> Any:
         """The principal the storefront publishes under at every registry."""
         ...
@@ -412,8 +425,8 @@ class PublicationRuntime(Generic[PayloadT]):
 
         The local listing is the durable decision, so the repair resends only
         what it implies, and only to the registries that diverged: a close for a
-        closed listing; for an open one, the stored listing republished and then
-        reopened. Results are recorded as every publication records them, so a
+        closed listing; for an open one, the domain's publication candidate for
+        the stored listing republished and then reopened. Results are recorded as every publication records them, so a
         registry still unreachable stays diverged for the next pass. Returns the
         listings ``repaired`` and those still ``unrepaired``.
         """
@@ -532,8 +545,11 @@ class PublicationRuntime(Generic[PayloadT]):
         listing = await self._repository.load_listing(listing_id=divergence.listing_id)
         if listing is None:
             return
+        candidate = await self._hooks.publication_candidate(listing)
+        await self._require_persisted_binding(candidate.listing_id, candidate.binding)
+        self._hooks.validate_candidate(candidate)
         published = await publish_listing_to_registries(
-            listing,
+            candidate.payload,
             enabled=self._enabled,
             registry_client_factory=self._open_registry_client,
             listing_request_factory=self._listing_request_factory,

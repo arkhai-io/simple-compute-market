@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from pathlib import Path
 
 import httpx
 import pytest
+import yaml
+from jsonschema import Draft202012Validator
 
 from core_storefront.auth import signed_response_headers
 from core_storefront.capacity import CapacityDelta
@@ -684,6 +687,91 @@ class _PaymentComposition(_SettlementComposition):
 
     async def publication_artifacts(self, _facts, _clauses):
         return [], [dict(self._option)], ()
+
+
+#: The API-credit registry's own listing schema, as the registry validates a
+#: publication against it.
+_CREDITS_SPEC = Path(__file__).resolve().parents[5] / "domains/apicredits/registry/filter-spec.yaml"
+
+
+def _credits_schema_errors(body: dict) -> list[str]:
+    shape = yaml.safe_load(_CREDITS_SPEC.read_text())["listing_shape"]
+    return [
+        f"{list(error.absolute_path)}: {error.message}"
+        for error in Draft202012Validator(shape).iter_errors(body)
+    ]
+
+
+class _RecordingRegistry:
+    """Stands where ``MultiRegistryClient`` wraps the one configured registry,
+    recording each request as the JSON the client would send. While
+    ``failing`` the registry refuses every publication."""
+
+    urls = (_REGISTRY_URL,)
+
+    def __init__(self) -> None:
+        self.published: list[dict] = []
+        self.failing = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+    async def publish_listing_per_registry(self, *, payloads):
+        results = []
+        for url, request in payloads.items():
+            self.published.append(request.to_dict())
+            results.append(
+                {"registry_url": url, "success": False, "error": "unreachable"}
+                if self.failing
+                else {"registry_url": url, "success": True, "response": {"ok": True}}
+            )
+        return results
+
+    async def update_listing_per_registry(self, *, listing_id, payloads):
+        return [{"registry_url": url, "success": True, "response": {"ok": True}} for url in payloads]
+
+
+async def test_every_publication_path_sends_a_document_the_credits_registry_admits(
+    db, monkeypatch
+):
+    """A listing carrying the market's settlement option, as a payments-composed
+    storefront publishes it: its first publication, refused by the registry, and
+    the repair the next pass makes through the domain's publication candidate
+    each send a document the API-credit registry's schema admits. Credits state
+    no listing price, so neither carries a ``pricing`` term."""
+    option = payment_option().model_dump(mode="json")
+    registry = _RecordingRegistry()
+    registry.failing = True
+    monkeypatch.setattr(publication_module, "_make_registry_client", lambda: registry)
+    monkeypatch.setattr(container_module, "resolved_marketplace_signer", _SELLER_SIGNER)
+    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    monkeypatch.setattr(
+        cc_module, "build_capacity_runtime", lambda factory: _QuotaRuntime({"svc-quota": 42})
+    )
+    svc = ListingService(
+        sqlite_client=db,
+        seller_principal=SELLER_PRINCIPAL,
+        settlement_composition=_PaymentComposition(option),
+    )
+
+    with settings_overrides(enable_registry_discovery=True, registry__urls=[_REGISTRY_URL]):
+        result = await svc.publish_from_quota(
+            resource_id="svc-quota", service_name="Acme", accepted_escrows=[]
+        )
+        (first,) = registry.published
+        registry.failing = False
+        repaired = await publication_module.converge_registries(db)
+
+    assert repaired["repaired"] == (result["listing_id"],)
+    first, repair = registry.published
+    for body in (first, repair):
+        assert _credits_schema_errors(body) == []
+        assert body["settlement_options"] == [option]
+        assert "pricing" not in body
+    assert repair == first
 
 
 async def test_a_published_payment_option_is_stored_as_its_json_value(db, monkeypatch):

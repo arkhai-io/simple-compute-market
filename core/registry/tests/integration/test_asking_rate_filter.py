@@ -1,9 +1,9 @@
 """Asking rates through the canonical `RegistryClient` and the real app.
 
-The compute spec publishes a seller's asking rate as exact decimal text with
-the asset and period it is quoted in. A rate bound compares exactly, matches
-only listings quoted in the named asset and period, and is refused by the
-registry itself when supplied without them.
+The compute spec publishes a seller's asking rate in the listing's top-level
+`pricing`, as exact decimal text with the asset and period it is quoted in. A
+rate bound compares exactly, matches only listings quoted in the named asset and
+period, and is refused by the registry itself when supplied without them.
 """
 
 from __future__ import annotations
@@ -24,12 +24,14 @@ def _listing(
     asset: str = "usd",
     period: str = "hour",
 ) -> ListingRequest:
-    resource: dict = {"gpu_model": "H200", "region": "us-west", "offering_mode": "vm"}
-    if amount is not None:
-        resource["asking_rate"] = {"amount": amount, "asset": asset, "period": period}
+    pricing = (
+        {}
+        if amount is None
+        else {"pricing": {"asking_rate": {"amount": amount, "asset": asset, "period": period}}}
+    )
     return ListingRequest(
         listing_id=listing_id,
-        listing_resource=resource,
+        listing_resource={"gpu_model": "H200", "region": "us-west", "offering_mode": "vm"},
         accepted_escrows=[
             {
                 "chain_name": "anvil",
@@ -39,6 +41,7 @@ def _listing(
             }
         ],
         storefront_url="http://seller",
+        extra=pricing,
     )
 
 
@@ -111,11 +114,46 @@ async def test_the_published_rate_round_trips(registry_client):
 
     fetched = await registry_client.get_listing("round-1")
 
-    assert fetched.listing_resource["asking_rate"] == {
-        "amount": "16.00",
-        "asset": "usd",
-        "period": "hour",
+    assert fetched.extra["pricing"] == {
+        "asking_rate": {"amount": "16.00", "asset": "usd", "period": "hour"},
     }
+    assert "asking_rate" not in fetched.listing_resource
+
+
+async def test_a_rate_structure_travels_beside_the_asking_rate(registry_client):
+    """A shape-priced listing states its resolved family rates in the same
+    `pricing` object; the registry stores and serves them without reading them."""
+    structure = {
+        "gpu": [{"asset": "usd", "rate": "80", "per": "hour"}],
+        "memory": [{"asset": "usd", "rate": "1", "per": "hour"}],
+    }
+    request = _listing("structured-1", "96.00")
+    request.extra["pricing"]["rate_structure"] = structure
+    await registry_client.publish_listing(request)
+
+    fetched = await registry_client.get_listing("structured-1")
+
+    assert fetched.extra["pricing"]["rate_structure"] == structure
+    assert await _ids(
+        registry_client, "asking_rate<=96 asking_rate_asset=usd asking_rate_period=hour"
+    ) == {"structured-1"}
+
+
+async def test_a_rate_in_the_listing_resource_is_refused(registry_client):
+    """The capacity description is not where a price is read: a rate left
+    there would publish and match no rate bound, so publication is refused,
+    naming its replacement, and nothing is stored."""
+    request = _listing("misplaced-1", None)
+    request.listing_resource["asking_rate"] = {"amount": "1.00", "asset": "usd", "period": "hour"}
+
+    with pytest.raises(RegistryClientError) as caught:
+        await registry_client.publish_listing(request)
+
+    assert caught.value.status_code == 422
+    assert "listing_resource.asking_rate" in caught.value.body
+    assert "pricing.asking_rate" in caught.value.body
+    page = await registry_client.list_listings(limit=100)
+    assert "misplaced-1" not in {str(row.id) for row in page.listings}
 
 
 def _introduction_listing(listing_id: str, amount: str) -> ListingRequest:
@@ -140,11 +178,11 @@ def _introduction_listing(listing_id: str, amount: str) -> ListingRequest:
             "region": "us-west",
             "offering_mode": "bare_metal",
             "capacity_backing": "unbacked",
-            "asking_rate": {"amount": amount, "asset": "usd", "period": "hour"},
         },
         accepted_escrows=[],
         settlement_options=[option],
         storefront_url="http://seller",
+        extra={"pricing": {"asking_rate": {"amount": amount, "asset": "usd", "period": "hour"}}},
     )
 
 
@@ -164,7 +202,7 @@ async def test_a_rateless_introduction_listing_is_found_by_its_asking_rate(
     assert matched == {"intro-1"}
     (option,) = fetched.settlement_options
     assert option.get("price", {}).get("rates", []) == []
-    assert fetched.listing_resource["asking_rate"]["amount"] == "4.00"
+    assert fetched.extra["pricing"]["asking_rate"]["amount"] == "4.00"
     # An option without lifecycle terms grants no stop. A rateless option has
     # no asset, so no asset-correlated penalty comparison can match it.
     assert await _ids(registry_client, "early_termination.payer=false") == {"intro-1"}
@@ -205,10 +243,13 @@ async def test_a_rateless_introduction_listing_is_found_by_its_asking_rate(
             "settlement": {"schema": "arkhai.payments.v1"},
         }
 
-    row.settlement_options = [
-        priced("USD/2"),
-        priced("USD/6") | {"lifecycle": lifecycle},
-    ]
+    row.published_document = {
+        **row.published_document,
+        "settlement_options": [
+            priced("USD/2"),
+            priced("USD/6") | {"lifecycle": lifecycle},
+        ],
+    }
     db_session.commit()
     assert await _ids(registry_client, "early_termination.payer=true") == {"intro-1"}
     assert await _ids(

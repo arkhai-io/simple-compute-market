@@ -368,8 +368,10 @@ class VmPublicationCycle:
                 source, candidate, listing_resource
             )
             try:
+                derived = self._await(self._listings.derive_listing(request))
                 derived = replace(
-                    self._await(self._listings.derive_listing(request)),
+                    derived,
+                    listing=derived.listing.model_copy(update={"rate_structure": rate_structure}),
                     rate_structure=rate_structure,
                 )
             except NoSettlementOption as exc:

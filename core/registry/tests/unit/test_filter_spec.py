@@ -275,7 +275,7 @@ def test_the_compute_listing_resource_requires_only_its_region() -> None:
     listing vocabulary, which is unchanged."""
     spec = load_filter_spec()
 
-    assert spec.version == 8
+    assert spec.version == 9
     assert spec.schema_identity is not None
     assert (spec.schema_identity.id, spec.schema_identity.version) == (
         "compute.market",

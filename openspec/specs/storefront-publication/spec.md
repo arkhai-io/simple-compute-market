@@ -2024,7 +2024,7 @@ the site by at most that window; admission at the site remains authoritative.
 ### Requirement: A listing's asking rate is declared per shape
 
 A compute listing MAY publish the rate its seller is asking for the listing's shape,
-as an `asking_rate` object on the published listing resource carrying `amount`,
+as an `asking_rate` object in the listing's published `pricing`, carrying `amount`,
 `asset`, and `period`. The rate prices one listing shape: listings of different
 shapes from the same pool carry independently declared rates, and a rate MUST NOT be
 decomposed per capacity dimension.
@@ -2428,8 +2428,9 @@ change MUST refresh the listing in place, and the record MUST NOT be hashed into
 identity, its shape digest, or any settlement option's identity. A settlement option's identity
 MUST continue to cover its rates, so a change that alters a listing's composed rate changes that
 option's identity while the listing's identity is unchanged. Publication to a registry MUST carry
-each settlement option's composed rate for the listing's own shape and MUST NOT depend on the
-registry keeping any listing field it does not already keep.
+each settlement option's composed rate for the listing's own shape in its option, and the recorded
+rates as the listing's `pricing.rate_structure`, under the requirement that a listing's
+listing-level prices are published in one pricing object.
 
 #### Scenario: A family rate changes
 
@@ -2447,7 +2448,7 @@ registry keeping any listing field it does not already keep.
 
 - **WHEN** a shape-priced listing is published
 - **THEN** the registry receives the listing's settlement options with their composed rates in the
-  existing option fields, and no additional listing-level field
+  existing option fields, and every recorded family's rates in `pricing.rate_structure`
 
 ### Requirement: A VM listing's admissibility resolves per listing
 
@@ -3257,6 +3258,57 @@ cleanup.
 - **THEN** the physical facts come from site projections, and no local physical
   inventory is consulted or retained as an alternative source
 
+### Requirement: A listing's listing-level prices are published in one pricing object
+
+A compute storefront MUST publish a listing's listing-level prices in one top-level
+`pricing` object, on creation, refresh, reopen and registry repair: the listing's asking
+rate as `pricing.asking_rate`, and, for a VM listing whose prices derive from resolved
+family rates, that structure as `pricing.rate_structure`. Neither MUST be placed in the
+listing's capacity description, and a listing stating neither MUST publish no `pricing`.
+A settlement option's price stays with the option it prices.
+The published structure MUST match the durable rates the storefront serves and uses to
+derive shape prices. The registry engine MUST NOT interpret either. The storefront's own
+view of a listing keeps the asking rate beside the shape it prices.
+
+#### Scenario: A shape-priced listing is published
+
+- **WHEN** a storefront derives a listing with resolved family rates and an asking rate
+- **THEN** the registry publication carries both in `pricing`, and its capacity
+  description carries neither
+- **AND** buyers can verify them against retained seller publication evidence
+
+#### Scenario: Family rates or an asking rate change or are withdrawn
+
+- **WHEN** reconciliation refreshes a listing with changed or absent prices
+- **THEN** the complete republication replaces the previous `pricing` accordingly, and a
+  listing left with no price publishes none
+
+#### Scenario: A listing reopens
+
+- **WHEN** the storefront reopens a previously closed listing
+- **THEN** it republishes its current durable prices before reopening discovery
+
+### Requirement: Registry repair republishes the domain's candidate
+
+When a publication pass republishes an open listing to a registry whose recorded outcome
+disagrees with it, the storefront MUST send the publication candidate its domain builds
+for that listing, as first publication and reopen do, and never the stored row as it is
+held. It MUST first check the candidate's binding against the listing's durable binding
+and validate the candidate as publication does; a listing that fails either stays
+unrepaired at that registry and is reported, rather than republished.
+
+#### Scenario: A registry missed a VM listing's publication
+
+- **WHEN** the next publication pass repairs a VM listing at a registry that missed it
+- **THEN** that registry receives the same document first publication sent, its prices in
+  `pricing` and no null capacity attribute
+
+#### Scenario: A repaired listing's binding disagrees
+
+- **WHEN** a listing's candidate carries a binding other than the listing's durable
+  binding
+- **THEN** no registry is sent the listing and it remains diverged
+
 ## Evidence
 
 - Canonical listing, negotiation, settlement, fulfillment, and stage-log principals: `core/storefront/tests/unit/test_settle_identity_models.py`, `test_sqlite_client_escrow_fulfillment_identity.py`, and `test_stage_log_identity.py`.
@@ -3298,6 +3350,7 @@ cleanup.
 - Each publisher builds only its named contributions: `core/storefront/tests/unit/test_publication_plugins.py` and `domains/vms/storefront/tests/unit/test_publication_wiring.py`.
 - Durable seller close, kept by every later write: `core/storefront/tests/integration/test_listing_closure.py`, `kit/capacity-publication/tests/unit/test_publication.py`, `domains/apicredits/storefront/tests/integration/test_publish_reconcile.py`, and `domains/bare_metal/storefront/tests/test_publication_cycle.py`.
 - Registry convergence: `core/storefront/tests/integration/test_listing_closure.py`, `kit/capacity-publication/tests/unit/test_registry_convergence.py`, and `domains/apicredits/storefront/tests/unit/test_capacity_reconcile_converges.py`.
+- A listing's prices published in `pricing`, and registry repair through the domain's candidate — each domain's first publication refused by a registry and repaired by the next pass, every body validating against its registry's listing schema and the repair equal to the first publication: VM, shape-priced with an asking rate, `domains/vms/storefront/tests/integration/test_publication_loop.py`; bare metal, `domains/bare_metal/storefront/tests/test_http_publication_rates.py`; API credits, against its own registry schema, `domains/apicredits/storefront/tests/integration/test_publish_reconcile.py`. The kit sending the candidate, not the stored row: `kit/capacity-publication/tests/unit/test_registry_convergence.py`. The publication codecs: `domains/vms/storefront/tests/unit/test_listing_publication_codec.py` and `domains/bare_metal/tests/test_storefront_publication.py`.
 - Loop controls from either client variant: `domains/vms/storefront/tests/unit/test_lifecycle_client_parity.py`.
 - Bare-metal shape derivation and its holds: `domains/bare_metal/tests/test_shapes.py`, `test_storefront_publication.py`, and `test_publication.py`; the published flat fields against the compute schema, `test_schema.py`.
 - Bare-metal publication with shape-bearing identity, successors, region holds, and reports: `domains/bare_metal/storefront/tests/test_publication_cycle.py` and `test_persistence.py`; system evidence in `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`, stages 03b and 06.

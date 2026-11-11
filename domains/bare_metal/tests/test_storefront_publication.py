@@ -1,4 +1,5 @@
-"""Classification and listing comparison, with no storefront state."""
+"""Classification, listing comparison, and the published listing resource,
+with no storefront state."""
 
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from arkhai_bare_metal import (
     classify_bare_metal_resources,
     compare_bare_metal_listing,
     listing_terms,
+    published_listing_resource,
 )
 from arkhai_bare_metal.fixtures.publication_view import (
     DEFAULT_CAPACITY,
@@ -531,3 +533,22 @@ def test_listing_terms_reads_only_term_fields():
         "demands": None,
         "max_duration_seconds": 5,
     }
+
+
+def test_a_priced_resource_publishes_its_rate_in_pricing():
+    rate = {"amount": "12.50", "asset": "usd", "period": "hour"}
+    stored = {"region": "us-west", "gpu_count": 8, "asking_rate": rate}
+
+    resource, pricing = published_listing_resource(stored)
+
+    assert resource == {"region": "us-west", "gpu_count": 8}
+    assert pricing == {"asking_rate": rate}
+    # The stored resource is left as it was.
+    assert stored["asking_rate"] == rate
+
+
+def test_an_unpriced_resource_publishes_no_pricing():
+    resource, pricing = published_listing_resource({"region": "us-west"})
+
+    assert resource == {"region": "us-west"}
+    assert pricing is None
