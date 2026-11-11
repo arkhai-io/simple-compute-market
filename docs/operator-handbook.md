@@ -703,8 +703,14 @@ over the migrated database.
   listing's next successful publication records what it published, then
   `rate_structure_changed_reopen` for having no rate pin — and the buyer
   reopens. A shape-priced listing takes no new negotiation until that
-  publication. Roll back only by deploying the earlier image over that backup; a
-  deal negotiated after the upgrade cannot be carried back.
+  publication has succeeded at every configured registry the listing was
+  published to before the upgrade: until then the others may still serve rates
+  the storefront did not record, and it refuses as `rate_structure_divergent`.
+  Registry convergence resends the listing to a registry whose last publish
+  failed; one whose last publish before the upgrade succeeded is sent the
+  listing again only when the listing next changes. Roll back only by deploying
+  the earlier image over that backup; a deal negotiated after the upgrade
+  cannot be carried back.
 - **Storefront tables.** A storefront creates the tables v0.3.0 created only when
   a store first opened, where they are absent, and drops the inventory tables
   v0.3.0 kept frozen, with their rows; inventory is declared at provisioning

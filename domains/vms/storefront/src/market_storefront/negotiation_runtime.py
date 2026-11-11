@@ -107,7 +107,8 @@ SHAPE_EXCEEDS_ADVERTISED = "shape_exceeds_advertised"
 RATE_STRUCTURE_CHANGED_REOPEN = "rate_structure_changed_reopen"
 #: A shape-priced listing no configured registry has yet accepted a publish of.
 RATE_STRUCTURE_UNPUBLISHED = "rate_structure_unpublished"
-#: Configured registries last accepted different rate structures for a listing.
+#: Configured registries last accepted different rate structures for a listing,
+#: or one the listing was sent to holds a structure the seller did not retain.
 RATE_STRUCTURE_DIVERGENT = "rate_structure_divergent"
 
 
@@ -133,11 +134,22 @@ async def _as_last_published(
     returned as stored, while a shape-priced one is refused until its first
     successful publish. Registries holding different structures are refused
     until convergence resends the listing to the ones that diverged.
+
+    A configured registry the listing was sent to but whose accepted payload is
+    not retained may be serving rates the seller cannot see: a publication row
+    recorded before accepted payloads were kept looks the same as a first
+    publish that has not yet succeeded. While another registry's structure is
+    known, a shape-priced listing is refused as divergent until that registry
+    accepts a publish. A registry the listing was never sent to serves none, and
+    is ignored.
     """
     configured = {str(url) for url in (settings.get("registry.urls") or ())}
-    payloads = await repository.load_published_payloads(
-        listing_id=str(record["listing_id"])
-    )
+    listing_id = str(record["listing_id"])
+    payloads = await repository.load_published_payloads(listing_id=listing_id)
+    sent_to = {
+        str(row["registry_url"])
+        for row in await repository.load_publications(listing_id=listing_id)
+    }
     published: dict[str | None, Any] = {}
     for registry_url, payload in payloads.items():
         if registry_url not in configured:
@@ -147,7 +159,11 @@ async def _as_last_published(
     if not published:
         refusal = RATE_STRUCTURE_UNPUBLISHED if has_rate_structure(record) else None
         return dict(record), refusal
-    if len(published) > 1:
+    unseen = (sent_to & configured) - payloads.keys()
+    shape_priced = has_rate_structure(record) or any(
+        structure is not None for structure in published.values()
+    )
+    if len(published) > 1 or (unseen and shape_priced):
         return dict(record), RATE_STRUCTURE_DIVERGENT
     (structure,) = published.values()
     return {**record, "rate_structure": structure}, None

@@ -46,7 +46,9 @@ the same way. A republication no registry accepted changes nothing a negotiation
 reads. Where the seller's registries last accepted different rate structures, the
 seller MUST refuse openings, rounds and acceptances distinctly until they converge,
 and a shape-priced listing no registry has accepted a publication of MUST take no
-opening. The buyer may still exit the negotiation.
+opening. A registry holding a publication record of a shape-priced listing but
+no retained accepted payload counts as holding a different rate structure while
+another registry's is known. The buyer may still exit the negotiation.
 
 A buyer MUST refuse an acceptance whose derived payment exceeds its own monetary
 ceiling. A price the buyer derives rather than states MUST price the shape it opens
@@ -108,6 +110,14 @@ Agreement and its bound mandate, never from the negotiated scalar.
   another refused it
 - **THEN** the seller refuses openings, rounds and acceptances on the listing with a
   distinct reason until its resend brings the registries to the same rates
+
+#### Scenario: A registry's accepted rates are unknown
+
+- **WHEN** after an upgrade from a release that kept no published payload, one of a
+  seller's registries accepts a republication of a shape-priced listing and another
+  that held the listing refuses it
+- **THEN** the seller refuses openings, rounds and acceptances on the listing with
+  the divergence reason until the other registry accepts a publication
 
 #### Scenario: A buyer's acceptance would exceed its ceiling
 

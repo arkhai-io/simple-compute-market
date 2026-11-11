@@ -501,6 +501,62 @@ async def test_an_upgraded_listing_refuses_openings_until_its_first_successful_p
 
 
 @pytest.mark.asyncio
+async def test_a_partial_first_refresh_refuses_until_the_unseen_registry_accepts(db):
+    """A registry still serving a listing published before payloads were kept
+    may hold rates the seller cannot see, so a refresh accepted elsewhere does
+    not let a negotiation price from the new rates alone."""
+    await db.update_listing(listing_id="L-hook", rate_structure=_structure(_BEFORE))
+    for registry_url in _REGISTRIES:
+        await db.upsert_publication(
+            listing_id="L-hook", registry_url=registry_url,
+            payload={"listing_id": "L-hook"}, status="published",
+        )
+    # The first refresh after the upgrade reprices; one registry accepts it.
+    await _reprice(db, _structure(_AFTER), registries=_REGISTRIES[:1])
+    await _record_publish(db, _structure(_AFTER), accepted=False, registries=_REGISTRIES[1:])
+    hook = _countering_hook()
+
+    with pytest.raises(OfferUnfulfillableError, match="^rate_structure_divergent$"):
+        await _open_shape_priced(db, hook)
+    hook.assert_not_awaited()
+
+    # Convergence resends the listing to the registry that refused it.
+    await _record_publish(db, _structure(_AFTER), registries=_REGISTRIES[1:])
+    opened = await _open_shape_priced(db, hook)
+    assert opened["action"] == "counter"
+    assert hook.await_args.kwargs["listing"]["rate_structure"] == _structure(_AFTER)
+
+
+@pytest.mark.asyncio
+async def test_a_flat_priced_listing_negotiates_beside_an_unseen_registry(db):
+    """A flat-priced quote reads no rate structure, so a registry's unknown
+    payload cannot diverge from it."""
+    await db.upsert_publication(
+        listing_id="L-hook", registry_url=_REGISTRIES[0],
+        payload={"listing_id": "L-hook"}, status="published",
+    )
+    await _record_publish(db, None, registries=_REGISTRIES[1:])
+    hook = _countering_hook()
+
+    opened = await _open_shape_priced(db, hook)
+
+    assert opened["action"] == "counter"
+    hook.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_registry_never_sent_the_listing_does_not_block_negotiation(db):
+    """A configured registry with no publication of the listing serves none of it."""
+    await _reprice(db, _structure(_BEFORE), registries=_REGISTRIES[:1])
+    hook = _countering_hook()
+
+    opened = await _open_shape_priced(db, hook)
+
+    assert opened["action"] == "counter"
+    hook.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_registries_holding_different_rates_refuse_until_the_resend_converges(db):
     await _reprice(db, _structure(_BEFORE))
     hook = _countering_hook()

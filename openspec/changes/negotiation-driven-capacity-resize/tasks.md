@@ -656,6 +656,51 @@ Evidence (levels as `TESTING.md` defines them):
   closes and refreshes are excluded; the `DECLARED` comment named "stage 07" for 07a2;
   this note was missing. Earlier notes citing 07a2–07a5 are history and stand.
 
+### Pre-closeout triage fix (2026-11-11)
+
+Review 27 (pre-closeout, at `58491f7c1`) found a gap in the published-rate pin
+(01 R5). The fix, against `58491f7c1`:
+
+- **27 F1 (owner: alternative b)** — after an upgrade no publication carries a
+  retained payload, so a first refresh that one registry accepted and another
+  refused let `_as_last_published` price from the accepting registry alone while
+  the other still served the old rates. A configured registry with a publication
+  row of the listing but no retained payload now counts as divergent while another
+  registry's structure is known, for a shape-priced listing
+  (`rate_structure_divergent`); a registry with no row is still ignored. The runtime
+  reads the repository's existing `load_publications` beside
+  `load_published_payloads`; no schema or wire change. D9, the negotiation-protocol
+  delta (a sentence and a scenario) and the operator handbook's upgrade section say
+  so. origin/spot-deals (`8619e1c1e`) carries an earlier version of this change
+  without the published-payload overlay, so no later change rewrote this code; its
+  `negotiate-open-ended-compute-terms` buyer-side digest check will meet the new
+  `_as_last_published` when that stack is rebuilt on this change.
+
+Evidence (levels as `TESTING.md` defines them):
+
+- Focused: `test_sync_negotiation_seller_round_hook.py` 19 passed (unit), with
+  three new cases: the partial first refresh refuses until the unseen registry
+  accepts (it fails without the fix), a flat-priced listing negotiates beside an
+  unseen registry (it fails without the shape-priced guard), and a registry never
+  sent the listing does not block. VM storefront unit and integration suites
+  matching negotiation, seller-round, publication and rate: 392 passed, 1 skipped.
+- `scripts/change-workflow run pre-commit` closed "[change-workflow] pre-commit at
+  58491f7c1…: passed, exit 0", after after-functional-change and
+  pre-commit-functional passed (`make check-packaging`, then `make test`: VM
+  storefront unit 1180 passed and 1 skipped, integration 575 passed) and every
+  change check passed.
+- Fresh-context compliance check: fixed — the handbook said convergence lifts
+  every such refusal, but convergence resends only to a registry whose last
+  publish failed (a pre-upgrade `published` row waits until the listing next
+  changes; D9 and the handbook now say so, a cost the owner was shown with
+  alternative b); no test covered the flat-priced exemption (added); D9 left out
+  the shape-priced qualifier; the delta's sentence implied the registry had
+  accepted a publish (reworded to any publication record without a retained
+  payload); two unwrapped lines.
+- Not run here: `first_use.py` (running it was refused in this session; it records
+  every publish at all configured registries, so the new rule leaves it
+  unaffected), and the pipeline (see 3.8's note).
+
 ## 3. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`. This change's implementation predates the closeout task becoming a planning requirement. The parts are recorded here so each carries an explicit disposition rather than an assumed one; confirm and tick each rather than treating the change as closed.
@@ -693,6 +738,19 @@ Per `openspec/README.md#plan-closeout-requirements`. This change's implementatio
       its result, and the scenarios that exercise this change (the run with a shape
       agreed below the listing's, 2.15), or an explicit blocker naming its cause and
       the change that owns it, with the validations it gates treated as unrun.
+      *Note (27 F2, owner's disposition):* GitHub Actions ends every e2e.yml dispatch
+      of this branch in `startup_failure` before any job starts (validation 22), and
+      the owner waived validation's pipeline part for the rest of the change (log
+      seq 48). That waiver does not discharge this part. At closeout's HEAD, run the
+      pipeline's lanes locally against their compose stacks — `make -C e2e-tests
+      test-e2e-vm`, `test-e2e-bare-metal` and `test-e2e-apicredits`, the targets
+      e2e.yml runs — and record each lane's result and the scenarios exercising
+      this change (`e2e_listing_shapes`, stage 08b included; `e2e_non_erc20_settlement`;
+      the `compute_deal_stages` helper's deals) as the evidence, naming the Actions
+      startup failure as why the pipeline itself did not run. If the local lanes
+      cannot run, the owner waives the evidence: record the blocker — Actions
+      `startup_failure`, cause not visible, owned by no change in this repository —
+      with the pipeline-gated scenarios unrun, and proceed to archival.
 - [ ] 3.9 **Promotion.** Write the permanent documents this change owes —
       `docs/development/ARCHITECTURE.md`, "Discovery and negotiation" (what a round
       negotiates) — and complete the design-promotion record, mapping every accepted

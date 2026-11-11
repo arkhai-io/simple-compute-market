@@ -328,9 +328,19 @@ partially failed republication therefore refuses every thread on the listing unt
 it converges. A buyer-named digest, letting the buyer say which publication it
 read, is deferred until multi-registry sellers lose deals to it. A shape-priced
 listing with no successful publication recorded — one carried across the upgrade —
-takes no opening until its first successful refresh (`rate_structure_unpublished`);
-a flat-priced one negotiates from its stored record as before the pin existed, since
-its quote reads no rate structure. Continuation resolves the listing without
+takes no opening until its first successful refresh (`rate_structure_unpublished`).
+For a shape-priced listing, a configured registry with a publication row of it but
+no retained accepted payload counts as divergent while another registry's is known
+(27 F1): after the upgrade, a refresh one registry accepts and another refuses
+would otherwise price from the new rates while the other still serves the old. A
+registry with no publication row of the listing serves none and is ignored. The
+cost is over-refusal in two cases: a newly configured registry whose first publish
+keeps failing stops negotiation on the listing until it accepts, and a registry
+whose last pre-upgrade publish succeeded, beside one convergence repaired, is not
+resent the listing until the listing next changes, since convergence resends only
+to a registry whose last publish failed. A flat-priced listing negotiates from its
+stored record as before the pin existed, with nothing published or with a
+registry's payload unseen, since its quote reads no rate structure. Continuation resolves the listing without
 refusing, so a buyer can always exit; every validated round and acceptance refuses.
 The
 settlement-option repricing lag predates this change and is a recorded gap, not
