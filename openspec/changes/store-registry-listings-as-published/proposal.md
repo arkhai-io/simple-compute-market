@@ -79,8 +79,8 @@ None.
 
 ## Dependencies and Related Changes
 
-- `add-database-migration-commands` is not a dependency: its scope is VM/API-credit
-  roles, not registry Alembic. D-e records the owner-approved correction.
+- `add-database-migration-commands` is archived. The publication revision follows
+  its packaged registry baseline; D-e records the migration boundary.
 - Prefer landing before `migrate-registry-to-postgres` so its chain inherits the
   additive revision. No new migration command is introduced.
 - `index-registry-filters` remains deferred; future indexes project from the opaque

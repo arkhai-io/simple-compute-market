@@ -20,7 +20,7 @@ make -C core/registry reinit
 ```
 
 The last command is the directly runnable story surface: a local in-process
-registry with fresh in-memory SQLite, the compute filter specification, and public
+registry with fresh temporary SQLite migrated through the packaged chain, the compute filter specification, and public
 deterministic Ed25519 development seller/registry identities. No external service,
 API key, secret, container or running server is required. The script checks
 `GET /health` before publication, prints the returned listing and seller evidence,

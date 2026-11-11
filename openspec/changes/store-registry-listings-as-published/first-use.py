@@ -5,16 +5,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import httpx
 from market_identity import Ed25519Signer, TrustedIdentitySet, verify_request
 from registry_client import ListingRequest, RegistryClient, UpdateListingRequest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from sqlalchemy.pool import StaticPool
 
 from core_registry.db.database import get_db
-from core_registry.db.models import Base
+from core_registry.db.migrations import migrate_database
 from core_registry.main import app
 
 
@@ -22,10 +23,10 @@ async def main() -> None:
     # Deterministic development identities; never use on a public network.
     seller = Ed25519Signer(bytes(range(32)))
     authority = Ed25519Signer(bytes(range(1, 33)))
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    Base.metadata.create_all(engine)
+    directory = TemporaryDirectory()
+    database_url = f"sqlite:///{Path(directory.name) / 'registry.db'}"
+    migrate_database(database_url)
+    engine = create_engine(database_url, connect_args={"check_same_thread": False})
     transport = httpx.ASGITransport(app=app)
     with Session(engine) as session:
         app.dependency_overrides[get_db] = lambda: session
@@ -78,6 +79,7 @@ async def main() -> None:
             app.dependency_overrides.clear()
             del app.state.registry_authority_signer
     engine.dispose()
+    directory.cleanup()
 
 
 if __name__ == "__main__":
