@@ -48,7 +48,12 @@ async def main() -> None:
                         "settlement": {"schema": "example.payment.v1"},
                     }],
                     extra={
-                        "rate_structure": {"cpu": [{"asset": "usd", "rate": "0.05", "per": "hour"}]},
+                        "pricing": {
+                            "asking_rate": {"amount": "0.40", "asset": "usd", "period": "hour"},
+                            "rate_structure": {
+                                "cpu": [{"asset": "usd", "rate": "0.05", "per": "hour"}],
+                            },
+                        },
                         "arbitrary_term": {"value": None},
                     },
                 )

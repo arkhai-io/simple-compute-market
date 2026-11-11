@@ -49,7 +49,7 @@ from core_registry.db.migrations import (
 
 FLOOR = Path(__file__).resolve().parents[1] / "fixtures" / "v0_3_0_floor"
 BASELINE = "v0_3_0_baseline"
-HEAD = "019_retained_publications"
+HEAD = "20261106_001_registry_retained_publications"
 
 
 def _url(path: Path) -> str:

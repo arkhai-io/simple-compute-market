@@ -192,8 +192,10 @@ dependencies = [
 dev = [
     { name = "arkhai-apicredits-buyer" },
     { name = "arkhai-core-buyer" },
+    { name = "jsonschema" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -230,8 +232,10 @@ requires-dist = [
 dev = [
     { name = "arkhai-apicredits-buyer", specifier = ">=0.5.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.5.0" },
+    { name = "jsonschema", specifier = ">=4.0" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 
 [[package]]

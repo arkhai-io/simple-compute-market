@@ -94,6 +94,7 @@ from .storefront_publication import (
     classify_bare_metal_resources,
     compare_bare_metal_listing,
     listing_terms,
+    published_listing_resource,
 )
 
 __all__ = [
@@ -118,6 +119,7 @@ __all__ = [
     "classify_bare_metal_resources",
     "compare_bare_metal_listing",
     "listing_terms",
+    "published_listing_resource",
     "BARE_METAL_ACCEPTED_ALKAHEST_BINDING_KIND",
     "BARE_METAL_LEASE_READY_EVIDENCE_KIND",
     "BARE_METAL_LEASE_READY_RESULT_KIND",

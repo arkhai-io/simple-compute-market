@@ -13,9 +13,14 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+from pathlib import Path
 
 import httpx
 import pytest
+import yaml
+from core_storefront.publication_runner import PublicationPayload
+from jsonschema import Draft202012Validator
+from market_core.schemas import derive_settlement_option_id
 from market_identity import TrustedIdentitySet
 from market_pool_overrides import PoolOverrideClient
 from storefront_client import StorefrontClient
@@ -51,15 +56,25 @@ class _Sites:
 
 
 @contextlib.asynccontextmanager
-async def _storefront(tmp_path, site: Site, *, default_max_duration_seconds: int | None = 3600):
+async def _storefront(
+    tmp_path,
+    site: Site,
+    *,
+    default_max_duration_seconds: int | None = 3600,
+    registries: RecordingRegistries | None = None,
+    build_payload: Terms | None = None,
+):
     """The running app over ``site``, its database under ``tmp_path``.
 
     ``default_max_duration_seconds`` is the configured
     ``[pricing].default_max_duration_seconds``; the runtime reads it when it is
     composed, so a configuration change is a second storefront over the same
-    database, as a restart is.
+    database, as a restart is. ``registries`` records what the registry is
+    sent, for a test that reads it; ``build_payload`` stands for the configured
+    settlement terms.
     """
-    registries = RecordingRegistries()
+    registries = registries if registries is not None else RecordingRegistries()
+    terms = build_payload if build_payload is not None else Terms()
 
     def cycle(runtime):
         return BareMetalPublicationCycle(
@@ -71,7 +86,7 @@ async def _storefront(tmp_path, site: Site, *, default_max_duration_seconds: int
             registry_urls=(REGISTRY_URL,),
             storefront_url=runtime.storefront_url,
             seller_principal=runtime.seller_principal,
-            build_payload=Terms(),
+            build_payload=terms,
             default_max_duration_seconds=runtime.default_max_duration_seconds,
         )
 
@@ -136,6 +151,75 @@ async def test_a_declared_rate_and_an_override_reach_the_listing_a_buyer_reads(t
     assert overridden.listing_resource["asking_rate"]["amount"] == "9.00"
     assert "asking_rate" not in withheld.listing_resource
     assert withheld.status == "open"
+
+
+#: The compute registry's own listing schema, which a bare-metal registry
+#: serves and validates a publication against.
+_COMPUTE_SPEC = (
+    Path(__file__).resolve().parents[4] / "core/registry/src/core_registry/filter-spec.yaml"
+)
+
+
+def _compute_schema_errors(body: dict) -> list[str]:
+    shape = yaml.safe_load(_COMPUTE_SPEC.read_text())["listing_shape"]
+    return [
+        f"{list(error.absolute_path)}: {error.message}"
+        for error in Draft202012Validator(shape).iter_errors(body)
+    ]
+
+
+_OPTION_SETTLEMENT = {"schema": "arkhai.payments.v1"}
+
+
+class _OneOptionTerms(Terms):
+    """Configured terms publishing one rateless settlement option, standing for
+    a composed mechanism: the compute schema admits no listing that offers
+    neither an option nor an escrow, and the option's content is the
+    mechanism's, not this domain's."""
+
+    async def __call__(self, candidate: dict) -> PublicationPayload:
+        option = {
+            "option_id": derive_settlement_option_id(settlement=_OPTION_SETTLEMENT),
+            "settlement": dict(_OPTION_SETTLEMENT),
+        }
+        return PublicationPayload(
+            settlement_options=(option,), max_duration_seconds=self.max_duration_seconds
+        )
+
+
+async def test_every_publication_path_sends_a_document_the_compute_registry_admits(tmp_path):
+    """A priced machine's first publication, which the registry refuses, and the
+    repair the next step makes through the domain's publication candidate each
+    send a document the compute registry's schema admits, the asking rate in
+    its ``pricing`` and not in the machine's description, while the listing a
+    buyer reads from the storefront keeps the rate beside the shape."""
+    registries = RecordingRegistries()
+    registries.failing = {("publish", REGISTRY_URL)}
+    site = Site(_priced(_rate("12.50")))
+    async with _storefront(
+        tmp_path, site, registries=registries, build_payload=_OneOptionTerms()
+    ) as (admin, public):
+        listing_id = _listing_id(await admin.admin_run_lifecycle_cycle("publication"))
+        # The refused first publication, then the cycle's own convergence retry.
+        refused = [body for operation, _, _, body in registries.sent if operation == "publish"]
+        registries.failing.clear()
+        registries.sent.clear()
+        repaired = await admin.admin_run_lifecycle_cycle("publication")
+        (repair,) = [body for operation, _, _, body in registries.sent if operation == "publish"]
+        local = await public.get_listing(listing_id)
+
+    assert [item["listing_id"] for item in repaired["actions"] if item["action"] == "converge"] == [
+        listing_id
+    ]
+    first = refused[0]
+    for body in (*refused, repair):
+        assert _compute_schema_errors(body) == []
+        assert body["pricing"] == {
+            "asking_rate": {"amount": "12.50", "asset": "usd", "period": "hour"},
+        }
+        assert "asking_rate" not in body["listing_resource"]
+        assert body == first
+    assert local.listing_resource["asking_rate"]["amount"] == "12.50"
 
 
 def _holds(report: dict) -> set[str]:

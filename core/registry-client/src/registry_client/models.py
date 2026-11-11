@@ -219,8 +219,10 @@ class ListingSummary:
     """Single listing record as returned by GET /listings or
     GET /listings/{id}. Captures common fields defensively.
 
-    ``storefront_url`` is the publisher's storefront URL — where a buyer
-    negotiates.
+    ``storefront_url`` is where a buyer negotiates: the URL the seller signed
+    into the listing's publication, or, for a listing served without seller
+    publication evidence (``publisher_publication`` null), the publisher
+    record's URL.
     """
 
     id: str | int | None = None
