@@ -263,7 +263,8 @@ class VmSettlementComposition:
             selected_clause: SettlementPublicationClause | None = option_resources.get("publication_clause")
             if selected_clause is not None and selected_clause.recurring is not None:
                 result = derive_rate_preset(
-                    selected_clause, helper=self.rate_preset_helpers.get(selected_clause.mechanism),                    servicing=self.rate_servicing,
+                    selected_clause, helper=self.rate_preset_helpers.get(selected_clause.mechanism),
+                    servicing=self.rate_servicing,
                     authorities=self.disputes.for_publication(),
                     max_duration_seconds=resources.get("max_duration_seconds"),
                     available_until_utc=resources.get("available_until_utc"),
