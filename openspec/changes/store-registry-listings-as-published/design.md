@@ -128,6 +128,23 @@ supplies `listing_resource`, demands and API-key storage; no pre-floor repair
 revision is needed. PostgreSQL inherits this additive revision under the
 campaign's preferred order. Storefront startup migration behavior is unchanged.
 
+### D-f. Publication recovery uses the domain codec
+
+Registry convergence republishes the domain's candidate payload, just as initial
+publication and reopen do. The capacity-publication runtime accepts an injected
+candidate factory for domains whose stored view differs from their publication.
+VM recovery uses its existing codec to omit absent capacity attributes and retain
+listing-level rates. Otherwise recovery sends JSON null capacity attributes and
+full schema validation refuses the reopen. The existing second-deal assertion
+remains the acceptance boundary. Promote this invariant to
+`openspec/specs/storefront-publication/architecture.md` at closeout.
+
+The API-credit filter schema describes the current `price`, `settlement`, and
+`lifecycle` carrier. Its old flat option shape causes full publication validation
+to reject the seeded listing, so discovery returns no matches and the CLI exits
+before starting a buy run. This is a schema correction, with no buyer exit-policy
+change. The existing credits purchase scenarios exercise it.
+
 ## Implementation cadence and validation
 
 One implementation round: registry persistence/evidence and client transport,

@@ -105,6 +105,7 @@ def build_publication_runtime(
         update_listing_request_factory=UpdateListingRequest,
         storefront_url=BASE_URL_OVERRIDE,
         on_published=_record_listing_published_stage_event,
+        candidate_factory=lambda listing: _candidate(sqlite_client, listing),
     )
 
 

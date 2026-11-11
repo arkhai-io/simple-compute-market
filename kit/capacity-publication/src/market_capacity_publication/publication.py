@@ -160,6 +160,7 @@ class PublicationRuntime(Generic[PayloadT]):
         update_listing_request_factory: RequestFactory,
         storefront_url: str,
         on_published: PublishedEvent | None = None,
+        candidate_factory: Callable[[dict[str, Any]], Awaitable[PublicationCandidate[PayloadT]]] | None = None,
     ) -> None:
         self._repository = repository
         self._hooks = hooks
@@ -170,6 +171,7 @@ class PublicationRuntime(Generic[PayloadT]):
         self._update_listing_request_factory = update_listing_request_factory
         self._storefront_url = storefront_url
         self._on_published = on_published
+        self._candidate_factory = candidate_factory
         if self._enabled and not self._registry_urls:
             raise ValueError("enabled publication requires at least one registry URL")
         if not isinstance(storefront_url, str) or not storefront_url.strip():
@@ -532,8 +534,16 @@ class PublicationRuntime(Generic[PayloadT]):
         listing = await self._repository.load_listing(listing_id=divergence.listing_id)
         if listing is None:
             return
+        # Recovery must use the domain's publication codec too: stored views
+        # may contain local-only fields or omit derived commercial terms.
+        payload: Any = listing
+        if self._candidate_factory is not None:
+            candidate = await self._candidate_factory(listing)
+            await self._require_persisted_binding(candidate.listing_id, candidate.binding)
+            self._hooks.validate_candidate(candidate)
+            payload = candidate.payload
         published = await publish_listing_to_registries(
-            listing,
+            payload,
             enabled=self._enabled,
             registry_client_factory=self._open_registry_client,
             listing_request_factory=self._listing_request_factory,

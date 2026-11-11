@@ -19,6 +19,8 @@ Implements D-b and supplies D-d's downstream authority/carrier answer.
 - [x] 2.3 Run existing publication-loop/rate-composition application-integration suites, shared publication helpers and VM listing-model suites; try the published rate field through the registry. Existing compute e2e lanes exercise publication, but do not assert this new term. Record exact evidence and limitations here.
 - [x] 2.4 Refresh affected wheel/lock environments with repository tooling; run `make check-packaging`, comment hygiene, scoped citations/check-change and pinned strict OpenSpec validation. Prepare a reproducible first-use recipe. Commit and open PR into dev after updating from origin/dev; promotion waits for review.
 
+- [x] 2.5 Route VM registry convergence through the same candidate codec as initial publication and reopen (`kit/capacity-publication/.../publication.py`, VM `services/publication_service.py`); update `domains/apicredits/registry/filter-spec.yaml` to validate the current settlement option carrier. Preserve existing second-deal and credits purchase assertions. Validate existing convergence/publication suites and all compose lanes before publishing the stack.
+
 ## 3. Closeout (post code-review)
 
 Per `openspec/README.md#plan-closeout-requirements`; promotion is deliberately not performed before review.
