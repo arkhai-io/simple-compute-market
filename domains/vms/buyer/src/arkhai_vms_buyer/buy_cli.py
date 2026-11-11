@@ -60,6 +60,7 @@ from .deal_helpers import (
     open_run_log,
 )
 from .listing_cli import settlement_clause_error_message
+from .negotiation_amounts import priced_at_opening_shape
 from .opening_shape import SHAPE_HELP, SHAPE_OPTION, parse_shape_option, shape_excess
 from .registry_listing import domain_listing_record
 from .run_log import RunLog
@@ -666,8 +667,28 @@ def register(app: typer.Typer) -> None:
         if not explicit_prices:
             from core_buyer.cli import interactive_disposition
 
+            pricing_matches = []
+            priceable = []
+            for match in matches:
+                # A candidate whose selected asset cannot price the shape would
+                # refuse it at the seller; skip it as a too-small one is skipped.
+                try:
+                    pricing_matches.append(priced_at_opening_shape(match, requested_shape))
+                except ValueError as exc:
+                    if not quiet:
+                        console.print(f"[dim]skip[/dim]      {match.get('listing_id')}: {exc}")
+                    continue
+                priceable.append(match)
+            if not priceable:
+                typer.secho(
+                    f"No matching listing can price the {SHAPE_OPTION}.",
+                    err=True,
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(2)
+            matches = priceable
             initial_price, max_price = _resolve_prices_from_matches(
-                matches=matches,
+                matches=pricing_matches,
                 console=console,
                 params=policy_params_all,
                 interactive=interactive_disposition(assume_yes),

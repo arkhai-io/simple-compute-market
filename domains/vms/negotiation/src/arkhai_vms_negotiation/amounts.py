@@ -10,8 +10,8 @@ from fractions import Fraction
 from typing import Any
 
 from arkhai_vms import price_vm_shape, vm_family_rate, vm_listing_resource_shape
-from arkhai_vms_listings import extract_compute_from_order, extract_initial_price_from_order
-from market_core.schemas import settlement_option_asset
+from arkhai_vms_listings import extract_compute_from_order
+from market_core.schemas import primary_rate_value, settlement_option_asset
 from market_identity import canonical_json
 from market_policy.scalar_policies import selected_settlement_artifact
 
@@ -78,12 +78,19 @@ def shape_hourly_amount(
 
     The rational ratio preserves fractional base units until the final quote;
     rounding either shape or the duration first would make the two sides disagree.
+
+    ``listing`` may be a registry's discovery record, which carries the publisher's
+    principals rather than a storefront ``Listing``'s ``seller_principal``, so only
+    the fields the quote reads are read and the record is never validated whole.
     """
     record = listing_record(listing)
     selected = selected_settlement_artifact(record, proposal)
     if selected is None:
         raise ValueError("shape_price_unavailable: selected option is not advertised")
-    per_hour = Fraction(extract_initial_price_from_order(record, selected_option=selected))
+    advertised_rate = primary_rate_value(selected)
+    if advertised_rate is None:
+        raise ValueError("shape_price_unavailable: selected option advertises no rate")
+    per_hour = Fraction(advertised_rate)
     structure = record.get("rate_structure")
     if isinstance(structure, str):
         structure = json.loads(structure)

@@ -194,7 +194,7 @@ VM and API-credit domains.
 
 ### D5 — The buyer's amount codec
 
-*Owner record R3.*
+*Owner record R3; owner's notes 13 O1.*
 
 The core buyer owns an optional, schema-opaque amount codec; the VM buyer supplies
 the listing-aware one. Transcripts stay scalar, `NegotiationOutcome.agreed_amount`
@@ -219,6 +219,24 @@ quantities (`gpu_count=1,vcpu_count=8,ram_gb=64`) filling the opening's
 `compute_resource`; an omitted quantity is the listing's. The buyer refuses a shape
 exceeding the listing on any quantity, as the seller would (D10) — `buy` skips such
 a match — and a resumed run reuses the shape its negotiation opened with.
+
+*Owner's notes 13 O1.* Prices the buyer does not state are derived for the shape it
+opens with. Derivation reads a candidate's advertised rate, which prices the whole
+advertised shape; against a smaller opening shape that would make derived defaults a
+multiplier above 1.0× of what the buyer asks for — the whole listing's price for the
+smaller machine. With `--shape`, each candidate's pricing copy states only its
+selected option's rate, scaled by the composed-price ratio of its effective opening
+shape to the advertised one (the ratio rule, D3) and rounded up to a whole base unit;
+derivation reads rates as exact integers, never through a float, so a derived ceiling
+never converts below 10,000 bps. `buy` then anchors on the cheapest scaled candidate as
+before, skipping one whose selected asset cannot price the shape, as the seller would
+refuse it. The scaling lives in the VM buyer (`priced_at_opening_shape`), so core's
+derivation stays shape-blind; explicit `--initial-price` and `--max-price` keep their
+stated values.
+Rejected: keeping whole-listing defaults, which silently overpays by the inverse of
+the shape ratio, and refusing `--shape` without explicit prices, which leaves the
+buyer to price a shape nothing shows it. Revisit if derivation moves into the buyer
+policy surface.
 
 Revisit the public-price adapter if the buyer gains explicit multiplier flags.
 
@@ -411,10 +429,12 @@ No reservation is resized here.
 
 ### D12 — `resize_reservation` is not wired here
 
-With no pre-settlement hold there is no reservation to resize during
-negotiation: the claim built at settlement from the agreed shape is reserved
-fresh. A resize is needed only when a hold was placed *before* the shape was
-final, and the change that introduces such a hold is
+No reservation exists while the shape is still negotiated, so there is none to
+resize. A deployment with a positive `hold_ttl_seconds` places a TTL soft hold at
+acceptance, before settlement, but only once the shape is final, and that hold
+claims the agreed shape (D11); with no hold, the claim built at settlement from
+the agreed shape is reserved fresh. A resize is needed only when a hold was placed
+*before* the shape was final, and the change that introduces such a hold is
 `negotiation-time-capacity-hold` (one superseded reservation per negotiation,
 resized per differing-terms proposal). That change is the first caller. This
 change's title names the mechanism the model described; its scope is that the
@@ -502,7 +522,7 @@ roll back only by restoring the pre-upgrade backup with the earlier image.
 | D1: revised terms are a child of `proposal`; core reuses `ProvisionTerms`; durable seller-quoted terms survive continuation and acceptance | `openspec/specs/negotiation-protocol/spec.md` — "A round may revise the capacity shape" |
 | D2, D3: the negotiated quantity is a multiplier in basis points; the ratio rule; amounts stay exact and round up once | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation"; rationale in this `design.md` |
 | D4: the seller's multiplier floor, at most 10,000 | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
-| D5: a schema-opaque buyer amount codec keeps transcript scalars separate from monetary outcomes; bounds against the opening shape; the ceiling check | `docs/development/ARCHITECTURE.md` — buyer negotiation composition; `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
+| D5: a schema-opaque buyer amount codec keeps transcript scalars separate from monetary outcomes; bounds against the opening shape; the ceiling check; derived prices for the opening shape | `docs/development/ARCHITECTURE.md` — buyer negotiation composition; `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
 | D6: legacy flat and hidden-reserve paths; the payment, not the scalar, enters settlement | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
 | D7, D8: registry listing-level rate carrier, the buyer's lift, and the retained seller proof | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation"; registry storage and proof belong to `store-registry-listings-as-published` |
 | D9: the pin, from the seller's last successful publication | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation"; `openspec/specs/storefront-publication/spec.md` — "The storefront keeps each registry's last successful publication" |

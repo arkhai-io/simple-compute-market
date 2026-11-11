@@ -1,7 +1,9 @@
 """Bind VM multiplier negotiation to core's schema-opaque amount codec."""
 from __future__ import annotations
 
+import copy
 import math
+from collections.abc import Mapping
 from decimal import Decimal
 from fractions import Fraction
 from typing import Any
@@ -14,6 +16,7 @@ from arkhai_vms_negotiation.amounts import (
 )
 from arkhai_vms_negotiation.policies import proposal_uses_scalar_amount
 from core_buyer.negotiation_client import NegotiationAmountCodec
+from market_core.schemas import settlement_option_schema
 
 
 def _exact_price(price: Any) -> Fraction:
@@ -21,6 +24,46 @@ def _exact_price(price: Any) -> Fraction:
     if value < 0:
         raise RuntimeError("buyer price must be non-negative")
     return value
+
+
+def priced_at_opening_shape(
+    listing: Mapping[str, Any],
+    requested_shape: Mapping[str, int] | None,
+) -> dict[str, Any]:
+    """A pricing copy of a candidate whose option advertises its opening shape's rate.
+
+    ``listing`` carries its selected settlement option alone. Generic price
+    derivation reads that option's advertised per-hour rate, which prices the
+    whole advertised shape; the amount codec anchors the buyer's bounds to the
+    shape it opens with, so a smaller ``requested_shape`` would turn derived
+    defaults into a multiplier above 1.0x of what the buyer asks for. The
+    copy's rate is the advertised one scaled by the composed-price ratio of
+    the opening shape, omitted quantities the listing's, rounded up to a whole
+    base unit so a derived ceiling never converts below 1.0x. With no
+    requested shape, or a candidate without family rates, without exactly one
+    option, or whose option advertises no rate, the candidate is returned as
+    it is. A shape the selected asset cannot price raises ``ValueError``.
+    """
+    record = dict(listing)
+    options = record.get("settlement_options") or []
+    if requested_shape is None or not has_rate_structure(record) or len(options) != 1:
+        return record
+    option = copy.deepcopy(dict(options[0]))
+    rates = (option.get("price") or {}).get("rates") or []
+    if not rates:
+        return record
+    proposal = {"settlement_selection": {
+        "option_id": option.get("option_id"),
+        "settlement": {"schema": settlement_option_schema(option)},
+    }}
+    requested = {**extract_compute_from_order(record), **requested_shape}
+    hourly = shape_hourly_amount(record, proposal, vm_listing_resource_shape(requested))
+    rates[0]["value"] = str(math.ceil(hourly))
+    record["settlement_options"] = [option]
+    # Derivation reads accepted escrows before options; the option's rate is
+    # the only one this copy states.
+    record["accepted_escrows"] = []
+    return record
 
 
 def amount_codec(

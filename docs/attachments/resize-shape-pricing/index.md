@@ -12,6 +12,10 @@ pricing, not a chain deployment. The prepared target is a fresh temporary SQLite
 store created and removed by [first_use.py](first_use.py), owned by the invoking
 checkout. It reuses the existing seller-hook suite's public development fixture
 principals and listing setup. No secret or remote target selector is required.
+The seller prices from what its registries last accepted, so the script records a
+successful publication of the listing's family rates to the fixture's two test
+registries (never contacted) whenever it stores them, and withdraws them the same
+way: as a publication without rates.
 The script loads a fake site's pool projection before starting negotiation and
 injects a matching **advertised listing** source verdict. It does not authenticate
 a real site response or demonstrate authoritative requested-shape feasibility.

@@ -6,9 +6,12 @@ import math
 
 import pytest
 from arkhai_vms import make_vm_provision_terms
+from arkhai_vms_negotiation.amounts import shape_hourly_amount
+from core_buyer.policy_surface import derive_scalar_prices
 from market_core.schemas import RateValue, derive_settlement_option_id
+from rich.console import Console
 
-from arkhai_vms_buyer.negotiation_amounts import amount_codec
+from arkhai_vms_buyer.negotiation_amounts import amount_codec, priced_at_opening_shape
 from identity_helpers import SELLER_SIGNER
 
 #: Deterministic development values; never a token or escrow on a public network.
@@ -142,3 +145,44 @@ def test_a_negative_bound_is_refused():
     codec = amount_codec(listing, selection(listing))
     with pytest.raises(RuntimeError, match="non-negative"):
         codec.scalar_from_price(-1)
+
+
+def test_a_price_for_the_opening_shape_scales_the_selected_option_and_rounds_up():
+    listing = shape_priced_listing()
+    listing["settlement_options"][0]["price"]["rates"][0]["value"] = "999"
+    priced = priced_at_opening_shape(listing, {"vcpu_count": 4})
+    # 999 x 80/100 is 799.2: rounded up, so the derived ceiling converts to at
+    # least the advertised minimum for the opening shape.
+    assert priced["settlement_options"][0]["price"]["rates"][0]["value"] == "800"
+    assert priced["accepted_escrows"] == []
+    assert listing["settlement_options"][0]["price"]["rates"][0]["value"] == "999"
+    codec = amount_codec(listing, selection(listing), opening_terms=_terms(vcpu_count=4))
+    assert codec.scalar_from_price(800) >= 10_000
+
+
+def test_a_large_derived_price_keeps_every_base_unit():
+    listing = shape_priced_listing()
+    listing["settlement_options"][0]["price"]["rates"][0]["value"] = str(10**18 + 3)
+    priced = priced_at_opening_shape(listing, {"vcpu_count": 4})
+    initial, ceiling = derive_scalar_prices(
+        params={}, matches=[priced], console=Console(quiet=True),
+    )
+    # 0.8 x (10**18 + 3) rounds up to ...003; through a float it would become
+    # 8 x 10**17, which converts to 9,999 basis points.
+    assert initial == ceiling == 800_000_000_000_000_003
+    codec = amount_codec(listing, selection(listing), opening_terms=_terms(vcpu_count=4))
+    assert codec.scalar_from_price(ceiling) == 10_000
+
+
+def test_an_option_advertising_no_rate_cannot_price_a_shape():
+    listing = shape_priced_listing()
+    listing["settlement_options"][0]["price"]["rates"] = []
+    with pytest.raises(ValueError, match="selected option advertises no rate"):
+        shape_hourly_amount(listing, {"settlement_selection": selection(listing)})
+
+
+def test_without_a_shape_or_family_rates_the_candidate_prices_as_advertised():
+    listing = shape_priced_listing()
+    assert priced_at_opening_shape(listing, None) == listing
+    flat = {key: value for key, value in listing.items() if key != "rate_structure"}
+    assert priced_at_opening_shape(flat, {"vcpu_count": 4}) == flat

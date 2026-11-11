@@ -33,6 +33,7 @@ from .deal_helpers import (
     make_publisher_trust_resolver,
 )
 from .listing_cli import settlement_clause_error_message
+from .negotiation_amounts import priced_at_opening_shape
 from .opening_shape import SHAPE_HELP, SHAPE_OPTION, parse_shape_option, shape_excess
 from .registry_listing import domain_listing_record
 from .run_log import RunLog
@@ -416,11 +417,17 @@ def register(app: typer.Typer) -> None:
                     pricing_params["initial_price"] = initial_price
                 if _max_explicit:
                     pricing_params["max_price"] = max_price
-                pricing_listing = _pricing_listing_for_selection(
-                    listing_dict,
-                    selected_settlement,
-                    accepted_escrow=picked_entry,
-                )
+                try:
+                    pricing_listing = priced_at_opening_shape(
+                        _pricing_listing_for_selection(
+                            listing_dict,
+                            selected_settlement,
+                            accepted_escrow=picked_entry,
+                        ),
+                        requested_shape,
+                    )
+                except ValueError as exc:
+                    raise typer.BadParameter(str(exc)) from exc
                 initial_price, max_price = resolve_prices_from_matches(
                     matches=[pricing_listing],
                     console=console,

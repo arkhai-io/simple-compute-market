@@ -554,6 +554,71 @@ shape-priced opening there is now refused `rate_structure_unpublished`; PR #350'
 "Door" line still says the release is reversible (R11; `gh` was denied in the triage
 session).
 
+### Round-2 triage fixes (2026-11-11)
+
+The triage of review 14, validation 07 and owner's notes 13 (the round `30f7e4216`..
+`e8b3099e9`) made every accepted fix in one pass against `e8b3099e9`. The open items
+above are resolved: O1 and O2 below, and the PR #350 "Door" line was corrected by the
+orchestrating session on the owner's word.
+
+- **07 V2** — a shape-priced `market buy` failed before reaching the seller: the
+  quote validated the buyer's registry record as a storefront `Listing`
+  (`extract_initial_price_from_order`), which requires `seller_principal`, a field a
+  registry's discovery record never carries (it states `publisher_principals`).
+  `arkhai_vms_negotiation.amounts.shape_hourly_amount` now reads the selected
+  option's advertised rate directly and refuses `shape_price_unavailable` when it
+  states none; the seller's results are unchanged. The buyer's `registry_listing()`
+  test fixture is now registry-shaped (no `seller_principal`; `publisher_id`,
+  `publisher_principals`), so the `negotiate` and `buy` CLI cases reproduced V2 (6
+  failed against the `e8b3099e9` wheel) and pass after the fix. Stages 07a2–07a5 and
+  task 2.15 wait on the fix commit's pipeline.
+- **07 V1** — the API-credit wheel-install tests installed a stale `arkhai-core 0.5.0`
+  that uv had cached two weeks earlier for the same find-links path and filename,
+  not the wheel the fixture had just built; the commit was not the cause.
+  `domains/apicredits/tests/test_distribution_install.py` installs with `--refresh`.
+- **13 O1** (a decision; D5) — with `--shape` and a price the buyer does not state,
+  `buy` and `negotiate` derive it for the opening shape: each candidate's selected
+  option rate is scaled by the composed-price ratio and rounded up
+  (`negotiation_amounts.priced_at_opening_shape`), before core's derivation picks
+  the cheapest; `buy` skips a candidate whose selected asset cannot price the shape.
+  Core's `extract_seller_min_price` returns the exact integer rate rather than a
+  float, which above 2^53 base units could round a derived ceiling below 10,000 bps.
+  The spec delta gains the buyer requirement and a scenario.
+- **13 O2** — `docs/attachments/resize-shape-pricing/first_use.py` enters the
+  seller-hook fixture's store as the async generator it now is, records a
+  successful publication wherever it stores or withdraws rates, and its `index.md`
+  says so.
+- **14 F1** — D12 and the proposal's non-goal distinguish the acceptance hold, once
+  the shape is final, from a hold placed while the shape is negotiated.
+
+Evidence (levels as `TESTING.md` defines them):
+
+- Focused: VM buyer 256 passed (unit and CLI, including the registry-shaped
+  regressions, derived prices under `--shape`, the 18-decimal rate and the skipped
+  unpriceable candidate); core buyer unit 168 passed; API-credit buyer 35 passed;
+  API-credit `test_distribution_install.py` 3 passed (wheel installation); VM
+  storefront multiplier, seller-hook, initial-price and revised-shape-client suites
+  62 passed (unit and library/app integration).
+- `make check-packaging` passed (run twice, after each set of fixes).
+- `scripts/change-workflow run pre-commit` closed "[change-workflow] pre-commit at
+  e8b3099e9…: passed, exit 0", after after-functional-change and
+  pre-commit-functional passed (VM storefront unit 1177 passed and 1 skipped,
+  integration 575 passed; e2e unit 896 passed and 1 skipped) and every change check
+  passed.
+- Fresh-context compliance check: fixed — derived rates passed through a float in
+  core's derivation (now exact); one unpriceable candidate aborted `buy` (now
+  skipped); D5 said derivation reads the selected option's rate (`buy` without
+  `--shape` reads the first accepted escrow; D5 reworded); the rateless-option
+  refusal had no test; the spec line's wrap; a redundant fixture update; the helper's
+  docstring; the proposal's hold wording. Declined — the derivation table's
+  "advertised" column label now shows the scaled rate under `--shape`; it is core's
+  label for the rate derivation anchored on, and relabelling it would teach core
+  about shapes.
+- Not run here: `first_use.py` itself (running a script was denied in the triage
+  session; its calls were checked against the fixture's helpers and the runtime's
+  overlay), and the VM pipeline lane's stages 07a2–07a5 (the fix commit's
+  validation).
+
 ## 3. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`. This change's implementation predates the closeout task becoming a planning requirement. The parts are recorded here so each carries an explicit disposition rather than an assumed one; confirm and tick each rather than treating the change as closed.

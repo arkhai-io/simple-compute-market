@@ -59,10 +59,11 @@ None.
   requested shape ahead of pricing it. Any revised-terms content is limited to what that policy can
   price: an unexamined field that passes content through unchecked risks a
   buyer claiming resources the seller never agreed to give away.
-- Calling `resize_reservation`. Both storefronts place no hold before
-  settlement, so there is no reservation to resize during negotiation;
-  `negotiation-time-capacity-hold`, the change that first holds capacity
-  before the shape is final, is its first caller.
+- Calling `resize_reservation`. Neither storefront holds capacity while terms
+  are negotiated: a configured soft hold is placed at acceptance, once the terms
+  are final, and a VM hold claims the agreed shape. There is no reservation to
+  resize during negotiation; `negotiation-time-capacity-hold`, the change that
+  first holds capacity before the shape is final, is its first caller.
 - Deciding which shapes a seller will consider (`capacity-shape-envelope`) or
   whether the site can currently serve one
   (`negotiation-capacity-feasibility-probe`). This change calls both where they
@@ -111,7 +112,8 @@ None.
 - D4 — the seller's floor is one storefront-wide bound of at most 10,000 —
   `openspec/specs/negotiation-protocol/spec.md`.
 - D5 — the buyer's schema-opaque amount codec: monetary outcomes, a separate
-  negotiated scalar, bounds against the opening shape, the ceiling check —
+  negotiated scalar, bounds against the opening shape, the ceiling check, derived
+  prices for the opening shape —
   `docs/development/ARCHITECTURE.md` (buyer negotiation composition) and
   `openspec/specs/negotiation-protocol/spec.md`.
 - D6 — legacy flat and hidden-reserve paths keep absolute semantics; the payment,

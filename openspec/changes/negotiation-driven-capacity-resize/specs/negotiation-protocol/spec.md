@@ -49,8 +49,9 @@ and a shape-priced listing no registry has accepted a publication of MUST take n
 opening. The buyer may still exit the negotiation.
 
 A buyer MUST refuse an acceptance whose derived payment exceeds its own monetary
-ceiling. Settlement MUST read money only from the Agreement and its bound mandate,
-never from the negotiated scalar.
+ceiling. A price the buyer derives rather than states MUST price the shape it opens
+with, not the listing's advertised shape. Settlement MUST read money only from the
+Agreement and its bound mandate, never from the negotiated scalar.
 
 #### Scenario: Family rates change without changing the advertised total
 
@@ -113,6 +114,14 @@ never from the negotiated scalar.
 - **WHEN** the payment derived from a seller's offer — its multiplier, the agreed
   shape and duration, and the published rates — exceeds the buyer's monetary ceiling
 - **THEN** the buyer refuses to accept it
+
+#### Scenario: A buyer opening with a smaller shape derives its prices for that shape
+
+- **WHEN** a buyer opens with a shape smaller than the listing's and states no price
+- **THEN** its derived opening and ceiling prices are the selected option's rate
+  scaled by the opening shape's composed-price ratio and rounded up to a whole base
+  unit, so it opens at the advertised minimum for what it asks, not above it by the
+  inverse of that ratio
 
 #### Scenario: The negotiated scalar is not money
 

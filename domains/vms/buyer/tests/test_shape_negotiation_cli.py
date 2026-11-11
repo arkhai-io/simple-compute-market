@@ -37,10 +37,6 @@ def _served(listing_id: str = "L-shape", **resource) -> dict:
     listing = registry_listing()
     listing["listing_id"] = listing_id
     listing["listing_resource"] = {**listing["listing_resource"], **resource}
-    listing.update(
-        publisher_id="publisher",
-        publisher_principals=seller_principals().model_dump(mode="json"),
-    )
     return listing
 
 
@@ -102,15 +98,18 @@ def _run_started() -> dict:
 # --- market negotiate -------------------------------------------------------
 
 
-def _negotiate(monkeypatch, listing, *extra):
+#: Explicit whole-token prices; a test of derived prices passes none.
+PRICES = ("--initial-price", "8", "--max-price", "10")
+
+
+def _negotiate(monkeypatch, listing, *extra, prices=PRICES):
     monkeypatch.setattr(
         "arkhai_vms_buyer.negotiate_cli.fetch_listing_dict", lambda *a, **kw: dict(listing)
     )
     return CliRunner().invoke(app, [
         "negotiate", "--listing-id", listing["listing_id"],
         "--registry-urls", "http://registry", "--duration-hours", "1",
-        "--ssh-public-key", "ssh-ed25519 AAAA", "--yes",
-        "--initial-price", "8", "--max-price", "10", *extra,
+        "--ssh-public-key", "ssh-ed25519 AAAA", "--yes", *prices, *extra,
     ])
 
 
@@ -131,6 +130,18 @@ def test_negotiate_opens_with_the_shape_and_anchors_its_bounds_to_it(buyer_env, 
     # is 1.25 times what the buyer opens with.
     assert buyer_env["amount_codec"].scalar_from_price(buyer_env["max_price"]) == 12_500
     assert _run_started()["compute_resource"] == {"vcpu_count": 4}
+
+
+@pytest.mark.parametrize("shape,hourly", [((), 1000), (("--shape", "vcpu_count=4"), 800)])
+def test_negotiate_derives_its_prices_for_the_shape_it_opens_with(
+    buyer_env, monkeypatch, shape, hourly,
+):
+    result = _negotiate(monkeypatch, _served(), *shape, prices=())
+    assert result.exit_code == 4, (result.output, result.exception)
+    # Derived prices open and bound at the advertised minimum for the shape
+    # asked for: four of eight vCPUs price at 800 an hour, not the listing's 1,000.
+    assert buyer_env["initial_price"] == buyer_env["max_price"] == hourly
+    assert buyer_env["amount_codec"].scalar_from_price(buyer_env["max_price"]) == 10_000
 
 
 def test_negotiate_refuses_a_shape_above_the_advertised_one(buyer_env, monkeypatch):
@@ -175,7 +186,7 @@ def test_a_resumed_negotiation_refuses_a_shape(buyer_env):
 # --- market buy -------------------------------------------------------------
 
 
-def _buy(monkeypatch, listings, *extra):
+def _buy(monkeypatch, listings, *extra, prices=PRICES):
     monkeypatch.setattr(
         "arkhai_vms_buyer.buy_cli.query_registry_for_matches_multi",
         lambda *a, **kw: [dict(listing) for listing in listings],
@@ -192,7 +203,7 @@ def _buy(monkeypatch, listings, *extra):
     result = CliRunner().invoke(app, [
         "buy", "--registry-urls", "http://registry", "--duration-hours", "1",
         "--ssh-public-key", "ssh-ed25519 AAAA", "--yes", "--max-matches", "1",
-        "--initial-price", "8", "--max-price", "10", *extra,
+        *prices, *extra,
     ])
     return result, tried, events
 
@@ -224,6 +235,31 @@ def test_buy_opens_with_the_shape_and_caps_payment_at_the_ceiling(buyer_env, mon
     with pytest.raises(RuntimeError, match="exceeds the buyer's ceiling"):
         codec.payment_from_scalar(12_500, advertised)
     assert _run_started()["compute_resource"] == {"vcpu_count": 4}
+
+
+@pytest.mark.parametrize("shape,hourly", [((), 1000), (("--shape", "vcpu_count=4"), 800)])
+def test_buy_derives_its_prices_for_the_shape_it_opens_with(
+    buyer_env, monkeypatch, shape, hourly,
+):
+    result, _, _ = _buy(monkeypatch, [_served()], *shape, prices=())
+    assert result.exit_code == 4, (result.output, result.exception)
+    assert buyer_env["initial_price"] == buyer_env["max_price"] == hourly
+    assert buyer_env["amount_codec"].scalar_from_price(buyer_env["max_price"]) == 10_000
+
+
+def test_buy_skips_a_listing_that_cannot_price_the_shape(buyer_env, monkeypatch):
+    unpriceable = _served("L-other-asset")
+    # Family rates in another asset than the selected option's price nothing.
+    unpriceable["pricing"] = {"rate_structure": {
+        "gpu": [{"asset": "usd", "rate": "60", "per": "hour"}],
+    }}
+    result, tried, _ = _buy(
+        monkeypatch, [unpriceable, _served()], "--shape", "vcpu_count=4", prices=(),
+    )
+    assert result.exit_code == 4, (result.output, result.exception)
+    assert [match["listing_id"] for match in tried[0]] == ["L-shape"]
+    assert "L-other-asset: shape_price_unavailable" in result.output
+    assert buyer_env["max_price"] == 800
 
 
 def test_buy_skips_a_listing_smaller_than_the_shape(buyer_env, monkeypatch):

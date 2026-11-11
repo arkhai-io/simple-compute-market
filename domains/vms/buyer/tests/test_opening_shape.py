@@ -9,13 +9,21 @@ from arkhai_vms_listings.models import Listing
 from arkhai_vms_buyer.negotiation_amounts import amount_codec
 from arkhai_vms_buyer.opening_shape import parse_shape_option, shape_excess
 from arkhai_vms_buyer.registry_listing import domain_listing_record
+from identity_helpers import seller_principals
 from test_negotiation_amounts import HOURLY, RATE_STRUCTURE, selection, shape_priced_listing
 
 
 def registry_listing() -> dict:
-    """A listing as a registry serves it: family rates only in its pricing."""
+    """A listing as a registry's discovery serves it.
+
+    Family rates only in its pricing, and the publisher's identity as the
+    registry states it, never the storefront ``Listing``'s ``seller_principal``.
+    """
     listing = shape_priced_listing()
     listing["pricing"] = {"rate_structure": listing.pop("rate_structure")}
+    del listing["seller_principal"]
+    listing["publisher_id"] = "publisher-1"
+    listing["publisher_principals"] = seller_principals().model_dump(mode="json")
     return listing
 
 
@@ -66,6 +74,10 @@ def test_a_registry_listing_negotiates_in_multiplier_mode_through_its_domain_rec
 
 
 def test_the_listing_model_reads_and_publishes_the_registry_format():
-    listing = Listing.model_validate(registry_listing())
+    stored = {
+        **registry_listing(),
+        "seller_principal": shape_priced_listing()["seller_principal"],
+    }
+    listing = Listing.model_validate(stored)
     assert listing.rate_structure == RATE_STRUCTURE
     assert listing.published_pricing() == {"rate_structure": RATE_STRUCTURE}
