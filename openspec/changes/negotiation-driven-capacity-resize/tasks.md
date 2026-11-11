@@ -373,7 +373,7 @@ Slice C plan (2026-11-06):
 - [x] 2.14 Focused tests: a negotiation agreeing a shape smaller than the listing's
       reserves the smaller shape; the committed reservation's dimensions match the
       agreed shape; the fulfillment request derives from the reservation.
-- [ ] 2.15 **Amended by the round-1 triage (owner record R13):** no buyer command
+- [x] 2.15 **Amended by the round-1 triage (owner record R13):** no buyer command
       could request a shape, so the run below could not have been made as written.
       Add a round-0 shape option to the VM buyer's `buy` and `negotiate` commands,
       filling `compute_resource` within the advertised cap (D10), and a stage in
@@ -391,6 +391,9 @@ Slice C plan (2026-11-06):
       `docs/attachments/resize-shape-pricing/final-validation.md`.
       Treat this as the deployment boundary: incompatible in-flight negotiations
       must drain before upgrading or rolling back.
+      **Observed:** validation 21's pipeline run 43090303156 at `77cee0783` passed
+      stages 07a2–07a4 in the VM lane: `market buy --shape` reached ready, and the
+      site's reservation and the create job held exactly the agreed smaller shape.
 - [x] 2.16 **Comment hygiene and import placement, before the pre-closeout review.** Run
       `make check-comment-hygiene` and read the comments this change added for any that
       narrate the review or migration that introduced them; move each import the change
@@ -618,6 +621,40 @@ Evidence (levels as `TESTING.md` defines them):
   session; its calls were checked against the fixture's helpers and the runtime's
   overlay), and the VM pipeline lane's stages 07a2–07a5 (the fix commit's
   validation).
+
+### Validation 21 triage fix (2026-11-11)
+
+Validation 21 (pipeline run 43090303156 at `77cee0783`) passed 07a2–07a4, then failed
+08b: the restated constrained shape was a new listing, judged against available
+capacity, and the cycle reported `listing_shape_infeasible` with no L40S free. Stage
+04's and 07a2's VMs were delivered, so 07a5's `admin_release_reservations` released
+nothing (`released_count=0`): the site's `FulfillmentReleaseGuard` frees only a
+torn-down or undispatched reservation. The fix, against `77cee0783`:
+
+- **21 V1 (owner: option A)** — `test_listing_shapes.py` declares 3 GPUs, so one stays
+  available after the two buys; 07a5 is removed, and the module docstring no longer
+  says every hold is released or that publication judges only the declaration.
+- **21 V1, outside the plan** — 01a, 08b and 09b filter the cycle's actions through
+  `_pool_actions`, which matches a pool named at the action's top level (`hold`,
+  `refuse`, `report`) as well as under `source` (`publish`, `fail`); before, 08b's
+  failure message printed `[]` for the very `report` that explained it.
+- 2.15 is ticked on validation 21's 07a2–07a4 pass. The VM lane, 08b included, is
+  observed again by the fix commit's validation.
+
+Evidence (levels as `TESTING.md` defines them):
+
+- Focused: `test_listing_shapes.py` collects its 27 stages; e2e unit 896 passed and 1
+  skipped. The scenario itself runs only against a stack: the fix commit's pipeline.
+- `scripts/change-workflow run pre-commit` closed "[change-workflow] pre-commit at
+  77cee0783…: passed, exit 0", after after-functional-change and
+  pre-commit-functional passed (`make check-packaging`, then `make test`: VM storefront
+  unit 1177 passed and 1 skipped, integration 575 passed) and every change check
+  passed.
+- Fresh-context compliance check: fixed — the module docstring's closing claim that
+  publication judges only the declaration (the reconciler judges a backed pool against
+  availability); `_pool_actions`' docstring omitted `fail` and `refuse` and did not say
+  closes and refreshes are excluded; the `DECLARED` comment named "stage 07" for 07a2;
+  this note was missing. Earlier notes citing 07a2–07a5 are history and stand.
 
 ## 3. Closeout
 

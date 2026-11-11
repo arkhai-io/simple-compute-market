@@ -4,7 +4,7 @@ A pool's `listing_shapes` hint states the shape its listings are sold in. This
 scenario proves the cross-service path from that declaration to discovery:
 
 1. A pool states a 1-GPU, 8-vCPU, 32 GiB, 100 GiB shape; its one declaration has
-   2 GPUs, 16 vCPUs, 64 GiB, and 200 GiB.
+   3 GPUs, 16 vCPUs, 64 GiB, and 200 GiB.
 2. The provisioning service projects the hint verbatim, and one publication
    cycle publishes exactly that shape, with every declared quantity, and no
    default GPU-only shapes.
@@ -29,8 +29,7 @@ scenario proves the cross-service path from that declaration to discovery:
    While the listing is shape-priced, `market buy --shape` opens with a smaller
    shape -- 1 GPU, 4 vCPUs, 16 GiB, and 50 GiB -- and the site's reservation
    and the provisioning job hold exactly that agreed shape, not the listing's.
-   Every hold is then released, so the declaration is whole again. Deleting
-   the override restores the hint's flat rate.
+   Deleting the override restores the hint's flat rate.
 8. The pool restates its shape with inline constraints -- `gpu.count`
    `{offer: 1, max: 4}` and a `memory.gib` maximum but no memory offer. One
    cycle publishes the base shape alone: one GPU and no `ram_gb`, since a
@@ -53,9 +52,9 @@ hints, so the scenario does not depend on the storefront's configured defaults.
 The region is stated twice on purpose: a listing advertises its pool's region
 hint, and a reservation matches that region against the declaration's own
 `region` attribute, so a pool whose members did not declare it would publish
-nothing. How many of the shape
-fit, and whether a reservation will be admitted, stay the site's: publication
-judges only that the declaration can serve the shape.
+nothing. How many of the shape fit, and whether a reservation will be admitted,
+stay the site's. Publication judges a shape against the pool's backing, which
+for this backed pool is the capacity still available.
 """
 
 from __future__ import annotations
@@ -104,7 +103,11 @@ pytestmark = [
 GPU_MODEL = "L40S"
 REGION = "California, US"
 RESOURCE_ID = "compute-e2e-listing-shapes-001"
-DECLARED = {"gpu_count": 2, "vcpu_count": 16, "ram_gb": 64, "disk_gb": 200}
+#: Three GPUs, so one stays available once stages 04 and 07a2 have each bought
+#: one: their VMs are delivered, and the site frees a delivered reservation only
+#: once its VM is torn down, which no stage here drives. Stage 08's restated
+#: shape is a new listing, judged against what is available.
+DECLARED = {"gpu_count": 3, "vcpu_count": 16, "ram_gb": 64, "disk_gb": 200}
 SHAPE = {
     "gpu": {"count": 1, "model": GPU_MODEL},
     "cpu": {"count": 8},
@@ -253,17 +256,27 @@ class TestStage00_Setup:
         shape_state.declared = True
 
 
+def _pool_actions(cycle: dict, pool_id: str) -> list[dict]:
+    """The publication cycle's actions naming one pool, so a failure says why.
+
+    A ``publish`` or ``fail`` names its pool under ``source``; a ``hold``,
+    ``refuse`` or ``report``, such as an infeasible shape, names it at the
+    action's top level. A ``close`` or ``refresh`` names only its listing and is
+    not included.
+    """
+    return [
+        action for action in cycle.get("actions") or []
+        if pool_id in (action.get("pool_id"), (action.get("source") or {}).get("pool_id"))
+    ]
+
+
 class TestStage01_Publication:
     def test_01a_one_cycle_publishes_exactly_the_stated_shape(
         self, storefront_admin_client, shape_state
     ):
         require_state(shape_state, "declared")
         cycle = advance_storefront(storefront_admin_client, "publication")
-        # What the cycle did with this pool's candidates, so a failure says why.
-        this_pool = [
-            action for action in cycle.get("actions") or []
-            if (action.get("source") or {}).get("pool_id") == E2E_LISTING_SHAPES_POOL_ID
-        ]
+        this_pool = _pool_actions(cycle, E2E_LISTING_SHAPES_POOL_ID)
 
         page = storefront_admin_client.list_listings(status="open", limit=200)
         shaped = []
@@ -558,18 +571,6 @@ class TestStage07_ShapePricing:
             SMALLER["ram_gb"] * 1024, f"{SMALLER['disk_gb']}G",
         ), params
 
-    def test_07a5_the_leases_are_released_before_the_listing_is_refreshed(
-        self, storefront_admin_client, shape_state
-    ):
-        """Stage 04's lease and the smaller shape's together hold both declared
-        GPUs, and a pool with no available slice yields no publication
-        candidate, so stage 07b's cycle could not refresh the listing. Both
-        leases' checks are done; releasing every hold leaves the declaration
-        whole for the later stages."""
-        require_state(shape_state, "smaller_reservation_ids")
-        released = storefront_admin_client.admin_release_reservations()
-        log.info("[07a5] released %s", released)
-
     def test_07b_deleting_the_override_restores_the_flat_rate(
         self, storefront_admin_client, shape_state
     ):
@@ -631,10 +632,7 @@ class TestStage08_ShapeConstraints:
     ):
         require_state(shape_state, "constrained")
         cycle = advance_storefront(storefront_admin_client, "publication")
-        this_pool = [
-            action for action in cycle.get("actions") or []
-            if (action.get("source") or {}).get("pool_id") == E2E_LISTING_SHAPES_POOL_ID
-        ]
+        this_pool = _pool_actions(cycle, E2E_LISTING_SHAPES_POOL_ID)
 
         listings = _pool_listings(storefront_admin_client)
         assert len(listings) == 1, (
@@ -701,10 +699,7 @@ class TestStage09_ShapeWithoutGpus:
     ):
         require_state(shape_state, "cpu_declared")
         cycle = advance_storefront(storefront_admin_client, "publication")
-        this_pool = [
-            action for action in cycle.get("actions") or []
-            if (action.get("source") or {}).get("pool_id") == E2E_LISTING_SHAPES_CPU_POOL_ID
-        ]
+        this_pool = _pool_actions(cycle, E2E_LISTING_SHAPES_CPU_POOL_ID)
 
         listings = _pool_listings(storefront_admin_client, E2E_LISTING_SHAPES_CPU_POOL_ID)
         assert len(listings) == 1, (
