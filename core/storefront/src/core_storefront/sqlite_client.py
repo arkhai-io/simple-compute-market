@@ -223,7 +223,8 @@ def write_listing_update(
     updated_at: str | None = None,
     listing_resource: Any | None = None,
     fulfillment_resource: Any | None = None,
-    max_duration_seconds: int | None = None,
+    max_duration_seconds: Any = UNSET,
+    available_until_utc: Any = UNSET,
     storefront_url: str | None = None,
     seller_principal: Identity | None = None,
     oracle_address: str | None = None,
@@ -237,9 +238,9 @@ def write_listing_update(
 ) -> None:
     """Update the supplied listing columns inside the caller's transaction.
 
-    ``None`` on a column means "not supplied", except ``rate_structure``, which
-    is written whenever it is passed: a listing that stops recording a rate
-    structure must have it cleared, not kept.
+    ``None`` on a column means "not supplied", except the capacity bounds and
+    ``rate_structure``, which are written whenever passed: withdrawing a term
+    must clear it rather than keep advertising the previous value.
 
     A change to ``closed`` must name who closed the listing; any other status
     change clears the reason. A change to ``open`` on a listing its seller
@@ -283,7 +284,13 @@ def write_listing_update(
     add("updated_at", updated_at or datetime.now().isoformat())
     add("listing_resource", listing_resource, serialize=True)
     add("fulfillment_resource", fulfillment_resource, serialize=True)
-    add("max_duration_seconds", max_duration_seconds)
+    for name, value in (
+        ("max_duration_seconds", max_duration_seconds),
+        ("available_until_utc", available_until_utc),
+    ):
+        if value is not UNSET:
+            updates.append(f"{name}=?")
+            values.append(value)
     add("storefront_url", storefront_url)
     if seller_principal is not None:
         seller_scheme, seller_identifier = _principal_columns(seller_principal)
@@ -492,6 +499,7 @@ class SQLiteClient:
         demands: Any | None,
         closed_by: str | None = None,
         rate_structure: Any | None = None,
+        available_until_utc: str | None = None,
     ) -> None:
         _require_consistent_closure(status, closed_by)
         # An upsert names no reopener, so it may never overwrite a seller's
@@ -522,9 +530,10 @@ class SQLiteClient:
               publication_clauses,
               demands,
               closed_by,
-              rate_structure
+              rate_structure,
+              available_until_utc
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(listing_id) DO UPDATE SET
               status=excluded.status,
               closed_by=excluded.closed_by,
@@ -541,7 +550,8 @@ class SQLiteClient:
               settlement_options=excluded.settlement_options,
               publication_clauses=excluded.publication_clauses,
               demands=excluded.demands,
-              rate_structure=excluded.rate_structure
+              rate_structure=excluded.rate_structure,
+              available_until_utc=excluded.available_until_utc
             """,
             (
                 listing_id,
@@ -562,6 +572,7 @@ class SQLiteClient:
                 self._serialize_resource(demands),
                 closed_by,
                 self._serialize_resource(rate_structure),
+                available_until_utc,
             ),
         )
 
@@ -585,6 +596,7 @@ class SQLiteClient:
         demands: Any | None = None,
         closed_by: str | None = None,
         rate_structure: Any | None = None,
+        available_until_utc: str | None = None,
     ) -> None:
         def _save() -> None:
             with sqlite3.connect(self.db_path) as conn:
@@ -607,6 +619,7 @@ class SQLiteClient:
                     demands=demands,
                     closed_by=closed_by,
                     rate_structure=rate_structure,
+                    available_until_utc=available_until_utc,
                 )
 
         await asyncio.to_thread(_save)
@@ -631,6 +644,7 @@ class SQLiteClient:
         demands: Any | None = None,
         closed_by: str | None = None,
         rate_structure: Any | None = None,
+        available_until_utc: str | None = None,
     ) -> None:
         """Persist a mutable listing projection and immutable binding atomically."""
 
@@ -667,6 +681,7 @@ class SQLiteClient:
                     demands=demands,
                     closed_by=closed_by,
                     rate_structure=rate_structure,
+                    available_until_utc=available_until_utc,
                 )
                 conn.execute(
                     """
@@ -818,7 +833,8 @@ class SQLiteClient:
         updated_at: str | None = None,
         listing_resource: Any | None = None,
         fulfillment_resource: Any | None = None,
-        max_duration_seconds: int | None = None,
+        max_duration_seconds: Any = UNSET,
+        available_until_utc: Any = UNSET,
         storefront_url: str | None = None,
         seller_principal: Identity | None = None,
         oracle_address: str | None = None,
@@ -850,6 +866,7 @@ class SQLiteClient:
                     listing_resource=listing_resource,
                     fulfillment_resource=fulfillment_resource,
                     max_duration_seconds=max_duration_seconds,
+                    available_until_utc=available_until_utc,
                     storefront_url=storefront_url,
                     seller_principal=seller_principal,
                     oracle_address=oracle_address,
@@ -893,7 +910,8 @@ class SQLiteClient:
                            publication_clauses,
                            demands,
                            closed_by,
-                           rate_structure
+                           rate_structure,
+                           available_until_utc
                     FROM listings WHERE listing_id = ?
                     """,
                     (listing_id,),
@@ -920,6 +938,7 @@ class SQLiteClient:
                     "demands",
                     "closed_by",
                     "rate_structure",
+                    "available_until_utc",
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
@@ -3776,7 +3795,8 @@ class SQLiteClient:
                            publication_clauses,
                            demands,
                            closed_by,
-                           rate_structure
+                           rate_structure,
+                           available_until_utc
                     FROM listings {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
@@ -3802,6 +3822,7 @@ class SQLiteClient:
                     "demands",
                     "closed_by",
                     "rate_structure",
+                    "available_until_utc",
                 ]
                 rows = cur.fetchall()
                 result = []

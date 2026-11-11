@@ -97,15 +97,21 @@ class TestResolveGpuPricing:
         assert result == _FLAT_DEFAULT
 
     @pytest.mark.parametrize("value", ["not-an-int", -1, True])
-    def test_malformed_max_duration_seconds_falls_through(self, value):
-        result = resolve_gpu_pricing(
-            {"pricing": {"gpu": {"H100": {"max_duration_seconds": value}}}},
-            gpu_model="H100",
-            storefront_override=_NO_OVERRIDE,
-            config_defaults_by_model={},
-            flat_default=_FLAT_DEFAULT,
-        )
-        assert result.max_duration_seconds == 60
+    def test_max_duration_seconds_is_strict_and_nonpositive_is_unlimited(self, value):
+        def resolve():
+            return resolve_gpu_pricing(
+                {"pricing": {"gpu": {"H100": {"max_duration_seconds": value}}}},
+                gpu_model="H100",
+                storefront_override=_NO_OVERRIDE,
+                config_defaults_by_model={},
+                flat_default=_FLAT_DEFAULT,
+            )
+
+        if value == -1 and not isinstance(value, bool):
+            assert resolve().max_duration_seconds == -1
+        else:
+            with pytest.raises(ValueError, match="max_duration_seconds"):
+                resolve()
 
     def test_retired_hint_keys_are_not_listing_terms(self):
         """A hint still stating min_price or token resolves exactly as one

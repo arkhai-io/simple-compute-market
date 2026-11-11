@@ -9,6 +9,7 @@ agree on that, or the seller refuses the buyer's opening for a missing amount.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 
 import pytest
@@ -22,7 +23,7 @@ from arkhai_vms_buyer.settlement_composition import (
 from core_buyer.settlement import SelectedSettlementOption
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_core.schemas import SettlementOption, SettlementSelection
-from market_identity import TrustedIdentitySet
+from market_identity import RequestEnvelope, TrustedIdentitySet, canonical_body_hash, sign_request
 
 from tests._settings_overrides import settings_overrides, replaced_setting
 from market_storefront.utils import config as storefront_config
@@ -86,6 +87,24 @@ async def test_a_buyer_selection_of_a_priced_alkahest_option_reaches_acceptance(
         with replaced_setting("settlement", configured):
             listing = (await publish(world))["broker-a"]
         listing_id = listing["listing_id"]
+        if shape_priced:
+            # A registry returns the seller's signed publication with its trust;
+            # a storefront's local listing alone cannot prove a published rate.
+            publication = world.registries.to("publish", listing_id)[0][1]
+            listing = {**listing, **publication}
+            request = sign_request(signer=TEST_MARKETPLACE_SIGNER, envelope=RequestEnvelope(
+                principal=TEST_MARKETPLACE_SIGNER.identity, role="seller", method="POST",
+                operation="listing.publish", resource="listings",
+                request_id="buyer-selection-publication", timestamp=1_793_966_340,
+                body_hash=canonical_body_hash(publication),
+            ))
+            listing["publisher_principals"] = TrustedIdentitySet(
+                identities=(TEST_MARKETPLACE_SIGNER.identity,)
+            ).model_dump(mode="json")
+            listing["publisher_publication"] = {
+                "body_base64": base64.b64encode(json.dumps(publication).encode()).decode(),
+                "request": request.model_dump(mode="json"),
+            }
         raw_options = [
             option
             for option in listing["settlement_options"]

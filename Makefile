@@ -593,6 +593,10 @@ clobber-wheels: _require-ar-project
 # scans, their file types, exclusions, and the one exemption are
 # scripts/check_comment_hygiene.py's, with their reasons.
 # ---------------------------------------------------------------------------
+.PHONY: check-agreement-amount-reads
+check-agreement-amount-reads: ## Refuse unclassified production amount reads
+	@python3 scripts/check_agreement_amount_reads.py
+
 check-comment-hygiene: ## Fail if change-ID/task-number references leak outside openspec/
 	@python3 scripts/check_comment_hygiene.py
 
@@ -648,7 +652,7 @@ check-uv-version: ## Fail if the installed uv is older than the minimum that wri
 	@python3 scripts/check_uv_version.py
 
 check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
-	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture check-agreement-amount-reads
 
 check-uv-setup: ## Fail if a reinit target or image install names internal packages instead of deriving them
 	@python3 scripts/check_uv_setup.py

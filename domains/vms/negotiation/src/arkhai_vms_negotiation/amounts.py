@@ -11,7 +11,9 @@ from typing import Any
 
 from arkhai_vms import price_vm_shape, vm_family_rate, vm_listing_resource_shape
 from arkhai_vms_listings import extract_compute_from_order
-from market_core.schemas import primary_rate_value, settlement_option_asset
+from market_core.schemas import (
+    BillingProjection, PriceBasis, SettlementOption, primary_rate_value, settlement_option_asset,
+)
 from market_identity import canonical_json
 from market_policy.scalar_policies import selected_settlement_artifact
 
@@ -114,21 +116,45 @@ def shape_hourly_amount(
     return per_hour * Fraction(requested.amount) / Fraction(base.amount)
 
 
+def selected_billing_basis(
+    listing: Any, proposal: Mapping[str, Any], project_billing: BillingProjection,
+) -> PriceBasis:
+    """Resolve canonical options through their installed mechanism's projection.
+
+    The legacy raw escrow proposal has no selected option; its payment is an
+    absolute whole-term total. No mechanism schema is interpreted here.
+    """
+    selected = selected_settlement_artifact(listing_record(listing), proposal)
+    if selected is None:
+        raise ValueError("shape_price_unavailable: selected option is not advertised")
+    if "option_id" not in selected:
+        return PriceBasis(unit="total")
+    return PriceBasis.model_validate(project_billing(SettlementOption.model_validate(selected)))
+
+
 def quote_from_multiplier(
     listing: Any,
     proposal: Mapping[str, Any],
     multiplier_bps: int,
-    duration_seconds: int,
+    duration_seconds: int | None,
     requested_shape: Mapping[str, Mapping[str, Any]] | None = None,
+    *,
+    price_basis: PriceBasis = PriceBasis(unit="total"),
 ) -> int:
-    """Round a complete exact quote upward once and refuse asset overflow."""
+    """Round one complete quote, over the term or one projected billing period.
+
+    Callers pricing a selected option supply its mechanism-owned basis. The
+    absolute helper default preserves whole-term arithmetic for raw quotes.
+    """
     if isinstance(multiplier_bps, bool) or not isinstance(multiplier_bps, int) or multiplier_bps < 0:
         raise ValueError("multiplier_bps must be a non-negative integer")
-    if isinstance(duration_seconds, bool) or not isinstance(duration_seconds, int) or duration_seconds <= 0:
-        raise ValueError("duration_seconds must be a positive integer")
+    seconds = price_basis.period_seconds if price_basis.unit == "per_period" else duration_seconds
+    if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds <= 0:
+        raise ValueError("duration_seconds must be a positive integer for a whole-term quote")
+    assert seconds is not None
     amount = math.ceil(
         shape_hourly_amount(listing, proposal, requested_shape)
-        * duration_seconds * multiplier_bps / (3600 * BASIS_POINTS)
+        * seconds * multiplier_bps / (3600 * BASIS_POINTS)
     )
     if amount > UINT256_MAX:
         raise ValueError("shape_price_overflow: quote exceeds uint256")

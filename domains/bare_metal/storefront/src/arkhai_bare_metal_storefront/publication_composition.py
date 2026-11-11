@@ -29,11 +29,13 @@ logger = logging.getLogger(__name__)
 
 def publication_payload_builder(
     runtime: BareMetalStorefrontRuntime,
+    *, publication_diagnostic: Callable[[dict[str, Any], dict[str, Any]], None] = lambda _candidate, _entry: None,
 ) -> Callable[[dict[str, Any]], Any]:
     """Build each candidate's payload from the configured publication terms.
 
-    A candidate reaches the builder only with a positive lease bound: the cycle
-    holds a pool whose override and configuration state none. A candidate left
+    Reserved capacity options need a positive relative lease bound. Recurring
+    candidates judge the listing's finite horizon independently, allowing an
+    absolute bound alone. A candidate left
     with no clause its backing admits, including one whose pool resolves no
     clause at all, is refused with ``NoSettlementOption`` naming no mechanism:
     the storefront's configuration rules every one out.
@@ -57,7 +59,7 @@ def publication_payload_builder(
     async def build(candidate: dict[str, Any]) -> PublicationPayload:
         # A pool's storefront override replaces the configured clauses and
         # bound for that pool's listings only.
-        override_clauses = candidate.get("override_clauses")
+        override_clauses = candidate.get("resolved_clauses", candidate.get("override_clauses"))
         configured = (
             tuple(
                 parse_settlement_publication_clause(
@@ -93,8 +95,9 @@ def publication_payload_builder(
         return await composition.publication_payload(
             candidate=candidate,
             clauses=admissible,
+            publication_diagnostic=lambda entry: publication_diagnostic(candidate, entry),
             max_duration_seconds=candidate.get(
-                "override_max_duration_seconds", default_max_duration
+                "max_duration_seconds", candidate.get("override_max_duration_seconds", default_max_duration)
             ),
         )
 
@@ -110,7 +113,7 @@ def build_publication_cycle(
     """Compose one cycle over the runtime's held projection of every configured site."""
     if runtime.site_projections is None:
         raise BareMetalPublicationError("site projection state is unavailable")
-    return cycle_factory(
+    cycle = cycle_factory(
         sqlite_client=runtime.db,
         registry=build_bare_metal_storefront_registry(domain=runtime.domain),
         site_projections=runtime.site_projections,
@@ -121,11 +124,18 @@ def build_publication_cycle(
         registry_urls=registry_configuration.urls,
         storefront_url=runtime.storefront_url,
         seller_principal=runtime.seller_principal,
-        build_payload=publication_payload_builder(runtime),
+        build_payload=publication_payload_builder(runtime, publication_diagnostic=lambda candidate, entry: cycle.report.record(
+            "report", site_id=candidate["site_id"], pool_id=candidate.get("pool_id"),
+            source={"physical_resource_id": candidate.get("physical_resource_id")},
+            reason=entry["code"], **{key: value for key, value in entry.items() if key != "code"},
+        )),
         default_max_duration_seconds=runtime.default_max_duration_seconds,
+        default_available_until_utc=runtime.default_available_until_utc,
+        default_publication_clauses=runtime.publication_clauses,
         enter_stage=runtime.loops.enter_stage,
         derivation=runtime.publication_derivation,
     )
+    return cycle
 
 
 def compose_publication_cycle(

@@ -64,6 +64,7 @@ TERM_LISTING_FIELDS: tuple[str, ...] = (
     "settlement_options",
     "demands",
     "max_duration_seconds",
+    "available_until_utc",
     "rate_structure",
 )
 

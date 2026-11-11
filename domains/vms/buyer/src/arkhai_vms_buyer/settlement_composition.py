@@ -13,6 +13,7 @@ from core_buyer.registry_config import registry_descriptors, resolve_indexer_url
 from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext
+from market_settlement_runtime.buyer_terms import BuyerTermsPolicy, compute_disclosure, lifecycle_disclosure
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
@@ -29,10 +30,12 @@ from market_settlement_runtime import (
     SettlementConfigurationRegistry,
 )
 
+from .cli_helpers import emit_lifecycle_disclosure
 from .chain_cli import chain_app
 from .common import refuse_retired_address_book_keys
 from .escrow_cli import escrow_app
 from .registry_listing import domain_listing_record
+from .pricing_record import retained_pricing_record
 from .settlement_stages import AlkahestBuyerStage, PaymentsBuyerStage
 
 
@@ -81,16 +84,39 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
     match = domain_listing_record(match)
     record = buyer_stage(selected.selection.settlement_schema).listing_record(match)
     if match.get("rate_structure"):
-        record = {**record, **{key: match[key] for key in (
-            "listing_id", "listing_resource", "rate_structure", "settlement_options", "accepted_escrows"
-        ) if key in match}}
+        record = {**record, **retained_pricing_record(match)}
     return record
+
+
+def buyer_term_context(mechanism: str, *, allow_unprotected_terms: bool = False) -> TermContext:
+    return TermContext(
+        mechanism=mechanism, has_adapter=mechanism == "arkhai.payments.v1", compute=True,
+        dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+        allow_missing_delivery_deadline=allow_unprotected_terms,
+    )
+
+
+def buyer_lifecycle_disclosure(option):
+    return lifecycle_disclosure(option, context=buyer_term_context(option.settlement_schema))
+
+
+def buyer_compute_disclosure(option, **kwargs):
+    return compute_disclosure(option, registry=buyer_settlement_registry(), **kwargs)
+
+
+def disclose_accepted_agreement(agreement) -> None:
+    emit_lifecycle_disclosure(
+        buyer_compute_disclosure(agreement.settlement, agreement=agreement)
+        + buyer_lifecycle_disclosure(agreement.settlement),
+        title="Accepted Agreement: price, horizon and lifecycle terms before approval",
+    )
 
 
 def validate_buyer_acceptance(outcome) -> None:
     if outcome.agreement is None or outcome.agreement.settlement is None:
         raise RuntimeError("accepted work has no Agreement settlement option")
     buyer_stage(outcome.agreement.settlement.settlement_schema).validate_acceptance(outcome)
+    disclose_accepted_agreement(outcome.agreement)
 
 
 def _alkahest_command_group():
@@ -163,6 +189,7 @@ def resolve_buyer_settlement_policy(
     identity: ResolvedBuyerIdentity | None = None,
     action_capable: bool = True,
     registry_urls: str | None = None,
+    allow_unprotected_terms: bool = False,
 ) -> BuyerSettlementPolicy:
     """Strictly resolve the common buyer ``[Settlement]`` hierarchy."""
 
@@ -197,14 +224,14 @@ def resolve_buyer_settlement_policy(
         config=settlement,
         registry=registry,
         stages=buyer_settlement_stages(),
-        option_preference=AuthoritySelection(authorities, contexts={
-            "arkhai.payments.v1": TermContext(
-                mechanism="arkhai.payments.v1", has_adapter=True, compute=True,
-                dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+        option_preference=BuyerTermsPolicy(AuthoritySelection(authorities, contexts={
+            "arkhai.payments.v1": buyer_term_context(
+                "arkhai.payments.v1", allow_unprotected_terms=allow_unprotected_terms,
             ),
-        }, report=logging.getLogger(__name__).info),
+        }, report=logging.getLogger(__name__).info), allow_unprotected_terms=allow_unprotected_terms),
         public_context={
             "dispute_authorities_by_registry": authorities,
+            "allow_unprotected_compute_terms": allow_unprotected_terms,
         },
     )
 

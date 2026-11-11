@@ -2,8 +2,9 @@
 
 The core owns round sequencing and opaque acceptance checks. Shape-priced
 listings use the VM amount codec: policy scalars are basis points while accepted
-outcomes carry derived payments. Flat listings retain the per-hour amount
-contract, scaled by lease hours. The VM outcome also carries the lease duration.
+outcomes carry derived payments. Flat listings scale hourly bounds by the
+selected billing span: one period or the reserved term. A recurring horizon is
+optional; the VM outcome also carries the buyer's requested duration.
 
 Importing this module also installs the RL middleware registrar so
 ``rl``-named policies in buyer.toml resolve (core cannot import
@@ -40,7 +41,7 @@ from arkhai_vms import VmProvisionTerms
 from .common import chain_address_books
 from .escrow_client import encode_escrow_proposal
 from .settlement_composition import validate_buyer_acceptance
-from .negotiation_amounts import amount_codec
+from .negotiation_amounts import amount_codec, priced_unit_count
 
 
 def _validate_model(model_type, value):
@@ -136,8 +137,9 @@ def negotiate_with_seller(
     Prices are per-hour bounds for the shape the buyer opens with. A
     seller-authenticated registry ``listing`` with a rate structure converts
     those bounds to basis points once; accepted terms determine the monetary
-    payment, which may not exceed ``max_price`` over the accepted duration.
-    Without a rate structure, lease hours scale the bounds to absolute amounts.
+    payment, which may not exceed ``max_price`` over one period for a recurring
+    option, or over the accepted duration for a reserved one. Without a rate
+    structure, the selected period or reserved lease hours scale the bounds.
 
     ``validate_acceptance`` defaults to the purchase table's entry guard. An
     introduction has no purchase entry and passes None; its command checks
@@ -156,14 +158,6 @@ def negotiate_with_seller(
                 "required for fresh negotiations"
             )
         duration_seconds = provision_terms.duration_seconds
-        # Translate per-hour bounds → absolute amounts (× duration / 3600).
-        # Listings broadcast per-hour rates; once the duration is fixed,
-        # the whole negotiation runs on absolute totals.
-        if duration_seconds is None or duration_seconds <= 0:
-            raise RuntimeError(
-                "provision_terms.duration_seconds must be > 0 to translate "
-                "per-hour bounds into absolute amounts."
-            )
 
     proposal_for_amount = settlement_selection or escrow_proposal
     opening_terms: Any = provision_terms
@@ -188,7 +182,7 @@ def negotiate_with_seller(
         initial_price=initial_price,
         max_price=max_price,
         unit_count=(
-            float(duration_seconds) / 3600.0 if duration_seconds is not None else None
+            priced_unit_count(listing, proposal_for_amount, duration_seconds) if resume is None else None
         ),
         provision_terms=provision_terms,
         encode_escrow_proposal=encode_escrow_proposal,

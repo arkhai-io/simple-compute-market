@@ -12,7 +12,7 @@ from core_buyer.orchestration import make_publisher_trust_resolver, wait_for_set
 from market_arkhai_payments import ArkhaiPaymentsConfig, PaymentApproval
 from market_arkhai_payments.models import AccountId
 from market_config.config_loader import load_user_config
-from market_core.schemas import Agreement
+from market_core.schemas import AgreedPrice, Agreement
 from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, Pending
 
 from .evidence import evidence_store
@@ -29,6 +29,7 @@ class AgreedTerms:
     listing_id: str
     agreed_amount: int
     duration_seconds: int
+    quote: AgreedPrice | None = None
 
 
 def payer_selection(selected):
@@ -149,6 +150,7 @@ def make_payment_settle_hook(
                 match["listing_id"],
                 outcome.agreed_amount,
                 outcome.agreement.duration_seconds,
+                policy.registry.agreed_price(outcome.agreement),
             )
             if not confirm_settlement(terms, match):
                 return BuyResult(status="exited", reason="user_declined")

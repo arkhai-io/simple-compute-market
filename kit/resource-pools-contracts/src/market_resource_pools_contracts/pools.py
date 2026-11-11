@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from .asking_rates import validate_asking_rates
+from .capacity_bounds import validate_capacity_bounds
 from .hints import (
     validate_hold_preference,
     validate_listing_shapes,
@@ -31,6 +32,7 @@ def _require_valid_policy_tags(policy_tags: dict[str, Any]) -> None:
         + validate_listing_shapes(policy_tags)
         + validate_asking_rates(policy_tags)
         + validate_pricing_rates(policy_tags)
+        + validate_capacity_bounds(policy_tags)
     )
     if problems:
         raise ValueError("; ".join(problems))

@@ -59,6 +59,15 @@ def shape_priced_listing() -> dict:
     }
 
 
+def with_advertised_rate(listing: dict, value: str) -> None:
+    """Re-advertise the listing's option at ``value``, under its new canonical ID."""
+    option = listing["settlement_options"][0]
+    option["price"]["rates"][0]["value"] = value
+    option["option_id"] = derive_settlement_option_id(
+        price=option["price"], settlement=option["settlement"],
+    )
+
+
 def selection(listing: dict) -> dict:
     return {
         "option_id": listing["settlement_options"][0]["option_id"],
@@ -149,7 +158,7 @@ def test_a_negative_bound_is_refused():
 
 def test_a_price_for_the_opening_shape_scales_the_selected_option_and_rounds_up():
     listing = shape_priced_listing()
-    listing["settlement_options"][0]["price"]["rates"][0]["value"] = "999"
+    with_advertised_rate(listing, "999")
     priced = priced_at_opening_shape(listing, {"vcpu_count": 4})
     # 999 x 80/100 is 799.2: rounded up, so the derived ceiling converts to at
     # least the advertised minimum for the opening shape.
@@ -162,7 +171,7 @@ def test_a_price_for_the_opening_shape_scales_the_selected_option_and_rounds_up(
 
 def test_a_large_derived_price_keeps_every_base_unit():
     listing = shape_priced_listing()
-    listing["settlement_options"][0]["price"]["rates"][0]["value"] = str(10**18 + 3)
+    with_advertised_rate(listing, str(10**18 + 3))
     priced = priced_at_opening_shape(listing, {"vcpu_count": 4})
     initial, ceiling = derive_scalar_prices(
         params={}, matches=[priced], console=Console(quiet=True),
