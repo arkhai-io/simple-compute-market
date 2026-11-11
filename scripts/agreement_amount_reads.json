@@ -90,5 +90,6 @@
   {"path": "domains/vms/storefront/src/market_storefront/services/listing_service.py", "scope": "ListingService._normalize_token_resource", "expression": "resource_payload.get('amount')", "count": 1, "reason": "Token resource parsing, not Agreement pricing."},
   {"path": "domains/vms/storefront/src/market_storefront/services/listing_service.py", "scope": "ListingService.refund", "expression": "payload.amount", "count": 1, "reason": "Refund request amount, not Agreement pricing."},
   {"path": "domains/vms/storefront/src/market_storefront/services/publication_terms.py", "scope": "compose_clause_rates", "expression": "price.amount", "count": 1, "reason": "Capability-pricing ShapePrice used to publish asking rates, not accepted money."},
-  {"path": "domains/vms/storefront/src/market_storefront/utils/migrations.py", "scope": "synthesize_accepted_escrows_from_demand", "expression": "normalized.get('amount')", "count": 1, "reason": "Historical token resource migration, not accepted Agreement pricing."}
+  {"path": "tools/mediation-lane-double/src/mediation_lane_double/service.py", "scope": "MediationDouble._payment_event", "expression": "effect['amount']", "count": 1, "reason": "Mediation fixture serializes an authority payment-effect amount, not accepted Agreement pricing."},
+  {"path": "tools/payments-lane-double/src/payments_lane_double/app.py", "scope": "PaymentsDouble.fund", "expression": "funding.amount", "count": 2, "reason": "Payments fixture funding request updates an account balance, not accepted Agreement pricing."}
 ]
