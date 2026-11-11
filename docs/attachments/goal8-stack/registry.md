@@ -5,8 +5,9 @@ Base: `ca498b1e6` (`dev`, 2026-11-11). The backup is
 
 The pre-floor rename and demands/API-key repair is superseded by dev's fixed
 `v0_3_0_baseline`; it is omitted rather than restoring the deleted Alembic tree.
-`019_retained_publications` ships inside `core_registry/alembic/versions`, after
-that baseline. Existing baseline, adoption, revision-discovery and command tests
+`019_retained_publications` (since renamed
+`20261106_001_registry_retained_publications`, with a refusing downgrade) ships
+inside `core_registry/alembic/versions`, after that baseline. Existing baseline, adoption, revision-discovery and command tests
 follow the new head; adoption preserves the legacy row and null proofs and reaches
 the same schema as a fresh chain. The floor fixture and baseline are unchanged.
 Campaign/design conflicts retain dev's archived migration status and PostgreSQL

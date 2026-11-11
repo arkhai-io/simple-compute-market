@@ -56,6 +56,11 @@ class VmPublicationHooks:
         except RuntimeError:
             return None
 
+    async def publication_candidate(
+        self, listing: dict[str, Any]
+    ) -> PublicationCandidate[dict[str, Any]]:
+        return await _candidate(self._db, listing)
+
     def registry_publisher(self) -> Identity:
         signer = container.resolved_marketplace_signer
         if signer is None:

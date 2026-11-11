@@ -69,6 +69,7 @@ class _Registries:
     def __init__(self):
         self.failing = set()
         self.sent = []
+        self.published = []
 
     async def __aenter__(self):
         return self
@@ -88,6 +89,7 @@ class _Registries:
         return results
 
     async def publish_listing_per_registry(self, *, payloads):
+        self.published.extend(payloads.items())
         return self._results("publish", payloads)
 
     async def update_listing_per_registry(self, *, listing_id, payloads):
@@ -96,17 +98,23 @@ class _Registries:
 
 
 class _Hooks:
+    def __init__(self, codec=None):
+        self._codec = codec or dict
+
     async def binding_for_listing(self, listing_id):
         return _BINDING
 
     def validate_candidate(self, candidate):
         return None
 
+    async def publication_candidate(self, listing):
+        return PublicationCandidate(listing["listing_id"], _BINDING, self._codec(listing))
 
-def _runtime(repository, registries):
+
+def _runtime(repository, registries, hooks=None):
     return PublicationRuntime(
         repository=repository,
-        hooks=_Hooks(),
+        hooks=hooks or _Hooks(),
         enabled=True,
         registry_urls=registries.urls,
         registry_client_factory=lambda: registries,
@@ -178,6 +186,44 @@ async def test_a_registry_left_closed_by_a_failed_reopen_is_republished_and_reop
 
     assert registries.sent == [("publish", _B), ("open", _B)]
     assert result == {"repaired": ("listing-1",), "unrepaired": ()}
+
+
+def _published_view(listing):
+    """A domain codec whose publication differs from the stored row: it omits
+    a stored null and carries a listing-level term the row does not hold."""
+    payload = dict(listing)
+    payload["listing_resource"] = {
+        name: value for name, value in listing["listing_resource"].items() if value is not None
+    }
+    payload["publication_terms"] = {"pricing": {"asking_rate": "7"}}
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_a_repair_republishes_the_domain_candidate_not_the_stored_row():
+    repository, registries = _Repository(), _Registries()
+    runtime = _runtime(repository, registries, hooks=_Hooks(codec=_published_view))
+    repository.listings["listing-1"] = {
+        **_listing(),
+        "listing_resource": {"offering_mode": "vm", "ram_gb": None},
+    }
+    candidate = PublicationCandidate(
+        "listing-1", _BINDING, _published_view(repository.listings["listing-1"])
+    )
+    await runtime.publish(candidate)
+    await runtime.close(BoundListing("listing-1", _BINDING), closed_by="reconciliation")
+    registries.failing = {("open", _B)}
+    await runtime.reopen(candidate, reopened_by="reconciliation")
+    registries.failing.clear()
+    registries.published.clear()
+
+    result = await runtime.converge()
+
+    assert result == {"repaired": ("listing-1",), "unrepaired": ()}
+    ((url, request),) = registries.published
+    assert url == _B
+    assert request["listing_resource"] == {"offering_mode": "vm"}
+    assert request["extra"] == {"pricing": {"asking_rate": "7"}}
 
 
 @pytest.mark.asyncio

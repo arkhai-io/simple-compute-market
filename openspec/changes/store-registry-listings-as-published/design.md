@@ -11,142 +11,223 @@ API-credit and introduction schemas; it must not interpret any domain's rates.
 The initial proposal compared A (retain accepted documents) with B (close the
 schema to existing carriers). B limits every new listing term to a registry code
 change and encourages placing commercial terms inside capacity descriptions.
-A is selected below. This is implementation for maintainer review, not promotion.
+A is selected below.
+
+The change was implemented before its design was reviewed. The owner waived the
+design review in favour of a design discussion held in its place; every decision
+below is settled by that discussion (round 1's owner record, `01`), and round 1's
+triage records them here.
 
 ## Decisions
 
-### D-a. Retain accepted documents; replace on republication
+### D1 — Retain accepted documents whole; replace on republication
 
-**Decided by webapp owner 2026-11-06, pending maintainer review.**
+Store the complete publication body in a JSON column (`published_document`).
+Reads serve it with registry-owned fields overlaid. Storing the request body
+whole is less fragile than maintaining the listing schema at the database level.
 
-Store the complete publication body in a JSON column. Authenticate first and
-validate against the configured `listing_shape` at publication, just as dry-run
-validation does. Registry-owned response names (`publisher_id`,
-`publisher_principals`, `created_at`, `updated_at`, `publisher_publication`, and
-`publisher_updates`) are reserved and refused by name; otherwise every admitted
-field, including nulls and unknown properties admitted by the schema, survives.
-Full validation closes the existing dry-run/publish disagreement; publishers must
-send a complete schema-valid document, not a partial patch.
+Authenticate first, then validate against the configured `listing_shape` at
+publication, exactly as the dry run does. Full validation closes the
+disagreement in which the dry run reported `valid=false` and publication still
+succeeded; publishers send a complete schema-valid document, not a partial
+patch. A refused republication leaves the last stored listing in place.
 
-Republication replaces the document whole. An omitted commercial field disappears;
-null is retained, not a request to merge an old value. Publisher and listing IDs,
-creation time, and lifecycle status remain stable; an explicitly supplied status
-is honored. `PUT` remains a narrowly scoped status/oracle update, rejects other
-keys instead of discarding them, and retains its own seller evidence. Status is
-registry lifecycle metadata, not a promise that the publication remains open.
+Registry-owned response names (`publisher_id`, `publisher_principals`,
+`created_at`, `updated_at`, `publisher_publication`, `publisher_updates`) are
+reserved and refused at publication by that exact list. Otherwise every admitted
+field, including nulls and unknown properties the schema admits, survives.
 
-Existing rows have no retained body or seller proof. Synthesize their old discovery
-shape from existing carriers on read, with null publication evidence. This avoids
-a data rewrite and never invents a seller signature or a lost rate structure.
-The next valid republication establishes the document and proof atomically. Old
-columns remain for legacy synthesis only, not a second commercial source of truth.
+Republication replaces the document whole. An omitted commercial field
+disappears; null is retained, not a request to merge an old value. Publisher and
+listing IDs and creation time stay stable. Status survives republication unless
+the publication supplies one; close and reopen stay explicit `PUT`s. `PUT`
+remains a narrowly scoped status/oracle update, refuses any other key rather
+than discarding it, and retains its own per-field seller evidence (D2).
 
-Filters continue to evaluate the served document. `index-registry-filters` stays
-deferred: when activated, its indexes must project paths from the document, plus
-registry-owned lifecycle columns, and prove parity for synthesized legacy rows.
-No indexes, SQL filtering, or runtime schema mutation are added here.
+Existing rows have no retained document or seller proof. Their old discovery
+shape is rebuilt on read from the carrier columns, with null publication
+evidence; no backfill rewrites them, and nothing invents a seller signature or a
+lost rate structure. The next valid republication establishes the document and
+proof atomically. The carrier columns are legacy-only, except `oracle_address`,
+which `PUT` still writes and which reads serve when an oracle update is
+recorded. On republished and new rows the other carriers are stale or empty and
+must not be read. Removing the carriers and the rebuild path is deferred to a
+carrier-removal migration, triggered when `migrate-registry-to-postgres` or
+`index-registry-filters` starts; neither copies nor indexes the stale carriers.
+
+A listing's signed `storefront_url` is its own: a storefront move reaches each
+listing on its next republication. The publisher record's URL serves rebuilt
+legacy rows and the publisher detail only.
+
+Filters evaluate the served document. `index-registry-filters` stays deferred:
+when activated, its index paths come from the document, plus registry-owned
+lifecycle columns, and must match rebuilt legacy rows. No indexes, SQL
+filtering, or runtime schema mutation are added here.
+
+Publishing is open to any self-generated key by default
+(`REGISTRY_REQUIRE_WRITE_API_KEY` defaults to false), and no request-body size
+limit applies. This change adds no limit; the default deployment's write
+admission is the registry write hardening gap (`openspec/changes/README.md`).
 
 Alternatives rejected: per-field merge leaves withdrawn terms live; a backfill
 cannot recover discarded data or signatures and unnecessarily rewrites rows;
-immediate indexes have no measured activation evidence. Revisit on measured
-query latency, or a demonstrated publisher need for a separately specified patch
+immediate indexes have no measured activation evidence; B, keeping only what the
+carriers name, keeps discarding admitted terms. Revisit on measured query
+latency, or a demonstrated publisher need for a separately specified patch
 protocol. Do not silently restore merge semantics.
 
-### D-b. Publish rate_structure at listing level
+### D2 — Retain the seller's exact body bytes and signed request
 
-**Decided by webapp owner 2026-11-06, pending maintainer review.**
-
-The VM publication loop carries resolved rates through its listing model and the
-shared opaque publication transport as top-level `rate_structure`. The neutral
-registry client accepts arbitrary extra listing terms rather than acquiring a VM
-rate type. VM publication omits absent optional capacity attributes rather than
-emitting null values that violate the compute schema; local stored views remain
-unchanged. The compute filter specification declares this optional object/null
-field; flat-priced listings carry no rate structure. Registry code never names
-or calculates rates. `asking_rate` stays in `listing_resource`; moving it is a
-separate follow-up only if a consumer needs it, not a prerequisite here.
-
-Example commercial content:
-
-```json
-{"listing_id":"example-listing","storefront_url":"https://seller.example/","listing_resource":{"region":"example"},"rate_structure":{"cpu":[{"asset":"usd","rate":"0.05","per":"hour"}]},"settlement_options":[{"option_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","settlement":{"schema":"example.payment.v1"}}]}
-```
-
-Revisit if a domain changes its rate vocabulary; that belongs to its publication
-codec/schema, never a domain import into registry storage.
-
-### D-c. Preserve seller evidence alongside registry response signatures
-
-**Decided by webapp owner 2026-11-06, pending maintainer review.**
-
-`publisher_publication` contains `body_base64` (the exact received HTTP body bytes)
-and `request` (the complete authenticated v2 envelope, including seller principal,
-operation, resource, request ID, timestamp, body hash and proof). The marketplace
-signature binds the canonical JSON hash, not JSON whitespace; retaining exact
-transport bytes also preserves the original representation without pretending
-the protocol signs whitespace. The registry's ordinary response signature covers
-the returned document and this evidence. No secrets are retained.
+`publisher_publication` contains `body_base64` (the exact received HTTP body
+bytes) and `request` (the complete authenticated v2 envelope, including seller
+principal, operation, resource, request ID, timestamp, body hash and proof). The
+marketplace signature binds the canonical JSON hash, not JSON whitespace;
+retaining exact transport bytes also preserves the original representation
+without pretending the protocol signs whitespace. The registry's ordinary
+response signature covers the returned document and this evidence. No secrets
+are retained. Size per row is acceptable at this scale.
 
 A buyer decodes the body, verifies its canonical hash and envelope signature,
-checks listing identity and `listing.publish` context, and uses the terms from that
-verified body. Historical verification uses the signed timestamp, not the live
-request freshness window. It must separately establish seller trust/ownership;
-a valid signature alone is neither current credential trust nor rate acceptance.
-The live publisher principal set can change under rotation without rewriting old
-publication evidence. Legacy rows explicitly have no seller evidence.
+checks listing identity and `listing.publish` context, and uses the terms from
+that verified body. Historical verification uses the signed timestamp, not the
+live request freshness window. The registry attests key ownership; the seller's
+proof attests terms. Verification uses the publisher's active keys as the
+registry serves them in `publisher_principals` at read time (retained keys for
+an accepted deal), matching the buyer's existing trust model. A consequence of
+rotation: a listing signed by a retired key is refused until republished.
+Independent seller identity is a candidate for the registry write hardening gap.
+Legacy rows explicitly have no seller evidence.
 
-Lifecycle/oracle updates do not rewrite publication evidence. `publisher_updates`
-retains the latest signed update for each mutable field, so an oracle change is
-not misrepresented as part of the original signed publication. Republication
-clears oracle update evidence and replaces commercial content; status evidence is
-retained when publication omits status. Reserved metadata cannot be spoofed by a
-published document.
+Lifecycle/oracle updates do not rewrite publication evidence.
+`publisher_updates` retains the latest signed update for each mutable field, so
+an oracle change is not misrepresented as part of the original signed
+publication. Republication clears oracle update evidence and replaces
+commercial content; status evidence is retained when publication omits status.
+Reserved metadata cannot be spoofed by a published document.
 
-Revisit if a versioned identity protocol changes the envelope or if consumers need
-full mutation history rather than the latest field proofs. A registry-only copy
-was rejected because it cannot prove what the seller published.
+Revisit if a versioned identity protocol changes the envelope or if consumers
+need full mutation history rather than the latest field proofs. A registry-only
+copy was rejected because it cannot prove what the seller published.
 
-### D-d. Resize gate 2.1a consumes verified registry terms
+### D3 — Listing pricing in one top-level `pricing` object
 
-**Decided by webapp owner 2026-11-06, pending maintainer review.**
+All of a listing's pricing travels together in a top-level `pricing` object:
+`asking_rate`, in its current strict shape, and an optional `rate_structure`
+keyed directly by family, with entries as the VM pricer emits them. A
+flat-priced listing carries `pricing.asking_rate` only. The compute schema does
+not name families.
 
-The buyer reads `rate_structure` from the registry listing, verifying it against
-D-c's seller publication. This supplies the authority/carrier answer to
-`negotiation-driven-capacity-resize` gate 2.1a. Implementing its buyer accessor,
-shape negotiation, open-ended periods or spot mechanics is outside this change.
-Revisit only if maintainer review changes D-a through D-c. A legacy row without
-seller evidence cannot satisfy this gate until its seller republishes.
+```json
+{
+  "listing_resource": {"region": "example", "offering_mode": "vm", "vcpu_count": 16},
+  "pricing": {
+    "asking_rate": {"amount": "2400", "asset": "<settlement clause asset>", "period": "hour"},
+    "rate_structure": {
+      "gpu": [{"asset": "<settlement clause asset>", "rate": "80", "per": "hour"}],
+      "cpu": [{"asset": "<settlement clause asset>", "rate": "5", "per": "hour"}],
+      "memory": [{"asset": "<settlement clause asset>", "rate": "1", "per": "hour"}],
+      "storage": [{"asset": "<settlement clause asset>", "rate": "1", "per": "hour"}]
+    }
+  }
+}
+```
 
-### D-e. Follow the packaged registry migration chain
+The compute filter specification declares the optional top-level `pricing`
+with `asking_rate` and `rate_structure`, removes `listing_resource.asking_rate`
+and the top-level `rate_structure`, and repoints the four asking-rate filters to
+`$.pricing.asking_rate.*` with their query names unchanged. Version 9 is
+unreleased and stays 9. Every in-repository publisher writes the new location
+through the opaque publication channel: the VM listings model and storefront,
+the bare-metal domain and storefront, `resource-pools`,
+`resource-pools-contracts` and `pool-overrides`. Round 1 implemented the
+intermediate state — a top-level `rate_structure` beside a nested asking rate —
+and round 2 moves both into `pricing`.
 
-`add-database-migration-commands` is archived. The registry's packaged Alembic
-chain starts at `v0_3_0_baseline`, adopts the v0.3.0 revision without replaying
-its DDL, and runs through `registry-migrate` before startup. Add revision
-`019_retained_publications` after that baseline. Its three nullable columns
-preserve existing rows without inventing seller evidence. The baseline already
-supplies `listing_resource`, demands and API-key storage; no pre-floor repair
-revision is needed. PostgreSQL inherits this additive revision under the
-campaign's preferred order. Storefront startup migration behavior is unchanged.
+The neutral registry client carries domain terms as opaque extra listing terms
+rather than acquiring a rate type; the domain's `publication_terms` carries
+`{"pricing": {...}}`. VM publication omits absent optional capacity attributes
+rather than emitting nulls the compute schema refuses; local stored views are
+unchanged. Registry code never names or calculates rates.
+
+Known upgrade gap: rebuilt legacy rows carry no `pricing`, so they drop out of
+asking-rate filters until their seller republishes. Reads of a top-level
+`rate_structure` and retained pricing records up the stack move to
+`pricing.rate_structure` in those changes; the stack merges together.
+
+Revisit if a domain changes its rate vocabulary; that belongs to its
+publication codec and schema, never a domain import into registry storage.
+
+### D4 — Buyers price from the verified registry carrier
+
+The buyer reads `pricing.rate_structure` from the registry listing, verified
+against D2's seller publication. This supplies the authority and carrier answer
+to `negotiation-driven-capacity-resize` gate 2.1a; its buyer accessor, shape
+negotiation, open-ended periods and spot mechanics are outside this change. A
+legacy row without seller evidence cannot satisfy the gate until its seller
+republishes, and a buyer sees a local rate change only after republication.
+
+### D5 — Migration ordering; downgrade is one-way
+
+The registry's packaged Alembic chain starts at `v0_3_0_baseline`, adopts the
+v0.3.0 revision without replaying its DDL, and runs through `registry-migrate`
+before startup. Revision `20261106_001_registry_retained_publications`, named by
+the dated convention the repository's migration chains use, follows that
+baseline. Its three nullable columns preserve existing rows without inventing
+seller evidence. Its downgrade refuses, as the baseline's does: dropping the
+columns would discard every retained document and seller proof. Rollback is
+restoring the pre-upgrade backup; an older image refuses the migrated database
+as ahead. PostgreSQL inherits this additive revision under the campaign's
+preferred order. Storefront startup migration behavior is unchanged.
+
+This decision is sequencing only. The rate-structure digest pinned at a
+negotiation's opening is a different decision, made in
+`negotiation-driven-capacity-resize`.
+
+### D6 — Registry repair republishes the domain's candidate
+
+Registry convergence republishes a listing through the domain's own candidate,
+as initial publication and reopen do: a stored view may hold local-only fields
+or lack derived listing terms, and republication replaces the registry's whole
+document (D1). The capacity-publication kit's `PublicationDomainHooks`
+therefore requires `publication_candidate(listing)`, which every composing
+domain implements from the candidate codec its publish path uses; where a
+domain's candidate is its stored row, that is what repair sends. Repair checks
+the binding and runs `validate_candidate` first, as publication does, so a
+listing whose binding disagrees stays unrepaired rather than being republished.
+Without the hook, VM repair sent JSON-null capacity attributes that full
+validation refuses, and would have dropped the listing's pricing terms.
+
+The API-credit filter schema declares the market's settlement option — required
+`option_id` and `settlement`, optional `price` and `lifecycle` — which its own
+mechanism and asset filters already read. Its earlier flat option shape had
+never been enforced; full validation at publication (D1) made it refuse every
+API-credit listing.
 
 ## Implementation cadence and validation
 
-One implementation round: registry persistence/evidence and client transport,
-then VM publication wiring, then focused validation and first-use evidence.
-Existing tests are run and their fixtures may follow deliberate schema-validation
-changes; no new permanent tests are added without maintainer approval.
-Post-review closeout performs promotion and archival; neither is claimed now.
+Round 1 implemented registry persistence, evidence and client transport, then VM
+publication wiring, with focused validation and first-use evidence. Round 1's
+triage makes the corrections and small fixes (the decision text, the migration
+rename and refusing downgrade, D6, and the client docstring). One further
+section implements D3's `pricing` move and the permanent tests at the levels
+`docs/development/TESTING.md` assigns, reviewed as round 2. Validation runs every
+part against each fixed `HEAD`, end-to-end included. Post-review closeout
+performs promotion and archival.
 
 ## Design promotion record
 
 | Accepted decision | Permanent location (post-review) |
 |---|---|
-| D-a opaque documents, replacement, legacy synthesis, filter parity | `openspec/specs/registry-discovery/spec.md`; `openspec/specs/registry-discovery/architecture.md` |
-| D-b listing-level family rates | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md` |
-| D-c seller evidence and metadata authority | `openspec/specs/registry-discovery/spec.md`; `openspec/specs/registry-discovery/architecture.md` |
-| D-d verified registry carrier for resize | `openspec/specs/registry-discovery/architecture.md`; downstream resize design gate |
-| D-e migration sequencing correction | Temporary: this design and `openspec/changes/README.md` |
+| D1 retained documents, replacement, reserved names, schema admission, legacy rebuild, filter parity | `openspec/specs/registry-discovery/spec.md`; `openspec/specs/registry-discovery/architecture.md` (including that a refused republication leaves the last stored listing) |
+| D2 seller evidence wire contract and trust anchor | `openspec/specs/registry-discovery/spec.md` (the `publisher_publication` / `publisher_updates` shape as a normative contract); `openspec/specs/registry-discovery/architecture.md` (why bytes, historical verification, rotation) |
+| D3 listing pricing object | `openspec/specs/registry-discovery/spec.md`; `openspec/specs/storefront-publication/spec.md` and `architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
+| D4 verified registry carrier for resize | `openspec/specs/registry-discovery/architecture.md`; downstream resize design gate |
+| D5 migration ordering | No permanent destination — sequencing only, unless closeout finds a line for `openspec/specs/registry-discovery/architecture.md` |
+| D6 repair through the domain candidate | `openspec/specs/storefront-publication/spec.md` and `architecture.md` |
+| D6 API-credit settlement option shape | No permanent destination — a schema correction in `domains/apicredits/registry/filter-spec.yaml`, guarded by the per-publisher schema tests (task 3.5) |
+
+No principle is promoted to `docs/development/ARCHITECTURE.md`.
 
 ## Open questions
 
-None for implementation. D-a through D-e await maintainer review. Promotion and
-archival remain post-review work.
+None.

@@ -3,26 +3,29 @@
 A registry acknowledges listing content it then discards: publication and reads
 select six named carriers even though the configured listing schema admits other
 terms. Buyers need a listing's resolved rates to price another shape, without
-confusing commercial terms with the advertised capacity description. Registry-only
-response signatures do not prove what the seller published.
+confusing commercial terms with the advertised capacity description, and need
+all of a listing's pricing in one place. Registry-only response signatures do
+not prove what the seller published.
 
 ## What Changes
 
-- Choose Option A: persist and serve the complete accepted publication document;
-  whole-document republication replaces commercial terms rather than merging.
-- Authenticate and validate the configured listing shape at publication. Reserve
-  registry metadata names explicitly; never acknowledge and discard a field.
-- Synthesize existing rows from retained carriers until republication; expose
-  absent seller evidence honestly, without invented backfills.
-- Retain exact publication body bytes and the authenticated v2 envelope/signature.
-  Keep lifecycle/oracle update proofs distinct from the publication proof.
-- Publish the VM storefront's `rate_structure` as a top-level listing term through
-  an opaque extra-term transport. Keep `asking_rate` in `listing_resource`.
+- Persist and serve the complete accepted publication document; whole-document
+  republication replaces commercial terms rather than merging (D1).
+- Authenticate and validate the whole configured listing shape at publication.
+  Refuse reserved registry metadata names; never acknowledge and discard a
+  field. `PUT` refuses keys other than status and oracle address (D1).
+- Rebuild existing rows from their carrier columns on read until republication;
+  expose absent seller evidence honestly, without invented backfills (D1).
+- Retain exact publication body bytes and the authenticated v2 envelope; keep
+  lifecycle/oracle update proofs distinct from the publication proof (D2).
+- Move all listing pricing into one top-level `pricing` object holding
+  `asking_rate` and the optional family `rate_structure`, written by every
+  in-repository publisher through an opaque extra-term transport (D3).
 - Supply the carrier and seller-authority answer to resize gate 2.1a; its buyer
-  accessor and pricing behavior remain downstream work.
-
-D-a through D-e in `design.md` were decided by webapp owner 2026-11-06, pending
-maintainer review. The PR calls these out before its implementation summary.
+  accessor and pricing behavior remain downstream work (D4).
+- Repair registries by republishing each domain's publication candidate, and
+  correct the API-credit schema's settlement option shape, which full validation
+  now enforces (D6).
 
 ## Capabilities
 
@@ -33,57 +36,76 @@ None.
 ### Modified Capabilities
 
 - `registry-discovery`: retained opaque documents, replacement, schema admission,
-  legacy synthesis and verifiable seller publication/update evidence.
-- `storefront-publication`: publish resolved rate structures at listing level.
+  reserved names, legacy rebuild, verifiable seller publication/update evidence,
+  and the `pricing` object's filters.
+- `storefront-publication`: publish listing pricing in the top-level `pricing`
+  object; repair registries through the domain's candidate.
+- `resource-pool-management`: pool kits and overrides write asking rates to
+  `pricing.asking_rate`.
 
 ## Non-Goals
 
 - No new filter operators, indexes, database engine, or migration entry points.
 - No domain imports or rate interpretation in the registry engine.
-- No asking-rate relocation, shape negotiation, open-ended or spot behavior.
+- No shape negotiation, open-ended or spot behavior.
 - No storefront startup migration changes.
+- No change to the registry's write admission or a request-body size limit;
+  that is the registry write hardening gap.
 
 ## Impact
 
-- `core/registry`: additive Alembic revision, document/evidence columns, publication,
-  update, serialization and validation routes.
+- `core/registry`: additive Alembic revision, document/evidence columns,
+  publication, update, serialization and validation routes; the compute filter
+  specification's `pricing` object.
 - `core/registry-client`: opaque additional listing terms; evidence remains in the
   already-preserved response extras.
 - `core/storefront`, VM listing models and VM storefront: carry publication terms
-  across create, refresh and reopen; compute schema declares top-level rates.
+  across create, refresh, reopen and repair.
+- Bare-metal domain and storefront, `resource-pools`, `resource-pools-contracts`
+  and `pool-overrides`: write the asking rate to `pricing.asking_rate`.
+- `kit/capacity-publication`: the required `publication_candidate` hook every
+  composing domain implements; registry repair republishes it.
+- `domains/apicredits/registry`: the settlement option shape the market uses.
 - Wire behavior: schema-invalid complete publications now fail rather than being
   stored; partial republication is not a patch. Unknown admitted terms survive.
-  New response evidence fields are additive; legacy rows have null evidence.
+  New response evidence fields are additive; legacy rows have null evidence and
+  drop out of asking-rate filters until republished.
 - Persistence: additive columns, no backfill, no recovered discarded content.
-  Downgrade loses documents/evidence and must not be used as data-preserving rollback.
+  The revision's downgrade refuses; rollback is restoring the pre-upgrade
+  backup, and an older image refuses the migrated database as ahead.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md` — assess at closeout; authority detail
-  currently belongs to the owning subsystem companions.
-- [x] Existing specifications and companions — registry discovery and storefront publication.
+- [ ] `docs/development/ARCHITECTURE.md` — assess at closeout; no principle is
+  promoted from this change.
+- [x] Existing specifications and companions — registry discovery, storefront
+  publication, resource-pool management.
 - [ ] New subsystem specification — none.
 
 ### Knowledge to promote
 
-- D-a document replacement, legacy synthesis and filter semantics —
-  `openspec/specs/registry-discovery/spec.md` and `architecture.md`.
-- D-b listing-level rates — `openspec/specs/storefront-publication/spec.md` and
+- D1 retained documents, replacement, reserved names, schema admission, legacy
+  rebuild and filter semantics — `openspec/specs/registry-discovery/spec.md` and
   `architecture.md`.
-- D-c seller proof and registry metadata boundaries —
+- D2 seller evidence wire contract and trust anchor —
   `openspec/specs/registry-discovery/spec.md` and `architecture.md`.
-- D-d verified carrier for resize — registry architecture; downstream gate records
-  the consumption contract when resize work starts.
-- D-e dependency correction is temporary sequencing rationale in this change and
-  `openspec/changes/README.md`, not permanent architecture.
+- D3 listing pricing object — `openspec/specs/registry-discovery/spec.md`,
+  `openspec/specs/storefront-publication/spec.md` and `architecture.md`,
+  `openspec/specs/resource-pool-management/spec.md`.
+- D4 verified carrier for resize — registry architecture; the downstream gate
+  records the consumption contract when resize work starts.
+- D5 migration ordering — sequencing only, no permanent destination unless
+  closeout finds a line for registry architecture.
+- D6 repair through the domain candidate —
+  `openspec/specs/storefront-publication/spec.md` and `architecture.md`.
 
 ## Dependencies and Related Changes
 
 - `add-database-migration-commands` is archived. The publication revision follows
-  its packaged registry baseline; D-e records the migration boundary.
+  its packaged registry baseline; D5 records the migration boundary.
 - Prefer landing before `migrate-registry-to-postgres` so its chain inherits the
   additive revision. No new migration command is introduced.
-- `index-registry-filters` remains deferred; future indexes project from the opaque
-  document and prove parity for legacy synthesis rather than assuming carriers.
+- `index-registry-filters` remains deferred; future indexes project from the
+  document and prove parity for rebuilt legacy rows rather than assuming carriers.
 - This supplies the registry carrier needed by `negotiation-driven-capacity-resize`
   §2 and the later open-ended/spot chain. It does not implement their behavior.

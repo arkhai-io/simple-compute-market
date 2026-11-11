@@ -76,6 +76,11 @@ class BareMetalPublicationHooks:
     async def binding_for_listing(self, listing_id: str) -> PublicationBinding | None:
         return await bare_metal_listing_binding(self._db, listing_id)
 
+    async def publication_candidate(
+        self, listing: dict[str, Any]
+    ) -> PublicationCandidate[dict[str, Any]]:
+        return await bare_metal_publication_candidate(self._db, str(listing["listing_id"]))
+
 
 async def bare_metal_publication_candidate(
     sqlite_client: SQLiteClient,
