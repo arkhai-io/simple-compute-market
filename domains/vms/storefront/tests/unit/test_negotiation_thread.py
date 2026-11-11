@@ -450,7 +450,7 @@ class TestSQLiteClientNegotiationMethods:
         timestamp="2025-01-01T00:00:00",)
         await sqlite_client.commit_agreed_terms(
             negotiation_id="test-large-agreed",
-            agreed_price=large_amount,
+            negotiated_scalar=large_amount,
             agreed_duration_seconds=3600,
         )
 
@@ -458,13 +458,13 @@ class TestSQLiteClientNegotiationMethods:
             negotiation_id="test-large-agreed",
         )
         assert row is not None
-        assert row["agreed_price"] == large_amount
+        assert row["negotiated_scalar"] == large_amount
 
         conn = sqlite3.connect(sqlite_client.db_path)
         try:
             stored = conn.execute(
                 """
-                SELECT typeof(agreed_price), agreed_price
+                SELECT typeof(negotiated_scalar), negotiated_scalar
                 FROM negotiation_threads
                 WHERE negotiation_id = ?
                 """,

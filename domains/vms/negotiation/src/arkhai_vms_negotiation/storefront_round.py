@@ -9,19 +9,29 @@ import os
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Protocol
+
+from arkhai_vms import vm_listing_resource_shape
+from arkhai_vms_listings.models import Listing
 
 from arkhai_vms_listings import (
     determine_strategy_from_order,
     extract_initial_price_from_order,
+    extract_compute_from_order,
+)
+from arkhai_vms_negotiation.amounts import (
+    BASIS_POINTS, has_rate_structure, multiplier_floor, quote_from_multiplier, shape_hourly_amount,
 )
 from arkhai_vms_negotiation.policies import (
     make_escrow_kind_dispatch_middleware,
     proposal_uses_scalar_amount,
 )
 from market_policy.listing_source import ListingSourceVerdict
+from market_policy.seller_round import SellerRoundResult
 from market_policy.scalar_policies import (
     pinned_proposal,
+    amount_from_proposal,
+    set_proposal_amount,
     selected_settlement_artifact,
 )
 from market_policy.negotiation_middleware import (
@@ -38,12 +48,19 @@ from market_policy.negotiation_middleware import (
 logger = logging.getLogger(__name__)
 
 
-# The result carrier and hook protocol are domain-invariant and live in
-# the policy kit; re-exported here so existing import paths keep working.
-from market_policy.seller_round import (  # noqa: E402,F401
-    SellerRoundHook,
-    SellerRoundResult,
-)
+class SellerRoundHook(Protocol):
+    """VM seller policy input includes the effective requested capability shape."""
+
+    async def __call__(
+        self,
+        *,
+        listing: Any,
+        history: list[NegotiationRound],
+        requested_duration_seconds: int | None = None,
+        requested_shape: Mapping[str, Mapping[str, Any]] | None = None,
+        strategy_label: str | None = None,
+        listing_source: ListingSourceVerdict | None = None,
+    ) -> SellerRoundResult: ...
 
 
 _FILE_POLICIES_DISCOVERED = False
@@ -203,7 +220,11 @@ def _direction_from_strategy_label(strategy: str) -> str:
 
 
 def _listing_dict(listing: Any) -> dict[str, Any]:
-    return listing.model_dump(mode="json") if hasattr(listing, "model_dump") else dict(listing)
+    raw = listing.model_dump(mode="json") if hasattr(listing, "model_dump") else dict(listing)
+    record = Listing.model_validate(raw).model_dump(mode="json")
+    if raw.get("rate_structure") is not None:
+        record["rate_structure"] = raw["rate_structure"]
+    return record
 
 
 def _selected_option(listing: Any, proposal: Any) -> Any:
@@ -224,29 +245,30 @@ def _seller_reference_amount(
     *,
     default_min_price: Any = None,
     proposal: Any = None,
+    requested_shape: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> int:
-    """The seller's absolute reference amount in base units.
+    """The multiplier reference, or legacy absolute reference for a flat listing.
 
-    The selected option's per-hour rate -- the one ``proposal`` selects, so the
-    seller negotiates in the asset the buyer chose -- scaled by the duration and
-    truncated to whole base units, in exact integer and rational arithmetic. A
-    rate in an 18-decimal token over a long duration exceeds what a
-    fixed-precision decimal context holds, and rounding there would silently
-    change the amount the seller negotiates from.
-
-    ``proposal`` is the buyer's pinned opening, the one an acceptance settles.
-    One selecting nothing the listing offers is priced from no entry and has
-    reference amount zero, never another entry's rate or the floor, and the
-    guards the default round hook composes into every chain refuse it for its
-    own reason at the opening: the escrow-shape guard an escrow the listing does
-    not accept, the opening guard a selection matching no option.
+    A shape-priced offering uses a shape-independent basis-point bound. A flat
+    or hidden-reserve offering retains its selected-option amount semantics and
+    exact truncation. An unknown selection is priced from no option, never an
+    unrelated asset or the configured hidden reserve.
     """
+    if has_rate_structure(listing):
+        if _selected_option(listing, proposal) is None:
+            return 0
+        return BASIS_POINTS
     selected = _selected_option(listing, proposal)
     if selected is None:
         return 0
     per_hour = extract_initial_price_from_order(
         listing, default_min_price=default_min_price, selected_option=selected
     )
+    if requested_shape is not None:
+        record = _listing_dict(listing)
+        advertised = vm_listing_resource_shape(extract_compute_from_order(record))
+        if requested_shape != advertised:
+            raise ValueError("shape_commercially_infeasible: flat-priced listing is shape-fixed")
     seconds = int(duration_seconds) if duration_seconds is not None else 3600
     return math.floor(Fraction(per_hour) * seconds / 3600)
 
@@ -256,6 +278,7 @@ async def _run_default_seller_round_policy(
     listing: Any,
     history: list[NegotiationRound],
     requested_duration_seconds: int | None = None,
+    requested_shape: Mapping[str, Mapping[str, Any]] | None = None,
     strategy_label: str | None = None,
     listing_source: ListingSourceVerdict | None = None,
     negotiation_config: Any = None,
@@ -264,19 +287,17 @@ async def _run_default_seller_round_policy(
     default_min_price: Any = None,
 ) -> SellerRoundResult:
     """Run the default VM seller per-round policy hook."""
-    from arkhai_vms_listings.models import Listing
-
     if not strategy_label:
-        strategy_label = determine_strategy_from_order(listing)
+        strategy_label = determine_strategy_from_order(
+            Listing.model_validate(listing) if isinstance(listing, Mapping) else listing
+        )
     if not strategy_label:
         raise ValueError(
             f"Listing {getattr(listing, 'listing_id', repr(listing))} "
             "has no usable strategy for negotiation"
         )
 
-    listing_dict = (
-        listing.model_dump(mode="json") if isinstance(listing, Listing) else listing
-    )
+    listing_dict = _listing_dict(listing)
     their_proposal = None
     for item in reversed(history):
         if item.sender == "them":
@@ -320,9 +341,19 @@ async def _run_default_seller_round_policy(
             requested_duration_seconds,
             default_min_price=default_min_price,
             proposal=pinned,
+            requested_shape=requested_shape,
         )
         if uses_scalar_amount else 0
     )
+
+    floor_bps = multiplier_floor(negotiation_config)
+    multiplier_mode = (
+        uses_scalar_amount and has_rate_structure(listing)
+        and _selected_option(listing, pinned) is not None
+    )
+    if multiplier_mode:
+        reference_amount = floor_bps
+        shape_hourly_amount(listing_dict, pinned, requested_shape)
 
     chain = _load_storefront_chain(
         negotiation_config=negotiation_config,
@@ -338,11 +369,25 @@ async def _run_default_seller_round_policy(
         listing_source=listing_source,
         intermediate={
             "requested_duration_seconds": requested_duration_seconds,
+            "requested_shape": requested_shape,
             "seller_reference_amount": int(reference_amount),
             "uses_scalar_amount": uses_scalar_amount,
         },
     )
     decision, context = run_negotiation_chain_with_context(chain, history, context)
+    if multiplier_mode and decision.action in {"counter", "accept"}:
+        proposed = amount_from_proposal(decision.proposal)
+        if proposed is not None:
+            if proposed < floor_bps:
+                decision = NegotiationDecision(
+                    action="counter", reason="multiplier_floor",
+                    proposal=set_proposal_amount(decision.proposal or pinned, floor_bps),
+                )
+                proposed = floor_bps
+            quote_from_multiplier(
+                listing_dict, pinned, proposed,
+                int(requested_duration_seconds or 3600), requested_shape,
+            )
     chain_label = ",".join(
         type(mw).__name__ if not hasattr(mw, "__name__") else mw.__name__
         for mw in chain
@@ -371,6 +416,7 @@ class _DefaultSellerRoundHook:
         listing: Any,
         history: list[NegotiationRound],
         requested_duration_seconds: int | None = None,
+        requested_shape: Mapping[str, Mapping[str, Any]] | None = None,
         strategy_label: str | None = None,
         listing_source: ListingSourceVerdict | None = None,
     ) -> SellerRoundResult:
@@ -378,6 +424,7 @@ class _DefaultSellerRoundHook:
             listing=listing,
             history=history,
             requested_duration_seconds=requested_duration_seconds,
+            requested_shape=requested_shape,
             strategy_label=strategy_label,
             listing_source=listing_source,
             negotiation_config=self.negotiation_config,

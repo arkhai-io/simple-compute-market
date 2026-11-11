@@ -15,10 +15,12 @@ expose it, and `vm_job_spec_service` already calls it in the fulfillment path. N
 calls it during negotiation, which runs as `kit/negotiation-runtime`'s lifecycle
 with the VM domain's hooks injected.
 
-This change is a shared prerequisite. Multidimensional shape negotiation needs it to
-distinguish a shape the seller will not sell from one the site cannot currently serve,
-and the parked capacity-economics thread needs it to let a buyer learn feasibility
-before any hold — and therefore any charge — exists.
+This change is a shared prerequisite. Shape negotiation runs without it by capping
+every requested quantity at the listing's advertised one, a shape the site was
+already found able to serve; negotiating a shape larger than the advertised one —
+lifting that cap — needs it, to distinguish a shape the seller will not sell from one
+the site cannot currently serve. The parked capacity-economics thread needs it to let
+a buyer learn feasibility before any hold — and therefore any charge — exists.
 
 ## What Changes
 
@@ -57,7 +59,9 @@ None.
 - Do not price the shape. `capacity-shape-pricing` owns that.
 - Do not add the protocol field carrying a shape change between rounds —
   `negotiation-driven-capacity-resize` owns it. This change verifies whatever shape the
-  round already carries, which today is the listing's own.
+  round carries; until it is composed, that change refuses any requested quantity
+  above the listing's advertised one, and composing this check is what lets that cap
+  lift.
 - Do not eliminate the race between concurrent negotiations. Accepted explicitly.
 - Do not change `probe()` itself, its matching semantics, or the aggregate client's
   site selection.
@@ -94,8 +98,10 @@ None.
 
 ## Dependencies and Related Changes
 
-- Shared prerequisite for `negotiation-driven-capacity-resize` and for the parked
-  capacity-economics thread.
+- Prerequisite for negotiating a shape larger than the advertised one under
+  `negotiation-driven-capacity-resize`, which caps requested shapes at the advertised
+  quantities until this check is composed — not for shape negotiation as a whole —
+  and for the parked capacity-economics thread.
   It does not belong exclusively to any roadmap goal.
 - Complements `capacity-shape-envelope`: admissibility first, from declared policy and
   without a round trip; then this check, authoritative and remote.

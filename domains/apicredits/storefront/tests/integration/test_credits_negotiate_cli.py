@@ -191,7 +191,7 @@ async def test_payment_negotiation_is_accepted_and_recorded(
 
     thread = await storefront.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
     assert thread["terminal_state"] == "success"
-    assert int(thread["agreed_price"]) == amount
+    assert int(thread["negotiated_scalar"]) == amount
     assert await storefront.db.load_credit_terms(negotiation_id=negotiation_id) == {
         "negotiation_id": negotiation_id,
         "quantity": 3,

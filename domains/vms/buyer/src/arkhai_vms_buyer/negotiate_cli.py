@@ -33,6 +33,9 @@ from .deal_helpers import (
     make_publisher_trust_resolver,
 )
 from .listing_cli import settlement_clause_error_message
+from .negotiation_amounts import priced_at_opening_shape
+from .opening_shape import SHAPE_HELP, SHAPE_OPTION, parse_shape_option, shape_excess
+from .registry_listing import domain_listing_record
 from .run_log import RunLog
 from .settlement_composition import (
     buyer_stage,
@@ -152,6 +155,7 @@ def register(app: typer.Typer) -> None:
             help="SSH public key pinned in accepted provisioning terms "
             "(default: provisioning.ssh_public_key).",
         ),
+        shape: str | None = typer.Option(None, SHAPE_OPTION, help=SHAPE_HELP),
         **policy_values: Any,
     ) -> None:
         """Drive a synchronous negotiation with one seller, round-by-round.
@@ -162,6 +166,12 @@ def register(app: typer.Typer) -> None:
         (default: listed_price — pay what's published).
         """
         console = Console()
+        requested_shape = parse_shape_option(shape)
+        if from_run and requested_shape is not None:
+            raise typer.BadParameter(
+                f"{SHAPE_OPTION} applies only to fresh negotiation; resume "
+                "uses the shape its negotiation opened with"
+            )
 
         from core_buyer.cli import parse_key_value_options
 
@@ -323,6 +333,7 @@ def register(app: typer.Typer) -> None:
                     fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
+            listing_dict = domain_listing_record(listing_dict)
             listing_dict["source_registry_url"] = source_registry_url
             listing_dict["source_registry_authority"] = registry_authorities[
                 source_registry_url
@@ -337,6 +348,14 @@ def register(app: typer.Typer) -> None:
                         fg=typer.colors.RED,
                     )
                     raise typer.Exit(2)
+        if requested_shape is not None and listing_dict is not None:
+            excess = shape_excess(requested_shape, listing_dict)
+            if excess:
+                raise typer.BadParameter(
+                    f"listing {listing_id!r} sells at most its advertised shape: "
+                    + "; ".join(excess),
+                    param_hint=SHAPE_OPTION,
+                )
 
         if not seller_url or not listing_id:
             typer.secho(
@@ -398,11 +417,17 @@ def register(app: typer.Typer) -> None:
                     pricing_params["initial_price"] = initial_price
                 if _max_explicit:
                     pricing_params["max_price"] = max_price
-                pricing_listing = _pricing_listing_for_selection(
-                    listing_dict,
-                    selected_settlement,
-                    accepted_escrow=picked_entry,
-                )
+                try:
+                    pricing_listing = priced_at_opening_shape(
+                        _pricing_listing_for_selection(
+                            listing_dict,
+                            selected_settlement,
+                            accepted_escrow=picked_entry,
+                        ),
+                        requested_shape,
+                    )
+                except ValueError as exc:
+                    raise typer.BadParameter(str(exc)) from exc
                 initial_price, max_price = resolve_prices_from_matches(
                     matches=[pricing_listing],
                     console=console,
@@ -439,6 +464,10 @@ def register(app: typer.Typer) -> None:
         # conditions it advertised; a resumed run carries its first run's record.
         if selected_stage is not None and listing_dict is not None:
             listing_record = selected_stage.listing_record(listing_dict)
+            if listing_dict.get("rate_structure"):
+                listing_record = {**listing_record, **{key: listing_dict[key] for key in (
+                    "listing_id", "listing_resource", "rate_structure", "settlement_options", "accepted_escrows"
+                ) if key in listing_dict}}
         elif resume_state is not None:
             listing_record = resume_point.listing_record
         else:
@@ -461,6 +490,7 @@ def register(app: typer.Typer) -> None:
             duration_seconds=duration_seconds,
             resumed_from=from_run,
             listing_record=listing_record,
+            **({"compute_resource": requested_shape} if requested_shape else {}),
             **(
                 settlement_policy.public_run_metadata()
                 if settlement_policy is not None
@@ -520,6 +550,7 @@ def register(app: typer.Typer) -> None:
                 duration_seconds=int(duration_seconds),
                 start_utc=requested_start_utc,
                 ssh_public_key=resolved_ssh_public_key,
+                compute_resource=requested_shape,
             )
 
             assert selected_stage is not None
@@ -566,6 +597,7 @@ def register(app: typer.Typer) -> None:
                 principal=identity.principal,
                 signer=signer,
                 listing_id=listing_id,
+                listing=listing_dict if listing_dict is not None else listing_record,
                 initial_price=initial_price or 0,
                 max_price=max_price,
                 provision_terms=provision_terms,

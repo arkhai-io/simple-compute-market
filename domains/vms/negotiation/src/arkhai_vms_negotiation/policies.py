@@ -26,7 +26,7 @@ from market_policy.scalar_policies import (  # noqa: F401 — re-exports
     DEFAULT_REASONABLE_MULTIPLIER,
     _accepted_entry_uses_scalar_amount,
     _accepted_escrow_for_proposal,
-    _amount_from_proposal,
+    amount_from_proposal,
     _escrow_kind_lookup_keys,
     _is_round_zero,
     _loads_json_list,
@@ -38,7 +38,7 @@ from market_policy.scalar_policies import (  # noqa: F401 — re-exports
     _opening_proposal,
     _peer_proposal,
     _proposal_requires_exact_amount,
-    _set_proposal_amount,
+    set_proposal_amount,
     _settlement_option_for_selection,
     format_wire_amount,
     parse_wire_amount,
@@ -182,7 +182,7 @@ def round_zero_opening_guard(
     )
     uses_scalar_amount = proposal_uses_scalar_amount(listing, proposal_for_scalar)
     context.intermediate["uses_scalar_amount"] = uses_scalar_amount
-    if uses_scalar_amount and _amount_from_proposal(proposal_for_scalar) is None:
+    if uses_scalar_amount and amount_from_proposal(proposal_for_scalar) is None:
         return (
             NegotiationDecision(
                 action="reject",
@@ -195,7 +195,8 @@ def round_zero_opening_guard(
 
 
 __all__ = [
-    "_amount_from_proposal",
+    "amount_from_proposal",
+    "set_proposal_amount",
     "format_wire_amount",
     "parse_wire_amount",
     "accept_exact_listing_middleware",

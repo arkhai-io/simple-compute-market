@@ -210,7 +210,7 @@ async def make_vm_lifecycle_fixture(
     )
     raw = agreement.model_dump_json(exclude_none=True).encode()
     await db.commit_agreed_terms(
-        negotiation_id=negotiation_id, agreed_price=100, agreed_duration_seconds=facts["duration_seconds"],
+        negotiation_id=negotiation_id, negotiated_scalar=100, agreed_duration_seconds=facts["duration_seconds"],
         agreement_bytes=raw, accepted_at=agreement.accepted_at, agreed_start_utc=start,
     )
     evidence = replace(evidence, evidence={**evidence.evidence, "agreement_sha256": hashlib.sha256(raw).hexdigest()})

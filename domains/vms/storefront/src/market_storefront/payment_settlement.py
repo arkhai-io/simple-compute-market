@@ -47,6 +47,7 @@ from market_identity import Identity
 from market_arkhai_payments.models import SignedReceipt
 
 from market_storefront.payment_repository import VmSettlementEvidenceConflict
+from market_storefront.services.vm_job_spec_service import settlement_vm_order
 from market_storefront.settlement_stages import (
     PaymentSettleResult,
     PaymentSettlementError,
@@ -118,12 +119,14 @@ class VmPaymentsCoordinator:
             provision = normalize_vm_provision_terms(agreement.get("provision_terms"))
         except (MandatePolicyError, KeyError, TypeError, ValueError) as exc:
             raise PaymentSettlementError(409, "accepted payment state is invalid") from exc
+        # The stored Agreement and its bound mandate carry the payment amount;
+        # negotiated_scalar is the negotiation's policy scalar and may be
+        # basis points.
         if (
             agreement["negotiation_id"] != negotiation_id
             or agreement["listing_id"] != thread["our_listing_id"]
             or agreement["buyer"] != buyer.model_dump(mode="json")
             or agreement["seller"] != seller.model_dump(mode="json")
-            or str(agreement["amount"]) != str(thread["agreed_price"])
             or agreement["duration_seconds"] != thread["agreed_duration_seconds"]
             or not provision.ssh_public_key.strip()
         ):
@@ -166,8 +169,10 @@ class VmPaymentsCoordinator:
         listing = await self.db.load_listing(listing_id=agreement["listing_id"])
         if not isinstance(listing, dict):
             raise PaymentSettlementError(409, "accepted listing is unavailable")
+        thread = await self.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        order = settlement_vm_order(thread, listing, agreement["provision_terms"])
         record = self._entry(agreement).verified_evidence(
-            raw=raw, order=listing, receipt=receipt, data=data
+            raw=raw, order=order, receipt=receipt, data=data
         )
         await self._save(record)
         if self.lifecycle is not None:

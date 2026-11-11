@@ -62,6 +62,8 @@ def accepted_seller_stage(
         raise SettlementRequestError("negotiation is not accepted")
     try:
         agreement = Agreement.model_validate_json(thread["agreement_bytes"])
+        # Bare-metal pricing is flat, so the Agreement's amount is the
+        # negotiated scalar itself.
         if (
             agreement.negotiation_id != negotiation_id
             or agreement.listing_id != thread["our_listing_id"]
@@ -69,7 +71,7 @@ def accepted_seller_stage(
             != Identity.model_validate(thread["buyer_principal"])
             or Identity.model_validate(agreement.seller)
             != Identity.model_validate(thread["seller_principal"])
-            or agreement.amount != thread["agreed_price"]
+            or agreement.amount != thread["negotiated_scalar"]
             or agreement.duration_seconds != thread["agreed_duration_seconds"]
         ):
             raise ValueError("Agreement differs from accepted negotiation")

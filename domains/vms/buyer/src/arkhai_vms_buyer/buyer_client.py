@@ -1,12 +1,9 @@
 """VM shim over the core buyer negotiation client.
 
-The round loop, chain loading, and outcome parsing moved to
-``core_buyer.negotiation_client`` when the API-credits domain became the
-second schema plugin. The seam that moved with it: listings broadcast
-**per-unit** rates and the core client scales them to absolute amounts
-by ``unit_count`` — this module supplies the VM unit, the lease hour
-(``duration_seconds / 3600``), and re-attaches ``duration_seconds`` to
-the outcome for VM callers and run-log compatibility.
+The core owns round sequencing and opaque acceptance checks. Shape-priced
+listings use the VM amount codec: policy scalars are basis points while accepted
+outcomes carry derived payments. Flat listings retain the per-hour amount
+contract, scaled by lease hours. The VM outcome also carries the lease duration.
 
 Importing this module also installs the RL middleware registrar so
 ``rl``-named policies in buyer.toml resolve (core cannot import
@@ -43,6 +40,7 @@ from arkhai_vms import VmProvisionTerms
 from .common import chain_address_books
 from .escrow_client import encode_escrow_proposal
 from .settlement_composition import validate_buyer_acceptance
+from .negotiation_amounts import amount_codec
 
 
 def _validate_model(model_type, value):
@@ -131,13 +129,15 @@ def negotiate_with_seller(
     validate_acceptance: Callable[[CoreNegotiationOutcome], None]
     | None = validate_buyer_acceptance,
     capture: EnvelopeCapture | None = None,
+    listing: dict[str, Any] | None = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
-    VM instantiation of ``core_buyer.negotiation_client
-    .negotiate_with_seller``: prices are per-hour rates, scaled to
-    absolute amounts by the lease duration fixed in
-    ``provision_terms.duration_seconds``.
+    Prices are per-hour bounds for the shape the buyer opens with. A
+    seller-authenticated registry ``listing`` with a rate structure converts
+    those bounds to basis points once; accepted terms determine the monetary
+    payment, which may not exceed ``max_price`` over the accepted duration.
+    Without a rate structure, lease hours scale the bounds to absolute amounts.
 
     ``validate_acceptance`` defaults to the purchase table's entry guard. An
     introduction has no purchase entry and passes None; its command checks
@@ -165,6 +165,21 @@ def negotiate_with_seller(
                 "per-hour bounds into absolute amounts."
             )
 
+    proposal_for_amount = settlement_selection or escrow_proposal
+    opening_terms: Any = provision_terms
+    if resume is not None:
+        proposal_for_amount = next(
+            (entry.proposal for entry in resume.transcript if entry.sender == "us" and entry.proposal),
+            None,
+        )
+        # The seller's round-zero echo is the complete shape the run opened with.
+        opening_terms = resume.accepted_provision_terms
+    codec = (
+        amount_codec(
+            listing, proposal_for_amount, opening_terms=opening_terms, max_price=max_price,
+        )
+        if proposal_for_amount is not None else None
+    )
     core_outcome = _core_negotiate_with_seller(
         seller_url=seller_url,
         principal=principal,
@@ -188,6 +203,7 @@ def negotiate_with_seller(
         policy_params=policy_params,
         validate_advertised_plan=validate_advertised_plan,
         validate_acceptance=validate_acceptance,
+        amount_codec=codec,
         resolve_seller_principals=resolve_seller_principals,
         capture=capture,
     )

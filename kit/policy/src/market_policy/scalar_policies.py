@@ -133,7 +133,7 @@ def _exact_amount(value: Any, *, field: str) -> int:
     return parsed
 
 
-def _amount_from_proposal(proposal: dict[str, Any] | None) -> Optional[int]:
+def amount_from_proposal(proposal: dict[str, Any] | None) -> Optional[int]:
     """Pull the absolute payment amount out of a scalar escrow proposal."""
     if not isinstance(proposal, dict):
         return None
@@ -147,7 +147,7 @@ def their_proposed_amount(history: list[NegotiationRound]) -> Optional[int]:
     """Most recent absolute amount the other side proposed. None if not yet."""
     for round_ in reversed(history):
         if round_.sender == "them":
-            amount = _amount_from_proposal(round_.proposal)
+            amount = amount_from_proposal(round_.proposal)
             if amount is not None:
                 return amount
     return None
@@ -190,7 +190,7 @@ def our_previous_counters(history: list[NegotiationRound]) -> list[int]:
     out: list[int] = []
     for h in history:
         if h.sender == "us" and h.action == "counter":
-            amount = _amount_from_proposal(h.proposal)
+            amount = amount_from_proposal(h.proposal)
             if amount is not None:
                 out.append(amount)
     return out
@@ -204,7 +204,8 @@ def our_first_proposal(history: list[NegotiationRound]) -> Optional[dict[str, An
     return None
 
 
-def _set_proposal_amount(proposal: dict[str, Any], amount: int) -> dict[str, Any]:
+def set_proposal_amount(proposal: dict[str, Any], amount: int) -> dict[str, Any]:
+    """Return a copy of a scalar escrow proposal carrying ``amount``."""
     out = dict(proposal)
     fields = dict(out.get("fields") or {})
     # Canonical wire form, not a JSON number: the seller writes the accepted
@@ -259,7 +260,7 @@ def _opening_proposal(context: NegotiationContext) -> dict[str, Any]:
     if escrow_shape_uses_scalar_amount(base) or _selects_scalar_option(
         context.listing or {}, base
     ):
-        return _set_proposal_amount(base, _opening_amount(context))
+        return set_proposal_amount(base, _opening_amount(context))
     return dict(base)
 
 
@@ -309,7 +310,7 @@ def bisection_middleware(
             return (
                 NegotiationDecision(
                     action="accept",
-                    proposal=_set_proposal_amount(skeleton, their_amount),
+                    proposal=set_proposal_amount(skeleton, their_amount),
                     reason="convergence",
                 ),
                 context,
@@ -319,7 +320,7 @@ def bisection_middleware(
             return (
                 NegotiationDecision(
                     action="counter",
-                    proposal=_set_proposal_amount(skeleton, proposed),
+                    proposal=set_proposal_amount(skeleton, proposed),
                 ),
                 context,
             )
@@ -330,7 +331,7 @@ def bisection_middleware(
             return (
                 NegotiationDecision(
                     action="accept",
-                    proposal=_set_proposal_amount(skeleton, their_amount),
+                    proposal=set_proposal_amount(skeleton, their_amount),
                     reason="convergence",
                 ),
                 context,
@@ -340,7 +341,7 @@ def bisection_middleware(
             return (
                 NegotiationDecision(
                     action="counter",
-                    proposal=_set_proposal_amount(skeleton, proposed),
+                    proposal=set_proposal_amount(skeleton, proposed),
                 ),
                 context,
             )
@@ -415,7 +416,7 @@ def listed_price_middleware(
         return (
             NegotiationDecision(
                 action="accept",
-                proposal=_set_proposal_amount(dict(their_proposal), their_amount),
+                proposal=set_proposal_amount(dict(their_proposal), their_amount),
                 reason="listed_price",
             ),
             context,
@@ -794,7 +795,7 @@ def buyer_counter_guard(
     )
     context.intermediate["uses_scalar_amount"] = uses_scalar_amount
 
-    raw_amount = _amount_from_proposal(proposal_for_scalar)
+    raw_amount = amount_from_proposal(proposal_for_scalar)
     if raw_amount is None:
         if uses_scalar_amount:
             return (
@@ -810,7 +811,7 @@ def buyer_counter_guard(
 
     context.intermediate["buyer_amount"] = buyer_amount
     if uses_scalar_amount:
-        context.intermediate["buyer_counter_proposal"] = _set_proposal_amount(
+        context.intermediate["buyer_counter_proposal"] = set_proposal_amount(
             pinned if isinstance(pinned, dict) else proposal or {},
             buyer_amount,
         )
@@ -1025,7 +1026,7 @@ def accept_exact_listing_middleware(
             expected_amount = _exact_amount(
                 context.our_reference_amount, field="our_reference_amount"
             )
-            proposed_amount = _amount_from_proposal(proposal)
+            proposed_amount = amount_from_proposal(proposal)
             if proposed_amount is None or proposed_amount != expected_amount:
                 return (
                     NegotiationDecision(
@@ -1040,7 +1041,7 @@ def accept_exact_listing_middleware(
             return (
                 NegotiationDecision(
                     action="accept",
-                    proposal=_set_proposal_amount(basis, expected_amount),
+                    proposal=set_proposal_amount(basis, expected_amount),
                     reason="exact_listing",
                 ),
                 context,
@@ -1090,7 +1091,7 @@ def accept_exact_listing_middleware(
     )
     requires_amount = _proposal_requires_exact_amount(matched)
     if requires_amount:
-        proposed_amount = _amount_from_proposal(proposal)
+        proposed_amount = amount_from_proposal(proposal)
         if proposed_amount is None or proposed_amount != expected_amount:
             return (
                 NegotiationDecision(
@@ -1183,7 +1184,7 @@ def accept_exact_listing_middleware(
         NegotiationDecision(
             action="accept",
             proposal=(
-                _set_proposal_amount(proposal, expected_amount)
+                set_proposal_amount(proposal, expected_amount)
                 if requires_amount
                 else dict(proposal)
             ),
@@ -1302,7 +1303,8 @@ def buyer_escrow_shape_guard(
 
 
 __all__ = [
-    "_amount_from_proposal",
+    "amount_from_proposal",
+    "set_proposal_amount",
     "escrow_contract_unpinned",
     "is_escrow_proposal",
     "pinned_proposal",

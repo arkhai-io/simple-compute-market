@@ -150,7 +150,9 @@ def _with_agreement(
             if selection is not None
             else {}
         ),
-        amount=acceptance.agreed_amount,
+        # Bare-metal listings are priced flat: the negotiated scalar is the
+        # absolute amount the buyer pays.
+        amount=acceptance.negotiated_scalar,
         asset=asset,
         duration_seconds=acceptance.agreement.duration_seconds,
         start_utc=acceptance.agreement.start_utc,
@@ -502,6 +504,7 @@ def build_bare_metal_negotiation_runtime(
         _record: Mapping[str, Any],
         terms: NegotiationTerms,
         thread: Mapping[str, Any],
+        _revised_terms: NegotiationTerms | None,
     ) -> None:
         recorded = await repository.load_bare_metal_message(
             negotiation_id=str(thread["negotiation_id"])
@@ -790,7 +793,7 @@ def build_bare_metal_negotiation_runtime(
             artifacts = plan_builder(
                 proposal=proposal,
                 listing=acceptance.listing_record,
-                agreed_amount=acceptance.agreed_amount,
+                agreed_amount=acceptance.negotiated_scalar,
                 duration_seconds=acceptance.agreement.duration_seconds,
                 uses_scalar_amount=acceptance.uses_scalar_amount,
                 buyer_principal=acceptance.buyer_principal,

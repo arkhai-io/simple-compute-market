@@ -12,7 +12,9 @@ implement the evaluate→advance→observe pattern:
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ from market_site_client import SiteCapacityClientError  # noqa: E402
 from market_storefront.services.capacity_client import build_capacity_runtime  # noqa: E402
 from market_storefront.services.vm_job_spec_service import (  # noqa: E402
     compute_capacity_claim_from_order,
+    settlement_vm_order,
 )
 
 
@@ -133,6 +136,8 @@ class AdminSettleService:
         and reserves fresh capacity only when there is none. The preview does
         the same: with a held reservation it reports the held resource's host;
         otherwise it probes the capacity ledger (read-only — consumes nothing).
+        Either way it claims the order settle would use: an accepted
+        negotiation's agreed shape, not the listing's advertised one.
         No chain reads, no DB writes, no provisioning.
 
         Returns:
@@ -148,6 +153,7 @@ class AdminSettleService:
         listing = await self._db.load_listing(listing_id=listing_id)
         if not listing:
             raise ValueError(f"Listing {listing_id!r} not found")
+        order = await self._settlement_order(listing, negotiation_id)
 
         held = await self._held_capacity(negotiation_id)
         if held is not None:
@@ -156,12 +162,12 @@ class AdminSettleService:
                 "would_submit": True,
                 "escrow_uid": escrow_uid,
                 "host_id": host_id,
-                "required_attributes": compute_capacity_claim_from_order(listing),
+                "required_attributes": compute_capacity_claim_from_order(order),
                 "capacity_reservation_id": capacity_reservation_id,
             }
 
         spec = await _build_provisioning_job_spec(
-            order_dict=listing,
+            order_dict=order,
             ssh_public_key=ssh_public_key,
             duration_seconds=duration_seconds,
             sqlite_client=self._db,
@@ -183,6 +189,29 @@ class AdminSettleService:
             "host_id": spec["host_id"],
             "required_attributes": spec["required_attributes"],
         }
+
+    async def _settlement_order(
+        self, listing: dict[str, Any], negotiation_id: str | None
+    ) -> dict[str, Any]:
+        """The order settlement would read for this deal.
+
+        An accepted negotiation settles its agreed shape, which may differ from
+        the listing's advertised one; settlement reads it through
+        ``settlement_vm_order``, so the preview does too. Before acceptance
+        nothing is agreed, and the listing is all there is to preview.
+        """
+        if not negotiation_id:
+            return listing
+        thread = await self._db.load_negotiation_thread_row(
+            negotiation_id=negotiation_id
+        )
+        if not isinstance(thread, Mapping) or thread.get("terminal_state") != "success":
+            return listing
+        provision_terms = thread.get("provision_terms")
+        raw = thread.get("agreement_bytes")
+        if isinstance(raw, bytes):
+            provision_terms = json.loads(raw).get("provision_terms", provision_terms)
+        return settlement_vm_order(dict(thread), dict(listing), provision_terms)
 
     async def _held_capacity(
         self, negotiation_id: str | None

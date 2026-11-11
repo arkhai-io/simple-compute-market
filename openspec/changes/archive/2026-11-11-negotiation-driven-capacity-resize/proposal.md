@@ -49,6 +49,8 @@ None.
 - `negotiation-protocol`: a round may revise the capacity shape; the negotiated
   quantity is a rate multiplier over the advertised minimum rate structure.
 - `vm-storefront-fulfillment`: the agreed shape is what the claim reserves.
+- `storefront-publication`: the storefront keeps each registry's last successful
+  publication, which a seller prices negotiations from.
 
 ## Non-Goals
 
@@ -57,10 +59,11 @@ None.
   requested shape ahead of pricing it. Any revised-terms content is limited to what that policy can
   price: an unexamined field that passes content through unchecked risks a
   buyer claiming resources the seller never agreed to give away.
-- Calling `resize_reservation`. Both storefronts place no hold before
-  settlement, so there is no reservation to resize during negotiation;
-  `negotiation-time-capacity-hold`, the change that first holds capacity
-  before the shape is final, is its first caller.
+- Calling `resize_reservation`. Neither storefront holds capacity while terms
+  are negotiated: a configured soft hold is placed at acceptance, once the terms
+  are final, and a VM hold claims the agreed shape. There is no reservation to
+  resize during negotiation; `negotiation-time-capacity-hold`, the change that
+  first holds capacity before the shape is final, is its first caller.
 - Deciding which shapes a seller will consider (`capacity-shape-envelope`) or
   whether the site can currently serve one
   (`negotiation-capacity-feasibility-probe`). This change calls both where they
@@ -77,8 +80,10 @@ None.
   middlewares' reference quantity, and every consumer of the negotiated amount
   on the escrow and hosted obligation paths.
 - Wire: a new optional child of `proposal`; the negotiated amount's meaning
-  changes from base units to basis points. In-flight negotiations must drain
-  across the deployment boundary.
+  changes from base units to basis points on shape-priced listings, and the
+  storefront's negotiated quantity is renamed `negotiated_scalar` in its database
+  and wire. Storefront state crosses the release one way: in-flight negotiations
+  must drain before the upgrade.
 - Tests: negotiation runtime and VM hook suites, `kit/policy` middleware
   suites, escrow amount construction, and one e2e run with a shape agreed
   below the listing's.
@@ -88,30 +93,70 @@ None.
 - [x] `docs/development/ARCHITECTURE.md` — "Discovery and negotiation" says what
       a round negotiates.
 - [x] Existing subsystem specification — `openspec/specs/negotiation-protocol/spec.md`,
-      `openspec/specs/vm-storefront-fulfillment/spec.md`.
+      `openspec/specs/vm-storefront-fulfillment/spec.md`,
+      `openspec/specs/storefront-publication/spec.md`.
+- [x] `docs/operator-handbook.md` — draining open negotiations before the upgrade.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
 ### Knowledge to promote
 
-- The negotiated quantity is a multiplier over the listing's minimum rate
-  structure, in basis points; a seller floor is expressed once; derived amounts
-  stay exact — `openspec/specs/negotiation-protocol/spec.md`.
-- A round after the first may carry a revised capacity shape as a child of
-  `proposal`, in the family-grouped form, evaluated in a fixed order with
-  distinct refusals — `openspec/specs/negotiation-protocol/spec.md`.
-- The agreed shape is what the claim reserves —
+- D1 — a round may carry a revised capacity shape as a child of `proposal`, in the
+  family-grouped form, with durable seller-quoted terms —
+  `openspec/specs/negotiation-protocol/spec.md`.
+- D2 — the negotiated variable is a multiplier; why, and the rejected models — this
+  change's `design.md`; the requirement in `openspec/specs/negotiation-protocol/spec.md`.
+- D3 — the multiplier is integer basis points; the quote is the selected option's
+  rate scaled by the composed-price ratio, exact, rounded up once, refused on
+  overflow — `openspec/specs/negotiation-protocol/spec.md`.
+- D4 — the seller's floor is one storefront-wide bound of at most 10,000 —
+  `openspec/specs/negotiation-protocol/spec.md`.
+- D5 — the buyer's schema-opaque amount codec: monetary outcomes, a separate
+  negotiated scalar, bounds against the opening shape, the ceiling check, derived
+  prices for the opening shape —
+  `docs/development/ARCHITECTURE.md` (buyer negotiation composition) and
+  `openspec/specs/negotiation-protocol/spec.md`.
+- D6 — legacy flat and hidden-reserve paths keep absolute semantics; the payment,
+  not the scalar, enters settlement — `openspec/specs/negotiation-protocol/spec.md`.
+- D7 — rates are listing-level sale terms at the registry's `pricing.rate_structure`,
+  with the seller's retained publication proof — `openspec/specs/negotiation-protocol/spec.md`;
+  registry storage and proof are `store-registry-listings-as-published`'s.
+- D8 — the buyer reads rates from the registry, lifted once at its registry
+  boundary and verified by the seller's retained proof —
+  `openspec/specs/negotiation-protocol/spec.md`.
+- D9 — the seller pins and prices from its last successful publication —
+  `openspec/specs/negotiation-protocol/spec.md` and
+  `openspec/specs/storefront-publication/spec.md`.
+- D10 — the evaluation order, distinct refusals, and the advertised-shape cap until
+  the feasibility probe is composed — `openspec/specs/negotiation-protocol/spec.md`.
+- D11 — the agreed shape is what the claim reserves —
   `openspec/specs/vm-storefront-fulfillment/spec.md`.
-- Why the negotiated variable had to change, the rejected models, and why the
-  multiplier is basis points — this change's `design.md`.
+- D12 — `resize_reservation` is not wired here — this change's `design.md`.
+- D13 — the storefront's negotiated quantity is `negotiated_scalar` —
+  `openspec/specs/negotiation-protocol/spec.md`.
+- D14 — settlement reads money only from the Agreement and its mandate —
+  `openspec/specs/negotiation-protocol/spec.md`.
+- D15 — the release is one-way for storefront state; drain before upgrading —
+  `docs/operator-handbook.md`.
+- D16 — the VM import guard follows the package layers — already stated by
+  `docs/development/ARCHITECTURE.md`.
+- D17 — content validation lives in the domain codec — this change's `design.md`.
 
 ## Dependencies and Related Changes
+
+- Depends on `store-registry-listings-as-published` (archived) for the listing-level
+  `pricing.rate_structure` and the retained seller-signed publication proof (D7, D8).
+  A changed structure refuses continuation or acceptance, requiring a new opening
+  rather than silently repricing the negotiation (D9). The buyer's verifier of that
+  proof arrives with `negotiate-open-ended-compute-terms`.
 
 - Depends on `capacity-shape-pricing` for the rate structure, the recorded
   structure that prices a revised shape, its evaluation, and the selected-option
   reference amount the multiplier reinterprets.
 - Consumes `capacity-shape-envelope` and `negotiation-capacity-feasibility-probe`
-  where a domain composes them; neither blocks this change.
+  where a domain composes them; neither blocks this change. Until the probe is
+  composed, requested shapes are capped at the advertised quantities (D10): the probe
+  is the prerequisite for negotiating a larger shape.
 - Builds on `fix-vm-fulfillment-capacity-boundary`: the committed reservation is
   authoritative through scheduling and dispatch, so once the claim is built from
   the agreed shape, fulfillment follows it.

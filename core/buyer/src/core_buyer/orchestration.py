@@ -47,6 +47,7 @@ from core_buyer.orchestrator import (
 from .aggregation import AggregationPolicy, load_aggregation_policy
 from .deal_helpers import settlement_acceptance_fields
 from .negotiation_client import (
+    NegotiationAmountCodec,
     NegotiationOutcome,
     _authenticated_json,
     negotiate_with_seller,
@@ -420,6 +421,7 @@ def make_negotiate_hook(
     validate_acceptance: Callable[[NegotiationOutcome], None] | None = None,
     advertised_plan_validator: AdvertisedPlanValidatorFn | None = None,
     accepted_listing_record: AcceptedListingRecordFn | None = None,
+    amount_codec_factory: Callable[[Any, Any], NegotiationAmountCodec | None] | None = None,
     capture: EnvelopeCapture | None = None,
 ) -> NegotiateFn:
     """Build the schema-instantiated negotiate hook.
@@ -455,6 +457,7 @@ def make_negotiate_hook(
             validate_acceptance=validate_acceptance,
             advertised_plan_validator=advertised_plan_validator,
             accepted_listing_record=accepted_listing_record,
+            amount_codec_factory=amount_codec_factory,
             capture=capture,
             on_event=on_event,
         )
@@ -481,6 +484,7 @@ def _negotiate_matches(
     on_event: Callable[[str, dict], None],
     advertised_plan_validator: AdvertisedPlanValidatorFn | None = None,
     accepted_listing_record: AcceptedListingRecordFn | None = None,
+    amount_codec_factory: Callable[[Any, Any], NegotiationAmountCodec | None] | None = None,
     capture: EnvelopeCapture | None = None,
 ) -> NegotiationResult:
     attempts: list[dict[str, Any]] = []
@@ -683,7 +687,10 @@ def _negotiate_matches(
                 chain=chain,
                 policy_params=negotiation_policy_params,
                 validate_acceptance=validate_acceptance,
-                validate_advertised_plan=(
+                amount_codec=(
+                    amount_codec_factory(match, settlement_proposal)
+                    if amount_codec_factory is not None else None
+                ),                validate_advertised_plan=(
                     advertised_plan_validator(match)
                     if advertised_plan_validator is not None
                     else None

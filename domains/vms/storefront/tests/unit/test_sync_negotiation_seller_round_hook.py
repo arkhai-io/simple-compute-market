@@ -6,6 +6,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from arkhai_vms import price_vm_shape, vm_family_rate
 from core_storefront.aggregation import fill_first
 from core_storefront.domain_registry import (
     StorefrontListingBinding,
@@ -42,6 +43,7 @@ from market_storefront.negotiation_runtime import (
     build_vm_negotiation_runtime,
 )
 from market_storefront.utils.migrations import migrate_storefront_database
+from tests._settings_overrides import replaced_setting
 from tests.fake_site import FakeProjectionSite, site_projection_state
 
 _BUYER_SIGNER = Ed25519Signer(b"\x41" * 32)
@@ -61,9 +63,13 @@ async def _noop_reconcile(_context) -> None:
     return None
 
 
-def _no_projections():
-    """A projection state over the runtime's site that has served nothing yet."""
-    return site_projection_state({"site-test": FakeProjectionSite(resource_pools=[])})
+async def _policy_projections():
+    """The held pool supplies policy; source confirmation is injected separately."""
+    state = site_projection_state({"site-test": FakeProjectionSite(resource_pools=[
+        {"pool_id": "pool-L-hook", "pool_metadata": {"policy_tags": {}}},
+    ])})
+    await state.poll_once()
+    return state
 
 
 def _capacity_runtime() -> CapacityRuntime:
@@ -205,7 +211,46 @@ async def db(tmp_path, monkeypatch):
         resolve_capacity_binding,
     )
     assert await client.load_listing_binding(listing_id="L-hook") == listing_binding
-    return client
+    with replaced_setting("registry.urls", list(_REGISTRIES)):
+        yield client
+
+
+#: The registries the storefront publishes to; test URLs, never contacted.
+_REGISTRIES = ("http://registry-a.test", "http://registry-b.test")
+
+
+def _structure(rates: dict[str, str]) -> dict[str, list[dict[str, str]]]:
+    return {
+        family: [{"asset": _TOKEN, "rate": rate, "per": "hour"}]
+        for family, rate in rates.items()
+    }
+
+
+async def _record_publish(
+    db,
+    structure,
+    *,
+    accepted: bool = True,
+    registries=_REGISTRIES,
+    listing_id: str = "L-hook",
+) -> None:
+    """Record a publish of ``structure`` as the publication kit records it."""
+    payload = {"listing_id": listing_id, "pricing": {"rate_structure": structure}}
+    for registry_url in registries:
+        await db.upsert_publication(
+            listing_id=listing_id,
+            registry_url=registry_url,
+            payload=payload,
+            status="published" if accepted else "failed",
+            last_error=None if accepted else "registry unavailable",
+            published_payload=payload if accepted else None,
+        )
+
+
+async def _reprice(db, structure, *, accepted: bool = True, registries=_REGISTRIES):
+    """Store a new rate structure and record a publish of it."""
+    await db.update_listing(listing_id="L-hook", rate_structure=structure)
+    await _record_publish(db, structure, accepted=accepted, registries=registries)
 
 
 def _option() -> SettlementOption:
@@ -271,7 +316,7 @@ async def _start(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
-        site_projections=_no_projections(),
+        site_projections=await _policy_projections(),
         seller_round_hook=seller_round_hook,
         listing_source_check=listing_source_check or _source_matches,
     )
@@ -313,7 +358,7 @@ async def _continue(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
-        site_projections=_no_projections(),
+        site_projections=await _policy_projections(),
         seller_round_hook=seller_round_hook,
         listing_source_check=listing_source_check or _source_matches,
     )
@@ -328,6 +373,225 @@ async def _continue(
         actor_role=("buyer" if actor_principal == buyer_principal else "admin"),
         seller_principal=seller_principal,
     )
+
+
+_BEFORE = {"gpu": "60", "cpu": "10"}
+_AFTER = {"gpu": "80", "cpu": "5"}
+
+
+def _countering_hook() -> AsyncMock:
+    return AsyncMock(return_value=SellerRoundResult(
+        our_amount=10_000,
+        strategy_label="maximize",
+        direction="maximize",
+        chain_label="custom",
+        decision=NegotiationDecision(action="counter", proposal=_selected_proposal(10_000)),
+    ))
+
+
+async def _open_shape_priced(db, hook):
+    return await _start(
+        sqlite_client=db, our_listing_id="L-hook",
+        buyer_principal=_BUYER, seller_principal=_SELLER,
+        proposal=_selected_proposal(9_000),
+        provision_terms=ProvisionTerms(kind="compute.v1", version=1, payload={
+            "duration_seconds": 3600, "ssh_public_key": "ssh-ed25519 AAAA",
+        }),
+        our_base_url="http://seller.test", their_agent_url="http://buyer.test",
+        seller_round_hook=hook,
+    )
+
+
+async def _admin_accept(db, negotiation_id):
+    registration = db.domain_registry.resolve_mode("vm")
+    runtime = build_vm_negotiation_runtime(
+        registration.contract,
+        registry=db.domain_registry,
+        binding=registration.binding,
+        capacity_runtime=_capacity_runtime(),
+        site_projections=await _policy_projections(),
+        listing_source_check=_source_matches,
+    )
+    return await runtime.accept_administratively(
+        repository=db, listing_id="L-hook", negotiation_id=negotiation_id,
+        amount=10_000, actor_principal=_SELLER,
+    )
+
+
+async def _round(db, negotiation_id, action, hook):
+    if action == "admin_accept":
+        return await _admin_accept(db, negotiation_id)
+    return await _continue(
+        sqlite_client=db, neg_id=negotiation_id,
+        buyer_action=action,
+        buyer_proposal=None if action == "exit" else _selected_proposal(10_000),
+        buyer_reason=None, buyer_principal=_BUYER, actor_principal=_BUYER,
+        seller_round_hook=hook,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["counter", "accept", "admin_accept", "exit"])
+async def test_a_published_repricing_refuses_even_with_unchanged_listing_total(db, action):
+    advertised = {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 4}}
+    revised = {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 2}}
+
+    def price(shape, rates):
+        return price_vm_shape(
+            shape, {family: vm_family_rate(rate, "hour") for family, rate in rates.items()}
+        ).amount
+
+    assert price(advertised, _BEFORE) == price(advertised, _AFTER) == "100"
+    assert price(revised, _BEFORE) == "80"
+    assert price(revised, _AFTER) == "90"
+    await _reprice(db, _structure(_BEFORE))
+    hook = _countering_hook()
+    opened = await _open_shape_priced(db, hook)
+    await _reprice(db, _structure(_AFTER))
+    hook.reset_mock()
+    if action == "exit":
+        response = await _round(db, opened["negotiation_id"], action, hook)
+        assert response["action"] == "exit"
+        hook.assert_not_awaited()
+        return
+    with pytest.raises(OfferUnfulfillableError, match="rate_structure_changed_reopen"):
+        await _round(db, opened["negotiation_id"], action, hook)
+    hook.assert_not_awaited()
+    thread = await db.load_negotiation_thread_row(negotiation_id=opened["negotiation_id"])
+    assert thread["terminal_state"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_republication_keeps_the_negotiation_on_its_published_rates(db):
+    """A stored repricing no registry accepted is not what a buyer can read."""
+    await _reprice(db, _structure(_BEFORE))
+    hook = _countering_hook()
+    opened = await _open_shape_priced(db, hook)
+    await _reprice(db, _structure(_AFTER), accepted=False)
+    hook.reset_mock()
+
+    response = await _round(db, opened["negotiation_id"], "counter", hook)
+
+    assert response["action"] == "counter"
+    hook.assert_awaited_once()
+    assert hook.await_args.kwargs["listing"]["rate_structure"] == _structure(_BEFORE)
+    stored = await db.load_listing(listing_id="L-hook")
+    assert stored["rate_structure"] == _structure(_AFTER)
+
+
+@pytest.mark.asyncio
+async def test_an_upgraded_listing_refuses_openings_until_its_first_successful_publish(db):
+    """Rows recorded before the published payload was kept carry none."""
+    await db.update_listing(listing_id="L-hook", rate_structure=_structure(_BEFORE))
+    for registry_url in _REGISTRIES:
+        await db.upsert_publication(
+            listing_id="L-hook", registry_url=registry_url,
+            payload={"listing_id": "L-hook"}, status="published",
+        )
+    hook = _countering_hook()
+
+    with pytest.raises(OfferUnfulfillableError, match="^rate_structure_unpublished$"):
+        await _open_shape_priced(db, hook)
+    hook.assert_not_awaited()
+
+    await _record_publish(db, _structure(_BEFORE))
+    opened = await _open_shape_priced(db, hook)
+    assert opened["action"] == "counter"
+    hook.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_partial_first_refresh_refuses_until_the_unseen_registry_accepts(db):
+    """A registry still serving a listing published before payloads were kept
+    may hold rates the seller cannot see, so a refresh accepted elsewhere does
+    not let a negotiation price from the new rates alone."""
+    await db.update_listing(listing_id="L-hook", rate_structure=_structure(_BEFORE))
+    for registry_url in _REGISTRIES:
+        await db.upsert_publication(
+            listing_id="L-hook", registry_url=registry_url,
+            payload={"listing_id": "L-hook"}, status="published",
+        )
+    # The first refresh after the upgrade reprices; one registry accepts it.
+    await _reprice(db, _structure(_AFTER), registries=_REGISTRIES[:1])
+    await _record_publish(db, _structure(_AFTER), accepted=False, registries=_REGISTRIES[1:])
+    hook = _countering_hook()
+
+    with pytest.raises(OfferUnfulfillableError, match="^rate_structure_divergent$"):
+        await _open_shape_priced(db, hook)
+    hook.assert_not_awaited()
+
+    # Convergence resends the listing to the registry that refused it.
+    await _record_publish(db, _structure(_AFTER), registries=_REGISTRIES[1:])
+    opened = await _open_shape_priced(db, hook)
+    assert opened["action"] == "counter"
+    assert hook.await_args.kwargs["listing"]["rate_structure"] == _structure(_AFTER)
+
+
+@pytest.mark.asyncio
+async def test_a_flat_priced_listing_negotiates_beside_an_unseen_registry(db):
+    """A flat-priced quote reads no rate structure, so a registry's unknown
+    payload cannot diverge from it."""
+    await db.upsert_publication(
+        listing_id="L-hook", registry_url=_REGISTRIES[0],
+        payload={"listing_id": "L-hook"}, status="published",
+    )
+    await _record_publish(db, None, registries=_REGISTRIES[1:])
+    hook = _countering_hook()
+
+    opened = await _open_shape_priced(db, hook)
+
+    assert opened["action"] == "counter"
+    hook.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_registry_never_sent_the_listing_does_not_block_negotiation(db):
+    """A configured registry with no publication of the listing serves none of it."""
+    await _reprice(db, _structure(_BEFORE), registries=_REGISTRIES[:1])
+    hook = _countering_hook()
+
+    opened = await _open_shape_priced(db, hook)
+
+    assert opened["action"] == "counter"
+    hook.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_registries_holding_different_rates_refuse_until_the_resend_converges(db):
+    await _reprice(db, _structure(_BEFORE))
+    hook = _countering_hook()
+    opened = await _open_shape_priced(db, hook)
+    # One registry accepted the repricing, the other missed it.
+    await _reprice(db, _structure(_AFTER), registries=_REGISTRIES[:1])
+    await _record_publish(db, _structure(_AFTER), accepted=False, registries=_REGISTRIES[1:])
+    hook.reset_mock()
+
+    with pytest.raises(OfferUnfulfillableError, match="^rate_structure_divergent$"):
+        await _open_shape_priced(db, hook)
+    with pytest.raises(OfferUnfulfillableError, match="^rate_structure_divergent$"):
+        await _round(db, opened["negotiation_id"], "counter", hook)
+    hook.assert_not_awaited()
+    thread = await db.load_negotiation_thread_row(negotiation_id=opened["negotiation_id"])
+    assert thread["terminal_state"] is None
+
+    # Convergence resends the listing to the registry that diverged.
+    await _record_publish(db, _structure(_AFTER), registries=_REGISTRIES[1:])
+    reopened = await _open_shape_priced(db, hook)
+    assert reopened["action"] == "counter"
+    with pytest.raises(OfferUnfulfillableError, match="rate_structure_changed_reopen"):
+        await _round(db, opened["negotiation_id"], "counter", hook)
+
+
+@pytest.mark.asyncio
+async def test_a_registry_no_longer_configured_is_not_read(db):
+    await _reprice(db, _structure(_BEFORE))
+    await _record_publish(db, _structure(_AFTER), registries=("http://retired.test",))
+    hook = _countering_hook()
+
+    opened = await _open_shape_priced(db, hook)
+
+    assert opened["action"] == "counter"
+    assert hook.await_args.kwargs["listing"]["rate_structure"] == _structure(_BEFORE)
 
 
 def test_normalize_vm_message_terms_uses_domain_runtime() -> None:
@@ -479,93 +743,6 @@ async def test_negotiation_runtime_uses_injected_seller_round_hook(db):
 
 
 @pytest.mark.asyncio
-async def test_negotiation_runtime_rejects_mismatched_resource_shape(db):
-    """A buyer requesting a shape other than the listing's is refused outright.
-
-    Seller negotiation policy currently prices only the listing's
-    advertised shape; this pins the loud-rejection behavior rather than
-    silent admission or silent fallback to the listing's shape.
-    """
-
-    async def hook(**_kwargs):
-        raise AssertionError("seller policy must not run for a rejected request")
-
-    with pytest.raises(OfferUnfulfillableError) as exc_info:
-        await _start(
-            sqlite_client=db,
-            our_listing_id="L-hook",
-            buyer_principal=_BUYER,
-            seller_principal=_SELLER,
-            proposal=_proposal(50),
-            provision_terms=ProvisionTerms(
-                kind="compute.v1",
-                version=1,
-                payload={
-                    "duration_seconds": 3600,
-                    "ssh_public_key": "ssh-rsa AAAA",
-                    # Listing offers gpu_count=1; this asks for 2.
-                    "compute_resource": {"gpu_count": 2},
-                },
-            ),
-            our_base_url="http://test-seller:8001",
-            their_agent_url="http://buyer:9000",
-            seller_round_hook=hook,
-        )
-    assert "resource_shape_not_negotiable" in str(exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_an_opening_on_a_listing_without_gpus_compares_its_own_dimensions(db):
-    """The opening reads a listing stating no GPUs as compute, and compares the
-    dimensions the buyer names against the ones it states."""
-    await db.upsert_listing_with_binding(
-        binding=_listing_binding(db, "L-cpu"),
-        status="open",
-        created_at=datetime.now().isoformat(),
-        updated_at=datetime.now().isoformat(),
-        listing_resource={
-            "vcpu_count": 8,
-            "ram_gb": 32,
-            "sla": 99.9,
-            "region": "California, US",
-            "resource_id": "resource-cpu",
-            "offering_mode": "vm",
-        },
-        settlement_options=[_option().model_dump(mode="json")],
-        fulfillment_resource=None,
-        max_duration_seconds=7200,
-        storefront_url="http://seller:8001",
-        seller_principal=_SELLER,
-    )
-
-    async def hook(**_kwargs):
-        raise AssertionError("seller policy must not run for a rejected request")
-
-    with pytest.raises(OfferUnfulfillableError) as exc_info:
-        await _start(
-            sqlite_client=db,
-            our_listing_id="L-cpu",
-            buyer_principal=_BUYER,
-            seller_principal=_SELLER,
-            proposal=_proposal(50),
-            provision_terms=ProvisionTerms(
-                kind="compute.v1",
-                version=1,
-                payload={
-                    "duration_seconds": 3600,
-                    "ssh_public_key": "ssh-rsa AAAA",
-                    "compute_resource": {"vcpu_count": 16},
-                },
-            ),
-            our_base_url="http://test-seller:8001",
-            their_agent_url="http://buyer:9000",
-            seller_round_hook=hook,
-        )
-    assert "resource_shape_not_negotiable" in str(exc_info.value)
-    assert "'listing': 8" in str(exc_info.value)
-
-
-@pytest.mark.asyncio
 async def test_negotiation_runtime_permits_matching_resource_shape(db):
     """A buyer that names a shape equal to the listing's own is unaffected."""
     seen = {}
@@ -661,7 +838,13 @@ async def test_negotiation_runtime_continuation_uses_injected_seller_round_hook(
         sqlite_client=db,
         neg_id=opened["negotiation_id"],
         buyer_action="counter",
-        buyer_proposal=_selected_proposal(100),
+        buyer_proposal={
+            **_selected_proposal(100),
+            "provision_terms": {
+                "kind": "compute.v1", "version": 1,
+                "payload": {"gpu": {"model": "H200", "count": 1}},
+            },
+        },
         buyer_reason=None,
         buyer_principal=_BUYER,
         actor_principal=_BUYER,
@@ -669,6 +852,10 @@ async def test_negotiation_runtime_continuation_uses_injected_seller_round_hook(
     )
 
     assert response["action"] == "accept"
+    messages = await db.load_negotiation_thread(negotiation_id=opened["negotiation_id"])
+    assert messages[-1]["provision_terms"]["payload"]["compute_resource"] == {
+        "gpu_model": "H200", "gpu_count": 1,
+    }
     assert response["accepted_escrow_proposal"]["fields"]["amount"] == "100"
     thread = await db.load_negotiation_thread_row(negotiation_id=opened["negotiation_id"])
     assert thread["settlement_data"]["accepted_escrow_proposal"] == response["accepted_escrow_proposal"]

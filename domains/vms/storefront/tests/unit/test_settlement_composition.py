@@ -169,7 +169,7 @@ async def _persist_accepted_negotiation(
     )
     await db.commit_agreed_terms(
         negotiation_id=negotiation_id,
-        agreed_price=42,
+        negotiated_scalar=42,
         agreed_duration_seconds=3600,
         agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
         settlement_data={"accepted_escrow_proposal": proposal},

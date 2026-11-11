@@ -118,7 +118,7 @@ async def test_force_accept_through_the_client_records_a_negotiated_acceptance(
     assert accepted.amount == 290
     thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
     assert thread["terminal_state"] == "success"
-    assert int(thread["agreed_price"]) == 290
+    assert int(thread["negotiated_scalar"]) == 290
     assert await db.load_credit_terms(negotiation_id=negotiation_id) == {
         "negotiation_id": negotiation_id,
         "quantity": 3,

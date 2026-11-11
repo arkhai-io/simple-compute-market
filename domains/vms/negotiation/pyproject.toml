@@ -7,8 +7,11 @@ requires-python = ">=3.12,<3.14"
 # torch is not a dependency: only the RL strategy imports it, lazily, and each
 # consumer opts in through its own `rl` extra, which pins the CPU index.
 dependencies = [
+    "arkhai-vms>=0.8.0",
+    "arkhai-core>=0.4.0",
     "arkhai-vms-listings>=0.7.0",
     "arkhai-kit-alkahest>=0.7.0",
+    "arkhai-kit-identity>=0.4.0",
     "arkhai-kit-policy>=0.6.0",
 ]
 

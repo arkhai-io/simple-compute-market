@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from typing_extensions import TypedDict
 from market_identity import Identity
 
 
@@ -73,12 +74,19 @@ class NegotiateNewResponse(BaseModel):
     settlement_data: dict[str, Any] | None = None
 
 
+class RoundProposal(TypedDict, total=False):
+    """Opaque proposal fields with one typed delivery-terms envelope."""
+
+    __pydantic_config__ = ConfigDict(extra="allow")
+    provision_terms: ProvisionTerms
+
+
 class NegotiateContinueRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["counter", "accept", "exit"]
     buyer_principal: Identity
-    proposal: dict[str, Any] | None = None
+    proposal: RoundProposal | None = None
     settlement_selection: SettlementSelection | None = None
     reason: str | None = None
 
@@ -104,7 +112,10 @@ class NegotiationSummary(BaseModel):
     buyer_principal: Identity | None = None
     seller_principal: Identity | None = None
     terminal_state: str | None = None
-    agreed_amount: OptionalUint256Amount = None
+    # The domain's accepted policy scalar, not money: a basis-point multiplier
+    # on shape-priced listings, an absolute amount on flat paths. The accepted
+    # Agreement carries the monetary amount.
+    negotiated_scalar: OptionalUint256Amount = None
     round_count: int = 0
     created_at: str | None = None
     model_config = {"extra": "allow"}
@@ -134,7 +145,8 @@ class NegotiationDetailResponse(BaseModel):
     buyer_principal: Identity | None = None
     seller_principal: Identity | None = None
     terminal_state: str | None = None
-    agreed_amount: OptionalUint256Amount = None
+    # The domain's accepted policy scalar; see NegotiationSummary.
+    negotiated_scalar: OptionalUint256Amount = None
     round_count: int = 0
     # Persisted rows, not typed fields: an amount read back out of storage
     # arrives as a Python int, and this response is signed over canonical
@@ -149,7 +161,7 @@ class AdvanceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["counter", "accept", "exit"]
-    proposal: dict[str, Any] | None = None
+    proposal: RoundProposal | None = None
     reason: str | None = None
 
 

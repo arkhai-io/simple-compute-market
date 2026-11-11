@@ -418,7 +418,8 @@ class RecordingRegistries:
         for url, request in payloads.items():
             body = self._json(request)
             self.sent.append(("publish", url, str(body.get("listing_id")), body))
-            results.append(self._result("publish", url))
+            # Each result carries the payload sent, as the real client's does.
+            results.append({**self._result("publish", url), "payload": body})
         return results
 
     async def update_listing_per_registry(self, *, listing_id, payloads):

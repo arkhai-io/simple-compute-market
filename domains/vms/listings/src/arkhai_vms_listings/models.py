@@ -41,6 +41,21 @@ def payload_resource_type(data: Mapping[str, Any]) -> str:
         return explicit
     return TOKEN_RESOURCE_TYPE if "token" in data else COMPUTE_RESOURCE_TYPE
 
+
+def registry_rate_structure(listing: Mapping[str, Any]) -> Any:
+    """The family rates a registry listing serves, or ``None`` when it serves none.
+
+    A registry carries a listing's listing-level prices in one ``pricing``
+    object, so its family rates are ``pricing.rate_structure``; it refuses a
+    top-level ``rate_structure`` at publication. See
+    openspec/specs/registry-discovery/spec.md, "The compute schema carries a
+    listing's asking rate".
+    """
+    pricing = listing.get("pricing")
+    if not isinstance(pricing, Mapping):
+        return None
+    return pricing.get("rate_structure")
+
 # =============================================================================
 # Domain Model Class Hierarchy
 # =============================================================================
@@ -471,6 +486,15 @@ class Listing(BaseModel):
             "the legacy accepted_escrows contract."
         ),
     )
+    rate_structure: dict[str, list[dict[str, str]]] | None = Field(
+        default=None,
+        description=(
+            "Resolved family rates a shape-priced listing's quotes derive from. "
+            "A registry serves them as ``pricing.rate_structure``: a listing "
+            "validated from that form reads them from there, and "
+            ":meth:`published_pricing` writes them back to it."
+        ),
+    )
     demands: list[EscrowDemand] | None = Field(
         default=None,
         description=(
@@ -486,10 +510,6 @@ class Listing(BaseModel):
             "for ERC20 escrows; total payment is computed at agreement time "
             "as primary_rate * agreed_duration_seconds / 3600."
         ),
-    )
-    rate_structure: dict[str, list[dict[str, str]]] | None = Field(
-        default=None,
-        description="Resolved family rates, published in the listing's pricing",
     )
 
     oracle_address: str | None = Field(
@@ -555,6 +575,12 @@ class Listing(BaseModel):
             data["listing_resource"] = ComputeDomainResource.parse_from_dict(
                 data["listing_resource"]
             )
+        # A stored listing keeps its rates in this field; a registry listing
+        # serves them only in its pricing object.
+        if data.get("rate_structure") is None:
+            published = registry_rate_structure(data)
+            if published is not None:
+                data["rate_structure"] = published
 
         return data
 

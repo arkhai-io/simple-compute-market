@@ -32,6 +32,7 @@ from market_settlement_runtime import (
 from .chain_cli import chain_app
 from .common import refuse_retired_address_book_keys
 from .escrow_cli import escrow_app
+from .registry_listing import domain_listing_record
 from .settlement_stages import AlkahestBuyerStage, PaymentsBuyerStage
 
 
@@ -70,12 +71,20 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
     """What the selected entry records about a match's listing at acceptance.
 
     The entry is the match's selected settlement option, from which the
-    buyer's proposal was built.
+    buyer's proposal was built. A shape-priced match also records what its
+    amount codec reads, its family rates keyed as the domain record keys them,
+    so a resumed run converts its bounds against the same rates.
     """
     selected = match.get("_selected_settlement")
     if not isinstance(selected, SelectedSettlementOption):
         return {}
-    return buyer_stage(selected.selection.settlement_schema).listing_record(match)
+    match = domain_listing_record(match)
+    record = buyer_stage(selected.selection.settlement_schema).listing_record(match)
+    if match.get("rate_structure"):
+        record = {**record, **{key: match[key] for key in (
+            "listing_id", "listing_resource", "rate_structure", "settlement_options", "accepted_escrows"
+        ) if key in match}}
+    return record
 
 
 def validate_buyer_acceptance(outcome) -> None:

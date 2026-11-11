@@ -84,7 +84,7 @@ async def seed_thread(
     )
     await db.commit_agreed_terms(
         negotiation_id=negotiation_id,
-        agreed_price=amount,
+        negotiated_scalar=amount,
         agreed_duration_seconds=message.duration_seconds,
         agreement_bytes=agreement_bytes,
         settlement_data=settlement_data,

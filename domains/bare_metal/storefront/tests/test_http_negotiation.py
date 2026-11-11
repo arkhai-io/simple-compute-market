@@ -662,7 +662,7 @@ async def test_a_countering_seller_negotiates_over_rounds_to_acceptance(tmp_path
     assert accepted["action"] == "accept"
     thread, terms = await _accepted_records(runtime, opened["negotiation_id"])
     assert thread["terminal_state"] == "success"
-    assert int(thread["agreed_price"]) == countered
+    assert int(thread["negotiated_scalar"]) == countered
     assert terms is not None and terms.host_id == "machine-1"
     assert thread["settlement_plan"] is not None
     # A recheck at the opening and one before the buyer's accept, each reading
