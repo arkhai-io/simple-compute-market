@@ -4,6 +4,11 @@ from __future__ import annotations
 import json
 import math
 from fractions import Fraction
+from types import SimpleNamespace
+
+from compute_delivery import agreement_window
+from market_deal_servicing import EndSession
+from market_deal_servicing.evidence import transaction
 
 import pytest
 
@@ -18,7 +23,8 @@ from market_policy.scalar_policies import bisection_middleware
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from market_storefront.services.vm_job_spec_service import compute_capacity_claim_from_order
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
-from market_storefront.services.vm_fulfillment_service import _reserve_capacity_for_obligation
+from market_storefront.delivery_ports import VmDeliveryDomain
+from market_storefront.delivery_records import register_delivery
 from market_storefront.settlement_stages import delivery_facts, vm_evidence
 from tests.integration.test_capacity_reservation_boundary import SITE_AUTHORITIES, site_app, _client
 from tests._settings_overrides import settings_overrides
@@ -167,14 +173,31 @@ async def test_smaller_agreed_shape_reaches_the_committed_reservation(db, site_a
         assert ledger.get_reservation(hold["capacity_reservation_id"])["dimensions"] == expected
     else:
         assert hold is None
-    reserved = await _reserve_capacity_for_obligation(
-        capacity=capacity, binding=PublicationBinding("site-test", "vm", "pool-L-hook", BACKED),
-        held_reservation=hold["payload"] if hold else None,
-        negotiation_id=opened["negotiation_id"], listing_id="L-hook", order_id="L-hook",
-        required_attributes=plan.required_attributes, duration_seconds=plan.duration_seconds,
-        start_utc=plan.start_utc, stage_event=lambda *args, **kwargs: None,
+    await fresh.save_vm_settlement_evidence(evidence)
+    domain = VmDeliveryDomain(
+        fresh, stages={}, payments=None, fulfillment=SimpleNamespace(),
     )
-    committed = ledger.get_reservation(reserved["capacity_reservation_id"])
+    claim = await domain.reserve_claim(opened["negotiation_id"])
+    assert claim.claim["dimensions"] == expected
+    binding = PublicationBinding("site-test", "vm", "pool-L-hook", BACKED)
+    with transaction(fresh.db_path) as connection:
+        register_delivery(connection, opened["negotiation_id"])
+        window = agreement_window(EndSession(connection).read(opened["negotiation_id"]))
+    accepted_hold = await domain.accepted_hold(opened["negotiation_id"])
+    if accepted_hold is not None:
+        reservation_id = accepted_hold.capacity_reservation_id
+    else:
+        reserved = await capacity.reserve(
+            binding, claim=claim.claim, deal_ref=claim.deal_ref,
+            lease_start_utc=window.start_utc, lease_duration_seconds=window.duration_seconds,
+        )
+        reservation_id = reserved["capacity_reservation_id"]
+    await capacity.commit(
+        binding, resource_id=None, capacity_reservation_id=reservation_id,
+        lease_start_utc=window.start_utc, lease_end_utc=window.end_utc,
+        deal_ref=claim.deal_ref,
+    )
+    committed = ledger.get_reservation(reservation_id)
     assert committed["state"] == "leased"
     assert committed["dimensions"] == expected
 
