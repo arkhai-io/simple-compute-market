@@ -119,7 +119,7 @@ async def payment_context(tmp_path):
         provision_terms=terms.model_dump(mode="json"),
     )
     await db.commit_agreed_terms(
-        negotiation_id=agreement.negotiation_id, agreed_price=100, agreed_duration_seconds=0,
+        negotiation_id=agreement.negotiation_id, negotiated_scalar=100, agreed_duration_seconds=0,
         agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
         accepted_at=now, agreed_start_utc=now,
         settlement_data=stage.agreement_artifacts(wire, composition),

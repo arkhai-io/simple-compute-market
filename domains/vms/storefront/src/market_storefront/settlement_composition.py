@@ -280,8 +280,8 @@ async def prepare_vm_settlement(
             f"Negotiation {negotiation_id} is not terminal-success "
             f"(terminal_state={thread.get('terminal_state')!r})"
         )
-    if thread.get("agreed_price") is None:
-        raise ValueError(f"Negotiation {negotiation_id} has no agreed_price committed")
+    if thread.get("negotiated_scalar") is None:
+        raise ValueError(f"Negotiation {negotiation_id} has no negotiated_scalar committed")
 
     listing_id = thread.get("our_listing_id")
     order = (

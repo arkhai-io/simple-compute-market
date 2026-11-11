@@ -972,7 +972,7 @@ class TestAdministrativeAcceptance:
         plan = thread["settlement_plan"]
         assert plan["obligations"][0]["mechanism"] == "alkahest.v1"
         assert thread["terminal_state"] == "success"
-        assert int(thread["agreed_price"]) == 5000
+        assert int(thread["negotiated_scalar"]) == 5000
         # The acceptance hold reserves at the listing's site, as it does after
         # a negotiated acceptance.
         assert any("reserv" in request for request in site_requests), site_requests

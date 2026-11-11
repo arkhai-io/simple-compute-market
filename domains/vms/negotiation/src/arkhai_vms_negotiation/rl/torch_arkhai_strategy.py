@@ -34,7 +34,7 @@ from market_policy.negotiation_middleware import (
     their_last_proposal,
 )
 from arkhai_vms_negotiation.policies import (
-    _amount_from_proposal,
+    amount_from_proposal,
     format_wire_amount,
     our_previous_counters,
     their_proposed_amount,

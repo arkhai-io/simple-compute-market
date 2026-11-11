@@ -243,6 +243,62 @@ def test_delivery_activation_reads_a_provider_ready_phase_as_ready(tmp_path) -> 
         connection.close()
 
 
+def test_a_recorded_publication_gains_no_published_payload(tmp_path) -> None:
+    """A v0.3.0 row's payload is the last attempt's, not one known accepted, so
+    its listing has no published payload until its next successful publish."""
+    path = create_floor_database(tmp_path / "floor.db")
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute(
+            "INSERT INTO publications (listing_id, registry_url, payload_json, "
+            "published_at, status) VALUES ('L1', 'http://registry.test', '{}', 1, "
+            "'published')"
+        )
+    connection.close()
+
+    migrate_storefront_database(path)
+
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute(
+            "SELECT payload_json, published_payload_json FROM publications"
+        ).fetchall() == [("{}", None)]
+    finally:
+        connection.close()
+
+
+def test_a_recorded_thread_keeps_its_negotiated_scalar(tmp_path) -> None:
+    """A v0.3.0 thread's accepted scalar is read under ``negotiated_scalar``,
+    exact and unchanged, after the chain runs."""
+    path = create_floor_database(tmp_path / "floor.db")
+    scalar = str(150 * 10**18)
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute(
+            "INSERT INTO negotiation_threads (negotiation_id, buyer_scheme, "
+            "buyer_identifier, seller_scheme, seller_identifier, terminal_state, "
+            "agreed_price) VALUES ('neg-1', ?, ?, ?, ?, 'success', ?)",
+            (_SELLER.scheme.value, "buyer", _SELLER.scheme.value, _SELLER.identifier, scalar),
+        )
+    connection.close()
+
+    migrate_storefront_database(path)
+
+    connection = sqlite3.connect(path)
+    try:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(negotiation_threads)")
+        }
+        assert "negotiated_scalar" in columns
+        assert "agreed_price" not in columns
+        assert connection.execute(
+            "SELECT negotiation_id, typeof(negotiated_scalar), negotiated_scalar "
+            "FROM negotiation_threads"
+        ).fetchall() == [("neg-1", "text", scalar)]
+    finally:
+        connection.close()
+
+
 def test_stored_vm_credentials_are_cleared(tmp_path) -> None:
     path = create_floor_database(tmp_path / "floor.db")
     connection = sqlite3.connect(path)

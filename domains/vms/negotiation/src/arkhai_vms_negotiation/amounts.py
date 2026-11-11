@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from collections.abc import Mapping
@@ -11,6 +12,7 @@ from typing import Any
 from arkhai_vms import price_vm_shape, vm_family_rate, vm_listing_resource_shape
 from arkhai_vms_listings import extract_compute_from_order, extract_initial_price_from_order
 from market_core.schemas import settlement_option_asset
+from market_identity import canonical_json
 from market_policy.scalar_policies import selected_settlement_artifact
 
 BASIS_POINTS = 10_000
@@ -21,21 +23,49 @@ def listing_record(listing: Any) -> dict[str, Any]:
     return listing.model_dump(mode="json") if hasattr(listing, "model_dump") else dict(listing)
 
 
-def has_rate_structure(listing: Any) -> bool:
+def _rate_structure(listing: Any) -> Any:
     structure = listing_record(listing).get("rate_structure")
     if isinstance(structure, str):
         structure = json.loads(structure)
-    return bool(structure)
+    return structure
+
+
+def has_rate_structure(listing: Any) -> bool:
+    return bool(_rate_structure(listing))
+
+
+def rate_structure_digest(listing: Any) -> str | None:
+    """The SHA-256 of the listing's rate structure as canonical JSON, or None.
+
+    Covers the family rates alone, so a negotiation pinned to it is refused
+    once any rate changes, and only then. None for a listing that is not
+    shape-priced.
+    """
+    structure = _rate_structure(listing)
+    if not structure:
+        return None
+    return hashlib.sha256(canonical_json(structure)).hexdigest()
 
 
 def multiplier_floor(config: Any = None) -> int:
+    """The seller's lowest acceptable multiplier, in basis points.
+
+    At most :data:`BASIS_POINTS`, so the advertised rates are always a price
+    the seller accepts and a buyer never has to bargain up to them.
+    """
     value = (
         config.get("multiplier_floor_bps", BASIS_POINTS)
         if isinstance(config, Mapping)
         else getattr(config, "multiplier_floor_bps", BASIS_POINTS)
     )
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError("multiplier_floor_bps must be a non-negative integer")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= BASIS_POINTS
+    ):
+        raise ValueError(
+            f"multiplier_floor_bps must be an integer from 0 to {BASIS_POINTS}"
+        )
     return value
 
 

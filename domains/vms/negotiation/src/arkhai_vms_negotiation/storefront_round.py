@@ -30,8 +30,8 @@ from market_policy.listing_source import ListingSourceVerdict
 from market_policy.seller_round import SellerRoundResult
 from market_policy.scalar_policies import (
     pinned_proposal,
-    _amount_from_proposal,
-    _set_proposal_amount,
+    amount_from_proposal,
+    set_proposal_amount,
     selected_settlement_artifact,
 )
 from market_policy.negotiation_middleware import (
@@ -376,12 +376,12 @@ async def _run_default_seller_round_policy(
     )
     decision, context = run_negotiation_chain_with_context(chain, history, context)
     if multiplier_mode and decision.action in {"counter", "accept"}:
-        proposed = _amount_from_proposal(decision.proposal)
+        proposed = amount_from_proposal(decision.proposal)
         if proposed is not None:
             if proposed < floor_bps:
                 decision = NegotiationDecision(
                     action="counter", reason="multiplier_floor",
-                    proposal=_set_proposal_amount(decision.proposal or pinned, floor_bps),
+                    proposal=set_proposal_amount(decision.proposal or pinned, floor_bps),
                 )
                 proposed = floor_bps
             quote_from_multiplier(

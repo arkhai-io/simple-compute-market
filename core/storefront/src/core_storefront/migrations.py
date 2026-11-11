@@ -621,7 +621,39 @@ def _add_negotiation_message_terms(connection: sqlite3.Connection) -> None:
     connection.execute("ALTER TABLE negotiation_messages ADD COLUMN provision_terms TEXT")
 
 
+def _add_publication_published_payload(connection: sqlite3.Connection) -> None:
+    """Keep each registry's last successfully published payload.
+
+    ``payload_json`` records the last attempt, failed or not; this column only
+    a successful publish writes. No row is backfilled: an earlier attempt's
+    payload is not known to be one a registry accepted, so a listing has none
+    until its next successful publish.
+    """
+    connection.execute("ALTER TABLE publications ADD COLUMN published_payload_json TEXT")
+
+
+def _name_negotiated_scalar(connection: sqlite3.Connection) -> None:
+    """Name the accepted negotiation quantity for what it is.
+
+    The column holds the domain's negotiated policy scalar — a basis-point
+    multiplier on shape-priced listings, an absolute amount on flat paths —
+    not a price; the accepted Agreement carries the monetary amount. Each
+    thread keeps its stored value under the new column name.
+    """
+    connection.execute(
+        "ALTER TABLE negotiation_threads RENAME COLUMN agreed_price TO negotiated_scalar"
+    )
+
+
 MIGRATIONS: tuple[Migration[sqlite3.Connection], ...] = (
     Migration("20261106_001_negotiation_message_terms", _add_negotiation_message_terms),
+    Migration(
+        "20261111_001_publication_published_payload",
+        _add_publication_published_payload,
+    ),
+    Migration(
+        "20261111_002_negotiation_negotiated_scalar",
+        _name_negotiated_scalar,
+    ),
 )
 """Core's migrations after the baseline, composed by every storefront chain."""

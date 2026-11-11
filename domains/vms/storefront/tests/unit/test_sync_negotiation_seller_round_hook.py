@@ -43,6 +43,7 @@ from market_storefront.negotiation_runtime import (
     build_vm_negotiation_runtime,
 )
 from market_storefront.utils.migrations import migrate_storefront_database
+from tests._settings_overrides import replaced_setting
 from tests.fake_site import FakeProjectionSite, site_projection_state
 
 _BUYER_SIGNER = Ed25519Signer(b"\x41" * 32)
@@ -210,7 +211,46 @@ async def db(tmp_path, monkeypatch):
         resolve_capacity_binding,
     )
     assert await client.load_listing_binding(listing_id="L-hook") == listing_binding
-    return client
+    with replaced_setting("registry.urls", list(_REGISTRIES)):
+        yield client
+
+
+#: The registries the storefront publishes to; test URLs, never contacted.
+_REGISTRIES = ("http://registry-a.test", "http://registry-b.test")
+
+
+def _structure(rates: dict[str, str]) -> dict[str, list[dict[str, str]]]:
+    return {
+        family: [{"asset": _TOKEN, "rate": rate, "per": "hour"}]
+        for family, rate in rates.items()
+    }
+
+
+async def _record_publish(
+    db,
+    structure,
+    *,
+    accepted: bool = True,
+    registries=_REGISTRIES,
+    listing_id: str = "L-hook",
+) -> None:
+    """Record a publish of ``structure`` as the publication kit records it."""
+    payload = {"listing_id": listing_id, "pricing": {"rate_structure": structure}}
+    for registry_url in registries:
+        await db.upsert_publication(
+            listing_id=listing_id,
+            registry_url=registry_url,
+            payload=payload,
+            status="published" if accepted else "failed",
+            last_error=None if accepted else "registry unavailable",
+            published_payload=payload if accepted else None,
+        )
+
+
+async def _reprice(db, structure, *, accepted: bool = True, registries=_REGISTRIES):
+    """Store a new rate structure and record a publish of it."""
+    await db.update_listing(listing_id="L-hook", rate_structure=structure)
+    await _record_publish(db, structure, accepted=accepted, registries=registries)
 
 
 def _option() -> SettlementOption:
@@ -335,37 +375,22 @@ async def _continue(
     )
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("action", ["counter", "accept", "exit"])
-async def test_rate_structure_repricing_refuses_even_with_unchanged_listing_total(db, action):
-    before = {"gpu": "60", "cpu": "10"}
-    after = {"gpu": "80", "cpu": "5"}
-    advertised = {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 4}}
-    revised = {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 2}}
+_BEFORE = {"gpu": "60", "cpu": "10"}
+_AFTER = {"gpu": "80", "cpu": "5"}
 
-    def price(shape, rates):
-        return price_vm_shape(
-            shape, {family: vm_family_rate(rate, "hour") for family, rate in rates.items()}
-        ).amount
 
-    def structure(rates):
-        return {
-            family: [{"asset": _TOKEN, "rate": rate, "per": "hour"}]
-            for family, rate in rates.items()
-        }
-
-    assert price(advertised, before) == price(advertised, after) == "100"
-    assert price(revised, before) == "80"
-    assert price(revised, after) == "90"
-    await db.update_listing(listing_id="L-hook", rate_structure=structure(before))
-    hook = AsyncMock(return_value=SellerRoundResult(
+def _countering_hook() -> AsyncMock:
+    return AsyncMock(return_value=SellerRoundResult(
         our_amount=10_000,
         strategy_label="maximize",
         direction="maximize",
         chain_label="custom",
         decision=NegotiationDecision(action="counter", proposal=_selected_proposal(10_000)),
     ))
-    opened = await _start(
+
+
+async def _open_shape_priced(db, hook):
+    return await _start(
         sqlite_client=db, our_listing_id="L-hook",
         buyer_principal=_BUYER, seller_principal=_SELLER,
         proposal=_selected_proposal(9_000),
@@ -375,27 +400,142 @@ async def test_rate_structure_repricing_refuses_even_with_unchanged_listing_tota
         our_base_url="http://seller.test", their_agent_url="http://buyer.test",
         seller_round_hook=hook,
     )
-    await db.update_listing(listing_id="L-hook", rate_structure=structure(after))
+
+
+async def _admin_accept(db, negotiation_id):
+    registration = db.domain_registry.resolve_mode("vm")
+    runtime = build_vm_negotiation_runtime(
+        registration.contract,
+        registry=db.domain_registry,
+        binding=registration.binding,
+        capacity_runtime=_capacity_runtime(),
+        site_projections=await _policy_projections(),
+        listing_source_check=_source_matches,
+    )
+    return await runtime.accept_administratively(
+        repository=db, listing_id="L-hook", negotiation_id=negotiation_id,
+        amount=10_000, actor_principal=_SELLER,
+    )
+
+
+async def _round(db, negotiation_id, action, hook):
+    if action == "admin_accept":
+        return await _admin_accept(db, negotiation_id)
+    return await _continue(
+        sqlite_client=db, neg_id=negotiation_id,
+        buyer_action=action,
+        buyer_proposal=None if action == "exit" else _selected_proposal(10_000),
+        buyer_reason=None, buyer_principal=_BUYER, actor_principal=_BUYER,
+        seller_round_hook=hook,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["counter", "accept", "admin_accept", "exit"])
+async def test_a_published_repricing_refuses_even_with_unchanged_listing_total(db, action):
+    advertised = {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 4}}
+    revised = {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 2}}
+
+    def price(shape, rates):
+        return price_vm_shape(
+            shape, {family: vm_family_rate(rate, "hour") for family, rate in rates.items()}
+        ).amount
+
+    assert price(advertised, _BEFORE) == price(advertised, _AFTER) == "100"
+    assert price(revised, _BEFORE) == "80"
+    assert price(revised, _AFTER) == "90"
+    await _reprice(db, _structure(_BEFORE))
+    hook = _countering_hook()
+    opened = await _open_shape_priced(db, hook)
+    await _reprice(db, _structure(_AFTER))
     hook.reset_mock()
     if action == "exit":
-        response = await _continue(
-            sqlite_client=db, neg_id=opened["negotiation_id"],
-            buyer_action=action, buyer_proposal=None, buyer_reason=None,
-            buyer_principal=_BUYER, actor_principal=_BUYER, seller_round_hook=hook,
-        )
+        response = await _round(db, opened["negotiation_id"], action, hook)
         assert response["action"] == "exit"
         hook.assert_not_awaited()
         return
     with pytest.raises(OfferUnfulfillableError, match="rate_structure_changed_reopen"):
-        await _continue(
-            sqlite_client=db, neg_id=opened["negotiation_id"],
-            buyer_action=action, buyer_proposal=_selected_proposal(10_000),
-            buyer_reason=None, buyer_principal=_BUYER, actor_principal=_BUYER,
-            seller_round_hook=hook,
-        )
+        await _round(db, opened["negotiation_id"], action, hook)
     hook.assert_not_awaited()
     thread = await db.load_negotiation_thread_row(negotiation_id=opened["negotiation_id"])
     assert thread["terminal_state"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_republication_keeps_the_negotiation_on_its_published_rates(db):
+    """A stored repricing no registry accepted is not what a buyer can read."""
+    await _reprice(db, _structure(_BEFORE))
+    hook = _countering_hook()
+    opened = await _open_shape_priced(db, hook)
+    await _reprice(db, _structure(_AFTER), accepted=False)
+    hook.reset_mock()
+
+    response = await _round(db, opened["negotiation_id"], "counter", hook)
+
+    assert response["action"] == "counter"
+    hook.assert_awaited_once()
+    assert hook.await_args.kwargs["listing"]["rate_structure"] == _structure(_BEFORE)
+    stored = await db.load_listing(listing_id="L-hook")
+    assert stored["rate_structure"] == _structure(_AFTER)
+
+
+@pytest.mark.asyncio
+async def test_an_upgraded_listing_refuses_openings_until_its_first_successful_publish(db):
+    """Rows recorded before the published payload was kept carry none."""
+    await db.update_listing(listing_id="L-hook", rate_structure=_structure(_BEFORE))
+    for registry_url in _REGISTRIES:
+        await db.upsert_publication(
+            listing_id="L-hook", registry_url=registry_url,
+            payload={"listing_id": "L-hook"}, status="published",
+        )
+    hook = _countering_hook()
+
+    with pytest.raises(OfferUnfulfillableError, match="^rate_structure_unpublished$"):
+        await _open_shape_priced(db, hook)
+    hook.assert_not_awaited()
+
+    await _record_publish(db, _structure(_BEFORE))
+    opened = await _open_shape_priced(db, hook)
+    assert opened["action"] == "counter"
+    hook.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_registries_holding_different_rates_refuse_until_the_resend_converges(db):
+    await _reprice(db, _structure(_BEFORE))
+    hook = _countering_hook()
+    opened = await _open_shape_priced(db, hook)
+    # One registry accepted the repricing, the other missed it.
+    await _reprice(db, _structure(_AFTER), registries=_REGISTRIES[:1])
+    await _record_publish(db, _structure(_AFTER), accepted=False, registries=_REGISTRIES[1:])
+    hook.reset_mock()
+
+    with pytest.raises(OfferUnfulfillableError, match="^rate_structure_divergent$"):
+        await _open_shape_priced(db, hook)
+    with pytest.raises(OfferUnfulfillableError, match="^rate_structure_divergent$"):
+        await _round(db, opened["negotiation_id"], "counter", hook)
+    hook.assert_not_awaited()
+    thread = await db.load_negotiation_thread_row(negotiation_id=opened["negotiation_id"])
+    assert thread["terminal_state"] is None
+
+    # Convergence resends the listing to the registry that diverged.
+    await _record_publish(db, _structure(_AFTER), registries=_REGISTRIES[1:])
+    reopened = await _open_shape_priced(db, hook)
+    assert reopened["action"] == "counter"
+    with pytest.raises(OfferUnfulfillableError, match="rate_structure_changed_reopen"):
+        await _round(db, opened["negotiation_id"], "counter", hook)
+
+
+@pytest.mark.asyncio
+async def test_a_registry_no_longer_configured_is_not_read(db):
+    await _reprice(db, _structure(_BEFORE))
+    await _record_publish(db, _structure(_AFTER), registries=("http://retired.test",))
+    hook = _countering_hook()
+
+    opened = await _open_shape_priced(db, hook)
+
+    assert opened["action"] == "counter"
+    assert hook.await_args.kwargs["listing"]["rate_structure"] == _structure(_BEFORE)
 
 
 def test_normalize_vm_message_terms_uses_domain_runtime() -> None:

@@ -150,7 +150,7 @@ class HookHarness:
             return {"accepted_offer": dict(acceptance.pinned_proposal or {})}
         return {
             "accepted_artifact": {
-                "amount": acceptance.agreed_amount,
+                "amount": acceptance.negotiated_scalar,
                 "terms": dict(acceptance.terms.wire or {}),
                 "buyer": acceptance.buyer_principal.model_dump(mode="json"),
             },
@@ -189,7 +189,7 @@ class HookHarness:
             repository: RecordingRepository,
             acceptance: Acceptance,
         ) -> None:
-            repository.effects.append(("hold", acceptance.agreed_amount))
+            repository.effects.append(("hold", acceptance.negotiated_scalar))
 
         async def persist_artifacts(
             repository: RecordingRepository,
@@ -435,7 +435,7 @@ async def test_accept_resumes_recorded_terms_and_builds_artifact_before_effects(
     # The domain sees the buyer's pinned proposal, whose selected option it
     # negotiates from.
     assert harness.reference_calls == [{"price": 10}]
-    assert repository.agreements[0]["agreed_price"] == 12
+    assert repository.agreements[0]["negotiated_scalar"] == 12
     assert repository.agreements[0]["agreement_bytes"] == b'{"accepted":true}'
     assert repository.agreements[0]["settlement_data"] == {"transaction_id": "a" * 64}
     assert repository.agreements[0]["accepted_at"] == "2026-08-15T00:00:00Z"
@@ -504,7 +504,7 @@ async def test_second_domain_owns_a_different_proposal_schema() -> None:
     )
 
     assert response["accepted_artifact"]["amount"] == 44
-    assert repository.agreements[0]["agreed_price"] == 44
+    assert repository.agreements[0]["negotiated_scalar"] == 44
     assert repository.threads["neg-fixed"]["buyer_escrow_proposal"] == {
         "tokens": 41
     }

@@ -45,7 +45,7 @@ async def test_administrative_acceptance_runs_the_domain_acceptance_hooks() -> N
     assert response["source"] == "admin_force_accept"
     assert response["accepted_artifact"]["amount"] == 13
     assert response["accepted_artifact"]["terms"] == {"units": 7}
-    assert repository.agreements[-1]["agreed_price"] == 13
+    assert repository.agreements[-1]["negotiated_scalar"] == 13
     assert repository.threads["neg-fixed"]["terminal_state"] == "success"
     assert [effect[0] for effect in repository.effects] == ["hold", "artifacts"]
     accepted = repository.messages["neg-fixed"][-1]

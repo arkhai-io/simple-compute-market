@@ -70,6 +70,12 @@ def make_legacy_negotiate_hook(
     capture: EnvelopeCapture | None = None,
 ) -> NegotiateFn:
     """Build the compute-instantiated negotiate hook over the core stage."""
+
+    def codec_for(match: dict[str, Any], proposal: Any):
+        # The same ceiling the core stage negotiates this match under.
+        max_price = derive_prices(match)[1] if derive_prices is not None else constraints.max_price
+        return amount_codec(match, proposal, opening_terms=provision, max_price=max_price)
+
     return _core_make_negotiate_hook(
         config=config,
         constraints=constraints,
@@ -86,7 +92,7 @@ def make_legacy_negotiate_hook(
         validate_acceptance=validate_buyer_acceptance,
         advertised_plan_validator=advertised_plan_validator,
         accepted_listing_record=accepted_listing_record,
-        amount_codec_factory=amount_codec,
+        amount_codec_factory=codec_for,
         capture=capture,
     )
 

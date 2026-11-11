@@ -1,11 +1,58 @@
-"""A complete VM multiplier quote rounds once without losing large integers."""
+"""VM multiplier arithmetic: the exact quote, the seller's floor, the rate pin."""
 from fractions import Fraction
+import hashlib
 import math
 
 import pytest
-from arkhai_vms_negotiation.amounts import quote_from_multiplier
+from dynaconf import Dynaconf
+from arkhai_vms_negotiation.amounts import (
+    multiplier_floor,
+    quote_from_multiplier,
+    rate_structure_digest,
+)
 from market_core.schemas import derive_settlement_option_id
+from market_identity import canonical_json
+from market_storefront.utils.config import negotiation_multiplier_floor
 from tests.unit import test_sync_negotiation_seller_round_hook as fixture
+
+
+def _negotiation(**values) -> Dynaconf:
+    source = Dynaconf(environments=False)
+    if values:
+        source.set("negotiation", values)
+    return source
+
+
+@pytest.mark.parametrize("floor", [0, 8000, 10_000])
+def test_a_floor_up_to_the_advertised_rates_is_read(floor):
+    assert negotiation_multiplier_floor(_negotiation(multiplier_floor_bps=floor)) == floor
+    assert multiplier_floor({"multiplier_floor_bps": floor}) == floor
+
+
+def test_an_unstated_floor_is_the_advertised_rates():
+    assert negotiation_multiplier_floor(_negotiation()) == 10_000
+
+
+@pytest.mark.parametrize("floor", [10_001, -1, 9_999.5, "10000", True])
+def test_a_floor_above_the_advertised_rates_or_not_an_integer_is_refused_by_key(floor):
+    with pytest.raises(ValueError, match=r"^\[negotiation\]\.multiplier_floor_bps must be"):
+        negotiation_multiplier_floor(_negotiation(multiplier_floor_bps=floor))
+    with pytest.raises(ValueError, match="multiplier_floor_bps"):
+        multiplier_floor({"multiplier_floor_bps": floor})
+
+
+def test_the_rate_pin_digests_the_canonical_rate_structure_alone():
+    structure = {
+        "gpu": [{"asset": fixture._TOKEN, "rate": "60", "per": "hour"}],
+        "cpu": [{"per": "hour", "rate": "10", "asset": fixture._TOKEN}],
+    }
+    reordered = {"cpu": structure["cpu"], "gpu": structure["gpu"]}
+    digest = rate_structure_digest({"listing_id": "L-1", "rate_structure": structure})
+    assert digest == hashlib.sha256(canonical_json(structure)).hexdigest()
+    assert rate_structure_digest({"listing_id": "L-2", "rate_structure": reordered}) == digest
+    assert rate_structure_digest({"rate_structure": {**structure, "cpu": []}}) != digest
+    assert rate_structure_digest({"listing_id": "L-1"}) is None
+    assert rate_structure_digest({"rate_structure": {}}) is None
 
 
 @pytest.mark.parametrize("bps", [9999, 10000, 10001, 12345])

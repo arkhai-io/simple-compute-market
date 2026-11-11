@@ -219,7 +219,7 @@ async def _seed(
     )
     await db.commit_agreed_terms(
         negotiation_id=NEGOTIATION,
-        agreed_price=100,
+        negotiated_scalar=100,
         agreed_duration_seconds=3600,
         agreement_bytes=raw,
         accepted_at=now,
@@ -354,7 +354,7 @@ async def test_settlement_is_pending_until_a_verified_receipt_then_delivers_once
     h = await make()
     with sqlite3.connect(h.db.db_path) as conn:
         conn.execute(
-            "UPDATE negotiation_threads SET agreed_price = ? WHERE negotiation_id = ?",
+            "UPDATE negotiation_threads SET negotiated_scalar = ? WHERE negotiation_id = ?",
             ("10000", NEGOTIATION),
         )
     pending = await h.settle()

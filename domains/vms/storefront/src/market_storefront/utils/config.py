@@ -18,6 +18,7 @@ import os
 import warnings
 from typing import Any
 
+from arkhai_vms_negotiation.amounts import BASIS_POINTS, multiplier_floor
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from dynaconf import Dynaconf
@@ -384,6 +385,27 @@ def source_confirmation_seconds(source: Dynaconf | None = None) -> float:
             f"intervals, which {reason}"
         )
     return window
+
+
+def negotiation_multiplier_floor(source: Dynaconf | None = None) -> int:
+    """`[negotiation].multiplier_floor_bps`: the lowest multiplier, in basis
+    points, the storefront accepts over a shape-priced listing's advertised
+    rates; 10,000 (the advertised rates themselves) unless stated.
+
+    Refused by key unless it is an integer from 0 to 10,000. A floor above the
+    advertised rates would make them a price the storefront refuses, so a buyer
+    reading them from the registry could never accept what was published.
+    """
+
+    active = settings if source is None else source
+    stated = active.get("negotiation.multiplier_floor_bps", BASIS_POINTS)
+    try:
+        return multiplier_floor({"multiplier_floor_bps": stated})
+    except ValueError:
+        raise ValueError(
+            "[negotiation].multiplier_floor_bps must be an integer from 0 to "
+            f"{BASIS_POINTS}: the advertised rates are the most a buyer is asked to pay"
+        ) from None
 
 
 def _positive_seconds(value: Any, *, key: str) -> float:

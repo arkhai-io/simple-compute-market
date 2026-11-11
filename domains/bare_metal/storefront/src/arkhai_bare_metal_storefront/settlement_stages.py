@@ -82,12 +82,14 @@ def _accepted_payment(
         seller = Identity.model_validate(thread["seller_principal"])
     except (MandatePolicyError, KeyError, TypeError, ValueError) as exc:
         raise SettlementRequestError("accepted payment state is invalid") from exc
+    # Bare-metal pricing is flat, so the Agreement's amount is the negotiated
+    # scalar itself.
     if (
         agreement.get("negotiation_id") != negotiation_id
         or agreement.get("listing_id") != thread.get("our_listing_id")
         or agreement.get("buyer") != buyer_principal.model_dump(mode="json")
         or agreement.get("seller") != seller.model_dump(mode="json")
-        or accepted.amount != thread.get("agreed_price")
+        or accepted.amount != thread.get("negotiated_scalar")
         or agreement.get("duration_seconds") != thread.get("agreed_duration_seconds")
     ):
         raise SettlementRequestError("stored Agreement does not match the accepted negotiation")

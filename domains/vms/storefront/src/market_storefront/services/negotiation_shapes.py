@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import closing
 from typing import Any, NoReturn
 
@@ -23,6 +23,7 @@ async def check_requested_shape(
     listing_resource: Mapping[str, Any],
     requested_resource: Mapping[str, Any],
     site_projections: SiteProjectionState,
+    feasibility: Callable[[dict[str, dict[str, Any]]], None] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Resolve the listing's own policy, never another shape's constraints.
 
@@ -30,6 +31,10 @@ async def check_requested_shape(
     supplies their effective resource; later grouped revisions are whole shapes.
     Source confirmation is separate from requested-shape feasibility: the held
     pool supplies policy, not an authoritative capacity probe.
+
+    The checks run in order: policy resolution, admissibility, ``feasibility``
+    (the caller's check of the requested shape against capacity, which raises
+    to refuse it), then the commercial guard on GPU model and region.
     """
     def refuse(reason: str) -> NoReturn:
         raise OfferUnfulfillableError(reason, listing_id=listing_id)
@@ -78,8 +83,11 @@ async def check_requested_shape(
     if problems:
         refuse(f"shape_inadmissible: {tuple(str(problem) for problem in problems)}")
 
-    # Requested-shape authoritative feasibility is not composed. The source
-    # check confirms only the advertised listing, not this requested shape.
+    # Requested-shape authoritative feasibility is not composed: the source
+    # check confirms only the advertised listing, not this requested shape. The
+    # caller's stand-in, if any, runs in its place, before the commercial guard.
+    if feasibility is not None:
+        feasibility(shape)
     mismatches = {
         key: {"requested": requested_resource[key], "listing": listing_resource.get(key)}
         for key in ("gpu_model", "region")

@@ -40,7 +40,7 @@ from market_negotiation_runtime import (
     RoundEvaluation,
     RoundRequest,
 )
-from market_policy.scalar_policies import _amount_from_proposal
+from market_policy.scalar_policies import amount_from_proposal
 
 import apicredits_storefront.container as _container
 from apicredits_storefront.listing_binding import api_credit_listing_binding
@@ -216,7 +216,7 @@ def _agreement(
 
 
 def _amount(proposal: Mapping[str, Any] | None) -> int | None:
-    value = _amount_from_proposal(proposal)
+    value = amount_from_proposal(proposal)
     return int(value) if value is not None else None
 
 
@@ -548,7 +548,9 @@ def _with_agreement(
             if isinstance(artifacts.get("settlement_selection"), Mapping)
             else None
         ),
-        amount=acceptance.agreed_amount,
+        # API-credit listings are priced flat: the negotiated scalar is the
+        # absolute amount the buyer pays.
+        amount=acceptance.negotiated_scalar,
         asset=asset,
         duration_seconds=acceptance.agreement.duration_seconds,
         start_utc=acceptance.agreement.start_utc,
@@ -584,7 +586,7 @@ def _build_response_artifacts(
             dispatch,
             selection=selection,
             option=option,
-            agreed_amount=acceptance.agreed_amount,
+            agreed_amount=acceptance.negotiated_scalar,
             buyer_principal=acceptance.buyer_principal,
             seller_principal=acceptance.seller_principal,
             listing=acceptance.listing_record,
@@ -603,7 +605,7 @@ def _build_response_artifacts(
             offered = authorized_escrow_proposal_at_amount(
                 proposal=acceptance.pinned_proposal,
                 listing=acceptance.listing_record,
-                agreed_amount=acceptance.agreed_amount,
+                agreed_amount=acceptance.negotiated_scalar,
                 uses_scalar_amount=acceptance.uses_scalar_amount,
             )
         except ReleaseConditionError as exc:
@@ -614,7 +616,7 @@ def _build_response_artifacts(
             buyer_principal=acceptance.buyer_principal,
             seller_principal=acceptance.seller_principal,
             proposal=acceptance.pinned_proposal,
-            agreed_amount=acceptance.agreed_amount,
+            agreed_amount=acceptance.negotiated_scalar,
             uses_scalar_amount=acceptance.uses_scalar_amount,
             listing=acceptance.listing_record,
         )

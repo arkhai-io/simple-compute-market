@@ -21,19 +21,36 @@ policy MUST NOT price a shape it has already determined it will not serve.
 Where a domain's offering carries a resolvable rate structure, the quantity negotiated
 between the parties MUST be a multiplier over the offering's advertised minimum rate
 structure rather than an absolute amount for one shape. The multiplier MUST be carried
-as an integer in basis points (10,000 is the advertised minimum), and every amount
-derived from it MUST be computed in exact integer or decimal arithmetic, rounded
-upward to the asset's base unit, and refused rather than truncated when it exceeds the
-asset's amount type. A round's concession MUST remain comparable to the previous
-round's when the requested capacity shape differs between them. A seller's commercial
-floor MUST be expressible once, as a bound on the multiplier, and apply to every
-admissible shape without per-shape restatement. The quote for a round is derived by
-each party from the advertised rate structure and the round's shape and multiplier;
-it is not carried on the wire. At opening, the seller MUST persist the digest of
-the seller-authenticated rate structure. A later round or acceptance MUST be refused
-with the distinct reason `rate_structure_changed_reopen` if the structure changed,
-even when the advertised shape's composed total is unchanged. The buyer may still
-exit the negotiation.
+as an integer in basis points (10,000 is the advertised minimum), and the storefront
+MUST record it as the negotiation's negotiated scalar, never under a name that reads
+as a price or an amount. The quote for a shape MUST be the selected settlement
+option's advertised rate scaled by the ratio of the requested shape's composed price
+to the advertised shape's, so the family rates set only that ratio, and then by the
+multiplier. Every amount derived from it MUST be computed in exact integer or decimal
+arithmetic, rounded upward to the asset's base unit once, and refused rather than
+truncated when it exceeds the asset's amount type. A round's concession MUST remain
+comparable to the previous round's when the requested capacity shape differs between
+them. A seller's commercial floor MUST be expressible once, as a bound on the
+multiplier of at most 10,000, and apply to every admissible shape without per-shape
+restatement. The quote for a round is derived by each party from the advertised rate
+structure and the round's shape and multiplier; it is not carried on the wire.
+
+A buyer reads the rate structure from the registry's listing, authenticated by the
+seller's publication. The seller MUST price and pin a negotiation from its most
+recent successful registry publication, the rates the buyer read, not from its own
+stored listing record. At opening, the seller MUST persist the digest of that rate
+structure. A later round or acceptance MUST be refused with the distinct reason
+`rate_structure_changed_reopen` if the published structure changed, even when the
+advertised shape's composed total is unchanged; a thread with no pin MUST be refused
+the same way. A republication no registry accepted changes nothing a negotiation
+reads. Where the seller's registries last accepted different rate structures, the
+seller MUST refuse openings, rounds and acceptances distinctly until they converge,
+and a shape-priced listing no registry has accepted a publication of MUST take no
+opening. The buyer may still exit the negotiation.
+
+A buyer MUST refuse an acceptance whose derived payment exceeds its own monetary
+ceiling. Settlement MUST read money only from the Agreement and its bound mandate,
+never from the negotiated scalar.
 
 #### Scenario: Family rates change without changing the advertised total
 
@@ -66,6 +83,43 @@ exit the negotiation.
   asset cannot represent
 - **THEN** the round is refused with that reason and no truncated amount is proposed
 
+#### Scenario: A smaller shape is quoted by the composed-price ratio
+
+- **WHEN** a selected option advertises a rate for the listing's shape and the
+  requested shape's composed price is half the advertised shape's
+- **THEN** the quote at 10,000 basis points is half what the option's rate charges for
+  the same duration, rounded upward once
+
+#### Scenario: A seller configures a floor above the advertised rates
+
+- **WHEN** a seller configures a multiplier floor above 10,000
+- **THEN** the storefront refuses the configuration at load
+
+#### Scenario: A republication fails during a negotiation
+
+- **WHEN** a seller's republication of a listing fails at every registry after a
+  negotiation opened
+- **THEN** the negotiation continues against the rates last published successfully
+
+#### Scenario: Registries hold different rates
+
+- **WHEN** one of a seller's registries accepted a republication with new rates and
+  another refused it
+- **THEN** the seller refuses openings, rounds and acceptances on the listing with a
+  distinct reason until its resend brings the registries to the same rates
+
+#### Scenario: A buyer's acceptance would exceed its ceiling
+
+- **WHEN** the payment derived from a seller's offer — its multiplier, the agreed
+  shape and duration, and the published rates — exceeds the buyer's monetary ceiling
+- **THEN** the buyer refuses to accept it
+
+#### Scenario: The negotiated scalar is not money
+
+- **WHEN** a shape-priced negotiation is accepted
+- **THEN** the storefront records the agreed multiplier as the negotiation's negotiated
+  scalar, and the Agreement, its mandate, and settlement carry the derived payment
+
 ### Requirement: A round may revise the capacity shape
 
 A negotiation round after the first MAY carry a revised capacity shape as a child of
@@ -77,9 +131,11 @@ and acceptance MUST resume that quote's terms without mutating the opening. Befo
 a revised shape the seller MUST evaluate, where its composition provides them,
 admissibility, authoritative feasibility, and commercial feasibility, and MUST report
 each refusal distinctly. A domain that composes no admissibility or feasibility check
-MUST state so in its composition rather than silently evaluating on price alone. A
-first-round shape that differs from the listing's is evaluated the same way rather
-than refused.
+MUST state so in its composition rather than silently evaluating on price alone.
+Until a seller composes an authoritative feasibility check, it MUST refuse, with a
+distinct reason and before pricing, a requested shape exceeding the listing's
+advertised shape on any quantity. A first-round shape that differs from the listing's
+is evaluated the same way rather than refused.
 
 #### Scenario: A buyer proposes a smaller shape
 
@@ -92,6 +148,13 @@ than refused.
 - **WHEN** a revised shape is outside what the seller will consider
 - **THEN** the refusal names admissibility, distinct from a feasibility or commercial
   refusal
+
+#### Scenario: A revised shape exceeds the advertised shape
+
+- **WHEN** a seller composes no authoritative feasibility check and a revised shape
+  asks for more of any quantity than the listing advertises
+- **THEN** the seller refuses it with a reason distinct from admissibility and
+  commercial refusals, without pricing it
 
 #### Scenario: A revised shape is unreadable
 

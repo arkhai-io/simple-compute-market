@@ -687,6 +687,24 @@ over the migrated database.
   option's identifier is not stable across a release that changes the envelope.
   Buyers re-read listings after such an upgrade; a closed listing at a registry
   keeps its older shape as history, and nothing rewrites it.
+- **Open negotiations cross the upgrade one way.** A shape-priced VM listing
+  negotiates a basis-point multiplier over its rates rather than an amount, every
+  storefront stores that negotiated quantity under a renamed column, and a VM
+  storefront pins and prices each negotiation from the rates it last published
+  successfully. None of this is read by an earlier image. Before upgrading a VM
+  storefront, drain it:
+  1. Pause new negotiations (`POST /api/v1/admin/pause`, with the `admin` role).
+  2. Let open negotiation threads end — accepted, exited, or expired.
+  3. Settle the deals already accepted.
+  4. Take the backup (step 1 of the procedure).
+
+  A shape-priced thread left open does not carry across: the upgraded storefront
+  refuses its next round or acceptance — `rate_structure_unpublished` until the
+  listing's next successful publication records what it published, then
+  `rate_structure_changed_reopen` for having no rate pin — and the buyer
+  reopens. A shape-priced listing takes no new negotiation until that
+  publication. Roll back only by deploying the earlier image over that backup; a
+  deal negotiated after the upgrade cannot be carried back.
 - **Storefront tables.** A storefront creates the tables v0.3.0 created only when
   a store first opened, where they are absent, and drops the inventory tables
   v0.3.0 kept frozen, with their rows; inventory is declared at provisioning

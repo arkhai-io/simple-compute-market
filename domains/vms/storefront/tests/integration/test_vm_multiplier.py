@@ -5,6 +5,7 @@ import json
 import math
 from fractions import Fraction
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from compute_delivery import agreement_window
 from market_deal_servicing import EndSession
@@ -14,11 +15,17 @@ import pytest
 
 from arkhai_vms import make_vm_provision_terms
 from arkhai_vms_buyer.negotiation_amounts import amount_codec
+from arkhai_vms_negotiation.storefront_round import SellerRoundResult
 from market_core.schemas import ProvisionTerms, derive_settlement_option_id
+from market_negotiation_runtime import OfferUnfulfillableError
 from core_storefront.aggregation import fill_first
 from market_capacity_publication import CapacityRuntime, CapacitySite, PublicationBinding
 from market_resource_pools_contracts.backing import BACKED
-from market_policy.negotiation_middleware import NegotiationContext, NegotiationRound
+from market_policy.negotiation_middleware import (
+    NegotiationContext,
+    NegotiationDecision,
+    NegotiationRound,
+)
 from market_policy.scalar_policies import bisection_middleware
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from market_storefront.services.vm_job_spec_service import compute_capacity_claim_from_order
@@ -33,7 +40,7 @@ from tests.unit.test_sync_negotiation_seller_round_hook import db, marketplace_d
 from tests.unit import test_sync_negotiation_seller_round_hook as fixture
 
 
-async def prepare(db, hourly=100, capacity_runtime=None):
+async def prepare(db, hourly=100, capacity_runtime=None, seller_round_hook=None):
     record = await db.load_listing(listing_id="L-hook")
     resource = {**json.loads(record["listing_resource"]), "vcpu_count": 4}
     option = fixture._option().model_dump(mode="json")
@@ -44,11 +51,8 @@ async def prepare(db, hourly=100, capacity_runtime=None):
     await db.update_listing(
         listing_id="L-hook", listing_resource=resource,
         settlement_options=[option],
-        rate_structure={
-            "gpu": [{"asset": fixture._TOKEN, "rate": "60", "per": "hour"}],
-            "cpu": [{"asset": fixture._TOKEN, "rate": "10", "per": "hour"}],
-        },
     )
+    await fixture._reprice(db, fixture._structure({"gpu": "60", "cpu": "10"}))
     state = await loaded_site_projection_state({"site-test": FakeProjectionSite(resource_pools=[{
         "pool_id": "pool-L-hook", "pool_metadata": {"policy_tags": {"listing_shapes": {"vm": [{
             "gpu": {"model": "H200", "count": 1}, "cpu": {"count": {"offer": 4, "max": 8}},
@@ -59,6 +63,7 @@ async def prepare(db, hourly=100, capacity_runtime=None):
         return build_vm_negotiation_runtime(
             registration.contract, registry=db.domain_registry, binding=registration.binding,
             capacity_runtime=capacity_runtime or fixture._capacity_runtime(), site_projections=state,
+            seller_round_hook=seller_round_hook,
             listing_source_check=fixture._source_matches,
         )
     def proposal(amount):
@@ -83,7 +88,7 @@ async def test_shape_change_keeps_the_floor_and_exact_payment_through_persistenc
     assert opened["proposal"]["fields"]["amount"] == "10000"
     revised = proposal(9500)
     revised["provision_terms"] = {"kind": "compute.v1", "version": 1, "payload": {
-        "gpu": {"model": "H200", "count": 1}, "cpu": {"count": 6},
+        "gpu": {"model": "H200", "count": 1}, "cpu": {"count": 3},
     }}
     async def continue_(action, value):
         return await runtime().continue_negotiation(
@@ -99,7 +104,7 @@ async def test_shape_change_keeps_the_floor_and_exact_payment_through_persistenc
     ], NegotiationContext(direction="minimize", our_reference_amount=10000))
     assert buyer_decision.action == "accept"
     accepted = await continue_(buyer_decision.action, buyer_decision.proposal)
-    expected = math.ceil(Fraction(hourly * 6 * 1801, 5 * 3600))
+    expected = math.ceil(Fraction(hourly * 9 * 1801, 10 * 3600))
     assert accepted["action"] == "accept"
     assert int(accepted["accepted_escrow_proposal"]["fields"]["amount"]) == expected
     assert accepted["agreement"].amount == expected
@@ -209,8 +214,66 @@ async def test_explicit_lower_floor_applies_to_an_unanticipated_shape(db):
             repository=db, listing_id="L-hook", buyer_principal=fixture._BUYER,
             seller_principal=fixture._SELLER, actor_principal=fixture._BUYER,
             proposal=proposal(7800), terms=make_vm_provision_terms(
-                duration_seconds=3600, ssh_public_key="", compute_resource={"vcpu_count": 7},
+                duration_seconds=3600, ssh_public_key="", compute_resource={"vcpu_count": 3},
             ), seller_agent_url="http://seller.test", buyer_agent_url="http://buyer.test",
         )
     assert opened["action"] == "counter"
     assert opened["proposal"]["fields"]["amount"] == "8000"
+
+
+async def test_a_shape_larger_than_advertised_refuses_before_pricing(db):
+    """The policy admits up to eight vCPUs, but no probe can confirm more than
+    the four advertised."""
+    hook = AsyncMock()
+    _listing, runtime, proposal = await prepare(db, seller_round_hook=hook)
+    with pytest.raises(OfferUnfulfillableError, match="^shape_exceeds_advertised: ") as refused:
+        await runtime().start(
+            repository=db, listing_id="L-hook", buyer_principal=fixture._BUYER,
+            seller_principal=fixture._SELLER, actor_principal=fixture._BUYER,
+            proposal=proposal(9000), terms=make_vm_provision_terms(
+                duration_seconds=3600, ssh_public_key="", compute_resource={"vcpu_count": 6},
+            ), seller_agent_url="http://seller.test", buyer_agent_url="http://buyer.test",
+        )
+    assert "vcpu_count" in refused.value.reason
+    assert "gpu_count" not in refused.value.reason
+    hook.assert_not_awaited()
+
+
+async def test_a_revision_larger_than_advertised_refuses_and_the_thread_continues(db):
+    hook = AsyncMock()
+    _listing, runtime, proposal = await prepare(db, seller_round_hook=hook)
+    hook.return_value = SellerRoundResult(
+        our_amount=10_000, strategy_label="maximize", direction="maximize",
+        chain_label="custom",
+        decision=NegotiationDecision(action="counter", proposal=proposal(10_000)),
+    )
+    opened = await runtime().start(
+        repository=db, listing_id="L-hook", buyer_principal=fixture._BUYER,
+        seller_principal=fixture._SELLER, actor_principal=fixture._BUYER,
+        proposal=proposal(9000), terms=make_vm_provision_terms(
+            duration_seconds=3600, ssh_public_key="",
+        ), seller_agent_url="http://seller.test", buyer_agent_url="http://buyer.test",
+    )
+    hook.reset_mock()
+
+    async def revise(gpu_count):
+        revised = proposal(9500)
+        revised["provision_terms"] = {"kind": "compute.v1", "version": 1, "payload": {
+            "gpu": {"model": "H200", "count": gpu_count}, "cpu": {"count": 2},
+        }}
+        return await runtime().continue_negotiation(
+            repository=db, negotiation_id=opened["negotiation_id"], buyer_action="counter",
+            buyer_proposal=revised, buyer_reason=None, buyer_principal=fixture._BUYER,
+            seller_principal=fixture._SELLER, actor_principal=fixture._BUYER,
+            actor_role="buyer",
+        )
+
+    with pytest.raises(OfferUnfulfillableError, match="^shape_exceeds_advertised: "):
+        await revise(2)
+    hook.assert_not_awaited()
+    smaller = await revise(1)
+    assert smaller["action"] == "counter"
+    hook.assert_awaited_once()
+    assert hook.await_args.kwargs["requested_shape"] == {
+        "gpu": {"model": "H200", "count": 1}, "cpu": {"count": 2},
+    }

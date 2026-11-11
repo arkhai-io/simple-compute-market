@@ -201,7 +201,9 @@ policies           = ["has_matching_inventory_guard", "escrow_shape_guard", "bis
 seller_model_path  = "domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_seller.pt"
 buyer_model_path   = "domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_buyer.pt"
 extra_policy_paths = []
-# One commercial floor for every shape priced by the advertised rate structure.
+# One commercial floor for every shape priced by the advertised rate structure,
+# in basis points of the advertised rates: an integer from 0 to 10000, so the
+# advertised rates are always a price the storefront accepts.
 multiplier_floor_bps = 10000
 
 [pricing]

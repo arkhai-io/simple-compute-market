@@ -28,8 +28,13 @@ from arkhai_vms_listings import (
 )
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_negotiation import storefront_round as vm_storefront_round
-from arkhai_vms_negotiation.policies import _amount_from_proposal
-from arkhai_vms_negotiation.amounts import has_rate_structure, multiplier_floor, quote_from_multiplier
+from arkhai_vms_negotiation.policies import amount_from_proposal
+from arkhai_vms_negotiation.amounts import (
+    has_rate_structure,
+    multiplier_floor,
+    quote_from_multiplier,
+    rate_structure_digest,
+)
 from arkhai_vms_negotiation.storefront_round import SellerRoundHook
 from arkhai_vms_settlement.proposals import accepted_escrow_artifacts_from_proposal
 from market_alkahest.proposals import (
@@ -93,14 +98,75 @@ AcceptedObligationDispatch = Mapping[
 ]
 
 
-def _rate_structure_digest(listing: Mapping[str, Any]) -> str | None:
-    structure = listing.get("rate_structure")
-    if structure is None:
-        return None
-    encoded = json.dumps(
-        structure, sort_keys=True, separators=(",", ":"), allow_nan=False
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+#: A requested shape asking more of some quantity than the listing advertises.
+#: Nothing checks a larger shape against capacity, so the advertised shape is
+#: the most a negotiation may ask for.
+SHAPE_EXCEEDS_ADVERTISED = "shape_exceeds_advertised"
+#: A negotiation round or acceptance over rates other than those its opening
+#: was pinned to.
+RATE_STRUCTURE_CHANGED_REOPEN = "rate_structure_changed_reopen"
+#: A shape-priced listing no configured registry has yet accepted a publish of.
+RATE_STRUCTURE_UNPUBLISHED = "rate_structure_unpublished"
+#: Configured registries last accepted different rate structures for a listing.
+RATE_STRUCTURE_DIVERGENT = "rate_structure_divergent"
+
+
+def _published_rate_structure(payload: Mapping[str, Any]) -> Any:
+    pricing = payload.get("pricing")
+    structure = pricing.get("rate_structure") if isinstance(pricing, Mapping) else None
+    return structure or None
+
+
+async def _as_last_published(
+    repository: Any, record: Mapping[str, Any]
+) -> tuple[dict[str, Any], str | None]:
+    """The listing record carrying the rates its registries last accepted.
+
+    The seller prices, and pins a negotiation to, what a buyer could read from a
+    registry: the rate structure each configured registry's last successful
+    publish carried, never a stored rate a failed publish did not deliver.
+    Returns the record with that structure in place of its own, and the reason
+    a negotiation over it must be refused, or ``None``.
+
+    A registry absent from the configuration is ignored, since publication neither
+    reaches nor repairs it. With nothing published, a flat-priced record is
+    returned as stored, while a shape-priced one is refused until its first
+    successful publish. Registries holding different structures are refused
+    until convergence resends the listing to the ones that diverged.
+    """
+    configured = {str(url) for url in (settings.get("registry.urls") or ())}
+    payloads = await repository.load_published_payloads(
+        listing_id=str(record["listing_id"])
+    )
+    published: dict[str | None, Any] = {}
+    for registry_url, payload in payloads.items():
+        if registry_url not in configured:
+            continue
+        structure = _published_rate_structure(payload)
+        published[rate_structure_digest({"rate_structure": structure})] = structure
+    if not published:
+        refusal = RATE_STRUCTURE_UNPUBLISHED if has_rate_structure(record) else None
+        return dict(record), refusal
+    if len(published) > 1:
+        return dict(record), RATE_STRUCTURE_DIVERGENT
+    (structure,) = published.values()
+    return {**record, "rate_structure": structure}, None
+
+
+def _quantities_above_advertised(
+    requested: Mapping[str, Mapping[str, Any]],
+    advertised: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, int]]:
+    """Each quantity ``requested`` asks more of than ``advertised`` offers.
+
+    A quantity the advertised shape does not state offers none.
+    """
+    offered = flatten_vm_shape(advertised).quantities
+    return {
+        name: {"requested": quantity, "advertised": offered.get(name, 0)}
+        for name, quantity in flatten_vm_shape(requested).quantities.items()
+        if quantity > offered.get(name, 0)
+    }
 
 
 def _negotiation_settings() -> Any:
@@ -250,7 +316,7 @@ def _proposal_from_amount(
 
 
 def _amount(proposal: Mapping[str, Any] | None) -> int | None:
-    value = _amount_from_proposal(proposal)
+    value = amount_from_proposal(proposal)
     return int(value) if value is not None else None
 
 
@@ -601,7 +667,7 @@ def _with_agreement(
         ).settlement_params
         if artifacts.get("settlement_selection") is not None
         else {},
-        amount=acceptance.agreed_amount if payment_amount is None else payment_amount,
+        amount=acceptance.negotiated_scalar if payment_amount is None else payment_amount,
         asset=asset,
         duration_seconds=acceptance.agreement.duration_seconds,
         start_utc=acceptance.agreement.start_utc,
@@ -625,14 +691,14 @@ def _build_response_artifacts(
     # its backing; only capacity effects ask the backing to admit them.
     if not isinstance(acceptance.binding, PublicationBinding):
         raise RuntimeError("VM negotiation has no frozen listing binding")
-    payment_amount = acceptance.agreed_amount
+    payment_amount = acceptance.negotiated_scalar
     if acceptance.uses_scalar_amount and has_rate_structure(acceptance.listing_record):
         try:
-            if accepted and acceptance.agreed_amount < multiplier_floor(_negotiation_settings()):
+            if accepted and acceptance.negotiated_scalar < multiplier_floor(_negotiation_settings()):
                 raise ValueError("multiplier_below_floor")
             payment_amount = quote_from_multiplier(
                 acceptance.listing_record, acceptance.pinned_proposal,
-                acceptance.agreed_amount, acceptance.agreement.duration_seconds,
+                acceptance.negotiated_scalar, acceptance.agreement.duration_seconds,
                 vm_listing_resource_shape(acceptance.terms.decoded.compute_resource)
                 if getattr(acceptance.terms.decoded, "compute_resource", None) else None,
             )
@@ -965,6 +1031,9 @@ def build_vm_negotiation_runtime(
             capacity_binding,
             site_id=listing_binding.site_id,
         )
+        record, refusal = await _as_last_published(repository, record)
+        if refusal is not None:
+            raise OfferUnfulfillableError(refusal, listing_id=listing_id)
         return ResolvedNegotiation(
             listing_id=listing_id,
             listing=Listing.model_validate(record),
@@ -1011,6 +1080,10 @@ def build_vm_negotiation_runtime(
             capacity_binding,
             site_id=thread_binding.site_id,
         )
+        # Not refused here: a buyer may exit whatever the listing's rates now
+        # are. Every validated round and acceptance refuses in
+        # validate_continuation instead.
+        record, _refusal = await _as_last_published(repository, record)
         return ResolvedNegotiation(
             listing_id=listing_id,
             listing=Listing.model_validate(record),
@@ -1034,17 +1107,32 @@ def build_vm_negotiation_runtime(
         # revisions are whole shapes and must never inherit omitted families.
         if partial:
             requested = {**advertised, **requested}
+        listing_id = str(record["listing_id"])
+
+        def within_advertised(shape: Mapping[str, Mapping[str, Any]]) -> None:
+            # Stands in for the authoritative feasibility probe, which is not
+            # composed: only the advertised shape is confirmed against its
+            # source, so no quantity may exceed it.
+            exceeded = _quantities_above_advertised(
+                shape, vm_listing_resource_shape(advertised)
+            )
+            if exceeded:
+                raise OfferUnfulfillableError(
+                    f"{SHAPE_EXCEEDS_ADVERTISED}: {exceeded}", listing_id=listing_id
+                )
+
         shape = await check_requested_shape(
             repository=repository,
-            listing_id=str(record["listing_id"]),
+            listing_id=listing_id,
             listing_resource=advertised,
             requested_resource=requested,
             site_projections=site_projections,
+            feasibility=within_advertised,
         )
         if not record.get("rate_structure") and shape != vm_listing_resource_shape(advertised):
             raise OfferUnfulfillableError(
                 "shape_commercially_infeasible: flat-priced listing is shape-fixed",
-                listing_id=str(record["listing_id"]),
+                listing_id=listing_id,
             )
         # Persist the complete effective shape so later rounds do not merge
         # a partial opening with a republished listing.
@@ -1085,7 +1173,11 @@ def build_vm_negotiation_runtime(
             **(result.intermediate or {}),
             "shape_checks": {
                 "admissibility": "checked" if shape is not None else "not requested",
-                "authoritative_feasibility": "not checked",
+                # No probe is composed; the advertised-shape cap stands in.
+                "authoritative_feasibility": (
+                    "not checked; capped at the advertised shape"
+                    if shape is not None else "not requested"
+                ),
                 "commercial_feasibility": "checked" if shape is not None else "not requested",
             },
         }
@@ -1116,16 +1208,22 @@ def build_vm_negotiation_runtime(
         thread: Mapping[str, Any],
         revised_terms: NegotiationTerms | None,
     ) -> None:
+        listing_id = str(listing_record["listing_id"])
+        # ``listing_record`` already carries the last published rates; reading
+        # them again finds what resolving the thread did not refuse.
+        _published, refusal = await _as_last_published(repository, listing_record)
+        if refusal is not None:
+            raise OfferUnfulfillableError(refusal, listing_id=listing_id)
         pin = await repository.load_domain_artifact(
             negotiation_id=thread["negotiation_id"],
             artifact_slot="message:rate-structure-pin",
             registry=registry,
         )
-        current_digest = _rate_structure_digest(listing_record)
-        if getattr(pin, "rate_structure_digest", None) != current_digest:
+        if getattr(pin, "rate_structure_digest", None) != rate_structure_digest(
+            listing_record
+        ):
             raise OfferUnfulfillableError(
-                "rate_structure_changed_reopen",
-                listing_id=str(listing_record["listing_id"]),
+                RATE_STRUCTURE_CHANGED_REOPEN, listing_id=listing_id
             )
         await prepare_requested_shape(repository, listing_record, revised_terms or terms)
 
@@ -1151,7 +1249,7 @@ def build_vm_negotiation_runtime(
             artifact_slot="message:rate-structure-pin",
             value={
                 "duration_seconds": opening.terms.requested_duration_seconds or 3600,
-                "rate_structure_digest": _rate_structure_digest(opening.listing_record),
+                "rate_structure_digest": rate_structure_digest(opening.listing_record),
             },
             registry=registry,
         )

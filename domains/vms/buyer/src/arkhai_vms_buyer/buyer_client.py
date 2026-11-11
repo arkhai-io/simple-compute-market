@@ -133,10 +133,11 @@ def negotiate_with_seller(
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
-    Prices are per-hour bounds for the advertised shape. A seller-authenticated
-    registry ``listing`` with a rate structure converts those bounds to basis
-    points once; accepted terms determine the monetary payment. Without a rate
-    structure, lease hours scale the bounds to absolute amounts.
+    Prices are per-hour bounds for the shape the buyer opens with. A
+    seller-authenticated registry ``listing`` with a rate structure converts
+    those bounds to basis points once; accepted terms determine the monetary
+    payment, which may not exceed ``max_price`` over the accepted duration.
+    Without a rate structure, lease hours scale the bounds to absolute amounts.
 
     ``validate_acceptance`` defaults to the purchase table's entry guard. An
     introduction has no purchase entry and passes None; its command checks
@@ -165,12 +166,20 @@ def negotiate_with_seller(
             )
 
     proposal_for_amount = settlement_selection or escrow_proposal
+    opening_terms: Any = provision_terms
     if resume is not None:
         proposal_for_amount = next(
             (entry.proposal for entry in resume.transcript if entry.sender == "us" and entry.proposal),
             None,
         )
-    codec = amount_codec(listing, proposal_for_amount) if proposal_for_amount is not None else None
+        # The seller's round-zero echo is the complete shape the run opened with.
+        opening_terms = resume.accepted_provision_terms
+    codec = (
+        amount_codec(
+            listing, proposal_for_amount, opening_terms=opening_terms, max_price=max_price,
+        )
+        if proposal_for_amount is not None else None
+    )
     core_outcome = _core_negotiate_with_seller(
         seller_url=seller_url,
         principal=principal,

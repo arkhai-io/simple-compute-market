@@ -373,7 +373,16 @@ Slice C plan (2026-11-06):
 - [x] 2.14 Focused tests: a negotiation agreeing a shape smaller than the listing's
       reserves the smaller shape; the committed reservation's dimensions match the
       agreed shape; the fulfillment request derives from the reservation.
-- [ ] 2.15 **Unobservable after a genuine VM-lane attempt; owner-authorized disposition.**
+- [ ] 2.15 **Amended by the round-1 triage (owner record R13):** no buyer command
+      could request a shape, so the run below could not have been made as written.
+      Add a round-0 shape option to the VM buyer's `buy` and `negotiate` commands,
+      filling `compute_resource` within the advertised cap (D10), and a stage in
+      `e2e-tests/tests/e2e/roles/scenarios/vms/test_listing_shapes.py` after 07a that
+      buys a smaller shape and asserts the reservation's dimensions and create-job
+      sizing equal it, reusing 05a/05b's helpers. Validation's pipeline (the CI
+      runner with Docker) and Helm parts observe it; the local Podman Compose
+      include-path failure below stays out of scope.
+      **Unobservable after a genuine VM-lane attempt; owner-authorized disposition.**
       One e2e run with a shape agreed below the listing's, asserting the VM
       built has the agreed shape. Fresh rebased images built with Podman 5.7.0 and
       the explicit native Compose 1.6.0 provider, but startup failed before readiness
@@ -447,6 +456,103 @@ Slice C plan (2026-11-06):
   to drain incompatible negotiations are explicit PR review items. Promotion
   and archival remain post-review; none of the closeout items below is ticked
   by these implementation checks alone.
+
+### Round-1 triage fixes (2026-11-11)
+
+The implementation round's triage (review 02, validation 05, owner records 01 and
+06) made every accepted fix in one pass against `30f7e4216`; another implementation
+review follows the fix commit's validation. Before fixing, each point's code was
+compared with `origin/spot-deals` (06 O1): none was rewritten there, so none was
+deferred; R4, R5, R9 and R13 conflict with #351's later lines in the files they
+share, which #351's triage resolves.
+
+- **02 F1** — the administrator's settlement preview builds its order with
+  `settlement_vm_order` when given an accepted negotiation, in both its held and
+  fresh-reserve branches (`services/admin_settle_service.py`); a resized-deal unit
+  regression covers both.
+- **02 F2** — `tests/integration/test_revised_shape_client.py` drives a smaller-shape
+  counter through the typed storefront client against the served shape-priced app
+  and asserts the Agreement's terms, the plan's order and the stored Agreement.
+- **01 R2** — `negotiation.multiplier_floor_bps` above 10,000 (or negative, or not
+  an integer) is refused at VM storefront composition (`negotiation_multiplier_floor`).
+- **01 R3** — the VM buyer's amount codec converts price bounds against its opening
+  shape and refuses a payment above its ceiling, admitting the quote's one upward
+  rounding (`negotiation_amounts.py`).
+- **01 R4** — the buyer lifts `pricing.rate_structure` into its record's
+  `rate_structure` at its registry boundary (`registry_listing.py`, `negotiate_cli.py`,
+  `buy_cli.py`, `settlement_composition.accepted_listing_record`); `Listing` reads
+  `pricing.rate_structure` when no top-level structure is stated.
+- **01 R5** — core migration `20261111_001_publication_published_payload` adds
+  `publications.published_payload_json`, written only by a successful publish
+  (`_record_results`; reopen updates go through `_record_reopens` and keep it).
+  `load_published_payloads` reads it; the VM runtime overlays the configured
+  registries' last published `pricing.rate_structure` where it resolves the listing
+  (`_as_last_published`), refusing `rate_structure_unpublished` and
+  `rate_structure_divergent` at opening and at every validated round and acceptance,
+  never at exit. `rate_structure_digest` moved to `arkhai_vms_negotiation.amounts`
+  over `market_identity.canonical_json` (the package now declares
+  `arkhai-kit-identity`; locks refreshed).
+- **01 R6** — requested shapes above the advertised shape on any quantity refuse as
+  `shape_exceeds_advertised`, at the feasibility position of `check_requested_shape`;
+  the round's `shape_checks` says so. Two existing multiplier tests that revised
+  above the advertised 4 vCPUs now revise to 3.
+- **01 R9** — core migration `20261111_002_negotiation_negotiated_scalar` renames
+  `negotiation_threads.agreed_price` to `negotiated_scalar`; the client's records,
+  the negotiation summary and detail wire, `storefront_client.models`, the kit's
+  `Acceptance.negotiated_scalar` and stage events, and every VM, bare-metal and
+  API-credit storefront consumer follow. Money parameters (the settlement build
+  context's `agreed_amount`, obligation builders, the buyer's outcome) keep their
+  names. Three `docs/attachments` smoke scripts that call `commit_agreed_terms` were
+  updated to the new keyword.
+- **01 R12** — `kit/policy` exports `amount_from_proposal` and `set_proposal_amount`;
+  every importer uses them, with no alias.
+- **01 R13** — `market buy` and `market negotiate` take `--shape`; stages 07a2–07a5 of
+  `test_listing_shapes.py` buy a smaller shape, assert the reservation and the create
+  job's sizing, and release the holds before 07b refreshes the listing. Unobserved
+  until the fix commit's pipeline runs the VM lane.
+- **06 O2, outside the plan** — `dev-env/Dockerfile` installs nothing; `compose.dev.yml`,
+  `compose/external.yml` and the `dev-env` chart's probes call `cast block-number`, so
+  the image build no longer reaches `archive.ubuntu.com`.
+- Documents: design.md decisions numbered D1–D17 with the owner record's settlements,
+  proposal's "Knowledge to promote" per decision, the spec deltas (ratio rule, floor
+  bound, last-published pin, divergence, buyer ceiling, negotiated scalar, settlement
+  money, the advertised-shape cap) and a new `storefront-publication` delta;
+  `docs/operator-handbook.md`'s drain steps; the probe change's proposal and index
+  row; this change's index row; three unowned-work rows.
+
+Evidence (each suite at the levels `TESTING.md` defines; integration where a real
+SQLite database or the served app is used):
+
+- Focused: VM storefront admin-settle unit 16 passed; the F2 app integration case
+  passed; VM buyer 247 passed (unit and CLI); core storefront 227 passed (unit and
+  library integration, including both migrations' upgrade tests); kit/capacity-publication
+  138, kit/policy 97, kit/negotiation-runtime 62, core/storefront-client 68, core/buyer
+  168, bare-metal storefront 611, API-credit storefront 275, e2e unit 896 passed and 1
+  skipped; `make -C helm test-render` passed.
+- `make check-packaging` passed. `scripts/change-workflow run pre-commit` closed
+  "[change-workflow] pre-commit at 30f7e4216…: passed, exit 0" after
+  after-functional-change and pre-commit-functional passed (its `make test` included
+  VM storefront unit 1177 passed and 1 skipped, integration 575 passed); its first
+  run failed only on decision destinations (D7 and D8 shared a bullet), fixed.
+- Fresh-context compliance check: fixed — the handbook's claim that every open thread
+  is refused (flat-priced ones carry across; the refusal reasons named); "as before"
+  in the fulfillment delta; the spec's "a failed republication changes nothing",
+  false when registries diverge (divergence now specified); refusal reasons,
+  migration ids and `--shape` missing from design.md; an out-of-order migration test;
+  the smoke scripts' keyword. Declined — the new seller-round tests sit in
+  `tests/unit/test_sync_negotiation_seller_round_hook.py` with real SQLite, as that
+  file's existing cases do; the new buyer CLI tests patch core names, as every VM
+  buyer CLI test does (ROADMAP's unowned "CLI tests replace … names inside core").
+- Not proven here: the VM and API-credit pipeline lanes (the fix commit's validation),
+  the image build without curl (same), and the deployed smaller-shape run (2.15).
+
+Open for the next review: buyer prices derived from the listing rather than given
+explicitly are the advertised whole-shape rate, so with a smaller `--shape` the
+buyer's ceiling exceeds 1.0× of what it buys (payment still capped at that amount);
+`docs/attachments/resize-shape-pricing/first_use.py` records no publication, so a
+shape-priced opening there is now refused `rate_structure_unpublished`; PR #350's
+"Door" line still says the release is reversible (R11; `gh` was denied in the triage
+session).
 
 ## 3. Closeout
 

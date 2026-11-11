@@ -249,7 +249,7 @@ async def test_opening_copies_binding_message_and_artifact_in_one_transaction(tm
     }
     await client.commit_agreed_terms(
         negotiation_id=thread_binding.negotiation_id,
-        agreed_price=100,
+        negotiated_scalar=100,
         agreed_duration_seconds=3600,
         settlement_data=settlement_data,
     )
@@ -257,6 +257,7 @@ async def test_opening_copies_binding_message_and_artifact_in_one_transaction(tm
         negotiation_id=thread_binding.negotiation_id
     )
     assert accepted["settlement_data"] == settlement_data
+    assert accepted["negotiated_scalar"] == 100
 
 
 @pytest.mark.asyncio

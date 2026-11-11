@@ -19,4 +19,4 @@ hold the agreed shape.
 #### Scenario: No revised shape was agreed
 
 - **WHEN** a negotiation concludes without any round revising the shape
-- **THEN** the listing's advertised shape is reserved, as before
+- **THEN** the listing's advertised shape is reserved

@@ -60,6 +60,8 @@ from .deal_helpers import (
     open_run_log,
 )
 from .listing_cli import settlement_clause_error_message
+from .opening_shape import SHAPE_HELP, SHAPE_OPTION, parse_shape_option, shape_excess
+from .registry_listing import domain_listing_record
 from .run_log import RunLog
 from .settle_cli import run_settle_from_log
 from .settlement_composition import (
@@ -396,6 +398,7 @@ def register(app: typer.Typer) -> None:
             "--ssh-public-key",
             help="SSH public key for provisioning (default: wallet.ssh_public_key).",
         ),
+        shape: str | None = typer.Option(None, SHAPE_OPTION, help=SHAPE_HELP),
         **policy_values: Any,
     ) -> None:
         """Run or resume a complete buyer lifecycle without a buyer daemon.
@@ -418,10 +421,16 @@ def register(app: typer.Typer) -> None:
         )
         initial_price: float | None = policy_params_all.get("initial_price")
         max_price: float | None = policy_params_all.get("max_price")
+        requested_shape = parse_shape_option(shape)
         if from_run:
             if explain:
                 raise typer.BadParameter(
                     "--explain applies to fresh discovery; it cannot resume a run"
+                )
+            if requested_shape is not None:
+                raise typer.BadParameter(
+                    f"{SHAPE_OPTION} applies only to fresh buys; resume uses the "
+                    "shape its negotiation opened with"
                 )
             _run_resume_from(
                 from_run=from_run,
@@ -554,7 +563,7 @@ def register(app: typer.Typer) -> None:
             selected = buyer_stage(
                 selected.selection.settlement_schema
             ).prepare_selection(selected)
-            normalized = dict(match)
+            normalized = domain_listing_record(match)
             normalized["_selected_settlement"] = selected
             normalized["settlement_options"] = [selected.option.model_dump(mode="json")]
             matches.append(normalized)
@@ -566,6 +575,28 @@ def register(app: typer.Typer) -> None:
                 fg=typer.colors.YELLOW,
             )
             raise typer.Exit(0)
+        if requested_shape is not None:
+            excess = [
+                (match, shape_excess(requested_shape, match)) for match in matches
+            ]
+            matches = [match for match, reasons in excess if not reasons]
+            refusals = [
+                f"{match.get('listing_id')}: {', '.join(reasons)}"
+                for match, reasons in excess
+                if reasons
+            ]
+            if not matches:
+                typer.secho(
+                    "A listing sells at most its advertised shape, and the "
+                    f"{SHAPE_OPTION} exceeds every matching listing's: "
+                    + "; ".join(refusals),
+                    err=True,
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(2)
+            if not quiet:
+                for refusal in refusals:
+                    console.print(f"[dim]skip[/dim]      {refusal}")
         chain_cfg = None
         selected_chain_name = ""
         rpc = ""
@@ -665,6 +696,7 @@ def register(app: typer.Typer) -> None:
             duration_seconds=duration_seconds,
             start_utc=requested_start_utc,
             ssh_public_key=ssh,
+            compute_resource=requested_shape,
         )
 
         def build_escrow_proposal_for_match(
@@ -690,6 +722,7 @@ def register(app: typer.Typer) -> None:
             start_utc=requested_start_utc,
             max_matches=max_matches,
             max_rounds=max_rounds,
+            **({"compute_resource": requested_shape} if requested_shape else {}),
             **settlement_policy.public_run_metadata(),
         )
         header = Table.grid(padding=(0, 2))

@@ -33,6 +33,8 @@ from .deal_helpers import (
     make_publisher_trust_resolver,
 )
 from .listing_cli import settlement_clause_error_message
+from .opening_shape import SHAPE_HELP, SHAPE_OPTION, parse_shape_option, shape_excess
+from .registry_listing import domain_listing_record
 from .run_log import RunLog
 from .settlement_composition import (
     buyer_stage,
@@ -152,6 +154,7 @@ def register(app: typer.Typer) -> None:
             help="SSH public key pinned in accepted provisioning terms "
             "(default: provisioning.ssh_public_key).",
         ),
+        shape: str | None = typer.Option(None, SHAPE_OPTION, help=SHAPE_HELP),
         **policy_values: Any,
     ) -> None:
         """Drive a synchronous negotiation with one seller, round-by-round.
@@ -162,6 +165,12 @@ def register(app: typer.Typer) -> None:
         (default: listed_price — pay what's published).
         """
         console = Console()
+        requested_shape = parse_shape_option(shape)
+        if from_run and requested_shape is not None:
+            raise typer.BadParameter(
+                f"{SHAPE_OPTION} applies only to fresh negotiation; resume "
+                "uses the shape its negotiation opened with"
+            )
 
         from core_buyer.cli import parse_key_value_options
 
@@ -323,6 +332,7 @@ def register(app: typer.Typer) -> None:
                     fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
+            listing_dict = domain_listing_record(listing_dict)
             listing_dict["source_registry_url"] = source_registry_url
             listing_dict["source_registry_authority"] = registry_authorities[
                 source_registry_url
@@ -337,6 +347,14 @@ def register(app: typer.Typer) -> None:
                         fg=typer.colors.RED,
                     )
                     raise typer.Exit(2)
+        if requested_shape is not None and listing_dict is not None:
+            excess = shape_excess(requested_shape, listing_dict)
+            if excess:
+                raise typer.BadParameter(
+                    f"listing {listing_id!r} sells at most its advertised shape: "
+                    + "; ".join(excess),
+                    param_hint=SHAPE_OPTION,
+                )
 
         if not seller_url or not listing_id:
             typer.secho(
@@ -465,6 +483,7 @@ def register(app: typer.Typer) -> None:
             duration_seconds=duration_seconds,
             resumed_from=from_run,
             listing_record=listing_record,
+            **({"compute_resource": requested_shape} if requested_shape else {}),
             **(
                 settlement_policy.public_run_metadata()
                 if settlement_policy is not None
@@ -524,6 +543,7 @@ def register(app: typer.Typer) -> None:
                 duration_seconds=int(duration_seconds),
                 start_utc=requested_start_utc,
                 ssh_public_key=resolved_ssh_public_key,
+                compute_resource=requested_shape,
             )
 
             assert selected_stage is not None

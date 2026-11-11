@@ -275,7 +275,7 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch,
                     mode="json"
                 ),
                 **recorded,
-                "agreed_price": 42,
+                "negotiated_scalar": 42,
                 "agreed_duration_seconds": 3600,
             }
 

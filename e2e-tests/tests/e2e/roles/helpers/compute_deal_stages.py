@@ -1044,7 +1044,7 @@ class Stage06b_ForceAcceptAndTerminal:
         assert detail.terminal_state == "success", (
             f"Expected terminal_state=success, got {detail.terminal_state!r}"
         )
-        assert detail.agreed_amount == agreed
+        assert detail.negotiated_scalar == agreed
         # No escrow rows yet — settlement (phase 7+) is what writes them.
         assert detail.escrows == [], (
             f"Expected escrows=[] before phase 7, got {detail.escrows!r}"

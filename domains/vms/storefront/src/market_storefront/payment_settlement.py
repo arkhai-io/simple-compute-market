@@ -120,7 +120,8 @@ class VmPaymentsCoordinator:
         except (MandatePolicyError, KeyError, TypeError, ValueError) as exc:
             raise PaymentSettlementError(409, "accepted payment state is invalid") from exc
         # The stored Agreement and its bound mandate carry the payment amount;
-        # agreed_price is the negotiation scalar and may be basis points.
+        # negotiated_scalar is the negotiation's policy scalar and may be
+        # basis points.
         if (
             agreement["negotiation_id"] != negotiation_id
             or agreement["listing_id"] != thread["our_listing_id"]

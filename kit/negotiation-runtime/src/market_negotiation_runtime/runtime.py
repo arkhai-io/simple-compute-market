@@ -140,7 +140,10 @@ class Acceptance:
     listing_record: Mapping[str, Any]
     terms: NegotiationTerms
     pinned_proposal: Mapping[str, Any] | None
-    agreed_amount: int
+    # The domain's accepted policy scalar, not money: its units belong to the
+    # domain (a basis-point multiplier on shape-priced listings, an absolute
+    # amount on flat paths). Accepted artifacts carry any derived payment.
+    negotiated_scalar: int
     agreement: AgreementTerms
     uses_scalar_amount: bool
     buyer_principal: Identity
@@ -594,7 +597,7 @@ class NegotiationRuntime:
         decision_amount = hooks.amount_from_proposal(
             _proposal_mapping(decision.proposal)
         )
-        agreed_amount = (
+        negotiated_scalar = (
             int(decision_amount)
             if decision_amount is not None
             else int(evaluation.our_amount)
@@ -606,7 +609,7 @@ class NegotiationRuntime:
             listing_record=resolved.listing_record,
             terms=decoded_terms,
             pinned_proposal=pinned_proposal,
-            agreed_amount=agreed_amount,
+            negotiated_scalar=negotiated_scalar,
             agreement=agreement,
             uses_scalar_amount=evaluation.uses_scalar_amount,
             buyer_principal=buyer,
@@ -662,7 +665,7 @@ class NegotiationRuntime:
         await self._enforce_on_acceptance(
             repository, hooks, resumed.resolved, listing_id
         )
-        agreed_amount = int(amount)
+        negotiated_scalar = int(amount)
         acceptance = Acceptance(
             negotiation_id=negotiation_id,
             listing_id=listing_id,
@@ -670,7 +673,7 @@ class NegotiationRuntime:
             listing_record=resumed.resolved.listing_record,
             terms=resumed.terms,
             pinned_proposal=resumed.pinned_proposal,
-            agreed_amount=agreed_amount,
+            negotiated_scalar=negotiated_scalar,
             agreement=resumed.agreement,
             uses_scalar_amount=resumed.uses_scalar_amount,
             buyer_principal=Identity.model_validate(thread.get("buyer_principal")),
@@ -684,9 +687,9 @@ class NegotiationRuntime:
             negotiation_id=negotiation_id,
             sender_principal=actor,
             sender_role="admin",
-            our_amount=agreed_amount,
-            their_amount=agreed_amount,
-            proposed_amount=agreed_amount,
+            our_amount=negotiated_scalar,
+            their_amount=negotiated_scalar,
+            proposed_amount=negotiated_scalar,
             action_taken="accept_offer",
             message_type="accepted",
         )
@@ -697,7 +700,7 @@ class NegotiationRuntime:
             "force_accepted",
             negotiation_id=negotiation_id,
             listing_id=listing_id,
-            agreed_amount=agreed_amount,
+            negotiated_scalar=negotiated_scalar,
             source="admin",
             actor_principal=actor.model_dump(mode="json"),
         )
@@ -705,7 +708,7 @@ class NegotiationRuntime:
             "negotiation_id": negotiation_id,
             "listing_id": listing_id,
             "action": "accept",
-            "amount": agreed_amount,
+            "amount": negotiated_scalar,
             "source": "admin_force_accept",
             **artifacts,
         }
@@ -882,7 +885,7 @@ class NegotiationRuntime:
                 listing_record=resolved.listing_record,
                 terms=decoded_terms,
                 pinned_proposal=pinned_proposal,
-                agreed_amount=accepted_amount,
+                negotiated_scalar=accepted_amount,
                 agreement=agreement,
                 uses_scalar_amount=uses_scalar_amount,
                 buyer_principal=stored_buyer,
@@ -908,7 +911,7 @@ class NegotiationRuntime:
                 "negotiation",
                 "accepted",
                 negotiation_id=negotiation_id,
-                agreed_amount=accepted_amount,
+                negotiated_scalar=accepted_amount,
                 our_initial_amount=reference_amount,
             )
             return {
@@ -996,7 +999,7 @@ class NegotiationRuntime:
         decision_amount = hooks.amount_from_proposal(
             _proposal_mapping(decision.proposal)
         )
-        agreed_amount = (
+        negotiated_scalar = (
             int(decision_amount)
             if decision_amount is not None
             else int(evaluation.our_amount)
@@ -1012,7 +1015,7 @@ class NegotiationRuntime:
             listing_record=resolved.listing_record,
             terms=decoded_terms,
             pinned_proposal=pinned_proposal,
-            agreed_amount=agreed_amount,
+            negotiated_scalar=negotiated_scalar,
             agreement=agreement,
             uses_scalar_amount=evaluation.uses_scalar_amount,
             buyer_principal=stored_buyer,
@@ -1141,7 +1144,7 @@ class NegotiationRuntime:
     ) -> None:
         await repository.commit_agreed_terms(
             negotiation_id=acceptance.negotiation_id,
-            agreed_price=acceptance.agreed_amount,
+            negotiated_scalar=acceptance.negotiated_scalar,
             agreed_duration_seconds=acceptance.agreement.duration_seconds,
             agreed_start_utc=acceptance.agreement.start_utc,
             accepted_at=(
