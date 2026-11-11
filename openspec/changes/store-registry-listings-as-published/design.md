@@ -87,9 +87,12 @@ without pretending the protocol signs whitespace. The registry's ordinary
 response signature covers the returned document and this evidence. No secrets
 are retained. Size per row is acceptable at this scale.
 
-A buyer decodes the body, verifies its canonical hash and envelope signature,
-checks listing identity and `listing.publish` context, and uses the terms from
-that verified body. Historical verification uses the signed timestamp, not the
+The evidence supports this verification: a consumer decodes the body, verifies
+its canonical hash and envelope signature, checks listing identity and
+`listing.publish` context, and uses the terms from that verified body. This
+change supplies the evidence; no buyer verifies it on this branch, and whether
+and how a buyer does is decided at `negotiation-driven-capacity-resize` gate
+2.1a (D4, review 23 F1). Historical verification uses the signed timestamp, not the
 live request freshness window. The registry attests key ownership; the seller's
 proof attests terms. Verification uses the publisher's active keys as the
 registry serves them in `publisher_principals` at read time (retained keys for
@@ -176,8 +179,8 @@ publication codec and schema, never a domain import into registry storage.
 
 ### D4 — Buyers price from the verified registry carrier
 
-The buyer reads `pricing.rate_structure` from the registry listing, verified
-against D2's seller publication. This supplies the authority and carrier answer
+The resize change's buyer reads `pricing.rate_structure` from the registry
+listing, verifiable against D2's seller publication. This supplies the authority and carrier answer
 to `negotiation-driven-capacity-resize` gate 2.1a; its buyer accessor, shape
 negotiation, open-ended periods and spot mechanics are outside this change. A
 legacy row without seller evidence cannot satisfy the gate until its seller
@@ -238,7 +241,7 @@ performs promotion and archival.
 | D1 retained documents, replacement, reserved names, schema admission, legacy rebuild, filter parity | `openspec/specs/registry-discovery/spec.md`; `openspec/specs/registry-discovery/architecture.md` (including that a refused republication leaves the last stored listing) |
 | D2 seller evidence wire contract and trust anchor | `openspec/specs/registry-discovery/spec.md` (the `publisher_publication` / `publisher_updates` shape as a normative contract); `openspec/specs/registry-discovery/architecture.md` (why bytes, historical verification, rotation) |
 | D3 listing pricing object | `openspec/specs/registry-discovery/spec.md`; `openspec/specs/storefront-publication/spec.md` and `architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
-| D4 verified registry carrier for resize | `openspec/specs/registry-discovery/architecture.md`; downstream resize design gate |
+| D4 verified registry carrier for resize | `openspec/specs/registry-discovery/architecture.md`, as the carrier and evidence the resize change's buyer reads, not as current buyer behaviour (no buyer verifies it on this branch); downstream resize design gate |
 | D5 migration ordering | No permanent destination — sequencing only, unless closeout finds a line for `openspec/specs/registry-discovery/architecture.md` |
 | D6 repair through the domain candidate | `openspec/specs/storefront-publication/spec.md` and `architecture.md` |
 | D6 API-credit settlement option shape | No permanent destination — a schema correction in `domains/apicredits/registry/filter-spec.yaml`, guarded by the per-publisher schema tests (task 3.5) |

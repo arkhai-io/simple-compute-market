@@ -220,8 +220,9 @@ class ListingSummary:
     GET /listings/{id}. Captures common fields defensively.
 
     ``storefront_url`` is where a buyer negotiates: the URL the seller signed
-    into the listing's publication, or, for a listing published before the
-    registry retained publications, the publisher record's URL.
+    into the listing's publication, or, for a listing served without seller
+    publication evidence (``publisher_publication`` null), the publisher
+    record's URL.
     """
 
     id: str | int | None = None

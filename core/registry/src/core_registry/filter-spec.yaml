@@ -47,12 +47,12 @@ listing_shape:
   # excluded from every query bounding a GPU field and appears in queries that
   # bound none.
   #
-  # v9: a listing's listing-level prices moved to the top-level `pricing`
-  # object, and their
-  # earlier locations -- `listing_resource.asking_rate` and a top-level
-  # `rate_structure` -- are refused for the reason v6 gives: a rate left there
-  # publishes, stores, and matches no rate bound. Each prohibition's
-  # `description` names its replacement, which the publication refusal quotes.
+  # v9: a listing's listing-level prices are published in the top-level
+  # `pricing` object. `listing_resource.asking_rate` and a top-level
+  # `rate_structure` are retired locations, refused for the reason v6 gives: a
+  # rate there would publish, store, and match no rate bound. Each
+  # prohibition's `description` names its replacement, which the publication
+  # refusal quotes.
   required: [listing_id, listing_resource, storefront_url]
   not:
     anyOf:

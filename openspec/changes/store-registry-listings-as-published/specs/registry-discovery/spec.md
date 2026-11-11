@@ -50,13 +50,15 @@ fields and signatures MUST NOT be fabricated or attributed to the seller.
 The registry MUST retain and return the exact publication HTTP body bytes as base64
 and the authenticated v2 request envelope including its seller proof. Its ordinary
 response signature MUST cover that evidence. Mutable lifecycle/oracle updates MUST
-retain distinct seller evidence and MUST NOT rewrite the publication proof. Buyers
-MUST verify the seller body, context and identity rather than treating a registry
-signature as a seller commitment.
+retain distinct seller evidence and MUST NOT rewrite the publication proof. The
+evidence MUST let a consumer verify the seller's body, context and identity rather
+than treating the registry's signature as the seller's commitment: the registry
+attests what it served and which keys belong to the publisher; the seller's proof
+attests the terms.
 
-#### Scenario: A buyer verifies a listing's commercial term
+#### Scenario: A consumer verifies a listing's commercial term
 
-- **WHEN** a buyer decodes publisher_publication.body_base64 and verifies its request envelope
+- **WHEN** a consumer decodes publisher_publication.body_base64 and verifies its request envelope
 - **THEN** the canonical body hash and seller signature bind the listing's published terms
 - **AND** historical verification is distinct from live request freshness and publisher trust
 

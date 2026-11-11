@@ -270,3 +270,41 @@ which reports jsonschema's own message as it did for v6; a unit test of a
 prohibition without a description, which needs a hot-swapped specification for
 a fallback string. The e2e lanes are not rerun here; the fix commit's
 validation reruns them.
+
+### Pre-closeout triage fixes
+
+Fixed in the triage of pre-closeout review 23, outside the plan's sections:
+
+- 23 F1 — the registry delta's "Seller publication evidence is independently
+  verifiable" no longer obliges buyers to verify: the evidence must let a
+  consumer verify the seller's body, context and identity rather than take the
+  registry's signature as the seller's commitment, and its scenario is a
+  consumer's verification, which `test_retained_publications.py` performs. No
+  buyer path reads `publisher_publication` on this branch; whether and how a
+  buyer verifies is decided at `negotiation-driven-capacity-resize` gate 2.1a.
+  D2's verification paragraph, D4's opening and D4's promotion row say so.
+- 23 F2 — the v9 note in the compute filter specification states the current
+  rule (listing-level prices in `pricing`; the two retired locations refused),
+  keeping its `v9:` label as the block's other entries do; `ListingSummary`'s
+  docstring names the publisher-URL case by what a client sees, a null
+  `publisher_publication` (it travels with `published_document`, whose absence
+  selects the publisher record's URL in `order_to_dict`).
+
+Evidence: comment and documentation edits only, so no test changed.
+`scripts/change-workflow run pre-commit`, which rebuilt every environment from
+fresh wheels and ran every suite `make test` runs, each passed (VM storefront
+unit 1150, 1 skipped, and application integration 565; bare-metal storefront
+611; API-credit storefront 275; the registry and registry-client suites):
+`after-functional-change … passed, exit 0`, `pre-commit-functional … passed,
+exit 0` (`make check-packaging` included), `pre-commit … passed, exit 0`. It
+ran again on the committed HEAD, so it also covers the change-document edits
+made after the first run. No lock changed. A fresh-context compliance check
+found one defect, fixed: the delta's first rewording, "without trusting the
+registry", overstated it — verification uses the keys the registry serves in
+`publisher_principals` (D2), so the requirement now says what each signature
+attests. Taken from its suggestions: D2 says whether and how a buyer verifies
+is decided at resize gate 2.1a, which records no obligation yet, and D4 opens
+with the resize change's buyer. Declined: retitling "independently
+verifiable", which reads as verifiable apart from the registry's signature;
+"consumers" in the storefront delta's "buyers can verify", which states a
+capability, not an obligation.
