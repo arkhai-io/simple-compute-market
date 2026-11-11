@@ -797,6 +797,25 @@ Both command surfaces consume actual mixed published options using proposed mech
 
 Both prescribed-provider E2E setups fail before readiness. The existing Compose-assembly gap carries the reproductions; this does not qualify deployed rate servicing or permanent live capabilities. Full setup/results are in `docs/attachments/negotiate-open-ended-compute-terms/mixed-selection-checkpoint.md`.
 
+## Reserved-purchase E2E deadline gate
+
+The deployed VM and bare-metal compositions do not inject
+`delivery_deadline_for_pool`; its default returns no enforced deadline. D3 and
+`dependency-contracts.md` require that result to omit the published deadline,
+including for once-only options. A raw clause value cannot replace the pool fact.
+The current canonical payment purchase drivers instead assert that their raw
+clause deadline is published. Their default buyer also refuses the resulting
+unprotected option before approval. The payload follows the frozen contract;
+the scenario predates it.
+
+The remaining choice is whether these reserved-deal scenarios should explicitly
+exercise the documented unprotected-terms opt-out, asserting that no deadline is
+promised, or wait for the effective pool-facts port and site enforcement. The
+former keeps the payment/fulfillment pipeline exercised now; the latter preserves
+the scenario's previous protected-purchase boundary. Do not restore a raw-clause
+fallback or silently waive the buyer policy. No deadline assertion or acceptance
+policy has been changed while this gate is open.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behavior.
