@@ -809,11 +809,19 @@ and assert that no delivery deadline is promised. Their dispute-coverage, paymen
 fulfillment and release checks remain in place. A reserved-payment purchase from
 these deployed sellers therefore needs `--allow-unprotected-terms`.
 
-**Open hole:** deployed sellers publish no delivery deadline until the effective
-pool-facts port, `delivery_deadline_for_pool`, is wired. That port is the
-prerequisite for a pool-backed published deadline. Whether a seller-configured
-deadline should be the interim source remains open with the maintainer; D3 is
-unchanged, and this repair introduces no raw-clause fallback.
+**Open hole and intended direction:** deployed sellers publish no delivery
+deadline until the effective pool-facts port, `delivery_deadline_for_pool`, is
+wired. [`renewable-compute-lease-deadlines`](../renewable-compute-lease-deadlines/)
+closes the hole: the deadline is a pool policy tag that the site enforces at
+commit and reclaims on expiry. That change is planned to land before the Goal 8
+release. This terms change's remaining step is to wire each composition's
+`delivery_deadline_for_pool` to read the pool's effective value, then return the
+reserved-payment scenarios to protected purchases. Their
+`--allow-unprotected-terms` opt-out is interim until then.
+
+Whether a seller-configured deadline should be the interim source remains open
+with the maintainer; D3 is unchanged, and this repair introduces no raw-clause
+fallback.
 
 ## Design promotion record
 
