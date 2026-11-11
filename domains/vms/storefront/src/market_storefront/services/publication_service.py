@@ -28,7 +28,6 @@ import market_storefront.container as container
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import BASE_URL_OVERRIDE, settings
-from market_storefront.services.publication_terms import published_rate_terms
 
 
 class VmPublicationHooks:
@@ -123,10 +122,11 @@ async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCa
     # record and no stored payload can be republished without one.
     listing.listing_resource.capacity_backing = binding.backing.label
     payload = listing.model_dump(mode="json")
-    # Optional capacity attributes are absent commitments, not JSON nulls;
-    # the compute publication schema types every present attribute.
-    payload["listing_resource"] = listing.listing_resource.model_dump(mode="json", exclude_none=True)
-    payload["publication_terms"] = published_rate_terms(listing.rate_structure)
+    payload["listing_resource"] = listing.published_listing_resource()
+    pricing = listing.published_pricing()
+    # Carried opaquely by core publication as a top-level term beside the
+    # common fields, so no registry or core code names a price.
+    payload["publication_terms"] = {"pricing": pricing} if pricing is not None else {}
     return PublicationCandidate(listing.listing_id, binding, payload)
 
 

@@ -946,6 +946,7 @@ dev = [
     { name = "nest-asyncio" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pyyaml" },
     { name = "wandb" },
 ]
 
@@ -1021,6 +1022,7 @@ dev = [
     { name = "nest-asyncio", specifier = ">=1.6.0,<2.0.0" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "wandb", specifier = ">=0.23.0" },
 ]
 

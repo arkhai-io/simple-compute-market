@@ -23,12 +23,60 @@ Implements D3's intermediate state (a top-level `rate_structure`) and supplies D
 
 Implements D3's `pricing` object and the permanent coverage the owner accepted (round 1 owner record R10, R2, R18). Reviewed as round 2.
 
-- [ ] 3.1 Compute filter specification (`core/registry/src/core_registry/filter-spec.yaml`): add an optional top-level `pricing` with `asking_rate` (its current strict shape) and an optional `rate_structure` (the strict family shape); remove `listing_resource.asking_rate` and the top-level `rate_structure`; repoint the four asking-rate filters to `$.pricing.asking_rate.*`, query names unchanged. Version 9 stays 9.
-- [ ] 3.2 Publishers write `pricing` through the opaque publication channel: the VM listings model and storefront (`publication_terms` carries `{"pricing": {...}}`), the bare-metal domain and storefront, `resource-pools`, `resource-pools-contracts` and `pool-overrides`.
-- [ ] 3.3 Spec deltas: `registry-discovery` (the `pricing` object and its filters; the legacy-row asking-rate gap), `storefront-publication` (publication of `pricing`; registry repair republishes the domain's candidate, D6), and a new `resource-pool-management` delta.
-- [ ] 3.4 Registry permanent tests at the levels `docs/development/TESTING.md` assigns. Integration: unknown fields kept, whole-document replacement, reserved-name refusal, `PUT` refusal of other keys, schema refusal leaving the stored content unchanged, legacy rebuild with null evidence, update evidence and its reset on republication, and a seller-proof round trip verified at the signed timestamp. Unit: validator error paths and the reserved list.
-- [ ] 3.5 Publisher integration tests proving each in-repository publisher's real payload (VM, bare-metal, API-credit) validates against its registry's schema, including the `pricing` object, on first publication and on registry repair through its `publication_candidate` hook (D6).
-- [ ] 3.6 Run the registry, registry-client, kit capacity-publication, VM storefront, bare-metal, resource-pool kit and API-credit suites and `make check-packaging`; record each with its level and result.
+- [x] 3.1 Compute filter specification (`core/registry/src/core_registry/filter-spec.yaml`): add an optional top-level `pricing` with `asking_rate` (its current strict shape) and an optional `rate_structure` (the strict family shape); remove `listing_resource.asking_rate` and the top-level `rate_structure`; repoint the four asking-rate filters to `$.pricing.asking_rate.*`, query names unchanged. Version 9 stays 9.
+  `pricing` is closed (`additionalProperties: false`), both members optional;
+  `rate_structure` is an object, no longer nullable. A rate left in
+  `listing_resource` is admitted (the resource stays open) and matches no rate
+  bound; the specification does not refuse it as v6 refuses retired names.
+  Registry suites updated to publish through `pricing`
+  (`test_asking_rate_filter.py`, `test_filter_eval.py`); `first-use.py` too.
+- [x] 3.2 Publishers write `pricing` through the opaque publication channel: the VM listings model and storefront (`publication_terms` carries `{"pricing": {...}}`), the bare-metal domain and storefront, `resource-pools`, `resource-pools-contracts` and `pool-overrides`.
+  VM: `Listing.published_listing_resource()` / `published_pricing()`
+  (`arkhai_vms_listings.models`), composed by `_candidate` in the VM
+  `publication_service`; `published_rate_terms` removed. Bare metal:
+  `arkhai_bare_metal.published_listing_resource`, applied in
+  `bare_metal_publication_candidate`, which every bare-metal publish path,
+  repair included, builds from. Correction: `resource-pools`,
+  `resource-pools-contracts` and `pool-overrides` needed no change — they
+  resolve and store `{amount, asset, period}` and never place it in a listing;
+  proposal and D3 now say so. Stored views are unchanged. E2E assertions that
+  read a registry listing's rate moved to `pricing`
+  (`test_bare_metal_publication.py` 05b–05d, `introduction_stages.py` 01).
+- [x] 3.3 Spec deltas: `registry-discovery` (the `pricing` object and its filters; the legacy-row asking-rate gap), `storefront-publication` (publication of `pricing`; registry repair republishes the domain's candidate, D6), and a new `resource-pool-management` delta.
+  `registry-discovery` MODIFIES "The compute schema carries a listing's asking
+  rate" (the permanent text also said the registry validates only in the dry
+  run, false since D1) and adds the legacy scenario. `storefront-publication`
+  replaces round 1's top-level `rate_structure` requirement with "A listing's
+  prices are published in one pricing object", adds "Registry repair
+  republishes the domain's candidate", MODIFIES "A listing's asking rate is
+  declared per shape". `resource-pool-management` MODIFIES "Asking-rate hint
+  validation": the pool kits name no published layout.
+- [x] 3.4 Registry permanent tests at the levels `docs/development/TESTING.md` assigns. Integration: unknown fields kept, whole-document replacement, reserved-name refusal, `PUT` refusal of other keys, schema refusal leaving the stored content unchanged, legacy rebuild with null evidence, update evidence and its reset on republication, and a seller-proof round trip verified at the signed timestamp. Unit: validator error paths and the reserved list.
+  Application integration, `core/registry/tests/integration/test_retained_publications.py`
+  (real app and database, canonical `RegistryClient`): every listed case, plus
+  a legacy row with a rate in its capacity excluded from a rate bound until
+  republished in `pricing`; the proof test also shows a forged body fails.
+  Unit, `tests/unit/test_listing_validation.py`: reserved list, ordering,
+  field paths, the `pricing` object's admission and refusals, retired names.
+- [x] 3.5 Publisher integration tests proving each in-repository publisher's real payload (VM, bare-metal, API-credit) validates against its registry's schema, including the `pricing` object, on first publication and on registry repair through its `publication_candidate` hook (D6).
+  Each first publication is refused by a registry, and the next pass repairs it
+  through the domain's candidate; every sent body validates against the
+  registry's `listing_shape` (jsonschema over the filter specification, read
+  by checkout path) and the repair equals the first publication. VM
+  (application integration, `test_publication_loop.py`): shape-priced with an
+  asking rate, both in `pricing`. Bare metal (application integration through
+  the running app, `test_http_publication_rates.py`): asking rate in
+  `pricing`; its settlement option is a stand-in builder (`_OneOptionTerms`),
+  so a real mechanism's option is not what it checks. API credits
+  (`test_publish_reconcile.py`, service-level over a real database, registry
+  factory replaced on its module): the real Arkhai payments option against
+  `domains/apicredits/registry/filter-spec.yaml`, no `pricing`. Unit tests of
+  the codecs: `domains/vms/storefront/tests/unit/test_listing_publication_codec.py`,
+  `domains/bare_metal/tests/test_storefront_publication.py`.
+  These check the schema only; the registry's reserved and retired names are
+  its own tested contract.
+- [x] 3.6 Run the registry, registry-client, kit capacity-publication, VM storefront, bare-metal, resource-pool kit and API-credit suites and `make check-packaging`; record each with its level and result.
+  See "Section 3 evidence" below.
 
 ## 4. Closeout (post code-review)
 
@@ -43,6 +91,10 @@ Per `openspec/README.md#plan-closeout-requirements`; promotion is deliberately n
 - [ ] 4.7 Run `make check-packaging` and `make check-architecture-change CHANGE=store-registry-listings-as-published`; resolve all failures/owned exceptions.
 - [ ] 4.8 Record end-to-end pipeline run/result and compute and credits publication scenarios; disclose that retained-field/proof assertions are not covered by current e2e scenarios. Unavailable pipeline is a blocker, not a pass.
 - [ ] 4.9 Promote the registry delta through archival, with rationale to `openspec/specs/registry-discovery/architecture.md` — the `publisher_publication` / `publisher_updates` shape as a normative wire contract in `spec.md`; why body bytes are kept and how historical verification and key rotation work; that a refused republication leaves the last stored listing in place. Promote the storefront delta through archival, with rationale (including D6) to `openspec/specs/storefront-publication/architecture.md`, and the `resource-pool-management` delta through archival. Complete the design promotion record. No principle is promoted to repository architecture; no new capability/index is introduced.
+  Amended in section 3: also correct `ARCHITECTURE.md`, "Discovery and
+  negotiation", which says resolved family rates never reach a registry
+  (promotion record row "D3/D4 correction"), and the storefront companion's
+  asking-rate paragraph, which names no location.
 - [ ] 4.10 Run scoped documentation citations and pinned `openspec validate store-registry-listings-as-published --strict` after promotion.
 - [ ] 4.11 Archive last, merging deltas with the pinned OpenSpec CLI and updating campaign link; review the archived documentation before cleanup.
 
@@ -116,3 +168,58 @@ binding first), D6's API-credit half given a promotion row, and task 3.5 widened
 to each domain's repair path, which only a fake codec proves today. Declined: a
 test of the refusing downgrade, which the baseline's refusal also lacks. The
 e2e lanes are not rerun here; the fix commit's validation reruns them.
+
+### Section 3 evidence
+
+Suites, from the final `scripts/change-workflow run pre-commit` (after the
+fresh-context fixes), every one passed: registry unit 148 and application
+integration 160; registry-client (unit) 25; kit capacity-publication (unit)
+136; VM storefront unit 1150 (1 skipped) and application integration 565;
+bare-metal storefront 611 (its HTTP tests application integration, its cycle
+tests orchestration over a real database); bare-metal domain (unit) 226;
+`kit/resource-pools` 141, `kit/resource-pools-contracts` 426,
+`kit/pool-overrides` 82 (unchanged code); API-credit storefront 275; e2e
+unit 896. Hooks: `after-functional-change … passed, exit 0` (relocked the VM,
+bare-metal and API-credit storefronts for their new dev dependencies),
+`pre-commit-functional … passed, exit 0` (`make check-packaging`: locks,
+installs and architecture rules OK), `pre-commit … passed, exit 0` (change
+index, task list, skills, strict OpenSpec validation, comment hygiene,
+citations, local imports).
+
+End-to-end scenarios covering the section once deployed:
+`e2e_bare_metal_publication` (stages 05b–05d read the rate from the registry
+listing's `pricing` and bound queries by it), `e2e_vm_introduction` and
+`e2e_bare_metal_unbacked_introduction` (stage 01 bounds by rate and reads
+`pricing.asking_rate`), `e2e_listing_shapes` (07a publishes a shape-priced
+listing; it reads the storefront's record, not the registry's `pricing`).
+`e2e-apicredits` exercises the API-credit schema at publication. No scenario
+asserts retained arbitrary fields or seller proofs.
+
+Owed by validation: none; the pipeline validation dispatches is the only
+push-produced evidence the section needs.
+
+Fresh-context check: fixed — proposal, D3 and 3.2 named the pool packages as
+writers; ARCHITECTURE.md's "never reach a registry" sentence now has a
+promotion row and a 4.9 amendment; codec unit tests added; the legacy
+rate-bound scenario tested; two comments reworded. Declined — taking each
+registry's schema through a packaged dependency: the API-credit specification
+is not packaged anywhere, and installing the registry into a storefront's
+test environment to read one file is heavier than reading it by checkout
+path, which the registry's own tests already do; asserting reserved and
+retired names in publisher tests: those are the registry's tested contract.
+
+Handoff:
+
+- Decisions taken within D3's wording, for review: `pricing` closed; a rate
+  left in `listing_resource` admitted silently rather than refused as a
+  retired location (a v8-era publisher would publish successfully and match
+  no rate bound, the skew v6's comment warns of); `rate_structure` no longer
+  accepts null.
+- `uv run --directory` and `uv run --find-links` are refused to unattended
+  runs; `cd <package> && uv run pytest` works only where the package's
+  environment resolves without the wheelhouse (the registry and API-credit
+  storefront do; the VM storefront does not, so use `make -C <package>
+  test-unit`/`test-integration`).
+- Up the stack: readers of a top-level `rate_structure` or
+  `listing_resource.asking_rate` from a registry listing move to `pricing`
+  (D3's known gap).

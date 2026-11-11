@@ -15,7 +15,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from arkhai_bare_metal import BARE_METAL_OFFERING_MODE
+from arkhai_bare_metal import BARE_METAL_OFFERING_MODE, published_listing_resource
 from core_storefront.multi_registry_client import (
     MultiRegistryClient,
     RegistryAuthorityTrust,
@@ -86,14 +86,26 @@ async def bare_metal_publication_candidate(
     sqlite_client: SQLiteClient,
     listing_id: str,
 ) -> PublicationCandidate[dict[str, Any]]:
-    """The persisted listing, as the kit runtime publishes it, with its binding."""
+    """The persisted listing, as the kit runtime publishes it, with its binding.
+
+    Every path that publishes -- first publication, refresh, reopen, and
+    registry repair -- builds its payload here, so each sends the same document.
+    """
     binding = await bare_metal_listing_binding(sqlite_client, listing_id)
     listing = await sqlite_client.load_listing(listing_id=listing_id)
     if binding is None or listing is None:
         raise CapacityBindingError(
             f"listing {listing_id!r} has no complete durable capacity binding"
         )
-    return PublicationCandidate(listing_id, binding, listing)
+    resource, pricing = published_listing_resource(_listing_resource(listing))
+    payload = {
+        **listing,
+        "listing_resource": resource,
+        # Carried opaquely by core publication as a top-level term beside the
+        # common fields, so no registry or core code names a price.
+        "publication_terms": {"pricing": pricing} if pricing is not None else {},
+    }
+    return PublicationCandidate(listing_id, binding, payload)
 
 
 def build_publication_runtime(

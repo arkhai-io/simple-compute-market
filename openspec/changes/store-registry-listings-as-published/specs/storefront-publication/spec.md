@@ -1,26 +1,117 @@
 ## ADDED Requirements
 
-### Requirement: Resolved rate structures are published at listing level
+### Requirement: A listing's prices are published in one pricing object
 
-A VM storefront MUST publish its resolved family rate structure as top-level
-`rate_structure`, when present, on creation, refresh and reopen. The published
-structure MUST match the durable rates the storefront serves and uses to derive
-shape prices. It MUST NOT be placed inside `listing_resource` or interpreted by
-the registry engine. Flat-priced listings MUST state no resolved structure.
-The existing asking rate remains independent in `listing_resource`.
+A compute storefront MUST publish every price a listing states in one top-level
+`pricing` object, on creation, refresh, reopen and registry repair: the listing's asking
+rate as `pricing.asking_rate`, and, for a VM listing whose prices derive from resolved
+family rates, that structure as `pricing.rate_structure`. Neither MUST be placed in the
+listing's capacity description, and a listing stating neither MUST publish no `pricing`.
+The published structure MUST match the durable rates the storefront serves and uses to
+derive shape prices. The registry engine MUST NOT interpret either. The storefront's own
+view of a listing keeps the asking rate beside the shape it prices.
 
 #### Scenario: A shape-priced listing is published
 
-- **WHEN** a storefront derives a listing with resolved family rates
-- **THEN** the registry publication carries those rates as top-level rate_structure
+- **WHEN** a storefront derives a listing with resolved family rates and an asking rate
+- **THEN** the registry publication carries both in `pricing`, and its capacity
+  description carries neither
 - **AND** buyers can verify them against retained seller publication evidence
 
-#### Scenario: Family rates change or are withdrawn
+#### Scenario: Family rates or an asking rate change or are withdrawn
 
-- **WHEN** reconciliation refreshes a listing with changed or absent resolved rates
-- **THEN** the complete republication replaces the previous rate_structure accordingly
+- **WHEN** reconciliation refreshes a listing with changed or absent prices
+- **THEN** the complete republication replaces the previous `pricing` accordingly, and a
+  listing left with no price publishes none
 
 #### Scenario: A listing reopens
 
 - **WHEN** the storefront reopens a previously closed listing
-- **THEN** it republishes its current durable rate structure before reopening discovery
+- **THEN** it republishes its current durable prices before reopening discovery
+
+### Requirement: Registry repair republishes the domain's candidate
+
+When a publication pass republishes an open listing to a registry whose recorded outcome
+disagrees with it, the storefront MUST send the publication candidate its domain builds
+for that listing, as first publication and reopen do, and never the stored row as it is
+held. It MUST first check the candidate's binding against the listing's durable binding
+and validate the candidate as publication does; a listing that fails either stays
+unrepaired at that registry and is reported, rather than republished.
+
+#### Scenario: A registry missed a VM listing's publication
+
+- **WHEN** the next publication pass repairs a VM listing at a registry that missed it
+- **THEN** that registry receives the same document first publication sent, its prices in
+  `pricing` and no null capacity attribute
+
+#### Scenario: A repaired listing's binding disagrees
+
+- **WHEN** a listing's candidate carries a binding other than the listing's durable
+  binding
+- **THEN** no registry is sent the listing and it remains diverged
+
+## MODIFIED Requirements
+
+### Requirement: A listing's asking rate is declared per shape
+
+A compute listing MAY publish the rate its seller is asking for the listing's shape,
+as an `asking_rate` object in the listing's published `pricing`, carrying `amount`,
+`asset`, and `period`. The rate prices one listing shape: listings of different
+shapes from the same pool carry independently declared rates, and a rate MUST NOT be
+decomposed per capacity dimension.
+
+The rate MUST resolve through this precedence, highest first:
+
+1. The storefront's site-scoped pool override for the listing's site, pool, and
+   offering mode, when it states asking rates.
+2. Otherwise, the `asking_rates` declaration on the Resource Pool the listing derives
+   from, read from the site's projection.
+3. Otherwise, no asking rate.
+
+Each tier states rates as a list of entries, each naming the capability shape it
+prices. An entry applies to the listing whose shape has the same canonical digest.
+An override's list MUST replace the pool's list as a whole; an empty override list
+MUST be accepted and MUST mean that no listing of that pool publishes an asking rate.
+An override is available for a pool at any site the storefront publishes for.
+
+No storefront configuration default MAY supply an asking rate. Every published rate
+is either the declaration of the listing's origin pool or an explicit override for
+that site and pool, so a storefront publishing for several seller sites never
+advertises its own blanket price as another site's.
+
+A listing whose shape no applicable entry prices MUST publish normally with no
+asking rate. An entry naming a shape the pool does not publish has no effect and MUST
+be reported in the storefront's system status.
+
+A storefront MUST publish only a complete rate: all three fields present, `amount`
+exact positive decimal text without an exponent, `asset` a trimmed non-empty opaque
+identifier, and `period` a unit this version accepts, which is `hour` alone.
+
+The asking rate MUST NOT participate in any shape digest or derivation identity.
+
+#### Scenario: A pool prices each of its shapes
+
+- **WHEN** a pool publishes a 1-GPU and an 8-GPU shape and declares a rate for each
+- **THEN** each listing publishes the rate declared for its own shape
+
+#### Scenario: A shape is priced nowhere
+
+- **WHEN** a pool publishes a shape that neither its declaration nor an override prices
+- **THEN** that listing publishes normally with no asking rate
+
+#### Scenario: The storefront overrides a remote site's rate
+
+- **WHEN** the storefront's override for a pool at a site other than its first
+  configured site states an asking rate for one of the pool's shapes
+- **THEN** that listing publishes the override's rate and not the pool's declaration
+
+#### Scenario: The storefront withholds every rate
+
+- **WHEN** the storefront's override for a pool states an empty asking-rate list
+- **THEN** no listing of that pool publishes an asking rate, whatever the pool declares
+
+#### Scenario: A storefront configures pricing defaults
+
+- **WHEN** a pool declares no asking rates, no override states any, and the storefront
+  configures negotiation-floor or settlement defaults
+- **THEN** no listing of that pool publishes an asking rate

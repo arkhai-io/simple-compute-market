@@ -138,8 +138,9 @@ and the top-level `rate_structure`, and repoints the four asking-rate filters to
 `$.pricing.asking_rate.*` with their query names unchanged. Version 9 is
 unreleased and stays 9. Every in-repository publisher writes the new location
 through the opaque publication channel: the VM listings model and storefront,
-the bare-metal domain and storefront, `resource-pools`,
-`resource-pools-contracts` and `pool-overrides`. Round 1 implemented the
+and the bare-metal domain and storefront. `resource-pools`,
+`resource-pools-contracts` and `pool-overrides` resolve and store a rate but
+never place it in a listing, so they are unchanged. Round 1 implemented the
 intermediate state — a top-level `rate_structure` beside a nested asking rate —
 and round 2 moves both into `pricing`.
 
@@ -225,8 +226,10 @@ performs promotion and archival.
 | D5 migration ordering | No permanent destination — sequencing only, unless closeout finds a line for `openspec/specs/registry-discovery/architecture.md` |
 | D6 repair through the domain candidate | `openspec/specs/storefront-publication/spec.md` and `architecture.md` |
 | D6 API-credit settlement option shape | No permanent destination — a schema correction in `domains/apicredits/registry/filter-spec.yaml`, guarded by the per-publisher schema tests (task 3.5) |
+| D3/D4 correction | `docs/development/ARCHITECTURE.md`, "Discovery and negotiation": its statement that resolved family rates never reach a registry is replaced by their publication in `pricing.rate_structure` |
 
-No principle is promoted to `docs/development/ARCHITECTURE.md`.
+No principle is promoted to `docs/development/ARCHITECTURE.md`; the one edit
+there corrects a statement this change makes false.
 
 ## Open questions
 

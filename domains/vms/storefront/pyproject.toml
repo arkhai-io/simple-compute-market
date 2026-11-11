@@ -84,8 +84,11 @@ dev = [
     # The canonical lifecycle client the lifecycle integration tests read and
     # commit deals through.
     "arkhai-kit-deal-lifecycle-client>=0.1.0",
-    # Validates documents against the generated Helm values schema.
+    # Validates documents against the generated Helm values schema, and
+    # published listings against the compute registry's listing schema.
     "jsonschema>=4.0",
+    # Reads the Helm values and the registry's filter specification.
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

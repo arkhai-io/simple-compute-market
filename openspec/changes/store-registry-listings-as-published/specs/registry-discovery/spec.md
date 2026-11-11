@@ -38,6 +38,13 @@ fields and signatures MUST NOT be fabricated or attributed to the seller.
 - **THEN** the registry serves its existing carriers and explicitly absent publication proof
 - **AND** a subsequent valid republication establishes the document and proof together
 
+#### Scenario: A legacy listing is bounded by asking rate
+
+- **WHEN** a buyer bounds a compute query by asking rate and a legacy listing's carriers
+  held a rate inside its capacity description
+- **THEN** the rebuilt listing carries no `pricing` and is excluded from the bound
+- **AND** it matches again once its seller republishes the rate in `pricing`
+
 ### Requirement: Seller publication evidence is independently verifiable
 
 The registry MUST retain and return the exact publication HTTP body bytes as base64
@@ -78,3 +85,54 @@ before changing listing content or publisher state.
 
 - **WHEN** an authenticated publication violates the configured listing shape
 - **THEN** it fails with field-path errors and leaves prior listing content unchanged
+
+### Requirement: The compute schema carries a listing's asking rate
+
+The compute filter specification MUST describe an optional top-level `pricing` object
+holding every price a listing states, apart from its capacity description: an optional
+`asking_rate` and an optional `rate_structure`. `pricing` MUST admit no other property.
+
+`asking_rate` carries `amount`, `asset`, and `period`, all required when the object is
+present. `amount` is exact decimal text; `asset` is an opaque, non-empty identifier of the
+same kind a settlement option's published asset carries, requiring no contract address,
+token decimals, or chain identity; `period` is the time unit the amount is quoted per,
+`hour` in this version. `rate_structure` maps a family name to a list of entries, each
+carrying exactly `asset`, a decimal-text `rate`, and `per`; the specification names no
+family.
+
+The object is declared in the compute specification, which is data the generic registry
+serves, and not in registry engine code. The registry validates it wherever it validates
+the listing shape: at publication and in the dry run. No registry surface may interpret an
+asset beyond comparing it for equality, or interpret a rate structure at all. The
+capacity description declares no asking rate: a rate a publisher places there is an
+admitted attribute like any other, and no rate filter reads it.
+
+#### Scenario: A listing is dry-run with a partial asking rate
+
+- **WHEN** a publisher dry-runs a compute listing whose `pricing.asking_rate` omits its
+  asset or its period
+- **THEN** the dry run reports the listing invalid, naming the asking rate
+
+#### Scenario: A listing misspells a pricing term
+
+- **WHEN** a publisher publishes a compute listing whose `pricing` carries a property the
+  specification does not name
+- **THEN** publication is refused naming `pricing`, and no listing content changes
+
+#### Scenario: A shape-priced listing publishes its rate structure
+
+- **WHEN** a listing publishes `pricing.rate_structure` beside its asking rate
+- **THEN** the registry stores and serves both unchanged and rate filters read only the
+  asking rate
+
+#### Scenario: A rate is quoted in an off-chain asset
+
+- **WHEN** a listing publishes an asking rate in an asset that has no contract
+  address, decimals, or chain identity
+- **THEN** the registry stores and serves the asset identifier opaquely
+
+#### Scenario: A rate is published inside the capacity description
+
+- **WHEN** a listing carries an asking rate in its capacity description and none in
+  `pricing`
+- **THEN** a rate-bounded query excludes it, as it excludes a listing publishing no rate

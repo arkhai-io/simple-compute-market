@@ -135,7 +135,7 @@ class ListingResponse(BaseModel):
     storefront_url: str
     seller_principal: Identity
     # Domain-owned resolved rates a listing's prices derive from, when its
-    # domain records them; also published as a listing-level term.
+    # domain records them; also published, in the listing's pricing.
     rate_structure: dict[str, Any] | None = None
     model_config = ConfigDict(extra="allow")
 

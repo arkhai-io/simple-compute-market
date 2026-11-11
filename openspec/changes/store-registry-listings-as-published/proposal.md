@@ -40,8 +40,9 @@ None.
   and the `pricing` object's filters.
 - `storefront-publication`: publish listing pricing in the top-level `pricing`
   object; repair registries through the domain's candidate.
-- `resource-pool-management`: pool kits and overrides write asking rates to
-  `pricing.asking_rate`.
+- `resource-pool-management`: an asking rate a pool or override declares is
+  published in the listing's `pricing.asking_rate`; the pool kits name no
+  published layout.
 
 ## Non-Goals
 
@@ -61,8 +62,10 @@ None.
   already-preserved response extras.
 - `core/storefront`, VM listing models and VM storefront: carry publication terms
   across create, refresh, reopen and repair.
-- Bare-metal domain and storefront, `resource-pools`, `resource-pools-contracts`
-  and `pool-overrides`: write the asking rate to `pricing.asking_rate`.
+- Bare-metal domain and storefront: write the asking rate to
+  `pricing.asking_rate`. `resource-pools`, `resource-pools-contracts` and
+  `pool-overrides` resolve and store the rate but never place it in a listing,
+  so they need no change.
 - `kit/capacity-publication`: the required `publication_candidate` hook every
   composing domain implements; registry repair republishes it.
 - `domains/apicredits/registry`: the settlement option shape the market uses.
@@ -76,8 +79,9 @@ None.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md` — assess at closeout; no principle is
-  promoted from this change.
+- [x] `docs/development/ARCHITECTURE.md` — no principle is promoted; closeout
+  corrects "Discovery and negotiation", which says resolved family rates never
+  reach a registry.
 - [x] Existing specifications and companions — registry discovery, storefront
   publication, resource-pool management.
 - [ ] New subsystem specification — none.

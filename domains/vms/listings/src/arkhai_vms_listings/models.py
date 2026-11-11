@@ -400,7 +400,8 @@ class ComputeResource(ComputeDomainResource):
         default=None,
         description=(
             "The seller's asking price for this listing's shape; omitted, not "
-            "null, when nothing prices it."
+            "null, when nothing prices it. Published in the listing's pricing, "
+            "not in its capacity description."
         ),
     )
 
@@ -420,11 +421,11 @@ class ComputeResource(ComputeDomainResource):
 
     @model_serializer(mode="wrap")
     def _omit_absent_fields(self, handler: Any) -> Any:
-        # Omitted rather than null: a rateless listing publishes no field (the
-        # compute schema types it as an object) and a withdrawn rate refreshes
-        # in place to a listing without one; a slice without GPUs publishes no
-        # GPU key, since the compute schema types a present ``gpu_model`` as a
-        # string and a null would state a value the shape does not.
+        # Omitted rather than null: a rateless listing records no rate, so a
+        # withdrawn rate refreshes in place to a listing without one; a slice
+        # without GPUs publishes no GPU key, since the compute schema types a
+        # present ``gpu_model`` as a string and a null would state a value the
+        # shape does not.
         data = handler(self)
         if isinstance(data, dict):
             for name in ("asking_rate", "gpu_count", "gpu_model"):
@@ -487,7 +488,8 @@ class Listing(BaseModel):
         ),
     )
     rate_structure: dict[str, list[dict[str, str]]] | None = Field(
-        default=None, description="Resolved family rates published as a listing-level term"
+        default=None,
+        description="Resolved family rates, published in the listing's pricing",
     )
 
     oracle_address: str | None = Field(
@@ -555,3 +557,34 @@ class Listing(BaseModel):
             )
 
         return data
+
+    def published_listing_resource(self) -> dict[str, Any]:
+        """The capacity description a registry publication carries.
+
+        Optional capacity attributes are absent commitments, not JSON nulls,
+        since the compute publication schema types every present attribute.
+        The asking rate is a term of sale and travels in :meth:`published_pricing`
+        instead; the stored listing keeps it beside the shape it prices.
+        """
+        resource = self.listing_resource.model_dump(mode="json", exclude_none=True)
+        resource.pop("asking_rate", None)
+        return resource
+
+    def published_pricing(self) -> dict[str, Any] | None:
+        """Every price the listing states, as the one ``pricing`` object a
+        registry publication carries, or ``None`` when it states none.
+
+        ``asking_rate`` prices the listing's whole shape; ``rate_structure``
+        holds the resolved family rates a shape-priced listing's prices derive
+        from. Either may be absent without the other.
+        """
+        pricing: dict[str, Any] = {}
+        resource = self.listing_resource
+        if isinstance(resource, ComputeResource) and resource.asking_rate is not None:
+            pricing["asking_rate"] = resource.asking_rate.model_dump(mode="json")
+        if self.rate_structure is not None:
+            pricing["rate_structure"] = {
+                family: [dict(rate) for rate in rates]
+                for family, rates in self.rate_structure.items()
+            }
+        return pricing or None
