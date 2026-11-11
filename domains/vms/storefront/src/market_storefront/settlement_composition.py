@@ -246,10 +246,10 @@ class VmSettlementComposition:
                     ",".join(blocker.code for blocker in status.blockers),
                 )
                 continue
-            clause = option_resources.get("publication_clause")
-            if clause is not None and clause.recurring is not None:
+            rate_clause = option_resources.get("publication_clause")
+            if rate_clause is not None and rate_clause.recurring is not None:
                 result = derive_rate_preset(
-                    clause, helper=self.rate_preset_helpers.get(clause.mechanism),
+                    rate_clause, helper=self.rate_preset_helpers.get(rate_clause.mechanism),
                     servicing=self.rate_servicing,
                     authorities=self.disputes.for_publication(),
                     max_duration_seconds=resources.get("max_duration_seconds"),
@@ -258,7 +258,7 @@ class VmSettlementComposition:
                     now=datetime.now(timezone.utc), default_penalty_periods=24,
                 )
                 if isinstance(result, RatePresetRefusal):
-                    diagnose({"code": result.code, "detail": result.detail, "mechanism": clause.mechanism})
+                    diagnose({"code": result.code, "detail": result.detail, "mechanism": rate_clause.mechanism})
                     continue
                 envelope = {"settlement_options": [result.model_dump(mode="json")]}
             else:
