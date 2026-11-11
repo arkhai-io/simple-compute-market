@@ -1,12 +1,13 @@
 ## ADDED Requirements
 
-### Requirement: A listing's prices are published in one pricing object
+### Requirement: A listing's listing-level prices are published in one pricing object
 
-A compute storefront MUST publish every price a listing states in one top-level
+A compute storefront MUST publish a listing's listing-level prices in one top-level
 `pricing` object, on creation, refresh, reopen and registry repair: the listing's asking
 rate as `pricing.asking_rate`, and, for a VM listing whose prices derive from resolved
 family rates, that structure as `pricing.rate_structure`. Neither MUST be placed in the
 listing's capacity description, and a listing stating neither MUST publish no `pricing`.
+A settlement option's price stays with the option it prices.
 The published structure MUST match the durable rates the storefront serves and uses to
 derive shape prices. The registry engine MUST NOT interpret either. The storefront's own
 view of a listing keeps the asking rate beside the shape it prices.

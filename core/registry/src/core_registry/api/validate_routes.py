@@ -55,30 +55,42 @@ def _reset_cache() -> None:
 def reject_retired_listing_shape(body: Any) -> None:
     """Give configured retired names specific errors before general validation.
 
-    The prohibitions come from the served schema, so another market's listing
-    vocabulary needs no registry code change. A named replacement helps a
-    publisher correct a spelling that would otherwise match no query.
+    The prohibitions, and the replacement each one's ``description`` names,
+    come from the served schema, so another market's listing vocabulary needs
+    no registry code change. A named replacement helps a publisher correct a
+    name that would otherwise match no query.
     """
+    if not isinstance(body, dict):
+        return
     shape = get_loaded_spec().listing_shape
-    retired: list[str] = []
-    for key in ("offer", "offer_resource"):
-        if _forbids_property(shape, key) and isinstance(body, dict) and key in body:
-            retired.append(key)
-    resource = body.get("listing_resource") if isinstance(body, dict) else None
+    retired: dict[str, str | None] = {
+        key: replacement
+        for key, replacement in _forbidden_properties(shape).items()
+        if key in body
+    }
+    resource = body.get("listing_resource")
     nested = shape.get("properties", {}).get("listing_resource", {})
-    for key in _forbidden_properties(nested):
-        if isinstance(resource, dict) and key in resource:
-            retired.append(f"listing_resource.{key}")
+    if isinstance(resource, dict):
+        retired.update(
+            (f"listing_resource.{key}", replacement)
+            for key, replacement in _forbidden_properties(nested).items()
+            if key in resource
+        )
     if retired:
+        named = "; ".join(
+            f"`{field}`: {replacement}"
+            for field, replacement in sorted(retired.items())
+            if replacement
+        )
         raise HTTPException(
             status_code=422,
             detail={
                 "error": "retired_listing_shape",
                 "retired_fields": sorted(retired),
                 "message": (
-                    "The published listing shape is named `listing_resource` "
-                    "and its offering-mode field `offering_mode`. See "
-                    "GET /filter-spec."
+                    f"Retired names are refused ({named}). See GET /filter-spec."
+                    if named
+                    else "Retired names are refused. See GET /filter-spec."
                 ),
             },
         )
@@ -110,24 +122,30 @@ def validate_listing_publication(candidate: dict[str, Any]) -> None:
         raise HTTPException(status_code=422, detail={"error": "invalid_listing", "errors": errors})
 
 
-def _forbidden_properties(schema: dict[str, Any]) -> list[str]:
-    """Property names a schema's ``not`` clause forbids by requiring them."""
+def _forbidden_properties(schema: dict[str, Any]) -> dict[str, str | None]:
+    """Property names a schema's ``not`` clause forbids by requiring them,
+    each with the replacement its clause's ``description`` names, if any.
+
+    Only a clause requiring exactly one name forbids that name on its own; a
+    clause requiring several forbids them together, which is general
+    validation's to report.
+    """
 
     prohibition = schema.get("not")
     if not isinstance(prohibition, dict):
-        return []
+        return {}
     clauses = prohibition.get("anyOf")
     if not isinstance(clauses, list):
         clauses = [prohibition]
-    names: list[str] = []
+    names: dict[str, str | None] = {}
     for clause in clauses:
-        if isinstance(clause, dict):
-            names.extend(clause.get("required", []) or [])
+        if not isinstance(clause, dict):
+            continue
+        required = clause.get("required")
+        if isinstance(required, list) and len(required) == 1:
+            description = clause.get("description")
+            names[required[0]] = description if isinstance(description, str) else None
     return names
-
-
-def _forbids_property(schema: dict[str, Any], key: str) -> bool:
-    return key in _forbidden_properties(schema)
 
 
 def _format_path(err: ValidationError) -> str:

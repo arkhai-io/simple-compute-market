@@ -17,6 +17,7 @@ from core_registry.api import filter_spec as filter_spec_module
 from core_registry.api.validate_routes import (
     RESERVED_LISTING_FIELDS,
     listing_validation_errors,
+    reject_retired_listing_shape,
     validate_listing_publication,
 )
 
@@ -129,6 +130,66 @@ def test_the_retired_shape_is_refused_with_its_replacement_named() -> None:
     assert caught.value.status_code == 422
     assert caught.value.detail["error"] == "retired_listing_shape"
     assert caught.value.detail["retired_fields"] == ["offer_resource"]
+    assert "`offer_resource`: the published shape is `listing_resource`" in (
+        caught.value.detail["message"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("fields", "retired", "replacement"),
+    [
+        (
+            {"listing_resource": {"region": "example", "asking_rate": _RATE}},
+            "listing_resource.asking_rate",
+            "`pricing.asking_rate`",
+        ),
+        (
+            {"rate_structure": {"gpu": [{"asset": "usd", "rate": "80", "per": "hour"}]}},
+            "rate_structure",
+            "`pricing.rate_structure`",
+        ),
+    ],
+)
+def test_a_price_at_its_earlier_location_is_refused_naming_pricing(
+    fields: dict, retired: str, replacement: str
+) -> None:
+    """A rate there would publish and match no rate bound, so it is refused
+    rather than stored, and the refusal names where it now goes."""
+    with pytest.raises(HTTPException) as caught:
+        validate_listing_publication(_listing(**fields))
+
+    assert caught.value.detail["error"] == "retired_listing_shape"
+    assert caught.value.detail["retired_fields"] == [retired]
+    assert replacement in caught.value.detail["message"]
+
+
+def test_every_retired_field_is_named_in_order_with_its_replacement() -> None:
+    with pytest.raises(HTTPException) as caught:
+        validate_listing_publication(
+            _listing(
+                listing_resource={"region": "example", "asking_rate": _RATE},
+                rate_structure={},
+            )
+        )
+
+    assert caught.value.detail["retired_fields"] == [
+        "listing_resource.asking_rate",
+        "rate_structure",
+    ]
+    message = caught.value.detail["message"]
+    assert message.index("`pricing.asking_rate`") < message.index("`pricing.rate_structure`")
+
+
+def test_a_body_that_is_not_an_object_names_no_retired_field() -> None:
+    assert reject_retired_listing_shape(["listing_resource"]) is None
+
+
+def test_the_dry_run_reports_a_price_at_its_earlier_location() -> None:
+    (error,) = listing_validation_errors(
+        _listing(listing_resource={"region": "example", "asking_rate": _RATE})
+    )
+
+    assert error.startswith("listing_resource: ")
 
 
 def test_publication_refuses_with_every_error() -> None:

@@ -111,11 +111,12 @@ copy was rejected because it cannot prove what the seller published.
 
 ### D3 — Listing pricing in one top-level `pricing` object
 
-All of a listing's pricing travels together in a top-level `pricing` object:
-`asking_rate`, in its current strict shape, and an optional `rate_structure`
-keyed directly by family, with entries as the VM pricer emits them. A
-flat-priced listing carries `pricing.asking_rate` only. The compute schema does
-not name families.
+A listing's listing-level prices travel together in a top-level `pricing`
+object: `asking_rate`, in its current strict shape, and an optional
+`rate_structure` keyed directly by family, with entries as the VM pricer emits
+them. A flat-priced listing carries `pricing.asking_rate` only. A settlement
+option's price stays with the option it prices. The compute schema does not
+name families.
 
 ```json
 {
@@ -150,8 +151,23 @@ rather than acquiring a rate type; the domain's `publication_terms` carries
 rather than emitting nulls the compute schema refuses; local stored views are
 unchanged. Registry code never names or calculates rates.
 
-Known upgrade gap: rebuilt legacy rows carry no `pricing`, so they drop out of
-asking-rate filters until their seller republishes. Reads of a top-level
+The earlier locations — `listing_resource.asking_rate`, released in version 8,
+and the top-level `rate_structure` round 1 and the changes up the stack
+write — are refused at
+publication, naming their place in `pricing`, as version 6 refuses its retired
+names: admitted, a rate there would publish and match no rate bound, and its
+seller would get no signal (review 16 F1). Dual-format reading was rejected: it
+needs a precedence rule and temporary logic, and version 9 is unreleased.
+
+Known upgrade gaps: rebuilt legacy rows carry no `pricing`, so they drop out of
+asking-rate filters until their seller republishes. A version 8 registry keeps
+only its named carriers, so it drops a new publisher's `pricing` with every
+other unnamed term until it upgrades; no publisher reads a registry's
+specification, and checking it would be a new interface across every domain.
+Conversely a version 8 storefront's rated listings are refused by a version 9
+registry until the storefront upgrades: the failure is visible, which is the
+point, so registries and storefronts upgrade together. Closeout decides whether
+`docs/operator-handbook.md` needs that upgrade note. Reads of a top-level
 `rate_structure` and retained pricing records up the stack move to
 `pricing.rate_structure` in those changes; the stack merges together.
 

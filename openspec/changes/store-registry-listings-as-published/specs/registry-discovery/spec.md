@@ -89,8 +89,9 @@ before changing listing content or publisher state.
 ### Requirement: The compute schema carries a listing's asking rate
 
 The compute filter specification MUST describe an optional top-level `pricing` object
-holding every price a listing states, apart from its capacity description: an optional
-`asking_rate` and an optional `rate_structure`. `pricing` MUST admit no other property.
+holding a listing's listing-level prices: an optional `asking_rate` and an optional
+`rate_structure`. `pricing` MUST admit no other property. A settlement option's price
+stays with the option it prices, and the capacity description carries no price.
 
 `asking_rate` carries `amount`, `asset`, and `period`, all required when the object is
 present. `amount` is exact decimal text; `asset` is an opaque, non-empty identifier of the
@@ -103,9 +104,12 @@ family.
 The object is declared in the compute specification, which is data the generic registry
 serves, and not in registry engine code. The registry validates it wherever it validates
 the listing shape: at publication and in the dry run. No registry surface may interpret an
-asset beyond comparing it for equality, or interpret a rate structure at all. The
-capacity description declares no asking rate: a rate a publisher places there is an
-admitted attribute like any other, and no rate filter reads it.
+asset beyond comparing it for equality, or interpret a rate structure at all.
+
+A price at its earlier location — `asking_rate` in the capacity description, or a
+top-level `rate_structure` — MUST be refused at publication, naming the field and its
+place in `pricing`, as the specification refuses its other retired names: stored, it
+would match no rate bound and its seller would get no signal.
 
 #### Scenario: A listing is dry-run with a partial asking rate
 
@@ -133,6 +137,14 @@ admitted attribute like any other, and no rate filter reads it.
 
 #### Scenario: A rate is published inside the capacity description
 
-- **WHEN** a listing carries an asking rate in its capacity description and none in
-  `pricing`
-- **THEN** a rate-bounded query excludes it, as it excludes a listing publishing no rate
+- **WHEN** a publisher publishes a compute listing carrying an asking rate in its
+  capacity description
+- **THEN** publication is refused naming `listing_resource.asking_rate` and
+  `pricing.asking_rate`, and no listing content changes
+
+#### Scenario: A rate structure is published at the top level
+
+- **WHEN** a publisher publishes a compute listing carrying `rate_structure` beside
+  `pricing` rather than inside it
+- **THEN** publication is refused naming `rate_structure` and
+  `pricing.rate_structure`, and no listing content changes

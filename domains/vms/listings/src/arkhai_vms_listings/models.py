@@ -571,8 +571,9 @@ class Listing(BaseModel):
         return resource
 
     def published_pricing(self) -> dict[str, Any] | None:
-        """Every price the listing states, as the one ``pricing`` object a
-        registry publication carries, or ``None`` when it states none.
+        """The listing-level prices, as the one ``pricing`` object a registry
+        publication carries, or ``None`` when the listing states none. A
+        settlement option's price travels with its option instead.
 
         ``asking_rate`` prices the listing's whole shape; ``rate_structure``
         holds the resolved family rates a shape-priced listing's prices derive

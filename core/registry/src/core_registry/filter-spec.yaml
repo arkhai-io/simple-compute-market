@@ -29,8 +29,9 @@ listing_shape:
   #
   # v6: the retired spellings of the published shape are refused outright.
   # `additionalProperties` stays true, so a seller may carry any attribute
-  # this schema does not name -- the prohibition is exactly the two retired
-  # names, not a closed shape.
+  # this schema does not name -- the prohibitions name only retired names
+  # and locations, not a closed shape. Each prohibition is a clause requiring
+  # one name.
   #
   # Refused rather than ignored because this is the boundary whose skew is
   # invisible: the offering-mode field is optional, so a listing carrying the
@@ -45,11 +46,19 @@ listing_shape:
   # resource. The GPU filters keep `on_missing: fail`, so such a listing is
   # excluded from every query bounding a GPU field and appears in queries that
   # bound none.
+  #
+  # v9: a listing's listing-level prices moved to the top-level `pricing`
+  # object, and their
+  # earlier locations -- `listing_resource.asking_rate` and a top-level
+  # `rate_structure` -- are refused for the reason v6 gives: a rate left there
+  # publishes, stores, and matches no rate bound. Each prohibition's
+  # `description` names its replacement, which the publication refusal quotes.
   required: [listing_id, listing_resource, storefront_url]
   not:
     anyOf:
-      - required: [offer_resource]
-      - required: [offer]
+      - {required: [offer_resource], description: "the published shape is `listing_resource`"}
+      - {required: [offer], description: "the published shape is `listing_resource`"}
+      - {required: [rate_structure], description: "family rates are published as `pricing.rate_structure`"}
   anyOf:
     - properties:
         accepted_escrows: {type: array, minItems: 1}
@@ -65,8 +74,11 @@ listing_shape:
       required: [region]
       additionalProperties: true
       # v6: `virtualization_type` is the retired spelling of `offering_mode`.
+      # v9: the capacity description carries no price.
       not:
-        required: [virtualization_type]
+        anyOf:
+          - {required: [virtualization_type], description: "the offering-mode field is `offering_mode`"}
+          - {required: [asking_rate], description: "the asking rate is published as `pricing.asking_rate`"}
       properties:
         gpu_model:
           type: string
@@ -157,10 +169,11 @@ listing_shape:
         internet_download_mbps: {type: integer, minimum: 0}
         internet_upload_mbps: {type: integer, minimum: 0}
         open_ports_count: {type: integer, minimum: 0}
-    # v9: every price the seller states for the listing travels in one
-    # top-level object, apart from the capacity description, which describes
-    # what is sold rather than its price. Closed, so a misspelt pricing term is
-    # refused rather than stored where no filter reads it.
+    # v9: the listing-level prices -- the asking rate and the resolved family
+    # rates -- travel in one top-level object. A settlement option's price
+    # stays with the option it prices, and the capacity description, which
+    # describes what is sold, carries no price. Closed, so a misspelt pricing
+    # term is refused rather than stored where no filter reads it.
     pricing:
       type: object
       additionalProperties: false

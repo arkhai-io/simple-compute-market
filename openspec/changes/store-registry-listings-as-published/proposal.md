@@ -4,7 +4,7 @@ A registry acknowledges listing content it then discards: publication and reads
 select six named carriers even though the configured listing schema admits other
 terms. Buyers need a listing's resolved rates to price another shape, without
 confusing commercial terms with the advertised capacity description, and need
-all of a listing's pricing in one place. Registry-only response signatures do
+a listing's listing-level prices in one place. Registry-only response signatures do
 not prove what the seller published.
 
 ## What Changes
@@ -18,9 +18,11 @@ not prove what the seller published.
   expose absent seller evidence honestly, without invented backfills (D1).
 - Retain exact publication body bytes and the authenticated v2 envelope; keep
   lifecycle/oracle update proofs distinct from the publication proof (D2).
-- Move all listing pricing into one top-level `pricing` object holding
-  `asking_rate` and the optional family `rate_structure`, written by every
-  in-repository publisher through an opaque extra-term transport (D3).
+- Move a listing's listing-level prices into one top-level `pricing` object
+  holding `asking_rate` and the optional family `rate_structure`, written by
+  every in-repository publisher through an opaque extra-term transport, and
+  refuse a price at its earlier location; settlement-option prices stay with
+  their options (D3).
 - Supply the carrier and seller-authority answer to resize gate 2.1a; its buyer
   accessor and pricing behavior remain downstream work (D4).
 - Repair registries by republishing each domain's publication candidate, and
@@ -71,6 +73,8 @@ None.
 - `domains/apicredits/registry`: the settlement option shape the market uses.
 - Wire behavior: schema-invalid complete publications now fail rather than being
   stored; partial republication is not a patch. Unknown admitted terms survive.
+  A version 8 publisher's `listing_resource.asking_rate` is refused, naming
+  `pricing.asking_rate`.
   New response evidence fields are additive; legacy rows have null evidence and
   drop out of asking-rate filters until republished.
 - Persistence: additive columns, no backfill, no recovered discarded content.

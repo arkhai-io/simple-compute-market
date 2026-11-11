@@ -139,16 +139,21 @@ async def test_a_rate_structure_travels_beside_the_asking_rate(registry_client):
     ) == {"structured-1"}
 
 
-async def test_a_rate_in_the_listing_resource_is_not_a_filterable_price(registry_client):
+async def test_a_rate_in_the_listing_resource_is_refused(registry_client):
     """The capacity description is not where a price is read: a rate left
-    there is stored like any admitted attribute and matches no rate bound."""
+    there would publish and match no rate bound, so publication is refused,
+    naming its replacement, and nothing is stored."""
     request = _listing("misplaced-1", None)
     request.listing_resource["asking_rate"] = {"amount": "1.00", "asset": "usd", "period": "hour"}
-    await registry_client.publish_listing(request)
 
-    assert await _ids(
-        registry_client, "asking_rate<=100 asking_rate_asset=usd asking_rate_period=hour"
-    ) == set()
+    with pytest.raises(RegistryClientError) as caught:
+        await registry_client.publish_listing(request)
+
+    assert caught.value.status_code == 422
+    assert "listing_resource.asking_rate" in caught.value.body
+    assert "pricing.asking_rate" in caught.value.body
+    page = await registry_client.list_listings(limit=100)
+    assert "misplaced-1" not in {str(row.id) for row in page.listings}
 
 
 def _introduction_listing(listing_id: str, amount: str) -> ListingRequest:

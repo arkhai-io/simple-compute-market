@@ -28,7 +28,8 @@ Implements D3's `pricing` object and the permanent coverage the owner accepted (
   `rate_structure` is an object, no longer nullable. A rate left in
   `listing_resource` is admitted (the resource stays open) and matches no rate
   bound; the specification does not refuse it as v6 refuses retired names.
-  Registry suites updated to publish through `pricing`
+  Revised in round 2's triage (16 F1): it is refused, as is a top-level
+  `rate_structure`; see "Round 2 triage fixes". Registry suites updated to publish through `pricing`
   (`test_asking_rate_filter.py`, `test_filter_eval.py`); `first-use.py` too.
 - [x] 3.2 Publishers write `pricing` through the opaque publication channel: the VM listings model and storefront (`publication_terms` carries `{"pricing": {...}}`), the bare-metal domain and storefront, `resource-pools`, `resource-pools-contracts` and `pool-overrides`.
   VM: `Listing.published_listing_resource()` / `published_pricing()`
@@ -47,7 +48,8 @@ Implements D3's `pricing` object and the permanent coverage the owner accepted (
   rate" (the permanent text also said the registry validates only in the dry
   run, false since D1) and adds the legacy scenario. `storefront-publication`
   replaces round 1's top-level `rate_structure` requirement with "A listing's
-  prices are published in one pricing object", adds "Registry repair
+  listing-level prices are published in one pricing object" (title narrowed in
+  round 2's triage, 16 F2), adds "Registry repair
   republishes the domain's candidate", MODIFIES "A listing's asking rate is
   declared per shape". `resource-pool-management` MODIFIES "Asking-rate hint
   validation": the pool kits name no published layout.
@@ -95,6 +97,9 @@ Per `openspec/README.md#plan-closeout-requirements`; promotion is deliberately n
   negotiation", which says resolved family rates never reach a registry
   (promotion record row "D3/D4 correction"), and the storefront companion's
   asking-rate paragraph, which names no location.
+  Amended in round 2's triage (16 F1): decide whether `docs/operator-handbook.md`
+  needs D3's upgrade note — a version 9 registry refuses a version 8
+  storefront's rated listings, so the two upgrade together.
 - [ ] 4.10 Run scoped documentation citations and pinned `openspec validate store-registry-listings-as-published --strict` after promotion.
 - [ ] 4.11 Archive last, merging deltas with the pinned OpenSpec CLI and updating campaign link; review the archived documentation before cleanup.
 
@@ -214,7 +219,7 @@ Handoff:
   left in `listing_resource` admitted silently rather than refused as a
   retired location (a v8-era publisher would publish successfully and match
   no rate bound, the skew v6's comment warns of); `rate_structure` no longer
-  accepts null.
+  accepts null. Review 16 F1 reversed the second: the location is refused.
 - `uv run --directory` and `uv run --find-links` are refused to unattended
   runs; `cd <package> && uv run pytest` works only where the package's
   environment resolves without the wheelhouse (the registry and API-credit
@@ -223,3 +228,45 @@ Handoff:
 - Up the stack: readers of a top-level `rate_structure` or
   `listing_resource.asking_rate` from a registry listing move to `pricing`
   (D3's known gap).
+
+### Round 2 triage fixes
+
+Fixed in round 2's triage (review 16), outside the plan's sections:
+
+- 16 F1 — the compute filter specification refuses a price at its earlier
+  location, `listing_resource.asking_rate` (released in v8) and a top-level
+  `rate_structure`, as v6 refuses its retired names. Each prohibition clause's
+  `description` names its replacement, and `reject_retired_listing_shape`
+  (`core_registry.api.validate_routes`) now reads every top-level and
+  `listing_resource` prohibition from the served schema, honouring only
+  single-name clauses, and quotes each replacement in its 422. Registry
+  delta (requirement paragraph, two scenarios), D3 (the refusal, the rejected
+  dual format, the upgrade gaps both ways) and proposal amended; 4.9 amended.
+  Integration test `test_a_rate_in_the_listing_resource_is_refused` replaces
+  the test that it was admitted and matched nothing; unit tests of both
+  locations, their order and replacements, a non-object body, and the dry
+  run's error.
+- 16 F2 — `pricing` is described as the listing-level prices, the asking rate
+  and the rate structure, with a settlement option's price staying with its
+  option: the schema comment, both deltas (the storefront requirement's title
+  too), D3, the proposal, and `Listing.published_pricing`'s docstring.
+
+Evidence: registry unit 153 and application integration 160, focused and again
+in the run below, every one passed. `scripts/change-workflow run pre-commit`,
+which reinitialized every environment from fresh wheels and ran every suite
+(VM storefront unit 1150, 1 skipped, and application integration 565;
+bare-metal storefront 611; API-credit storefront 275; the rest unchanged):
+`after-functional-change … passed, exit 0`, `pre-commit-functional … passed,
+exit 0` (`make check-packaging` included), `pre-commit … passed, exit 0`
+(change index, task list, skills, strict OpenSpec validation, comment hygiene,
+citations, local imports). No lock changed. A fresh-context compliance check
+found two defects, both fixed: the v6 schema comment's "exactly the two retired
+names" and the v9 note's "a listing's prices"; and the task notes, amended
+above. Taken from its suggestions: single-name prohibition clauses only, the
+unit tests of order and a non-object body, D3's reverse upgrade gap and the
+4.9 handbook decision, the top-level `rate_structure` scenario, D3's
+"unreleased" wording. Declined: naming the replacement in the dry run's error,
+which reports jsonschema's own message as it did for v6; a unit test of a
+prohibition without a description, which needs a hot-swapped specification for
+a fallback string. The e2e lanes are not rerun here; the fix commit's
+validation reruns them.
