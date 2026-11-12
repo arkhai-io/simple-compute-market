@@ -2042,7 +2042,7 @@ and lock of each package bumped and of each package pinning one: `core`, `core/b
 at the owner's direction (2026-11-12) as round 3, a one-section round whose validation
 and implementation review are waived (`design.md`, "Implementation cadence").
 
-- [ ] 12a.1 **Audit against the policy's base:** measure every package whose sources
+- [x] 12a.1 **Audit against the policy's base:** measure every package whose sources
   the change edits against its version on `origin/dev`, the branch it merges into, as
   the policy says, starting from 13.7's list: still at the released version —
   `arkhai-core` 0.5.0, `arkhai-kit-alkahest` 0.11.0, `arkhai-kit-negotiation-runtime`
@@ -2055,15 +2055,155 @@ and implementation review are waived (`design.md`, "Implementation cadence").
   why, including the `arkhai-kit-config` schema table, which 13.7 left to this round.
   A package already bumped on `dev` is bumped again only where the change needs a
   larger bump than it has.
-- [ ] 12a.2 **Bump and move the pins:** set each version 12a.1 records in its
+  Done (2026-11-12), against `origin/dev` at `07af25d57`, the merge-base, with
+  `marketplace-v0.3.0` as the last release. The diff's sources touch 21 packages, not
+  13.7's ten: 13.7 compared with the release and so missed those `dev` had already
+  bumped. Bumped here:
+  - `arkhai-core` 0.5.0 → 0.6.0, minor: `PriceBasis`, `AgreedPrice`,
+    `BillingProjection`, `agreed_price` are new public API.
+  - `arkhai-kit-alkahest` 0.11.0 → 0.12.0, minor: `alkahest_billing_basis`,
+    `alkahest_payment_presentation`, and the registration's projection and presenter.
+  - `arkhai-kit-negotiation-runtime` 0.5.2 → 0.6.0, minor:
+    `NegotiationDomainHooks.resolve_acceptance`. The release also carries `dev`'s
+    unbumped edits: `Acceptance.agreed_amount` renamed to `negotiated_scalar`
+    (incompatible), the continuation validator's extra argument, and
+    `decode_revised_terms`.
+  - `arkhai-vms` 0.8.0 → 0.9.0 and `arkhai-bare-metal` 0.15.0 → 0.16.0, minor: the
+    listings' `available_until_utc` and strict relative bound, and an optional
+    `duration_seconds` in the messages and provision terms (bare metal also gains
+    `start_utc`, and stops copying the relative maximum into the listing resource, a
+    wire change, minor before 1.0.0).
+  - `arkhai-vms-negotiation` 0.6.0 → 0.7.0, minor: `selected_billing_basis`, the
+    quote's `price_basis` and the seller round's `project_billing`.
+  - `arkhai-kit-arkhai-payments` 0.6.2 → 0.7.0 (0.6.1 released), minor:
+    `payments_billing_basis`, `payments_payment_presentation`, and the compute deadline
+    taken from the pool. `dev`'s patch bump is smaller than the change needs.
+  - `arkhai-core-buyer` 0.6.2 → 0.7.0 (0.6.1 released), minor: `make_negotiate_hook`'s
+    `acceptance_validator` and `AcceptanceValidatorFn`, the amount codec's
+    `validate_reply`/`validate_accepted`, `exact_agreed_amount`'s `project_billing`.
+  - `arkhai-kit-config` 0.5.2 → 0.6.0 (0.5.1 released), minor: `settlement_fragment`
+    gives a seller's root the `rate_servicing` table, a configuration surface the
+    generated values schemas did not admit. That is a new feature of a public
+    function, not a fix, so a patch would not do.
+  - `arkhai-apicredits-buyer` 0.8.0 → 0.8.1, patch: exact escrow recovery projects
+    through Alkahest's billing basis. This is an internal change with no new API.
+  - `arkhai-core-registry-client` 0.12.3 → 0.13.0 and `arkhai-kit-policy` 0.6.0 →
+    0.7.0, minor. The change's own edit to each is only that its exact `arkhai-core`
+    pin moves to 0.6.0: `dev` gave `arkhai-kit-config` a patch for the same kind of
+    edit, because a published wheel keeps the requirements it was built with, so a pin
+    moved under an unchanged version never reaches PyPI. The version set here is also
+    the first release of edits `dev` made after `marketplace-v0.3.0` without a bump:
+    - registry-client gained `extra` on `ListingRequest` and `ValidatePublishRequest`;
+    - policy renamed `_amount_from_proposal` to `amount_from_proposal`, dropping the
+      old name, and made `set_proposal_amount` public. `arkhai-vms-negotiation`
+      imports both.
+
+    A release reads those as new API and an incompatible change, so each takes minor,
+    not patch. The cascade stops there: their only exact pinners are
+    `arkhai-core-buyer`, `arkhai-bare-metal-buyer` and
+    `arkhai-kit-negotiation-runtime`, and each is already bumped.
+
+  Already bumped on the branch, so not bumped again: `arkhai-vms-listings` 0.9.0 and
+  `arkhai-kit-resource-pools-contracts` 0.4.0. Already bumped on `dev` by at least the
+  minor bump the change needs, so not bumped again:
+  - `arkhai-core-storefront` 0.18.0 (0.17.1 released);
+  - `arkhai-kit-settlement-runtime` 0.8.0 (0.7.0);
+  - `arkhai-kit-contact-exchange` 0.5.0 (0.4.1);
+  - `arkhai-kit-pool-overrides` 0.3.0 (0.2.1); the protocol's `projection_problems` is
+    incompatible for implementers, which takes minor before 1.0.0;
+  - `arkhai-kit-resource-pools` 0.10.0 (0.9.0);
+  - `arkhai-bare-metal-buyer` 0.8.0 (0.7.2);
+  - `arkhai-bare-metal-storefront` 0.28.0 (0.27.0);
+  - `arkhai-vms-buyer` 0.11.0 (0.10.2);
+  - `arkhai-vms-storefront` 0.28.0 (0.27.0).
+
+  Two more packages move an exact pin and owe no bump, since `dev` already bumped them:
+  `arkhai-core-registry` 0.6.0 (0.5.0) and `arkhai-apicredits-storefront` 0.21.0
+  (0.20.0). Every other package the diff touches changes only its lock.
+
+  `dev` also added API after the release, without a bump, to packages bumped here or on
+  the branch: bare metal's `published_listing_resource`,
+  `VmMessage.rate_structure_digest`, the negotiation module's `rate_structure_digest`
+  and quote helpers, Alkahest's payment adapter, vms-listings' `registry_rate_structure`
+  and the negotiation runtime's edits above. Each of those packages takes a minor bump,
+  so its first release covers `dev`'s edits too. The consumers whose code imports that
+  API now have bounds that admit only the versions set here. That includes the
+  registry-client `extra`, which core-storefront's publication passes the storefronts'
+  `publication_terms` through, and policy's renamed function in the API-credits
+  storefront. Two other packages were edited on `dev` without a bump, and this change
+  does not touch them: `arkhai-core-storefront-client`, which renamed `agreed_amount`
+  to `negotiated_scalar`, and `arkhai-apicredits-domain`, which now imports policy's
+  renamed function under `arkhai-kit-policy>=0.6.0`. They are recorded as an unowned
+  gap in `openspec/changes/README.md`.
+- [x] 12a.2 **Bump and move the pins:** set each version 12a.1 records in its
   `pyproject.toml`; move every exact pin on a bumped package (13.7 names those on
   `arkhai-core`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-arkhai-payments` and
   `arkhai-core-buyer`) and raise the lower bound of each consumer that imports the new
   API (the `>=0.11.0` bounds on `arkhai-kit-alkahest` in the API-credits and VM buyers,
   and any other consumer of an API this change added).
-- [ ] 12a.3 **Relock:** `make dist`, then refresh every lock the bumps and pins change,
+  Done (2026-11-12). Versions as 12a.1 records. Exact pins moved:
+  - `arkhai-core==0.6.0` in `core/registry-client`, `core/registry`, `kit/policy`,
+    `kit/alkahest`, `kit/arkhai-payments`, `kit/contact-exchange` and
+    `kit/settlement-runtime`;
+  - `arkhai-kit-negotiation-runtime==0.6.0` in all three storefronts;
+  - `arkhai-kit-arkhai-payments==0.7.0` in the bare-metal buyer and storefront;
+  - `arkhai-core-buyer==0.7.0` and `arkhai-core-registry-client==0.13.0` in the
+    bare-metal buyer, and the latter in `core/buyer`;
+  - `arkhai-kit-policy==0.7.0` in `kit/negotiation-runtime`.
+
+  Lower bounds were raised wherever the change's own code imports the new API, or
+  calls it through a registration the change gave a new member: a registry's
+  `project_billing`, `present_payment` or `agreed_price` over an installed mechanism
+  fails on an older mechanism kit that registers no projection. By dependency:
+  - `arkhai-core>=0.6.0`: `core/buyer`, `domains/vms/negotiation`, the VM and
+    bare-metal buyers, and the VM and bare-metal storefronts.
+  - `arkhai-kit-alkahest>=0.12.0`: the API-credits and VM buyers (they import
+    `alkahest_billing_basis`), and both compute storefronts (their registries install
+    Alkahest and project it).
+  - `arkhai-kit-arkhai-payments>=0.7.0`: the VM buyer and VM storefront.
+  - `arkhai-core-buyer>=0.7.0`: the API-credits and VM buyers.
+  - `arkhai-vms>=0.9.0`: the VM buyer and storefront (an omitted horizon in the
+    provision terms).
+  - `arkhai-vms-negotiation>=0.7.0`: the VM buyer and storefront.
+  - `arkhai-bare-metal>=0.16.0`: the bare-metal buyer (the listing's
+    `available_until_utc`) and storefront.
+  - `arkhai-kit-config>=0.6.0`: both compute storefronts, whose values-schema tests and
+    committed chart schemas carry `rate_servicing`.
+  - `arkhai-kit-settlement-runtime>=0.8.0`: `kit/alkahest` (`presentation` and the
+    registration's new members).
+  - `arkhai-kit-resource-pools-contracts>=0.4.0`: `kit/resource-pools`,
+    `domains/vms/domain`, `domains/bare_metal` and the VM storefront (capacity bounds).
+  - `arkhai-vms-buyer>=0.11.0`: the VM storefront's `dev` group, whose tests import
+    `pricing_record`.
+  - `arkhai-kit-policy>=0.7.0`: `domains/vms/negotiation` (`amount_from_proposal`,
+    `set_proposal_amount`).
+  - `arkhai-vms-listings>=0.9.0`: the VM buyer, whose `pricing_record` imports
+    `registry_rate_structure`.
+  - `arkhai-core-registry-client>=0.13.0`: core-storefront and both compute
+    storefronts. Core-storefront passes a listing's `publication_terms` as
+    `ListingRequest(extra=...)`, and the storefronts' publication now puts
+    `available_until_utc` there. Core-storefront's use is `dev`'s own code, under a
+    version `dev` already bumped, so it is fixed here outside the plan.
+  - `arkhai-kit-policy>=0.7.0` in the API-credits storefront too, outside the plan for
+    the same reason: its negotiation runtime imports the renamed
+    `amount_from_proposal`.
+
+  Left as they are: consumers whose sources the change does not edit, since they import
+  nothing it added. Examples are `kit/storefront`'s `>=0.5.0` on the negotiation
+  runtime, the API-credits domain and storefront, compute delivery, the lane doubles
+  and `e2e-tests`. The VM storefront's `arkhai-bare-metal>=0.10.0` stays too: the
+  storefront imports nothing from `arkhai_bare_metal`. No Dockerfile, Makefile or
+  workflow spells a version (`check-uv-setup`).
+  This took three passes. The first set registry-client and policy as pin-only patches
+  and left the VM buyer at `arkhai-vms-listings>=0.4.1`. The second left the
+  registry-client and API-credits-storefront policy bounds low. Fresh-context checks
+  found each, and all were corrected before the final relock below.
+- [x] 12a.3 **Relock:** `make dist`, then refresh every lock the bumps and pins change,
   as `docs/development/BUILD_AND_PACKAGING.md` directs, deriving each from its project.
-- [ ] 12a.4 **Verify:** `make check-packaging` (locks current with their projects and
+  Done (2026-11-12): `make lock` (it builds the wheelhouse, then relocks every
+  project from it) exit 0. It rewrote 42 locks, every one that records a bumped
+  package or a moved requirement. Nothing was edited by hand.
+- [x] 12a.4 **Verify:** `make check-packaging` (locks current with their projects and
   the wheels, layers, dependencies), `make check-version-bumps CHANGE_BASE=dev` (no
   version more than one SemVer step from the merge-base), `make check-comment-hygiene`
   and `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms`, whose
@@ -2071,6 +2211,54 @@ and implementation review are waived (`design.md`, "Implementation cadence").
   and application integration) against the relocked environments. End-to-end: none; the
   pass changes no behaviour any scenario observes, and the owner waived this round's
   validation, so none is owed.
+  Done (2026-11-12). On the final tree, `scripts/change-workflow run pre-commit
+  negotiate-open-ended-compute-terms` passed every hook, each exiting 0:
+  - `after-functional-change`: `make lock`, which changed nothing further.
+  - `pre-commit-functional`: `make dist-clean`, `make check-packaging` (installs from
+    locks, locks current with projects and wheels, Python version, layout, and the
+    layers, scope, dependencies and kinds rules), and the whole `make test` against
+    the relocked environments. That covers every package's unit, library-integration
+    and application-integration suites. Among them: the VM storefront's 1192 passed and
+    1 skipped (unit), its 589 passed (application integration), and the bare-metal
+    storefront's 632 passed.
+  - `pre-commit`: index, tasks, skills, strict OpenSpec validation, and `make
+    check-repository`, which includes version bumps and comment hygiene.
+
+  `make check-version-bumps CHANGE_BASE=dev` and `make check-comment-hygiene` also
+  passed on their own after the first relock. The two earlier pre-commit runs, before
+  each round of fresh-context fixes, passed too. No `make test` flake this time. End-to-end: none is
+  owed (above). No marker in `e2e-tests/` observes a version, and no `Owed by
+  validation:` line applies.
+
+### Section 12a verification and handoff (2026-11-12)
+
+- The fresh-context check found two medium problems, both fixed:
+  - `dev` had changed `kit/policy` and `core/registry-client` after the release
+    without a bump, so this pass's versions are minor, not the pin-only patches the
+    first pass set. `arkhai-vms-negotiation` now requires `arkhai-kit-policy>=0.7.0`.
+  - The VM buyer's `pricing_record` imports `registry_rate_structure`, which `dev`
+    added to vms-listings unbumped. The buyer now requires `arkhai-vms-listings>=0.9.0`.
+
+  Its five low findings were wording in these notes: a count, two packages left out, a
+  misstated reason, an ambiguous "both buyers", and an unchecked box. All are fixed.
+  It found no layering, packaging or documentation-placement problem. Its re-check
+  confirmed those fixes and found three low problems, all fixed:
+  - the `arkhai-core-registry-client>=0.12.1` bounds, which admit versions without
+    `extra`;
+  - the API-credits storefront's `arkhai-kit-policy>=0.6.0`;
+  - wording that said `dev` had bumped the packages it changed, and that left out the
+    negotiation runtime's unbumped edits.
+- Outside the plan: `dev`'s own unbumped edits to `arkhai-core-storefront-client` and
+  `arkhai-apicredits-domain`, which this change does not touch, are recorded as an
+  unowned gap in `openspec/changes/README.md` and left for their owners.
+- The audit method, for any later pass: list the packages whose `src/` the diff from
+  `origin/dev` touches, and compare each version at the release tag, on `origin/dev`
+  and at `HEAD`. Then check `dev`'s unbumped source edits since the release in every
+  package the pass bumps, and in every package a moved pin forces it to bump. Then
+  raise the bounds of the consumers whose edited code imports that API, or calls it
+  through a mechanism registration.
+- Next is closeout, resuming at 13.3 and confirming 13.7 again on the relocked tree.
+  The owner waived this round's validation and implementation review.
 
 ## 13. Closeout
 

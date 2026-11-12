@@ -35,7 +35,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.15.0"
+version = "0.16.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute" },
@@ -63,7 +63,7 @@ requires-dist = [
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-storefront", marker = "extra == 'storefront'", specifier = ">=0.16.0" },
     { name = "arkhai-kit-capability-shape", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.3.0" },
+    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.4.0" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pydantic-core", specifier = ">=2.33" },
 ]
@@ -88,18 +88,18 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-registry-client"
-version = "0.12.3"
+version = "0.13.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -107,7 +107,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_registry_client-0.12.3-py3-none-any.whl" },
+    { path = "arkhai_core_registry_client-0.13.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -151,7 +151,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.5.2"
+version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -162,7 +162,7 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.5.2-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -22,13 +22,13 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -48,7 +48,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.5.2"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -64,7 +64,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
-    { name = "arkhai-kit-policy", specifier = "==0.6.0" },
+    { name = "arkhai-kit-policy", specifier = "==0.7.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -75,7 +75,7 @@ dev = [
 
 [[package]]
 name = "arkhai-kit-policy"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -84,7 +84,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_policy-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_kit_policy-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]
