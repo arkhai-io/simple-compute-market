@@ -16,7 +16,8 @@ pending maintainer review. D-a–D-e of resize/registry are unchanged.
   `total` or `per_period`, plus the selected period for presentation. It must not
   multiply the already accepted amount by duration or by the multiplier again.
   The billing-kind interpretation is of the accepted option, not a current offer.
-- Carrier: top-level registry `rate_structure`, verified against retained
+- Carrier: the registry publication's `pricing.rate_structure`, inside its closed
+  `pricing` object beside `pricing.asking_rate`, verified against retained
   `publisher_publication.body_base64` and its complete authenticated request.
   Verify the historical signature at its signed timestamp, seller trust, listing
   identity and `listing.publish` context. A legacy row without proof fails closed

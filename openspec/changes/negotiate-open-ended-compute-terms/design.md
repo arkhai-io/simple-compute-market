@@ -85,8 +85,13 @@ implementation that rejects every repository reader found during migration.
 Status: decided by webapp owner 2026-11-06, pending maintainer review.
 
 The seller-signed acceptance binds the agreed multiplier and the rate-structure
-digest: the same digest D-e pins at opening, computed over `rate_structure` as
-published (D-b) and seller-signed in the registry's retained publication (D-c).
+digest: the same digest D-e pins at opening, computed over the family rates as
+published (D-b) and seller-signed in the registry's retained publication (D-c). A
+publication carries its listing-level prices in one closed `pricing` object,
+`pricing.asking_rate` and `pricing.rate_structure`
+(`core/registry/src/core_registry/filter-spec.yaml`); the registry refuses a top-level
+`rate_structure`, and the buyer lifts `pricing.rate_structure` into its listing record
+before computing the digest.
 Opening, every round and acceptance refer to this one rate identity. The buyer
 verifies it against the retained seller-signed registry publication, never a
 snapshot supplied by the seller. Historical publication verification, exact option
@@ -293,7 +298,7 @@ deal, the setup charge" with its worst case (nothing earned, nothing taken) stat
 than implied, dispute authority/window/case-hold cap and evidence retention. A filed case
 is shown by the authority's per-part answer, `held` with its extension or `not_held`
 with the reason, never as a refund pending: an accepted case over paid-out money
-recovers none of it. Values come from the selected option, not a stored class. Asking rate keeps its stated unit.
+recovers none of it. Values come from the selected option, not a stored class. The listing's asking rate, `pricing.asking_rate`, keeps its stated unit.
 The seller's side of the same display is the default-buyer refusal diagnostic (D3), so
 seller and buyer read one policy.
 
