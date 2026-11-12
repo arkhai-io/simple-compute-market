@@ -55,6 +55,7 @@ from test_publication_cycle import (
     member,
     pool,
     projections_over,
+    unresolvable,
 )
 
 
@@ -755,13 +756,11 @@ async def test_status_reports_a_refused_generation_as_loaded_with_the_sites_hold
 async def test_status_reports_a_held_pools_reason_from_the_latest_cycle_only(
     tmp_path, monkeypatch
 ) -> None:
-    """A pool resolving no lease bound is reported held, by its reason, once a
-    cycle has run; a preview records nothing, so before that status reports no
-    derivation. Spec scenario "A bare-metal pool resolves no lease bound"."""
-    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
-    runtime = _derivation_runtime(
-        tmp_path, monkeypatch, sites, default_max_duration_seconds=None
-    )
+    """A pool whose declarations do not resolve is reported held, by its reason,
+    once a cycle has run; a preview records nothing, so before that status
+    reports no derivation."""
+    sites = {"site-a": Site(unresolvable("pool-1", member("r1", "pool-1")))}
+    runtime = _derivation_runtime(tmp_path, monkeypatch, sites)
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
@@ -774,7 +773,8 @@ async def test_status_reports_a_held_pools_reason_from_the_latest_cycle_only(
 
     assert before == {} and previewed == {}
     (hold,) = status.publication_derivation["site-a"]["holds"]
-    assert hold == {"pool_id": "pool-1", "reason": "pool_lease_bound_missing"}
+    assert (hold["pool_id"], hold["reason"]) == ("pool-1", "pool_unresolvable")
+    assert hold["problems"]
     assert {name: loop["state"] for name, loop in status.lifecycle.items()} == {
         "delivery_recovery": "paused",
         "negotiation_watchdog": "paused",
@@ -844,7 +844,7 @@ async def test_a_cycle_failing_in_compose_leaves_the_last_derivation_in_status(
 ) -> None:
     """A cycle that fails before deriving a site leaves that site's last
     derivation, which status keeps reporting beside the failed outcome."""
-    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
+    sites = {"site-a": Site(unresolvable("pool-1", member("r1", "pool-1")))}
     composed = iter((True, False))
 
     def factory(runtime):
@@ -856,7 +856,6 @@ async def test_a_cycle_failing_in_compose_leaves_the_last_derivation_in_status(
         tmp_path,
         monkeypatch,
         sites,
-        default_max_duration_seconds=None,
         publication_cycle_factory=factory,
     )
     app = _app(runtime)

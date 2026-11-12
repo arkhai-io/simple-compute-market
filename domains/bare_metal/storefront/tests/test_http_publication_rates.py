@@ -31,11 +31,22 @@ from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_regi
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from held_loops import held_loop_controller
 from recurring_world import MECHANISM, recurring_world, undeclared
-from test_http_system import ADMIN_SIGNER, SELLER_SIGNER, _app, _runtime
+from test_http_system import (
+    ADMIN_SIGNER,
+    SELLER_SIGNER,
+    _admin_client,
+    _app,
+    _derivation_runtime,
+    _runtime,
+)
 from test_publication_cycle import (
+    CONFIGURED_CLAUSES_RAW,
+    DEFAULT_GPU_MODEL,
     REGISTRY_URL,
     RecordingRegistries,
     Site,
+    member,
+    pool,
     projections_over,
     Terms,
     _priced,
@@ -268,28 +279,57 @@ async def test_a_bound_conflict_after_the_write_holds_rather_than_fails(tmp_path
     assert "min_duration_seconds" not in held.listing_resource
 
 
-async def test_a_pool_resolving_no_lease_bound_is_held_through_the_running_app(tmp_path):
-    """With no configured maximum, the step reports the pool held for its lease
-    bound and publishes nothing for it; an override stating a maximum then lets
-    the next step publish it. Spec scenario: "A bare-metal pool resolves no
-    lease bound"."""
-    site = Site(_priced(_rate("12.50")))
-    async with _storefront(tmp_path, site, default_max_duration_seconds=None) as (
-        admin,
-        public,
-    ):
-        held = await admin.admin_run_lifecycle_cycle("publication")
-        await PoolOverrideClient(admin).put_pool_override(
-            {"site_id": SITE, "pool_id": "pool-1", "offering_mode": "bare_metal",
-             "terms": {"max_duration_seconds": 7200}}
-        )
-        listing = await public.get_listing(
-            _listing_id(await admin.admin_run_lifecycle_cycle("publication"))
-        )
+@contextlib.asynccontextmanager
+async def _composed(tmp_path, monkeypatch, site: Site, **changes):
+    """The running app over ``site``, each cycle composed from the runtime as
+    production composes it, under the configured Alkahest settlement."""
+    app = _app(_derivation_runtime(tmp_path, monkeypatch, {SITE: site}, **changes))
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            yield admin
 
-    assert _holds(held) == {"pool_lease_bound_missing"}
-    assert [item for item in held["actions"] if item["action"] == "publish"] == []
+
+async def test_a_reserved_option_publishes_with_no_relative_maximum(tmp_path, monkeypatch):
+    """With no maximum lease duration from any tier, the pool is not held: its
+    listing publishes its reserved escrow with no relative maximum. Spec
+    scenarios "A bare-metal pool states no maximum duration" (its publication
+    half) and "A bare-metal pool resolves no lease bound"."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    async with _composed(tmp_path, monkeypatch, site, default_max_duration_seconds=None) as admin:
+        report = await admin.admin_run_lifecycle_cycle("publication")
+        listing = await admin.get_listing(_listing_id(report))
+
+    assert _holds(report) == set()
     assert listing.status == "open"
+    assert listing.max_duration_seconds is None
+    assert listing.extra["accepted_escrows"]
+
+
+async def test_pool_level_clauses_publish_below_a_model_hint(tmp_path, monkeypatch):
+    """With no configured clause, a pool's ``pricing.settlements`` hint publishes
+    its clauses for each machine whose GPU model has no hint of its own, while a
+    model hint -- here an empty list, which withholds every option -- wins for
+    its model's machine. Spec scenarios "A bare-metal pool states pool-level
+    clauses" and "A pool-level hint below a model hint"."""
+    site = Site(pool(
+        "pool-1",
+        member("r1", "pool-1"),
+        member("r2", "pool-1", attributes={"gpu_model": "A100"}),
+        policy_tags={"pricing": {
+            "settlements": list(CONFIGURED_CLAUSES_RAW),
+            "gpu": {DEFAULT_GPU_MODEL: {"settlements": []}},
+        }},
+    ))
+    async with _composed(tmp_path, monkeypatch, site, publication_clauses=()) as admin:
+        report = await admin.admin_run_lifecycle_cycle("publication")
+        listing = await admin.get_listing(_listing_id(report))
+
+    assert listing.listing_resource["gpu_model"] == "A100"
+    assert listing.extra["accepted_escrows"]
+    refused = [item for item in report["actions"] if item["action"] == "refuse"]
+    assert [(item["physical_resource_id"], item["reason"]) for item in refused] == [
+        ("r1", "no_settlement_option")
+    ]
 
 
 def _recurring(options: list[dict]) -> list[dict]:

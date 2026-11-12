@@ -16,8 +16,8 @@ The owner's record of round 1 (`reviews/01-implementation-owner.md`) stood in fo
 the design review this change never had; its decisions are in `design.md` D1–D12, and
 the code they need, with review 04's F1 and F2, is round 2: first planned as section 5,
 then split at the owner's direction into sections 5–12, one session each but 5 and 6
-together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–8
-are done; implementation resumes at section 9. Verification levels follow `docs/development/TESTING.md`;
+together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–9
+are done; implementation resumes at section 10. Verification levels follow `docs/development/TESTING.md`;
 every behaviour this change adds gets permanent tests at the level it assigns (owner
 record 01, R2).
 
@@ -1313,7 +1313,7 @@ Delivers D10's shared clause resolver (R28) and D5's reserved-bound rule in both
 `publication_terms.py`, `publication.py`), the VM storefront's publication terms and
 pool-override models, and `docs/operator-handbook.md`.
 
-- [ ] 9.1 **The shared clause resolver (D10; R28), from 5.9:** move clause and
+- [x] 9.1 **The shared clause resolver (D10; R28), from 5.9:** move clause and
   listing-term resolution out of `arkhai_vms_listings.pricing_resolution` into
   `kit/resource-pools-contracts` beside `capacity_bounds.py` and `raw_pricing`, taking
   the `gpu` key as data, resolving field by field in D10's order (override > per-model
@@ -1321,18 +1321,90 @@ pool-override models, and `docs/operator-handbook.md`.
   flat `[pricing]`), bounds in D5's order. Both domains call it; bare metal's
   `pricing.bare_metal.settlements` hint is replaced, with no compatibility path (D12);
   VM's family rates stay in VM. A v0.3.0 VM configuration or hint resolves as before.
-- [ ] 9.2 **The reserved-bound rule (D5; R27), from 5.9:** in both domains no positive
+  Done (2026-11-12): `kit/resource-pools-contracts/src/market_resource_pools_contracts/listing_terms.py`
+  — `ListingTerms` (accepted escrows, settlements), `resolve_listing_terms(policy_tags, *,
+  model_family, model, storefront_override, config_defaults_by_model, flat_default)` in
+  D10's five tiers, each field whole, and the hint readers `model_hint`,
+  `model_hint_terms`, `pool_hint_terms` (`pricing.settlements`, clauses only) and
+  `model_hint_bounds` (strict). It does not resolve bounds: VM's `resolve_gpu_pricing`
+  (still in `pricing_resolution.py`, now composition only) takes the settlement terms from
+  it and composes the bounds through `resolve_capacity_bounds` with its v0.3.0 per-model
+  tiers below the mode hint; bare metal keeps its per-pool bounds in `site_reading.py`
+  (D10's added paragraph records why). Bare metal: `publication.py` resolves each
+  candidate's clauses through the shared resolver with its machine's `gpu_model`, the
+  family key read from `COMPUTE_CAPABILITY_SCHEMA`; `publication_terms.py` and its
+  `pool_pricing_unreadable` hold are removed (`git rm`). Outside the plan's file list, as
+  the fourth tier requires: `config.py` gains `[pricing.defaults.gpu.<model>].settlements`
+  (`ModelPricingSettings`, `PricingDefaultsSettings`), `runtime.py` compiles them at
+  startup (refusing naming the key) into `publication_clauses_by_model`, which
+  `publication_composition.py` hands the cycle; `settings.toml` documents it; `make
+  helm-values-schema` regenerated `helm/charts/bare-metal-storefront/values.schema.json`.
+  A wrongly shaped hint field falls through in both domains (VM's released behaviour;
+  D10). Versions, against `marketplace-v0.3.0` and `dev`: `arkhai-kit-resource-pools-contracts`
+  0.3.0 and `arkhai-vms-listings` 0.8.0 are both released and unbumped on `dev`, so this
+  section bumps them a minor each, to 0.4.0 (the new public module, and round 1's
+  `capacity_bounds`, added without a bump) and 0.9.0 (the pool-level tier); the
+  consumers' floors follow: `>=0.4.0` in VM listings and the bare-metal storefront,
+  `arkhai-vms-listings>=0.9.0` in the VM storefront. Both storefronts are already
+  0.28.0, unreleased.
+- [x] 9.2 **The reserved-bound rule (D5; R27), from 5.9:** in both domains no positive
   relative maximum means no relative limit; retire `pool_lease_bound_missing` and
   `reserved_lease_bound_missing`, and add the bare-metal upgrade step (the replaced hint
   and the retired diagnostic) to `docs/operator-handbook.md`.
-- [ ] 9.3 **Permanent tests (R2):** unit, in `kit/resource-pools-contracts/tests`: each
+  Done (2026-11-12): bare metal's `_hold_unbounded_pools` (`pool_lease_bound_missing`)
+  and the composition's `reserved_lease_bound_missing` skip are removed; a pool resolving
+  no positive maximum publishes with `max_duration_seconds` null. VM already published
+  so, and bare-metal negotiation already checks a duration only against a stated
+  maximum (`negotiation.py`). Docstrings and `settings.toml`/`startup_refusal.py` prose
+  follow. `docs/operator-handbook.md`, "What the upgrade from v0.3.0 changes", gains two
+  bullets: v0.3.0 shipped the hold, so held pools now publish unbounded (set a default,
+  override or hint to keep a ceiling); and bare metal now reads the pool's `pricing`
+  hint, so a shared pool's VM clause hint reaches its bare-metal listings. The replaced
+  `pricing.bare_metal.settlements` hint was never released (absent from
+  `marketplace-v0.3.0`), so the step names the hint tiers bare metal now reads rather
+  than a migration from it. `DEPLOYMENT_AND_CONFIG.md`'s bare-metal override bullet and
+  `storefront-publication/architecture.md` still name the retired hold: closeout
+  promotes them (D5 and D10's promotion rows, task 13.9).
+- [x] 9.3 **Permanent tests (R2):** unit, in `kit/resource-pools-contracts/tests`: each
   tier of D10's order winning field by field, the pool-level hint, a v0.3.0 VM
   configuration and hint unchanged, bounds keeping D5's order; the moved
   `domains/vms/storefront/tests/unit/test_pricing_resolution.py` cases follow the
   resolver. Application integration through each storefront's typed client: a pool-level
   `pricing.settlements` hint publishes its clause in both domains; a reserved option
   publishes without a relative maximum in both domains.
-- [ ] 9.4 **Verify:** `make dist`, then `make -C kit/resource-pools-contracts test`
+  Done (2026-11-12). Unit, `kit/resource-pools-contracts/tests/unit/test_listing_terms.py`
+  (the resolver called directly): each of the five tiers winning below the one above,
+  field by field, a list resolved whole and an empty list stopping lower tiers, another
+  model's hint ignored, a listing without a model, the family as data, every malformed
+  hint level falling through, no pool-level accepted escrows, and `model_hint_bounds`
+  stated, absent and refused. VM, `domains/vms/storefront/tests/unit/test_pricing_resolution.py`
+  (unit, `resolve_gpu_pricing`): the moved order cases now live in the kit file; it keeps
+  VM's composition — a released per-model hint and configuration resolving as before, the
+  pool-level clauses below the model hint (and for a model-less shape), the mode hint
+  above the per-model bound tiers, each bound tier above the next (override over mode
+  hint, model hint over model configuration, model configuration over flat), strict
+  bounds and retired keys. This departs from the plan's line: the v0.3.0 VM case and the
+  bound order are VM unit tests, not the kit's, since the kit resolver resolves no bounds
+  and knows no VM configuration. Bare metal, unit: `tests/test_publication_cycle.py`
+  `test_each_machine_takes_its_clauses_from_the_highest_tier_stating_them` (the cycle with
+  a recording payload builder: model hint and pool hint each over a configured model,
+  model configuration over flat, flat, then an override replacing all); the two lease-bound cycle tests now assert publication with a
+  null maximum and no hold; `tests/test_config_loader.py` (the per-model table read under
+  the model's spelling); `tests/test_app_composition.py` (per-model clauses compiled and
+  handed to the cycle by `build_publication_cycle`, and refused at startup naming the
+  key). `tests/test_http_system.py`'s two status tests that leaned on the retired hold use
+  an unresolvable pool's `pool_unresolvable` hold instead. Application integration
+  through the typed admin client with real SQLite and the production cycle composition:
+  bare metal `tests/test_http_publication_rates.py`
+  `test_a_reserved_option_publishes_with_no_relative_maximum` (null maximum, the Alkahest
+  escrow published, no hold) and `test_pool_level_clauses_publish_below_a_model_hint`
+  (two machines in one pool, no configured clause: the A100 machine publishes the
+  pool-level clauses, the default-model (H200) machine's empty model hint refuses it as
+  `no_settlement_option`); VM `tests/integration/test_publication_loop.py`
+  `test_a_reserved_option_publishes_with_no_relative_maximum` and
+  `test_pool_level_clauses_publish_below_a_model_hint` (the GPU-less shape publishes the
+  pool-level clause, the H100 shape's empty hint refuses it).
+- [x] 9.4 **Verify:** `make dist`, then `make -C kit/resource-pools-contracts test`
   (unit), `make -C domains/vms/storefront test` (which tests `domains/vms/listings`;
   including `test_reconciler_derivation.py`, `test_reconciler_projection.py`,
   `test_pool_overrides_api.py`), `make -C domains/bare_metal/storefront test`,
@@ -1342,6 +1414,50 @@ pool-override models, and `docs/operator-handbook.md`.
   `vms/test_pool_declared_offering_modes.py` and
   `bare_metal/test_bare_metal_publication.py` publish through the resolver; none sets a
   pool-level hint, and none is owed beyond them.
+  Done (2026-11-12), after `make dist`: `make -C kit/resource-pools-contracts test`
+  (unit) 449 passed; `make -C domains/vms/storefront test` unit 1189 passed, 1 skipped,
+  application integration 584 passed (including `test_reconciler_derivation.py`,
+  `test_reconciler_projection.py`, `test_pool_overrides_api.py` and the two new
+  `test_publication_loop.py` cases); `make -C domains/bare_metal/storefront test` (unit
+  and application integration) 629 passed, after `make helm-values-schema`; `make
+  check-comment-hygiene` passed; `scripts/change-workflow run pre-commit
+  negotiate-open-ended-compute-terms` on the final code passed every hook —
+  `after-functional-change` exit 0 (relocking every project over contracts 0.4.0),
+  `pre-commit-functional` exit 0 (`make check-packaging` and the whole `make test`),
+  `pre-commit` exit 0. End-to-end confirmed as stated: the three scenarios publish
+  through the resolver; no marker in `e2e-tests/` states a pool `pricing` hint for bare
+  metal (its drivers state clauses by override) or a pool-level `pricing.settlements`;
+  the bare-metal lanes configure their bounds, so none exercises the retired hold. No
+  `Owed by validation:` evidence: no CI workflow a push alone produces bears on this
+  section.
+
+### Section 9 verification and handoff (2026-11-12)
+
+- The fresh-context compliance check found one high finding: contracts 0.3.0 and
+  `arkhai-vms-listings` 0.8.0 are the versions `marketplace-v0.3.0` released, so adding
+  API under them was a versioning defect (round 1's `capacity_bounds` included); both
+  are now bumped a minor (9.1's note). Its re-check found every fix holding and three
+  wording slips, fixed: the model named in 9.3's note, "shipped" for round 1's
+  unreleased `capacity_bounds`, and a parenthetical in the payload builder's docstring. Also fixed: stale comments in `reconciler.py` and
+  `publication_composition.py`, a history phrase in `listing_terms.py`, a handbook clause
+  naming a diagnostic v0.3.0 never had, VM bound-order coverage, a cycle test that did
+  not exercise the pool hint over a configured model, integration docstrings claiming
+  acceptance, D10's promotion row gaining `ARCHITECTURE.md`, and nits. Declined: VM's
+  `GPU_FAMILY_KEY = "gpu"` literal (pre-existing; it is the value bare metal derives
+  from the compute schema, and VM's family-rate code is keyed on it).
+- For the round's triage, settling sections 6 and 8's version question by the release
+  tag: `arkhai-kit-settlement-runtime` released 0.7.0, so 0.8.0 is unreleased and
+  needs nothing; `arkhai-kit-arkhai-payments` released 0.6.1 and is 0.6.2 on `dev` (a
+  patch), while section 8 added `RatePresetPricing.delivery_deadline_seconds`, new API,
+  which by `docs/development/RELEASING.md` takes it to 0.7.0 with its exact pins;
+  `arkhai-kit-config` released 0.5.1 and is 0.5.2 on `dev`, while section 6 added the
+  seller's `rate_servicing` key to its generated schema — whether that is a minor is the
+  triage's call. Left unchanged here: outside this section, and each moves exact pins.
+- For the next sections: section 10 does not touch the resolver. A bare-metal candidate
+  carries `resolved_clauses` from every tier now (the payload builder falls back to the
+  flat clauses only when the cycle resolved none). Bare-metal integration cases that
+  need the production cycle with a pool hint can use
+  `test_http_publication_rates.py`'s `_composed` (over `_derivation_runtime`).
 
 ## 10. The buyer's per-term waivers and duration flags
 
@@ -1493,9 +1609,12 @@ anything requiring code returns to implementation. Former numbers 6.1–6.11 are
   ("Versioning policy", D12), `openspec/specs/storefront-publication/architecture.md`
   (D5, D6, D9, D10), `openspec/specs/buyer-orchestration/architecture.md` (D5's buyer-check
   seams, D7, D8) and
-  the bare-metal upgrade step in `docs/operator-handbook.md` (D5, D10), the seller
-  root's `rate_servicing` tables (D6) and the storefront-wide
-  `[pricing].default_premature_stop_penalty_periods` with its startup refusal (D3) in
+  the bare-metal upgrade step in `docs/operator-handbook.md` (D5, D10; written in 9.2,
+  confirmed here), the seller
+  root's `rate_servicing` tables (D6), the storefront-wide
+  `[pricing].default_premature_stop_penalty_periods` with its startup refusal (D3), and
+  bare metal's clause tiers with `[pricing.defaults.gpu.<model>]` and its override
+  bullet's retired `pool_lease_bound_missing` (D5, D10) in
   `docs/development/DEPLOYMENT_AND_CONFIG.md`. The archive
   merges the deltas into `negotiation-protocol`, `storefront-publication`,
   `resource-pool-management`, `settlement-configuration`, `buyer-orchestration` and

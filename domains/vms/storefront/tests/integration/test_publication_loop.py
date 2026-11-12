@@ -1352,6 +1352,48 @@ async def test_a_pool_priced_only_per_gpu_model_refuses_its_shape_without_gpus(w
     assert refusal["shape_digest"] == resolve_shape(cpu_shape).digest
 
 
+async def test_a_reserved_option_publishes_with_no_relative_maximum(world):
+    """A pool resolving no maximum lease duration from any tier -- the packaged
+    default states none -- publishes its reserved escrow with no relative
+    maximum and is not held."""
+    world.pools.append(_shaped())
+
+    await _cycle(world)
+    listings = await _listings(world)
+    report = await _report(world)
+
+    ((_, listing),) = listings.items()
+    assert listing["max_duration_seconds"] is None
+    assert listing["accepted_escrows"]
+    assert report["holds"] == []
+
+
+async def test_pool_level_clauses_publish_below_a_model_hint(world):
+    """With no configured clause, a pool's ``pricing.settlements`` hint publishes
+    for the shape whose model has no hint of its own -- here one stating no
+    GPUs -- while the model hint, an empty list withholding every option, wins
+    for its model's shape. Spec scenario "A pool-level hint below a model hint"."""
+    cpu_shape = {"cpu": {"count": 8}, "memory": {"gib": 32}}
+    world.pools.append(
+        _shaped(
+            shapes=(_SHAPE, cpu_shape),
+            pricing={"settlements": [settlement_clause()], "gpu": {"H100": {"settlements": []}}},
+        )
+    )
+
+    with replaced_setting("pricing.settlements", []):
+        await _cycle(world)
+        listings = await _listings(world)
+        derivation = await _derivation(world)
+
+    ((_, listing),) = listings.items()
+    assert "gpu_model" not in listing["listing_resource"]
+    assert listing["accepted_escrows"]
+    (refusal,) = derivation["refusals"]
+    assert (refusal["reason"], refusal["pool_id"]) == ("no_settlement_option", "broker-a")
+    assert refusal["shape_digest"] == resolve_shape(_SHAPE).digest
+
+
 # ---------------------------------------------------------------------------
 # Shape admissibility
 # ---------------------------------------------------------------------------

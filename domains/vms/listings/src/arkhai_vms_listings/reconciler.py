@@ -863,9 +863,10 @@ def _projected_pool_rows(
 
     # Terms resolve per GPU model because the hint and configured tiers are
     # keyed by model; a listing takes its shape's model's terms. A shape
-    # stating no GPUs groups under ``None``: it resolves only the override's and
-    # the flat default's terms and the unkeyed families' rates, so a pool whose
-    # only terms are per GPU model leaves it with no settlement option.
+    # stating no GPUs groups under ``None``: it resolves only the override's,
+    # the pool-level hint's and the flat default's terms and the unkeyed
+    # families' rates, so a pool whose only clauses are per GPU model, with no
+    # pool-level or flat clauses, leaves it with no settlement option.
     models = sorted(
         {shape.gpu_model for shape in shapes},
         key=lambda model: (model is not None, model or ""),

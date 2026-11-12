@@ -32,6 +32,7 @@ from arkhai_bare_metal_storefront.contribution import (
 )
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.fulfillment_service import fulfill_bare_metal
+from arkhai_bare_metal_storefront.publication_composition import build_publication_cycle
 from arkhai_bare_metal_storefront.config import IDENTITY_CREDENTIAL_ENV
 from arkhai_bare_metal_storefront.runtime import build_runtime_from_configuration
 from arkhai_bare_metal_storefront.server import (
@@ -620,6 +621,46 @@ def test_publication_clauses_that_do_not_compile_are_refused_at_startup(
     document["pricing"] = {"settlements": [{"mechanism": "alkahest.v1"}]}
 
     with pytest.raises(RuntimeError, match=r"\[pricing\].settlements"):
+        _configured_runtime(monkeypatch, tmp_path, document)
+
+
+#: A configured clause; its asset is a deterministic development address, never
+#: to be used on a public network.
+_ALKAHEST_CLAUSE = {
+    "mechanism": "alkahest.v1",
+    "asset": "0x" + "9f" * 20,
+    "rate": "10",
+    "per": "hour",
+    "mechanism_input": {"chain": "anvil", "escrow_kind": "erc20_escrow_obligation_default"},
+}
+
+
+def test_per_model_clauses_reach_the_publication_cycle(monkeypatch, tmp_path):
+    """``[pricing.defaults.gpu.<model>]`` clauses are compiled at startup and
+    composed into the cycle as the tier between the pool's hints and
+    ``[pricing].settlements``; a model stating none adds no tier."""
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["pricing"] = {"defaults": {"gpu": {"H100": {"settlements": [_ALKAHEST_CLAUSE]}, "A100": {}}}}
+
+    runtime = _configured_runtime(monkeypatch, tmp_path, document)
+    composed = build_publication_cycle(
+        runtime,
+        registry_configuration=runtime.registry_configuration,
+        cycle_factory=lambda **kwargs: kwargs,
+    )
+
+    assert {model: [clause.mechanism for clause in clauses]
+            for model, clauses in runtime.publication_clauses_by_model.items()} == {
+        "H100": ["alkahest.v1"]
+    }
+    assert composed["publication_clauses_by_model"] is runtime.publication_clauses_by_model
+
+
+def test_per_model_clauses_that_do_not_compile_are_refused_at_startup(monkeypatch, tmp_path):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["pricing"] = {"defaults": {"gpu": {"H100": {"settlements": [{"mechanism": "alkahest.v1"}]}}}}
+
+    with pytest.raises(RuntimeError, match=r"\[pricing\.defaults\.gpu\.H100\]\.settlements"):
         _configured_runtime(monkeypatch, tmp_path, document)
 
 

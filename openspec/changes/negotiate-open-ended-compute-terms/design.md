@@ -471,6 +471,21 @@ resolver, moved out of `arkhai_vms_listings.pricing_resolution`, lives provision
 confirms or moves it, since it is compute-family resolution and no compute family kit
 exists yet.
 
+The resolver (`market_resource_pools_contracts.listing_terms`) resolves the settlement
+terms — the clause list and VM's legacy accepted-escrow list — and not the bounds, which
+keep D5's order through the shared `resolve_capacity_bounds`: VM composes its per-model
+bound tiers below the mode hint, the compatibility v0.3.0 is owed, from the resolver's
+`model_hint_bounds`; bare metal resolves bounds per pool (override, mode hint,
+configuration), as its admission and override write check read them, and never shipped
+model bound tiers. Bare metal resolves clauses per candidate, the model being its
+machine's GPU model, and gains `[pricing.defaults.gpu.<model>].settlements`, compiled at
+startup like `[pricing].settlements`, so its fourth tier exists. The pool-level hint
+states clauses only. A hint field of the wrong shape falls through as an absent one in
+both domains: that is what v0.3.0's VM resolver does, and bare metal's earlier hold
+(`pool_pricing_unreadable`) was never released (D12), so the released behaviour is the
+one both keep. The family key bare metal passes is read from the compute vocabulary's
+schema (the family of `GPU_MODEL_ATTRIBUTE`), not restated.
+
 ### D11. The buyer waives each default refusal on its own, and names its duration once
 
 One flag per default refusal, in both buyers (`market buy`/`negotiate`, `bare-metal
@@ -1040,11 +1055,11 @@ Destinations are planned, not claims of implemented behavior.
 |---|---|
 | D1, D2/D2a/D2b classes, monetary quote unit, tested money readers and acceptance pricing pin | `docs/development/ARCHITECTURE.md` (with the authority description); `openspec/specs/negotiation-protocol/spec.md` |
 | D3 penalty preset default and its setting, the deadline's source, buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/deal-lifecycle/spec.md` (the clause fallback in its two delivery-deadline requirements, through the archive's delta); `docs/development/DEPLOYMENT_AND_CONFIG.md` (the storefront-wide `[pricing]` terms of sale: `default_premature_stop_penalty_periods` and its startup refusal); foundation-owned lifecycle contract |
-| D5 the horizon as the Agreement's, listing bounds, the acceptance hook, the floored default, the buyer's check and its seams, and the reserved-bound rule | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md`; `openspec/specs/buyer-orchestration/architecture.md` (the per-listing acceptance validator and the bounds a resumed run keeps); `docs/operator-handbook.md` (bare-metal upgrade step) |
+| D5 the horizon as the Agreement's, listing bounds, the acceptance hook, the floored default, the buyer's check and its seams, and the reserved-bound rule | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md` (its "Missing defaults" paragraph still names the retired hold); `openspec/specs/resource-pool-management/spec.md`; `openspec/specs/buyer-orchestration/architecture.md` (the per-listing acceptance validator and the bounds a resumed run keeps); `docs/operator-handbook.md` (bare-metal upgrade step, written in implementation); `docs/development/DEPLOYMENT_AND_CONFIG.md` (the bare-metal override bullet that still names `pool_lease_bound_missing`) |
 | D6 servicing declaration and its three doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` (with the storefronts' integration fixtures at the composition ports no installed mechanism supplies); `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Settlement consumer configuration and cutover": the seller root's `rate_servicing` tables) |
 | D7, D8 display, the mechanism's presenter, the default buyer's policy and seller-policy distinction | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |
 | D9 recurring publication and the shared per-clause step | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |
-| D10 the unified clause source | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
+| D10 the unified clause source | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md`; `docs/development/ARCHITECTURE.md` (what `kit/resource-pools-contracts` holds, under "Kit areas", once closeout confirms or moves the resolver); `docs/development/DEPLOYMENT_AND_CONFIG.md` (bare metal's `[pricing.defaults.gpu.<model>].settlements` and the pool's `pricing` hint tiers); `docs/operator-handbook.md` (bare-metal upgrade step, written in implementation) |
 | D11 per-term waivers and duration flags | `openspec/specs/buyer-orchestration/spec.md` |
 | D12 compatibility owed to releases; sibling domains alike | `docs/development/RELEASING.md` ("Versioning policy"); `docs/development/ARCHITECTURE.md` ("Family kits") |
 | Goal/dependency currency | `docs/development/ROADMAP.md`; `openspec/changes/README.md` at integration/closeout |

@@ -1196,6 +1196,44 @@
                 "null"
               ]
             },
+            "^[dD][eE][fF][aA][uU][lL][tT][sS]$": {
+              "additionalProperties": false,
+              "type": [
+                "object",
+                "null"
+              ],
+              "patternProperties": {
+                "^[gG][pP][uU]$": {
+                  "additionalProperties": {
+                    "additionalProperties": false,
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "patternProperties": {
+                      "^[sS][eE][tT][tT][lL][eE][mM][eE][nN][tT][sS]$": {
+                        "anyOf": [
+                          {
+                            "items": {
+                              "additionalProperties": true,
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              }
+            },
             "^[dD][eE][fF][aA][uU][lL][tT]_[mM][aA][xX]_[dD][uU][rR][aA][tT][iI][oO][nN]_[sS][eE][cC][oO][nN][dD][sS]$": {
               "anyOf": [
                 {

@@ -48,6 +48,15 @@ from .hints import (
     validate_pricing_rates,
     validate_pool_declarations,
 )
+from .listing_terms import (
+    POOL_SETTLEMENTS_KEY,
+    ListingTerms,
+    model_hint,
+    model_hint_bounds,
+    model_hint_terms,
+    pool_hint_terms,
+    resolve_listing_terms,
+)
 from .pools import (
     PoolCreate,
     PoolImportDiff,
@@ -102,6 +111,13 @@ __all__ = [
     "validate_listing_shapes",
     "validate_pricing_rates",
     "validate_pool_declarations",
+    "POOL_SETTLEMENTS_KEY",
+    "ListingTerms",
+    "model_hint",
+    "model_hint_bounds",
+    "model_hint_terms",
+    "pool_hint_terms",
+    "resolve_listing_terms",
     "PoolCreate",
     "PoolImportDiff",
     "PoolImportRequest",

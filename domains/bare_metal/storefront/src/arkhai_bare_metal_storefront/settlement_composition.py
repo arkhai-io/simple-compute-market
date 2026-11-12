@@ -284,13 +284,6 @@ class BareMetalStorefrontSettlementComposition:
             mechanism_readiness = readiness_by_mechanism.get(clause.mechanism)
             if mechanism_readiness is None or not mechanism_readiness.ready:
                 continue
-            if (
-                clause.recurring is None
-                and max_duration_seconds is None
-                and self.seller_stages[clause.mechanism].fulfils_through_capacity
-            ):
-                diagnose({"code": "reserved_lease_bound_missing", "detail": "reserved bare-metal publication requires a positive relative maximum", "mechanism": clause.mechanism})
-                continue
             artifacts = step.publish(
                 mechanism_readiness, clause,
                 resources=resources,

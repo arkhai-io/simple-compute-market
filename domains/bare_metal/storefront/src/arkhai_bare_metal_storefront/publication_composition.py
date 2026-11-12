@@ -31,19 +31,21 @@ def publication_payload_builder(
     runtime: BareMetalStorefrontRuntime,
     *, publication_diagnostic: Callable[[dict[str, Any], dict[str, Any]], None] = lambda _candidate, _entry: None,
 ) -> Callable[[dict[str, Any]], Any]:
-    """Build each candidate's payload from the configured publication terms.
+    """Build each candidate's payload from its resolved publication terms.
 
-    Reserved capacity options need a positive relative lease bound. Recurring
-    candidates judge the listing's finite horizon independently, allowing an
-    absolute bound alone. A candidate left
+    A candidate's clauses are those the cycle resolved for it, else the
+    configured ones. Recurring candidates judge the listing's finite horizon
+    independently, allowing an absolute bound alone; a reserved option needs no
+    relative bound. A candidate left
     with no clause its backing admits, including one whose pool resolves no
     clause at all, is refused with ``NoSettlementOption`` naming no mechanism:
     the storefront's configuration rules every one out.
 
-    A pool override's clauses are read in full before anything is decided by
-    their mechanisms, so one that cannot be read raises as a defect that leaves
-    the candidate's listing as it is, whatever mechanism it names, rather than
-    standing for a mechanism the configuration rules out, which would close it.
+    A resolved clause list, whichever tier supplied it, is read in full
+    before anything is decided by its mechanisms, so one that cannot be read
+    raises as a defect that leaves the candidate's listing as it is, whatever
+    mechanism it names, rather than standing for a mechanism the configuration
+    rules out, which would close it.
     """
     composition = runtime.settlement_composition
     if composition is None:
@@ -57,8 +59,8 @@ def publication_payload_builder(
         return composition.seller_stages[mechanism].fulfils_through_capacity
 
     async def build(candidate: dict[str, Any]) -> PublicationPayload:
-        # A pool's storefront override replaces the configured clauses and
-        # bound for that pool's listings only.
+        # The clauses the cycle resolved for this candidate, from the highest
+        # tier stating them; none resolved leaves the flat configured ones.
         override_clauses = candidate.get("resolved_clauses", candidate.get("override_clauses"))
         configured = (
             tuple(
@@ -132,6 +134,7 @@ def build_publication_cycle(
         default_max_duration_seconds=runtime.default_max_duration_seconds,
         default_available_until_utc=runtime.default_available_until_utc,
         default_publication_clauses=runtime.publication_clauses,
+        publication_clauses_by_model=runtime.publication_clauses_by_model,
         enter_stage=runtime.loops.enter_stage,
         derivation=runtime.publication_derivation,
     )

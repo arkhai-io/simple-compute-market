@@ -1,15 +1,20 @@
-"""VM-domain three-tier resolution of commercial terms.
+"""VM-domain resolution of commercial terms.
 
 `market_resource_pools_contracts.hints.raw_pricing`, in
 `kit/resource-pools-contracts`, owns the domain-neutral `pricing` key and its
-bare read; this module owns the VM domain's family-grouped form and how it
-resolves against the storefront's own configured and overridden values. Two
-kinds of term resolve here:
+bare read, and `market_resource_pools_contracts.listing_terms` the order every
+compute storefront resolves a listing's settlement terms in; this module owns
+the VM domain's family-grouped form and how it resolves against the
+storefront's own configured and overridden values. Two kinds of term resolve
+here:
 
-- **Per-model listing terms** (`max_duration_seconds`, `accepted_escrows`,
-  `settlements`), keyed by GPU model under `pricing.gpu.<model>` and resolved
-  independently per field, so a tier that sets one field does not block the
-  others from falling through.
+- **Per-model listing terms** (`max_duration_seconds`, `available_until_utc`,
+  `accepted_escrows`, `settlements`), keyed by GPU model under
+  `pricing.gpu.<model>` and resolved independently per field, so a tier that
+  sets one field does not block the others from falling through. Settlement
+  terms take the shared order, which also reads the pool-level
+  `pricing.settlements`; the bounds keep VM's per-model tiers below the mode
+  hint (`resolve_gpu_pricing`).
 - **Family rates**: for each capacity family, a list of rates per unit of the
   family per time unit, one per asset. The GPU family is keyed by model, the
   others are not. Each family resolves independently, and within a family the
@@ -22,7 +27,7 @@ kinds of term resolve here:
   held (see openspec/specs/storefront-publication/spec.md, "An unreadable family
   rate holds its pool").
 
-Three tiers, highest to lowest precedence:
+Family rates resolve through three tiers, highest to lowest precedence:
 
 1. The storefront's own per-pool override, the site-scoped override store,
    merged before this resolver sees it.
@@ -42,7 +47,14 @@ from typing import Any, Mapping
 
 from arkhai_vms import VM_PRICING_PROJECTION, vm_family_rate
 from market_resource_pools_contracts.hints import raw_pricing
-from market_resource_pools_contracts import CapacityBounds, capacity_bound_hint, resolve_capacity_bounds
+from market_resource_pools_contracts import (
+    CapacityBounds,
+    ListingTerms,
+    capacity_bound_hint,
+    model_hint_bounds,
+    resolve_capacity_bounds,
+    resolve_listing_terms,
+)
 
 GPU_FAMILY_KEY = "gpu"
 
@@ -57,13 +69,6 @@ KEYED_FAMILIES: frozenset[str] = frozenset(
     family
     for family, priced in VM_PRICING_PROJECTION.families.items()
     if priced.key is not None
-)
-
-_FIELD_NAMES = (
-    "max_duration_seconds",
-    "available_until_utc",
-    "accepted_escrows",
-    "settlements",
 )
 
 
@@ -81,6 +86,21 @@ class GpuPricingFields:
     settlements: Any = None
 
 
+def _bounds(fields: GpuPricingFields | None) -> CapacityBounds:
+    if fields is None:
+        return CapacityBounds()
+    return CapacityBounds(
+        max_duration_seconds=fields.max_duration_seconds,
+        available_until_utc=fields.available_until_utc,
+    )
+
+
+def _terms(fields: GpuPricingFields) -> ListingTerms:
+    return ListingTerms(
+        accepted_escrows=fields.accepted_escrows, settlements=fields.settlements
+    )
+
+
 def resolve_gpu_pricing(
     policy_tags: Mapping[str, Any],
     *,
@@ -89,98 +109,50 @@ def resolve_gpu_pricing(
     config_defaults_by_model: Mapping[str, GpuPricingFields],
     flat_default: GpuPricingFields,
 ) -> GpuPricingFields:
-    """Resolve one GPU model's listing terms through the three-tier chain.
+    """Resolve one GPU model's listing terms.
 
-    Each field is resolved independently: storefront
-    override (if set) wins outright; otherwise the pool's own pricing
-    hint for this model (if the hint declares that field *and* it has a
-    valid shape for that field -- see `_VALID_HINT_FIELD`, below);
-    otherwise the storefront's per-model config default (if one is
-    configured for this model); otherwise the storefront's flat config
-    default. A field left unset all the way through every tier stays
-    ``None``. Capacity bounds are strict: malformed values raise, and the
-    mode-level ``capacity_bounds.vm`` hint precedes a model-level pricing hint.
-    A nonpositive relative bound masks lower tiers without limiting duration.
+    The settlement terms resolve through the shared five-tier order
+    (`market_resource_pools_contracts.listing_terms`): override, the pool's
+    hint for this model, its hint for the pool, the per-model configuration,
+    then the flat configuration. Capacity bounds keep their own order: the
+    override, the mode-level ``capacity_bounds.vm`` hint, then the model hint,
+    the per-model configuration, and the flat configuration -- the per-model
+    bound tiers a released VM storefront reads, kept so its configuration and
+    hints mean what they meant. Bounds are strict: a malformed value raises,
+    and a nonpositive relative bound masks lower tiers without limiting
+    duration. A field left unset through every tier stays ``None``.
     """
-    hint_fields = _hint_fields_for_model(policy_tags, gpu_model)
     config_fields = config_defaults_by_model.get(gpu_model) if gpu_model else None
-
-    def bound_tier(fields: Any) -> CapacityBounds:
-        if fields is None:
-            return CapacityBounds()
-        return CapacityBounds(
-            max_duration_seconds=(
-                fields.get("max_duration_seconds")
-                if isinstance(fields, Mapping) else fields.max_duration_seconds
-            ),
-            available_until_utc=(
-                fields.get("available_until_utc")
-                if isinstance(fields, Mapping) else fields.available_until_utc
-            ),
-        )
-
     # Validate every stated tier, including a masked hint: an unreadable bound
     # must hold the pool, never silently publish a guessed lower-tier limit.
     bounds = resolve_capacity_bounds(
-        bound_tier(storefront_override),
+        _bounds(storefront_override),
         capacity_bound_hint(policy_tags, "vm"),
-        bound_tier(hint_fields),
-        bound_tier(config_fields),
-        bound_tier(flat_default),
+        model_hint_bounds(policy_tags, model_family=GPU_FAMILY_KEY, model=gpu_model),
+        _bounds(config_fields),
+        _bounds(flat_default),
     )
-
-    def _resolve(field_name: str) -> Any:
-        if field_name in CapacityBounds.model_fields:
-            return getattr(bounds, field_name)
-        override_value = getattr(storefront_override, field_name)
-        if override_value is not None:
-            return override_value
-        if hint_fields is not None:
-            hint_value = hint_fields.get(field_name)
-            # A hint field with the wrong shape is treated the same as an
-            # absent one -- this domain, not `kit/resource-pools`, owns
-            # validating the shape it accepts; silently propagating a
-            # malformed value into a commercial candidate is worse than
-            # falling through to a lower tier the same way a missing value
-            # already does.
-            if hint_value is not None and _VALID_HINT_FIELD[field_name](hint_value):
-                return hint_value
-        if config_fields is not None:
-            config_value = getattr(config_fields, field_name)
-            if config_value is not None:
-                return config_value
-        return getattr(flat_default, field_name)
-
-    return GpuPricingFields(**{name: _resolve(name) for name in _FIELD_NAMES})
-
-
-_VALID_HINT_FIELD: Mapping[str, Any] = {
-    "accepted_escrows": lambda v: isinstance(v, list),
-    "settlements": lambda v: isinstance(v, list),
-}
+    terms = resolve_listing_terms(
+        policy_tags,
+        model_family=GPU_FAMILY_KEY,
+        model=gpu_model,
+        storefront_override=_terms(storefront_override),
+        config_defaults_by_model={
+            model: _terms(fields) for model, fields in config_defaults_by_model.items()
+        },
+        flat_default=_terms(flat_default),
+    )
+    return GpuPricingFields(
+        max_duration_seconds=bounds.max_duration_seconds,
+        available_until_utc=bounds.available_until_utc,
+        accepted_escrows=terms.accepted_escrows,
+        settlements=terms.settlements,
+    )
 
 
 def _pool_pricing(policy_tags: Mapping[str, Any]) -> Mapping[str, Any] | None:
     pricing = raw_pricing(policy_tags)
     return pricing if isinstance(pricing, Mapping) else None
-
-
-def _hint_fields_for_model(
-    policy_tags: Mapping[str, Any],
-    gpu_model: str | None,
-) -> Mapping[str, Any] | None:
-    if not gpu_model:
-        return None
-    pricing = _pool_pricing(policy_tags)
-    if pricing is None:
-        return None
-    gpu_family = pricing.get(GPU_FAMILY_KEY)
-    if not isinstance(gpu_family, Mapping):
-        return None
-    model_fields = gpu_family.get(gpu_model)
-    if not isinstance(model_fields, Mapping):
-        return None
-    return model_fields
 
 
 # ---------------------------------------------------------------------------
