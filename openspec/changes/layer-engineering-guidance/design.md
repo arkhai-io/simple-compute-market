@@ -565,8 +565,10 @@ against it:
    of what moved, skills included. One session.
 3. **The engineering layer.** `docs/guidance/engineering/` with its table and
    neutral examples, engineering material out of `AGENTS.md`, `ARCHITECTURE.md`,
-   `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`, and `BUILD_AND_PACKAGING.md`, and its
-   citations. One session.
+   `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`, `BUILD_AND_PACKAGING.md`, and
+   `RELEASING.md`'s versioning policy (D10 as amended), and its citations. One
+   session, over two sections the plan cuts — the testing files and the rest — since
+   round 1's inventory gives the layer forty files.
 4. **The repository layer at the root and across systems.** `AGENTS.md` rewritten
    (its layer table, repository tags, exceptions, closeout-parts row),
    `openspec/README.md` as this repository's guide with its closeout parts, the
