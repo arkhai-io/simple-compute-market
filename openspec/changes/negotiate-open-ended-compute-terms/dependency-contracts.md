@@ -3,7 +3,7 @@
 These are implementation inputs for terms and its consumers, not claims that the
 interfaces or rate execution exist. The owner's round-1 review (record 01) settled
 the design these contracts rest on; where it amended one, the entry below states the
-settled contract, which the round-2 section of `tasks.md` implements. D-a–D-e of
+settled contract, which the round-2 sections of `tasks.md` implement. D-a–D-e of
 resize/registry are unchanged.
 
 ## Price and accepted evidence
@@ -80,7 +80,7 @@ treatments the composition has qualified and whether it services setup
 absent or empty means no rate servicing. The neutral contract is `RateServicing` in
 `kit/settlement-runtime`'s `rate_servicing.py`. Round 1 implemented an earlier form —
 an adapter-required revision map, `published`/`proposed` declarations and a
-`proposed_lane` identity — which the round-2 section replaces with the treatments
+`proposed_lane` identity — which round 2 (section 6) replaces with the treatments
 table; spot's materialization gate then checks the option's treatments and `setup`
 against the declaration instead of calling `select()`. A refusal keeps the
 withdrawn-option/refetch semantics.

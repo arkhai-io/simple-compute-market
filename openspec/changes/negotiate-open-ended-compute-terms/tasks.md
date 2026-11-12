@@ -14,9 +14,10 @@ numerical presentation, optional recurring horizon plumbing and accepted recover
 disclosure. Task 4.2 adds mixed-publication first use through both buyer commands. Task 4.3 runs focused application regressions and records failed E2E readiness as unobservable. Sections 1–4 were replayed onto dev as round 1 (`6f86ac5e6`).
 The owner's record of round 1 (`reviews/01-implementation-owner.md`) stood in for
 the design review this change never had; its decisions are in `design.md` D1–D12, and
-the code they need, with review 04's F1 and F2, is section 5, implemented as round 2.
-**Section 5 returns to planning** to be split into session-sized sections (its
-round-2 session checkpoint); implementation resumes at 5.5's work. Verification levels follow `docs/development/TESTING.md`;
+the code they need, with review 04's F1 and F2, is round 2: first planned as section 5,
+then split at the owner's direction into sections 5–12, one session each but 5 and 6
+together, reviewed as one round (`design.md`, "Implementation cadence"). Implementation
+resumes at 5.5. Verification levels follow `docs/development/TESTING.md`;
 every behaviour this change adds gets permanent tests at the level it assigns (owner
 record 01, R2).
 
@@ -614,38 +615,42 @@ no Alkahest purchase, an unowned gap in `openspec/changes/README.md`.
   whose provenance belongs in Git history (R23); the spec deltas (R25); the `design.md` decisions and `proposal.md`'s scope
   and "Knowledge to promote" (R30).
 
-## 5. Round 2: the owner's corrections, permanent tests and review fixes
+## 5. Round 2 groundwork: the guard's removal, the buyer's horizon check and the floor
 
-Implemented as round 2 and reviewed as an implementation round. Each task names the
-decision it implements; `design.md` holds the rationale. Before changing an interface
+Delivers the work round 2's first session implemented: the amount-read guard removed
+(D2, R6), the buyer's accepted-horizon check (D5, review 04 F1, F2) and the floored
+default horizon (D5, R9). Touches `scripts/`, the `Makefile`,
+`kit/settlement-runtime`, `core/buyer`, both buyers and both storefronts.
+
+Replanned against the reviewed design (2026-11-12). Round 2 — the owner's corrections,
+the permanent tests and the review's fixes — was planned as one section 5; its first
+session found it larger than one session holds, and the owner returned the change to
+planning to split it (`design.md`, "Implementation cadence"). Sections 5–12 are round 2,
+reviewed as one implementation round. Each task names the decision it implements;
+`design.md` holds the rationale. Before changing an interface
 `spot-deals-through-arkhai-payments` consumes, compare with `origin/spot-deals`; its
-triage follows.
+triage follows. Every section adds the permanent tests of the behaviour it changes at
+the level `docs/development/TESTING.md` assigns (R2); sections 11 and 12 add those of
+round 1's behaviour that no later section touches.
+
+Former numbers, which earlier notes, the checked tasks' amendments and the reviews
+cite: 5.1, 5.3 and 5.4 keep theirs, and 5.3's served-storefront integration case and
+its F2 pin-boundary case moved to 6.2; 5.2's tests are split by behaviour across 6.3,
+7.3, 8.3, 9.3, 10.3, section 11 and 12.1–12.3; 5.5 → 6.1; 5.6 → 8.1 and 8.2; 5.7 → 10.1
+and 10.2; 5.8 → 7.2; 5.9 → 7.1, 9.1 and 9.2; 5.10 → 12.2; 5.11 → 12.5. Section 5's own
+verification is the new 5.5.
 
 - [ ] 5.1 **Remove the amount-read guard (R6):** delete
   the guard's script and its JSON inventory under `scripts/`,
   their wiring in the `Makefile`, `scripts/check_change.py` and
   `scripts/tests/test_check_change.py`, and `amount_read_probe.py`. Cover each money
-  consumer with a per-period Agreement instead (task 5.2).
+  consumer with a per-period Agreement instead (task 11.3).
   Done: the two scripts and the probe removed with `git rm`; the `Makefile`,
   `scripts/check_change.py` and `scripts/tests/test_check_change.py` are byte-identical
   to `origin/dev`'s again (`git diff origin/dev` on them is empty). The money-consumer
-  tests are task 5.2's. `docs/attachments/negotiate-open-ended-compute-terms/reader-guard-checkpoint.md`
+  tests are task 11.3's. `docs/attachments/negotiate-open-ended-compute-terms/reader-guard-checkpoint.md`
   still describes the removed guard as round-1 evidence; closeout's narrative
-  compression decides its fate.
-- [ ] 5.2 **Permanent tests (R2)** at the levels `docs/development/TESTING.md` assigns.
-  Unit: the accessor and each installed registration's projection; capacity-bound
-  validation and tier selection; `resolve_horizon` and the runway, including R9's
-  floor; the servicing declaration (R15, R19); `default_buyer_refusals`, disclosure and
-  `present_payment`; the deadline's resolution in both compositions and the payments
-  builder (R21); the unified clause resolver (R28); the configurable penalty multiple
-  (R11); every money consumer driven with a per-period Agreement — mandate derivation,
-  buyer caps and display, recovery, confirmation (R6). Integration, through each
-  storefront's typed client with real SQLite: mixed publication on one capacity
-  identity; the cached-option 409 with no writes; horizon refusal naming the minimum;
-  pin production and verification against a dev-shaped publication, including legacy
-  records failing closed (R4). Convert the change's probes that drive real seams into
-  these tests; the rest stay as closeout evidence. Task 1.2's probe becomes a test or is
-  dropped where a foundation suite covers it (R7).
+  compression decides its fate. Implemented; checked once 5.5 passes.
 - [ ] 5.3 **The buyer's accepted-horizon check (review 04 F1, F2):** one pure function
   in `kit/settlement-runtime/src/market_settlement_runtime/horizon.py`, sharing
   `resolve_horizon`'s bound arithmetic, taking the Agreement's `start_utc` and
@@ -657,9 +662,12 @@ triage follows.
   bare metal's acceptance check (`cli.py`, `validate_acceptance`). In the VM buyer's
   `verify_pricing_acceptance`, compare the provision duration with the Agreement's only
   when the buyer requested one (F2). Test at each buyer's acceptance boundary: a signed
-  21-hour duration under a 20-hour bound, an end past `available_until_utc`, and a
-  production-client integration case where an omitted VM horizon reaches acceptance.
-  Partly done; left unchecked for its integration case. `check_accepted_horizon` and
+  21-hour duration under a 20-hour bound and an end past `available_until_utc`.
+  Replanned (2026-11-12): the production-client integration case where an omitted VM
+  horizon reaches acceptance, and an F2 case at the pricing-pin boundary, are task 6.2,
+  since both need a recurring option in the VM storefront's integration world, whose
+  servicing declaration 6.1 reshapes. Implemented; checked once 5.5 passes.
+  `check_accepted_horizon` and
   the shared `bound_seconds`/`parse_utc` arithmetic are in `horizon.py`, which
   `resolve_horizon` and `derive_rate_preset` now also use. Bare metal calls it inside
   `buy`'s `validate_acceptance`, after the quote check, so a refusal ends the run as
@@ -681,11 +689,8 @@ triage follows.
   37 passed, including four new refusals before approval; `make -C core/buyer test`
   (unit) 168 passed. One kept VM orchestrator fixture advertised a 3600-second bound
   under a 7200-second deal; the check now refuses that, so the fixture advertises
-  7200. Still owed: the production-client integration case (an omitted VM horizon
-  reaching acceptance through the served storefront) and an F2 case at the pin
-  boundary; both need a recurring option in the VM storefront's integration world,
-  whose servicing declaration task 5.5 reshapes, so they are written after 5.5 with
-  5.2's pin tests.
+  7200. The production-client integration case and the F2 pin-boundary case are
+  task 6.2's.
 - [ ] 5.4 **The horizon floor and the acceptance hook (R9):** when the buyer names no
   horizon and the limiting bound is a fractional-second `available_until_utc`, floor the
   default horizon to whole seconds instead of refusing, at acceptance
@@ -696,59 +701,25 @@ triage follows.
   the runway's 50-minute spec case, the refusals and a nonpositive relative bound;
   the new `test_rate_publication.py` floors the published default horizon the same
   way and reports no-runway and unbounded candidates. Its `FixtureHelper` is the
-  start of 5.2's derivation tests.
-- [ ] 5.5 **The servicing declaration (R15, R16, R19):** replace `RateServicing`'s
-  revision map, `published`/`proposed` status and `proposed_lane` with a table per
-  mechanism of qualified `settles_through` treatments and `setup`
-  (`[settlement.rate_servicing.<mechanism>]`). Publication, cached-acceptance refusal
-  before persistence and materialization refuse an option naming any undeclared
-  treatment on an entitlement or at the term end, or a setup charge without `setup`.
-  Admit only where the helper supports a treatment and the composition declares it.
-  Tests inject declarations; accepted-deal continuation never reads it.
-- [ ] 5.6 **The delivery deadline's source and the E2E drivers (R21, R22):** the
-  composition supplies the deadline — the pool port's value when it gives one, else the
-  payments clause's configured `delivery_deadline_seconds`
-  (`kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py`,
-  `arkhai_payments_option_builder`, reads it for compute options again). Both
-  reserved-payment drivers
-  (`e2e-tests/tests/e2e/roles/scenarios/vms/purchase_driver.py`,
-  `e2e-tests/tests/e2e/roles/scenarios/bare_metal/purchase_driver.py`) drop
-  `--allow-unprotected-terms` and assert that the published `delivery_deadline_seconds`
-  equals the configured value; `e2e-tests/tests/unit/test_dispute_coverage.py` returns
-  to its earlier fixtures.
-- [ ] 5.7 **Buyer waivers and durations (R14, R18):** in both buyers, one flag per
-  refusal — `--allow-no-delivery-deadline`, `--allow-no-penalty`,
-  `--allow-charged-preemption`, `--allow-charged-term-end` — with
-  `--allow-unprotected-terms` as shorthand; the foundation's
-  `allow_missing_delivery_deadline` is set only by the first or the shorthand; every
-  waiver used is recorded in run metadata and named in the disclosure. `bare-metal buy`
-  restores the 3600-second default for reserved options only, shown as the buyer's
-  default; VM's `market buy`/`negotiate` gain `--duration-seconds` beside
-  `--duration-hours`, both together an error naming the conflict.
-- [ ] 5.8 **The penalty setting (R11):** replace the hard-coded
-  `default_penalty_periods=24` in both compositions with
-  `[pricing].default_premature_stop_penalty_periods` (default 24), read by the shared
-  per-clause step; a penalty stated on a clause still wins.
-- [ ] 5.9 **Unify VM and bare-metal publication (R26, R27, R28):** extract the
-  per-clause step (deadline resolution, the recurring-or-once branch,
-  `derive_rate_preset`, diagnostics, the penalty setting) into one
-  `kit/settlement-runtime` function both compositions call, with the `compute` flag and
-  the deadline lookup as parameters; each `resolve_acceptance` hook keeps only its
-  domain's artifact rebuilding. In both domains no positive relative maximum means no
-  relative limit: retire `pool_lease_bound_missing` and `reserved_lease_bound_missing`,
-  and add the bare-metal upgrade step to `docs/operator-handbook.md`. Both domains
-  resolve clauses and listing terms through one shared resolver moved out of
-  `arkhai_vms_listings.pricing_resolution` into `kit/resource-pools-contracts`, with the
-  order D10 gives and the new pool-level `pricing.settlements` hint, replacing bare
-  metal's `pricing.bare_metal.settlements`.
-- [ ] 5.10 **The retained pricing record (R4):** confirm no other buyer read compares
-  a top-level `rate_structure` with a signed body (the triage's V1 fix covered
-  `pricing_record.py`), and cover the adaptation with task 5.2's pin tests.
-- [ ] 5.11 **Validate the round:** the affected unit and integration suites, then
-  validation's VM and bare-metal E2E lanes — the pipeline, or a locally deployed stack
-  where the owner waives the pipeline part (R23) — covering the protected purchases and
-  the VM listing-shape lane. `make check-packaging`, `make check-comment-hygiene`, and
-  `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms`.
+  start of the derivation tests 6.3, 7.3 and 8.3 grow. Implemented; checked once 5.5
+  passes.
+- [ ] 5.5 **Verify the groundwork** (repository obligation: AGENTS.md "Tests and
+  diagnostics"; the implementation skill's compliance check). The work is committed in
+  `999f2f4d8` without its compliance check or pre-commit run. Rerun on the current
+  state: `make -C kit/settlement-runtime test` (unit), `make -C domains/vms/buyer test`
+  (unit), `make -C domains/bare_metal/buyer test` (unit), `make -C core/buyer test`
+  (unit), `make -C domains/vms/storefront test` (unit and application integration
+  through its typed client), `make -C domains/bare_metal/storefront test` (unit and
+  application integration), each after `make dist`; then the fresh-context compliance
+  check over the section's diff from `adf435188`, `make check-packaging`,
+  `make check-comment-hygiene` and `scripts/change-workflow run pre-commit
+  negotiate-open-ended-compute-terms`. Fix what they find, then check 5.1, 5.3 and 5.4.
+  End-to-end: the reserved purchases (`vms/test_vm_payment_purchase.py`,
+  `bare_metal/test_bare_metal_payment_deal.py` under
+  `e2e-tests/tests/e2e/roles/scenarios/`) pass through the buyer's accepted-horizon
+  check with an explicit reserved duration; none exercises an omitted recurring horizon,
+  since no deployed composition publishes a per-period option (the unowned gap in
+  `openspec/changes/README.md`), and none is owed by this section.
 
 ### Round-2 session checkpoint (2026-11-12)
 
@@ -772,52 +743,331 @@ triage follows.
   wheels, so `make dist` first, then each package's `make -C <package> test`, which
   reinstalls them. Run a package's tests through its `make` target; `uv run pytest`
   in a buyer directory fails to resolve its split environments.
-- Restart at 5.5 (it reshapes `RateServicing`, which the owed 5.3 integration case
-  and 5.2's declaration tests both inject), then 5.3's remainder, 5.6–5.10, 5.2's
-  remaining tests and 5.11. `kit/settlement-runtime/tests/unit/test_rate_publication.py`'s
-  `FixtureHelper` is the place to grow 5.2's derivation tests (servicing, penalty
-  multiple, deadline, setup gate); `test_horizon.py` already covers `resolve_horizon`
-  and the runway.
+- Restart, as replanned: 5.5 verifies and checks this work, then section 6 reshapes
+  `RateServicing` and writes 5.3's moved integration and pin cases (6.2), in the same
+  session. `kit/settlement-runtime/tests/unit/test_rate_publication.py`'s
+  `FixtureHelper` is the place to grow the derivation tests of sections 6–8 (servicing,
+  setup gate, penalty multiple, deadline); `test_horizon.py` already covers
+  `resolve_horizon` and the runway.
 
-## 6. Closeout
+## 6. The servicing declaration and the omitted horizon at the served storefront
+
+Delivers D6's treatments table (R15, R16, R19) at the publication and cached-acceptance
+doors, and the served-storefront cases review 04's F1 and F2 left owed (D5). Touches
+`kit/settlement-runtime` (`rate_servicing.py`, `rate_publication.py`), both storefronts'
+settlement compositions, negotiation runtimes and configuration, and their tests.
+
+- [ ] 6.1 **The servicing declaration (D6; R15, R16, R19):** in
+  `kit/settlement-runtime/src/market_settlement_runtime/rate_servicing.py`, replace
+  `RateServicing`'s revision map, `published`/`proposed` status and `proposed_lane`
+  with a table per mechanism of qualified `settles_through` treatments and `setup`
+  (`[settlement.rate_servicing.<mechanism>]`), absent or empty meaning none. Publication
+  (both compositions' publication paths:
+  `domains/vms/storefront/src/market_storefront/settlement_composition.py`,
+  `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/settlement_composition.py`)
+  and cached-acceptance refusal before persistence (both `negotiation_runtime.py`) refuse
+  an option naming any undeclared treatment on an entitlement or at the term end, or a
+  setup charge without `setup`, keeping the withdrawn-option/refetch outcome; the same
+  contract is what spot's materialization reads (`dependency-contracts.md`, "Servicing
+  handoff"), which this change does not implement. Admit only where the helper supports
+  a treatment and the composition declares it. Deployed compositions declare nothing;
+  accepted-deal continuation never reads the declaration. Remove the lane opt-in and its
+  fixtures' proposed-revision form.
+- [ ] 6.2 **The served-storefront horizon and pin cases (D5; review 04 F1, F2), moved
+  from 5.3:** with a declaration injected into the VM storefront's integration world, an
+  application-integration case in
+  `domains/vms/storefront/tests/integration/test_buyer_selection_negotiation.py` where a
+  buyer omitting the horizon on a recurring option reaches acceptance through the served
+  storefront and the buyer's `check_accepted_horizon` admits the signed default; and an
+  F2 case at the pricing-pin boundary where a buyer that requested no duration passes
+  `verify_pricing_acceptance` against the Agreement's resolved `duration_seconds`.
+- [ ] 6.3 **Permanent tests of the declaration (R2):** unit, in
+  `kit/settlement-runtime/tests/unit/test_servicing.py` and `test_rate_publication.py`
+  (grow its `FixtureHelper`): table parsing, absent and empty, an undeclared
+  entitlement treatment, an undeclared term-end treatment, a setup charge without
+  `setup`, a helper not supporting a declared treatment. Application integration through
+  each storefront's typed client with real SQLite (VM
+  `tests/integration/test_publication_loop.py`, bare-metal `test_http_publication_rates.py`
+  and `test_http_negotiation.py`): publication omits the undeclared candidate while its
+  reserved peer and capacity identity stay; a cached undeclared selection gets the signed
+  409/refetch with no negotiation rows written.
+- [ ] 6.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit),
+  `make -C domains/vms/storefront test` (unit and application integration),
+  `make -C domains/bare_metal/storefront test` (unit and application integration),
+  `make -C domains/vms/buyer test` (unit), `make check-comment-hygiene` and
+  `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms`.
+  End-to-end: `vms/test_listing_shapes.py` and `bare_metal/test_bare_metal_publication.py`
+  publish under the deployed compositions, which declare no servicing, so they show the
+  declaration's dark default; none exercises an admitted declaration, and none is owed
+  while no deployed composition declares one.
+
+## 7. One shared per-clause publication step and the penalty setting
+
+Delivers D9's shared per-clause step (R26) and D3's configurable penalty multiple
+(R11). Touches `kit/settlement-runtime` (`rate_publication.py`), both storefronts'
+settlement compositions and `resolve_acceptance` hooks, and both storefronts'
+configuration readers.
+
+- [ ] 7.1 **The shared per-clause step (D9; R26), from 5.9:** extract the per-clause
+  publication step — deadline resolution, the recurring-or-once branch,
+  `derive_rate_preset`, the diagnostics and the penalty setting — from
+  `publication_artifacts` (VM `settlement_composition.py`) and `publication_payload`
+  (bare-metal `settlement_composition.py`) into one function in
+  `kit/settlement-runtime/src/market_settlement_runtime/rate_publication.py`, with the
+  `compute` flag and the deadline lookup as parameters so it names no family. Both
+  compositions call it; each `resolve_acceptance` hook keeps only its domain's artifact
+  rebuilding over `resolve_horizon`. Behaviour is unchanged: the existing publication
+  suites pass with their assertions unchanged.
+- [ ] 7.2 **The penalty setting (D3; R11), from 5.8:** replace the hard-coded
+  `default_penalty_periods=24` with `[pricing].default_premature_stop_penalty_periods`
+  (default 24), read in both storefronts' configuration and passed to the shared step;
+  a penalty stated on a clause still wins. Validate it as a positive integer at load.
+- [ ] 7.3 **Permanent tests (R2):** unit, in `test_rate_publication.py`: the shared
+  step's once and recurring branches, its diagnostics for a missing helper, undeclared
+  servicing and an unbounded horizon, the default multiple, a configured multiple and a
+  clause's own penalty winning; each storefront's configuration test for the setting's
+  default, a configured value and a refused nonpositive one.
+- [ ] 7.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit),
+  `make -C domains/vms/storefront test` (unit and application integration, including
+  `test_publication_loop.py`, `test_pool_overrides_api.py` and
+  `test_listing_identity_carryover.py`), `make -C domains/bare_metal/storefront test`
+  (unit and application integration), `make check-comment-hygiene` and
+  `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms`.
+  End-to-end: `vms/test_listing_shapes.py`, `bare_metal/test_bare_metal_publication.py`
+  and the two reserved purchases read options the shared step now publishes; none
+  exercises a recurring option or the penalty, and none is owed (the per-period gap row).
+
+## 8. The delivery deadline's source and the protected E2E purchases
+
+Delivers D3's deadline source (R21) and returns both reserved-payment drivers to
+protected purchases (R22). Touches `kit/arkhai-payments`, the shared per-clause step's
+deadline parameter in both compositions, and `e2e-tests`.
+
+- [ ] 8.1 **The deadline's source (D3; R21), from 5.6:** the composition supplies the
+  deadline to the shared step — the pool port's value when it gives one
+  (`delivery_deadline_for_pool`), else the payments clause's configured
+  `delivery_deadline_seconds`; `arkhai_payments_option_builder` in
+  `kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py` reads it for
+  compute options again. A pool value takes precedence over the clause's.
+- [ ] 8.2 **The protected E2E purchases (R22), from 5.6:** both reserved-payment drivers
+  (`e2e-tests/tests/e2e/roles/scenarios/vms/purchase_driver.py`,
+  `e2e-tests/tests/e2e/roles/scenarios/bare_metal/purchase_driver.py`) drop
+  `--allow-unprotected-terms` and assert that the published `delivery_deadline_seconds`
+  equals the configured value; `e2e-tests/tests/unit/test_dispute_coverage.py` returns
+  to its earlier fixtures (task 4.4's reversal).
+- [ ] 8.3 **Permanent tests (R2):** unit: the payments builder emitting the configured
+  deadline on a compute option and none where unconfigured
+  (`kit/arkhai-payments/tests`); the deadline's resolution in both compositions — pool
+  value, clause fallback, neither — through the shared step's lookup
+  (`test_rate_publication.py` and each storefront's publication unit test); the e2e unit
+  suites for the drivers (`e2e-tests/tests/unit/test_dispute_coverage.py`,
+  `test_vm_purchase_driver.py`). Application integration through each storefront's typed
+  client: a configured clause publishes its deadline on a hosted compute option and a
+  default buyer's refusal no longer fires.
+- [ ] 8.4 **Verify:** `make dist`, then `make -C kit/arkhai-payments test` (unit),
+  `make -C kit/settlement-runtime test` (unit), `make -C domains/vms/storefront test`,
+  `make -C domains/bare_metal/storefront test`, `make test-e2e-unit` (unit),
+  `make check-comment-hygiene` and `scripts/change-workflow run pre-commit
+  negotiate-open-ended-compute-terms`. End-to-end: `vms/test_vm_payment_purchase.py` and
+  `bare_metal/test_bare_metal_payment_deal.py` run the protected purchases and assert the
+  published deadline; validation's pipeline lanes (e2e-vm, e2e-bare-metal) are the
+  evidence for this section.
+
+## 9. One clause source and one reserved-bound rule
+
+Delivers D10's shared clause resolver (R28) and D5's reserved-bound rule in both domains
+(R27). Touches `kit/resource-pools-contracts`, `domains/vms/listings`
+(`pricing_resolution.py`, `reconciler.py`), the bare-metal storefront (`config.py`,
+`publication_terms.py`, `publication.py`), the VM storefront's publication terms and
+pool-override models, and `docs/operator-handbook.md`.
+
+- [ ] 9.1 **The shared clause resolver (D10; R28), from 5.9:** move clause and
+  listing-term resolution out of `arkhai_vms_listings.pricing_resolution` into
+  `kit/resource-pools-contracts` beside `capacity_bounds.py` and `raw_pricing`, taking
+  the `gpu` key as data, resolving field by field in D10's order (override > per-model
+  pool hint > the new pool-level `pricing.settlements` hint > per-model configuration >
+  flat `[pricing]`), bounds in D5's order. Both domains call it; bare metal's
+  `pricing.bare_metal.settlements` hint is replaced, with no compatibility path (D12);
+  VM's family rates stay in VM. A v0.3.0 VM configuration or hint resolves as before.
+- [ ] 9.2 **The reserved-bound rule (D5; R27), from 5.9:** in both domains no positive
+  relative maximum means no relative limit; retire `pool_lease_bound_missing` and
+  `reserved_lease_bound_missing`, and add the bare-metal upgrade step (the replaced hint
+  and the retired diagnostic) to `docs/operator-handbook.md`.
+- [ ] 9.3 **Permanent tests (R2):** unit, in `kit/resource-pools-contracts/tests`: each
+  tier of D10's order winning field by field, the pool-level hint, a v0.3.0 VM
+  configuration and hint unchanged, bounds keeping D5's order; the moved
+  `domains/vms/storefront/tests/unit/test_pricing_resolution.py` cases follow the
+  resolver. Application integration through each storefront's typed client: a pool-level
+  `pricing.settlements` hint publishes its clause in both domains; a reserved option
+  publishes without a relative maximum in both domains.
+- [ ] 9.4 **Verify:** `make dist`, then `make -C kit/resource-pools-contracts test`
+  (unit), `make -C domains/vms/storefront test` (which tests `domains/vms/listings`;
+  including `test_reconciler_derivation.py`, `test_reconciler_projection.py`,
+  `test_pool_overrides_api.py`), `make -C domains/bare_metal/storefront test`,
+  `make check-packaging` (the moved module changes package edges),
+  `make check-comment-hygiene` and `scripts/change-workflow run pre-commit
+  negotiate-open-ended-compute-terms`. End-to-end: `vms/test_listing_shapes.py`,
+  `vms/test_pool_declared_offering_modes.py` and
+  `bare_metal/test_bare_metal_publication.py` publish through the resolver; none sets a
+  pool-level hint, and none is owed beyond them.
+
+## 10. The buyer's per-term waivers and duration flags
+
+Delivers D11 (R14, R18) in both buyers. Touches `kit/settlement-runtime`
+(`buyer_terms.py`), the VM buyer (`buy_cli.py`, `negotiate_cli.py`,
+`settlement_composition.py`) and the bare-metal buyer (`cli.py`,
+`settlement_composition.py`).
+
+- [ ] 10.1 **Per-term waivers (D11; R14), from 5.7:** in both buyers, one flag per
+  default refusal — `--allow-no-delivery-deadline`, `--allow-no-penalty`,
+  `--allow-charged-preemption`, `--allow-charged-term-end` — with
+  `--allow-unprotected-terms` as shorthand for all four, composed in `BuyerTermsPolicy`;
+  the foundation's `allow_missing_delivery_deadline` is set only by the first or the
+  shorthand; every waiver used is recorded in run metadata and named in the
+  pre-approval disclosure. Codec, capability and authority checks are never waived.
+- [ ] 10.2 **Durations (D11; R18), from 5.7:** `bare-metal buy` restores the
+  3600-second default for reserved options only, shown as the buyer's default in the
+  disclosure, never for recurring ones; VM's `market buy`/`negotiate` gain
+  `--duration-seconds` beside `--duration-hours`, both together an error naming the
+  conflict.
+- [ ] 10.3 **Permanent tests (R2):** unit, in `kit/settlement-runtime/tests/unit`: each
+  flag waiving exactly its refusal, the shorthand waiving all four, the foundation flag
+  set only by the deadline waiver or the shorthand. Each buyer's CLI suites
+  (`domains/vms/buyer/tests/test_buy_resume_cli.py`, `test_explain_cli.py`;
+  `domains/bare_metal/buyer/tests`): the flags parsed, recorded in run metadata and named
+  in the disclosure; the bare-metal reserved default shown as the buyer's and absent for
+  a recurring option; both VM duration flags refused together.
+- [ ] 10.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit),
+  `make -C domains/vms/buyer test` (unit), `make -C domains/bare_metal/buyer test`
+  (unit), `make -C core/buyer test` (unit), `make check-comment-hygiene` and
+  `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms`.
+  End-to-end: the reserved purchases buy without waivers since section 8; none passes a
+  per-term flag, and none is owed, since a flag's effect is the buyer's own policy,
+  which the unit suites prove.
+
+## 11. Permanent unit tests of round 1's behaviour
+
+Delivers R2's unit tests for round-1 behaviour no later section touches (D1, D2/D2a,
+D5, D7) and R6's per-period money consumers. Touches tests only, in `core`,
+`kit/alkahest`, `kit/arkhai-payments`, `kit/contact-exchange`,
+`kit/resource-pools-contracts`, `kit/settlement-runtime`, both buyers and the VM
+storefront.
+
+- [ ] 11.1 **The accessor and the projections (D2; R2):** `agreed_price` in
+  `core/tests/unit/test_rate_helpers.py` and `test_settlement_options.py` — total and
+  per-period, sub-hour periods, rounding upward once, the absolute amount fallback and
+  refusal of a missing projector; each installed registration's projection (Alkahest,
+  payments, contact) — once totals, unsupported rate parameters failing closed.
+- [ ] 11.2 **Bounds, the buyer's policy and presentation (D5, D7; R2):** capacity-bound
+  validation and tier selection in `kit/resource-pools-contracts/tests`;
+  `default_buyer_refusals`, `lifecycle_disclosure` and `present_payment`'s registry checks
+  (basis, asset, accepted money unchanged, missing presenter refused) in
+  `kit/settlement-runtime/tests/unit`.
+- [ ] 11.3 **Every money consumer with a per-period Agreement (D2; R6):** mandate
+  derivation (`kit/arkhai-payments/tests`), buyer caps and display, recovery and
+  confirmation (`domains/vms/buyer/tests`, `domains/bare_metal/buyer/tests`), each driven
+  with a per-period Agreement and asserting the money is read once, never scaled by
+  duration or multiplier again.
+- [ ] 11.4 **Verify:** `make dist`, then `make -C core test` (unit), `make -C
+  kit/alkahest test`, `make -C kit/arkhai-payments test`, `make -C kit/contact-exchange
+  test`, `make -C kit/resource-pools-contracts test`, `make -C kit/settlement-runtime
+  test`, `make -C domains/vms/buyer test`, `make -C domains/bare_metal/buyer test` (all
+  unit), `make check-comment-hygiene` and `scripts/change-workflow run pre-commit
+  negotiate-open-ended-compute-terms`. End-to-end: none; no deployed run produces a
+  per-period Agreement (the unowned gap in `openspec/changes/README.md`), so these unit
+  tests are the money consumers' evidence.
+
+## 12. Permanent integration tests, the retained pricing record and the round's validation
+
+Delivers R2's application-integration tests of round 1's behaviour (D1, D5, D2b), R4's
+pin tests and the retained-record confirmation (D2b), the probes' conversion (R2, R7),
+and the round's validation. Touches the VM and bare-metal storefronts' integration
+suites, the VM buyer and the change's probes.
+
+- [ ] 12.1 **Publication and acceptance through the typed client (D1, D5; R2):** each
+  storefront with real SQLite: mixed publication on one capacity identity (reserved,
+  on-demand, spot with an injected declaration); a horizon refusal naming the minimum
+  that passes the runway.
+- [ ] 12.2 **The retained pricing record and pin tests (D2b; R4), from 5.10:** confirm no
+  other buyer read compares a top-level `rate_structure` with a signed body (the
+  triage's V1 fix covered `pricing_record.py`); application integration through the VM
+  storefront's typed client: pin production and verification against a dev-shaped
+  publication whose `pricing` object carries the rate structure, a changed pin refused,
+  and a legacy record without proof failing closed for multiplier pricing.
+- [ ] 12.3 **The probes (R2, R7):** convert the change's probes under
+  `openspec/changes/negotiate-open-ended-compute-terms/` that drive real seams into
+  tests at the level `docs/development/TESTING.md` assigns, where 11.1–12.2 and sections
+  6–10 do not already cover them; task 1.2's codec probe becomes a test or is dropped
+  where a `kit/deal-lifecycle` suite covers the round trip. The rest stay as closeout
+  evidence; record which went where in this task's note.
+- [ ] 12.4 **Verify the section:** `make dist`, then `make -C domains/vms/storefront test`
+  and `make -C domains/bare_metal/storefront test` (unit and application integration),
+  `make -C domains/vms/buyer test` (unit), and any suite 12.3's conversions land in.
+- [ ] 12.5 **Validate the round (R23), from 5.11:** every suite sections 5–12 named,
+  `make check-packaging`, `make check-comment-hygiene`, `make check-architecture-change
+  CHANGE=negotiate-open-ended-compute-terms` and `scripts/change-workflow run pre-commit
+  negotiate-open-ended-compute-terms`. End-to-end: validation's VM and bare-metal lanes —
+  the pipeline, or a locally deployed stack where the owner waives the pipeline part —
+  covering the protected purchases (`vms/test_vm_payment_purchase.py`,
+  `bare_metal/test_bare_metal_payment_deal.py`) and the VM listing-shape lane
+  (`vms/test_listing_shapes.py`); an unrun lane is a blocker at closeout.
+
+## 13. Closeout
 
 Documentation-only, in `openspec/README.md#plan-closeout-requirements` order;
-anything requiring code returns to implementation. These are future implementation
-closeout tasks, not authorization to promote unimplemented behavior now.
+anything requiring code returns to implementation. Former numbers 6.1–6.11 are now
+13.1–13.11.
 
-- [ ] 6.1 **Comment hygiene:** run `make check-comment-hygiene`; confirm touched
-  comments describe current invariants, not change provenance.
-- [ ] 6.2 **Import placement:** confirm touched imports are module-level unless an
-  experimentally verified circularity or deliberate lazy-load reason is recorded.
-- [ ] 6.3 **Documentation compliance:** classify D1–D12, including the horizon as the Agreement's
-  refinement; verify each permanent home and no duplicated codec/authority ownership.
-  Confirm or move D10's shared clause resolver out of `kit/resource-pools-contracts`.
-- [ ] 6.4 **Narrative compression:** reduce completed-task notes to behavior, material
+- [ ] 13.1 **Comment hygiene:** run `make check-comment-hygiene`; confirm the comments
+  rounds 1 and 2 added describe current invariants, not change provenance.
+- [ ] 13.2 **Import placement:** confirm the imports the change added are module-level
+  unless an experimentally verified circularity or deliberate lazy-load reason is
+  recorded, including those of the modules sections 7 and 9 moved.
+- [ ] 13.3 **Documentation compliance:** classify D1–D12, including the horizon as the
+  Agreement's refinement; verify each permanent home and no duplicated codec/authority
+  ownership. Confirm or move D10's shared clause resolver out of
+  `kit/resource-pools-contracts`.
+- [ ] 13.4 **Narrative compression:** reduce completed-task notes to behavior, material
   evidence, residual work and permanent destinations; retain reasoning in design. Fold
-  `design.md`'s dated implementation sections into D1–D12 and remove their narrative.
-- [ ] 6.5 **Roadmap currency:** update Goal 8 terms/display/bounds gap and current state
-  in `docs/development/ROADMAP.md`; record the disposition in the promotion record.
-- [ ] 6.6 **Campaign index currency:** update this row/dependency graph in
-  `openspec/changes/README.md` and run `make check-change-index`. The integrating
-  owner coordinates the shared campaign; this reconciliation supplies row text only.
-- [ ] 6.7 **Packaging:** run `make check-packaging` and
+  `design.md`'s dated implementation sections into D1–D12 and remove their narrative;
+  decide the fate of the round-1 checkpoint attachments under
+  `docs/attachments/negotiate-open-ended-compute-terms/`, including
+  `reader-guard-checkpoint.md`, which describes the removed guard.
+- [ ] 13.5 **Roadmap currency:** in `docs/development/ROADMAP.md`, close Goal 8's gap
+  row "No listing can say how a deal is billed or whether the seller may end it…" and
+  update the goal's current state; keep the default-horizon admission row unowned;
+  record the disposition in the promotion record.
+- [ ] 13.6 **Campaign index currency:** update this change's row and its place in the
+  Goal 8 dependency graph in `openspec/changes/README.md`, keep or retire the three
+  unowned gap rows under "Unowned work found by `negotiate-open-ended-compute-terms`"
+  as what landed decides, and run `scripts/change-workflow run pre-commit
+  negotiate-open-ended-compute-terms`, whose default checks include the change index.
+- [ ] 13.7 **Packaging:** run `make check-packaging` and
   `make check-architecture-change CHANGE=negotiate-open-ended-compute-terms`; resolve
-  all failures/owned exceptions. Run agent-skill checks if instructions were touched.
-- [ ] 6.8 **End-to-end pipeline:** record the pipeline run/result and scenarios proving
-  both domains' classes, bounds, display and the declaration/publication/acceptance gates.
-  Materialization and startup/continuation pipeline evidence belongs to spot and convergence,
-  respectively, not this change's closeout. Readiness/dependency
-  failures are explicit blockers, never passing evidence or live-deployment claims.
-- [ ] 6.9 **Promotion:** after code review, promote D1–D12 to the destinations in the
-  design-promotion table, including publication/buyer architecture companions,
-  architecture vocabulary, D12's principles in `docs/development/RELEASING.md` and
-  `docs/development/ARCHITECTURE.md`, and the bare-metal upgrade step in
-  `docs/operator-handbook.md`. Archive merges deltas into negotiation, publication,
-  resource-pool, settlement-configuration and buyer specs; record destinations and
-  identity decision outcomes. No new capability-index entry is needed.
-- [ ] 6.10 **Documentation citations:** run
+  all failures/owned exceptions. If the change touched `.agents/`, `.claude/` or
+  `.codex/`, confirm the agent-skills check of `scripts/change-workflow run pre-commit`
+  passes.
+- [ ] 13.8 **End-to-end pipeline:** record the pipeline run/result and the scenarios
+  exercising this change: `vms/test_listing_shapes.py`, `vms/test_vm_payment_purchase.py`
+  and `bare_metal/test_bare_metal_payment_deal.py` (protected purchases asserting the
+  published deadline), and `bare_metal/test_bare_metal_publication.py`. Materialization
+  and startup/continuation pipeline evidence belongs to spot and convergence,
+  respectively, not this change's closeout. Readiness/dependency failures are explicit
+  blockers, never passing evidence or live-deployment claims.
+- [ ] 13.9 **Promotion:** promote D1–D12 to the destinations in `design.md`'s
+  "Design promotion record": `docs/development/ARCHITECTURE.md` (D1, D2/D2a/D2b with the
+  authority description; D12 under "Family kits"), `docs/development/RELEASING.md`
+  ("Versioning policy", D12), `openspec/specs/storefront-publication/architecture.md`
+  (D5, D6, D9, D10), `openspec/specs/buyer-orchestration/architecture.md` (D7, D8) and
+  the bare-metal upgrade step in `docs/operator-handbook.md` (D5, D10). The archive
+  merges the deltas into `negotiation-protocol`, `storefront-publication`,
+  `resource-pool-management`, `settlement-configuration` and `buyer-orchestration`
+  specs; record destinations and identity decision outcomes. No new capability-index
+  entry is needed.
+- [ ] 13.10 **Documentation citations:** run
   `make check-doc-citations CHANGE=negotiate-open-ended-compute-terms`, resolve all
-  matches, then `bunx @fission-ai/openspec@1.14.0 validate negotiate-open-ended-compute-terms --strict`.
-- [ ] 6.11 **Archival:** last, run
-  `bunx @fission-ai/openspec@1.14.0 archive negotiate-open-ended-compute-terms -y`
-  and link the campaign row to the resulting archive.
+  matches, then `scripts/change-workflow openspec validate
+  negotiate-open-ended-compute-terms --strict`.
+- [ ] 13.11 **Archival:** last, run `scripts/change-workflow openspec archive
+  negotiate-open-ended-compute-terms -y`, merging the deltas (no `--skip-specs`), and
+  link the campaign row to the resulting archive.

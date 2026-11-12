@@ -960,7 +960,7 @@ supplies the pool port's value when it gives one, else the clause's configured v
 (D3). The drivers then drop `--allow-unprotected-terms` and again assert that the
 published `delivery_deadline_seconds` equals the configured value, and
 `e2e-tests/tests/unit/test_dispute_coverage.py` returns to its earlier fixtures. That
-work is the round-2 section of `tasks.md`; `renewable-compute-lease-deadlines` later
+work is in the round-2 sections of `tasks.md`; `renewable-compute-lease-deadlines` later
 supplies the pool port, which takes precedence.
 
 ## Round-1 triage
@@ -972,7 +972,16 @@ D9; R11, R13 and R21 in D3; R12 and R17 in D7; R14 and R18 in D11; R15, R16 and 
 D6 and D8; R28 in D10; R29 in D12. Review 04's F1 and F2 are recorded in D5, and
 validation 05's V1 was R4's adaptation of the retained pricing record to the
 publication's `pricing` object, fixed in that triage. The code each decision needs is
-the round-2 section of `tasks.md`.
+the round-2 sections of `tasks.md`.
+
+### Implementation cadence
+
+Round 1 was sections 1–4. Round 2 implements the decisions above and is reviewed as
+one implementation round. It was first planned as one section; its first session found
+that section larger than one session holds, and the owner returned the change to
+planning (2026-11-12) to split it into sections that each fit one session, still
+reviewed as one round. Each session ends at its section's verification point and
+commits it; the round's review and validation follow its last section.
 
 Part B of the record compares this change with the Goal 8 MVP replan on
 `goal-8-mvp-design`. The owner decided that this change is finished and merged as
