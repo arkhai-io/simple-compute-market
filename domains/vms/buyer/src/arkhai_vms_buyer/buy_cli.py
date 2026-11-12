@@ -52,6 +52,7 @@ from .cli_helpers import (
 from .cli_helpers import (
     resolve_prices_from_matches as _resolve_prices_from_matches,
 )
+from .cli_helpers import emit_term_refusals
 from . import common
 from .common import resolve_config_value
 from .deal_helpers import (
@@ -593,7 +594,7 @@ def register(app: typer.Typer) -> None:
                 err=True,
                 fg=typer.colors.YELLOW,
             )
-            raise typer.Exit(0)
+            raise typer.Exit(2 if emit_term_refusals(settlement_policy) else 0)
         if requested_shape is not None:
             excess = [
                 (match, shape_excess(requested_shape, match)) for match in matches

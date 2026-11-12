@@ -23,7 +23,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .buy_orchestrator import query_registry_for_matches_multi
-from .cli_helpers import emit_buyer_explanation
+from .cli_helpers import emit_buyer_explanation, emit_term_refusals
 from .settlement_composition import resolve_buyer_settlement_policy
 from arkhai_vms_listings import (
     format_accepted_escrows,
@@ -249,6 +249,7 @@ def listing_list(
 
     if not items:
         console.print("No open listings found.")
+        emit_term_refusals(settlement_policy)
         return
 
     console.print(table)

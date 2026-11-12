@@ -40,7 +40,9 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 from market_settlement_runtime.presentation import PaymentPresentation, amount_rate_quote
 
 from market_arkhai_payments.client import PaymentsClient
-from market_arkhai_payments.mandates import PaymentsOptionParams, duration_seconds
+from market_arkhai_payments.mandates import (
+    SUPPORTED_PARTIAL_PERIODS, PaymentsOptionParams, duration_seconds,
+)
 from market_arkhai_payments.models import AccountId, Asset
 from market_arkhai_payments.receipts import ReceiptIdentity
 
@@ -502,7 +504,7 @@ def validate_payment_lifecycle(
         dispute_interfaces=dispute_interfaces, authority=entry.requirements if entry else None,
         buyer=True, accepted_authorities=tuple(item.authority for item in authorities),
         compute=compute, has_stoppable_part=params is not None and params.period is not None,
-        supported_partial_periods=frozenset({"charged", "returned", "prorated", "chosen"}),
+        supported_partial_periods=SUPPORTED_PARTIAL_PERIODS,
     ))
     AccountId.model_validate(terms.adjudication.dispute.account)
     return terms

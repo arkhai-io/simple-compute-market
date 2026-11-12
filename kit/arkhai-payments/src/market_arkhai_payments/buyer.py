@@ -8,12 +8,14 @@ Agreement on the seller's behalf; attachment at approval is the buyer's own poli
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from market_core.schemas import Agreement, SettlementOption
 from market_settlement_runtime.buyer_terms import BuyerTermsPolicy
 from market_settlement_runtime.rate_publication import default_buyer_refusals
 from pydantic import ValidationError
+from market_deal_lifecycle.terms import TermContext
 
 from market_arkhai_payments.agreement import (
     PaymentSettlementData,
@@ -26,17 +28,32 @@ from market_arkhai_payments.errors import (
     PaymentApprovalDeclined,
     ReceiptVerificationError,
 )
-from market_arkhai_payments.mandates import check
+from market_arkhai_payments.mandates import SUPPORTED_PARTIAL_PERIODS, check
 from market_arkhai_payments.models import AccountId, Mandate
 from market_arkhai_payments.receipts import verify_receipt, verify_snapshot
 from market_arkhai_payments.seller import ClientForOwner
 from market_arkhai_payments.settlement_config import (
+    ARKHAI_PAYMENTS_MECHANISM,
     ArkhaiPaymentsConfig,
     ArkhaiPaymentsConfigurationError,
     payments_client_for_owner,
 )
 
 ConfirmPayment = Callable[[Mandate, str], bool]
+
+
+def approvable_terms(context: TermContext) -> TermContext:
+    """A buyer's payments term context, with the terms this helper can take.
+
+    It approves a rate part that a stop ends, each mandate encoding the stop
+    entries and term end its Agreement's partial-period treatments name, so a
+    buyer selects exactly the options whose mandate it can re-derive and approve.
+    """
+    if context.mechanism != ARKHAI_PAYMENTS_MECHANISM:
+        raise ValueError(f"{context.mechanism} is not {ARKHAI_PAYMENTS_MECHANISM}")
+    return replace(
+        context, has_stoppable_part=True, supported_partial_periods=SUPPORTED_PARTIAL_PERIODS,
+    )
 
 
 class PaymentApproval:
