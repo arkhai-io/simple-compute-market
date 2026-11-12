@@ -157,7 +157,7 @@ class BuyerLifecycle:
                             if not isinstance(view.outcome, Accepted)), financial.outcome)
             authority = AuthorityView(
                 outcome=outcome, state=financial.state, events=financial.events,
-                extensions=financial.extensions, deadline=financial.deadline,
+                parts=financial.parts, extensions=financial.extensions, deadline=financial.deadline,
                 disputes=cases.disputes, cases=cases.cases,
             )
         return LifecycleRead(

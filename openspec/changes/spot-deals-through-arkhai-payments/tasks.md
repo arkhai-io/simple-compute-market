@@ -215,12 +215,12 @@ admin_cli.py; kit/deal-lifecycle-buyer and each domain's canonical buyer end ver
 Reuse the foundation's command identity/recovery contract; do not add a
 second preemption endpoint or a local payment-stop scheduler.
 
-- [ ] 4.1 Admit notice against the accepted payee entitlement and adapter support,
+- [x] 4.1 Admit notice against the accepted payee entitlement and adapter support,
       preserve its command operation identity, and immediately submit stop
       with explicit parts and optional at. Return the authority's effective time
       and pending/unknown/refused status. Verify current listing edits cannot
       grant or revoke the accepted permission.
-- [ ] 4.2 Surface verified pendingStop in lifecycle read/list. Preserve an earlier
+- [x] 4.2 Surface verified pendingStop in lifecycle read/list. Preserve an earlier
       buyer stop, immutable retry identity and the authority's notice minimum.
       On-demand refusal points to delivery_end only for seller non-delivery,
       not a self-interested override or automatic seller-fault filing after a lawful end.

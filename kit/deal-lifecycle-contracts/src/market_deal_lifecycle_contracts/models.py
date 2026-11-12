@@ -14,7 +14,7 @@ from pydantic import Base64Bytes, BaseModel, ConfigDict, Field, JsonValue, model
 Reference = Annotated[str, Field(min_length=1)]
 Instant = Annotated[int, Field(strict=True, ge=0)]
 Amount = Annotated[str, Field(pattern=r"^(0|[1-9][0-9]*)$")]
-CommandKind = Literal["start", "stop", "reverse", "dispute", "delivery_end", "append"]
+CommandKind = Literal["start", "stop", "notice", "reverse", "dispute", "delivery_end", "append"]
 PaymentEventKind = Literal["start", "stop", "stop_request", "collect", "reverse", "award", "return", "extend", "lift"]
 DisputeEventKind = Literal["filed", "appended", "ruled", "closed"]
 LifecycleState = Literal["unstarted", "running", "ending", "ended", "repair_required"]
@@ -286,6 +286,7 @@ class DealSummary(WireModel):
     entitlements: dict[str, JsonValue]
     state: LifecycleState
     deadline: Instant | None = None
+    parts: list[PaymentPartObservation] = Field(default_factory=list)
     has_open_extension: bool
     open_cases: list[Reference]
     filings: list[FilingProgress] = Field(default_factory=list)

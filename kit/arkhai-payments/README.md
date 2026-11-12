@@ -388,6 +388,14 @@ the caller. No rate call allocates another billing-start key or stores a ledger.
 The continuation composition must pass these descriptors from its journal; the
 once-only end-service caller alone is not recurring enablement.
 
+Seller `notice` is admitted by seller servicing against its immutable accepted
+payee entitlement. The rate adapter expands it into explicit per-rate-part
+stops using that same command key, persists all descriptor digests through the
+caller's operation store before the first authority call, and returns verified
+controlling pending/final stops. A same-key retry recovers a lost response and
+never postpones an earlier payer stop. Notice carries no treatment override or
+local scheduling promise.
+
 `authorize` is read-only for commit, dispatch, physical start and disclose.
 Disclosure additionally requires `billing_operation_key` and a matching verified
 start event containing the same activation envelope. A caller-supplied journaled
