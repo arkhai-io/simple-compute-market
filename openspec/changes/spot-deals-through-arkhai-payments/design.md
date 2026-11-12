@@ -26,6 +26,19 @@ is mechanism-owned and stateless; the caller's journal and continuation state li
 in `kit/deal-servicing`, implemented by
 [`converge-ongoing-compute-leases`](../converge-ongoing-compute-leases/).
 
+Goal 8 ships first as an MVP change set — `offer-per-period-vm-terms`,
+`derive-rate-parts-in-the-payments-kit` and `serve-running-rate-deals-on-vm` — which
+takes this design's VM rate mechanics, seller notice and buyer end in reduced form.
+Four parts of this design are deferred past it. Their designs stay here, for the
+work that follows the MVP:
+
+| Deferred past the MVP | Design and tasks | Why the MVP does without it |
+|---|---|---|
+| Setup parts | D1, D2; the setup clauses of tasks 2.1, 2.2 and 2.4 | MVP presets carry no setup part: a setup charge's only return is the `delivery_end` remedy, which the MVP leaves to operators |
+| The mechanical `delivery_end` self-penalty on rate parts | D5; task 3.5 | The MVP handles a seller's failure by operator procedure, so no mechanical seller-fault remedy runs on a rate part |
+| The buyer's watchdog | D6a; task 4.5a | The MVP accepts the exposure it bounds: a buyer whose resource is lost while the storefront is down is charged until its own stop lands |
+| Identity rotation and re-anchoring | D7; tasks 5.2–5.3 | The MVP drains running deals before the payments signing key retires, and the service publishes no rotation to design against (D7) |
+
 ## Decisions
 
 ### D1. Rate options and presets use the common terms and the price accessor
@@ -50,7 +63,7 @@ listing or a registry cache. The accepted-rate carrier or digest that
 `negotiation-driven-capacity-resize` task 2.1a chooses is an input gate: without
 resolvable bound pricing, materialization is refused.
 
-**Setup.** An optional `setup_amount`, a positive integer minor-unit string in the
+**Setup.** Deferred past the MVP, whose presets carry no setup part (Context). An optional `setup_amount`, a positive integer minor-unit string in the
 option's asset, adds a `once` part beside the rate; omission means no setup part.
 It is an additional charge, not `max(setup, usage)`, visible before approval and
 bound into the option ID. A preset populates it from an explicitly configured setup
@@ -347,7 +360,9 @@ journal, the evidence store retains the cause and the kept evidence, and an
 uncertain filing outcome uses the same operation identity and read-and-retry
 contract rather than a second correction journal.
 
-Arkhai mediation's mechanical delivery-end rule is payee agreement under the foundation's guards; its cause=payee branch is the standard self-penalty
+The mechanical self-penalty on a rate part is deferred past the MVP, which leaves a
+seller's failure to operator procedure (Context); the filing path above is the
+foundation's and is unaffected. Arkhai mediation's mechanical delivery-end rule is payee agreement under the foundation's guards; its cause=payee branch is the standard self-penalty
 (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); its amounts and effects belong to mediation's published mapping, not to
 this payment adapter, which derives the parts and terms the ruling reads — the rate
 part it stops returned, the setup part it returns only for non-delivery, the penalty it
@@ -416,7 +431,8 @@ cooperative payment stop. The buyer's `delivery_end(cause=payer)` case and its h
 Both-authorities-down recovery keeps the journal and retry path. The terms change owns the display of a normal stop against
 an immediate surrender, and of billing that continues while a stop is pending.
 
-**The buyer's watchdog.** The honest-crash exposure — the resource lost while the
+**The buyer's watchdog.** Deferred past the MVP, which accepts the exposure this
+bounds (Context). The honest-crash exposure — the resource lost while the
 seller's storefront is down, the buyer charged until its own stop lands (foundation
 D12) — is bounded from the buyer's side by this change's watchdog: a probe loop in
 `kit/deal-lifecycle-buyer` that the buyer's own `buy` command runs in the foreground.
@@ -459,6 +475,18 @@ configured `SERVICE_IDENTITY` in test mode (`livemode = false`). The
 mechanism-specific materialization check layers on the neutral declaration
 validation and refuses mismatched identities, live mode and production use; it
 never queries private control or status routes to establish trust.
+
+**Rotation and re-anchoring are deferred past the MVP**, whose operating rule is to
+drain running deals before the payments signing key retires. The design below also
+rests on a service feature that does not exist yet: the payments service has never
+rotated its signing key and publishes no retirement mechanism. The vendored contract
+carries no key history, validity window or retirement notice, and no vector shows a
+snapshot under one key attesting a receipt signed under another. The kit's side of
+the seam exists — receipt identities with validity windows and a `retiring` flag
+(`kit/arkhai-payments/src/market_arkhai_payments/receipts.py`) — and no real
+rotation has exercised it. The overlap, the retirement dates and the attesting
+snapshot are therefore assumptions about a future service revision, to be re-derived
+against what the service publishes before tasks 5.2–5.3 are planned.
 
 Configuration may list current and retiring service identities with retirement
 dates. During the overlap an old receipt remains verifiable and a fresh snapshot

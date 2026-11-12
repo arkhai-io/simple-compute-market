@@ -111,6 +111,7 @@ publication configuration/builders and their focused publication suites.
       seller's self-penalty for non-delivery returns it. The bare-metal preset
       ships no setup default; VM's may default to zero. Bind all terms into option
       identity; invent no amount or bare-metal minimum-spend gate.
+      Deferred past the MVP: its presets carry no setup part, so the setup derivation delivered under 2.1, 2.2 and here is offered by no MVP option.
 - [x] 2.5 Supply the preset helper to the terms-owned VM/bare-metal publication
       adapters through their injected preset-helper interface; helper availability
       gates rate emission, not the terms change's archive. Do not implement generic
@@ -179,6 +180,7 @@ Journal persistence itself belongs to convergence.
       penalty after refunds. Verify no seller payment calls, exceptional-end payment
       operation, direct-payment fallback or second correction journal. Report missing
       dispute intent/request/mapping or producer qualification to foundation.
+      Deferred past the MVP: it leaves a seller's failure to operator procedure, so no mechanical self-penalty runs on a rate part.
 - [x] 3.6 Implement the pure rate authorize hook for commit/dispatch/start/disclose
       under D4's phase table and settlement-servicing delta. Return reason,
       operation identity and verified provenance with allow/refuse/pending. Verify
@@ -231,8 +233,8 @@ second preemption endpoint or a local payment-stop scheduler.
       command acceptance as an authoritative scheduled end.
 - [ ] 4.4 Prepare committed first-use configuration/examples for both domains
       under the lane profile, with paired on-demand/spot options, explicit authority
-      entries, test mode and double selector. Use explicit setup opt-out for the
-      interim; include priced setup fixtures only on a qualified setup revision. Document
+      entries, test mode and double selector. Use explicit setup opt-out;
+      priced setup fixtures are deferred past the MVP with setup parts. Document
       one runnable invocation per domain that lands on its preemption surface.
       Before convergence, use lane-only approval/command fixtures and assert
       delivery refuses without the rate hook; do not commit/deliver an unserviced
@@ -259,6 +261,7 @@ second preemption endpoint or a local payment-stop scheduler.
       --watch`, loses access with the storefront stopped, restarts into `buy --resume`
       and observes a single buyer stop; and in convergence's rows 1 and 2 as the buyer's
       stop landing with the storefront absent.
+      Deferred past the MVP: it accepts the honest-crash exposure the watchdog bounds.
 - [ ] 4.6 Verify the foundation-owned VM admin route delegates notice for a lawful
       entitled stop and files delivery_end for seller-caused emergency failure,
       including spot hardware failure; request a foundation fix rather than add a
@@ -295,12 +298,14 @@ convergence persist outputs through their existing ports.
       foundation verifier accepting identity sets with validity windows, embedded
       receipt attestation and a caller-supplied minimum sequence; do not implement
       a parallel proof verifier.
+      Deferred past the MVP: it drains running deals before the payments signing key retires, and the service has never rotated a key and publishes no retirement mechanism to build against (D7).
 - [ ] 5.3 Integrate durable anchor replacement via the evidence-store port while
       keeping original bytes; expose dependent/unanchored deals for convergence's
       status. Refuse stale-anchor rollback and mode-change re-anchoring. Document
       retirement only after rate deals re-anchor or drain and once-only deals
       drain. Inventory all dependent hosted deals; do not claim durable once-only
       re-anchoring without a consumer.
+      Deferred past the MVP with 5.2, for the same reason.
 
 Validation: configuration unit cases for invalid proposed composition and mode;
 kit integration with the in-process contract fake rotating identities across a
