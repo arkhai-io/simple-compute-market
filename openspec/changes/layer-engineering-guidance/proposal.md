@@ -67,7 +67,9 @@ cites guidance held elsewhere.
 - **`make check-guidance`.** It holds the tags, the vocabulary, the exception
   tables, the link direction, and the anchors of links into guidance, and lists the
   guidance set; `make check-repository` calls it.
-- **`[load]` may name a directory**, so `load.common` names `docs/guidance/` once.
+- **`[load]` may name a directory**, so `load.common` names `docs/guidance/` once;
+  a directory entry that yields no Markdown file is refused rather than read as
+  nothing.
 - **The checks are classified.** Every check enforcing guidance is recorded with
   the rule it enforces and that rule's layer.
 
@@ -90,12 +92,14 @@ cites guidance held elsewhere.
 
 As `openspec/README.md`'s change documentation requirements ask:
 
-- **`[load]`** — an entry may name a directory, expanded to its Markdown files in
-  sorted order. Compatible: every existing configuration resolves as before.
-- **`config load <step>`** — prints the expanded list. Compatible: its output is
-  still one path per line.
+- **`[load]`** — an entry ending in `/` names a directory, expanded to its Markdown
+  files in sorted order. Compatible: every existing configuration resolves as before.
+- **`config load <step>`** — prints the expanded list, and refuses, naming the entry,
+  a directory entry that is missing, unreadable, or holds no Markdown file.
+  Compatible: its output is still one path per line, and no existing configuration
+  has a directory entry.
 - **The skills `change-design`, `change-plan`, `change-implement`,
-  `change-review`, and `change-closeout`** — read the guidance files in a
+  `change-review`, `change-triage`, `change-merge`, and `change-closeout`** — read the guidance files in a
   capability's directory beside its specification and companion, and closeout gains
   the guidance placement part. Compatible: no argument form or outcome changes.
 
@@ -127,7 +131,7 @@ As `openspec/README.md`'s change documentation requirements ask:
   its tests (directory entries).
 - `scripts/check_guidance.py` and its tests, and the `Makefile`'s `check-guidance`
   and `check-repository`.
-- `.agents/skills/change-{design,plan,implement,review,closeout}/SKILL.md`.
+- `.agents/skills/change-{design,plan,implement,review,triage,merge,closeout}/SKILL.md`.
 - `openspec/specs/market-change-workflow/README.md`, for the classification of the
   checks.
 
@@ -186,5 +190,5 @@ changes.
 - D19, flat files: `openspec/specs/change-workflow/README.md`, with directories carrying no meaning (CW-n6dm)
 - D20: no permanent destination — superseded by D3
 - D21, `make check-guidance`: `openspec/specs/market-change-workflow/spec.md` (MCW-c4ek); `openspec/specs/market-change-workflow/README.md`
-- D22, capability guidance read with its capability: `openspec/specs/change-workflow/spec.md` (CW-r8cg); the five skills
+- D22, capability guidance read with its capability: `openspec/specs/change-workflow/spec.md` (CW-r8cg); the seven skills that read a capability's specification
 - D23: no permanent destination — `openspec/config.yaml` is unchanged in kind

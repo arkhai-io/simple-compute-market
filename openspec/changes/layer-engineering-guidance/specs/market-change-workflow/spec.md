@@ -9,8 +9,9 @@ list; when a package version differs from its version at the merge-base with the
 branch the change lands on by more than one SemVer step; when an import its diff adds
 inside a function has no comment giving its reason; when a capability with a
 specification has no row in the capability index, or a row links no capability; or
-when the guidance check, `make check-guidance`, fails. The guidance check MUST fail,
-over every guidance file, on missing `tags`; on zero or several layer tags; on a tag
+when the guidance check, `make check-guidance`, fails. The guidance check MUST find
+every capability's guidance by its place, not its tags, and MUST fail, over every
+guidance file, on missing `tags`; on zero or several layer tags; on a tag
 in neither its layer's vocabulary table nor a lower one's; on a vocabulary row no file
 uses; on a malformed table; on an exception row citing no guidance file or naming an
 unknown kind; and on a link to a guidance file tagged with a higher layer. It MUST
@@ -57,6 +58,11 @@ outside the archived changes and `docs/prompts/`.
 - **WHEN** a skill links to `openspec/README.md#plan-closeout-requirements` after that
   section has moved to the workflow's closeout guidance
 - **THEN** the guidance check fails, naming the link and its missing anchor
+
+#### Scenario: An untagged capability guide
+
+- **WHEN** `openspec/specs/<capability>/testing.md` has no frontmatter
+- **THEN** the guidance check fails, naming the file
 
 #### Scenario: Engineering guidance links upward
 

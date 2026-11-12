@@ -1,6 +1,7 @@
 # Design: layer engineering guidance
 
-Status: design settled. Planning follows the design review.
+Status: design settled and reviewed; design review 19's findings are settled in D5,
+D21, and D22. Planning follows.
 
 ## Context
 
@@ -193,10 +194,23 @@ Files a reorganization adds or moves within `docs/guidance/` are picked up witho
 editing the configuration. The expansion selects nothing, so it decides nothing
 about the loader. It is a compatible change to a public interface (CW-c2tw).
 
+A directory entry fails closed (design review 19 F3). An entry ending in `/` is a
+directory entry, so the name tells a missing directory from a missing file;
+`config load` refuses one that is missing, unreadable, or holds no Markdown file,
+naming the entry, and the post-compaction hook, which already turns a configuration
+error into telling the session its documents are unknown, says so rather than
+naming nothing. Literal entries are unchanged, and an absent or empty `load` list
+still means no documents, so every existing configuration resolves as before.
+Nothing needs a deliberately empty directory: until the last round `load.common`
+lists the new files by path.
+
 Rejected: listing every file, which a forgotten entry silently leaves unread;
 moving repository documents into per-step lists now, which answers the loader's
 question without its design and leaves them out of the hook's re-read; loading by
-tag, which is the loader.
+tag, which is the loader; for a directory entry, allowing an empty directory with a
+marker for a deliberate one, which nothing here needs; refusing any entry naming
+nothing on disk, literal files included, which changes what a literal entry means
+for an adopting repository's existing configuration.
 
 ### D6 — Engineering guidance describes private and public repositories
 
@@ -407,9 +421,15 @@ headings.
 
 ### D21 — `make check-guidance`
 
-The guidance set is every Markdown file under `docs/guidance/`, every Markdown file
-outside `openspec/changes/` carrying `tags` frontmatter, and the documents
-`AGENTS.md`'s layer table names, which act as the manual override. `make
+The guidance set is every Markdown file under `docs/guidance/`; every Markdown file
+in a capability's directory under `openspec/specs/` other than its `spec.md`, its
+companion (`architecture.md`, or `README.md` in a capability organized by an
+index), and its `index.md`, whatever its name and whether or not it is tagged;
+every other Markdown file outside `openspec/changes/` carrying `tags` frontmatter;
+and the documents `AGENTS.md`'s layer table names, which act as the manual
+override. A capability's guidance is found by that rule before its frontmatter is
+read, so an untagged capability guide fails the check rather than escaping it
+(design review 19 F1). `make
 check-guidance` (`scripts/check_guidance.py`), which `make check-repository` calls,
 fails on a guidance file with no `tags`; on zero or several layer tags; on a tag in
 neither its layer's table nor a lower one; on a table row no file uses; on a
@@ -424,13 +444,19 @@ layer tag with a directory, since directories carry no meaning.
 tags, and `--list-exceptions` every exception row, so a lift-out, the closeout part,
 and a later loader read the set without re-implementing it.
 
-Rejected: warning on an unused tag, which lets the vocabulary accrete; no check.
+Rejected: warning on an unused tag, which lets the vocabulary accrete; no check;
+finding capability guidance by its tags alone, which leaves an untagged guide
+invisible to the check that should catch it; a fixed list of eligible guidance file
+names per capability, which a guide of another name escapes; a manifest of each
+capability's guidance files, which is metadata to keep in step with the files.
 
 ### D22 — A step reads the guidance beside a capability
 
 Wherever a step reads a capability's specification and companion — design,
-planning, implementation, review, closeout — it also reads every tagged guidance
-file in the capability's directory. Guidance moved beside its capability would
+planning, implementation, review, triage, merge, closeout — it also reads every
+guidance file in the capability's directory, as D21 finds them. Triage reads the
+specifications its findings cite before deciding a fix, and merge reconciles them
+and the code against both sides (design review 19 F2). Guidance moved beside its capability would
 otherwise be read by no step, and exceptions beside a component would never reach
 the agent.
 

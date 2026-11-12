@@ -93,8 +93,18 @@ states its layer and tags.
 
 ### Requirement: CW-r8cg A step reads the guidance beside a capability
 
-Wherever a step reads a capability's specification and companion, it MUST also read
-every tagged guidance file in that capability's directory.
+Every Markdown file in a capability's directory other than its specification, its
+companion, and its index MUST be treated as that capability's guidance, whatever its
+name and whether or not it is tagged. Wherever a step reads a capability's
+specification and companion, it MUST also read every guidance file in that
+capability's directory.
+
+#### Scenario: Triage judges a finding against a capability
+
+- **WHEN** a finding cites a capability whose directory holds a guidance file with an
+  exception row
+- **THEN** the triage session reads that file with the specification before deciding
+  the finding's fix
 
 #### Scenario: Implementing a section that touches a capability
 
@@ -110,8 +120,10 @@ every tagged guidance file in that capability's directory.
 The documents a step's skill loads MUST be `load.common` and `load.<step>`, printed
 together by `config load <step>`; `config load common` MUST print `load.common`
 alone, for a session no step runs; and the post-compaction hook MUST have a session
-re-read `load.common`. An entry naming a directory MUST resolve to the Markdown files
-beneath it, in sorted path order, each printed once.
+re-read `load.common`. An entry ending in `/` names a directory and MUST resolve to
+the Markdown files beneath it, in sorted path order, each printed once; `config load`
+MUST refuse, naming the entry, a directory entry that is missing, unreadable, or
+holds no Markdown file.
 
 #### Scenario: Design loads the roadmap
 
@@ -125,3 +137,9 @@ beneath it, in sorted path order, each printed once.
   `engineering/comments.md` and `workflow/closeout.md`
 - **THEN** `config load common` prints both files' paths in sorted order in place of
   the directory, and the post-compaction hook names them
+
+#### Scenario: A directory entry names nothing
+
+- **WHEN** `load.common` names `docs/guidens/`, which does not exist
+- **THEN** `config load common` fails, naming the entry, and the post-compaction hook
+  tells the session the documents to re-read are unknown
