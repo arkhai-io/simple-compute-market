@@ -77,3 +77,25 @@ def test_payment_approval_asks_the_policy_that_selected_the_option(monkeypatch, 
     monkeypatch.setattr(arkhai_payments, "load_user_config", lambda: config)
     approval = arkhai_payments.payment_buyer(resolve_buyer_settlement_policy(config))
     assert type(approval.terms_policy) is expected
+
+
+def test_the_selected_policy_orders_a_listings_options():
+    policy = resolve_buyer_settlement_policy(document())
+    assert policy.option_order == policy.option_preference.order
+
+
+def test_policy_refusals_are_told_to_the_user_when_nothing_was_admitted(capsys):
+    policy = resolve_buyer_settlement_policy(document())
+    cli_helpers.emit_terms_policy_refusals(policy)
+    assert capsys.readouterr().err == ""
+
+    policy.option_preference.policy_refused["abc"] = ("a default buyer refuses this option: no delivery deadline",)
+    cli_helpers.emit_terms_policy_refusals(policy)
+    assert capsys.readouterr().err.splitlines() == [
+        "Your terms policy refused every option it was offered:",
+        "  option abc: a default buyer refuses this option: no delivery deadline",
+    ]
+
+    policy.option_preference.admitted.add("def")
+    cli_helpers.emit_terms_policy_refusals(policy)
+    assert capsys.readouterr().err == ""

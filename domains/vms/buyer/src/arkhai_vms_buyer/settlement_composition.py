@@ -227,16 +227,18 @@ def resolve_buyer_settlement_policy(
         role="buyer",
         report=logging.getLogger(__name__).warning if identity is not None else lambda _: None,
     )
+    admission = BuyerTermsAdmission(
+        AuthoritySelection(authorities, contexts={
+            "arkhai.payments.v1": buyer_term_context("arkhai.payments.v1"),
+        }, report=logging.getLogger(__name__).info),
+        load_buyer_terms_policy(terms_policy or terms_policy_selection(document)),
+    )
     return BuyerSettlementPolicy(
         config=settlement,
         registry=registry,
         stages=buyer_settlement_stages(),
-        option_preference=BuyerTermsAdmission(
-            AuthoritySelection(authorities, contexts={
-                "arkhai.payments.v1": buyer_term_context("arkhai.payments.v1"),
-            }, report=logging.getLogger(__name__).info),
-            load_buyer_terms_policy(terms_policy or terms_policy_selection(document)),
-        ),
+        option_preference=admission,
+        option_order=admission.order,
         public_context={"dispute_authorities_by_registry": authorities},
     )
 

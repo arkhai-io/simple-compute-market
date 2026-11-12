@@ -17,10 +17,9 @@ from typing import Any
 
 from market_settlement_runtime.terms_policy import (
     BuyerTermsOffer,
-    BuyerTermsPolicy,
     SellerTermsOffer,
-    SellerTermsPolicy,
     SellerTermsReview,
+    SellerTermsSelection,
 )
 
 
@@ -42,9 +41,26 @@ class ExampleBuyer:
     on its own: the deadline is optional, the on-demand penalty has a floor.
     """
 
-    def __init__(self, *, require_delivery_deadline: bool, minimum_penalty: int) -> None:
+    def __init__(
+        self, *, require_delivery_deadline: bool, minimum_penalty: int, prefer_spot: bool,
+    ) -> None:
         self.require_delivery_deadline = require_delivery_deadline
         self.minimum_penalty = minimum_penalty
+        self.prefer_spot = prefer_spot
+
+    def prefer(self, offers: Sequence[BuyerTermsOffer]) -> Sequence[BuyerTermsOffer]:
+        """Put options the seller may stop on notice first, when asked to.
+
+        Sorting is stable, so within each class the default order stands.
+        """
+        if not self.prefer_spot:
+            return offers
+
+        def is_spot(offer: BuyerTermsOffer) -> bool:
+            early = offer.lifecycle.early_termination if offer.lifecycle else None
+            return early is not None and "payee" in early.entitlements
+
+        return sorted(offers, key=lambda offer: not is_spot(offer))
 
     def refusals(self, offer: BuyerTermsOffer) -> Sequence[str]:
         terms = offer.lifecycle
@@ -62,17 +78,25 @@ class ExampleBuyer:
         return tuple(f"example buyer policy: {reason}" for reason in reasons)
 
 
-def example_buyer(settings: Mapping[str, Any]) -> BuyerTermsPolicy:
-    return ExampleBuyer(**_settings(
-        settings, {"require_delivery_deadline": False, "minimum_penalty": 1},
-    ))
+def example_buyer(settings: Mapping[str, Any]) -> ExampleBuyer:
+    return ExampleBuyer(**_settings(settings, {
+        "require_delivery_deadline": False, "minimum_penalty": 1, "prefer_spot": False,
+    }))
 
 
 class ExampleSeller:
-    """Publish only options that promise a delivery deadline."""
+    """Publish only options that promise a delivery deadline, and serve no
+    buyer whose identifier is listed."""
 
-    def __init__(self, *, penalty_periods: int) -> None:
+    def __init__(self, *, penalty_periods: int, refused_buyers: list) -> None:
         self.penalty_periods = penalty_periods
+        self.refused_buyers = frozenset(refused_buyers)
+
+    def admit(self, selection: SellerTermsSelection) -> Sequence[str]:
+        # The reason is sent to the buyer, so it says nothing private.
+        if selection.buyer.identifier in self.refused_buyers:
+            return ("this seller does not serve this buyer",)
+        return ()
 
     def default_penalty_periods(self) -> int:
         return self.penalty_periods
@@ -84,5 +108,5 @@ class ExampleSeller:
         return SellerTermsReview()
 
 
-def example_seller(settings: Mapping[str, Any]) -> SellerTermsPolicy:
-    return ExampleSeller(**_settings(settings, {"penalty_periods": 12}))
+def example_seller(settings: Mapping[str, Any]) -> ExampleSeller:
+    return ExampleSeller(**_settings(settings, {"penalty_periods": 12, "refused_buyers": []}))

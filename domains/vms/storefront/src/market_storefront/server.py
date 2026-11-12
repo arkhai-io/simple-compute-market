@@ -424,6 +424,7 @@ def _build_vm_services(
         arkhai_payments_stage=settlement_composition.arkhai_payments_stage,
         rate_servicing=settlement_composition.rate_servicing,
         rate_term_projections=settlement_composition.rate_term_projections,
+        terms_policy=settlement_composition.terms_policy,
     )
     listing_service = _build_listing_service(
         registry=registry,

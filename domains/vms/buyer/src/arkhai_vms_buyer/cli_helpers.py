@@ -18,6 +18,20 @@ from market_settlement_runtime.terms_policy import (
 import typer
 
 
+def emit_terms_policy_refusals(settlement_policy: Any) -> None:
+    """Say so when the buyer's own terms policy is why nothing is selectable."""
+    report = getattr(settlement_policy.option_preference, "policy_refusal_report", None)
+    lines = report() if callable(report) else ()
+    if not lines:
+        return
+    typer.secho(
+        "Your terms policy refused every option it was offered:",
+        err=True, fg=typer.colors.YELLOW,
+    )
+    for line in lines:
+        typer.secho(f"  {line}", err=True, fg=typer.colors.YELLOW)
+
+
 def buyer_terms_selection(*, allow_unprotected_terms: bool) -> TermsPolicySelection:
     """The configured terms policy, or the one the shorthand flag selects."""
     return flagged_buyer_selection(

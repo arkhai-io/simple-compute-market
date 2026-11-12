@@ -18,7 +18,7 @@ from market_settlement_runtime.rate_publication import (
 )
 from market_settlement_runtime.terms_policy import (
     DefaultSellerTermsPolicy, SellerTermsPolicy,
-    review_for_publication,
+    penalty_periods, review_for_publication,
 )
 
 from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
@@ -298,7 +298,7 @@ class BareMetalStorefrontSettlementComposition:
                     available_until_utc=candidate.get("available_until_utc"),
                     delivery_deadline_seconds=deadline,
                     now=datetime.now(UTC),
-                    default_penalty_periods=self.terms_policy.default_penalty_periods(),
+                    default_penalty_periods=penalty_periods(self.terms_policy),
                 )
                 if isinstance(result, RatePresetRefusal):
                     diagnose({"code": result.code, "detail": result.detail, "mechanism": clause.mechanism})

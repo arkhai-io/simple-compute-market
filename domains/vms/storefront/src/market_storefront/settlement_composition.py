@@ -26,7 +26,7 @@ from market_settlement_runtime.rate_publication import (
 )
 from market_settlement_runtime.terms_policy import (
     DefaultSellerTermsPolicy, SellerTermsPolicy, load_seller_terms_policy,
-    review_for_publication, terms_policy_selection,
+    penalty_periods, review_for_publication, terms_policy_selection,
 )
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
@@ -276,7 +276,7 @@ class VmSettlementComposition:
                     available_until_utc=resources.get("available_until_utc"),
                     delivery_deadline_seconds=deadline,
                     now=datetime.now(timezone.utc),
-                    default_penalty_periods=self.terms_policy.default_penalty_periods(),
+                    default_penalty_periods=penalty_periods(self.terms_policy),
                 )
                 if isinstance(result, RatePresetRefusal):
                     diagnose({"code": result.code, "detail": result.detail, "mechanism": selected_clause.mechanism})

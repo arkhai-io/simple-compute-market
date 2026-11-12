@@ -110,6 +110,10 @@ class BuyerSettlementPolicy:
     stages: SettlementStageTable[Any] = field(repr=False)
     public_context: Mapping[str, Any] = field(default_factory=dict, repr=False)
     option_preference: Callable[[SettlementOption, Mapping[str, Any]], int | None] | None = field(default=None, repr=False)
+    # Reorders one listing's surviving options; it can neither add nor drop one.
+    option_order: Callable[
+        [tuple[SettlementOption, ...], Mapping[str, Any]], Iterable[SettlementOption]
+    ] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.registry.validate(self.config, role="buyer")
@@ -159,10 +163,22 @@ class BuyerSettlementPolicy:
         )
         mechanism_order = {registration.mechanism_id: index
                            for index, registration in enumerate(self.ordered_registrations())}
-        return result, tuple(sorted(result.candidates, key=lambda candidate: (
+        candidates = tuple(sorted(result.candidates, key=lambda candidate: (
             mechanism_order[candidate.registration.mechanism_id], ranks[candidate.option.option_id],
             candidate.option.option_id,
         )))
+        if self.option_order is not None and len(candidates) > 1:
+            by_id = {candidate.option.option_id: candidate for candidate in candidates}
+            ordered = [
+                option.option_id
+                for option in self.option_order(
+                    tuple(candidate.option for candidate in candidates), listing
+                )
+            ]
+            if sorted(ordered) != sorted(by_id):
+                raise ValueError("option order must return exactly the options it was given")
+            candidates = tuple(by_id[option_id] for option_id in ordered)
+        return result, candidates
 
     def compatible_options(
         self,

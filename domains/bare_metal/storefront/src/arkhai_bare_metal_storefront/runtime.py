@@ -324,6 +324,10 @@ class BareMetalStorefrontRuntime:
                     clock=self.source_confirmation_clock,
                 ),
                 trading_pause=self.trading_pause,
+                terms_policy=(
+                    self.settlement_composition.terms_policy
+                    if self.settlement_composition is not None else None
+                ),
                 plan_builder=self.plan_builder,
                 accepted_obligation_dispatch=(
                     self.settlement_composition.accepted_obligation_dispatch()

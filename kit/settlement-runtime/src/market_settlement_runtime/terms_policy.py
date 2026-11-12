@@ -1,22 +1,27 @@
 """Installed terms policies: what a buyer or a seller declines, by its own rule.
 
-A policy states which valid, serviceable options its party will not take or
-publish. It returns reasons to decline and nothing else, so term validation,
+A policy states which valid, serviceable options its party will not take,
+publish or serve, and a buyer's may order the ones it accepts. It returns
+reasons to decline or an order and nothing else, so term validation,
 dispute-authority acceptance, mandate derivation and receipt verification run
-whatever it answers. See
+whatever it answers. A policy implements any of its role's methods; the
+packaged default answers for the rest. See
 openspec/specs/settlement-configuration/spec.md, "A terms policy declines and
 waives nothing else".
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from importlib.metadata import EntryPoint, entry_points
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from market_core.schemas import SettlementOption
 from market_deal_lifecycle.terms import LifecycleTerms
+from market_identity import Identity
 
 from .rate_publication import default_buyer_refusals
 
@@ -25,7 +30,11 @@ SELLER_TERMS_POLICY_GROUP = "market.seller_terms_policies"
 DEFAULT_TERMS_POLICY = "default"
 PERMISSIVE_TERMS_POLICY = "permissive"
 
+SELLER_REFUSAL_CODE = "seller_terms_policy_refusal"
+
 TermsPolicyRole = Literal["buyer", "seller"]
+
+logger = logging.getLogger(__name__)
 
 
 class TermsPolicyError(ValueError):
@@ -40,12 +49,26 @@ class BuyerTermsOffer:
     lifecycle: LifecycleTerms | None
     has_adapter: bool
     registry_url: str = ""
+    # The listing advertising the option; empty when the option is read from
+    # an accepted Agreement.
+    listing: Mapping[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable
 class BuyerTermsPolicy(Protocol):
     def refusals(self, offer: BuyerTermsOffer) -> Sequence[str]:
         """Reasons this buyer declines the option; empty accepts it."""
+        ...
+
+
+@runtime_checkable
+class BuyerTermsPreference(Protocol):
+    def prefer(self, offers: Sequence[BuyerTermsOffer]) -> Sequence[BuyerTermsOffer]:
+        """One listing's acceptable options, most preferred first.
+
+        They arrive in the default order. An offer left out is not refused: it
+        follows the returned ones, in the order it arrived.
+        """
         ...
 
 
@@ -63,6 +86,31 @@ class SellerTermsReview:
 
     refusals: tuple[str, ...] = ()
     diagnostics: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class SellerTermsSelection:
+    """One advertised option a verified buyer selected, before it is accepted.
+
+    The option is None when the buyer opened with an escrow proposal, which
+    selects an accepted escrow contract and no settlement option.
+    """
+
+    option: SettlementOption | None
+    lifecycle: LifecycleTerms | None
+    buyer: Identity
+    listing: Mapping[str, Any]
+    at: datetime
+
+
+@runtime_checkable
+class SellerTermsAdmission(Protocol):
+    def admit(self, selection: SellerTermsSelection) -> Sequence[str]:
+        """Reasons this seller will not serve the selection; empty admits it.
+
+        The reasons are sent to the buyer.
+        """
+        ...
 
 
 @runtime_checkable
@@ -114,7 +162,14 @@ _GROUPS: dict[str, str] = {
     "buyer": BUYER_TERMS_POLICY_GROUP,
     "seller": SELLER_TERMS_POLICY_GROUP,
 }
-_PROTOCOLS: dict[str, type] = {"buyer": BuyerTermsPolicy, "seller": SellerTermsPolicy}
+_METHODS: dict[str, tuple[str, ...]] = {
+    "buyer": ("refusals", "prefer"),
+    "seller": ("default_penalty_periods", "review", "admit"),
+}
+
+
+def _implements(policy: Any, method: str) -> bool:
+    return callable(getattr(policy, method, None))
 
 
 def _entry_point_index(role: str, installed: Iterable[EntryPoint]) -> dict[str, EntryPoint]:
@@ -174,13 +229,13 @@ def load_terms_policy(
         raise TermsPolicyError(
             f"{role} terms policy {selection.name!r} rejected its settings: {exc}"
         ) from exc
-    if not isinstance(policy, _PROTOCOLS[role]):
+    if not any(_implements(policy, method) for method in _METHODS[role]):
         raise TermsPolicyError(
-            f"{role} terms policy {selection.name!r} must build a "
-            f"{_PROTOCOLS[role].__name__}, got {type(policy).__name__}"
+            f"{role} terms policy {selection.name!r} must build an object with at "
+            f"least one of {', '.join(_METHODS[role])}; got {type(policy).__name__}"
         )
     if role == "seller":
-        periods = policy.default_penalty_periods()
+        periods = penalty_periods(policy)
         if type(periods) is not int or periods < 0:
             raise TermsPolicyError(
                 f"seller terms policy {selection.name!r} default_penalty_periods "
@@ -218,6 +273,9 @@ class DefaultBuyerTermsPolicy:
     def refusals(self, offer: BuyerTermsOffer) -> Sequence[str]:
         return default_buyer_refusals(offer.lifecycle, has_adapter=offer.has_adapter)
 
+    def prefer(self, offers: Sequence[BuyerTermsOffer]) -> Sequence[BuyerTermsOffer]:
+        return offers
+
 
 class PermissiveBuyerTermsPolicy:
     """Decline nothing: every option the composition can take is acceptable."""
@@ -225,12 +283,18 @@ class PermissiveBuyerTermsPolicy:
     def refusals(self, offer: BuyerTermsOffer) -> Sequence[str]:
         return ()
 
+    def prefer(self, offers: Sequence[BuyerTermsOffer]) -> Sequence[BuyerTermsOffer]:
+        return offers
+
 
 class DefaultSellerTermsPolicy:
-    """Publish every derived option, reporting what a default buyer refuses."""
+    """Publish and serve every option, reporting what a default buyer refuses."""
 
     def default_penalty_periods(self) -> int:
         return 24
+
+    def admit(self, selection: SellerTermsSelection) -> Sequence[str]:
+        return ()
 
     def review(self, offer: SellerTermsOffer) -> SellerTermsReview:
         return SellerTermsReview(diagnostics=tuple(
@@ -262,6 +326,8 @@ def review_for_publication(
     diagnose: Callable[[dict[str, Any]], None],
 ) -> bool:
     """Ask the seller's policy about one derived option; True publishes it."""
+    if not _implements(policy, "review"):
+        policy = DefaultSellerTermsPolicy()
     review = policy.review(SellerTermsOffer(
         option,
         LifecycleTerms.model_validate(option.lifecycle) if option.lifecycle is not None else None,
@@ -270,8 +336,78 @@ def review_for_publication(
     for code, detail in review.diagnostics:
         diagnose({"code": code, "detail": detail, **subject})
     for detail in review.refusals:
-        diagnose({"code": "seller_terms_policy_refusal", "detail": detail, **subject})
+        diagnose({"code": SELLER_REFUSAL_CODE, "detail": detail, **subject})
     return not review.refusals
+
+
+def penalty_periods(policy: Any) -> int:
+    """The policy's default penalty periods, or the packaged default's."""
+    if not _implements(policy, "default_penalty_periods"):
+        policy = DefaultSellerTermsPolicy()
+    return policy.default_penalty_periods()
+
+
+def selection_refusal(policy: Any, selection: SellerTermsSelection) -> str | None:
+    """The reason a storefront refuses a selection, or None when it is admitted.
+
+    The policy's reasons are what the buyer reads, after the refusal's code. A
+    policy that fails refuses, and the buyer is told only that.
+    """
+    if not _implements(policy, "admit"):
+        return None
+    try:
+        reasons = tuple(str(reason) for reason in policy.admit(selection))
+    except Exception:  # noqa: BLE001 - installed code; fail closed
+        logger.exception("seller terms policy failed admitting a selection")
+        reasons = ("the seller's terms policy failed",)
+    return f"{SELLER_REFUSAL_CODE}: " + "; ".join(reasons) if reasons else None
+
+
+def seller_selection(
+    selected: Mapping[str, Any] | None, *, buyer: Identity, listing: Mapping[str, Any],
+    at: datetime,
+) -> SellerTermsSelection:
+    """Describe a selection from the listing's own artifact the buyer selected.
+
+    The artifact is the listing's settlement option, or its accepted escrow
+    for an escrow proposal; it is never the buyer's copy.
+    """
+    option = (
+        SettlementOption.model_validate(selected)
+        if isinstance(selected, Mapping) and "option_id" in selected else None
+    )
+    lifecycle = (
+        LifecycleTerms.model_validate(option.lifecycle)
+        if option is not None and option.lifecycle is not None else None
+    )
+    return SellerTermsSelection(option, lifecycle, buyer, listing, at)
+
+
+def preferred_options(
+    policy: Any, offers: Sequence[BuyerTermsOffer],
+) -> tuple[BuyerTermsOffer, ...]:
+    """One listing's acceptable offers in the policy's order.
+
+    Ordering cannot refuse or introduce: an offer the policy leaves out keeps
+    its place after the ones it returned, and one it invents is an error.
+    """
+    offers = tuple(offers)
+    if not _implements(policy, "prefer") or len(offers) < 2:
+        return offers
+    by_id = {offer.option.option_id: offer for offer in offers}
+    try:
+        returned = [offer.option.option_id for offer in policy.prefer(offers)]
+    except Exception as exc:  # noqa: BLE001 - installed code
+        raise TermsPolicyError(
+            f"buyer terms policy failed ordering options ({type(exc).__name__}: {exc})"
+        ) from exc
+    unknown = [option_id for option_id in returned if option_id not in by_id]
+    if unknown:
+        raise TermsPolicyError(
+            "buyer terms policy preferred an option it was not offered: " + ", ".join(unknown)
+        )
+    ordered = list(dict.fromkeys(returned))
+    return tuple(by_id[option_id] for option_id in (*ordered, *(i for i in by_id if i not in ordered)))
 
 
 def flagged_buyer_selection(
@@ -298,12 +434,16 @@ __all__ = [
     "BUYER_TERMS_POLICY_GROUP",
     "BuyerTermsOffer",
     "BuyerTermsPolicy",
+    "BuyerTermsPreference",
     "DEFAULT_TERMS_POLICY",
     "DefaultBuyerTermsPolicy",
     "DefaultSellerTermsPolicy",
     "PERMISSIVE_TERMS_POLICY",
     "PermissiveBuyerTermsPolicy",
+    "SELLER_REFUSAL_CODE",
     "SELLER_TERMS_POLICY_GROUP",
+    "SellerTermsAdmission",
+    "SellerTermsSelection",
     "SellerTermsOffer",
     "SellerTermsPolicy",
     "SellerTermsReview",
@@ -316,7 +456,11 @@ __all__ = [
     "load_buyer_terms_policy",
     "load_seller_terms_policy",
     "load_terms_policy",
+    "penalty_periods",
     "permissive_buyer_terms_policy",
+    "preferred_options",
+    "selection_refusal",
+    "seller_selection",
     "review_for_publication",
     "terms_policy_selection",
 ]

@@ -49,6 +49,7 @@ from .cli_helpers import (
     buyer_terms_selection,
     emit_buyer_explanation,
     emit_lifecycle_disclosure,
+    emit_terms_policy_refusals,
 )
 from .cli_helpers import (
     resolve_prices_from_matches as _resolve_prices_from_matches,
@@ -597,6 +598,7 @@ def register(app: typer.Typer) -> None:
                 err=True,
                 fg=typer.colors.YELLOW,
             )
+            emit_terms_policy_refusals(settlement_policy)
             raise typer.Exit(0)
         if requested_shape is not None:
             excess = [

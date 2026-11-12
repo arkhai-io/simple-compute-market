@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+import pytest
+
 from core_buyer.settlement import BuyerSettlementPolicy
 from market_core import SettlementStageTable
 from market_core.schemas import SettlementOption, derive_settlement_option_id
@@ -309,3 +311,36 @@ def test_explanation_reports_ordered_public_survivors_and_rejections() -> None:
         "mechanism_mismatch": 1,
         "no_settlement_options": 1,
     }
+
+
+def test_an_option_order_chooses_among_one_listings_survivors() -> None:
+    first, second = sorted(
+        (_option("alkahest.v1", "usdc"), _option("alkahest.v1", "dai")),
+        key=lambda option: option.option_id,
+    )
+    listing = {"listing_id": "L", "settlement_options": [second.model_dump(), first.model_dump()]}
+    policy = _policy(("alkahest.v1",))
+    default = policy.select(listing, expiration_unix=2_000_000_000)
+    assert default is not None and default.option == first
+
+    seen: list[tuple] = []
+
+    def reverse(options, listed):
+        seen.append((options, listed))
+        return tuple(reversed(options))
+
+    chosen = replace(policy, option_order=reverse).select(listing, expiration_unix=2_000_000_000)
+    assert chosen is not None and chosen.option == second
+    # The order is asked about the survivors in the default order.
+    assert seen == [((first, second), listing)]
+
+
+@pytest.mark.parametrize("answer", [lambda options: options[:1], lambda options: (*options, options[0])])
+def test_an_option_order_cannot_drop_or_repeat_an_option(answer) -> None:
+    options = [_option("alkahest.v1", "usdc"), _option("alkahest.v1", "dai")]
+    policy = replace(_policy(("alkahest.v1",)), option_order=lambda given, _listing: answer(given))
+    with pytest.raises(ValueError, match="exactly the options it was given"):
+        policy.select(
+            {"settlement_options": [option.model_dump() for option in options]},
+            expiration_unix=2_000_000_000,
+        )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 from copy import deepcopy
+from datetime import datetime, timezone
 from importlib.metadata import EntryPoint, entry_points
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from market_core.schemas import SettlementOption, derive_settlement_option_id
 from market_deal_lifecycle.configuration import DisputeEntry
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext, decode_terms
+from market_identity import Ed25519Signer
 
 from market_settlement_runtime.buyer_terms import BuyerTermsAdmission
 from market_settlement_runtime.rate_publication import default_buyer_refusals
@@ -30,7 +32,10 @@ from market_settlement_runtime.terms_policy import (
     installed_terms_policies,
     load_buyer_terms_policy,
     load_seller_terms_policy,
+    penalty_periods,
     review_for_publication,
+    selection_refusal,
+    seller_selection,
     terms_policy_selection,
 )
 
@@ -156,9 +161,9 @@ def test_only_the_selected_entry_point_is_imported():
 
 @pytest.mark.parametrize("value,message", [
     ("market_settlement_runtime.terms_policy:DEFAULT_TERMS_POLICY", "must export a factory"),
-    ("builtins:dict", "must build a BuyerTermsPolicy, got dict"),
+    ("builtins:dict", "at least one of refusals, prefer; got dict"),
     # A seller policy is not a buyer policy.
-    ("market_settlement_runtime.terms_policy:default_seller_terms_policy", "must build a BuyerTermsPolicy"),
+    ("market_settlement_runtime.terms_policy:default_seller_terms_policy", "at least one of refusals, prefer"),
 ])
 def test_an_export_that_is_not_a_policy_factory_is_refused(value, message):
     with pytest.raises(TermsPolicyError, match=message):
@@ -314,3 +319,178 @@ def test_the_example_seller_withholds_an_option_without_a_deadline(example_entry
     assert review_for_publication(policy, option(), reported.append) is True
     assert review_for_publication(policy, option(deadline=None), reported.append) is False
     assert [item["code"] for item in reported] == ["seller_terms_policy_refusal"]
+
+
+# --- preference ----------------------------------------------------------------
+
+
+class _Reversing:
+    def prefer(self, offers):
+        return tuple(reversed(offers))
+
+
+def test_the_packaged_policies_keep_the_order_they_are_given():
+    gate = admission(DefaultBuyerTermsPolicy())
+    options = (option(), option(penalty="200"), option(penalty="300"))
+    assert gate.order(options, {}) == options
+    assert admission(PermissiveBuyerTermsPolicy()).order(options, {}) == options
+
+
+def test_a_policy_that_only_orders_refuses_as_the_default_does():
+    gate = admission(_Reversing())
+    first, second = option(), option(penalty="200")
+    assert gate.order((first, second), {"listing_id": "L"}) == (second, first)
+    with pytest.raises(ValueError, match="a default buyer refuses this option"):
+        gate.rank(option(deadline=None))
+
+
+def test_ordering_can_neither_drop_nor_introduce_an_option():
+    first, second, third = option(), option(penalty="200"), option(penalty="300")
+
+    class OnlyThird:
+        def prefer(self, offers):
+            return [offers[2], offers[2]]
+
+    assert admission(OnlyThird()).order((first, second, third), {}) == (third, first, second)
+
+    class Inventing:
+        def prefer(self, offers):
+            return [BuyerTermsOffer(option(penalty="999"), None, True)]
+
+    with pytest.raises(TermsPolicyError, match="preferred an option it was not offered"):
+        admission(Inventing()).order((first, second), {})
+
+    class Broken:
+        def prefer(self, offers):
+            raise RuntimeError("boom")
+
+    with pytest.raises(TermsPolicyError, match="failed ordering options"):
+        admission(Broken()).order((first, second), {})
+
+
+def test_the_preference_sees_each_offers_terms_price_and_listing():
+    seen = []
+
+    class Looking:
+        def prefer(self, offers):
+            seen.extend(offers)
+            return offers
+
+    listing = {"listing_id": "L", "source_registry_url": "https://registry.example/"}
+    first, second = option(), option(penalty="200")
+    admission(Looking()).order((first, second), listing)
+    assert [(o.option, o.lifecycle.early_termination.penalty, o.has_adapter, o.registry_url, o.listing)
+            for o in seen] == [
+        (first, 100, True, "https://registry.example/", listing),
+        (second, 200, True, "https://registry.example/", listing),
+    ]
+
+
+# --- why nothing was selectable --------------------------------------------------
+
+
+def test_the_admission_reports_policy_refusals_only_when_nothing_was_admitted():
+    gate = admission(DefaultBuyerTermsPolicy())
+    refused = option(deadline=None)
+    assert gate.policy_refusal_report() == ()
+    assert gate(refused, {}) is None
+    assert gate(refused, {}) is None
+    assert gate.policy_refusal_report() == (
+        f"option {refused.option_id}: a default buyer refuses this option: no delivery deadline",
+    )
+    assert gate(option(), {}) == 0
+    assert gate.policy_refusal_report() == ()
+
+
+def test_an_authority_refusal_is_not_reported_as_the_policys():
+    gate = admission(PermissiveBuyerTermsPolicy(), accepted=False)
+    assert gate(option(), {}) is None
+    assert gate.policy_refusal_report() == ()
+
+
+# --- seller admission at selection -----------------------------------------------
+
+# Public deterministic development identities, never for a public network.
+BUYER = Ed25519Signer(b"\x41" * 32).identity
+OTHER_BUYER = Ed25519Signer(b"\x42" * 32).identity
+AT = datetime(2026, 11, 12, tzinfo=timezone.utc)
+
+
+def test_the_default_seller_admits_every_selection():
+    selection = seller_selection(
+        option().model_dump(mode="json"), buyer=BUYER, listing={"listing_id": "L"}, at=AT,
+    )
+    assert selection_refusal(DefaultSellerTermsPolicy(), selection) is None
+    assert selection_refusal(None, selection) is None
+
+
+def test_a_seller_refusal_carries_its_code_and_the_policys_reasons():
+    seen = []
+
+    class NotThisBuyer:
+        def admit(self, selection):
+            seen.append(selection)
+            return ("buyer is not served", "try another seller")
+
+    value = option()
+    selection = seller_selection(
+        value.model_dump(mode="json"), buyer=BUYER, listing={"listing_id": "L"}, at=AT,
+    )
+    assert selection_refusal(NotThisBuyer(), selection) == (
+        "seller_terms_policy_refusal: buyer is not served; try another seller"
+    )
+    (asked,) = seen
+    assert (asked.option, asked.buyer, asked.listing, asked.at) == (value, BUYER, {"listing_id": "L"}, AT)
+    assert asked.lifecycle.delivery_deadline_seconds == 60
+
+
+def test_an_escrow_selection_has_no_option():
+    selection = seller_selection(
+        {"chain_name": "anvil", "escrow_address": "0x11"}, buyer=BUYER, listing={}, at=AT,
+    )
+    assert (selection.option, selection.lifecycle) == (None, None)
+
+
+def test_a_seller_policy_that_fails_refuses_without_telling_the_buyer_why():
+    class Broken:
+        def admit(self, selection):
+            raise RuntimeError("internal detail")
+
+    refusal = selection_refusal(Broken(), seller_selection(None, buyer=BUYER, listing={}, at=AT))
+    assert refusal == "seller_terms_policy_refusal: the seller's terms policy failed"
+
+
+def test_a_seller_policy_implementing_only_admission_takes_the_default_for_the_rest(monkeypatch):
+    class OnlyAdmission:
+        def admit(self, selection):
+            return ()
+
+    monkeypatch.setattr(builtins, "_only_admission", lambda settings: OnlyAdmission(), raising=False)
+    policy = load_seller_terms_policy(TermsPolicySelection("only"), installed=[
+        entry("only", "builtins:_only_admission", SELLER_TERMS_POLICY_GROUP),
+    ])
+    assert penalty_periods(policy) == 24
+    reported: list[dict] = []
+    assert review_for_publication(policy, option(deadline=None), reported.append) is True
+    assert [item["code"] for item in reported] == ["default_buyer_refusal"]
+
+
+def test_the_example_seller_refuses_a_listed_buyer_and_the_example_buyer_prefers_spot(
+    example_entry_points,
+):
+    seller = load_seller_terms_policy(
+        TermsPolicySelection("example", {"refused_buyers": [BUYER.identifier]}),
+        installed=example_entry_points["seller"],
+    )
+    selection = seller_selection(option().model_dump(mode="json"), buyer=BUYER, listing={}, at=AT)
+    assert selection_refusal(seller, selection) == (
+        "seller_terms_policy_refusal: this seller does not serve this buyer"
+    )
+    assert selection_refusal(seller, seller_selection(None, buyer=OTHER_BUYER, listing={}, at=AT)) is None
+
+    buyer = load_buyer_terms_policy(
+        TermsPolicySelection("example", {"prefer_spot": True}),
+        installed=example_entry_points["buyer"],
+    )
+    on_demand, spot = option(), option(payee="last_boundary")
+    assert admission(buyer).order((on_demand, spot), {}) == (spot, on_demand)
