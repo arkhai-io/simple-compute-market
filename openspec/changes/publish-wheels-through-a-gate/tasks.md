@@ -1,23 +1,16 @@
 ## Readiness
 
-Sections 1 and 2 are implementable now and need nothing from outside this
-repository. Together they stop the failure mode that motivates the change: a
-merge can no longer put a permanent artifact on a public index.
+Redesigned 2026-11-12. The interim gate (a merge publishing to the development registry
+and a promotion script here) is replaced by the release described in `design.md`: CI
+publishes nothing, a candidate is a `main` commit loaded by the publish targets, the
+deployment validates, promotes and publishes, and the release is recorded last on its
+release branch. Sections 1–2 are kept as implemented. Sections 3–6 belonged to the
+interim design and are withdrawn, their completed tasks preserved. Sections 7–12 are the
+redesign's work.
 
-Sections 3 to 6 are **blocked on a writer identity for the development
-registry**, which is granted outside this repository. They are planned here so
-the shape is reviewable, and must not be started before the identity exists —
-a merge-to-main publication step that cannot authenticate is worse than none,
-because it fails on every merge and is muted rather than fixed.
-
-Section 5 is additionally blocked on the settlement client being publicly
-resolvable. Section 6 is additionally blocked on the cross-repository inventory
-format existing.
-
-Sequencing note: section 2 removes public publication before section 3 provides
-its replacement. That order is deliberate. The gap between them publishes
-nothing, which is the safe state; the reverse order leaves ungated public
-publication running for longer than necessary.
+Sections 7–12 need nothing from outside this repository except 8.6 (a development
+registry that serves npm). Section 7 should land first: until it does, a merge still
+publishes to PyPI and npm.
 
 ## 1. One enumeration
 
@@ -125,17 +118,10 @@ publication running for longer than necessary.
 
 ## 3. Publish to the development registry on merge
 
-**Blocked on a writer identity for the development registry.**
+Withdrawn by the redesign (`design.md` D1): development registries are scratch, and the
+candidate is loaded by the publish targets after a merge, not by CI.
 
-- [ ] 3.1 Add a workflow invoking `push-runtime-artifacts`, authenticating by
-  workload identity federation. Do not add a long-lived credential.
-
-  **Not on merge to the default branch.** The registry push is to be triggered
-  deliberately — `workflow_dispatch`, or a push filter on a nominated branch —
-  rather than by merging. That keeps the property section 2 established: no
-  merge publishes anything anywhere, and the difference between the registry
-  and the public index becomes which gate a human passes rather than which
-  branch they landed on.
+- [x] 3.1 Withdrawn: no workflow pushes to a registry.
 - [x] 3.2 `push-wheels` resolves and attempts every manifest entry. Two defects
   found by running it, both mine:
 
@@ -160,133 +146,175 @@ publication running for longer than necessary.
   What it does not prove is the identity. The push authenticated as a person
   with `gcloud` credentials, which is what task 3.1 exists to replace: the
   registry now holds a complete build, and nothing yet lets CI put one there.
-- [ ] 3.3 Verify by inspecting the registry after one *workflow* run: every
-  manifest entry present at the version its `pyproject.toml` declares. A
-  by-hand push has established the set is complete and uploadable; what remains
-  unverified is that the workflow's own identity can do it.
+- [x] 3.3 Withdrawn with 3.1.
 
 ## 4. Promotion
 
-**Blocked on section 3.**
-
-- [ ] 4.1 Add a promotion script under `scripts/` that, for every manifest
-  entry, fetches the public index's recorded `sha256` for that version from its
-  JSON metadata. No download — the digest is in the metadata, so checking all
-  entries costs one request each.
-- [ ] 4.2 Classify each entry: absent from the index, present with identical
-  bytes, present with differing bytes.
-- [ ] 4.3 **Check every entry before uploading any.** On any differing-bytes
-  entry, fail the whole promotion and upload nothing. A per-entry skip would put
-  distributions on a public index whose versions describe code from different
-  builds, and a public index is write-once, so that state is permanent.
-- [ ] 4.4 Upload absent entries by copying bytes retrieved from the development
-  registry. Do not rebuild, and do not change any version.
-- [ ] 4.5 Decide and record the position on sdists. At least one current
-  distribution has both a wheel and an sdist published; the script must state
-  whether sdists are promoted, verified, or ignored, and this is an open
-  question in `design.md` rather than a settled one.
-- [ ] 4.6 Add a Make target invoking the script. Human-invoked only — no
-  schedule, no webhook, no trigger.
-- [ ] 4.7 Add focused tests under `scripts/tests/` for the three classification
-  outcomes and for the all-or-nothing refusal, with the index metadata stubbed.
-  The refusal is the behaviour worth testing: it is the one that only fires when
-  something has already gone wrong.
-- [ ] 4.8 Document the removal condition in code where the target lives: this
-  repository publishes directly because no promotion pipeline consumes its
-  artifacts. State the condition, not a removal plan — a condition is checkable
-  and becomes false on its own, and a migration narrative is what `AGENTS.md`
-  excludes from production code.
+- [x] 4.1–4.8 Withdrawn: promotion and public publication are the deployment's
+  (`design.md` D1, D8). The all-or-nothing refusal and the wheels-only answer to the
+  sdist question carry forward as requirements on that publisher (D8).
 
 ## 5. Repair the published graph
-
-**Blocked on sections 3 and 4, and on the settlement client being publicly
-resolvable.**
 
 - [x] 5.1 Withdrawn: `settle-through-arkhai-payments` removed hosted settlement on 2026-10-08, including
   `arkhai-kit-hosted-settlement`, so there is no package to bump. (It was to
   replace 0.1.4 on PyPI, which declares a dependency PyPI does not carry.)
-- [ ] 5.2 Promote the new version and verify installation into a clean
-  environment from the public index alone, with no `.dist` and no checkout.
-- [ ] 5.3 Reconcile with `configure-pypi-trusted-publishing`, which claims
-  overlapping acceptance on the distribution inventory and on proving
-  PyPI-only installation. Decide which change owns which half before either is
-  archived; do not let both claim it.
+- [x] 5.2 Withdrawn: there is no package left to repair.
+- [x] 5.3 Withdrawn: reconciliation with `configure-pypi-trusted-publishing` moves to
+  13.6 under the redesign.
 
 ## 6. Inventory substitution
 
-**Blocked on the cross-repository inventory format.**
+- [x] 6.1–6.3 Withdrawn: the component declaration (section 8) is the enumeration, and the
+  release's bill of materials (`design.md` D5) binds component versions to a product
+  version. Comment hygiene and import placement move to 13.1 and 13.2.
 
-- [ ] 6.1 Replace the manifest from section 1 with the release inventory as the
-  single enumeration. Mechanical if section 1 held to one declaration.
-- [ ] 6.2 Record which distribution versions a promoted product version
-  comprises. Nothing in a wheel's filename says which product version it belongs
-  to, so the inventory is the only place that binding exists.
-- [ ] 6.3 **Comment hygiene and import placement, before the pre-closeout review.** Run
-  `make check-comment-hygiene` and read the comments this change added for any that
-  narrate the review or migration that introduced them; move each import the change
-  added to module level unless a verified circular import or a recorded lazy-load
-  reason keeps it local. Closeout only confirms both. Read the promotion script and
-  the manifest directly: the target does not catch a comment narrating that this
-  mechanism is temporary, which is the violation this change is most likely to
-  introduce. Check the imports the promotion script and its tests added, verifying
-  each move against the suite rather than a syntax check.
+## 7. CI publishes nothing
 
-## 7. Closeout
+- [ ] 7.1 Delete `.github/workflows/publish-pypi.yml`, `publish-npm.yml`, `release.yml` and
+  `release-cli.yml`. This also closes 2.7: there is no publishing workflow left to
+  recover.
+- [ ] 7.2 Delete `scripts/verify-marketplace-release.py` and
+  `scripts/tests/test_verify_marketplace_release.py`. Nothing else reads the release
+  contract.
+- [ ] 7.3 Make CI build the wheelhouse and resolve every declared distribution against
+  it, in `.github/workflows/tests.yml`. Repoint `scripts/tests/test_publish_matrix.py`
+  and `test_image_publication_contract.py` at what remains. Delete the assertions about
+  the deleted workflows; keep the ones that protect a build property, such as a
+  `force-include` that escapes its directory.
+- [ ] 7.4 Check that no workflow under `.github/workflows/` contains an upload step
+  (`pypa/gh-action-pypi-publish`, `npm publish`, `docker push`,
+  `docker/build-push-action` with push, `softprops/action-gh-release`,
+  `gh release create`). Add it to the check that 1.5 introduced.
+
+## 8. One declaration of what a release comprises
+
+- [ ] 8.1 Rename `manifests/published-distributions.json` to
+  `manifests/release-components.json`. Keep every distribution entry, and add `public`
+  to each. `arkhai-apicredits-sample-app` and `lane-double-controls` are not public;
+  check the rest against `docs/development/RELEASING.md`'s published-packages list.
+  Update `scripts/push-distributions.py` and the tests that read the old path.
+- [ ] 8.2 Declare the service images (registry, storefront, provisioning, bare-metal
+  storefront, frp-grant-admission), each with its published name and the local image
+  its build writes. Also declare the chart directory, the `market` binary with its
+  build target, and the npm package directory.
+- [ ] 8.3 Make `push-images` push the declared images through
+  `scripts/publish_artifacts.py`, in place of its four literal lines. Keep the bare tag
+  beside the revision tag (`design.md` D4).
+- [ ] 8.4 Give `build-bare-metal-storefront` the local `-$(GIT_SUFFIX)` tag that the
+  registry, storefront and provisioning builds write when `IMAGE_SUFFIX` is empty.
+- [ ] 8.5 Make `push-charts` and `push-cli` take their chart directory and binary from
+  the declaration. Widen the single-enumeration check (1.5) to fail on any image, chart
+  or binary list in a publish target or workflow.
+- [ ] 8.6 **External blocker: a development registry that serves npm.** Add `push-npm`,
+  which packs the declared npm package and uploads it to that registry. Until the
+  registry exists, record that the package is built and tested but not loaded.
+- [ ] 8.7 Tests under `scripts/tests/` cover:
+  - the declaration's shape;
+  - every declared image having a build target that writes its local revision tag;
+  - `push-images` (with `docker` stubbed) pushing exactly the declared set, and each
+    image's bare tag.
+
+## 9. The chart names no release
+
+- [ ] 9.1 Remove `appVersion` from `helm/Chart.yaml`, and anything that reads it. Confirm
+  `helm/values.yaml` keeps the bare tags with empty digests.
+- [ ] 9.2 Add a render test in `helm/`: the chart's defaults name no semver-shaped image
+  tag, no revision-suffixed tag and no digest.
+
+## 10. Version check against the previous release
+
+- [ ] 10.1 Add `scripts/check-release-versions.py` and `make check-release-versions`.
+  - It reads `manifests/release-bom.cdx.json` from the latest `marketplace-v*` tag that
+    carries one.
+  - It compares that file with `.dist`'s wheels and with `helm/`'s version and git tree
+    id.
+  - It refuses a component whose version is unchanged but whose contents differ, and
+    names each one.
+  - When no earlier tag carries a bill of materials, it says so and passes.
+
+  It reads only git and the wheelhouse; it never contacts a registry or an index.
+- [ ] 10.2 Tests: an unchanged wheel passes, a changed wheel with a bumped version
+  passes, a changed wheel at the same version fails, a changed chart tree at the same
+  chart version fails, and no previous record passes. Use a scratch git repository
+  holding a bill of materials at a tag.
+
+## 11. Retire the curl installer
+
+- [ ] 11.1 Delete `install.sh`, `scripts/install-remote.sh`, `scripts/build-installer.sh`,
+  `scripts/tests/test_install_remote_urls.py` and
+  `scripts/tests/test_install_sh_dependencies.py`.
+- [ ] 11.2 Rewrite `docs/buyer-quickstart.md`'s install section. It offers PyPI
+  (`uv tool install arkhai-core-buyer --with arkhai-vms-buyer`, pinned to a release's
+  versions) and the release's `market` binary with its SHA-256 (linux x86_64), and
+  keeps the from-the-repository path. Remove `install.sh` from `README.md`'s tree.
+
+## 12. Documentation
+
+- [ ] 12.1 Rewrite `docs/development/RELEASING.md` from this repository's side, replacing
+  its workflow sections. It covers:
+  - the five steps in `design.md`;
+  - "the revision names a candidate, the semver names a release";
+  - the component declaration and what `public` means;
+  - the publish targets and why development tags guarantee nothing;
+  - the cut: the branch, the bill-of-materials commit and the tag, made last;
+  - what the bill of materials contains;
+  - `make check-release-versions`;
+  - that public channels are reached only by the deployment's promotion;
+  - how a new PyPI project comes to be owned by the organization.
+
+  It names no private repository, project, registry or host. This also discharges 2.3.
+
+## 13. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 7.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
-  the comments this change added for any that narrate the review or migration that
-  introduced them, including any in the promotion script and the manifest that
-  narrate this mechanism as temporary. Do not edit code here: anything to rewrite
-  returns the change to implementation.
-- [ ] 7.2 **Import placement — confirm.** Check the imports this change added, in the
-  promotion script and its tests, for any still local without a recorded reason. One
-  that should move returns the change to implementation.
-- [ ] 7.3 **Documentation compliance.** Re-check this change's accepted decisions
-  against `openspec/README.md`'s placement rules, and the permanent documents
-  against the code they describe.
-- [ ] 7.4 **Narrative compression.** Compress completed-task notes to final behavior,
-  material validation evidence, unresolved or deferred work, and
-  permanent-documentation destinations, moving durable rationale into `design.md`
-  first. The rejected alternatives and the reasoning for all-or-nothing refusal stay
-  in `design.md`.
-- [ ] 7.5 **Roadmap currency.** Update the affected goal's current state and gap
-  mapping in `docs/development/ROADMAP.md`, or record that no goal is affected.
-  Expected disposition: `docs/development/ROADMAP.md` owes nothing, since this is a
-  lesser goal and changes no market capability; record it as a deliberate
-  disposition.
-- [ ] 7.6 **Campaign index currency.** Update this change's row, and its campaign's
-  dependency graph, in `openspec/changes/README.md`, or record that both are
-  unchanged; this includes the Package and release readiness campaign summary.
-  Other rows' `Depends on` are left alone: archive cleanup releases dependents after
-  the closeout gate.
-- [ ] 7.7 **Packaging.** Run `make check-packaging` and resolve every failure it
-  reports (a failure needing a code or lock change returns the change to
-  implementation).
-- [ ] 7.8 **End-to-end pipeline.** Record the passing run the latest validation names,
-  its result, and the scenarios that exercise this change, or an explicit blocker
-  naming its cause and the change that owns it, with the validations it gates
-  treated as unrun.
-- [ ] 7.9 **Promotion.** Write the permanent documents this change owes —
-  `docs/development/RELEASING.md` — and complete the design-promotion record below. A
-  `spec.md` the deltas cover — here `openspec/specs/deployment-state/spec.md` — is
-  written by the archive in 7.11, not by hand; the record names it all the same.
-- [ ] 7.10 **Documentation citations.** After promotion, run
+- [ ] 13.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`. Read the
+  comments this change added for any that narrate the redesign or describe a mechanism
+  as temporary. Do not edit code here: anything to rewrite returns the change to
+  implementation.
+- [ ] 13.2 **Import placement — confirm.** Check the imports this change added, in
+  `scripts/check-release-versions.py`, the publish scripts and their tests, for any
+  still local without a recorded reason.
+- [ ] 13.3 **Documentation compliance.** Re-check the accepted decisions against
+  `openspec/README.md`'s placement rules, and the permanent documents against the code.
+  Also check that no document still describes a publishing workflow, the release
+  contract or the curl installer.
+- [ ] 13.4 **Narrative compression.** Compress completed-task notes to final behavior,
+  material evidence, deferred work and promotion destinations. The rejected
+  alternatives (merge publishes to the development registry; a tag workflow publishing
+  promoted bytes; a trusted-publishing workflow for new projects) stay in `design.md`.
+- [ ] 13.5 **Roadmap currency.** Expected disposition: `docs/development/ROADMAP.md` owes
+  nothing, since no market capability changes. Record it.
+- [ ] 13.6 **Campaign index currency.** Update this change's row and the Package and
+  release readiness campaign in `openspec/changes/README.md`. Settle with
+  `configure-pypi-trusted-publishing` which of the distribution-graph and PyPI-only
+  installation acceptance it still owns, and record that in both rows.
+- [ ] 13.7 **Packaging.** Run `make check-packaging` and resolve every failure.
+- [ ] 13.8 **End-to-end pipeline.** Record the passing run the latest validation names
+  and the scenarios touching this change, or an explicit blocker. Also record the first
+  release cut under this procedure: its tag, and that its bill of materials was
+  committed and `make check-release-versions` passed at the cut.
+- [ ] 13.9 **Promotion.** Write `docs/development/RELEASING.md` and
+  `docs/buyer-quickstart.md` (sections 11–12) and complete the record below.
+  `openspec/specs/deployment-state/spec.md` is written by the archive.
+- [ ] 13.10 **Documentation citations.** Run
   `make check-doc-citations CHANGE=publish-wheels-through-a-gate` and resolve every
-  match, then `openspec validate publish-wheels-through-a-gate --strict`.
-- [ ] 7.11 **Archival.** Last, once every other part is checked: `openspec archive
-  publish-wheels-through-a-gate -y` merges the deltas into `openspec/specs/` and moves
-  the change under `openspec/changes/archive/`; point the index row at the archived
-  directory, and run `openspec validate --specs --strict`.
+  match. Then run `openspec validate publish-wheels-through-a-gate --strict`.
+- [ ] 13.11 **Archival.** Last: `openspec archive publish-wheels-through-a-gate -y`, point
+  the index row at the archived directory, then run `openspec validate --specs --strict`.
 
 ## Design promotion record
 
 | Accepted decision | Permanent location | State |
 |---|---|---|
-| Public publication is a deliberate promotion of artifacts already in the development registry, never a merge side effect | `docs/development/RELEASING.md` | Pending |
-| Promotion copies bytes and never rebuilds; a distribution's version cannot change at the gate | `openspec/specs/deployment-state/spec.md` | Pending |
-| A version present on the public index with differing bytes fails the whole promotion before anything is uploaded | `docs/development/RELEASING.md` | Pending |
-| One enumeration of published distributions, read by every publication path | `openspec/specs/deployment-state/spec.md` | Pending |
-| A product version is distinct from a distribution version; images retag, wheels and archives copy at their built version | `openspec/specs/deployment-state/spec.md` | Pending |
-| The interim publication mechanism is described by its condition, and deleted rather than adapted when a promotion pipeline consumes these artifacts | `docs/development/RELEASING.md` | Pending |
+| Continuous integration publishes nothing | `openspec/specs/deployment-state/spec.md`; `docs/development/RELEASING.md` | Pending (at archival / 12.1) |
+| The revision names a candidate and the semver names a release | `openspec/specs/deployment-state/spec.md`; `docs/development/RELEASING.md` | Pending |
+| One declaration of what a release comprises, each distribution public or not | `openspec/specs/deployment-state/spec.md` | Pending (at archival) |
+| The chart names no release; its version follows its own semver | `openspec/specs/deployment-state/spec.md` | Pending (at archival) |
+| A release is recorded last by a tagged bill-of-materials commit on its release branch, content identities only | `openspec/specs/deployment-state/spec.md`; `docs/development/RELEASING.md` | Pending |
+| A version whose contents changed is refused against the previous release | `openspec/specs/deployment-state/spec.md`; `docs/development/RELEASING.md` | Pending |
+| A product version is distinct from a distribution version | `openspec/specs/deployment-state/spec.md` | Pending (at archival) |
+| Public channels receive promoted bytes, all or nothing, wheels only | `openspec/specs/deployment-state/spec.md` | Pending (at archival) |
+| Development tags are rewritten by design and guarantee nothing; bare tags never leave development | `docs/development/RELEASING.md` | Pending |
+| The buyer CLI ships from PyPI and as the promoted binary | `docs/buyer-quickstart.md` | Pending |

@@ -1,135 +1,257 @@
 ## Context
 
-Twenty-eight distributions reach public PyPI on merge to `main`. Three wheels
-plus images, charts, and the CLI reach Artifact Registry when a human runs
-`push-runtime-artifacts`. The two paths enumerate their contents separately —
-`packages.json` in the workflow, a hardcoded list in the Makefile — and neither
-knows about the other.
+Before this design, a release was whatever CI produced. PyPI and npm received
+whatever a push to `main` built, and a `marketplace-v*` tag made CI build a
+wheelhouse, a manifest, provenance and a ghcr image. None of it was what a deployment
+validated. Images are not reproducible, so the ghcr image a tag produced was never
+the image production ran. A version pushed to PyPI before validation is permanent.
 
-The recorded cross-repository promotion model is that artifacts move between
-environments by copying and are never rebuilt from source at promotion time,
-and that promotion operates on an inventory of components rather than on
-individual artifacts. Nothing in this repository publishes that way, and the
-pipeline that would is deferred behind a runtime that does not exist.
+The deployment released marketplace v0.3.0 another way. It loaded the tag's artifacts
+into its development registry with this repository's publish targets, validated
+them, copied them by digest through pre-production and production, and published to
+PyPI and ghcr from production's copies. This redesign makes that the release, and
+gives this repository the half it owns.
+
+The change was first designed as an interim gate: merges would publish to the
+development registry and a promotion script here would copy to PyPI until an external
+promotion existed. That promotion now exists. Sections 3–6 of `tasks.md` belonged to
+the interim design and are withdrawn. The decisions it got right (one enumeration,
+copy without rebuilding, a version fixed at build time) carry forward below.
 
 ## Goals / Non-Goals
 
-**Goals:** no public publication without a deliberate act; one enumeration of
-what this repository publishes; bytes on a public index identical to bytes
-already published to the development registry; a conflicting version fails
-loudly before anything is uploaded.
+**Goals:**
+- Nothing reaches a public channel except bytes a deployment validated.
+- A release names exactly what was validated, in a record anyone can read.
+- One declaration of what a release comprises.
+- A version that changed meaning is caught before anything ships.
+- No release-specific facts are written by hand in more than one place.
 
-**Non-Goals:** a durable promotion system, automatic deployment, semver
-enforcement, and any change to what a distribution contains.
+**Non-Goals:**
+- Promotion, deployment or publication tooling in this repository.
+- Trusting a development tag.
+- Reproducible images.
+- Enforcing semver beyond "changed contents need a changed version".
+
+## The release, from this repository's side
+
+1. **Change.** Work lands on `dev` and then `main`. CI builds and tests; it publishes
+   nothing.
+2. **Candidate.** After a merge, `main`'s commit X is loaded into a development
+   registry from a clean checkout of X, with `make check-release-versions` first and
+   then `make push-runtime-artifacts`. The deployment's operator runs this, usually
+   through an agent session.
+3. **Validation and promotion.** The deployment validates X. It records the release's
+   bill of materials from what actually ran, promotes it to pre-production and
+   production, and deploys it. None of this is this repository's.
+4. **Cut.** Once production runs the release, `releases/<semver>` is cut at X. One
+   commit adds the bill of materials, and that commit is tagged
+   `marketplace-v<semver>`.
+5. **Publication.** PyPI, npm, ghcr, and the GitHub release (with the `market` binary
+   and the bill of materials) receive the promoted artifacts. The operator does this,
+   not CI.
+
+A fault found at step 3 is fixed on `main`, and the next commit becomes the
+candidate. A candidate that fails before production gets no branch, no tag and no
+public artifact. A failed release does not appear in the record.
 
 ## Decisions
 
-### D1. Merging publishes to the development registry, not to a public index
+### D1. CI publishes nothing
 
-The trigger is unchanged; the destination is not. This keeps the convenience of
-publish-on-merge for the internal case while removing the property that made it
-dangerous, which is that a merge could put a permanent artifact on a public
-index under a version that already meant something else.
+Every workflow that uploads is deleted: `publish-pypi.yml`, `publish-npm.yml`,
+`release.yml` and `release-cli.yml`. CI keeps building and testing. That includes
+building the wheelhouse and resolving every declared distribution against it, which
+was the one useful thing the publishing workflow checked before it uploaded.
 
-### D2. Promotion copies bytes and verifies them against PyPI first
+A trusted-publishing workflow kept "only to create a new PyPI project" was
+considered and rejected. The operator publishes with their own credentials, and a
+project first uploaded that way is moved into the organization by an owner. Keeping a
+workflow for one rare step would keep a publishing path alive for nothing.
 
-The step downloads from Artifact Registry, and for each distribution fetches
-PyPI's recorded `sha256` from its JSON API — no download needed, the digest is
-in the metadata. Three outcomes: absent from PyPI, upload; present with
-matching bytes, skip; present with differing bytes, **fail the entire
-promotion before uploading anything**.
+A tag-triggered workflow that publishes the promoted bytes was also considered. It
+would need either read access to production's registry from GitHub, or a rebuild
+checked against the bill of materials. It is deferred, not rejected. If it returns, it
+publishes promoted bytes or nothing, and the cut stays a human act.
 
-All-or-nothing is the point. A per-distribution skip would let a partially
-promoted set reach PyPI with one distribution's version silently describing
-different code from its sibling's, which is the failure the inventory exists to
-prevent. Checking all twenty-eight before uploading any is cheap because the
-check is metadata-only.
+**Alternative rejected: merge to `main` publishes to the development registry.** That
+was this change's interim design (former D1). Development registries are scratch:
+developers push uncommitted builds to them to test on a cluster. A merge-triggered
+push would be one writer among many, guaranteeing nothing about what a tag holds when
+validation runs.
 
-This is meaningful only because the wheels are reproducible — the build backend
-stamps a fixed timestamp, so identical source yields identical bytes. Were that
-not so, every comparison would report a false conflict.
+### D2. The revision names a candidate; the semver names a release
 
-*Open question for implementation:* PyPI holds both a wheel and an sdist for at
-least one current distribution. The step needs a stated position on whether
-sdists are promoted, verified, or ignored.
+A candidate is a `main` commit. Its images are `<service>-<rev>`, its CLI is stored
+under `<rev>`, and its wheels and chart carry their own versions. The release's
+semver does not exist until the candidate is promoted. Promotion aliases each image
+as `<service>-<semver>` on the same digest and binds the set in the bill of materials.
 
-### D3. One enumeration, read from the release inventory
+This is why a merge cannot be a release. At merge time the semver is unassigned, and
+whether X will pass is unknown. It is also why the release branch is cut last. Cut
+before validation, it would need rebasing every time validation found a fault.
 
-`push-wheels` and the publish matrix both read the same source. Two lists that
-must agree, in two languages, in two files, is the failure this repository has
-already seen in the hosted-release variables: a fact extracted into a second
-representation drifts silently, and the copy that drifts is the one nobody
-reads.
+### D3. The chart names no release
 
-Until the inventory format exists, a plain manifest file serves. The
-substitution is mechanical and does not reopen the decision.
+A chart's bytes include its version and its default values. Chart defaults that named
+a release's images would cause two failures. The chart built at the cut would differ
+from the chart the deployment validated. And two releases with an unchanged chart
+would need two chart versions, coupling the chart's version to the product's.
 
-### D4. Wheels are promoted without relabelling
+So the chart carries no release facts:
+- **Version.** `version` follows the chart's own semver and changes only when the
+  chart does.
+- **Images.** The default values keep the bare development tags, so development
+  workflows need no edits. A deployment names its images in its own values.
+- **appVersion.** It has no meaning here and is removed, so it cannot become a third
+  version number that drifts.
 
-A wheel's version is inside the artifact — filename, `METADATA`, `RECORD`. It
-cannot be retagged the way an image can, and rebuilding under a new version
-changes the digest and violates copy-don't-rebuild. So wheel semver is fixed at
-build time and promotion may only accept or reject it.
+The bill of materials records which chart version a release uses. One chart version
+can then appear in many releases.
 
-The corollary is that a product version is not a wheel version. The product
-version is the human-assigned label at the gate; the inventory binds a set of
-independently versioned wheels to it; images are retagged to it. The same
-distinction is being recorded against the cross-repository promotion model,
-whose current text describes one artifact type in language that reads as
-covering all four.
+### D4. One declaration of what a release comprises
 
-### D5. The interim section is documented by condition, not by intention
+`manifests/published-distributions.json` becomes `manifests/release-components.json`.
+It is renamed because it no longer lists only distributions. It declares:
+- **distributions:** each one's key, source path and distribution name, as today,
+  plus `public`, whether it goes to PyPI. The demo API and the lane doubles' contract
+  are built and loaded but not public. Today the deployment keeps that exclusion as a
+  second list.
+- **images:** each service image's published name and the local image its build
+  writes.
+- **chart:** the chart's directory.
+- **binaries:** the `market` CLI and the target that builds it.
+- **npm:** the middleware package's directory.
 
-The section states what is true — that this repository publishes directly
-because no promotion pipeline consumes its artifacts — rather than that it is
-temporary or scheduled for removal. A condition is checkable and becomes false
-on its own; a stated intention is a migration narrative that rots in place and
-is exactly what `AGENTS.md` excludes from permanent code.
+The publish targets read the declaration, and so do the deployment's bill-of-materials
+builder and promotion. The Makefile still builds everything; the declaration says
+what is published, not how to build it. A check fails on any second list of
+components in a workflow or publish target (the existing single-enumeration check,
+widened).
 
-**Removal condition:** a promotion pipeline consumes this repository's
-artifacts from the development registry. At that point the promotion script,
-its target, and this section are deleted rather than adapted.
+`push-images` reads the declaration, which fixes its omission of the bare-metal
+storefront. That storefront's build gains the local `-<rev>` tag its siblings
+already write.
 
-### D6. Promotion is human-invoked
+`push-images` keeps pushing the bare `arkhai:<service>` tags beside the revision tags.
+Shared development releases follow those tags, and that is how a developer's build
+reaches the development cluster. No release step reads a bare tag; promotion copies
+by digest and writes none.
 
-No schedule, webhook, or trigger. This matches the promotion model's own
-decision that semver is human-supplied at a gate, and it introduces no
-mechanism capable of publishing without a human — a property other systems
-consuming these artifacts are entitled to rely on.
+### D5. A release is recorded by a tagged commit on its release branch
+
+At the cut, `releases/<semver>` is created at the candidate's commit X. A single commit
+adds `manifests/release-bom.cdx.json`, and that commit is tagged `marketplace-v<semver>`.
+
+- **Why a branch.** The repository is public, so the record sits beside the source it
+  describes, readable by every consumer.
+- **Why one commit.** Hotfixes that should carry forward land on `main` and ship in
+  the next release, so a release branch never grows past its record. The tag marks
+  the record, and the record names X as its source revision.
+- **Why the deployment builds it.** Only the deployment knows which image digests
+  passed validation. It reads them from what its validated environments ran, so the
+  bill of materials is built there and committed here.
+- **What it contains.** Content identities only:
+  - each component's name and version;
+  - its content digest;
+  - its source revision;
+  - for the chart, the git tree id of its directory at X.
+
+  It never holds a registry host, project or path. Those belong to the deployment,
+  and a public record that named them would leak them.
+- **Its format.** CycloneDX. The format is defined with the deployment's release
+  inventory; this repository relies only on the fields above.
+
+The release branch and tag are made only after production runs the release. Public
+channels are published only after the cut. The irreversible steps (a public tag, a
+PyPI version, an npm version) therefore come last. A release that fails earlier can
+be destroyed entirely by the deployment, and nothing public refers to it.
+
+### D6. A version must change when its contents change
+
+`make check-release-versions` reads the bill of materials at the latest
+`marketplace-v*` tag and compares it with the candidate:
+
+- **Wheels.** A wheel whose version equals the previous release's but whose SHA-256
+  differs is refused. Wheels build reproducibly (the build backend fixes timestamps),
+  so equal source gives equal bytes, and any difference is a real change.
+- **The chart.** If `helm/Chart.yaml`'s version equals the previous release's but the
+  chart directory's git tree id differs, it is refused. `helm package` is not
+  byte-reproducible, so the tree id stands in for content.
+
+It runs before a candidate is loaded and again at the cut, and needs only git and the
+wheelhouse. A refusal means "bump the version". The check never chooses a version
+itself.
+
+This is the version guard this change originally left out of scope, because nothing
+recorded what the previous release contained. The bill of materials now records it.
+
+### D7. A product version is distinct from a distribution version
+
+Carried forward from the interim design. A wheel's version is inside the wheel and
+cannot be relabelled without a rebuild, which would change its digest. Wheels,
+binaries and charts are promoted at the version they were built with. Images are
+aliased to the product version, because an image's tag is outside it. The bill of
+materials binds the product version to the set.
+
+### D8. Public channels receive promoted bytes, all or nothing
+
+Carried forward, restated for an external promoter. Bytes reach PyPI and npm
+unchanged from what was promoted. Before uploading anything, the publisher checks
+every distribution against the index. If any version already holds different bytes,
+the whole publication fails before the first upload. The publisher never replaces or
+deletes a version.
+
+With D6 in place this refusal should never fire, since a changed wheel cannot keep its
+version through the cut. It remains the last line of defence.
+
+PyPI receives wheels only. A source distribution is not built at the cut, so there is
+nothing promoted to copy. This resolves the interim design's open sdist question.
+
+### D9. The buyer CLI ships as the promoted binary and from PyPI
+
+The curl installer is deleted. It built the CLI from a source tarball, which bypassed
+the released wheels, and it has been broken since a marketplace release became
+GitHub's latest. A customer installs the CLI one of two ways:
+- **From PyPI,** `uv tool install arkhai-core-buyer --with arkhai-vms-buyer`, pinned to
+  the versions the release notes give. This works on every platform.
+- **As the release's `market` binary,** downloaded from its GitHub release and checked
+  against the SHA-256 in the bill of materials. The binary is a single-file build made
+  when the candidate is loaded, so it runs on linux x86_64 only. Other platforms use
+  PyPI.
 
 ## Risks / Trade-offs
 
-- **[Byte comparison reports a conflict for a benign reason]** → Would mean the
-  builds are not reproducible, which is a defect worth surfacing. Fail and
-  investigate rather than widening the comparison.
-- **[A distribution is stranded: version on PyPI, different code in the
-  registry]** → Already true for `arkhai-kit-hosted-settlement` 0.1.4 and
-  undetected. This change surfaces it as a hard failure. Resolution is a
-  version bump, not a mechanism change.
-- **[The interim mechanism outlives its condition]** → The condition is
-  checkable and named. It is also cheap: a script and a target.
-- **[Contributors expect merge to publish]** → An intended break. Announce it
-  in `RELEASING.md` rather than leaving it to be discovered.
-- **[Two enumerations reappear because the inventory is late]** → The interim
-  manifest is a single file both paths read from day one. Do not ship the
-  registry path with its own list.
+- **A developer push lands in the development registry during validation.** The
+  deployment detects this, not this repository: its bill-of-materials builder refuses
+  when the running digests disagree with X's revision tags. The candidate is reloaded.
+- **A change that only adds tests inside a chart directory forces a chart version
+  bump.** The tree id cannot tell tests from templates. Accepted: a version bump is
+  cheap, and a missed change is not.
+- **The binary is linux x86_64 only.** Accepted for now. PyPI covers every platform.
+- **The npm package cannot be loaded into a development registry until one serves
+  npm.** Until then it is built and validated, but promotion has nothing to copy.
+  Tracked as an external blocker in `tasks.md`.
+- **The release is published after production runs it.** For a short while production
+  serves a release whose wheels are not yet on PyPI. Nothing in production installs
+  from PyPI.
 
-## Migration Plan
+## Open Questions
 
-1. Single manifest; both existing paths read it. No behaviour change.
-2. Writer identity and merge-to-`main` publication to the development registry,
-   all twenty-eight distributions.
-3. Remove publication from `publish-pypi.yml`.
-4. Add the promotion script and its target, byte-verified and all-or-nothing.
-5. Bump and promote `arkhai-kit-hosted-settlement` once its dependency resolves
-   publicly, repairing the live breakage.
-6. Substitute the inventory for the manifest when the format lands.
+None. The bill-of-materials fields this repository reads are fixed in D5. The rest of
+the format is the deployment's.
 
 ## Permanent Documentation Promotion
 
-The publication and promotion model, the byte-conflict rule, and the removal
-condition belong in `docs/development/RELEASING.md`. The distinction between a
-product version and a distribution version belongs in
-`openspec/specs/deployment-state/spec.md`; its cross-repository half belongs
-with whatever owns promotion and is not this repository's to place. Registry
-coordinates and credentials are never recorded in repository artifacts.
+- **`openspec/specs/deployment-state/spec.md`** (via the spec delta at archive): the
+  requirements in this change's delta.
+- **`docs/development/RELEASING.md`:**
+  - the release from this repository's side;
+  - "the revision names a candidate, the semver names a release";
+  - the component declaration;
+  - the cut and its record;
+  - `make check-release-versions`;
+  - that public channels are the deployment's.
+- **`docs/buyer-quickstart.md`:** installing the CLI.
+
+Registry coordinates and credentials are never recorded in this repository.
