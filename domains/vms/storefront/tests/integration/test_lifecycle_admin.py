@@ -6,9 +6,11 @@ adapter to qualify dispatch and notice ordering, not rate mandate execution.
 """
 
 import asyncio
-import copy
 import json
 import sqlite3
+from datetime import datetime, timezone
+
+from market_arkhai_payments import PaymentSettlementData, derive_mandate, mandate_policy_for_agreement, transaction_id
 from unittest.mock import patch
 
 import httpx
@@ -37,13 +39,13 @@ from tests.integration.test_payment_settlement import (
     NEGOTIATION,
     PAYEE,
     SELLER,
-    _client,
+    _client, _config, SERVICE,
 )
 from tests.integration.test_payment_settlement import make as make
 
 
 class Notice:
-    supported_commands = frozenset({"stop"})
+    supported_commands = frozenset({"notice"})
 
     def __init__(self, commitment_ref, effective_at):
         self.commitment_ref = commitment_ref
@@ -67,17 +69,50 @@ class Notice:
         return AuthorityView(outcome=Accepted(), events=events)
 
 
+def approve_rate(h, *, entitled, payer_notice=300):
+    """Lane-only approved command fixture; the installed delivery hook stays closed."""
+    agreement, _ = h.lifecycle.accepted(NEGOTIATION)
+    now = h.lifecycle.clock()
+    stamp = datetime.fromtimestamp(now, timezone.utc).isoformat().replace("+00:00", "Z")
+    agreement.update(start_utc=stamp, accepted_at=stamp)
+    option = agreement["settlement"]
+    option["settlement"].update(period="PT60S", reserve_ahead_seconds=120, approval_window="PT60S")
+    option["price"]["rates"] = [{"field": "amount", "per": "hour", "value": 6000}]
+    rights = {"payer": {"notice_seconds": payer_notice, "settles_through": "started_period"}}
+    if entitled:
+        rights["payee"] = {"notice_seconds": 120, "settles_through": "started_period"}
+    option["lifecycle"]["early_termination"] = {
+        "version": 1, "entitlements": rights, "settles_through": "started_period",
+    }
+    option["option_id"] = derive_settlement_option_id(**{k: v for k, v in option.items() if k != "option_id"})
+    mandate = derive_mandate(agreement, mandate_policy_for_agreement(agreement, _config()))
+    h.data = PaymentSettlementData(mandate=mandate, transaction_id=transaction_id(mandate))
+    h.payments.signer = SERVICE
+    h.payments.observed_at = now
+    h.payments.engine.fund(mandate.from_.root, "USD/2", 1_000_000)
+    h.payments.receipt = h.payments.engine.approve(mandate, account=mandate.from_.root)
+    with sqlite3.connect(h.db.db_path) as conn:
+        conn.execute("UPDATE negotiation_threads SET agreement_bytes=?,settlement_data=? WHERE negotiation_id=?",
+                     (json.dumps(agreement).encode(), json.dumps(h.data.to_wire()), NEGOTIATION))
+    h.lifecycle.register(agreement, h.data, h.payments.receipt)
+    h.delivery.starts.append(NEGOTIATION)
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("entitled", [False, True])
-async def test_admin_interrupt_obeys_entitlement_and_retries_filing_independently(make, entitled):
+@pytest.mark.parametrize("entitled,kind", [(False, None), (False, "failure"), (True, "failure"), (True, "preemption")])
+async def test_admin_interrupt_obeys_entitlement_and_retries_filing_independently(make, entitled, kind):
     h = await make()
-    h.serve()
-    await h.settle()
-    await h.delivered()
+    if entitled:
+        approve_rate(h, entitled=True)
+    else:
+        h.serve()
+        await h.settle()
+        await h.delivered()
     now = h.lifecycle.clock()
     notice = None
     mediation = None
-    if not entitled:
+    preemption = kind == "preemption"
+    if not preemption:
         mediation = MediationContractFake()
         mediation.lose_next_response = True
         agreement, _ = h.lifecycle.accepted(NEGOTIATION)
@@ -105,25 +140,7 @@ async def test_admin_interrupt_obeys_entitlement_and_retries_filing_independentl
         h.lifecycle.clients[canonical_json(authority)] = client
         h.lifecycle.credential_available = lambda candidate: candidate == authority
         h.lifecycle.seller.credential_available = h.lifecycle.credential_available
-    if entitled:
-        agreement, _ = h.lifecycle.accepted(NEGOTIATION)
-        agreement = copy.deepcopy(agreement)
-        agreement["settlement"]["lifecycle"]["early_termination"] = {
-            "version": 1,
-            "entitlements": {"payee": {"notice_seconds": 120, "settles_through": "last_boundary"}},
-            "settles_through": "last_boundary",
-        }
-        option = agreement["settlement"]
-        option["option_id"] = derive_settlement_option_id(**{
-            key: value for key, value in option.items() if key != "option_id"
-        })
-        # Install only the accepted option projection needed by admin dispatch.
-        # The current once adapter deliberately cannot approve a rate mandate.
-        with sqlite3.connect(h.db.db_path) as conn:
-            conn.execute(
-                "UPDATE negotiation_threads SET agreement_bytes=? WHERE negotiation_id=?",
-                (json.dumps(agreement).encode(), NEGOTIATION),
-            )
+    if preemption:
         notice = Notice(h.data.transaction_id, now + 120)
         h.lifecycle.seller.payments = PaymentAdapterTable([
             (PaymentSelector("arkhai.payments.v1"), lambda _: notice),
@@ -138,20 +155,16 @@ async def test_admin_interrupt_obeys_entitlement_and_retries_filing_independentl
         initialize_administrator_identities(h.db.db_path)
         async with _client(SELLER, "admin", httpx.ASGITransport(app=app)) as client:
             async def interrupt(body):
-                return await client.authenticated_request(
-                    "POST", "/api/v1/admin/deals/" + NEGOTIATION + "/interrupt",
-                    role="admin", operation="admin_interrupt_deal", resource=NEGOTIATION,
-                    body=body,
-                )
+                return await client.admin_interrupt_deal(NEGOTIATION, **body)
 
-            body = {"reason": "development reclaim", "operation_key": "admin-demo"}
+            body = {"reason": "development reclaim", "operation_key": "admin-demo", "interruption_kind": kind}
             preview = await interrupt(body | {"dry_run": True})
             assert preview["status"] == "dry_run"
             response = await interrupt(body)
-            assert response["settlement_action"] == ("notice_stop" if entitled else "delivery_end_filing")
+            assert response["settlement_action"] == ("notice_stop" if preemption else "delivery_end_filing")
             retry = await interrupt(body)
             assert retry["delivery"]["recorded_end"] == response["delivery"]["recorded_end"]
-            if not entitled:
+            if not preemption:
                 assert response["lifecycle_outcome"]["status"] == "unknown", response["lifecycle_outcome"]
                 assert retry["lifecycle_outcome"]["status"] == "accepted"
                 assert len(mediation.cases) == 1
@@ -165,8 +178,8 @@ async def test_admin_interrupt_obeys_entitlement_and_retries_filing_independentl
         end = EndSession(conn)
         requests = end.requests(NEGOTIATION)
         filings = [intent for intent in end.intents(NEGOTIATION) if intent.kind == "filing"]
-        if entitled:
-            assert notice.calls and all(command.kind == "stop" and command.at is None for command in notice.calls)
+        if preemption:
+            assert notice.calls and all(command.kind == "notice" and command.at is None for command in notice.calls)
             assert requests == [] and filings == []
         else:
             assert len(requests) == len(filings) == 1
@@ -190,3 +203,28 @@ async def test_admin_interrupt_obeys_entitlement_and_retries_filing_independentl
             assert end.selected_end(NEGOTIATION).ended_at == now + 120
             assert not [intent for intent in end.intents(NEGOTIATION) if intent.kind == "filing"]
         await h.lifecycle.end.drive_physical(NEGOTIATION)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rate,kind", [(False, "preemption"), (True, None)])
+async def test_admin_refuses_unentitled_preemption_and_unclassified_rate_before_effect(make, rate, kind):
+    h = await make()
+    if rate:
+        approve_rate(h, entitled=True)
+    else:
+        h.serve()
+        await h.settle()
+    app = FastAPI()
+    app.include_router(router)
+    app.middleware("http")(administrator_identity_middleware)
+    with patch("market_storefront.middleware.admin_identity.get_administrator_configs",
+               return_value={"operator": TrustedIdentitySet(identities=(SELLER.identity,))}):
+        initialize_administrator_identities(h.db.db_path)
+        async with _client(SELLER, "admin", httpx.ASGITransport(app=app)) as client:
+            with pytest.raises(StorefrontClientError) as refused:
+                await client.admin_interrupt_deal(NEGOTIATION, interruption_kind=kind,
+                                                 reason="hardware failure", operation_key="refused")
+            assert refused.value.status_code == 409
+    with transaction(h.db.db_path) as conn:
+        assert EndSession(conn).requests(NEGOTIATION) == []
+        assert EndSession(conn).intents(NEGOTIATION) == []

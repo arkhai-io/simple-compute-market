@@ -244,7 +244,10 @@ class PaymentAdapter:
         except (PaymentsError, ArkhaiPaymentsConfigurationError, ValidationError) as exc:
             if attempted and not isinstance(exc, PaymentsAPIError):
                 return Unknown(reason=f"operation requires verified read recovery: {exc}")
-            return _failure(exc)
+            return self._command_failure(command, exc)
+
+    def _command_failure(self, command: LifecycleCommand, exc: Exception) -> LifecycleOutcome:
+        return _failure(exc)
 
     def command_event(self, command: LifecycleCommand) -> dict[str, Any]:
         return {"kind": "reverse", "part": int(str(command.payload["part"])),

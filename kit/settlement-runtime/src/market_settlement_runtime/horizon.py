@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from math import floor
+from math import ceil, floor
 
 from market_core.schemas import SettlementOption
 from market_deal_lifecycle.terms import TermContext, validate_terms
@@ -36,6 +36,14 @@ RateTermProjections = Mapping[str, Callable[[SettlementOption], RateTermTiming]]
 class ResolvedHorizon:
     start_utc: str
     duration_seconds: int
+
+
+def minimum_rate_duration_seconds(
+    *, start: int | float, approval_expiry: int | float,
+    delivery_deadline_seconds: int, period_seconds: int,
+) -> int:
+    """Leave delivery plus a full period after both approval and service start."""
+    return ceil(max(approval_expiry, start) - start) + delivery_deadline_seconds + period_seconds
 
 
 def resolve_horizon(
@@ -111,10 +119,11 @@ def resolve_horizon(
         if duration < timing.period_seconds:
             raise ValueError("recurring horizon must leave at least one whole period")
         expiry = datetime.fromtimestamp(floor(accepted_at.timestamp()), UTC) + timedelta(seconds=timing.approval_window_seconds)
-        minimum = max(expiry, start) - start + timedelta(
-            seconds=(lifecycle.delivery_deadline_seconds or 0) + timing.period_seconds,
+        minimum_seconds = minimum_rate_duration_seconds(
+            start=start.timestamp(), approval_expiry=expiry.timestamp(),
+            delivery_deadline_seconds=lifecycle.delivery_deadline_seconds or 0,
+            period_seconds=timing.period_seconds,
         )
-        minimum_seconds = minimum.days * 86400 + minimum.seconds
         if duration < minimum_seconds:
             raise ValueError(f"The horizon leaves no runway: minimum duration_seconds is {minimum_seconds}")
     return ResolvedHorizon(start.isoformat().replace("+00:00", "Z"), duration)

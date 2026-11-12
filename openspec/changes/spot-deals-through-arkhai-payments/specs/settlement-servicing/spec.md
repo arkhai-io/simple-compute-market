@@ -50,6 +50,12 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **THEN** both derive setup once followed by rate, with the same amounts, asset, end, afterStop hold, maxHoldExtension and per-part authorities
 - **AND** neither reads Agreement.amount as a direct charge
 
+#### Scenario: Service starts after the approval window
+- **GIVEN** a rate mandate whose service start is later than approval expiry
+- **WHEN** its finite duration is derived or checked
+- **THEN** its end MUST leave the delivery deadline and one whole period after max(approval expiry, start_utc)
+- **AND** acceptance horizon resolution and mandate derivation use the same runway calculation
+
 #### Scenario: On-demand has no seller stop entitlement
 - **GIVEN** an accepted option with no seller early-termination entitlement
 - **WHEN** the buyer checks a mandate containing a seller stop entry
@@ -103,6 +109,16 @@ The hosted adapter MUST translate lifecycle commands into explicit per-part even
 - **GIVEN** the rate part is already stopped at the authority
 - **WHEN** start is refused as transaction_stopped
 - **THEN** the adapter reports the failed start for delivery-end handling, not successful start
+
+#### Scenario: A monetary command needs repair
+- **WHEN** the authority refuses a rate command with HTTP 409 request_id_reused or hold_not_reversible
+- **THEN** the adapter reports a rejected outcome requiring repair before another monetary operation
+- **AND** server or transport failures remain unknown and retryable
+
+#### Scenario: Approval cannot reserve the initial funds
+- **WHEN** approval returns HTTP 409 insufficient_funds
+- **THEN** the buyer receives a typed PaymentApprovalInsufficientFunds refusal identifying the funding action
+- **AND** no receipt polling or delivery commitment follows that refusal
 
 #### Scenario: A stop is repeated
 - **WHEN** a stop submission reports an already-stopped part

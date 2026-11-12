@@ -1,0 +1,33 @@
+# Public deterministic development profile; never use these authorities on a public network.
+# Approval/command fixtures only. This is not a storefront publication configuration.
+profile = "lane-only"
+domains = ["vms", "bare_metal"]
+double_selector = "in-process"
+setup_opt_out = true
+
+[payments]
+livemode = false
+service_url = "http://127.0.0.1:9"
+fee_bps = 250
+
+[buyer]
+allow_unprotected_terms = true
+
+[authority]
+interface = "arkhai.mediation.v1"
+origin = "https://mediation.example"
+account = "33333333-3333-4333-8333-333333333333"
+record_key = "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+[authority.params]
+procedure = "optimistic"
+
+[recurring]
+period = "PT60S"
+reserve_ahead_seconds = 120
+
+[[products]]
+name = "spot"
+payee_notice_seconds = 30
+
+[[products]]
+name = "on-demand"

@@ -248,6 +248,13 @@ the target is no longer locally achievable: the adapter surfaces the shortfall a
 the case path, not an endlessly retried refund. No post-release refund command or
 journal kind exists.
 
+Conflict classification uses the structured API code at the command boundary:
+HTTP 409 `request_id_reused` and `hold_not_reversible` require repair. HTTP 409
+`insufficient_funds` during buyer approval becomes `PaymentApprovalInsufficientFunds`,
+with an instruction to fund the payer account before retrying. All these codes,
+plus `insufficient_held_funds`, `hold_matured` and `transaction_stopped`, occur in
+the vendored `ApiErrorCode` enum. Server errors retain their unknown classification.
+
 #### Pure rate authorization
 
 Spot implements `authorize(phase, evidence)`; convergence composes it with physical
@@ -388,6 +395,13 @@ entitled stop and files `delivery_end` through the dispute adapter for a
 seller-caused emergency failure, spot hardware failure included. Alkahest splitter
 execution and its defects remain outside this work.
 
+The administrator wire selector is `interruption_kind=preemption|failure`, separate
+from the existing free-text `reason`. Existing typed-client callers omit a kind
+and describe operator ends of once-only deals; they retain `failure` as the
+compatibility default. Rate requests must state a kind. The storefront CLI has no
+interrupt verb today; `deals preempt` already sends notice explicitly. The typed
+client exposes the selector and operation key in both sync and async variants.
+
 ### D6a. The rate buyer end preserves the priced notice
 
 This change owns the rate buyer-end flow the foundation defers to it, in the neutral
@@ -409,33 +423,10 @@ cooperative payment stop. The buyer's `delivery_end(cause=payer)` case and its h
 Both-authorities-down recovery keeps the journal and retry path. The terms change owns the display of a normal stop against
 an immediate surrender, and of billing that continues while a stop is pending.
 
-**The buyer's watchdog.** The honest-crash exposure — the resource lost while the
-seller's storefront is down, the buyer charged until its own stop lands (foundation
-D12) — is bounded from the buyer's side by this change's watchdog: a probe loop in
-`kit/deal-lifecycle-buyer` that the buyer's own `buy` command runs in the foreground.
-There is no buyer daemon: the buyer used to run a persistent service and that design
-was retired; what runs the watchdog is the process the buyer already has. With the
-opt-in flag, the `buy` command does not return after delivery: once `available`, it
-probes the disclosed access on the configured interval and, when the resource fails a
-configured number of consecutive probes, sends the buyer's ordinary entitled stop and
-`hint` through the flow above, journals the probe evidence it acted on, and exits. It
-exits also when the deal ends by any other path, or when the buyer stops it. The
-opt-in, interval and threshold are persisted per deal in the buyer's profile, so
-`buy --resume` re-enters the loop after a restart where the deal is still running; the
-deal read shows `monitored`, `stopped` or `unmonitored`, and a deal whose monitor is
-not running is shown as unmonitored, never as protected. The probe is injected per
-domain — the VM's or bare-metal host's reachability on the disclosed address and
-credential kind — so the kit learns no credential format; what "stops answering"
-means is that access, not the buyer's workload.
-
-The bound is conditional and stated as one, wherever the watchdog is described:
-detection takes at most `interval × threshold + probe timeout` after the loss, and
-only while the monitor runs; the stop's acknowledgement at the authority and any
-priced notice come after that, and billing runs until the stop lands. A probe failure
-is the buyer's observation (foundation D9), kept with its instants, and the stop it
-triggers is reversible by nothing, so the default interval and threshold are
-conservative. The watchdog sends nothing the buyer could not send by hand and asks
-nothing new of the authority.
+**Deferred buyer watchdog.** Goal 8's MVP excludes the foreground watchdog.
+Reachability probes would trigger an irreversible stop, and protection would
+exist only while the foreground buy process runs. This slice builds no probe
+loop, monitor state or buy flags. The buyer can invoke the ordinary stop manually.
 
 ### D7. Servicing declarations and identity rotation
 

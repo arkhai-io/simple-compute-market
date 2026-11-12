@@ -25,7 +25,7 @@ from market_arkhai_payments.buyer import ConfirmPayment, PaymentApproval
 from market_arkhai_payments.client import PaymentsClient
 from market_arkhai_payments.errors import (
     MandatePolicyError,
-    PaymentApprovalDeclined,
+    PaymentApprovalDeclined, PaymentApprovalInsufficientFunds,
     PaymentsAPIError,
     PaymentsBlocked,
     PaymentsError,
@@ -116,6 +116,7 @@ __all__ = [
     "rate_term_timing",
     "PaymentApproval",
     "PaymentApprovalDeclined",
+    "PaymentApprovalInsufficientFunds",
     "PaymentSellerStage",
     "PaymentSettlementData",
     "PaymentsAPIError",

@@ -34,7 +34,7 @@ class RatePaymentAdapter(PaymentAdapter):
     is always freshly verified against the caller's durable sequence floor.
     """
 
-    supported_commands = frozenset({"start", "stop", "reverse"})
+    supported_commands = frozenset({"start", "stop", "notice", "reverse"})
 
     def __init__(self, agreement: Mapping[str, Any], data: PaymentSettlementData, *,
                  account: str, client_for_owner: ClientForAccount, verify_snapshot: SnapshotVerifier,
@@ -70,6 +70,16 @@ class RatePaymentAdapter(PaymentAdapter):
             return super().validate(command)
         if command.negotiation_id != self.negotiation_id:
             return Rejected(reason="command negotiation does not match payment commitment")
+        if command.kind == "notice" or (command.kind == "stop" and not command.payload):
+            if command.kind == "notice" and self.account != self.data.mandate.to.root:
+                return Rejected(reason="seller notice requires the accepted payee account")
+            if command.payload:
+                return Rejected(reason="notice derives all affected rate parts from the accepted mandate")
+            for stop in self._notice_stops(command):
+                refusal = self.validate(stop)
+                if refusal is not None:
+                    return refusal
+            return None
         part = command.payload.get("part")
         if part not in self.rate_parts:
             return Rejected(reason="command requires an explicit rate part")
@@ -113,6 +123,8 @@ class RatePaymentAdapter(PaymentAdapter):
         return event
 
     def describe(self, command: LifecycleCommand, keys: OperationKeys) -> PaymentOperation:
+        if command.kind == "notice" or (command.kind == "stop" and not command.payload):
+            raise ValueError("deal stop expands into journaled per-part stops through submit")
         refusal = self.validate(command)
         if refusal is not None:
             raise ValueError(refusal.reason)
@@ -123,7 +135,42 @@ class RatePaymentAdapter(PaymentAdapter):
 
     async def submit(self, command: LifecycleCommand, keys: OperationKeys, *,
                      journaled_digest: str | None = None) -> LifecycleOutcome:
+        if command.kind == "notice" or (command.kind == "stop" and not command.payload):
+            return await self._notice(command, keys)
         return await asyncio.to_thread(self.submit_now, command, keys, journaled_digest=journaled_digest)
+
+    def _notice_stops(self, command: LifecycleCommand) -> tuple[LifecycleCommand, ...]:
+        return tuple(command.model_copy(update={"kind": "stop", "payload": {"part": part}})
+                     for part in self.rate_parts)
+
+    async def _notice(self, command: LifecycleCommand, keys: OperationKeys) -> LifecycleOutcome:
+        refusal = self.validate(command)
+        if refusal is not None:
+            return refusal
+        if (keys.negotiation_id, keys.operation_key) != (command.negotiation_id, command.operation_key):
+            return Rejected(reason="operation keys do not match the command")
+        if keys.store is None:
+            return Rejected(reason="deal stop requires the caller's durable operation store")
+        stops = self._notice_stops(command)
+        operations = tuple(self.describe(stop, keys) for stop in stops)
+        # Persist every descriptor before the first part is submitted. The same
+        # journal and derived keys recover a partially acknowledged command.
+        for operation in operations:
+            if not await keys.store.check_and_record(
+                command.negotiation_id, keys.part_event(operation.part, "stop-descriptor"), operation.digest,
+            ):
+                return Rejected(reason="operation key retry changes the stop descriptor")
+        for stop, operation in zip(stops, operations, strict=True):
+            outcome = await self.submit(stop, keys, journaled_digest=operation.digest)
+            if not isinstance(outcome, Accepted):
+                return outcome
+        view = await self.read()
+        if not isinstance(view.outcome, Accepted):
+            return view.outcome
+        records = [part.final_stop or part.pending_stop for part in view.parts]
+        if any(record is None for record in records):
+            return Unknown(reason="deal stop awaits a verified controlling stop for every rate part")
+        return Accepted(records=[record for record in records if record is not None])
 
     def submit_now(self, command: LifecycleCommand, keys: OperationKeys, *,
                    journaled_digest: str | None = None) -> LifecycleOutcome:
@@ -150,19 +197,23 @@ class RatePaymentAdapter(PaymentAdapter):
                     return Accepted(records=[observed.final_stop] if observed.final_stop else [])
             except (PaymentsError, ArkhaiPaymentsConfigurationError, ValidationError) as exc:
                 return Unknown(reason=f"stop requires verified read recovery: {exc}")
-        result = super().submit_now(command, keys)
-        if isinstance(result, Rejected):
-            if "insufficient_held_funds" in result.reason:
+        return super().submit_now(command, keys)
+
+    def _command_failure(self, command: LifecycleCommand, exc: Exception) -> LifecycleOutcome:
+        if isinstance(exc, PaymentsAPIError) and exc.status_code == 409:
+            if exc.code in {"request_id_reused", "hold_not_reversible"}:
+                return Rejected(reason=f"{exc.code}: repair required before another monetary operation")
+            if exc.code == "insufficient_held_funds":
                 try:
                     self.snapshot_now()
                 except (PaymentsError, ArkhaiPaymentsConfigurationError, ValidationError):
                     return Unknown(reason="insufficient held funds requires verified read reconciliation")
                 return Rejected(reason="insufficient held funds: reconcile recorded reversals before another delta")
-            if "hold_matured" in result.reason:
+            if exc.code == "hold_matured":
                 return Rejected(reason="hold_matured: unrecoverable held-money shortfall; use the case path")
-            if "transaction_stopped" in result.reason and command.kind == "start":
+            if exc.code == "transaction_stopped" and command.kind == "start":
                 return Rejected(reason="transaction_stopped: delivery must end; billing did not start")
-        return result
+        return super()._command_failure(command, exc)
 
     def billing_operations(self, operation_key: str, evidence: DeliveryEvidence) -> tuple[PaymentOperation, ...]:
         error = self._evidence_error(evidence, activated=True)

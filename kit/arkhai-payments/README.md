@@ -388,6 +388,26 @@ the caller. No rate call allocates another billing-start key or stores a ledger.
 The continuation composition must pass these descriptors from its journal; the
 once-only end-service caller alone is not recurring enablement.
 
+Seller `notice` is admitted by seller servicing against its immutable accepted
+payee entitlement. The rate adapter expands it into explicit per-rate-part
+stops using that same command key, persists all descriptor digests through the
+caller's operation store before the first authority call, and returns verified
+controlling pending/final stops. A same-key retry recovers a lost response and
+never postpones an earlier payer stop. Notice carries no treatment override or
+local scheduling promise. An ordinary deal-level payer `stop` with an empty
+payload uses the same expansion and journal contract; each derived stop retains
+the accepted payer notice. Explicit part commands still require their exact
+caller-journaled descriptor digest.
+
+Command failures are classified from their structured API codes. HTTP 409
+request_id_reused and hold_not_reversible return a rejection requiring repair;
+insufficient_held_funds requires a verified read before another delta, and
+hold_matured exposes the shortfall for the case path. Server errors stay unknown.
+At approval, HTTP 409 insufficient_funds raises the exported
+PaymentApprovalInsufficientFunds exception, carrying status_code/code and an
+instruction to fund the payer account. The buyer does not poll for a receipt
+after this refusal.
+
 `authorize` is read-only for commit, dispatch, physical start and disclose.
 Disclosure additionally requires `billing_operation_key` and a matching verified
 start event containing the same activation envelope. A caller-supplied journaled

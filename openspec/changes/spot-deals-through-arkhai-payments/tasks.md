@@ -200,7 +200,7 @@ cryptographic proof test matrix.
 
 - Delivered `mandates.py`, `agreement.py`, `presets.py`, `settlement_config.py`, `operations.py` and `rate_adapter.py` in the payments kit; buyer/seller gates and both compute `settlement_composition.py` integrations. No installed recurring servicing declaration was enabled.
 - Reused the shared DeliveryEvidence, lifecycle codec, snapshot verifier, foundation dispute filing and authority fixture. Rate descriptors require caller-persisted digests; disclosure can consume the journaled start outcome with its operation identity. Neutral per-part observations distinguish stop requests from winning final stops; watch observes notice maturity independently of its event cursor and retains the first observation on replay.
-- Focused evidence: payments 221, lifecycle servicing 63, mediation 77, VM publication/payment integration 104, bare-metal publication/payment integration 21 existing tests pass. Published vector/generated checks and kit typing pass. Composition-file typechecks pass (bare-metal skips untyped-import diagnostics for existing unmarked dependencies). No permanent tests added; existing projection expectations follow the new public fields.
+- Focused evidence: payments 221, lifecycle servicing 63, mediation 77, VM publication/payment integration 104, bare-metal publication/payment integration 21 existing tests pass. Published vector/generated checks and kit typing pass. Composition-file typechecks pass (bare-metal skips untyped-import diagnostics for existing unmarked dependencies). Permanent rate regression coverage is recorded with section 4; existing projection expectations follow the new public fields.
 - `make check-packaging`, comment hygiene, amount-read inventory, change index and pinned OpenSpec strict validation pass. The durable packet and exact commands are in `docs/attachments/spot-deals-sections-1-3/index.md`; `make dist-ci && make -C kit/arkhai-payments first-use-rate` reproduces the prepared fixture with no secrets or resident services.
 - E2E is **unobservable**, not passed: with the required Podman Compose provider set, the invocation-owned VM lane failed before setup with `/bin/sh: 1: docker: not found`, Makefile:240 Error 127. No stack, readiness or scenario result is claimed; no SCM containers were started.
 - Resume at section 4 after maintainer code/design review; sections 4–6, full qualification and section 7 closeout are untouched. Post-review promotion remains the owning permanent specs/companions, architecture/configuration docs, roadmap and campaign index named below; this slice updates the kit README but does not archive or promote unimplemented behavior.
@@ -215,21 +215,21 @@ admin_cli.py; kit/deal-lifecycle-buyer and each domain's canonical buyer end ver
 Reuse the foundation's command identity/recovery contract; do not add a
 second preemption endpoint or a local payment-stop scheduler.
 
-- [ ] 4.1 Admit notice against the accepted payee entitlement and adapter support,
+- [x] 4.1 Admit notice against the accepted payee entitlement and adapter support,
       preserve its command operation identity, and immediately submit stop
       with explicit parts and optional at. Return the authority's effective time
       and pending/unknown/refused status. Verify current listing edits cannot
       grant or revoke the accepted permission.
-- [ ] 4.2 Surface verified pendingStop in lifecycle read/list. Preserve an earlier
+- [x] 4.2 Surface verified pendingStop in lifecycle read/list. Preserve an earlier
       buyer stop, immutable retry identity and the authority's notice minimum.
       On-demand refusal points to delivery_end only for seller non-delivery,
       not a self-interested override or automatic seller-fault filing after a lawful end.
-- [ ] 4.3 Add the typed notice method and recommended deals preempt CLI verb to
+- [x] 4.3 Add the typed notice method and recommended deals preempt CLI verb to
       both domains, taking negotiation ID, operation key and optional --at.
       Delegate through lifecycle submit and its existing seller authentication.
       Output authority status/time, including unknown; do not report local
       command acceptance as an authoritative scheduled end.
-- [ ] 4.4 Prepare committed first-use configuration/examples for both domains
+- [x] 4.4 Prepare committed first-use configuration/examples for both domains
       under the lane profile, with paired on-demand/spot options, explicit authority
       entries, test mode and double selector. Use explicit setup opt-out for the
       interim; include priced setup fixtures only on a qualified setup revision. Document
@@ -241,28 +241,25 @@ second preemption endpoint or a local payment-stop scheduler.
       started_period on the payee entitlement and any charged term end. Include
       default-buyer refusal as a separate observation; returned-capable fixtures
       may use default buyers only once the matching contract is vendored.
-- [ ] 4.5 Re-drive both domains' canonical rate buyer end: stop then hint, keep
+- [x] 4.5 Re-drive both domains' canonical rate buyer end: stop then hint, keep
       service during nonzero payer notice, and end through watch at effective
       stop. Consume foundation 7.5 round 2 (after 12.3 and 13.3) and
       buyer-orchestration's “The buyer's end is backed by its own stop or a case”
       for immediate surrender and outage handling; do not implement those paths here.
       Coordinate rate notice display.
-- [ ] 4.5a Add the buyer's watchdog per D6a: the probe loop in `kit/deal-lifecycle-buyer`
-      with a per-domain injected probe; the opt-in flag on both domains' `buy` commands,
-      which then stay in the foreground from `available` until the stop is sent, the deal
-      ends or the buyer stops them; the opt-in, interval and threshold persisted per deal
-      in the buyer's profile and re-entered by `buy --resume`; `monitored` / `stopped` /
-      `unmonitored` in the deal read; the budget `interval × threshold + probe timeout`
-      in the display. Verify in the kit's unit suite with a clock-injected probe fake
-      (threshold, no stop below it, one stop and one journal entry at it, idempotent on
-      restart); in one application-level test per domain that starts the real `buy
-      --watch`, loses access with the storefront stopped, restarts into `buy --resume`
-      and observes a single buyer stop; and in convergence's rows 1 and 2 as the buyer's
-      stop landing with the storefront absent.
-- [ ] 4.6 Verify the foundation-owned VM admin route delegates notice for a lawful
+- [ ] 4.5a **Deferred beyond Goal 8 MVP:** the foreground buyer watchdog is excluded
+      from the MVP set. It would trigger an irreversible stop from reachability
+      probes and would run only while the foreground buy process lives. Build no
+      watchdog in this slice.
+- [x] 4.6 Verify the foundation-owned VM admin route delegates notice for a lawful
       entitled stop and files delivery_end for seller-caused emergency failure,
-      including spot hardware failure; request a foundation fix rather than add a
-      second classification switch here.
+      including spot hardware failure. The authorized foundation selector amendment
+      is a separate commit; it reuses notice admission and the existing failure path.
+- [x] 4.7 Add permanent lowest-level coverage for rate mandate derivation, buyer
+      exact re-derivation, pure authorization phases, refusal classification,
+      start/stop/reverse identities and verified observations; seller notice and
+      both domains' normal end/explicit-surrender command wiring. Keep examples
+      as first-use entry points.
 
 Validation: lifecycle client/contract unit suites; application-integration at each
 storefront for seller authentication, accepted-option admission, refusal before
@@ -272,6 +269,25 @@ surrender, hint failure, payment-authority outage and both-authorities-down retr
 First use runs deals preempt against a double-backed approved spot fixture and
 reads pending stop while asserting delivery is refused without the rate hook.
 Before convergence lands, this proves command and authority record, not teardown.
+
+## Section 4 implementation result and restart
+
+- 4.1–4.3: accepted-entitlement notice uses the existing administrator-authenticated submit route, durable command identity and per-part stop descriptors. Async/sync clients and both `deals preempt` verbs retain verified pending/final stops in read/list and recover lost responses without postponing an earlier payer stop. Application tests prove current listing edits can neither grant nor revoke accepted notice rights.
+- 4.4: `domains/vms/storefront/examples/preempt.lane.toml` is the committed lane-only approval/command profile for both domains: paired options, explicit authority, in-process doubles, test mode, setup opt-out and explicit charged-term buyer acceptance. Both first-use commands pass; the default buyer separately refuses charged terms and materialization without the rate hook refuses. Runnable setup and observations: `docs/attachments/spot-deals-section-4/index.md`.
+- 4.5: ordinary rate end journals the payer stop, then hints, retaining service during notice. Both domain compositions select the rate adapter; the VM `end` and bare-metal `teardown` verbs default to normal end, with `--end-now-regardless` selecting the existing immediate-surrender path. Escalation reuses the original stop. Unknown stop, hint loss and restart preserve independent progress. Application tests observe the effective stop through watch; deployed rate delivery/teardown remains convergence qualification.
+- 4.5a is deferred beyond Goal 8 MVP: a foreground reachability probe would trigger an irreversible stop and run only while buy remains alive. No watchdog was built.
+- 4.6: separate selector commit `a0ae6148d` adds `interruption_kind=preemption|failure` beside the free-text reason. Rate requests must state it; once-only omission retains failure for existing callers. Lawful preemption requires the accepted payee entitlement and delegates notice. Failure ends delivery and files for spot and on-demand, with no automatic rate self-penalty. Both typed admin clients expose the selector and operation key; the storefront CLI has no interrupt verb.
+- Permanent coverage includes exact setup/rate derivation and buyer comparison, authorization's phase table and immutable activation bindings, start/stop/reverse keys, unknown-response recovery, refusal classes, verified pending/final stop records and fixed settled figures after held reversal. Seller and buyer application tests use real SQLite, signed typed clients and injected authority doubles; canonical command tests use their own module's factory seams.
+- Validation: payments 266, servicing 70, contracts 37, lifecycle client 2, buyer half 22; focused VM storefront 157 and bare-metal storefront 46; buyer suites and final packaging results are in the evidence index. Payments and servicing typing, buyer-half typing, published vectors and generated checks pass.
+- Required compose VM run: `PROVISIONING_MODE=mock mise exec -- make -C e2e-tests test-e2e-vm` exits **2**: 290 pass, 2 skip, one failure in the explicitly excluded retained `rate_structure` pricing mismatch (`test_listing_shapes.py::TestStage07_ShapePricing::test_07a2_market_buy_buys_a_smaller_shape_and_reaches_ready`). It is unchanged. The owned stack, volumes/network and leftover test Anvil were stopped.
+- Resolved attempts: fixture approval must use its explicit clock and funding; stop requests cannot be in the past; held rate earnings become reversible at the authority's earning/stop boundary. Commands use the caller's operation store rather than its envelope-only store. Bare-metal fixture runway includes approval, delivery and a period. Clear inherited proxy variables for loopback tests. No production behavior was changed for these fixture/environment mistakes.
+- Remaining scope is sections 5–6 and post-review section 7: no installed recurring delivery declaration, self-penalty remedy, watchdog or live qualification is claimed. Charged-term fixtures retain explicit buyer acceptance; default-buyer policy is unchanged. No PR, comments or canonical-branch changes were made.
+
+## Section 4 follow-up corrections
+
+- [x] Runway: acceptance horizon and payment mandate derivation share `minimum_rate_duration_seconds`. A start 3600 seconds after acceptance with a 60-second approval window, 30-second delivery deadline and 60-second period requires a 90-second duration. The previous mandate function admitted 89 seconds; the regression covers below/at/above the bound for early and late starts. Settlement-runtime 182 and payments 272 tests pass; payment typing, vectors and generated checks pass.
+
+- [x] Refusal classification: the vendored `ApiErrorCode` enum defines every code named by D4, including request_id_reused and hold_not_reversible. Their HTTP 409 responses now require repair through structured command-error classification. HTTP 409 insufficient_funds at approval raises exported `PaymentApprovalInsufficientFunds` with funding guidance before polling. Server responses retain unknown/generic API failure rather than claiming a funding refusal. Payments 277 tests, typing, vectors and generated checks pass.
 
 ## 5. Proposed declarations and identity re-anchoring
 
