@@ -435,7 +435,7 @@ def buy_bare_metal(
     ),
     allow_unprotected_terms: bool = typer.Option(
         False, "--allow-unprotected-terms",
-        help="Explicitly waive default delivery-deadline, penalty and returned-period recommendations. Does not waive codec capabilities or authority acceptance.",
+        help="Shorthand for the packaged 'permissive' terms policy, which declines no option: the default delivery-deadline, penalty and returned-period refusals are not made. Does not waive codec capabilities or authority acceptance. Refused beside a configured terms_policy of your own.",
     ),
     payment_timeout_seconds: float = typer.Option(300.0, min=1.0, max=3600.0),
     config: str | None = typer.Option(None, "--config"),
