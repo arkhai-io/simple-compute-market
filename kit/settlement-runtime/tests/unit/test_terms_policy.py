@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from copy import deepcopy
 from importlib.metadata import EntryPoint, entry_points
 from pathlib import Path
@@ -221,20 +222,17 @@ def test_a_seller_refusal_withholds_the_option_with_its_own_diagnostic():
 
 
 @pytest.mark.parametrize("periods", [-1, 1.5, True, None])
-def test_a_seller_policy_with_unusable_penalty_periods_is_refused_at_load(periods):
+def test_a_seller_policy_with_unusable_penalty_periods_is_refused_at_load(periods, monkeypatch):
     class Odd(DefaultSellerTermsPolicy):
         def default_penalty_periods(self):
             return periods
 
-    import builtins
-    builtins._odd_seller_factory = lambda settings: Odd()  # type: ignore[attr-defined]
-    try:
-        with pytest.raises(TermsPolicyError, match="non-negative integer"):
-            load_seller_terms_policy(TermsPolicySelection("odd"), installed=[
-                entry("odd", "builtins:_odd_seller_factory", SELLER_TERMS_POLICY_GROUP),
-            ])
-    finally:
-        del builtins._odd_seller_factory  # type: ignore[attr-defined]
+    # An entry point resolves an importable attribute, so the factory is given one.
+    monkeypatch.setattr(builtins, "_odd_seller_factory", lambda settings: Odd(), raising=False)
+    with pytest.raises(TermsPolicyError, match="non-negative integer"):
+        load_seller_terms_policy(TermsPolicySelection("odd"), installed=[
+            entry("odd", "builtins:_odd_seller_factory", SELLER_TERMS_POLICY_GROUP),
+        ])
 
 
 # --- what a policy cannot waive ----------------------------------------------
