@@ -49,6 +49,25 @@ def emit_lifecycle_disclosure(rows, *, title: str) -> None:
         typer.echo(f"  {name}: {value}", err=True)
 
 
+def emit_term_refusals(settlement_policy: Any) -> bool:
+    """Say why advertised options were refused; True when any was.
+
+    These are the refusals of term validation and dispute-authority acceptance,
+    which run before clauses select, so a buyer left with nothing to select is
+    told what its composition could not take.
+    """
+    authority = getattr(settlement_policy.option_preference, "authority", None)
+    refusals = tuple(getattr(authority, "refusals", ()))
+    if refusals:
+        typer.secho(
+            "Advertised settlement options were refused before selection:",
+            err=True, fg=typer.colors.RED,
+        )
+        for reason in refusals:
+            typer.secho(f"  {reason}", err=True, fg=typer.colors.RED)
+    return bool(refusals)
+
+
 def emit_buyer_explanation(payload: dict[str, Any]) -> None:
     """Print human evidence followed by one stable machine-readable JSON line."""
 

@@ -28,6 +28,7 @@ from .buy_orchestrator import fetch_listing_dict
 from .buyer_client import ResumeState, load_buyer_chain, negotiate_with_seller
 from .cli_helpers import emit_lifecycle_disclosure, resolve_prices_from_matches
 from .common import resolve_negotiation_config
+from .cli_helpers import emit_term_refusals
 from .deal_helpers import (
     load_negotiation_resume_point,
     make_publisher_trust_resolver,
@@ -399,6 +400,7 @@ def register(app: typer.Typer) -> None:
             except ValueError as exc:
                 raise typer.BadParameter(str(exc)) from exc
             if selected_settlement is None:
+                emit_term_refusals(settlement_policy)
                 raise typer.BadParameter(
                     f"listing {listing_id!r} has no installed, enabled, compatible "
                     "settlement option"
