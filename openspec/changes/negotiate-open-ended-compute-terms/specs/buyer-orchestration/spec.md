@@ -16,7 +16,7 @@ before approval.
 
 #### Scenario: Payee treatment is displayed faithfully
 
-- **WHEN** a buyer selects an interim spot option with `settles_through: started_period` for both parties
+- **WHEN** a buyer selects a spot option with `settles_through: started_period` for both parties
 - **THEN** the display says both stops charge the started period, not that seller preemption returns it
 - **AND** the display states that the setup charge is owed from approval, not reversed by a payment stop alone, and returned iff delivered=false for either cause in a qualified delivery_end claim
 

@@ -486,8 +486,7 @@ added by this reconciliation.
   (verify: "The horizon leaves no runway"), and
   refuse expired/excessive horizons and missing reserved duration. Carry term-end
   `settles_through` into payments `end.partialPeriod` through the foundation codec;
-  compute presets use returned and fail closed until vendored. Interim recommendation:
-  absolute end with a charged final partial period disclosed in the option. Remove only VM's
+  compute presets use returned, which the vendored payments contract expresses. Remove only VM's
   round-zero fallback here. Unit targets: domain terms/policy suites;
   app integration: `domains/vms/storefront/tests/integration/test_buyer_selection_negotiation.py`
   and bare-metal negotiation tests. `unify-compute-delivery-path` gates using the same

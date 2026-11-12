@@ -11,11 +11,15 @@ selected option's `lifecycle`, beside its `price` and `settlement` (foundation D
 "The option's shape"; terms D4). Payment derivation consumes that shared codec; it
 keeps no mechanism-specific copy of the terms.
 
-`kit/arkhai-payments` derives a single `once` part today. Its vendored schema is an
-earlier publication that predates per-part authorities (the revised contract has no
-mandate-level authorities), `maxHoldExtension` and `pendingStop`. The revised contract
-this design builds on is an implementation gate, not a description of the current
-generated models; the foundation vendors it once for both changes.
+The vendored payments contract (`kit/arkhai-payments/schema/SOURCE.md`) publishes
+every primitive this design uses: per-part authorities with a payee-only `start`,
+stop entries `{account, notice, partialPeriod}` whose treatment is `charged`,
+`returned`, `prorated` or the dispute authority's `chosen`, a part `end` that always
+carries its own `partialPeriod`, `maxHoldExtension`, pending stops and stop-relative
+holds. It is the only revision: there is no unpublished candidate, and the kit
+derives a setup `once` part and a rate part against it on one path
+(`kit/arkhai-payments/src/market_arkhai_payments/mandates.py`). What limits a rate
+offer is the composition's servicing declaration (D5, D7), not the contract.
 
 Both compute domains are in scope. API credits stays on `once` parts. The adapter
 is mechanism-owned and stateless; the caller's journal and continuation state live
@@ -108,10 +112,11 @@ period boundary under reserve-ahead.
 `end.partialPeriod` is derived exclusively from `early_termination.settles_through`
 through the foundation codec — `started_period` ↔ `charged`, `last_boundary` ↔
 `returned`, `stop` ↔ `prorated` — with no second end-treatment option parameter.
-The intended preset is `last_boundary`. Until `returned` is expressible, every
-interim rate offer, on-demand included, explicitly commits `started_period` at the
-term end and discloses the final partial-period charge; publication and acceptance
-refuse unexpressible terms, and SCM implements no compensating refund.
+The shipped preset is `last_boundary`. The contract expresses all three, so
+derivation refuses none of them for the contract's sake. A seller who configures
+`started_period` at the term end publishes an option that commits the final
+partial-period charge, which the default buyer refuses (D5). SCM implements no
+compensating refund.
 
 The foundation owns per-part authority derivation from the common codec. This
 change adds the rate-specific `start` permission, period, reservation and end
@@ -121,12 +126,11 @@ carry the entitled party's `notice_seconds` and the `partialPeriod` mapped from 
 `settles_through` (D5). An exceptional end grants no seller stop entry or implicit
 payment privilege: the seller files a dispute and mediation acts under its own
 entry; there is no additional seller restitution entry and no multiple-entry
-dependency. On the returned-capable revision every rate stop entry and rate end
-carries an explicit `partialPeriod`; the installed schema also requires the foundation's inert `returned` field on `once` ends, and the dispute
-authority's rate stop entry is `{account, notice: PT0S, partialPeriod: chosen}`,
-under which a stop carries its own charged, returned or prorated treatment. On the
-interim revision these fields are absent and the vector-qualified fixed charged
-semantics apply, dispute stops included; chosen-entry treatment is unavailable.
+dependency. Every rate stop entry and every part end carries an explicit
+`partialPeriod`: the schema requires it on `once` ends too, where the kit writes an
+inert `returned` that prices no period, and the dispute authority's rate stop entry
+is `{account, notice: PT0S, partialPeriod: chosen}`, under which a stop carries its
+own charged, returned or prorated treatment.
 Only the dispute authority extends and lifts holds. Reverse permissions remain the
 payee's and the dispute authority's. Setup uses the foundation's `once` permissions
 and its own encoded end at Agreement start, effectively clamped to approval if later, without rate start
@@ -145,12 +149,10 @@ configuration cannot alter an accepted mandate.
 
 ### D3. External contract context; one vendoring owner
 
-The revised contract has per-part authorities `{stop: [{account, notice,
-partialPeriod}], reverse, extend, start}`, with `start` on rate parts. Until
-`partialPeriod` is vendored only its expressible charged semantics may be offered;
-D5 defines that fail-closed interim. The contract also carries `maxHoldExtension`,
-an optional per-part `end` (with `partialPeriod` required for rate ends on the
-returned-capable revision), `{afterStop: d}` holds, `start` and `stop` with an
+The vendored contract has per-part authorities `{stop: [{account, notice,
+partialPeriod}], reverse, extend, start}`, with `start` on rate parts. It also
+carries `maxHoldExtension`, an optional per-part `end` whose `partialPeriod` is
+required, `{afterStop: d}` holds, `start` and `stop` with an
 optional part, `stop` with an optional `at`, and `extend`/`lift`. An entitled stop
 takes effect at `max(at ?? now, now + senderNotice)` at authority receipt and is
 never backdated. There is no implicit role-based or buyer-favourable stop
@@ -163,9 +165,7 @@ The seller's emergency exit, a spot hardware failure included, is the journaled
 `delivery_end` filing, not a payment stop of its own. On-demand's promise not to
 preempt is enforced by remedy rather than by a mandate guarantee of physical
 service: the buyer may enforce the premature-stop penalty through a case over held
-money, and the seller's own exit is the mechanically ruled self-penalty. Interim
-charged-only fixtures prove only their named mechanics and cannot qualify the
-standard returned self-penalty.
+money, and the seller's own exit is the mechanically ruled self-penalty.
 
 Per-part snapshots expose `started`, `stop`, `pendingStop`, `extensions` and
 `releaseAt`, beside rate progress and the causal sequence. Approval reserves the
@@ -187,16 +187,20 @@ remains held. Only the dispute authority opens case extensions and applies rulin
 effects, then lifts that case's refs.
 
 These are external dependencies, not behaviour SCM can implement by asserting it in
-a normative spec. The foundation vendors the schema and vectors and implements
-snapshot-proof verification in its round 2; this change gates on that verified
-interface before reading any snapshot field and supplies no second proof verifier.
+a normative spec. The foundation vendored the schema and vectors and implements
+snapshot-proof verification; this change reads snapshot fields only through that
+verifier and supplies no second one.
 
-Outstanding qualification requests to the service: signed snapshot vectors, paired
-snapshots before and after `start`, a mixed `once`/`rate` mandate vector, partial
-rate-reversal integration traces before and after a stop, and the reservation and
-charge behaviour where a late rate start approaches the absolute term bound. A
-missing vector blocks the corresponding conformance claim; double-generated vectors
-are not published authority evidence.
+The vendored vectors include signed snapshots before and after `start`, after
+stops and term ends, and of a setup-and-rate mandate whose setup end is clamped at
+approval; partial reversals while running and after a stop; and a same-key payer
+stop replayed before and after its notice deadline. Two limits remain, recorded as
+qualification limits and not closed by a double (`SOURCE.md`, "Producer
+evidence"): the producer's independent HTTP run covered fixed payer and payee
+treatment only, so `chosen` stops, term ends and reversals rest on its ledger
+integration suite; and the stop-retry vectors are fixed-clock fixtures, not a real
+lost HTTP response. A claim no vector or producer run covers stays unproven;
+double-generated traces are not published authority evidence.
 
 ### D4. Adapter commands and immutable operation descriptors
 
@@ -291,15 +295,18 @@ payee entitlement or term end whose `settles_through` is not `last_boundary`,
 naming the offending term; a buyer may explicitly loosen it. The rate adapter
 consumes that policy and does not own a second one.
 
-Until the returned-capable contract revision is vendored, publication and
-acceptance refuse every unexpressible value. The interim rate offer, spot or
-on-demand, explicitly commits `started_period` on each present entitlement and,
-when only a charged end is expressible, on the term end too. Default buyers refuse
-it: disclosure alone does not override their acceptance policy, and an interim
-scenario configures its buyer to accept `started_period` for every affected term,
-a charged term end included. Rate offers reach default buyers only once the
-vendored revision expresses `returned` on seller stops and term ends. No storefront
-refund restores a missing payment term.
+The contract expresses every value, so none is refused as unexpressible, and the
+shipped presets — payer `started_period`, payee and term end `last_boundary` — pass
+the default buyer policy as published. A seller may configure `started_period` on
+its own stop or at the term end: the option then commits it, the seller's
+publication diagnostics name it as a term a default buyer refuses, and a buyer takes
+it only by loosening its policy. Whether a composition may offer a rate option at
+all is decided by its servicing declaration (D7), which a production composition
+makes only for what it has qualified against its payment authority. The declaration
+names a mechanism and a contract revision, so it admits rate servicing as a whole;
+Goal 8's MVP change set restates it as the list of treatments a composition has
+qualified, and this design's doors then admit a treatment only where it is listed.
+No storefront refund restores a missing payment term.
 
 For authority start S and period P, periods are half-open [S + kP, S + (k+1)P). At
 E = S nothing is earned. With S = 0, P = 60, A = 100 and E = 60 all three
@@ -315,10 +322,10 @@ The verified stop record determines treatment:
 |---|---|
 | Payer or payee stop | that authority entry's `partialPeriod` |
 | Exhaustion (terms) | the `fundedThrough` boundary; no partial period |
-| Absolute part end (terms) | the end's own `partialPeriod`; compute preset `returned`, interim `charged` |
+| Absolute part end (terms) | the end's own `partialPeriod`; the shipped presets' is `returned` |
 | Seller `delivery_end` | the seller files through the dispute adapter; mediation's mechanical self-penalty stops rates now with `returned` and reverses unserved earnings and `once` shares; no seller payment calls |
 | `end_delivery` receipt | evidence of surrendered service only; the storefront cannot stop the buyer's billing; the buyer half journals and retries its own stop, and billing runs until it lands |
-| Dispute-authority stop or effects | a human ruling states its chosen-entry treatment; `delivery_end` realizes the payer's notice and treatment; payee-agreed claims are mechanical under the foundation guards; the interim fixed charged semantics remain a qualification gate |
+| Dispute-authority stop or effects | a human ruling states its chosen-entry treatment; `delivery_end` realizes the payer's notice and treatment; payee-agreed claims are mechanical under the foundation guards; hosted execution of a `chosen` stop is a qualification limit (D3) |
 | Superseded or equal-time competing request | the authority's recorded winning stop and entry, never local arrival order |
 | Unknown cause or ambiguous winning entry | surface an unsupported or unknown state; no inferred monetary action |
 
@@ -352,9 +359,9 @@ on bad sellers, banning included, and the buyer may still bring its own case.
 The adapter consumes the foundation's `delivery_end` dispute intent and
 mediation's request vocabulary and published mapping (foundation section 12.3). No
 exceptional-end event kind or field enters the payments vocabulary: the authority
-applies ordinary stop and reverse ruling effects. Missing `returned` or
-chosen-entry producer evidence blocks qualification of the standard package and is
-no ground for a seller-side substitute.
+applies ordinary stop and reverse ruling effects. Until a hosted run qualifies the
+`chosen` entry's returned stop (D3), the standard package is unqualified on that
+deployment; that is no ground for a seller-side substitute.
 
 ### D6. Seller notice is one command at the authority
 
@@ -509,10 +516,10 @@ its runnable scenarios and their execution; this change prepares its entry point
 — the rate and setup preset and approval fixtures, the typed buyer-end and seller
 notice and preempt commands, the adapter `start` and read seams — and runs no lane
 qualification of them. Physical completion evidence proves release and access
-closure, not `lease_ended` intent alone. A prepared interim rate scenario,
-on-demand included, names its buyer's explicit `started_period` acceptance for the
-payee entitlement and any charged term end, keeping default-policy refusal and
-returned-capable acceptance as distinct observations.
+closure, not `lease_ended` intent alone. A prepared scenario whose option names
+`started_period` on the payee entitlement or at the term end names its buyer's
+explicit acceptance of it, keeping default-policy refusal and default acceptance of
+the shipped `last_boundary` presets as distinct observations.
 
 Published vectors qualify derivation and contract use here; proposed lanes never
 prove hosted internals, and hosted prerequisites are reported before a scenario
@@ -537,7 +544,7 @@ satisfy none of them and enable no published production servicing.
 - An unsupported post-stop refund journal: reverse already works after a stop while money is held, and paid-out money is outside that primitive.
 - Storefront cumulative-target end refunds: they bind only a cooperative seller, race independent authority rulings, and absorb unrelated discounts.
 - Boundary-aligned seller notices as a substitute for `partialPeriod`: they change the offered notice and cannot encode an arbitrary committed treatment.
-- Local final-period pricing: the payment term and the authority decide it, the explicitly charged interim preset included.
+- Local final-period pricing: the payment term and the authority decide it, whichever treatment the option names.
 - A separate per-period mechanism or domain adapter: generic parts and authorities serve both domains.
 - A new preemption route or an escrow-keyed admin verb: lifecycle `submit` is already the authenticated command boundary.
 - Pinning accepting keys forever, or draining every deal on each rotation: a bounded overlap with re-anchoring preserves running deals without trusting revoked keys.

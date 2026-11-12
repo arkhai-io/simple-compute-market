@@ -16,7 +16,7 @@ Rate mechanics qualification MUST follow "Lane qualification identifies readines
 - **WHEN** kit rate integration tests run
 - **THEN** they exercise the shared clock-injected payments authority engine and verified vector fixtures without starting lane HTTP tooling
 
-#### Scenario: Interim fixtures disclose non-default policy
+#### Scenario: Fixtures disclose non-default policy
 - **WHEN** a spot or on-demand command fixture offers started_period on an entitlement or term end rejected by default buyer policy
 - **THEN** its committed setup explicitly configures buyer acceptance for every affected term
 - **AND** focused fixture validation records default-policy refusal separately

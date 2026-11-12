@@ -113,9 +113,10 @@ Keep the foundation's exact shapes and names:
   `last_boundary` ↔ returned, `stop` ↔ prorated. Seller presets offer payer charged and
   payee returned; the buyer's default acceptance policy refuses a payee entitlement
   or term end that is not returned (the buyer benefits, so the buyer enforces it in
-  negotiation), and a buyer may loosen it. Until the vendored contract expresses
-  returned, interim rate options explicitly offer charged treatment, which default buyers refuse. Publication and acceptance fail closed on any
-  unsupported treatment. `exposure_seconds` and `stop+exposure` are retired.
+  negotiation), and a buyer may loosen it. The vendored payments contract expresses all
+  three treatments (`kit/arkhai-payments/schema/SOURCE.md`), so the shipped presets publish
+  as stated; the codec still refuses a treatment the selected mechanism's installed contract
+  does not support, and what limits a rate offer is the composition's servicing declaration (D6). `exposure_seconds` and `stop+exposure` are retired.
 - `adjudication = {version, dispute, dispute_window_seconds, case_hold_max_seconds}`;
   `dispute = {interface, origin, account, record_key, params}`.
 - `premature_stop_penalty` is a nonnegative integer amount in the option asset's minor units, encoded as a canonical decimal string; absent/zero means none. It applies to an unentitled seller end, including a spot emergency without notice, not an entitled notice stop. Recommendation: on-demand presets default to 24 periods' price (calculated through the agreed-price accessor), and buyer default acceptance refuses on-demand without a positive penalty because the buyer benefits and enforces it, like partialPeriod. Expose seller override and explicit buyer opt-out; never silently downgrade the default. The number is a ceiling, not a guarantee: the remedy takes `min(penalty, earned amounts still held)` after the refunds, and early in a deal what is earned and held is the setup charge alone — an on-demand VM pulled minutes after activation, with its started period returned, leaves nothing else to take, and zero with no setup charge. A seller-funded stake that makes the ceiling collectible is the reserved `bond` term (foundation D5), not this change's.
@@ -236,10 +237,10 @@ while the payments end is absolute: horizon rounding cannot align that end to a
 billing boundary. Foundation D5 therefore gives the term end its own
 `settles_through`, mapped to the rate part's `end.partialPeriod` with the same
 values as stop authorities. Compute presets use `last_boundary` (returned), so
-billing never runs past the agreed maximum. Publication and acceptance fail
-closed until that treatment is vendored. Interim recommendation: publish rate
-options with an absolute end and a charged final partial period, disclosed in
-the option as term-end `started_period`, not as the returned preset. Exhaustion
+billing never runs past the agreed maximum; the vendored payments contract
+expresses that treatment. A seller who configures term-end `started_period`
+publishes a charged final partial period, committed in the option, which the
+default buyer refuses (D3). Exhaustion
 needs no separate rule: reserve-ahead places it on a period boundary.
 
 Recurring start_utc must resolve to whole-second precision before the final signature;

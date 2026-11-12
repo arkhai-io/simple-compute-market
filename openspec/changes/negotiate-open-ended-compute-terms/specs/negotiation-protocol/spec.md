@@ -83,7 +83,7 @@ Reserved duration MUST be positive and fit both bounds.
 
 - **WHEN** the effective seller bound or shorter buyer horizon is 125 seconds for a 60-second period
 - **THEN** duration and max term bind 125 seconds before signature, without rounding
-- **AND** the term end carries its own `settles_through` under the foundation codec: compute presets use `last_boundary` mapped to `end.partialPeriod: returned`, and fail closed until vendored
+- **AND** the term end carries its own `settles_through` under the foundation codec: compute presets use `last_boundary` mapped to `end.partialPeriod: returned`
 
 #### Scenario: Reserved term exceeds availability
 

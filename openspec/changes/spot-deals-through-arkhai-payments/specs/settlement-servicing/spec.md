@@ -64,7 +64,7 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 
 #### Scenario: The rate adapter consumes lifecycle treatment
 - **GIVEN** the deal-lifecycle requirements for stop-authority and term-end treatment
-- **WHEN** a returned-capable rate mandate is derived
+- **WHEN** a rate mandate is derived
 - **THEN** the adapter uses the shared codec for rate stop entries and rate end, including the dispute authority's chosen entry
 - **AND** setup once ends retain the published schema's required inert returned partialPeriod, which prices no recurring period
 
@@ -112,17 +112,20 @@ The hosted adapter MUST translate lifecycle commands into explicit per-part even
 ### Requirement: Rate stops consume authority-priced period treatment
 The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping and capability refusal rules. It MUST observe the winning authority entry rather than compute cooperative end-price corrections. Seller delivery_end MUST instead be filed through the dispute adapter, with no seller-side stop or reverse for that filing.
 
-#### Scenario: The contract has no partialPeriod field yet
-- **WHEN** an interim spot or on-demand preset is offered against a contract supporting only charged behavior
-- **THEN** every present entitlement and term end commits started_period; absent wire treatment fields use vector-qualified fixed charged semantics, including dispute stops
-- **AND** last_boundary or stop terms refuse before publication or acceptance
-- **AND** the buyer-orchestration default acceptance policy refuses the interim offer; proceeding requires explicit buyer acceptance of started_period on payee stops and any charged term end
+#### Scenario: Every committed treatment is derived as committed
+- **WHEN** an accepted rate option names started_period, last_boundary or stop on an entitlement or at the term end
+- **THEN** derivation writes charged, returned or prorated on that stop entry or part end, and the dispute authority's stop entry is chosen
+- **AND** no treatment is replaced with another
 
-#### Scenario: Returned-capable spot reaches default buyers
-- **GIVEN** a vendored revision expressing returned and an offered spot option with payee and term-end settles_through last_boundary
+#### Scenario: A seller stop that keeps the started period needs the buyer's opt-in
+- **WHEN** an offered option's payee entitlement or term end settles through started_period
+- **THEN** the buyer-orchestration default acceptance policy refuses it, naming the term; proceeding requires explicit buyer acceptance of started_period on payee stops and any charged term end
+
+#### Scenario: The shipped spot preset reaches default buyers
+- **GIVEN** an offered spot option with payee and term-end settles_through last_boundary
 - **WHEN** the buyer's default acceptance policy and exact mandate check run
 - **THEN** those treatments pass policy without loosening it
-- **AND** an unexpressible returned treatment is never replaced with charged
+- **AND** a returned treatment is never replaced with charged
 
 #### Scenario: Rate earning follows completed periods or stop
 - **WHEN** a rate period begins
@@ -190,10 +193,10 @@ The rate adapter MUST derive end.partialPeriod only from early_termination.settl
 - **THEN** billing keeps 100 for [10,70) and returns the incomplete [70,130) period
 - **AND** delivery still ends at 120 without rounding down the accepted duration
 
-#### Scenario: Only charged absolute ends are expressible
-- **WHEN** an interim spot or on-demand rate preset is published
-- **THEN** its early_termination.settles_through explicitly commits started_period and discloses the final partial-period charge
-- **AND** an option requesting returned or prorated refuses publication and acceptance
+#### Scenario: A seller configures a charged absolute end
+- **WHEN** a rate preset's early_termination.settles_through is started_period
+- **THEN** the published option commits started_period at its term end, so the final partial period is charged
+- **AND** the default buyer acceptance policy refuses the option, naming the term end
 
 ### Requirement: Rate delivery authorization is pure and phase-specific
 The hosted rate adapter MUST implement authorize(phase, evidence) for commit, dispatch, start and disclose without mutation. Results MUST carry allow/refuse/pending, reason, operation identity and verified evidence references. Missing or unverified state MUST NOT allow work. The neutral servicing composition MUST NOT inspect hosted part fields.
@@ -243,7 +246,7 @@ The hosted payment adapter MUST expose no exceptional-end operation and MUST NOT
 - **AND** SCM does not duplicate mediation's computation or apply a second correction
 
 #### Scenario: The standard package cannot be qualified
-- **WHEN** the dispute intent, published mapping or required returned/chosen-entry contract support is absent or unqualified
+- **WHEN** the dispute intent or published mapping is absent, or the payment authority's execution of a chosen returned stop is unqualified
 - **THEN** qualification reports the missing dependency without a seller-side stop/reverse substitute
 
 ### Requirement: Rate observations require verified authority state

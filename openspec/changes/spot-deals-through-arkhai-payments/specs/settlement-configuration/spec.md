@@ -19,7 +19,7 @@ SCM MUST admit period and reserve_ahead_seconds together or neither and require 
 #### Scenario: Rate end treatment is explicit
 - **WHEN** a rate option is published or accepted
 - **THEN** only early_termination.settles_through supplies term-end treatment through the deal-lifecycle codec and is checked against vendored end capabilities
-- **AND** an unknown value or unexpressible treatment refuses instead of defaulting from current configuration
+- **AND** an unknown value, or a treatment the installed contract does not support, refuses instead of defaulting from current configuration
 
 #### Scenario: A seller opts out of setup
 - **WHEN** a complete rate option omits setup_amount

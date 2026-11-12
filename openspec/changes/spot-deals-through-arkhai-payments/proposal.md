@@ -35,19 +35,16 @@ continuation is a separate, dependent change.
   `start`, pending and final stops, funding and maximum-term observations, and
   export immutable operation descriptors for caller-owned journals. Started-period
   treatment is a per-stopper `partialPeriod` payment term, not a storefront
-  refund: on the returned-capable revision every rate end carries it (`once` ends
-  do not) and the dispute authority's stop entry is `chosen`, with the treatment in
-  each stop event; on the interim revision the fields are absent and the
-  vector-qualified fixed charged semantics apply, dispute stops included. Periods
-  earn at period end or at the part's stop, not at period start. The term end
-  carries its own `partialPeriod`, `returned` in the compute presets; unexpressible
-  terms fail closed, and an interim rate option commits `started_period` on every
-  present entitlement and, where only a charged end is expressible, on the term
-  end, disclosed. Negotiation decides the accepted treatment: seller presets offer
-  `last_boundary`, and the terms-owned buyer policy by default refuses any other
-  payee or term-end treatment, so interim spot and on-demand need the buyer's
-  explicit `started_period` acceptance and reach default buyers only once
-  `returned` is expressible in the vendored contract.
+  refund: every rate stop entry and every part end carries it (a `once` end's is
+  inert) and the dispute authority's stop entry is `chosen`, with the treatment in
+  each stop event. Periods earn at period end or at the part's stop, not at period
+  start. The term end carries its own `partialPeriod`, `returned` in the compute
+  presets. The vendored contract expresses every treatment; what limits a rate
+  offer is the composition's servicing declaration. Negotiation decides the
+  accepted treatment: seller presets offer `last_boundary` on the payee entitlement
+  and at the term end, and the terms-owned buyer policy by default refuses any
+  other payee or term-end treatment, so an option naming `started_period` there
+  needs the buyer's explicit acceptance.
 - The seller half's notice command runs through the existing seller-authenticated,
   negotiation-keyed lifecycle `submit`, with a typed client method and a
   `deals preempt` operator verb in both domains. The stop is submitted at once to

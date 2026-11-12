@@ -37,16 +37,16 @@ foundation; this design's D1–D7.
 - [x] 1.4 Obtain or explicitly gate on published signed snapshot/start/mixed-part
       vectors and partial-reversal-before/after-stop traces. Identify missing
       authority conformance evidence without replacing it with a double claim.
-      Verify explicit partialPeriod on rate stop entries and rate ends on the
-      returned-capable revision and dispute chosen-entry payloads. The published schema requires an inert returned partialPeriod on once ends too; preserve the foundation encoding (see dependency-contracts.md).
+      Verify explicit partialPeriod on rate stop entries and rate ends
+      and dispute chosen-entry payloads. The published schema requires an inert returned partialPeriod on once ends too; preserve the foundation encoding (see dependency-contracts.md).
       Confirm delivery_end remains a dispute intent/request and mediation's
       published standard self-penalty uses its own chosen stop entry with returned.
       Producer evidence gates that package; there is no seller restitution entry
       or several-stop-entries-per-account dependency.
-      Record absent treatment fields and fixed charged dispute-stop semantics on
-      the interim revision; it cannot qualify returned delivery_end. Freeze
+      The vendored contract is the only revision and expresses every treatment,
+      so the vectors have no charged-only split. Freeze
       timestamp precision and per-end partialPeriod/late-start semantics with
-      the vendored contract. Unexpressible terms fail closed; never hand-edit
+      the vendored contract. Never hand-edit
       generated models. The authority, not SCM, computes a returned/prorated
       partial period at the unchanged absolute end.
 
@@ -80,7 +80,7 @@ publication configuration/builders and their focused publication suites.
       Gate setup-bearing presets on foundation 12.1 vendoring delivery_end and both signature vectors, not another payments wire change; rate-only opt-out remains available. Verify malformed pairs, calendar periods, setup opt-out, the pending-revision refusal and insufficient lead.
 - [x] 2.2 Derive setup-once then rate deterministically through the accessor and
       codec. Include rate end, afterStop hold, maxHoldExtension and exact per-part
-      authorities/notices. On the returned-capable revision require partialPeriod
+      authorities/notices. Require partialPeriod
       on rate stop entries and rate ends; retain the inert once-end field required by the published schema;
       dispute rate stop is {account, notice: PT0S, partialPeriod: chosen} and its
       stop event supplies treatment. Keep rate start payee-only and seller stop
@@ -90,7 +90,7 @@ publication configuration/builders and their focused publication suites.
       Verify setup's encoded end is Agreement start, effectively clamped to approval if later, and absolute
       capacity bounds are never extended after late activation/start. Map early_termination.settles_through
       through the foundation codec to end.partialPeriod: preset last_boundary;
-      explicitly disclosed started_period for interim spot/on-demand when only charged is expressible.
+      a seller-configured started_period is committed in the option, which the default buyer refuses.
       Refuse unsupported terms rather than round term durations or downgrade.
 - [x] 2.3 Extend the buyer's exact mandate check for mixed parts, ordering, price,
       asset, hold, cap and stop authorities. Verify explicit zero payer notice is
@@ -157,10 +157,10 @@ Journal persistence itself belongs to convergence.
       Implement D4's refusal classification, including transaction_stopped start
       failure, read-before-insufficient-funds reconciliation and matured shortfall.
 - [x] 3.4 Map settles_through to partialPeriod through the foundation codec:
-      started_period/charged, last_boundary/returned, stop/prorated. Gate each
-      value on vendored capability at publication and acceptance; interim spot
-      and on-demand use fixed charged semantics on all present entries and ends,
-      with absent wire fields and no chosen-entry payload support. Qualify boundary/no-start/terms stops,
+      started_period/charged, last_boundary/returned, stop/prorated. The
+      vendored contract expresses each value, so the codec's capability check
+      refuses none; publication, acceptance and materialization gate a rate
+      option on the composition's servicing declaration. Qualify boundary/no-start/terms stops,
       superseded and equal-time requests from authority vectors; compute no
       local end-correction delta or clawback. Periods stay reserved until their
       end or part stop; afterStop payout is unchanged. Negotiation decides entitled
@@ -237,10 +237,10 @@ second preemption endpoint or a local payment-stop scheduler.
       Before convergence, use lane-only approval/command fixtures and assert
       delivery refuses without the rate hook; do not commit/deliver an unserviced
       live rate option. This fixture is the explicit lane-only door exception.
-      Any interim spot or on-demand fixture must explicitly configure its buyer to accept
-      started_period on the payee entitlement and any charged term end. Include
-      default-buyer refusal as a separate observation; returned-capable fixtures
-      may use default buyers only once the matching contract is vendored.
+      A fixture whose option names started_period on the payee entitlement or
+      at the term end must explicitly configure its buyer to accept it, with
+      default-buyer refusal as a separate observation; fixtures on the shipped
+      last_boundary presets use default buyers.
 - [ ] 4.5 Re-drive both domains' canonical rate buyer end: stop then hint, keep
       service during nonzero payer notice, and end through watch at effective
       stop. Consume foundation 7.5 round 2 (after 12.3 and 13.3) and
@@ -325,7 +325,7 @@ hosted-target evidence.
 - [ ] 6.2 Supply evidence metadata at the adapter/command first-use boundary:
       contract revision, target class/mode, hashes and control trace. Readiness
       gates scenario runs, not a claim that the target was prepared here.
-      Record buyer acceptance-policy configuration for interim spot/on-demand evidence;
+      Record buyer acceptance-policy configuration for evidence from an option a default buyer refuses;
       an opted-in buyer is not evidence of acceptance by default buyers.
 - [ ] 6.3 Reference convergence's sole consolidated rate qualification matrix
       (its design's Scenarios and evidence); do not reproduce it here. Retain

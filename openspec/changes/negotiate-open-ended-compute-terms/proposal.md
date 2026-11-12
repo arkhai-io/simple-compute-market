@@ -43,9 +43,8 @@ do not express these products across mechanisms or bound them by an absolute dat
 - Both buyer CLIs show class, unit-bearing price, setup once charge, reserve,
   maximum term, the delivery deadline, entitlements/notices, per-stopper and term-end `settles_through`
   billing treatment and adjudication/retention terms. Compute term ends use
-  `last_boundary` mapped to payments `end.partialPeriod: returned`, failing closed
-  until vendored. Interim recommendation: an absolute end with a charged final
-  partial period disclosed in the option.
+  `last_boundary` mapped to payments `end.partialPeriod: returned`, which the
+  vendored contract expresses.
   Buyer guarantees rest on authority records and kept signed bytes.
 - Drop bare metal's minimum-spend gate. Presets use an honestly named setup `once`
   part beside the rate by default once foundation 12.1 vendors the delivery_end revision and vectors; before then setup-bearing presets remain disabled, without a new payments wire gate. Sellers may refuse churners in negotiation policy.
