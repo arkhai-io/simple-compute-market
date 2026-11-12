@@ -16,8 +16,8 @@ The owner's record of round 1 (`reviews/01-implementation-owner.md`) stood in fo
 the design review this change never had; its decisions are in `design.md` D1–D12, and
 the code they need, with review 04's F1 and F2, is round 2: first planned as section 5,
 then split at the owner's direction into sections 5–12, one session each but 5 and 6
-together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–10
-are done; implementation resumes at section 11. Verification levels follow `docs/development/TESTING.md`;
+together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–11
+are done; implementation resumes at section 12. Verification levels follow `docs/development/TESTING.md`;
 every behaviour this change adds gets permanent tests at the level it assigns (owner
 record 01, R2).
 
@@ -1657,22 +1657,106 @@ D5, D7) and R6's per-period money consumers. Touches tests only, in `core`,
 `kit/resource-pools-contracts`, `kit/settlement-runtime`, both buyers and the VM
 storefront.
 
-- [ ] 11.1 **The accessor and the projections (D2; R2):** `agreed_price` in
+- [x] 11.1 **The accessor and the projections (D2; R2):** `agreed_price` in
   `core/tests/unit/test_rate_helpers.py` and `test_settlement_options.py` — total and
   per-period, sub-hour periods, rounding upward once, the absolute amount fallback and
   refusal of a missing projector; each installed registration's projection (Alkahest,
   payments, contact) — once totals, unsupported rate parameters failing closed.
-- [ ] 11.2 **Bounds, the buyer's policy and presentation (D5, D7; R2):** capacity-bound
+  Done (2026-11-12), all unit. Core, `test_rate_helpers.py` (`agreed_price` called
+  directly with injected projections): a prepaid two-hour Agreement reads 5,000,000
+  total; PT15M and PT1M Agreements read 625,000 and 41,667 per period, unchanged at a
+  7200- or 172800-second horizon; a selected option without a projection refused; no
+  option keeps its absolute amount; five projections contradicting their unit refused;
+  an amount beyond uint256 refused. `test_settlement_options.py`: an acceptance-bound
+  listing (by `listing_id` or a registry's `id`) must hold the exact selected option —
+  another listing, none, or a repriced option refused. Departs from the plan's line:
+  the accessor never rounds, so "rounding upward once" and the sub-hour quotes are VM's
+  `quote_from_multiplier`, tested in `domains/vms/storefront/tests/unit/test_vm_multiplier.py`
+  beside its existing quote tests (`domains/vms/negotiation` has no suite of its own):
+  one period's price (625,000; 41,666.67 rounded
+  up to 41,667) at a 7200- or 172800-second or omitted horizon, against 5,000,000 over
+  a two-hour whole term; and `selected_billing_basis` taking the option's projection,
+  a legacy raw escrow proposal a total without one. Projections, each registration's
+  `project_billing` called directly: Alkahest (`kit/alkahest/tests/unit/test_settlement_config.py`)
+  a total for a published accepted-escrow option (built by the file's builder helper)
+  and an explicit negotiated proposal, refused with a `period`, with lifecycle terms or
+  another schema; payments (`kit/arkhai-payments/tests/test_settlement_config.py`) a
+  total for a once option, refused with `period`, `period` and `reserve_ahead_seconds`,
+  or `setup_amount` (the strict parameter codec), or another schema; contact
+  (`kit/contact-exchange/tests/unit/test_settlement_config.py`) a total for a rateless
+  introduction, also through the registry's `agreed_price`, refused with a rate, an
+  asset, foreign parameters or another schema.
+- [x] 11.2 **Bounds, the buyer's policy and presentation (D5, D7; R2):** capacity-bound
   validation and tier selection in `kit/resource-pools-contracts/tests`;
   `default_buyer_refusals`, `lifecycle_disclosure` and `present_payment`'s registry checks
   (basis, asset, accepted money unchanged, missing presenter refused) in
   `kit/settlement-runtime/tests/unit`.
-- [ ] 11.3 **Every money consumer with a per-period Agreement (D2; R6):** mandate
+  Done (2026-11-12), all unit. `kit/resource-pools-contracts/tests/unit/test_capacity_bounds.py`
+  (new): the absolute bound read as one Z timestamp from either UTC spelling or an aware
+  datetime, keeping fractional seconds, and refused naive, offset, as text, as an epoch
+  or null; a nonpositive relative bound meaning none and a non-integer refused; a tier's
+  strict fields and extra keys refused; a pool hint read per offering mode, an absent
+  mode empty, and six malformed hints each refused naming where, by both the reader and
+  `validate_capacity_bounds`; `resolve_capacity_bounds` field by field from the highest
+  stating tier (an override's absolute date over a hint's among them), and a stated 0
+  masking the tiers below. (VM's per-model bound tiers are
+  9.3's.) `kit/settlement-runtime/tests/unit/test_buyer_presentation.py` (new; options
+  from `test_buyer_terms.py`'s fixtures, a fixture registration whose projection and
+  presenter each test sets): `default_buyer_refusals` empty without an adapter and for
+  once, on-demand and spot options, one wording per term, three terms in order on one
+  option, and a zero penalty; `lifecycle_disclosure`'s deadline, each stopper's notice
+  and treatment, term end, penalty ceiling and asset, buyer end and dispute rows for
+  on-demand, the seller's notice stop for spot, the once option's "no entitled stop",
+  the missing deadline beside its refusal, the no-adapter branch, and three mismatched
+  contexts refused; `present_payment` returning a matching presentation, refusing one
+  off the option's basis, period or asset or changing an accepted quote, and refusing a
+  mechanism without a presenter or a projection. Added beyond the plan, for D7's
+  display that both buyers share: `compute_disclosure` showing an accepted per-period
+  Agreement over two days as one period's price with its reserve, horizon and end, a
+  selected spot option with its omitted horizon and bounds, a whole-term option as a
+  reserved total, and refusing an option other than the accepted one.
+- [x] 11.3 **Every money consumer with a per-period Agreement (D2; R6):** mandate
   derivation (`kit/arkhai-payments/tests`), buyer caps and display, recovery and
   confirmation (`domains/vms/buyer/tests`, `domains/bare_metal/buyer/tests`), each driven
   with a per-period Agreement and asserting the money is read once, never scaled by
   duration or multiplier again.
-- [ ] 11.4 **Verify:** `make dist`, then `make -C core test` (unit), `make -C
+  Done (2026-11-12), all unit. No installed mechanism bills per period (the installed
+  payments projection refuses one, 11.1), so the buyers' per-period cases inject a
+  projection: a fixture mechanism's option in VM's, the payments registration with its
+  projection and presenter replaced in bare metal's. Mandate, `kit/arkhai-payments/tests/test_agreement.py`:
+  the mandate's one part charges the accepted 10,000 at a 3600-, 7200- or 172800-second
+  duration and stays bound. The mandate takes the installed projection, which no test
+  can replace, so what is tested is that a payments option carrying `period` (625,000
+  over two days, the option re-derived) is refused at all three entry points: no
+  mandate policy and no settlement data ("lacks the terms a payments mandate needs"),
+  and a stored once mandate re-checked against it fails as malformed, never compared.
+  Each refusal is the projection's strict codec rejecting `period`; the policy's own
+  guard against a per-period quote (`agreement.py`, `quote.unit != "total"`) is
+  unreachable through the installed projection and untested. VM buyer, `tests/test_negotiation_amounts.py`
+  (`amount_codec` and `priced_unit_count` with an injected projection): the payment is
+  one period's price (250 a quarter hour; 16.67 rounded up to 17 a minute) at any
+  horizon or none; the per-hour ceiling caps one period (200), refusing a larger accepted
+  shape naming "800 per hour for 900s", at a two-day horizon; bounds scale by one period
+  (0.25) whatever the horizon, a reserved selection by its duration, and refuse one
+  without. `tests/test_per_period_acceptance.py` (new): `verify_pricing_acceptance`,
+  which acceptance and a resumed run's `verify_recovered_pricing` call, over a record
+  with a real seller-signed publication — a per-period Agreement at one period's quote
+  admitted with no requested duration, one at 192 periods, the hourly rate or one unit
+  off refused, and the period price refused when the projection reads it as a total;
+  the confirmation (`_confirm_settlement_interactive`, the buyer declining on the
+  isolated standard input of Click's test runner, no name replaced) showing a
+  per-period charge and a two-hour total unscaled. The resumed run's evidence walk itself is not driven here. Core's escrow
+  recovery read, `core/buyer/tests/unit/test_identity_recovery.py`: `exact_agreed_amount`
+  refuses a per-period projection and an unprojected selected option. Bare metal,
+  `tests/test_purchase_quote.py` (new; a payments registration with its projection and
+  presenter replaced, through the registry both functions take): `purchase_quote` is one
+  period's 625,000 at no, a two-hour or a two-day horizon; `require_quoted_agreement`
+  admits the Agreement at that quote, refuses one at 192 or 48 periods or one unit off,
+  refuses the period price where no quote says it is per period, and holds an explicitly
+  requested horizon. Bare metal sets no ceiling, and its display is `compute_disclosure`,
+  11.2's. Not covered: VM `market buy`'s or `bare-metal buy`'s own flow with a per-period
+  option, which no installed mechanism reaches.
+- [x] 11.4 **Verify:** `make dist`, then `make -C core test` (unit), `make -C
   kit/alkahest test`, `make -C kit/arkhai-payments test`, `make -C kit/contact-exchange
   test`, `make -C kit/resource-pools-contracts test`, `make -C kit/settlement-runtime
   test`, `make -C domains/vms/buyer test`, `make -C domains/bare_metal/buyer test` (all
@@ -1680,6 +1764,53 @@ storefront.
   negotiate-open-ended-compute-terms`. End-to-end: none; no deployed run produces a
   per-period Agreement (the unowned gap in `openspec/changes/README.md`), so these unit
   tests are the money consumers' evidence.
+  Done (2026-11-12), on the final tests: `make -C core test` (core unit 130, core buyer
+  unit 170, core storefront 227, storefront client 68, all passed); `make -C kit/alkahest
+  test` 465 passed; `make -C kit/arkhai-payments test` (with mypy, vectors and
+  generated-model checks) 235 passed; `make -C kit/contact-exchange test` 146 passed;
+  `make -C kit/resource-pools-contracts test` 478 passed; `make -C kit/settlement-runtime
+  test` (unit and library integration) 302 passed; `make -C domains/vms/buyer test` 299
+  passed; `make -C domains/bare_metal/buyer test` 63 passed; added for
+  `test_vm_multiplier.py`, `make -C domains/vms/storefront test` unit 1192 passed, 1
+  skipped, application integration 584 passed. Only tests changed, so no wheel changed;
+  `make dist` ran before the pre-commit run. `make check-comment-hygiene` passed;
+  `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms` passed
+  every hook — `after-functional-change` exit 0 (nothing rebuilt),
+  `pre-commit-functional` exit 0 (`make check-packaging` and the whole `make test`),
+  `pre-commit` exit 0. End-to-end confirmed as stated: no marker in `e2e-tests/`
+  produces a per-period Agreement. No `Owed by validation:` evidence: no CI workflow a
+  push alone produces bears on this section.
+
+### Section 11 verification and handoff (2026-11-12)
+
+- The fresh-context compliance check found two medium, two low and three nits, all
+  fixed: the VM confirmation test patched `typer.confirm` (a library name `TESTING.md`'s
+  conventions forbid new tests to replace), now typing the decline on Click's isolated
+  standard input; the 11.3 note claimed a per-period mandate case it did not run (now
+  says what the strict codec's refusal proves, with `match=` on each refusal); the
+  bare-metal test's docstring and the note's opening misnamed its fixture; a fixture
+  address comment; an import group; the 11.1 note's placement reason; and the
+  "absolute date overrides a hint" case added. Its re-check found every fix holding and
+  one dropped space, restored (the payments suite rerun after it, 235 passed), and
+  `scripts/change-workflow run pre-commit` passed every hook again on the final state.
+  Declined: nothing.
+- For the round's triage: the payments mandate policy's guard against a per-period
+  quote (`kit/arkhai-payments/src/market_arkhai_payments/agreement.py`, `quote.unit !=
+  "total"`) cannot be reached, since `_policy` takes the installed projection, which
+  refuses any `period` first; it is defence in depth with no test. Making the
+  projection injectable would let a test reach it; this section changes tests only.
+- For section 12: `kit/settlement-runtime/tests/unit/test_buyer_presentation.py` and
+  `domains/vms/buyer/tests/test_per_period_acceptance.py` import fixtures from sibling
+  test modules (`test_buyer_terms.py`, `test_negotiation_amounts.py`; bare metal's
+  `test_purchase_quote.py` from `test_cli_completion.py`). The VM file builds a real
+  seller-signed publication record for `verify_pricing_acceptance` (`_signed_record`),
+  a start for 12.2's pin cases at unit level; 12.2's own cases are application
+  integration through the storefront. 12.3's probe conversion: `price_probe.py`,
+  `billing_projection_probe.py` and `consumer_price_probe.py` are now covered by 11.1
+  and 11.3's tests (the accessor, the installed projections, the per-period quote and
+  codec, exact escrow recovery, the mandate's refusal and the confirmation), except the
+  probes' retained-record round trip through `accepted_listing_record`, which 12.2
+  owns.
 
 ## 12. Permanent integration tests, the retained pricing record and the round's validation
 

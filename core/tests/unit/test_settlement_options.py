@@ -4,9 +4,12 @@ import pytest
 from pydantic import ValidationError
 
 from market_core.schemas import (
+    Agreement,
+    PriceBasis,
     RateValue,
     SettlementOption,
     SettlementSelection,
+    agreed_price,
     derive_settlement_option_id,
 )
 
@@ -44,6 +47,40 @@ def test_settlement_option_rejects_payload_drift() -> None:
     raw["price"]["asset"] = "eur"
     with pytest.raises(ValidationError, match="canonical payload"):
         SettlementOption.model_validate(raw)
+
+
+def _accepted(option: SettlementOption) -> Agreement:
+    return Agreement(
+        negotiation_id="neg-1", listing_id="listing-1", listing_hash="0" * 64,
+        buyer={"scheme": "ed25519", "identifier": "buyer"},
+        seller={"scheme": "ed25519", "identifier": "seller"},
+        settlement=option, amount=250, asset="usd", duration_seconds=7200,
+        start_utc="2026-01-01T00:00:00Z", accepted_at="2026-01-01T00:00:00Z",
+    )
+
+
+def _total(_option: SettlementOption) -> PriceBasis:
+    return PriceBasis(unit="total")
+
+
+def test_an_acceptance_bound_listing_must_hold_the_exact_selected_option() -> None:
+    option = _option()
+    agreement = _accepted(option)
+    listing = {"listing_id": "listing-1", "settlement_options": [option.model_dump(mode="json")]}
+    assert agreed_price(agreement, listing, project_billing=_total).amount == 250
+    # A registry record names its listing ``id``.
+    record = {"id": "listing-1", "settlement_options": listing["settlement_options"]}
+    assert agreed_price(agreement, record, project_billing=_total).amount == 250
+    with pytest.raises(ValueError, match="identity differs"):
+        agreed_price(agreement, {**listing, "listing_id": "listing-2"}, project_billing=_total)
+    with pytest.raises(ValueError, match="exact selected option"):
+        agreed_price(agreement, {**listing, "settlement_options": []}, project_billing=_total)
+    repriced = option.model_dump(mode="json")
+    repriced["price"]["rates"][0]["value"] = "126"
+    repriced.pop("option_id")
+    repriced["option_id"] = derive_settlement_option_id(**repriced)
+    with pytest.raises(ValueError, match="exact selected option"):
+        agreed_price(agreement, {**listing, "settlement_options": [repriced]}, project_billing=_total)
 
 
 def test_settlement_selection_is_exact_and_expiry_bounded() -> None:

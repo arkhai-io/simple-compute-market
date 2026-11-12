@@ -9,6 +9,7 @@ from typing import Any
 import market_arkhai_payments.settlement_config as settlement_config
 import pytest
 from market_arkhai_payments import PaymentsClient
+from market_core.schemas import PriceBasis, SettlementOption, derive_settlement_option_id
 from market_arkhai_payments.settlement_config import (
     ARKHAI_PAYMENTS_MECHANISM,
     ArkhaiPaymentsConfig,
@@ -23,6 +24,8 @@ from market_identity import Ed25519Signer, Eip191Signer
 from market_deal_lifecycle.configuration import DisputeEntry
 from market_arkhai_payments.fixtures import dispute_lifecycle
 from market_settlement_runtime import SettlementPublicationClause
+
+import payment_terms
 
 BUYER = "00000000-0000-4000-8000-000000000011"
 PAYEE = "00000000-0000-4000-8000-000000000012"
@@ -403,6 +406,35 @@ def test_registration_has_no_client_factory_or_settlement_lifecycle() -> None:
     assert registration.client_factory is None
     assert registration.accepted_obligation_builder is None
     assert registration.settlement_verifier is None
+
+
+def _with_params(option: SettlementOption, **changes: Any) -> SettlementOption:
+    raw = option.model_dump(mode="json", exclude_none=True)
+    raw.pop("option_id")
+    raw["settlement"] = {**raw["settlement"], **changes}
+    return SettlementOption(option_id=derive_settlement_option_id(**raw), **raw)
+
+
+def test_the_installed_projection_bills_a_once_option_as_one_total() -> None:
+    project = create_arkhai_payments_registration().project_billing
+    assert project is not None
+    assert project(payment_terms.option()) == PriceBasis(unit="total")
+    with pytest.raises(ValueError, match="requires an Arkhai payments option"):
+        project(_with_params(payment_terms.option(), schema="fixture.other.v1"))
+
+
+@pytest.mark.parametrize("params", [
+    {"period": "PT15M"}, {"period": "PT1M", "reserve_ahead_seconds": 1800}, {"setup_amount": "500"},
+])
+def test_the_installed_projection_refuses_rate_parameters_rather_than_label_them_a_total(
+    params: dict[str, Any],
+) -> None:
+    # The installed adapter services once parts only; a rate option labelled a
+    # total would be charged its one period's price for the whole term.
+    project = create_arkhai_payments_registration().project_billing
+    assert project is not None
+    with pytest.raises(ValueError, match="Extra inputs"):
+        project(_with_params(payment_terms.option(), **params))
 
 
 def test_attach_agreement_is_a_buyer_setting(monkeypatch: pytest.MonkeyPatch) -> None:
