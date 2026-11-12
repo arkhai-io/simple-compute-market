@@ -53,6 +53,7 @@ from market_settlement_runtime import (
     SettlementSQLiteRepository,
 )
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
+from market_settlement_runtime.terms_policy import load_seller_terms_policy, terms_policy_selection
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
@@ -896,6 +897,7 @@ def build_runtime_from_configuration(
     settlement_composition = BareMetalStorefrontSettlementComposition.from_raw_config(
         settlement_config,
         disputes=RegistryDisputePolicy.from_document(active.model_dump()),
+        terms_policy=load_seller_terms_policy(terms_policy_selection(active.model_dump())),
         resources={
             "marketplace_signer": signer,
             "claimant_principal": principal,

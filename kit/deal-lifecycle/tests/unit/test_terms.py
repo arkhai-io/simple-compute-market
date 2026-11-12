@@ -144,15 +144,13 @@ def test_once_no_adapter_and_reserved_bond():
         validate_terms(data, context())
 
 
-def test_default_buyer_deadline_policy_is_separate_from_publication():
+def test_a_missing_deadline_is_valid_for_either_side():
+    """Declining an option without one is the buyer's terms policy's decision."""
     data = terms()
     del data["delivery_deadline_seconds"]
     assert validate_terms(data, context())
     accepted = (DisputeAuthority(**AUTHORITY),)
-    with pytest.raises(ValueError, match="no delivery_deadline"):
-        validate_terms(data, context(buyer=True, accepted_authorities=accepted))
-    assert validate_terms(data, context(buyer=True, accepted_authorities=accepted,
-                                        allow_missing_delivery_deadline=True))
+    assert validate_terms(data, context(buyer=True, accepted_authorities=accepted))
 
 
 @pytest.mark.parametrize("value,mapped", [

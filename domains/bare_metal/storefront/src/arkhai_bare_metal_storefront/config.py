@@ -283,6 +283,9 @@ class BareMetalStorefrontSettings(_Section):
     dispute: list[dict[str, Any]] = Field(default_factory=list)
     disputecredential: list[dict[str, Any]] = Field(default_factory=list, repr=False)
     use_registry_dispute_authorities: bool = True
+    # The installed seller terms policy: its name, or a table with a name and
+    # that policy's settings.
+    terms_policy: str | dict[str, Any] = "default"
     registry: RegistrySettings = Field(default_factory=RegistrySettings)
     capacity: CapacitySettings
     pricing: PricingSettings = Field(default_factory=PricingSettings)

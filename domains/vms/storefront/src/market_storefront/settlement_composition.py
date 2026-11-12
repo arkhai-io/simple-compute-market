@@ -22,8 +22,12 @@ from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_term_t
 from market_arkhai_payments.settlement_config import ARKHAI_PAYMENTS_MECHANISM
 from market_settlement_runtime.horizon import RateTermProjections
 from market_settlement_runtime.rate_publication import (
-    RatePresetHelper, RatePresetRefusal, default_buyer_refusals,
+    RatePresetHelper, RatePresetRefusal,
     derive_rate_preset, effective_delivery_deadline,
+)
+from market_settlement_runtime.terms_policy import (
+    DefaultSellerTermsPolicy, SellerTermsPolicy, load_seller_terms_policy,
+    review_for_publication, terms_policy_selection,
 )
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
@@ -113,6 +117,9 @@ class VmSettlementComposition:
         default_factory=lambda: {ARKHAI_PAYMENTS_MECHANISM: PaymentsRatePresetHelper()}, repr=False,
     )
     rate_term_projections: RateTermProjections = field(default_factory=dict, repr=False)
+    # Decides the unstated on-demand penalty and whether a derived option is
+    # published; it sees options only after derivation has validated them.
+    terms_policy: SellerTermsPolicy = field(default_factory=DefaultSellerTermsPolicy, repr=False)
     delivery_deadline_for_pool: Callable[[str, str | None], int | None] = field(
         default=lambda _site, _pool: None, repr=False,
     )
@@ -269,7 +276,8 @@ class VmSettlementComposition:
                     max_duration_seconds=resources.get("max_duration_seconds"),
                     available_until_utc=resources.get("available_until_utc"),
                     delivery_deadline_seconds=deadline,
-                    now=datetime.now(timezone.utc), default_penalty_periods=24,
+                    now=datetime.now(timezone.utc),
+                    default_penalty_periods=self.terms_policy.default_penalty_periods(),
                 )
                 if isinstance(result, RatePresetRefusal):
                     diagnose({"code": result.code, "detail": result.detail, "mechanism": selected_clause.mechanism})
@@ -295,9 +303,10 @@ class VmSettlementComposition:
                 except RateServicingUnavailable as exc:
                     diagnose({"code": "rate_servicing_undeclared", "detail": str(exc), "mechanism": settlement_option_schema(item)})
                     continue
-                terms = LifecycleTerms.model_validate(item["lifecycle"]) if item.get("lifecycle") is not None else None
-                for detail in default_buyer_refusals(terms, has_adapter=terms is not None):
-                    diagnose({"code": "default_buyer_refusal", "detail": detail, "mechanism": settlement_option_schema(item), "option_id": item["option_id"]})
+                if not review_for_publication(
+                    self.terms_policy, SettlementOption.model_validate(item), diagnose,
+                ):
+                    continue
                 settlement_options.append(dict(item))
         # Nothing published is returned as such, with the readiness that
         # explains it: whether that refuses a listing, and how, is the caller's.
@@ -970,6 +979,9 @@ def build_vm_settlement_composition(
         configuration_registry=registry,
         mechanism_resources=mechanism_resources,
         disputes=disputes,
+        terms_policy=load_seller_terms_policy(
+            terms_policy_selection(storefront_config.settings.as_dict())
+        ),
         arkhai_payments_stage=payments_stage,
         payments_coordinator=VmPaymentsCoordinator(
             domain=domain, db=sqlite_client, stage=payments_stage

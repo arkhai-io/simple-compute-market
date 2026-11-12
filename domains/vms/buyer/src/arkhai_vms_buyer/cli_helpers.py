@@ -11,7 +11,19 @@ from typing import Any, Optional
 
 from rich.console import Console
 from core_buyer import format_buyer_explanation
+from market_config.config_loader import load_user_config
+from market_settlement_runtime.terms_policy import (
+    TermsPolicySelection, flagged_buyer_selection, terms_policy_selection,
+)
 import typer
+
+
+def buyer_terms_selection(*, allow_unprotected_terms: bool) -> TermsPolicySelection:
+    """The configured terms policy, or the one the shorthand flag selects."""
+    return flagged_buyer_selection(
+        terms_policy_selection(load_user_config()),
+        allow_unprotected_terms=allow_unprotected_terms,
+    )
 
 
 def resolve_prices_from_matches(

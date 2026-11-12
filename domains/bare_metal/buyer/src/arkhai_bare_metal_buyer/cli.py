@@ -64,6 +64,7 @@ from .settlement_composition import (
     buyer_settlement_registry, validate_authority,
 )
 from market_settlement_runtime.buyer_terms import option_quote
+from market_settlement_runtime.terms_policy import flagged_buyer_selection, load_buyer_terms_policy
 from .settlement_stages import purchase_quote, require_quoted_agreement
 
 # The commands build their collaborators through the factories below: a Typer
@@ -110,7 +111,10 @@ def registry_client(
 def payment_approval(config: BareMetalBuyerConfig) -> PaymentApproval:
     """Approve payments from the configured payer account, and nothing else."""
 
-    return PaymentApproval(config.arkhai_payments, config.payer_account)
+    return PaymentApproval(
+        config.arkhai_payments, config.payer_account,
+        terms_policy=load_buyer_terms_policy(config.terms_policy),
+    )
 
 
 bare_metal_app = typer.Typer(
@@ -438,6 +442,14 @@ def buy_bare_metal(
 ) -> None:
     """Approve one exact Arkhai option and provision after its receipt verifies."""
     buyer_config = load_bare_metal_buyer_config(config)
+    try:
+        buyer_config = buyer_config.model_copy(update={
+            "terms_policy": flagged_buyer_selection(
+                buyer_config.terms_policy, allow_unprotected_terms=allow_unprotected_terms,
+            ),
+        })
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     if buyer_config.payer_account is None:
         raise typer.BadParameter("bare-metal buyer config requires payer_account")
     if buyer_config.arkhai_payments is None or not buyer_config.arkhai_payments.enabled:
@@ -477,7 +489,7 @@ def buy_bare_metal(
     try:
         stage = BUYER_STAGES[selected.settlement_schema]
         stage.validate_option(selected)
-        validate_authority(selected, buyer_config, allow_unprotected_terms=allow_unprotected_terms)
+        validate_authority(selected, buyer_config)
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(
             f"buy requires a supported priced settlement option: {exc}"
@@ -515,7 +527,7 @@ def buy_bare_metal(
         listing_id=listing_id,
         option_id=option_id,
         duration_seconds=duration_seconds,
-        allow_unprotected_compute_terms=allow_unprotected_terms,
+        terms_policy=buyer_config.terms_policy.name,
         seller_url=listing.storefront_url,
         storefront_url=listing.storefront_url,
         publisher_id=str(listing.publisher_id),

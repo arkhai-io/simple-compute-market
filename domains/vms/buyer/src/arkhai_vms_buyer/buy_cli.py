@@ -46,6 +46,7 @@ from .buy_orchestrator import (
 )
 from .buyer_client import ResumeState, negotiate_with_seller
 from .cli_helpers import (
+    buyer_terms_selection,
     emit_buyer_explanation,
     emit_lifecycle_disclosure,
 )
@@ -483,9 +484,12 @@ def register(app: typer.Typer) -> None:
         signer = identity.signer
         ssh = None if explain else resolve_ssh_public_key(override=ssh_public_key)
         try:
+            terms_selection = buyer_terms_selection(
+                allow_unprotected_terms=allow_unprotected_terms,
+            )
             settlement_policy = resolve_buyer_settlement_policy(
                 identity=identity, registry_urls=registry_urls,
-                allow_unprotected_terms=allow_unprotected_terms,
+                terms_policy=terms_selection,
             )
         except ValueError as exc:
             typer.secho(str(exc), err=True, fg=typer.colors.RED)
@@ -750,7 +754,7 @@ def register(app: typer.Typer) -> None:
 
         run_log = RunLog.start(
             command="market buy",
-            allow_unprotected_compute_terms=allow_unprotected_terms,
+            terms_policy=terms_selection.name,
             profile_id=identity.profile_id,
             principal=identity.principal,
             registry_urls=reg_urls,

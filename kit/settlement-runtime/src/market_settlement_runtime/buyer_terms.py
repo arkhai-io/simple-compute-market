@@ -15,26 +15,32 @@ from market_core.schemas import AgreedPrice, Agreement, SettlementOption
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import PARTIAL_PERIOD, TermContext, decode_terms
 
-from .rate_publication import default_buyer_refusals
 from .configuration import SettlementConfigurationRegistry
+from .rate_publication import default_buyer_refusals
+from .terms_policy import BuyerTermsOffer, BuyerTermsPolicy, DefaultBuyerTermsPolicy
 
 
-class BuyerTermsPolicy:
-    """Compose the same recommendations sellers diagnose with authority ranking."""
+class BuyerTermsAdmission:
+    """Ask the buyer's terms policy, then admit and rank the dispute authority.
+
+    The policy can only add refusals. Authority acceptance and term validation
+    run for every option it does not refuse, and a policy that fails refuses.
+    """
 
     def __init__(
-        self, authority: AuthoritySelection, *, allow_unprotected_terms: bool = False,
+        self, authority: AuthoritySelection, policy: BuyerTermsPolicy | None = None,
     ) -> None:
         self.authority = authority
-        self.allow_unprotected_terms = allow_unprotected_terms
+        self.policy: BuyerTermsPolicy = policy if policy is not None else DefaultBuyerTermsPolicy()
 
     def rank(self, option: SettlementOption, *, registry_url: str = "") -> int:
         context = self.authority.contexts.get(option.settlement_schema)
-        refusals = default_buyer_refusals(
-            decode_terms(option.lifecycle),
+        refusals = policy_refusals(
+            self.policy, option,
             has_adapter=context.has_adapter if context is not None else False,
+            registry_url=registry_url,
         )
-        if refusals and not self.allow_unprotected_terms:
+        if refusals:
             raise ValueError("; ".join(refusals))
         return self.authority.rank(
             option.settlement_schema, option.lifecycle, registry_url=registry_url,
@@ -46,6 +52,19 @@ class BuyerTermsPolicy:
         except ValueError as exc:
             self.authority.report(str(exc))
             return None
+
+
+def policy_refusals(
+    policy: BuyerTermsPolicy, option: SettlementOption, *, has_adapter: bool,
+    registry_url: str = "",
+) -> tuple[str, ...]:
+    """One policy's refusals of one option; a failing policy is a refusal."""
+    try:
+        return tuple(str(reason) for reason in policy.refusals(BuyerTermsOffer(
+            option, decode_terms(option.lifecycle), has_adapter, registry_url,
+        )))
+    except Exception as exc:  # noqa: BLE001 - installed code; fail closed
+        return (f"buyer terms policy failed ({type(exc).__name__}: {exc})",)
 
 
 def option_quote(

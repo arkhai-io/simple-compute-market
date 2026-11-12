@@ -13,7 +13,10 @@ from core_buyer.registry_config import registry_descriptors, resolve_indexer_url
 from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext
-from market_settlement_runtime.buyer_terms import BuyerTermsPolicy, compute_disclosure, lifecycle_disclosure
+from market_settlement_runtime.buyer_terms import BuyerTermsAdmission, compute_disclosure, lifecycle_disclosure
+from market_settlement_runtime.terms_policy import (
+    TermsPolicySelection, load_buyer_terms_policy, terms_policy_selection,
+)
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
@@ -88,11 +91,10 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
     return record
 
 
-def buyer_term_context(mechanism: str, *, allow_unprotected_terms: bool = False) -> TermContext:
+def buyer_term_context(mechanism: str) -> TermContext:
     return TermContext(
         mechanism=mechanism, has_adapter=mechanism == "arkhai.payments.v1", compute=True,
         dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
-        allow_missing_delivery_deadline=allow_unprotected_terms,
     )
 
 
@@ -189,9 +191,14 @@ def resolve_buyer_settlement_policy(
     identity: ResolvedBuyerIdentity | None = None,
     action_capable: bool = True,
     registry_urls: str | None = None,
-    allow_unprotected_terms: bool = False,
+    terms_policy: TermsPolicySelection | None = None,
 ) -> BuyerSettlementPolicy:
-    """Strictly resolve the common buyer ``[Settlement]`` hierarchy."""
+    """Strictly resolve the common buyer ``[Settlement]`` hierarchy.
+
+    ``terms_policy`` overrides the configured root ``terms_policy`` selection.
+    The installed policy it names is loaded here, and the resolution fails if
+    it cannot be.
+    """
 
     document = dict(load_user_config() if config is None else config)
     if "settlement" in document:
@@ -224,15 +231,13 @@ def resolve_buyer_settlement_policy(
         config=settlement,
         registry=registry,
         stages=buyer_settlement_stages(),
-        option_preference=BuyerTermsPolicy(AuthoritySelection(authorities, contexts={
-            "arkhai.payments.v1": buyer_term_context(
-                "arkhai.payments.v1", allow_unprotected_terms=allow_unprotected_terms,
-            ),
-        }, report=logging.getLogger(__name__).info), allow_unprotected_terms=allow_unprotected_terms),
-        public_context={
-            "dispute_authorities_by_registry": authorities,
-            "allow_unprotected_compute_terms": allow_unprotected_terms,
-        },
+        option_preference=BuyerTermsAdmission(
+            AuthoritySelection(authorities, contexts={
+                "arkhai.payments.v1": buyer_term_context("arkhai.payments.v1"),
+            }, report=logging.getLogger(__name__).info),
+            load_buyer_terms_policy(terms_policy or terms_policy_selection(document)),
+        ),
+        public_context={"dispute_authorities_by_registry": authorities},
     )
 
 

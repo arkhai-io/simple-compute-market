@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
+from market_core.schemas import Agreement, SettlementOption
+from market_deal_lifecycle.configuration import DisputeEntry
+from market_settlement_runtime import SettlementPublicationClause
+from market_settlement_runtime.rate_publication import derive_rate_preset
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingDeclaration
+from market_settlement_runtime.terms_policy import PermissiveBuyerTermsPolicy
 
 from market_arkhai_payments import (
     MandatePolicyError,
@@ -14,12 +22,15 @@ from market_arkhai_payments import (
     mandate_policy_for_agreement,
     transaction_id,
 )
-from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
+from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
+from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_contract_revision
 
 from payment_terms import (
     BUYER,
+    DISPUTE,
     IMPOSTOR,
     OTHER,
+    PAYEE,
     SERVICE,
     agreement,
     agreement_bytes,
@@ -145,3 +156,75 @@ def test_an_approval_receipt_from_another_key_is_refused():
     terms = agreement()
     with pytest.raises(ReceiptVerificationError):
         _approval(fake).approve(agreement_bytes(terms), _seller_data(terms))
+
+# --- the buyer's terms policy at approval ------------------------------------
+
+
+def _recurring(*, delivery_deadline_seconds):
+    """A recurring Agreement and the seller's data for it, derived as a storefront does."""
+    mechanism = "arkhai.payments.v1"
+    authority = DisputeEntry.model_validate({
+        **dispute_lifecycle(DISPUTE)["adjudication"]["dispute"],
+        "advertisement": {"mechanisms": [mechanism], "minimum_dispute_window_seconds": 0,
+                          "minimum_case_hold_seconds": None},
+    })
+    servicing = RateServicing(
+        required_contracts={mechanism: rate_contract_revision()},
+        declarations={mechanism: RateServicingDeclaration(mechanism, rate_contract_revision(), "published")},
+    )
+    clause = SettlementPublicationClause.model_validate({
+        "mechanism": mechanism, "asset": "USD/2", "rate": "60", "per": "hour",
+        "mechanism_input": {"asset": "USD/2", "payee_account": PAYEE,
+                            "approval_window": "PT10S", "dispute_window_seconds": 3600},
+        "recurring": {"period": "PT60S", "reserve_ahead_seconds": 120},
+    })
+    now = datetime.fromtimestamp(1_800_000_000, timezone.utc)
+    derived = derive_rate_preset(
+        clause, helper=PaymentsRatePresetHelper(), servicing=servicing, authorities=(authority,),
+        max_duration_seconds=3600, available_until_utc=None,
+        delivery_deadline_seconds=delivery_deadline_seconds, now=now, default_penalty_periods=24,
+    )
+    assert isinstance(derived, SettlementOption), derived
+    stamp = now.isoformat().replace("+00:00", "Z")
+    terms = Agreement.model_validate({
+        "negotiation_id": "rate", "listing_id": "listing-1", "listing_hash": "a" * 64,
+        "buyer": {"scheme": "ed25519", "identifier": "buyer-key"},
+        "seller": {"scheme": "ed25519", "identifier": "seller-key"},
+        "settlement": derived, "settlement_params": {"payer_account": BUYER},
+        "amount": 100, "asset": "USD/2", "duration_seconds": 3600,
+        "accepted_at": stamp, "start_utc": stamp,
+        "provision_terms": {"kind": "test.v1", "version": 1, "payload": {}},
+    }).model_dump(mode="json", exclude_none=True)
+    data = PaymentSettlementData.for_agreement(terms, config(), rate_servicing=servicing).to_wire()
+    return terms, data
+
+
+def test_approval_asks_the_buyer_terms_policy_about_the_accepted_option():
+    terms, data = _recurring(delivery_deadline_seconds=None)
+    fake = FakePaymentsClient(signer=SERVICE)
+    with pytest.raises(MandatePolicyError, match="a default buyer refuses this option: no delivery deadline"):
+        _approval(fake).check(agreement_bytes(terms), data)
+    permissive = PaymentApproval(
+        config(), BUYER, client_for_owner=fake, terms_policy=PermissiveBuyerTermsPolicy(),
+    )
+    permissive.check(agreement_bytes(terms), data)
+
+    class Declining:
+        def refusals(self, offer):
+            assert offer.has_adapter and offer.lifecycle is not None
+            return ("not on these terms",)
+
+    with pytest.raises(MandatePolicyError, match="not on these terms"):
+        PaymentApproval(config(), BUYER, client_for_owner=fake, terms_policy=Declining()).check(
+            agreement_bytes(terms), data,
+        )
+
+
+def test_a_permissive_terms_policy_does_not_waive_the_mandate_check():
+    terms, data = _recurring(delivery_deadline_seconds=30)
+    data["mandate"]["fee"] = {"bps": 0}
+    with pytest.raises(MandatePolicyError):
+        PaymentApproval(
+            config(), BUYER, client_for_owner=FakePaymentsClient(signer=SERVICE),
+            terms_policy=PermissiveBuyerTermsPolicy(),
+        ).check(agreement_bytes(terms), data)
