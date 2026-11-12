@@ -196,7 +196,11 @@ Each earned amount stays held until its part's stop plus the dispute window. An
 accepted case extension covers current and later earnings, capped from each
 amount's normal release by `maxHoldExtension`. A stop does not release money under
 an open extension. Partial reverse works before and after a stop while money
-remains held. Only the dispute authority opens case extensions and applies ruling
+remains held. A part's stop record states `settled` figures — gross, fee and net —
+as they stood when the stop was recorded, and a later reversal of held funds does
+not restate them, while the amount actually paid out falls by what was reversed; a
+hosted test-mode run showed this. Reconciliation therefore never reads `settled` as
+the final payout: it reads the reversals recorded after the stop beside it. Only the dispute authority opens case extensions and applies ruling
 effects, then lifts that case's refs.
 
 These are external dependencies, not behaviour SCM can implement by asserting it in
@@ -255,12 +259,18 @@ target or delta API and no started-period correction journal. The caller writes
 each descriptor durably before calling. The adapter has no database and no daemon
 and imports neither `kit/deal-servicing` nor either domain.
 
-A `transaction_stopped` refusal of `start` signals a delivery end, not success. A
+Approval is refused with `409 insufficient_funds` when the payer's balance cannot
+cover the first reservation, which is every part's first batch, `once` parts
+included (D3); a hosted test-mode run showed this. The classification names it: a
+definitive refusal whose cause is the payer's balance — not `unknown`, not a mandate
+mismatch and not a seller fault — reported to the buyer as funds to add before
+approving. A `transaction_stopped` refusal of `start` signals a delivery end, not success. A
 repeated stop is already satisfied only when the verified record shows the same or
 an earlier effective stop. Transport and server errors stay `unknown` and
 retryable. `request_id_reused` with different bytes and `hold_not_reversible`
 require repair. `insufficient_held_funds` requires a read of what actually
-reversed, not an inference of partial success from the code. `hold_matured` means
+reversed, not an inference of partial success from the code, and that read is of
+the recorded reversals, never of a stop record's `settled` figures (D3). `hold_matured` means
 the target is no longer locally achievable: the adapter surfaces the shortfall and
 the case path, not an endlessly retried refund. No post-release refund command or
 journal kind exists.
