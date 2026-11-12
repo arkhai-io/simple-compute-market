@@ -200,7 +200,7 @@ cryptographic proof test matrix.
 
 - Delivered `mandates.py`, `agreement.py`, `presets.py`, `settlement_config.py`, `operations.py` and `rate_adapter.py` in the payments kit; buyer/seller gates and both compute `settlement_composition.py` integrations. No installed recurring servicing declaration was enabled.
 - Reused the shared DeliveryEvidence, lifecycle codec, snapshot verifier, foundation dispute filing and authority fixture. Rate descriptors require caller-persisted digests; disclosure can consume the journaled start outcome with its operation identity. Neutral per-part observations distinguish stop requests from winning final stops; watch observes notice maturity independently of its event cursor and retains the first observation on replay.
-- Focused evidence: payments 221, lifecycle servicing 63, mediation 77, VM publication/payment integration 104, bare-metal publication/payment integration 21 existing tests pass. Published vector/generated checks and kit typing pass. Composition-file typechecks pass (bare-metal skips untyped-import diagnostics for existing unmarked dependencies). No permanent tests added; existing projection expectations follow the new public fields.
+- Focused evidence: payments 221, lifecycle servicing 63, mediation 77, VM publication/payment integration 104, bare-metal publication/payment integration 21 existing tests pass. Published vector/generated checks and kit typing pass. Composition-file typechecks pass (bare-metal skips untyped-import diagnostics for existing unmarked dependencies). Permanent rate regression coverage is recorded with section 4; existing projection expectations follow the new public fields.
 - `make check-packaging`, comment hygiene, amount-read inventory, change index and pinned OpenSpec strict validation pass. The durable packet and exact commands are in `docs/attachments/spot-deals-sections-1-3/index.md`; `make dist-ci && make -C kit/arkhai-payments first-use-rate` reproduces the prepared fixture with no secrets or resident services.
 - E2E is **unobservable**, not passed: with the required Podman Compose provider set, the invocation-owned VM lane failed before setup with `/bin/sh: 1: docker: not found`, Makefile:240 Error 127. No stack, readiness or scenario result is claimed; no SCM containers were started.
 - Resume at section 4 after maintainer code/design review; sections 4–6, full qualification and section 7 closeout are untouched. Post-review promotion remains the owning permanent specs/companions, architecture/configuration docs, roadmap and campaign index named below; this slice updates the kit README but does not archive or promote unimplemented behavior.
@@ -229,7 +229,7 @@ second preemption endpoint or a local payment-stop scheduler.
       Delegate through lifecycle submit and its existing seller authentication.
       Output authority status/time, including unknown; do not report local
       command acceptance as an authoritative scheduled end.
-- [ ] 4.4 Prepare committed first-use configuration/examples for both domains
+- [x] 4.4 Prepare committed first-use configuration/examples for both domains
       under the lane profile, with paired on-demand/spot options, explicit authority
       entries, test mode and double selector. Use explicit setup opt-out for the
       interim; include priced setup fixtures only on a qualified setup revision. Document
@@ -241,28 +241,25 @@ second preemption endpoint or a local payment-stop scheduler.
       started_period on the payee entitlement and any charged term end. Include
       default-buyer refusal as a separate observation; returned-capable fixtures
       may use default buyers only once the matching contract is vendored.
-- [ ] 4.5 Re-drive both domains' canonical rate buyer end: stop then hint, keep
+- [x] 4.5 Re-drive both domains' canonical rate buyer end: stop then hint, keep
       service during nonzero payer notice, and end through watch at effective
       stop. Consume foundation 7.5 round 2 (after 12.3 and 13.3) and
       buyer-orchestration's “The buyer's end is backed by its own stop or a case”
       for immediate surrender and outage handling; do not implement those paths here.
       Coordinate rate notice display.
-- [ ] 4.5a Add the buyer's watchdog per D6a: the probe loop in `kit/deal-lifecycle-buyer`
-      with a per-domain injected probe; the opt-in flag on both domains' `buy` commands,
-      which then stay in the foreground from `available` until the stop is sent, the deal
-      ends or the buyer stops them; the opt-in, interval and threshold persisted per deal
-      in the buyer's profile and re-entered by `buy --resume`; `monitored` / `stopped` /
-      `unmonitored` in the deal read; the budget `interval × threshold + probe timeout`
-      in the display. Verify in the kit's unit suite with a clock-injected probe fake
-      (threshold, no stop below it, one stop and one journal entry at it, idempotent on
-      restart); in one application-level test per domain that starts the real `buy
-      --watch`, loses access with the storefront stopped, restarts into `buy --resume`
-      and observes a single buyer stop; and in convergence's rows 1 and 2 as the buyer's
-      stop landing with the storefront absent.
-- [ ] 4.6 Verify the foundation-owned VM admin route delegates notice for a lawful
+- [ ] 4.5a **Deferred beyond Goal 8 MVP:** the foreground buyer watchdog is excluded
+      from the MVP set. It would trigger an irreversible stop from reachability
+      probes and would run only while the foreground buy process lives. Build no
+      watchdog in this slice.
+- [x] 4.6 Verify the foundation-owned VM admin route delegates notice for a lawful
       entitled stop and files delivery_end for seller-caused emergency failure,
-      including spot hardware failure; request a foundation fix rather than add a
-      second classification switch here.
+      including spot hardware failure. The authorized foundation selector amendment
+      is a separate commit; it reuses notice admission and the existing failure path.
+- [x] 4.7 Add permanent lowest-level coverage for rate mandate derivation, buyer
+      exact re-derivation, pure authorization phases, refusal classification,
+      start/stop/reverse identities and verified observations; seller notice and
+      both domains' normal end/explicit-surrender command wiring. Keep examples
+      as first-use entry points.
 
 Validation: lifecycle client/contract unit suites; application-integration at each
 storefront for seller authentication, accepted-option admission, refusal before
@@ -273,17 +270,18 @@ First use runs deals preempt against a double-backed approved spot fixture and
 reads pending stop while asserting delivery is refused without the rate hook.
 Before convergence lands, this proves command and authority record, not teardown.
 
-## Section 4 seller checkpoint and restart
+## Section 4 implementation result and restart
 
-- 4.1–4.2: accepted payee entitlement admission in seller servicing; hosted notice expands into explicit per-rate-part stops, with every descriptor persisted through the foundation operation store before I/O. Read/list preserve verified payment-part observations and controlling pending/final stops. VM registrations distinguish once-only from rate commitments.
-- 4.3: async/sync typed seller lifecycle clients and both storefronts\' `deals preempt NEGOTIATION_ID --operation-key KEY [--at UNIX_SECOND]` reuse administrator authentication and the existing submit route. Output is the unchanged authority outcome and effective stop record; no scheduler or bespoke route was added.
-- 4.4 is partial: the committed `domains/vms/storefront/examples/preempt.py --domain vms|bare_metal` fixture invokes each production CLI against signed lifecycle routes, an approved payment-authority double and a mediation double. It has paired on-demand/spot options, explicit authorities, test mode, setup opt-out, explicit charged-term buyer acceptance and separate default-buyer refusal. Missing rate-hook materialization refuses. Deployed lane-profile preparation remains open.
-- First use passes for both domains: lost response is unknown, read/list retain pending notice, identical retry recovers the authority time, changed retry and wrong actor refuse, on-demand refuses before payment effect, and an earlier payer stop remains the winner. Evidence and runnable setup: `docs/attachments/spot-deals-section-4/index.md`.
-- Existing suites pass: lifecycle contracts 37, client 2, seller servicing 70, buyer lifecycle 20, payments 221; seller-servicing/payments typing passes. Focused VM lifecycle/operator suites: 126 pass. Focused bare-metal lifecycle/operator suites: 29 pass. Comment hygiene and packaging pass. No permanent tests added; compose VM end-to-end remains unrun at this checkpoint.
-- Resolved fixture attempts: the default receipt helper seeded a later approval instant than the invocation clock, so an explicit authority `fund`/`approve` now prepares the actual current approval. A requested past stop is refused by the producer; the first use requests now + 1 and observes the enforced now + 30 minimum. Reinitializing the VM environment after rebuilding wheels loads the new bare-metal CLI. Lock refresh includes both storefronts and end-to-end because the typed lifecycle client is now a runtime dependency.
-- Resume at 4.5/4.5a. The current buyer half has only immediate `end_delivery`; `ending.py` sends stop then surrender/case, and the VM buyer composition still selects the once-only `PaymentAdapter`, which cannot open a rate commitment. Implement the normal rate stop-then-hint flow before using it for watchdog stops; retain the foundation\'s immediate-surrender/outage ownership. VM `buy` currently resumes with `--from`, has no watchdog flags, and returns after ready. Watchdog needs the profile-persisted settings, injected access probe, foreground lock/liveness/read state and restart-safe stop/evidence journal described by D6a. Bare-metal watchdog wiring has not been assessed; finish VM first.
-- 4.6 requires a foundation fix: the VM admin branch still selects bare `stop` from accepted payee entitlement, and otherwise `delivery_end`; it has no emergency/failure selector. Lawful rate interruptions must delegate `notice`; seller-caused emergency failure, including spot hardware failure, must retain the foundation cause classification and filing path. No second classification switch was added here. Existing admin tests pass but inject a stop-only notice fake and do not prove hosted rate delegation.
-- Before section completion, run the required compose VM end-to-end once with mock provisioning, obtain its real exit code and stop the owned stack. Permanent promotion remains post-review closeout. No branch push, PR or canonical branch mutation has occurred at this checkpoint.
+- 4.1–4.3: accepted-entitlement notice uses the existing administrator-authenticated submit route, durable command identity and per-part stop descriptors. Async/sync clients and both `deals preempt` verbs retain verified pending/final stops in read/list and recover lost responses without postponing an earlier payer stop. Application tests prove current listing edits can neither grant nor revoke accepted notice rights.
+- 4.4: `domains/vms/storefront/examples/preempt.lane.toml` is the committed lane-only approval/command profile for both domains: paired options, explicit authority, in-process doubles, test mode, setup opt-out and explicit charged-term buyer acceptance. Both first-use commands pass; the default buyer separately refuses charged terms and materialization without the rate hook refuses. Runnable setup and observations: `docs/attachments/spot-deals-section-4/index.md`.
+- 4.5: ordinary rate end journals the payer stop, then hints, retaining service during notice. Both domain compositions select the rate adapter; the VM `end` and bare-metal `teardown` verbs default to normal end, with `--end-now-regardless` selecting the existing immediate-surrender path. Escalation reuses the original stop. Unknown stop, hint loss and restart preserve independent progress. Application tests observe the effective stop through watch; deployed rate delivery/teardown remains convergence qualification.
+- 4.5a is deferred beyond Goal 8 MVP: a foreground reachability probe would trigger an irreversible stop and run only while buy remains alive. No watchdog was built.
+- 4.6: separate selector commit `a0ae6148d` adds `interruption_kind=preemption|failure` beside the free-text reason. Rate requests must state it; once-only omission retains failure for existing callers. Lawful preemption requires the accepted payee entitlement and delegates notice. Failure ends delivery and files for spot and on-demand, with no automatic rate self-penalty. Both typed admin clients expose the selector and operation key; the storefront CLI has no interrupt verb.
+- Permanent coverage includes exact setup/rate derivation and buyer comparison, authorization's phase table and immutable activation bindings, start/stop/reverse keys, unknown-response recovery, refusal classes, verified pending/final stop records and fixed settled figures after held reversal. Seller and buyer application tests use real SQLite, signed typed clients and injected authority doubles; canonical command tests use their own module's factory seams.
+- Validation: payments 266, servicing 70, contracts 37, lifecycle client 2, buyer half 22; focused VM storefront 157 and bare-metal storefront 46; buyer suites and final packaging results are in the evidence index. Payments and servicing typing, buyer-half typing, published vectors and generated checks pass.
+- Required compose VM run: `PROVISIONING_MODE=mock mise exec -- make -C e2e-tests test-e2e-vm` exits **2**: 290 pass, 2 skip, one failure in the explicitly excluded retained `rate_structure` pricing mismatch (`test_listing_shapes.py::TestStage07_ShapePricing::test_07a2_market_buy_buys_a_smaller_shape_and_reaches_ready`). It is unchanged. The owned stack, volumes/network and leftover test Anvil were stopped.
+- Resolved attempts: fixture approval must use its explicit clock and funding; stop requests cannot be in the past; held rate earnings become reversible at the authority's earning/stop boundary. Commands use the caller's operation store rather than its envelope-only store. Bare-metal fixture runway includes approval, delivery and a period. Clear inherited proxy variables for loopback tests. No production behavior was changed for these fixture/environment mistakes.
+- Remaining scope is sections 5–6 and post-review section 7: no installed recurring delivery declaration, self-penalty remedy, watchdog or live qualification is claimed. Charged-term fixtures retain explicit buyer acceptance; default-buyer policy is unchanged. No PR, comments or canonical-branch changes were made.
 
 ## 5. Proposed declarations and identity re-anchoring
 

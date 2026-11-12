@@ -17,6 +17,7 @@ from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
 import time
+import tomllib
 
 import httpx
 from fastapi import FastAPI
@@ -70,7 +71,12 @@ class LossyPayments(FakePaymentsClient):
         return result
 
 
-def main(domain: str, output: Path | None):
+def main(domain: str, output: Path | None, profile_path: Path):
+    profile = tomllib.loads(profile_path.read_text())
+    if (profile["profile"] != "lane-only" or profile["double_selector"] != "in-process"
+            or not profile["setup_opt_out"] or profile["payments"]["livemode"]
+            or domain not in profile["domains"]):
+        raise ValueError("preemption fixture requires the lane-only in-process test profile with setup opted out")
     if domain == "vms":
         from market_storefront.cli import app as cli
         from market_storefront.groups import deals as commands
@@ -82,7 +88,7 @@ def main(domain: str, output: Path | None):
     buyer, seller, administrator, receipt_signer = (Ed25519Signer(bytes([n]) * 32) for n in (1, 2, 3, 7))
     mediation = MediationContractFake()
     entry = DisputeEntry.model_validate({
-        **mediation.authority,
+        **profile["authority"],
         "advertisement": {"mechanisms": [MECHANISM], "minimum_dispute_window_seconds": 0,
                           "minimum_case_hold_seconds": None},
     })
@@ -93,8 +99,8 @@ def main(domain: str, output: Path | None):
         declarations={MECHANISM: RateServicingDeclaration(MECHANISM, rate_contract_revision(), "published")},
     )
     config = ArkhaiPaymentsConfig(
-        enabled=True, service_url="http://127.0.0.1:9", service_identity=receipt_signer.identity,
-        fee_bps=250, development_auth=True, livemode=False,
+        enabled=True, service_identity=receipt_signer.identity, development_auth=True,
+        **profile["payments"],
     )
     stamp = datetime.fromtimestamp(now, timezone.utc).isoformat().replace("+00:00", "Z")
     observations = {"evidence_class": "fixture", "domain": domain, "profile": "lane-only",
@@ -104,12 +110,14 @@ def main(domain: str, output: Path | None):
         with sqlite3.connect(path) as conn:
             create_schema(conn)
         agreements, adapters, doubles = {}, {}, {}
-        for product, payee_notice in (("spot", 30), ("on-demand", None)):
+        for product_config in profile["products"]:
+            product = product_config["name"]
+            payee_notice = product_config.get("payee_notice_seconds")
             clause = SettlementPublicationClause.model_validate({
                 "mechanism": MECHANISM, "asset": "USD/2", "rate": "60", "per": "hour",
                 "mechanism_input": {"asset": "USD/2", "payee_account": PAYEE,
                                     "approval_window": "PT60S", "dispute_window_seconds": 3600},
-                "recurring": {"period": "PT60S", "reserve_ahead_seconds": 120, "setup_amount": None,
+                "recurring": {**profile["recurring"], "setup_amount": None,
                               "payee_notice_seconds": payee_notice, "payee_settles_through": "started_period",
                               "settles_through": "started_period"},
             })
@@ -138,7 +146,7 @@ def main(domain: str, output: Path | None):
             terms = decode_terms(option.lifecycle)
             policy = BuyerTermsPolicy(AuthoritySelection(
                 {"": (entry,)}, contexts={MECHANISM: rate_context((entry,), terms)},
-            ), allow_unprotected_terms=True)
+            ), allow_unprotected_terms=profile["buyer"]["allow_unprotected_terms"])
             PaymentApproval(config, PAYER, terms_policy=policy).check(json.dumps(agreement), data.to_wire())
             fake = LossyPayments(signer=receipt_signer, observed_at=now)
             fake.engine.fund(PAYER, "USD/2", 1_000_000)
@@ -279,5 +287,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--domain", choices=("vms", "bare_metal"), default="vms")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--profile", type=Path, default=Path(__file__).with_name("preempt.lane.toml"))
     args = parser.parse_args()
-    main(args.domain, args.output)
+    main(args.domain, args.output, args.profile)
