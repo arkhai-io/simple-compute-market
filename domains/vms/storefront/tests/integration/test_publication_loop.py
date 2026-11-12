@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -32,11 +32,22 @@ from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_arkhai_payments.fixtures import dispute_lifecycle
+from market_core.schemas import (
+    RateValue,
+    SettlementOption,
+    SettlementPrice,
+    derive_settlement_option_id,
+)
 from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
+from market_deal_lifecycle.terms import (
+    Adjudication, DisputeAuthority, EarlyTermination, Entitlement, LifecycleTerms, encode_terms,
+)
 from market_identity import Ed25519Signer
 from market_pool_overrides import PoolOverrideClient
 from market_settlement_runtime import ReadinessBlocker
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingDeclaration
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
+from storefront_client import StorefrontClientError
 
 import market_storefront.container as container
 from market_storefront import lifecycle
@@ -2450,3 +2461,94 @@ async def test_a_once_payment_option_publishes_its_clause_s_deadline_where_the_p
     refusals = [item for item in report["actions"] if item.get("reason") == "default_buyer_refusal"]
     assert len(refusals) == refused
     assert all(item["detail"].endswith("no delivery deadline") for item in refusals)
+
+
+# A cached rate option the servicing declaration in force does not qualify,
+# selected through the negotiation route of the same payments composition, which
+# declares only `charged`. No recurring encoder, term timing or billing projection
+# is composed: the door refuses the option before reading any of them.
+
+# A fictional authority: the origin is a reserved name that resolves nowhere.
+_AUTHORITY = DisputeAuthority(
+    interface="fixture.mediation.v1", origin="https://mediation.invalid",
+    account="fixture-account", record_key="fixture-record", params={},
+)
+
+
+def _narrowed_payments_composition(fulfillment) -> VmSettlementComposition:
+    return replace(_payments_composition(fulfillment), rate_servicing=RateServicing({
+        _PAYMENTS: RateServicingDeclaration(_PAYMENTS, frozenset({"charged"}), False),
+    }))
+
+
+def _on_demand_option() -> dict:
+    """A rate option whose payer's stop charges its started period and whose term
+    end returns the last one, as a storefront declaring ``returned`` published it."""
+    lifecycle = encode_terms(LifecycleTerms(
+        adjudication=Adjudication(version=1, dispute=_AUTHORITY, dispute_window_seconds=604800,
+                                  case_hold_max_seconds=None),
+        early_termination=EarlyTermination(version=1, settles_through="last_boundary", entitlements={
+            "payer": Entitlement(notice_seconds=0, settles_through="started_period"),
+        }),
+        delivery_deadline_seconds=1200,
+    ))
+    price = SettlementPrice(asset="USD/6", rates=[RateValue(field="amount", per="hour", value=2_500_000)])
+    settlement = {
+        "schema": _PAYMENTS, "payee_account": _PAYEE, "window": "PT5M",
+        "period": "PT15M", "reserve_ahead_seconds": 1800,
+    }
+    return SettlementOption(
+        option_id=derive_settlement_option_id(price=price, settlement=settlement, lifecycle=lifecycle),
+        price=price, settlement=settlement, lifecycle=lifecycle,
+    ).model_dump(mode="json")
+
+
+def _negotiation_threads(db) -> int:
+    """Read from persistence: the publication app mounts no negotiations route."""
+    with sqlite3.connect(db.db_path) as connection:
+        return connection.execute("SELECT COUNT(*) FROM negotiation_threads").fetchone()[0]
+
+
+async def test_a_cached_rate_option_whose_treatment_is_withdrawn_is_refused_through_the_app(
+    tmp_path,
+):
+    """The published listing's record gains a rate option published while
+    ``returned`` was declared, seeded as service-internal state since no installed
+    mechanism publishes one. A buyer selecting it is answered with the signed 409
+    asking for a refetch, and no negotiation is written."""
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": _payments_token_cache(tmp_path)}), \
+            replaced_setting("pricing.defaults", {}):
+        async with publication_app(
+            tmp_path,
+            negotiation=True,
+            settlement_configuration=_PAYMENTS_SETTLEMENT,
+            settlement_composition_factory=_narrowed_payments_composition,
+        ) as world:
+            world.set_settlement_clauses([settlement_clause("1")])
+            world.pools.append(pool("bounded", backing="backed"))
+            await _cycle(world)
+            ((listing_id, listing),) = (await _listings(world)).items()
+            option = _on_demand_option()
+            await world.db.update_listing(
+                listing_id=listing_id,
+                settlement_options=[*listing["settlement_options"], option],
+            )
+
+            with pytest.raises(StorefrontClientError) as refused:
+                await world.buyer.negotiate_new(
+                    listing_id=listing_id,
+                    initial_amount=625_000,
+                    provision_terms=_vm_provision(3600),
+                    settlement_selection={
+                        "option_id": option["option_id"],
+                        "settlement": {"schema": _PAYMENTS, "payer_account": _PAYEE},
+                        "expiration_unix": 1_900_000_000,
+                    },
+                    selection_only=True,
+                )
+            threads = _negotiation_threads(world.db)
+
+    assert refused.value.status_code == 409
+    assert "settlement_option_withdrawn_refetch" in str(refused.value)
+    assert "does not declare returned" in str(refused.value)
+    assert threads == 0

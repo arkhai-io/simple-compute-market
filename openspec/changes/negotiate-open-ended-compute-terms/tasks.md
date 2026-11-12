@@ -2336,8 +2336,8 @@ one-section round whose validation and implementation review are owed (`design.m
     through the thread count and a seller round hook never awaited. The harnesses
     gained a declaration argument: bare metal's `_payment_service` also takes the
     seeded option, and VM's `_start` in `test_sync_negotiation_seller_round_hook.py`.
-    The carried case still covers what these do not: publishing the option first,
-    and the signed HTTP answer.
+    The signed HTTP answer is tested through each app since the round-4 triage
+    (below); only publishing the option first needs the carried case.
 - [x] 12b.2 **Carry and delete (D6):** copy each carried test, with the world module it
   uses, into `openspec/changes/spot-deals-through-arkhai-payments/carried-tests/`
   (`vms/` and `bare_metal/`), with a `README.md` saying what each case proves, which
@@ -2456,6 +2456,55 @@ one-section round whose validation and implementation review are owed (`design.m
   `make test` has synced it.
 - Next: validation and one implementation review side by side, then the round's
   triage. Closeout resumes at 13.3, and confirms 13.7 again.
+
+### Round-4 triage fixes (2026-11-12)
+
+Review 49, validation 50 (passed), owner record 48 (no notes) and orchestrator
+observation 51, all at `1fce75a13`.
+
+- **49 F1 (fix, accepted by the owner):** R2's typed-client test of the cached-option
+  409 had gone with the carried cases, though the refusal itself needs no
+  unimplemented port. Each storefront's app suite gains
+  `test_a_cached_rate_option_whose_treatment_is_withdrawn_is_refused_through_the_app`:
+  bare metal in `tests/test_http_negotiation.py`, VM in
+  `tests/integration/test_publication_loop.py`. Each seeds the listing record with an
+  Arkhai payments rate option whose term end returns the last period, as
+  service-internal state (`TESTING.md`, "Integration Tests"), and composes payments
+  through the real registry with a declaration naming only `charged`. Neither composes
+  a recurring encoder, term timing or billing projection. Each then selects the option
+  through the buyer's typed client and asserts the signed 409,
+  `settlement_option_withdrawn_refetch`, "does not declare returned", and that no
+  negotiation is written. With `returned` declared too, each test fails past the gate
+  (bare metal at the missing timing projection, VM at the once option's parameters),
+  so the gate is what each one proves. 12b.1's note and the carried-tests README row
+  name the new tests.
+- **51 R1 (none, by the owner):** the computation reads any section whose title
+  contains "closeout" as the closeout section (`scripts/change_workflow/next_step.py`,
+  `Section.closeout`), which is why it skipped 12b as a round. It is not recorded as a
+  gap. The owner will revisit it after this change merges to `dev`.
+- Exit, on the owner's word: validate the fix commit, then closeout resumes at 13.3,
+  with no further implementation review and no pre-closeout review.
+- Evidence:
+  - Bare-metal storefront, `make -C domains/bare_metal/storefront test` (unit and
+    application integration): 630 passed.
+  - VM storefront, `make -C domains/vms/storefront test-integration` (application
+    integration through the typed client): 583 passed. The new test, rerun after the
+    compliance fixes below: passed.
+  - `make check-comment-hygiene`: OK.
+  - `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms`:
+    `after-functional-change` passed, exit 0, and changed no lock;
+    `pre-commit-functional` passed, exit 0, with `make check-packaging` and the whole
+    `make test` (VM unit 1194 passed, 1 skipped; VM integration 583; bare-metal
+    storefront 630); `pre-commit` passed, exit 0. Afterwards only this note changed.
+- The fresh-context check found:
+  - "no longer" in two new comments, which the history-wording check rejects;
+  - a cross-reference to another module's test, too vague to find;
+  - an unexplained once clause in the VM setup;
+  - a raw thread count with no stated reason.
+
+  All four are fixed: the comments state what holds, the clause is dropped, and the
+  read's reason is its docstring. Its point that this note was missing is met by this
+  note.
 
 ## 13. Closeout
 
