@@ -283,6 +283,10 @@ Before convergence lands, this proves command and authority record, not teardown
 - Resolved attempts: fixture approval must use its explicit clock and funding; stop requests cannot be in the past; held rate earnings become reversible at the authority's earning/stop boundary. Commands use the caller's operation store rather than its envelope-only store. Bare-metal fixture runway includes approval, delivery and a period. Clear inherited proxy variables for loopback tests. No production behavior was changed for these fixture/environment mistakes.
 - Remaining scope is sections 5–6 and post-review section 7: no installed recurring delivery declaration, self-penalty remedy, watchdog or live qualification is claimed. Charged-term fixtures retain explicit buyer acceptance; default-buyer policy is unchanged. No PR, comments or canonical-branch changes were made.
 
+## Section 4 follow-up corrections
+
+- [x] Runway: acceptance horizon and payment mandate derivation share `minimum_rate_duration_seconds`. A start 3600 seconds after acceptance with a 60-second approval window, 30-second delivery deadline and 60-second period requires a 90-second duration. The previous mandate function admitted 89 seconds; the regression covers below/at/above the bound for early and late starts. Settlement-runtime 182 and payments 272 tests pass; payment typing, vectors and generated checks pass.
+
 ## 5. Proposed declarations and identity re-anchoring
 
 Files: kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py and
