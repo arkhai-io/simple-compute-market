@@ -12,10 +12,10 @@ from dataclasses import replace
 from typing import Any
 
 from market_core.schemas import Agreement, SettlementOption
-from market_deal_lifecycle.terms import TermContext
 from market_settlement_runtime.buyer_terms import BuyerTermsPolicy
 from market_settlement_runtime.rate_publication import default_buyer_refusals
 from pydantic import ValidationError
+from market_deal_lifecycle.terms import TermContext
 
 from market_arkhai_payments.agreement import (
     PaymentSettlementData,

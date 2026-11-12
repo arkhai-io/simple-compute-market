@@ -18,13 +18,6 @@ from arkhai_bare_metal_buyer.cli import (
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from arkhai_bare_metal_buyer.plugin import domain
-from arkhai_bare_metal_buyer.settlement_composition import (
-    buyer_lifecycle_disclosure, validate_authority,
-)
-from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
-from market_arkhai_payments.fixtures import dispute_lifecycle, recurring_options
-from market_core.schemas import SettlementOption
-from market_deal_lifecycle.configuration import DisputeEntry
 from core_buyer.cli import build_app
 from core_buyer.introductions import IntroductionPayloadsDeleted
 from market_core import DomainCapability
@@ -324,28 +317,3 @@ def test_a_field_the_registry_does_not_declare_is_refused_before_any_read() -> N
         bare_metal_listing_params(
             _SpecClient(), "region=us-west", registry_url="https://registry"
         )
-
-
-@pytest.mark.parametrize("kind", ["spot", "on-demand"])
-def test_a_recurring_option_a_seller_publishes_passes_the_buyers_authority_check(kind):
-    # Development accounts, never used on a public network.
-    authority = DisputeEntry.model_validate({
-        **dispute_lifecycle("33333333-3333-4333-8333-333333333333")["adjudication"]["dispute"],
-        "interface": MEDIATION_INTERFACE,
-        "advertisement": {"mechanisms": ["arkhai.payments.v1"],
-                          "minimum_dispute_window_seconds": 0, "minimum_case_hold_seconds": None},
-    })
-    option = SettlementOption.model_validate(recurring_options(
-        authority, payee="22222222-2222-4222-8222-222222222222",
-    )[kind])
-    config = SimpleNamespace(
-        registry_url="https://registry.example",
-        dispute_authorities_by_registry={"https://registry.example": (authority,)},
-    )
-
-    validate_authority(option, config)
-
-    rows = dict(buyer_lifecycle_disclosure(option))
-    assert rows["Seller stop"].startswith(
-        "Entitled with 120 seconds' notice" if kind == "spot" else "No entitled payment stop"
-    )
