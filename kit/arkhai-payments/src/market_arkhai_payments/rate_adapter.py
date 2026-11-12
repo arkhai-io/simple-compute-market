@@ -197,19 +197,23 @@ class RatePaymentAdapter(PaymentAdapter):
                     return Accepted(records=[observed.final_stop] if observed.final_stop else [])
             except (PaymentsError, ArkhaiPaymentsConfigurationError, ValidationError) as exc:
                 return Unknown(reason=f"stop requires verified read recovery: {exc}")
-        result = super().submit_now(command, keys)
-        if isinstance(result, Rejected):
-            if "insufficient_held_funds" in result.reason:
+        return super().submit_now(command, keys)
+
+    def _command_failure(self, command: LifecycleCommand, exc: Exception) -> LifecycleOutcome:
+        if isinstance(exc, PaymentsAPIError) and exc.status_code == 409:
+            if exc.code in {"request_id_reused", "hold_not_reversible"}:
+                return Rejected(reason=f"{exc.code}: repair required before another monetary operation")
+            if exc.code == "insufficient_held_funds":
                 try:
                     self.snapshot_now()
                 except (PaymentsError, ArkhaiPaymentsConfigurationError, ValidationError):
                     return Unknown(reason="insufficient held funds requires verified read reconciliation")
                 return Rejected(reason="insufficient held funds: reconcile recorded reversals before another delta")
-            if "hold_matured" in result.reason:
+            if exc.code == "hold_matured":
                 return Rejected(reason="hold_matured: unrecoverable held-money shortfall; use the case path")
-            if "transaction_stopped" in result.reason and command.kind == "start":
+            if exc.code == "transaction_stopped" and command.kind == "start":
                 return Rejected(reason="transaction_stopped: delivery must end; billing did not start")
-        return result
+        return super()._command_failure(command, exc)
 
     def billing_operations(self, operation_key: str, evidence: DeliveryEvidence) -> tuple[PaymentOperation, ...]:
         error = self._evidence_error(evidence, activated=True)

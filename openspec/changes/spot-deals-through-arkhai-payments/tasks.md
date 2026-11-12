@@ -287,6 +287,8 @@ Before convergence lands, this proves command and authority record, not teardown
 
 - [x] Runway: acceptance horizon and payment mandate derivation share `minimum_rate_duration_seconds`. A start 3600 seconds after acceptance with a 60-second approval window, 30-second delivery deadline and 60-second period requires a 90-second duration. The previous mandate function admitted 89 seconds; the regression covers below/at/above the bound for early and late starts. Settlement-runtime 182 and payments 272 tests pass; payment typing, vectors and generated checks pass.
 
+- [x] Refusal classification: the vendored `ApiErrorCode` enum defines every code named by D4, including request_id_reused and hold_not_reversible. Their HTTP 409 responses now require repair through structured command-error classification. HTTP 409 insufficient_funds at approval raises exported `PaymentApprovalInsufficientFunds` with funding guidance before polling. Server responses retain unknown/generic API failure rather than claiming a funding refusal. Payments 277 tests, typing, vectors and generated checks pass.
+
 ## 5. Proposed declarations and identity re-anchoring
 
 Files: kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py and

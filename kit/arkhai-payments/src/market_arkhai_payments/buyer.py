@@ -23,7 +23,7 @@ from market_arkhai_payments.agreement import (
 )
 from market_arkhai_payments.errors import (
     MandatePolicyError,
-    PaymentApprovalDeclined,
+    PaymentApprovalDeclined, PaymentApprovalInsufficientFunds, PaymentsAPIError,
     ReceiptVerificationError,
 )
 from market_arkhai_payments.mandates import check
@@ -113,7 +113,12 @@ class PaymentApproval:
         assert self.config.service_identity is not None
         attachment = agreement if self.config.attach_agreement else None
         with self._client_for_owner(self.payer_account) as client:
-            approved = client.approve(data.mandate, agreement=attachment)
+            try:
+                approved = client.approve(data.mandate, agreement=attachment)
+            except PaymentsAPIError as exc:
+                if exc.status_code == 409 and exc.code == "insufficient_funds":
+                    raise PaymentApprovalInsufficientFunds() from exc
+                raise
             self._require_proof(approved, agreement, data, "approval")
             snapshot = client.poll(data.transaction_id, timeout=timeout, interval=interval)
         if not verify_snapshot(

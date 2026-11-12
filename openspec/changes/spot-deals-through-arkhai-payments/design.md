@@ -248,6 +248,13 @@ the target is no longer locally achievable: the adapter surfaces the shortfall a
 the case path, not an endlessly retried refund. No post-release refund command or
 journal kind exists.
 
+Conflict classification uses the structured API code at the command boundary:
+HTTP 409 `request_id_reused` and `hold_not_reversible` require repair. HTTP 409
+`insufficient_funds` during buyer approval becomes `PaymentApprovalInsufficientFunds`,
+with an instruction to fund the payer account before retrying. All these codes,
+plus `insufficient_held_funds`, `hold_matured` and `transaction_stopped`, occur in
+the vendored `ApiErrorCode` enum. Server errors retain their unknown classification.
+
 #### Pure rate authorization
 
 Spot implements `authorize(phase, evidence)`; convergence composes it with physical

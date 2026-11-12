@@ -180,8 +180,10 @@ def test_billing_requires_journaled_deal_bound_activation_before_any_effect(inva
 
 @pytest.mark.parametrize("code,status,kind,expected,reason", [
     ("transaction_stopped", 409, "start", "rejected", "delivery must end"),
-    ("request_id_reused", 409, "reverse", "rejected", "request_id_reused"),
-    ("hold_not_reversible", 409, "reverse", "rejected", "hold_not_reversible"),
+    ("request_id_reused", 409, "reverse", "rejected", "repair required"),
+    ("request_id_reused", 503, "reverse", "unknown", "request_id_reused"),
+    ("hold_not_reversible", 409, "reverse", "rejected", "repair required"),
+    ("hold_not_reversible", 503, "reverse", "unknown", "hold_not_reversible"),
     ("insufficient_held_funds", 409, "reverse", "rejected", "reconcile recorded reversals"),
     ("hold_matured", 409, "reverse", "rejected", "case path"),
     ("unavailable", 503, "reverse", "unknown", "unavailable"),
