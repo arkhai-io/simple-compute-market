@@ -1,0 +1,422 @@
+# Tasks
+
+Sections follow `design.md`'s implementation cadence: the inventory (sections 1–2),
+the workflow layer (3), the engineering layer (4), the repository layer at the root
+and across systems (5), the repository layer beside each capability (6), and the
+code (7–8), then closeout (9). Every move follows the inventory as round 1's triage
+corrected it (D2); a destination named below is the one the design's hard-case
+sample gives, and the corrected inventory overrides it.
+
+Rounds 2 to 5 edit `.agents/workflow.toml` and the skills, which lie outside the
+inert paths, so each of their commits runs the functional pre-commit hooks:
+relocking, the packaging check, and every suite.
+
+**What the closing checks report until closeout.** `scripts/change-workflow run
+pre-commit layer-engineering-guidance` fails on two checks every section expects,
+and on nothing else: the documentation citations of files the change creates until
+they exist — and of the hard-case sample's provisional destinations in `design.md`,
+which closeout's citation part resolves (task 9.11) — and the specification index,
+which wants `change-workflow/index.md` entries for CW-g7lt, CW-d2rw, CW-p9sa,
+CW-x4ex, CW-n6dm, and CW-r8cg, entries closeout's promotion writes (task 9.9). Any
+other failure is the section's to fix.
+
+## 1. Inventory of the root and workflow documents
+
+Delivers the first half of the inventory (D2): `AGENTS.md`, `openspec/README.md`,
+`docs/agents/change-workflow.md`, `docs/agents/domain.md`, and
+`docs/development/ARCHITECTURE.md`, classified by D1's test, with destinations by
+D3 and D8–D10, tags by D7 and D17–D19, and exceptions by D9. No guidance text moves.
+Files: `openspec/changes/layer-engineering-guidance/inventory.md` (new).
+
+- [ ] 1.1 Create `inventory.md` with its sections table — columns `Source` (document
+  and heading, or the part of a heading's text a split row covers), `Layer`, `Tags`,
+  `Destination` (file, and heading where it joins one), `Reason`, `Ambiguous` (empty,
+  or what the test did not decide) — and an opening paragraph saying the inventory
+  is change history and that the corrected rows govern every later section (D2).
+  Verify the file exists with that header.
+- [ ] 1.2 Classify every heading of `AGENTS.md` and `openspec/README.md` at every
+  level, splitting a section into one row per layer its text holds (D1), the
+  closeout parts one row per part with the part's layer and the layer of the rule it
+  confirms (D8), and each exception the text states — a case selected, a shared rule
+  overridden — marked as one, with where its table goes (D9). Verify by listing the
+  two documents' headings (`grep -n '^#' AGENTS.md openspec/README.md`) and finding a
+  row for each.
+- [ ] 1.3 Classify every heading of `docs/agents/change-workflow.md`,
+  `docs/agents/domain.md`, and `docs/development/ARCHITECTURE.md` the same way,
+  including the workflow guide's links to this repository's documents and its step
+  table's validation parts (D1's direction), and `ARCHITECTURE.md`'s engineering
+  rules and the subsections filed under "Deterministic database-concurrency tests"
+  (D10). Verify every heading has a row.
+- [ ] 1.4 Verify: every row has a layer, tags from the tags the inventory proposes,
+  a destination, and a reason; every row the test did not decide says why in
+  `Ambiguous`; `git diff --stat` against the section's start shows only
+  `inventory.md` changed; and `scripts/change-workflow run pre-commit
+  layer-engineering-guidance` reports no failure but the two the preamble expects.
+  End-to-end: none; the inventory changes no behaviour.
+
+## 2. Inventory of the repository documents, restatements, vocabulary, and checks
+
+Delivers the rest of the inventory (D2, D10, D11, D13, D18, D23):
+`docs/development/TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`, `BUILD_AND_PACKAGING.md`,
+`VALIDATION_RUNBOOK.md`, and `RELEASING.md`; the restatements in the skills and in
+`openspec/config.yaml`; the proposed vocabulary tables; and the draft classification
+of the checks. No guidance text moves. Files: `inventory.md`.
+
+- [ ] 2.1 Classify every heading of `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md`:
+  general method to engineering with the neutral example it needs named in
+  `Reason`, Python, uv, and Helm forms split from a neutral principle into their own
+  rows (D7), capability sections beside the capability they pertain to (D3, D10),
+  cross-system material staying, and overlap with `docs/operator-handbook.md`
+  flagged in `Ambiguous` (D10). Verify every heading has a row.
+- [ ] 2.2 Give `BUILD_AND_PACKAGING.md`, `VALIDATION_RUNBOOK.md`, and `RELEASING.md`
+  each a document-level row with its tags, and a row for each section holding
+  general method, such as a uv convention that holds in any repository (D10).
+  Verify each document has its row.
+- [ ] 2.3 Add a restatements table: every place a `change-*` or `guidance-review`
+  skill, or `openspec/config.yaml`, restates or cites a guidance rule — the file and
+  its section, the rule's source today, and the destination the rule moves to — so
+  later sections re-point each citation and the loader change inherits the list
+  (D11, D23). Verify by searching the skills and `openspec/config.yaml` for citations
+  of the guidance documents and finding a row for each.
+- [ ] 2.4 Add the proposed vocabulary: the engineering, workflow, and repository
+  tag tables as D18 shapes them (`Tag | Kind | Description`, each layer's own tag as
+  its first row), holding exactly the tags the rows of sections 1 and 2 use. Verify
+  every tag used in a row appears in one table, and every table row is used.
+- [ ] 2.5 Add the draft classification of the checks (D13): each check enforcing
+  guidance — comment hygiene, history wording, local imports, decision
+  destinations, version bumps, the capability and specification indexes, citations,
+  public content, secrets, the pre-push check, the architecture and packaging
+  checks, the workflow's default checks (change index, tasks, agent skills, strict
+  validation), and the guidance check — with the rule it enforces, that rule's
+  layer, and where the check runs. Verify every target `make check-repository`,
+  `make check-packaging`, and `make pre-push` run has a row.
+- [ ] 2.6 Verify: sections 1 and 2 together give every heading of every document in
+  `design.md`'s Context table but `docs/prompts/` a row; only `inventory.md`
+  changed; `scripts/change-workflow run pre-commit layer-engineering-guidance`
+  reports no failure but the two the preamble expects. End-to-end: none; the
+  inventory changes no behaviour.
+
+## 3. The workflow layer
+
+Delivers the workflow layer (D1, D3, D8, D16–D19): `docs/guidance/workflow/` with
+its README and tag table, the closeout list with the guidance placement part, and
+workflow material moved out of the root documents and the workflow guide, every
+citation of it re-pointed. Files: `docs/guidance/workflow/*.md` (new); `AGENTS.md`;
+`openspec/README.md`; `docs/agents/change-workflow.md`, `docs/agents/domain.md`;
+`openspec/specs/market-change-workflow/README.md`; `openspec/specs/change-workflow/README.md`;
+`openspec/specs/planning-governance/spec.md` (Evidence only);
+`.agents/skills/change-*/SKILL.md`, `.agents/skills/guidance-review/SKILL.md`;
+`.agents/workflow.toml`.
+
+- [ ] 3.1 Write `docs/guidance/workflow/README.md`: frontmatter `tags: [workflow]`;
+  the layer model — the three layers, D1's test, and the link direction, citing
+  CW-g7lt and CW-d2rw; what the layer holds and how its files are organized (flat,
+  organization carrying no meaning, D19, CW-n6dm); and its `## Tags` table from the
+  corrected inventory, `workflow` its first row (D18). Verify the table holds every
+  tag the layer's files use.
+- [ ] 3.2 Write `docs/guidance/workflow/closeout.md` (D8, D16): frontmatter; the
+  ordered list of the workflow's parts — comment hygiene, import placement,
+  documentation compliance, narrative compression, campaign index currency, the
+  repository's own closeout parts as its root guidance names them, promotion,
+  guidance placement, documentation citations, archival — each part under its own
+  heading carrying its text from `openspec/README.md#plan-closeout-requirements`
+  with every repository command replaced by what the repository's guidance names
+  (D8); the guidance placement part as D16 words it; and the promotion story from
+  `AGENTS.md`'s "Cross-references must resolve" (D6). Verify no make target, and no
+  link to a file the inventory tags `repository`, appears in it.
+- [ ] 3.3 Move the rest of the workflow material to the files the corrected
+  inventory names — on the hard-case sample's reading, `working-model.md`,
+  `openspec-documentation.md`, `changes.md`, `change-references.md`, and `terms.md`
+  — each with frontmatter, deleting the moved text from `AGENTS.md`,
+  `openspec/README.md`, and `docs/agents/domain.md`, and keeping in place, under
+  their final headings, what the inventory leaves there. Verify each workflow row of
+  the inventory sits in its destination and no longer in its source.
+- [ ] 3.4 Leave this repository's closeout parts — roadmap currency, packaging,
+  end-to-end pipeline — in `openspec/README.md` under `## This repository's closeout
+  parts`, naming the commands each runs; and add to `AGENTS.md` the row naming that
+  section, so closeout, planning, and review find the parts through the root
+  guidance before section 5 rewrites it (D8). Verify the row's link resolves to the
+  heading.
+- [ ] 3.5 Give `docs/agents/change-workflow.md` frontmatter tagging it `workflow`,
+  and move what the inventory finds of this repository in it — its links to
+  `market-change-workflow`, its step table's naming of this repository's validation
+  parts — to `openspec/specs/market-change-workflow/README.md`, stating it there in
+  this repository's terms (D1's direction). Verify the guide links to no file the
+  inventory tags `repository`.
+- [ ] 3.6 Re-point every citation of moved workflow material, by name and never by
+  part number (D8): the skills, from the inventory's restatements table, including
+  `change-closeout`'s count of the parts and its order; `change-workflow`'s README
+  and spec text; `openspec/specs/planning-governance/spec.md`'s Evidence, outside
+  the archive's merge (D14); and every other document citing
+  `openspec/README.md#plan-closeout-requirements` or another moved heading. The
+  skills' restatements stay as they are (D11). Verify `grep -rn` over the tracked
+  tree outside `openspec/changes/archive/` and `docs/prompts/` finds no citation of
+  a heading this section removed.
+- [ ] 3.7 Add each new `docs/guidance/workflow/` file to `load.common` in
+  `.agents/workflow.toml` by path, keeping its comment current, so later sessions on
+  the branch read them (design, "Implementation cadence"); and add each repository
+  path a skill now names to `openspec/specs/market-change-workflow/README.md`'s "How
+  this repository provides the workflow's roles". Verify `scripts/change-workflow
+  config load common` prints the new files, and `pytest -q
+  scripts/tests/test_change_workflow_assumptions.py` (unit) passes.
+- [ ] 3.8 Verify the section: `make check-agent-skills`; `make check-doc-citations`
+  run unscoped reports nothing it did not report before the section; `pytest -q
+  scripts/tests/test_change_workflow_assumptions.py scripts/tests/test_change_workflow_config.py`
+  (unit); and `scripts/change-workflow run pre-commit layer-engineering-guidance`,
+  whose functional hooks run every suite, reports no failure but the two the
+  preamble expects. End-to-end: none; no pipeline scenario reads guidance, and none is
+  owed.
+
+## 4. The engineering layer
+
+Delivers the engineering layer (D1, D3, D6, D7, D10, D17–D19):
+`docs/guidance/engineering/` with its README and tag table, general rules given
+neutral examples, engineering material moved out of the repository documents, every
+citation re-pointed. Files: `docs/guidance/engineering/*.md` (new); `AGENTS.md`;
+`docs/development/ARCHITECTURE.md`, `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`,
+`BUILD_AND_PACKAGING.md`; skills and documents citing moved text;
+`.agents/workflow.toml`.
+
+- [ ] 4.1 Write `docs/guidance/engineering/README.md`: frontmatter `tags:
+  [engineering]`; what the layer holds; its organization (D19); and its `## Tags`
+  table from the corrected inventory, `engineering` its first row, with the topic
+  and tool tags (D7, D18). Verify the table holds every tag the layer's files use.
+- [ ] 4.2 Move the engineering material to the files the corrected inventory names,
+  each with frontmatter, each general rule given a neutral example in place of this
+  repository's, and each language or tool form in its own file beside its neutral
+  principle (D7); this repository's examples stay in the repository documents as
+  local illustration. Verify each engineering row of the inventory sits in its
+  destination, and no engineering file names a package, service, document, or make
+  target of this repository.
+- [ ] 4.3 Write what may enter a repository (D6): what holds in every repository,
+  what a public repository additionally refuses, and what a private one may hold —
+  the last limited to what a private repository may hold that a public one may not,
+  the one piece of new guidance this change writes — from `AGENTS.md`'s "Public
+  repository discipline", with "Cross-references must resolve"'s rule in the
+  documentation file. Verify the private-repository part adds no obligation.
+- [ ] 4.4 Delete the moved text from its sources, leaving in each what the inventory
+  keeps, and re-point every citation of what moved, skills included. Verify `grep
+  -rn` over the tracked tree outside `openspec/changes/archive/` and
+  `docs/prompts/` finds no citation of a heading this section removed, and no
+  engineering file links to a file the inventory tags `workflow` or `repository`
+  (D1's direction).
+- [ ] 4.5 Add each new `docs/guidance/engineering/` file to `load.common` by path.
+  Verify `scripts/change-workflow config load common` prints them.
+- [ ] 4.6 Verify the section as section 3.8 does. End-to-end: none; no pipeline
+  scenario reads guidance, and none is owed.
+
+## 5. The repository layer at the root and across systems
+
+Delivers the repository layer's root and cross-system guidance (D3, D8, D9, D13,
+D17, D18, D21's manual override): `AGENTS.md` rewritten as the entry,
+`openspec/README.md` as this repository's guide, the cross-system documents tagged,
+and the classification of the checks. Files: `AGENTS.md`; `openspec/README.md`;
+`docs/development/ARCHITECTURE.md`, `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`,
+`BUILD_AND_PACKAGING.md`, `VALIDATION_RUNBOOK.md`, `RELEASING.md`;
+`openspec/specs/market-change-workflow/README.md`.
+
+- [ ] 5.1 Rewrite `AGENTS.md` (D3, D9, D18): frontmatter `tags: [repository]`; the
+  three layers and where each lives; its layer table naming every repository
+  guidance document by path, which is the guidance check's manual override (D21),
+  and the closeout-parts row of section 3.4; the repository's `## Tags` table,
+  `repository` its first row, listing only tags neither shared layer has; the
+  `## Exceptions to shared guidance` table for every multi-system exception the
+  inventory found — at least the public case selected, and the buyer CLIs' test
+  seams overridden; and this repository's own rules. Verify every repository row of
+  the inventory whose destination is `AGENTS.md` sits there, and each exception row
+  cites a guidance file and has the kind `selects` or `overrides`.
+- [ ] 5.2 Finish `openspec/README.md` as this repository's OpenSpec guide (D3, D8):
+  frontmatter; its placement table naming `docs/guidance/` and capability guidance
+  files beside capabilities; the validator pin; its closeout parts naming `make
+  check-guidance` where the guidance placement part runs the repository's guidance
+  check (D21). Verify it holds no row the inventory tags `workflow`.
+- [ ] 5.3 Give `ARCHITECTURE.md`, `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`,
+  `BUILD_AND_PACKAGING.md`, `VALIDATION_RUNBOOK.md`, and `RELEASING.md` frontmatter
+  with their tags (D10, D17), and move what the inventory finds misfiled across
+  systems — on the sample's reading, "Public repository content checks" to
+  `market-change-workflow`'s README. Verify each document opens with its frontmatter
+  and appears in `AGENTS.md`'s layer table.
+- [ ] 5.4 Write the classification of the checks (D13) in
+  `openspec/specs/market-change-workflow/README.md` as `### What each check enforces`
+  under "This repository's checks": a table of each check, the rule it enforces
+  linked to its guidance, that rule's layer, and where it runs, from the inventory's
+  corrected draft, the guidance check marked as enforcing workflow rules from this
+  repository's script. Verify every row of the draft is in the table.
+- [ ] 5.5 Re-point every citation of what this section moved, and verify the
+  section as section 3.8 does. End-to-end: none; no pipeline scenario reads guidance,
+  and none is owed.
+
+## 6. The repository layer beside each capability
+
+Delivers capability guidance beside its capability and the steps that read it (D3,
+D9, D10, D22; CW-p9sa, CW-x4ex, CW-r8cg): the capability sections of `TESTING.md`,
+`DEPLOYMENT_AND_CONFIG.md`, and `ARCHITECTURE.md` moved into guidance files in
+`openspec/specs/<capability>/`, with their exceptions, and the seven skills reading
+them. Files: `openspec/specs/<capability>/*.md` (new guidance files);
+`docs/development/TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`, `ARCHITECTURE.md`;
+`.agents/skills/change-{design,plan,implement,review,triage,merge,closeout}/SKILL.md`.
+
+- [ ] 6.1 Move each section the corrected inventory places beside a capability into
+  a guidance file in that capability's directory — on the sample's reading,
+  `openspec/specs/resource-pool-management/testing.md`,
+  `openspec/specs/negotiation-protocol/testing.md`,
+  `openspec/specs/marketplace-identity/configuration.md`, and
+  "Durable fulfillment acceptance" beside `fulfillment` — each with frontmatter
+  `tags: [repository, <topic>]` and no capability tag (D18), deleting it from its
+  source. Verify each such row sits in its destination, and no file in a capability
+  directory but `spec.md`, its companion, and `index.md` lacks frontmatter.
+- [ ] 6.2 Put each exception the inventory found that applies to one capability in
+  that capability's guidance file, as an `## Exceptions to shared guidance` row
+  (D9, CW-x4ex). Verify each cites a guidance file.
+- [ ] 6.3 Extend the seven skills' reading lists — `change-design`, `change-plan`,
+  `change-implement` (both of its lists), `change-review`, `change-triage`,
+  `change-merge`, and `change-closeout` — so that wherever each reads a capability's
+  specification and companion it also reads every other Markdown file in the
+  capability's directory but its `index.md` (D22, CW-r8cg). Verify `make
+  check-agent-skills` passes and each skill's list names the guidance files.
+- [ ] 6.4 Re-point every citation of what this section moved, and verify the
+  section as section 3.8 does. End-to-end: none; no pipeline scenario reads guidance,
+  and none is owed.
+
+## 7. `[load]` directory entries
+
+Delivers directory entries in `[load]` (D5; CW-l7hn, modified). Files:
+`scripts/change_workflow/config.py`, `scripts/change_workflow/hook.py` where its
+handling needs it; `scripts/tests/test_change_workflow_config.py`,
+`scripts/tests/test_change_workflow_hooks.py`.
+
+- [ ] 7.1 Make `config.documents()` expand an entry ending in `/` into the Markdown
+  files beneath it, recursively, in sorted path order, each document once across
+  `load.common` and `load.<step>`, and refuse with a `StepError` naming the entry a
+  directory entry that is missing, unreadable, or holds no Markdown file; literal
+  entries and an absent or empty list resolve as before. `config load` reports the
+  refusal as an error rather than a traceback. Verify with unit tests: a directory
+  entry expands in sorted order in place of the directory; an entry naming a missing
+  directory, a file, an unreadable directory, and a directory with no Markdown each
+  refuse naming the entry; a literal missing file is still printed; and the
+  existing "Design loads the roadmap" test passes.
+- [ ] 7.2 Verify the post-compaction hook names the expanded files for a directory
+  entry, and, for a refused entry, tells the session the documents to re-read are
+  unknown (CW-l7hn's scenario "A directory entry names nothing"), with unit tests in
+  `test_change_workflow_hooks.py`.
+- [ ] 7.3 Verify the section: `pytest -q scripts/tests/test_change_workflow_config.py
+  scripts/tests/test_change_workflow_hooks.py` (unit), then `make test-release-tooling`,
+  and `scripts/change-workflow run pre-commit layer-engineering-guidance`.
+  End-to-end: none; the engine's loading runs in no pipeline scenario, and none is
+  owed.
+
+## 8. `make check-guidance`
+
+Delivers the guidance check and `load.common` collapsed to one entry (D5, D9, D15,
+D16, D21; MCW-c4ek, modified; CW-g7lt, CW-d2rw, CW-x4ex as checked rules), and the
+fixes the check finds in the guidance. Files: `scripts/check_guidance.py` (new),
+`scripts/tests/test_check_guidance.py` (new); `scripts/check_change.py`,
+`scripts/tests/test_check_change.py`; `Makefile`; `.agents/workflow.toml`; guidance
+files the check finds wanting.
+
+- [ ] 8.1 Write `scripts/check_guidance.py`, standard library only like the other
+  closing checks: the guidance set as D21 gives it — every Markdown file under
+  `docs/guidance/`; every Markdown file in a capability directory under
+  `openspec/specs/` but its `spec.md`, its companion (`architecture.md`, or
+  `README.md` where the capability has an `index.md`), and its `index.md`, found by
+  place before its frontmatter is read; every other tracked Markdown file outside
+  `openspec/changes/` carrying `tags` frontmatter; and the documents `AGENTS.md`'s
+  layer table names. It fails, naming the file, on each of MCW-c4ek's conditions:
+  missing `tags`; zero or several layer tags; a tag in neither its layer's table nor
+  a lower one's; a table row no file uses; a malformed table; an exception row
+  citing no guidance file or naming a kind other than `selects` or `overrides`; a
+  link to a guidance file tagged with a higher layer; and, in any tracked Markdown
+  file outside `openspec/changes/archive/` and `docs/prompts/`, a citation of a
+  guidance file — a Markdown link or a quoted path — whose anchor names no heading
+  in it, headings slugged as GitHub renders their anchors. It compares no layer tag
+  with a directory (CW-n6dm). `--list [--tag <tag>]` prints each guidance file with
+  its tags, and `--list-exceptions` every exception row. Verify with unit tests in
+  `test_check_guidance.py` over temporary trees, one per failure condition, each of
+  MCW-c4ek's guidance scenarios ("An untagged capability guide", "A guidance link's
+  section moved", "Engineering guidance links upward"), a passing tree, the archive
+  and `docs/prompts/` exclusions, a workflow-tagged file under an engineering
+  directory passing, and both listings.
+- [ ] 8.2 Add `make check-guidance` to the `Makefile` and to `scripts/check_change.py`'s
+  checks, so `make check-repository` runs it, and name it in `check-repository`'s
+  help text. Verify `test_check_change.py` (unit) covers the new check and passes.
+- [ ] 8.3 Collapse `load.common` to `AGENTS.md`, `docs/guidance/`, the cross-system
+  documents, and `openspec/README.md` (D5), with its comment current. Verify
+  `scripts/change-workflow config load common` prints every guidance file sections 3
+  and 4 listed by path, and nothing more under `docs/guidance/`.
+- [ ] 8.4 Run `make check-guidance` over the tree and fix in the guidance whatever it
+  reports — a missing tag, an unused row, a stale anchor, an upward link — each fix
+  following the corrected inventory. Verify `make check-guidance` passes.
+- [ ] 8.5 Verify the section: `pytest -q scripts/tests/test_check_guidance.py
+  scripts/tests/test_check_change.py` (unit), then `make test-release-tooling`, and
+  `scripts/change-workflow run pre-commit layer-engineering-guidance`, which now runs
+  the guidance check. End-to-end: none; no pipeline scenario runs the closing
+  checks, and none is owed.
+
+## 9. Closeout
+
+The closeout task, in the order this change itself gives it (D8): the workflow's
+parts from `docs/guidance/workflow/closeout.md`, with this repository's parts from
+`openspec/README.md`'s "This repository's closeout parts" at the position the list
+names. They are `openspec/README.md#plan-closeout-requirements`'s eleven parts,
+reordered, plus guidance placement (D16).
+
+- [ ] 9.1 Comment hygiene. Confirm; do not do it here. Run `make
+  check-comment-hygiene` and `make check-history-wording`, and read the comments
+  sections 7 and 8 added to `scripts/change_workflow/config.py`,
+  `scripts/check_guidance.py`, and their tests; anything reported returns the change
+  to implementation.
+- [ ] 9.2 Import placement. Confirm; run `make check-local-imports` over the code
+  sections 7 and 8 added; an import that should move returns the change to
+  implementation.
+- [ ] 9.3 Documentation compliance. Re-check each decision's destination against
+  the placement rules as this change left them — `openspec/README.md`, "Documentation
+  placement", and CW-p9sa — directly, not by waiting for the closeout review.
+- [ ] 9.4 Narrative compression. Shorten the completed task notes to final
+  behaviour, material evidence, deferred work, and destinations, moving any
+  alternatives or review rationale into `design.md` first. `inventory.md` stays as
+  change history (D2).
+- [ ] 9.5 Campaign index currency. Set this change's row in
+  `openspec/changes/README.md` to `in closeout` and link it to its archive; in the
+  lesser goal, rewrite the current-state paragraph "The guidance agents load is not
+  layered" to the layered guidance as it now stands, and narrow the gap row this
+  change owned to loading by tag, removing the skills' restatements, moving a layer
+  out, and citing guidance held elsewhere, each still unowned. Leave the dependents'
+  `Depends on` (`add-skill-extension-points`, `extract-change-workflow-repository`)
+  to archive cleanup. Name the update in the design-promotion record.
+- [ ] 9.6 Roadmap currency. Record that no update is owed: the lesser goal lives in
+  the change index, not in `docs/development/ROADMAP.md`, and no roadmap goal or gap
+  row changes.
+- [ ] 9.7 Packaging. Run `make check-packaging` and resolve every failure; run
+  `make check-architecture-change CHANGE=layer-engineering-guidance`; run `make
+  check-agent-skills`, since the change edited `.agents/`.
+- [ ] 9.8 End-to-end pipeline. Confirm the pipeline passes at the closeout's code
+  and record the run and its result; no scenario exercises this change's behaviour,
+  which no deployed service reads. If it cannot run for an unrelated reason, record
+  the blocker and its owner, and treat it as unrun.
+- [ ] 9.9 Promotion. Write the permanent documents the proposal's "Knowledge to
+  promote" names and complete the design-promotion record: `change-workflow/README.md`'s
+  new section "The repository's guidance is layered" under "The public surface"
+  (D1, D3, D4, D6, D9, D19), its "A repository's configuration" and its "Current
+  limits" bullet on `[load]` (D5), and its "Closeout and archival" (D8);
+  `change-workflow/index.md`'s new group "The repository's guidance" under "5. The
+  public surface" listing CW-g7lt, CW-d2rw, CW-p9sa, CW-x4ex, CW-n6dm, and CW-r8cg
+  with their summary lines, and CW-l7hn's summary line revised for directory entries;
+  `market-change-workflow/index.md`'s MCW-c4ek summary line revised for the guidance
+  check, and its README's "The closing checks" (D15, D21); and confirm the
+  destinations earlier sections already wrote — the guidance READMEs, `AGENTS.md`,
+  `openspec/README.md`, `market-change-workflow/README.md`'s "What each check
+  enforces", and `planning-governance`'s Evidence. `change-workflow/spec.md` and
+  `market-change-workflow/spec.md` are written by the archive in 9.12. No id is
+  retired.
+- [ ] 9.10 Guidance placement (D16). Read each guidance section the change added,
+  moved, or rewrote — every row of the corrected inventory, and what 9.9 wrote —
+  against the layer test, adjacency, and exception placement; move what is misplaced
+  and re-point its citations; run `make check-guidance`. Report for the closeout
+  review any placement needing a decision.
+- [ ] 9.11 Documentation citations. Run `make check-doc-citations
+  CHANGE=layer-engineering-guidance` and resolve every match; then
+  `scripts/change-workflow openspec validate layer-engineering-guidance --strict`.
+- [ ] 9.12 Archival. Archive with `scripts/change-workflow openspec archive
+  layer-engineering-guidance -y`, which merges the `change-workflow` and
+  `market-change-workflow` deltas into their specifications (no `--skip-specs`), and
+  link the change's row to its archive directory.

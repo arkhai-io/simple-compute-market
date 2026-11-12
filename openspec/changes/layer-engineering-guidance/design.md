@@ -254,6 +254,13 @@ Citations name parts by heading, never by number, so reordering or a repository'
 own parts never break them. `add-skill-extension-points` builds its closeout slot
 on this list, and depends on this change for its design.
 
+`closeout.md` names no make target: a part that runs a check says "the repository's
+comment checks" or "the repository's guidance check", and this repository's
+guidance names each command. The round that moves the list leaves this repository's
+parts in `openspec/README.md` under their final heading and adds `AGENTS.md`'s row
+naming them at once, so closeout can find them before the root guidance is
+rewritten in a later round.
+
 Rejected: the list whole in `openspec/README.md`, tagged, which leaves workflow and
 repository material interleaved; dissolving the list beside the rules it confirms,
 which breaks the direction rule; leaving the list to `add-skill-extension-points`,
@@ -336,7 +343,8 @@ no meaning (CW-n6dm), and capability guidance read with its capability (CW-r8cg)
 and modifies CW-l7hn for directory entries; its README takes the rationale.
 `market-change-workflow` modifies MCW-c4ek to add the guidance check to the closing
 checks. `planning-governance` changes no requirement; its Evidence section's
-closeout part numbers are re-pointed to part names at promotion. The placement
+closeout part numbers are re-pointed by hand to part names, outside the archive's
+merge, in the round that moves the closeout list, since the citation breaks then. The placement
 principles are the workflow's because they govern how the workflow places and reads
 guidance.
 
@@ -396,7 +404,13 @@ Rejected: a separate `layer:` key; TOML frontmatter.
 ```
 
 The engineering and workflow tables sit in their layers' `README.md`; the layer
-tags are defined with the layer model. This repository's table is a section of
+tags are defined with the layer model. Each layer's table lists its own layer tag as
+its first row, as the example shows, so `engineering` is a row of the engineering
+table, `workflow` of the workflow table, and `repository` of `AGENTS.md`'s. The
+layer model itself — the test and the link direction — is workflow material, stated
+for readers in `docs/guidance/workflow/README.md` and normatively by CW-g7lt and
+CW-d2rw; a row naming another layer's word is not a link, so the engineering table's
+description of its layer may say what it holds without the workflow. This repository's table is a section of
 `AGENTS.md` and lists only tags neither shared layer has; capability tags are not
 listed, since a capability's guidance is located by its directory. A file uses tags
 from its layer's table or a lower one. A table reads well to a person and lets a tag

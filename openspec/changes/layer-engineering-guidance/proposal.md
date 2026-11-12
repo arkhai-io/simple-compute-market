@@ -169,26 +169,26 @@ changes.
 
 ### Knowledge to promote
 
-- D1, the layers, their test, and the link direction: `openspec/specs/change-workflow/spec.md` (CW-g7lt, CW-d2rw); `openspec/specs/change-workflow/README.md`; `docs/guidance/engineering/README.md`
+- D1, the layers, their test, and the link direction: `openspec/specs/change-workflow/spec.md` (CW-g7lt, CW-d2rw); `openspec/specs/change-workflow/README.md`, "The repository's guidance is layered" (a new section under "The public surface"); `docs/guidance/workflow/README.md`, the layer model
 - D2: no permanent destination — the inventory is change history, and the placement and tags it produces are their own record
-- D3, shared guidance under `docs/guidance/` and repository guidance beside its system: `openspec/specs/change-workflow/spec.md` (CW-p9sa); `openspec/specs/change-workflow/README.md`; `openspec/README.md`'s placement table; `AGENTS.md`
-- D4, frontmatter tags: `openspec/specs/change-workflow/spec.md` (CW-g7lt); `openspec/specs/change-workflow/README.md`
-- D5, `[load]` directory entries: `openspec/specs/change-workflow/spec.md` (CW-l7hn); `.agents/workflow.toml`
-- D6, private and public repositories: `docs/guidance/engineering/` (what may enter a repository); `AGENTS.md`'s exceptions; `openspec/specs/change-workflow/README.md`, that the workflow runs in private repositories too
+- D3, shared guidance under `docs/guidance/` and repository guidance beside its system: `openspec/specs/change-workflow/spec.md` (CW-p9sa); `openspec/specs/change-workflow/README.md`, "The repository's guidance is layered"; `openspec/README.md`, "Documentation placement"; `AGENTS.md`'s layer table
+- D4, frontmatter tags: `openspec/specs/change-workflow/spec.md` (CW-g7lt); `openspec/specs/change-workflow/README.md`, "The repository's guidance is layered"
+- D5, `[load]` directory entries: `openspec/specs/change-workflow/spec.md` (CW-l7hn); `openspec/specs/change-workflow/README.md`, "A repository's configuration" and its "Current limits" bullet on `[load]`; `.agents/workflow.toml`
+- D6, private and public repositories: `docs/guidance/engineering/repository-content.md`, or the file round 1's inventory names for it; `AGENTS.md`'s exceptions table; `openspec/specs/change-workflow/README.md`, "The repository's guidance is layered", that the workflow runs in private repositories too
 - D7, tool tags: `docs/guidance/engineering/README.md`
-- D8, the closeout parts by layer: `docs/guidance/workflow/closeout.md`; `openspec/README.md`'s "This repository's closeout parts"; `AGENTS.md`'s layer table; `planning-governance`'s Evidence; `.agents/skills/change-closeout/SKILL.md`
-- D9, exceptions: `openspec/specs/change-workflow/spec.md` (CW-x4ex); `openspec/specs/change-workflow/README.md`; `AGENTS.md`
+- D8, the closeout parts by layer: `docs/guidance/workflow/closeout.md`; `openspec/README.md`, "This repository's closeout parts"; `AGENTS.md`'s layer table; `openspec/specs/planning-governance/spec.md`, "Evidence"; `openspec/specs/change-workflow/README.md`, "Closeout and archival"; `.agents/skills/change-closeout/SKILL.md`
+- D9, exceptions: `openspec/specs/change-workflow/spec.md` (CW-x4ex); `openspec/specs/change-workflow/README.md`, "The repository's guidance is layered"; `AGENTS.md`'s exceptions table
 - D10: no permanent destination — how this change treats each document; the result is the documents themselves
 - D11: no permanent destination — the restatements stay, and their inventory rows are change history for the loader change
 - D12: no permanent destination — `docs/prompts/` is left as it is
-- D13, the checks' classification: `openspec/specs/market-change-workflow/README.md`, "This repository's checks"
-- D14, the capability deltas: `openspec/specs/change-workflow/spec.md` and `index.md`; `openspec/specs/market-change-workflow/spec.md` and `index.md`
-- D15, the anchor check: `openspec/specs/market-change-workflow/spec.md` (MCW-c4ek); `openspec/specs/market-change-workflow/README.md`
+- D13, the checks' classification: `openspec/specs/market-change-workflow/README.md`, "What each check enforces" (a new subsection of "This repository's checks")
+- D14, the capability deltas: `openspec/specs/change-workflow/spec.md`, and `index.md`'s new group "The repository's guidance" under "5. The public surface" with CW-l7hn's summary line revised under "A repository's configuration"; `openspec/specs/market-change-workflow/spec.md`, and `index.md`'s MCW-c4ek summary line under "5. This repository's checks"
+- D15, the anchor check: `openspec/specs/market-change-workflow/spec.md` (MCW-c4ek); `openspec/specs/market-change-workflow/README.md`, "The closing checks"
 - D16, the guidance placement part: `docs/guidance/workflow/closeout.md`; `.agents/skills/change-closeout/SKILL.md`; `openspec/specs/market-change-workflow/spec.md` (MCW-c4ek) for its mechanical rule
 - D17, the frontmatter: `openspec/specs/change-workflow/spec.md` (CW-g7lt); `docs/guidance/engineering/README.md`
 - D18, the vocabulary tables: `docs/guidance/engineering/README.md`; `docs/guidance/workflow/README.md`; `AGENTS.md`
-- D19, flat files: `openspec/specs/change-workflow/README.md`, with directories carrying no meaning (CW-n6dm)
+- D19, flat files: `openspec/specs/change-workflow/README.md`, "The repository's guidance is layered", with directories carrying no meaning (CW-n6dm)
 - D20: no permanent destination — superseded by D3
-- D21, `make check-guidance`: `openspec/specs/market-change-workflow/spec.md` (MCW-c4ek); `openspec/specs/market-change-workflow/README.md`
+- D21, `make check-guidance`: `openspec/specs/market-change-workflow/spec.md` (MCW-c4ek); `openspec/specs/market-change-workflow/README.md`, "The closing checks"; `openspec/README.md`, "This repository's closeout parts", which names the command
 - D22, capability guidance read with its capability: `openspec/specs/change-workflow/spec.md` (CW-r8cg); the seven skills that read a capability's specification
 - D23: no permanent destination — `openspec/config.yaml` is unchanged in kind
