@@ -48,3 +48,15 @@ SCM MUST refuse rate mandate materialization without a composition's rate-servic
 #### Scenario: Publication is disabled after materialization
 - **WHEN** a previously materialized rate deal is recovered with new publication disabled
 - **THEN** its existing servicing continues under accepted terms
+
+### Requirement: Compute buyers select what the payments buyer helper can approve
+Both compute buyers MUST take the lifecycle capabilities of their payments term context — a stoppable rate part and the partial-period treatments the vendored contract encodes — from the payments kit's buyer helper, the same set mandate derivation and seller presets use, rather than declare their own. Other mechanisms keep their own contexts. A buyer whose term validation or dispute-authority acceptance refused every advertised option MUST be told each distinct reason at normal verbosity, and a `buy` that finds nothing for that reason MUST NOT exit as a successful empty search.
+
+#### Scenario: A buyer selects a seller's spot or on-demand option
+- **GIVEN** spot and on-demand options a storefront's preset helper derived, and a buyer accepting their dispute authority
+- **WHEN** the buyer selects either one
+- **THEN** term validation admits it and the buyer discloses its class, per-period price, notices, penalty and partial-period treatments before negotiating
+
+#### Scenario: Every advertised option is refused
+- **WHEN** term validation refuses every option a `buy` discovered
+- **THEN** the command prints why each was refused after "No listings matched" and exits 2
