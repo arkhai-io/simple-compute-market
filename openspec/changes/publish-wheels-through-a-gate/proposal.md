@@ -1,53 +1,75 @@
 ## Why
 
-This repository has two publication paths and they share nothing.
+This repository publishes from its own CI to five channels, and every one of them
+publishes something other than what a deployment validated:
 
-`push-runtime-artifacts` sends three images, three client wheels, charts, and
-the CLI to Artifact Registry. It is run by a human and its artifacts are
-promoted between environments by copying.
+- `publish-pypi.yml` uploads to PyPI on every push to `main`, at whatever version each
+  `pyproject.toml` states. Python source often changes without a version bump, and
+  PyPI is write-once, so a merge can make a version permanently describe different
+  code. It has done so: a kit distribution reached PyPI declaring a dependency PyPI
+  did not carry, uninstallable outside this repository and correctable only by a
+  further version.
+- `publish-npm.yml` does the same for the TypeScript credits middleware.
+- `release.yml`, on a `marketplace-v*` tag, builds and pushes a storefront image to
+  ghcr and attests it. Image builds are not reproducible, so that attested image is
+  not the image production runs; for marketplace v0.3.0 the two differ by digest, from
+  one commit and one Dockerfile.
+- `release-cli.yml`, on a `market-cli-v*` tag, publishes a tarball of the repository's
+  source and a curl installer. The installer builds the buyer CLI from that source,
+  bypassing the released wheels, and it has stopped working: it fetches the latest
+  GitHub release's `install.sh`, and the latest release is now a marketplace release
+  that has none.
 
-`publish-pypi.yml` sends twenty-eight distributions to public PyPI on every push
-to `main`, versioned by whatever each `pyproject.toml` says, with no gate, no
-prior deployment, and no promotion. Python source frequently changes without a
-corresponding semver bump, so a merge can publish a distribution whose version
-already describes different code — and PyPI is write-once, so the mistake is
-permanent and correctable only by another version.
-
-That path already published a broken artifact. `arkhai-kit-hosted-settlement`
-0.1.4 is live on PyPI declaring a dependency on
-`arkhai-hosted-settlement-client==0.4.2`, which PyPI does not carry. Installing
-it fails for everyone outside this repository, and has since it was published,
-because inside the repository `.dist` always had the wheel.
-
-Promotion is eventually owned by a pipeline maintained outside this repository,
-which does not exist yet. Waiting for it means continuing to publish ungated;
-building a parallel permanent mechanism here means building something destined
-for deletion. The available move is to isolate the concern: put
-publication behind a deliberate step in this repository, shaped like the
-promotion model that will replace it.
+The deployment already releases differently, and marketplace v0.3.0 went out that way:
+it loads a candidate's artifacts into its development registry with this repository's
+publish targets, validates them there, copies them unchanged through pre-production
+and production, and only then publishes them. What this repository lacks is a
+release that matches: a tag cut before anything was validated cannot name what was
+validated, and a merge to `main` cannot be a release, because the release's version
+and the artifacts it comprises are not known when the merge happens.
 
 ## What Changes
 
-- **Automated publication to PyPI stops.** Merging to `main` no longer
-  publishes to a public index.
-- Merge to `main` publishes to the development Artifact Registry instead, via
-  `push-runtime-artifacts`, and that path carries all twenty-eight
-  distributions rather than three.
-- The set of distributions published is read from the release inventory. The
-  hardcoded list in `push-wheels` and the `packages.json` matrix in
-  `publish-pypi.yml` are both replaced by it; neither survives as a second
-  enumeration.
-- All twenty-eight are published, not the three the registry path names today.
-  The kit is composable functionality other teams are meant to build
-  marketplaces from, so importing a piece of it individually is the point; a
-  distribution that exists and is unpublished cannot be imported at all.
-- A promotion step, human-invoked, copies artifacts from Artifact Registry to
-  PyPI. It never rebuilds. Before uploading anything it compares every
-  distribution's bytes against what PyPI already holds, and **fails the whole
-  promotion** if any version exists on PyPI with different content. A version
-  already present with identical bytes is skipped, not an error.
-- The promotion step lives in a section of this repository documented as
-  conditional on no promotion pipeline consuming these artifacts.
+- **CI publishes nothing.** No workflow uploads to PyPI, npm, ghcr, a registry, or a
+  GitHub release. `publish-pypi.yml`, `publish-npm.yml`, `release.yml` and
+  `release-cli.yml` are deleted, with the release contract
+  (`arkhai.marketplace-release.v2`) and its verifier. CI builds and tests, including
+  building the wheelhouse and resolving every declared distribution against it.
+- **A candidate is a `main` commit; a release is a promoted candidate.** After a change
+  merges to `main`, the commit is loaded into a development registry with
+  `make push-runtime-artifacts`. The revision names a candidate (`<service>-<rev>`
+  image tags, the CLI under its revision); the semver names a release, applied only
+  when the candidate is promoted. A candidate that fails validation is fixed on `main`
+  and the next commit is loaded; nothing is rebased.
+- **The chart names no release.** Its version follows its own semver, its default
+  values keep the bare development tags, and a deployment selects images by its own
+  values. Which chart version a release uses is recorded in the release's bill of
+  materials, so one chart version can serve many releases and the chart a deployment
+  validated is the chart it ships.
+- **One declaration of what a release comprises.** `manifests/published-distributions.json`
+  becomes `manifests/release-components.json`, declaring the distributions (with
+  whether each is public), the service images, the chart, the CLI binary and the npm
+  package. Every publish target reads it; `push-images` gains the bare-metal
+  storefront it omits today.
+- **A release is recorded on a release branch, last.** Once a release has been deployed
+  to production, `releases/<semver>` is cut from the candidate's commit, one commit
+  adds the release's bill of materials (CycloneDX, content identities only: names,
+  versions, digests and source revisions, never registry locations), and that commit
+  is tagged `marketplace-v<semver>`. Public channels are published after the cut. A
+  release that fails before production never gets a branch, a tag, or a public
+  artifact.
+- **A version must change when its contents change.** `make check-release-versions`
+  compares the built wheels and the chart with the previous release's bill of
+  materials and refuses any whose version is unchanged but whose contents differ. It
+  runs before a candidate is loaded and again at the cut.
+- **The curl installer is retired.** `install.sh`, `scripts/install-remote.sh` and
+  `scripts/build-installer.sh` are deleted, and `market-cli-v*` tags are no longer made.
+  The buyer CLI is installed from PyPI, pinned to the release's versions, or as the
+  release's `market` binary from its GitHub release.
+- **`docs/development/RELEASING.md` describes this repository's half of the release**:
+  candidates, the component declaration, the cut and its bill of materials, the
+  version check, and that public channels are reached only by the deployment's
+  promotion of artifacts it validated.
 
 ## Capabilities
 
@@ -57,54 +79,57 @@ None.
 
 ### Modified Capabilities
 
-- `deployment-state`: publication to a public index is a deliberate,
-  byte-verified promotion of artifacts already published to a development
-  registry, rather than a side effect of merging. The set of published
-  distributions is derived from the release inventory rather than enumerated
-  per publication path.
+- `deployment-state`: CI publishes nothing; a candidate is a default-branch commit
+  named by its revision and a release a promoted candidate named by its semver; one
+  declaration of release components; the chart names no release; a release is
+  recorded by a tagged bill-of-materials commit on its release branch; a version
+  whose contents changed is refused.
 
 ## Dependencies and Related Changes
 
-- Requires the cross-repository release inventory format, which is defined
-  outside this repository. Until it exists, the single package list can be a
-  plain manifest both paths read; the inventory replaces it without reopening
-  the decision.
-- Requires a writer identity for CI against the development registry, granted
-  outside this repository.
-- Follows `resolve-hosted-client-from-an-index`, which is what makes the
-  published graph installable from a public index at all.
-- Anticipated by `configure-pypi-trusted-publishing`, which this change's
-  byte-verification and inventory-derived matrix subsume in part. Reconcile the
-  two before either is archived.
-- Superseded in full by the promotion pipeline that will consume these
-  artifacts. The condition for its removal is recorded in `design.md`.
+- Absorbs `promote-releases-from-infrastructure`, which proposed the same retirement of
+  CI publication and the `push-images` repair. Its directory is removed with this
+  change's redesign.
+- `configure-pypi-trusted-publishing` configured trusted publishers so CI could publish
+  each release. CI no longer publishes, so its publisher half has no consumer; its
+  remaining value is the reviewed distribution graph and the PyPI-only installation
+  proof. Narrow or withdraw it in its own design.
+- The bill-of-materials format is defined with the deployment's release inventory,
+  outside this repository. This repository fixes only what its own documents and
+  checks read from it.
+- `sign-multi-language-credits-middleware` names the npm workflow this change deletes;
+  its npm publication becomes the deployment's.
+- The npm package can only be loaded into a development registry once that registry
+  serves npm, which is provisioned outside this repository.
 
 ## Non-Goals
 
-- Do not build a durable promotion system here. This is an interim mechanism
-  with a stated removal condition.
-- Do not implement automatic deployment or triggered promotion. Promotion is
-  human-invoked, which is what lets it coexist with a harness runtime whose
-  guarantee depends on no trigger mechanism existing.
-- Do not rebuild artifacts at promotion. Bytes are copied.
-- Do not attempt to clobber or delete on PyPI. Neither is possible and neither
-  is wanted; a conflict is a failure, not something to overwrite.
-- Do not change any distribution's version as part of promotion. Wheel versions
-  are fixed at build time and the gate may only accept or reject them.
-- Do not add a semver-bump enforcement mechanism. The absence of one is why
-  automated publication stops; supplying one is separate work.
+- No promotion, publication or deployment tooling here. The deployment validates,
+  promotes, deploys and publishes; this repository provides the publish targets that
+  load a candidate and the declaration that says what a release comprises.
+- No guarantee about what a development registry holds under a tag. Development tags,
+  including revision tags and the bare tags shared development releases follow, are
+  rewritten as developers iterate; a release is identified by the digests its bill of
+  materials records, never by a development tag.
+- No change to any distribution's version at promotion. A wheel's version is inside
+  it, so promotion accepts or refuses it.
+- No reproducible image builds. A release records the image digests that were
+  validated and copies those.
 
 ## Impact
 
-Touches `push-wheels` and `push-runtime-artifacts` in the root `Makefile`, a new
-promotion script under `scripts/`, `.github/workflows/publish-pypi.yml`
-(publication removed), a merge-to-`main` workflow publishing to Artifact
-Registry, and `docs/development/RELEASING.md`.
+Deletes `.github/workflows/publish-pypi.yml`, `publish-npm.yml`, `release.yml` and
+`release-cli.yml`; `scripts/verify-marketplace-release.py`; `install.sh`,
+`scripts/install-remote.sh` and `scripts/build-installer.sh`; and their tests. Touches
+`manifests/` (renamed and widened), `scripts/push-distributions.py`,
+`scripts/publish_artifacts.py`, the root `Makefile`'s publish targets and the
+bare-metal storefront's build target, `helm/Chart.yaml`, `.github/workflows/tests.yml`,
+`docs/development/RELEASING.md`, `docs/buyer-quickstart.md`, `README.md`, and the
+`deployment-state` specification. No runtime behavior changes.
 
-**Contributor-workflow break:** merging no longer publishes to PyPI. Anyone
-depending on that behaviour must invoke promotion deliberately.
+**Contributor-workflow break:** merging to `main` publishes nothing, and pushing a
+`marketplace-v*` or `market-cli-v*` tag runs nothing. A release is cut only through the
+release procedure, after production runs it.
 
-**Externally visible break already present:** `arkhai-kit-hosted-settlement`
-0.1.4 on PyPI is uninstallable and cannot be corrected in place. It requires a
-version bump once its dependency is publicly resolvable, and that is a
-consequence of this work rather than a task within it.
+**Consumer-visible break:** the curl installer URL stops being served. It already
+returns 404.
