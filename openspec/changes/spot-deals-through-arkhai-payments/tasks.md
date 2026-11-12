@@ -120,6 +120,22 @@ publication configuration/builders and their focused publication suites.
 - [x] 2.6 Add the materialization servicing-declaration gate: refuse undeclared
       rate servicing, including for accepted options after declaration withdrawal.
       The terms change retains publication/acceptance gate ownership.
+- [x] 2.7 Both compute buyers' payments term contexts take the stoppable rate part
+      and the contract's partial-period set from the buyer helper,
+      `market_arkhai_payments.buyer.approvable_terms`; `SUPPORTED_PARTIAL_PERIODS`
+      in mandates.py is the one set mandate derivation, buyer lifecycle validation
+      and the preset context read. Without it both buyers dropped every spot and
+      on-demand option ("early_termination requires a stoppable part") and `market
+      buy` printed "No listings matched" with exit 0. Authority selection now keeps
+      each distinct refusal; VM `buy`, `negotiate` and `listing list` print them
+      when nothing was selectable, and `buy` exits 2. Tests: payments
+      test_buyer.py (the presets' options pass only with the helper's context),
+      deal-lifecycle test_selection.py, VM test_recurring_option_selection.py,
+      bare-metal test_buyer_composition.py. An in-process VM `market buy` trial
+      with a fixture-only servicing declaration selected, disclosed, negotiated,
+      validated acceptance and approved both options, then stopped at commit: the
+      buyer lifecycle builds the once-only payment adapter for a rate mandate,
+      which the rate buyer-end work (task 4.5) replaces.
 
 Validation: unit targets test_mandates.py, test_buyer.py and
 test_settlement_config.py; vector conformance for mixed and rate mandates;
