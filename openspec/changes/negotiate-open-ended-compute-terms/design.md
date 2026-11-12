@@ -358,8 +358,10 @@ a mock only at the external I/O boundary. That rule stays as written (owner, clo
 2026-11-12): it is what keeps a test of functionality that does not exist yet from
 merging. Each door keeps a test at the lowest level that proves it without such a
 fixture. The storefront integration cases that needed one leave this change: their
-copies are kept in the change that installs the recurring mechanism, which adds them
-once its code stands at those ports.
+copies are kept in the change that installs the recurring mechanism,
+`spot-deals-through-arkhai-payments`, which supplies the recurring encoder and adds them
+once its code stands at those ports (owner, 2026-11-12). A case whose behaviour needs no
+unimplemented port is rewritten here without the fixture rather than moved.
 
 1. Publication omits a recurring candidate naming any undeclared treatment on an
    entitlement or at the term end, or a setup charge where `setup` is not declared,
@@ -1072,6 +1074,14 @@ planning add the version pass as a section before closeout, run as a one-section
 whose validation and implementation review are waived, since a version, pin and lock
 change alters no behaviour the round's validation and review have not already judged;
 the change then goes to closeout.
+
+Round 4 is one section, 12b. The second closeout attempt put four questions to the owner
+(`tasks.md` 13.3's note); two answers need code — the fixture-port storefront tests
+leave this change (D6) and `bare-metal buy` honours `default_duration_seconds` (D11) —
+and closeout edits no code. The owner confirmed the return and directed (2026-11-12)
+that planning add the fix as a section before closeout, run as a one-section round
+whose validation and implementation review are owed, since it changes tests and buyer
+behaviour; the change then goes to closeout, which resumes at 13.3.
 
 Part B of the record compares this change with the Goal 8 MVP replan on
 `goal-8-mvp-design`. The owner decided that this change is finished and merged as

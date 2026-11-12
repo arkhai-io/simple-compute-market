@@ -19,8 +19,9 @@ then split at the owner's direction into sections 5–12, one session each but 5
 together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–12
 are done and were validated, reviewed and triaged. The first closeout attempt found the
 packages unversioned for the change's edits; section 12a, the version pass, is round 3,
-a one-section round whose validation and review the owner waived, before closeout
-resumes at 13.3. The second closeout attempt returned for the owner's answers in 13.3's
+a one-section round whose validation and review the owner waived. The second closeout
+attempt's questions needed code: section 12b is round 4, a one-section round whose
+validation and review are owed, before closeout resumes at 13.3. The second closeout attempt returned for the owner's answers in 13.3's
 note that need code. Verification levels follow `docs/development/TESTING.md`;
 every behaviour this change adds gets permanent tests at the level it assigns (owner
 record 01, R2).
@@ -2261,6 +2262,62 @@ and implementation review are waived (`design.md`, "Implementation cadence").
 - Next is closeout, resuming at 13.3 and confirming 13.7 again on the relocked tree.
   The owner waived this round's validation and implementation review.
 
+## 12b. Closeout's fixes: no fixture-port storefront tests, the configured reserved default
+
+Delivers the code two of the owner's answers to 13.3's questions need (13.3's note):
+the storefront integration tests standing fixtures at unimplemented composition ports
+leave this change (D6; `docs/development/TESTING.md`, "Integration Tests"), and
+`bare-metal buy` gives a reserved option its configured `default_duration_seconds`
+(D11; the `buyer-orchestration` delta's "Recurring purchase may omit a horizon").
+Touches both storefronts' tests, `openspec/changes/spot-deals-through-arkhai-payments/`
+(the carried copies), and the bare-metal buyer (`settlement_stages.py`, `cli.py`, its
+composition and tests). Planned at the owner's direction (2026-11-12) as round 4, a
+one-section round whose validation and implementation review are owed (`design.md`,
+"Implementation cadence").
+
+- [ ] 12b.1 **Sort the fixture-port cases (D6):** for each of the fourteen tests 13.3's
+  note lists — VM `tests/integration/test_publication_loop.py` (5),
+  `tests/integration/test_buyer_selection_negotiation.py` (3), bare-metal
+  `tests/test_http_publication_rates.py` (4) and `tests/test_http_negotiation.py` (2) —
+  decide whether its behaviour needs a recurring encoder, term timing or a billing
+  projection (the ports `tests/recurring_world.py` fixes in each storefront). A case that
+  needs none (a once option's clause deadline, perhaps) is rewritten in place without the
+  world; a case that needs one is carried. For each carried case, name the lowest-level
+  test that still proves its door without a fixture (the publication omission, the
+  cached-selection refusal, the penalty multiple, the clause deadline, the omitted
+  horizon at the default bound, the unrequested-duration pricing check, the runway
+  refusal naming the minimum) — `kit/settlement-runtime/tests/unit` (`test_servicing.py`,
+  `test_rate_publication.py`, `test_horizon.py`), the buyers' unit suites — and add one
+  where none exists. Record the sorting in this task's note.
+- [ ] 12b.2 **Carry and delete (D6):** copy each carried test, with the world module it
+  uses, into `openspec/changes/spot-deals-through-arkhai-payments/carried-tests/`
+  (`vms/` and `bare_metal/`), with a `README.md` saying what each case proves, which
+  ports it needs, and that the change installing them restores the cases to the
+  storefront suites once its code stands at those ports; add one line to that change's
+  row Notes in `openspec/changes/README.md` pointing at the directory. Then delete the
+  carried tests from the storefront suites, and each `tests/recurring_world.py` once
+  nothing imports it; remove helpers only they used.
+- [ ] 12b.3 **The configured reserved default (D11):** `bare-metal buy` gives a reserved
+  option without a duration the loaded `BareMetalBuyerConfig.default_duration_seconds`
+  in place of `RESERVED_DEFAULT_DURATION_SECONDS` in
+  `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/settlement_stages.py`, still
+  shown as the buyer's default and never applied to a recurring option; the
+  `--duration-seconds` help in `cli.py` names the configured default instead of 3600.
+  Unit tests in `domains/bare_metal/buyer/tests`: a configured value reaching the
+  disclosure and the provision terms, the 3600 default when unconfigured, and a recurring
+  option ignoring it. Confirm with `make check-version-bumps CHANGE_BASE=dev` that
+  `arkhai-bare-metal-buyer`'s 0.8.0 on `dev` already carries the bump this needs.
+- [ ] 12b.4 **Verify:** `make dist`, then `make -C domains/vms/storefront test` (unit
+  and application integration through its typed client), `make -C
+  domains/bare_metal/storefront test` (unit and application integration),
+  `make -C kit/settlement-runtime test` (unit), `make -C domains/bare_metal/buyer test`
+  (unit), `make check-comment-hygiene` and `scripts/change-workflow run pre-commit
+  negotiate-open-ended-compute-terms`, whose functional hooks run the packaging check and
+  every suite. End-to-end: `bare_metal/test_bare_metal_payment_deal.py` buys a reserved
+  option with an explicit `--duration-seconds`, so it does not exercise the configured
+  default; no scenario drives a recurring option (the per-period gap row), and none is
+  owed — the default is the buyer's own resolution, which the unit tests prove.
+
 ## 13. Closeout
 
 Documentation-only, in `openspec/README.md#plan-closeout-requirements` order;
@@ -2276,7 +2333,8 @@ the relocked tree.
 Closeout stopped again 2026-11-12, at `1738eec49`, in 13.3: two of the owner's answers
 to its questions need code (13.3's note). Its documentation outcomes are recorded: D6,
 D10 and D11 in `design.md`, the `deal-lifecycle` rename and the `buyer-orchestration`
-default in the deltas. Closeout resumes at 13.3 after the fix round.
+default in the deltas. Section 12b is the fix round; closeout resumes at 13.3 after it,
+and confirms 13.7 again.
 
 - [x] 13.1 **Comment hygiene:** run `make check-comment-hygiene`; confirm the comments
   rounds 1 and 2 added describe current invariants, not change provenance.
