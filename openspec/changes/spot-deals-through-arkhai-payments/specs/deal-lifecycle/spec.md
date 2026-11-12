@@ -35,6 +35,25 @@ Both compute storefront operator CLIs MUST provide deals preempt by negotiation 
 - **THEN** the CLI delegates the same command through lifecycle submit
 - **AND** displays pending, unknown or accepted authority state without bypassing notice
 
+### Requirement: Administrator interruption explicitly classifies its cause
+The VM administrator interrupt verb MUST distinguish `interruption_kind=preemption` from `interruption_kind=failure`. Preemption MUST delegate the existing notice admission and journaled stop, requiring the accepted payee entitlement. Failure MUST end delivery and file delivery_end for both spot and on-demand, without a local rate-part payout remedy. An omitted kind MUST refuse for rate deals; once-only deals retain failure as their compatibility default. The free-text administrator reason remains required for hosted interruptions.
+
+#### Scenario: A lawful administrator preemption
+- **GIVEN** the accepted option grants a payee entitlement
+- **WHEN** an administrator interrupts with kind preemption
+- **THEN** it delegates notice through the same lifecycle submit and operation journal
+- **AND** it waits for the effective authority stop before ending delivery
+
+#### Scenario: Failure is independent of spot permission
+- **GIVEN** a spot or on-demand deal
+- **WHEN** an administrator interrupts with kind failure and a hardware-failure reason
+- **THEN** delivery ends and delivery_end is filed under the existing seller-failure path
+- **AND** no automatic rate-part reverse or self-penalty is attempted
+
+#### Scenario: Missing classification cannot guess a rate deal's cause
+- **WHEN** a rate interruption omits its kind or an unentitled deal requests preemption
+- **THEN** the request refuses before any notice, physical end or filing
+
 ### Requirement: Canonical rate buyer end preserves service during notice
 The buyer half MUST normally submit rate stop at the payment authority and send hint, allowing delivery until effective stop reaches end service through watch. It MUST reserve end_delivery for explicit immediate surrender or the unreachable-payment-authority delivery_end(cause=payer) case path. Immediate surrender MUST disclose that paid notice may outlast service.
 

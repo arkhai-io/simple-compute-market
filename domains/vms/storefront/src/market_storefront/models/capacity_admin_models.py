@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -84,6 +84,10 @@ class InterruptDealRequest(BaseModel):
     )
     operation_key: str | None = Field(default=None, min_length=1)
     reason: str | None = None
+    interruption_kind: Literal["preemption", "failure"] | None = Field(
+        default=None,
+        description="Hosted cause: lawful preemption or seller-caused failure. Required for rate deals.",
+    )
     seller_amount: int | None = Field(
         default=None,
         ge=0,

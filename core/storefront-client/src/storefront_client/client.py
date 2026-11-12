@@ -1159,11 +1159,17 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         reason: str = "operator_interruption",
         interrupted_at_utc: str | None = None,
+        interruption_kind: str | None = None,
+        operation_key: str | None = None,
         dry_run: bool = False,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         """Interrupt an active interruptible deal through the admin control plane."""
         body: dict[str, Any] = {"reason": reason, "dry_run": dry_run}
+        if interruption_kind is not None:
+            body["interruption_kind"] = interruption_kind
+        if operation_key is not None:
+            body["operation_key"] = operation_key
         if interrupted_at_utc is not None:
             body["interrupted_at_utc"] = interrupted_at_utc
         return await self._authenticated_post(
@@ -2408,11 +2414,17 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         reason: str = "operator_interruption",
         interrupted_at_utc: str | None = None,
+        interruption_kind: str | None = None,
+        operation_key: str | None = None,
         dry_run: bool = False,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         """Interrupt an active interruptible deal through the admin control plane."""
         body: dict[str, Any] = {"reason": reason, "dry_run": dry_run}
+        if interruption_kind is not None:
+            body["interruption_kind"] = interruption_kind
+        if operation_key is not None:
+            body["operation_key"] = operation_key
         if interrupted_at_utc is not None:
             body["interrupted_at_utc"] = interrupted_at_utc
         return self._authenticated_post(

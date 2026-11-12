@@ -290,8 +290,8 @@ class AdminController:
     ) -> InterruptDealResponse:
         """Interrupt a hosted negotiation or a splitter-backed escrow.
 
-        Hosted notice rights come from the accepted option. Without a right,
-        delivery ends locally while the authority handles the correction.
+        Hosted callers select preemption or failure explicitly. Preemption
+        requires the accepted right; failure ends delivery and files a case.
         Splitter-backed escrows retain their separate on-chain declaration.
         """
         thread = await self._db.load_negotiation_thread_row(negotiation_id=escrow_uid)
@@ -305,12 +305,12 @@ class AdminController:
                     actor = self._operator(request).principal
                     key = body.operation_key or hashlib.sha256(canonical_json({
                         "negotiation_id": escrow_uid, "administrator": actor.model_dump(mode="json"),
-                        "reason": body.reason,
+                        "reason": body.reason, "interruption_kind": body.interruption_kind,
                     })).hexdigest()
                     try:
                         kind, outcome, delivery = await lifecycle.interrupt(
                             escrow_uid, actor=actor, operation_key=key,
-                            reason=body.reason, dry_run=body.dry_run,
+                            reason=body.reason, interruption_kind=body.interruption_kind, dry_run=body.dry_run,
                         )
                     except (KeyError, ValueError) as exc:
                         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -318,7 +318,7 @@ class AdminController:
                         escrow_uid=escrow_uid, listing_id=agreement["listing_id"],
                         status="dry_run" if body.dry_run else outcome.status,
                         interrupted_at_utc=self._interrupt_time(None),
-                        settlement_action="notice_stop" if kind == "stop" else "delivery_end_filing",
+                        settlement_action="notice_stop" if kind == "notice" else "delivery_end_filing",
                         lifecycle_outcome=outcome.model_dump(mode="json"),
                         delivery=delivery.model_dump(mode="json"),
                     )
