@@ -119,27 +119,90 @@ Delivers the rest of the inventory (D2, D10, D11, D13, D18, D23):
 `openspec/config.yaml`; the proposed vocabulary tables; and the draft classification
 of the checks. No guidance text moves. Files: `inventory.md`.
 
-- [ ] 2.1 Classify every heading of `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md`:
+- [x] 2.1 Classify every heading of `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md`:
   general method to engineering with the neutral example it needs named in
   `Reason`, Python, uv, and Helm forms split from a neutral principle into their own
   rows (D7), capability sections beside the capability they pertain to (D3, D10),
   cross-system material staying, and overlap with `docs/operator-handbook.md`
   flagged in `Ambiguous` (D10). Verify every heading has a row.
-- [ ] 2.2 Give `BUILD_AND_PACKAGING.md`, `VALIDATION_RUNBOOK.md`, and `RELEASING.md`
+  Note: every heading `grep '^#'` lists in both documents has a row (Grep over the
+  inventory's Source cells), the five TOML comments in `DEPLOYMENT_AND_CONFIG.md`'s
+  fenced blocks included. That proves each heading has a row, not that each
+  paragraph under it does; the split rows come from reading both documents in full,
+  and the second fresh-context check found one paragraph without a row (the
+  provisioning service's stored-pool refusal), now its own. Beyond the sample: the Python testing forms gather in one
+  `engineering/testing-python.md` rather than one file beside each neutral file
+  (flagged); Kubernetes, Helm, and Dynaconf forms have their own files; and
+  `DEPLOYMENT_AND_CONFIG.md`'s Kubernetes section, which the sample keeps whole, is
+  split into its general rules and its charts (flagged). Capability sections go
+  beside thirteen capabilities as `testing.md` or `configuration.md`, written
+  `specs/<capability>/<file>` so the citation check reads no file a corrected row
+  may never create; "Validation namespaces" goes to `market-change-workflow`'s
+  README, as a description of the system. Handbook overlap is flagged on definition
+  documents, the registry's secret profile, payments access, and the upgrade's
+  migrations list. Two exceptions are marked, both **overrides** in `AGENTS.md`: the
+  buyer CLIs' test seams and `ARKHAI_IDENTITY_CREDENTIAL`. Four section 1 rows that
+  waited on this section, or that its rows place differently, are amended in place:
+  `ARCHITECTURE.md`'s "Local development" rules, split into an engineering row and a
+  repository one; "Operator lifecycle controls", now in `engineering/test-seams.md`
+  beside "Pause the loop, then advance it explicitly"; "Testing strategy"'s
+  deterministic-sequence rule, now in `engineering/system-tests.md` with `TESTING.md`'s
+  discipline; and "Tests and diagnostics"' reason for the packaging check, split out
+  as an engineering packaging rule. Evidence: inspected; no test applies to a change
+  document.
+- [x] 2.2 Give `BUILD_AND_PACKAGING.md`, `VALIDATION_RUNBOOK.md`, and `RELEASING.md`
   each a document-level row with its tags, and a row for each section holding
   general method, such as a uv convention that holds in any repository (D10).
   Verify each document has its row.
-- [ ] 2.3 Add a restatements table: every place a `change-*` or `guidance-review`
+  Note: each document opens with a row whose Source is "The document as a whole";
+  every heading of the three also has a row, since 2.6 asks for every heading of
+  every document in the Context table. `BUILD_AND_PACKAGING.md`'s general method
+  moves to `engineering/packaging.md`, `packaging-uv.md`, `packaging-docker.md`, and
+  `packaging-python.md`. Three rows are engineering by D1's test inside documents
+  D10 keeps whole: `RELEASING.md`'s "Versioning policy" and the closing paragraph of
+  "Import package renames", and the runbook's per-observation method under
+  "Observations the qualification owes". Each keeps D10's destination, `stays`, and
+  puts the move (`versioning.md`, `packaging-python.md`, `system-tests.md`) as the
+  recommendation in `Ambiguous` for the owner, since a corrected row cannot override
+  a settled decision. The runbook was read for its opening, section 10, and section
+  29; its other sections are classified by heading as procedure, so whether they
+  hold further general method was not checked paragraph by paragraph.
+- [x] 2.3 Add a restatements table: every place a `change-*` or `guidance-review`
   skill, or `openspec/config.yaml`, restates or cites a guidance rule — the file and
   its section, the rule's source today, and the destination the rule moves to — so
   later sections re-point each citation and the loader change inherits the list
   (D11, D23). Verify by searching the skills and `openspec/config.yaml` for citations
   of the guidance documents and finding a row for each.
-- [ ] 2.4 Add the proposed vocabulary: the engineering, workflow, and repository
+  Note: `## Restatements`, 57 rows. Every hit of a Grep over the eleven skills for
+  the guidance documents' paths and `ROADMAP` has a row, as do the uncited
+  restatements found by searching for "in prose", "current system", "lowest level",
+  and "module level" and by reading each skill's loading, planning, and checking
+  steps, and each of `openspec/config.yaml`'s context paragraphs and rule groups,
+  every bullet of each. The fresh-context checks found gaps — `change-triage`'s
+  `ROADMAP` examples, `change-plan`'s layer ordering, `rules.design`, and bullets
+  missing from `rules.tasks` and `rules.specs` — now covered;
+  the search for restatements without a citation remains a reading, not a
+  mechanical check. Found on the way: `change-plan`, `change-implement`, and
+  `change-triage` name four test levels (unit, library integration, application
+  integration, system) where `TESTING.md` names unit, integration, smoke, and
+  system; recorded on their rows for section 4. Not in the table: the 29 places the
+  skills name `dev` or a `.snapshot/` path, and the make targets they run (section
+  1's handoff asked this section to look). They are the skills' own instructions
+  naming this repository, not restated guidance, so they are neither re-pointed nor
+  inherited by the loader; task 3.7 lists the repository paths a skill names in
+  `market-change-workflow`'s README, and moving them out of the skills is
+  `extract-change-workflow-repository`'s.
+- [x] 2.4 Add the proposed vocabulary: the engineering, workflow, and repository
   tag tables as D18 shapes them (`Tag | Kind | Description`, each layer's own tag as
   its first row), holding exactly the tags the rows of sections 1 and 2 use. Verify
   every tag used in a row appears in one table, and every table row is used.
-- [ ] 2.5 Add the draft classification of the checks (D13): each check enforcing
+  Note: `## Proposed vocabulary` replaces section 1's flat list. `configuration`,
+  `packaging`, and `deployment` are settled as engineering topics; `versioning` and
+  the tools `uv`, `docker`, `kubernetes`, `helm`, `dynaconf`, and `ansible` are new.
+  A Grep requiring every row's Tags cell to consist only of the tables' tags matches
+  all 406 rows; no engineering row uses a workflow or repository tag, and no
+  workflow row a repository tag; each table tag appears in a row.
+- [x] 2.5 Add the draft classification of the checks (D13): each check enforcing
   guidance — comment hygiene, history wording, local imports, decision
   destinations, version bumps, the capability and specification indexes, citations,
   public content, secrets, the pre-push check, the architecture and packaging
@@ -147,11 +210,69 @@ of the checks. No guidance text moves. Files: `inventory.md`.
   validation), and the guidance check — with the rule it enforces, that rule's
   layer, and where the check runs. Verify every target `make check-repository`,
   `make check-packaging`, and `make pre-push` run has a row.
-- [ ] 2.6 Verify: sections 1 and 2 together give every heading of every document in
+  Note: `## Draft classification of the checks`, 25 rows: the eight checks
+  `scripts/check_change.py` runs, `check-packaging`'s `dist` prerequisite and five
+  checks, both scripts `make pre-push` runs and the target itself, the four default
+  checks, and `check-architecture-change`, `check-uv-version`, `audit-secrets`
+  (which refuses nothing), and the guidance check to come.
+- [x] 2.6 Verify: sections 1 and 2 together give every heading of every document in
   `design.md`'s Context table but `docs/prompts/` a row; only `inventory.md`
   changed; `scripts/change-workflow run pre-commit layer-engineering-guidance`
   reports no failure but the two the preamble expects. End-to-end: none; the
   inventory changes no behaviour.
+  Note: 406 rows, each with six cells, one of the three layers, that layer as its
+  first tag, a destination, and a reason (Grep over the rows); section 1's headings
+  were checked in 1.2–1.3, and every heading of `TESTING.md`,
+  `DEPLOYMENT_AND_CONFIG.md`, `BUILD_AND_PACKAGING.md`, `VALIDATION_RUNBOOK.md`, and
+  `RELEASING.md` has a row (Grep over the Source cells against each document's
+  `grep '^#'`, fenced comments included). The worktree changes only `inventory.md`
+  and this task list. `scripts/change-workflow run pre-commit
+  layer-engineering-guidance` fails only on the two the preamble expects — the
+  citations of files the change creates (from `design.md`, `proposal.md`, and
+  `tasks.md`; none from `inventory.md`) and the six `CW-*` entries `index.md` lacks;
+  the index, tasks, skills, and strict OpenSpec checks pass. A shell loop over the
+  headings was refused (no rule allows it), so the heading check was made with Grep.
+  End-to-end scenarios covering the section: none confirmed, as planned. Owed by
+  validation: nothing.
+
+Section 2 notes (handoff):
+
+- Round 1's triage corrects the rows of both sections before any text moves. The
+  `Ambiguous` cells most likely to change later sections: the one Python testing
+  file (`testing-python.md`) against one beside each neutral file; splitting
+  `DEPLOYMENT_AND_CONFIG.md`'s Kubernetes section, which the sample kept whole; the
+  three engineering rows D10 keeps in place (`RELEASING.md`'s "Versioning policy"
+  and its compatibility paragraph, the runbook's observation method), whose moves
+  would need D10 read as procedures staying whole and policy inside them moving —
+  a reading the owner may take, or send to design; which
+  capability takes "Host Requirement Enforcement", "Payment Receipts in Tests", the
+  storefront startup paragraphs, and the provisioning definition documents; whether
+  "Validation namespaces" joins `market-change-workflow`'s README; and the handbook
+  and runbook duplicates recommended for one home ("Accepted Arkhai purchase
+  qualification", the v0.3.0 migrations list, the settlement cutover sequence).
+- The engineering layer has grown well past the sample's file list: the rows name
+  39 engineering files, one of them (`comments-python.md`) recommended against
+  (testing alone is `test-levels`, `testing`,
+  `test-seams`, `test-determinism`, `integration-tests`, `system-tests`,
+  `test-doubles`, `contract-fixtures`, `conformance-tests`, `boundary-changes`,
+  `migration-tests`, `concurrency-tests`, `helm-render-tests`, `ansible-checks`, and
+  `testing-python`). Section 4 is sized for the sample; it may be worth the owner
+  weighing, at the round's triage, whether section 4 splits.
+- Exceptions found across both sections, for section 5's `AGENTS.md` table: the
+  public case (selects), the buyer CLIs' test seams (overrides), and
+  `ARKHAI_IDENTITY_CREDENTIAL` (overrides). None was found that applies to one
+  capability alone, so section 6's task 6.2 may have nothing to place unless the
+  triage finds one.
+- Capability guidance destinations are written `specs/<capability>/<file>`, a
+  shorthand the citation check does not read, so the inventory stays out of the
+  preamble's expected citation failures; section 6 writes them at full paths.
+- `deployment` moved from the repository table to the engineering one, so
+  `AGENTS.md`'s table (section 5) holds only `repository`, `architecture`, and
+  `checks`.
+- Not read in full this session: `ARCHITECTURE.md` beyond its build, deployment,
+  operator-controls, and testing sections, which section 1 inventoried; and
+  `VALIDATION_RUNBOOK.md` beyond its opening, failure diagnostics, and section 29,
+  whose other sections are classified by heading as procedure.
 
 ## 3. The workflow layer
 
