@@ -352,8 +352,9 @@ that service's own suite establishes its ledger/payout internals.
 ## 7. Closeout
 
 Documentation only, after code review, in the order required by
-openspec/README.md#plan-closeout-requirements. Any required code fix returns this
-change to implementation and review.
+docs/guidance/workflow/closeout.md, with this repository's parts in
+openspec/README.md#this-repositorys-closeout-parts. Any required code fix returns
+this change to implementation and review.
 
 - [ ] 7.1 **Comment hygiene.** Run make check-comment-hygiene and inspect touched
       comments/docstrings for stale provenance. Do not edit code during closeout.

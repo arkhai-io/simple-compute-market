@@ -319,7 +319,7 @@ When every decision is settled, and before writing anything:
   decisions added it, and whether any of it gives the change a new prerequisite
   or a second domain, subsystem, or acceptance boundary. Ask the owner
   explicitly whether any of it should be split into its own change, as
-  `openspec/README.md#defects-found-during-a-change` frames it: a small,
+  `docs/guidance/workflow/changes.md#defects-found-during-a-change` frames it: a small,
   understood defect fix, or unification the architecture favours, belongs in the
   change; work that is large, or not understood well enough to fix without a
   design of its own, is split. A change that can close out on its own is
@@ -349,7 +349,7 @@ Only when the owner says the design is settled:
   change's implementation cadence.
 - Keep under `## Open Questions` only what is genuinely deferred, each with what
   would trigger revisiting it. A question may not stay open while a task
-  prescribes its answer (`openspec/README.md#open-questions-and-prescribed-tasks`).
+  prescribes its answer (`docs/guidance/workflow/changes.md#open-questions-and-prescribed-tasks`).
 - Amend `proposal.md` when scope, non-goals, capabilities, or impact moved, and
   keep its `## Permanent documentation impact` and `### Knowledge to promote`
   naming the permanent destination of every material decision: a bullet starting

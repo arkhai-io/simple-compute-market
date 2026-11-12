@@ -102,7 +102,7 @@ None.
   locks, and change documents. Most are the root `Makefile`, `core/Makefile`,
   `domains/Makefile`, `.github/workflows/tests.yml`, and
   `.github/workflows/publish-pypi.yml`, which each reference several.
-- `docs/agents/domain.md` and `CONTEXT.md` describe the platform context as
+- The domain docs and `CONTEXT.md` describe the platform context as
   `core/`, `kit/`, and `provisioning/`; the context's membership is unchanged but
   its directories are.
 - Wheels, locks, and images are unaffected in content; `make check-packaging`
@@ -133,5 +133,5 @@ None.
 
 - The directory conventions, including the roles directory and the vocabulary
   placement decided here — `docs/development/ARCHITECTURE.md#package-and-dependency-layers`.
-- `docs/development/BUILD_AND_PACKAGING.md` and `docs/agents/domain.md` for the
-  new layout.
+- `docs/development/BUILD_AND_PACKAGING.md`, and the domain docs (since removed),
+  for the new layout.

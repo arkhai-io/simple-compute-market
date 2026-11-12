@@ -316,9 +316,9 @@ For each finding, open what it cites and decide:
   A defect a finding shows outside the change's stated scope is an `edit` or a
   `fix` when its fix is understood and small beside the change, recorded in the
   task notes or the triage record; one that is large, or not understood well enough
-  to fix without a design of its own, is `none`, recorded where `AGENTS.md`'s
-  "Deferred work" says — its own change, or an unowned gap
-  (`openspec/README.md#defects-found-during-a-change`).
+  to fix without a design of its own, is `none`, recorded where deferred work goes
+  (`docs/guidance/workflow/working-model.md#deferred-work`) — its own change, or an
+  unowned gap (`docs/guidance/workflow/changes.md#defects-found-during-a-change`).
 - **Section:** the `tasks.md` section the finding concerns, when it concerns one.
 - **Default acceptance:** whether the finding is accepted by default or discussed.
   It is accepted by default when every condition of the default rule holds
@@ -555,7 +555,8 @@ acceptances' outcomes are carried out with the rest.
 - **task:** append it to `tasks.md` in the section it concerns, amending rather than
   replacing, with the finding cited in its note.
 - **none:** nothing to carry out, except for a large or vague out-of-scope defect
-  (step 2): record it where `AGENTS.md`'s "Deferred work" says, and name where in
+  (step 2): record it where deferred work goes
+  (`docs/guidance/workflow/working-model.md#deferred-work`), and name where in
   the finding's `Result`.
 - **fix, at a closeout triage:** the change is archived, and its code was reviewed
   and validated before closeout, so a closeout triage makes documentation fixes

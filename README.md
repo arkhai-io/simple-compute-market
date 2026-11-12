@@ -333,7 +333,7 @@ SCM is released under the [MIT License](./LICENSE).
 Before making a non-trivial change, read:
 
 1. [`AGENTS.md`](./AGENTS.md)
-2. [OpenSpec contributor workflow](./openspec/README.md)
+2. The change workflow's [working model](./docs/guidance/workflow/working-model.md) and this repository's [OpenSpec guide](./openspec/README.md)
 3. [Architecture](./docs/development/ARCHITECTURE.md)
 4. The applicable [capability specification](./openspec/specs/README.md)
 5. The applicable [active change](./openspec/changes/README.md)

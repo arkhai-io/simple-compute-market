@@ -218,8 +218,8 @@ If any check fails, stop and say why.
 
 ## 2. Load the context
 
-Read in full: `openspec/README.md#plan-closeout-requirements` (part 6 states the
-dependent rules), and `openspec/changes/README.md` — its legend, the change's row
+Read in full: `docs/guidance/workflow/closeout.md#campaign-index-currency`, which
+states the dependent rules, and `openspec/changes/README.md` — its legend, the change's row
 and campaign, and every row and dependency graph that names the change. From the
 archived change read `proposal.md`, `design.md`'s design-promotion record,
 `tasks.md`'s closeout section with its end-to-end evidence, and the latest passing

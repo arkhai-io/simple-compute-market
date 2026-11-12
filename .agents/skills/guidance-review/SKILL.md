@@ -120,8 +120,9 @@ the ledger for comparison:
   with how many the owner took; a recommended waiver the owner declined is a ledger
   correction. Note waivers the owner gave that no step recommended, by reason.
 - **Terms the owner asked about.** Each word or mechanism the owner asked an agent to
-  explain, with how often, and whether its home defines it — the homes `AGENTS.md`'s
-  "Domain docs" names. An undefined term the owner asked about is a candidate entry,
+  explain, with how often, and whether its home defines it — the homes
+  `docs/guidance/workflow/terms.md` names, the market's in `AGENTS.md`'s "Domain
+  docs". An undefined term the owner asked about is a candidate entry,
   unless the change that met it added the entry then.
 
 The labelling is your reading of recorded text: say so, and say which counts a
@@ -167,13 +168,13 @@ the later ones. A rule fitted to cover more of the earlier changes at a lower ra
 did not hold on the later ones when Rule E was chosen — about 2% rose to 10–14% — so a
 widening that holds only on the data it was drawn from is no evidence.
 
-Ask in prose, each option and your recommendation written out (`AGENTS.md`, "Asking
-the owner"). The owner may pick, narrow, reword, or pick nothing.
+Ask in prose, each option and your recommendation written out
+(`docs/guidance/workflow/working-model.md#asking-the-owner`). The owner may pick, narrow, reword, or pick nothing.
 
 ## 5. Write the proposal, on the owner's word
 
 When the owner picks edits and asks for a change, write its `proposal.md` as
-`openspec/README.md` asks of a proposal: why — the period it covered and the figures
+`docs/guidance/workflow/changes.md` asks of a proposal: why — the period it covered and the figures
 behind each edit, in aggregate — what changes, and its permanent documentation impact.
 Write it, with its `ready for design` row in the change index, in a worktree on a new
 branch from `origin/dev`, as `change-design` writes a prerequisite's proposal ("When

@@ -1,19 +1,25 @@
+---
+tags: [workflow]
+---
+
 # The change workflow
 
 How an OpenSpec change moves from design to archive with agent skills: which skill
 each step uses and how to start it, how one orchestrating session carries a change
 through its steps, what a review leaves behind, and where the owner's corrections
 are recorded. The phases, the closeout parts, and the rules each step follows are
-in [`openspec/README.md`](../../openspec/README.md); the status a change is in, and
-what it waits on, are in its row of the
+the workflow's guidance, under [`docs/guidance/workflow/`](../guidance/workflow/README.md):
+the [working model](../guidance/workflow/working-model.md),
+[closeout](../guidance/workflow/closeout.md), and
+[a change's documents](../guidance/workflow/changes.md) among them. The status a
+change is in, and what it waits on, are in its row of the
 [change index](../../openspec/changes/README.md). The workflow's contract is the
 [`change-workflow` specification](../../openspec/specs/change-workflow/spec.md),
 organized by its [`index.md`](../../openspec/specs/change-workflow/index.md); how
 the workflow and its engine work, and why they are shaped as they are, its
-[`README.md`](../../openspec/specs/change-workflow/README.md). This repository's own
-part — its validation parts, its Helm validation namespace, and how it provides each
-role the workflow asks of a repository — is
-[`market-change-workflow`](../../openspec/specs/market-change-workflow/README.md).
+[`README.md`](../../openspec/specs/change-workflow/README.md). An adopting
+repository's own part — its validation parts, and how it provides each role the
+workflow asks of it — is its own guidance's to state.
 
 ## Skills
 
@@ -33,14 +39,14 @@ memory.
 | Planning | `change-plan` | `make plan CHANGE=<change>`, once the design review's triage advances the change | `tasks.md`, ending with the closeout task, one commit |
 | Implementation | `change-implement` | `make implement CHANGE=<change> [SECTION=<n> \| SECTIONS=<n-m>]` | each section's code and tests, its task notes, one commit per section |
 | Implementation review | `change-review` | `make review CHANGE=<change> KIND=implementation` | `reviews/NN-implementation.md` |
-| Validation | `change-validate` | `make validate CHANGE=<change>` | `reviews/NN-validation.md`; pushes `HEAD`, then runs the preflight and each part of the plan `scripts/change-workflow config parts <change>` prints through `scripts/change-workflow run validation` — here the uv version check, the pipeline, each CI workflow the change's complete sections owe, the local part, and the Helm part |
+| Validation | `change-validate` | `make validate CHANGE=<change>` | `reviews/NN-validation.md`; pushes `HEAD`, then runs the preflight and each part of the plan `scripts/change-workflow config parts <change>` prints through `scripts/change-workflow run validation`, an owed CI part dispatching each CI workflow the change's complete sections owe |
 | Triage | `change-triage` | `make triage CHANGE=<change>` | `reviews/NN-<kind>.triage.md` ending with `## Next`, the exit it chose in prose; an outcome naming that exit and the records it triaged; `interventions.jsonl`, accepted fixes in one commit, the index row when a phase-closing review's triage advances the change; whatever it edited that no fix commit holds, in one commit of its own |
 | Pre-closeout review | `change-review` | `make review CHANGE=<change> KIND=pre-closeout` | `reviews/NN-pre-closeout.md` |
 | Merge | `change-merge` | `make merge CHANGE=<change> [FROM=<branch>]`, once the pre-closeout triage advances the change, and again after the archive when the computation names it | the branch the change lands on — `FROM`, else the one the last finished merge recorded, else the one its clone recorded — merged into the change's branch, its conflicts resolved and the change's code reconciled with it, in the merge commit or one after it; the branch, remote, and commit it fetched as its outcome's `landing`; the index row (`ready for closeout`) when it advances with `HEAD` validated before closeout; after the archive, the row kept `archived` and a note appended to `reviews/pull-request.md` |
 | Closeout | `change-closeout` | `make closeout CHANGE=<change>` | permanent documents, the promotion record, the archived change, one commit |
 | Closeout review | `change-review` | `make review CHANGE=<change> KIND=closeout` | `reviews/NN-closeout.md` |
 | Merge review | `change-review` | `make review CHANGE=<change> KIND=merge`, when the merge after the archive names it | `reviews/NN-merge.md` |
-| Archive cleanup | `change-archive-cleanup` | `make archive-cleanup CHANGE=<change>` | the index (dependents released, row `archived`), any waiver as a ledger line, one commit, `reviews/pull-request.md`; fetches the branch the last finished merge recorded, recording it as its outcome's `landing`; runs every validation part's cleanup (`scripts/change-workflow run cleanup <change>`) — here recording the capacity the latest validation measured, then tearing down the change's validation namespace and images — and commits any tracked file it wrote, here the capacity figure, on its own; then, for a change worked in its own clone, copies its history into your workspace (`make change-history`). Run again after a merge after the archive, it releases nothing, leaves the row, and appends to `reviews/pull-request.md` rather than redrafting it |
+| Archive cleanup | `change-archive-cleanup` | `make archive-cleanup CHANGE=<change>` | the index (dependents released, row `archived`), any waiver as a ledger line, one commit, `reviews/pull-request.md`; fetches the branch the last finished merge recorded, recording it as its outcome's `landing`; runs every validation part's cleanup (`scripts/change-workflow run cleanup <change>`) and commits any tracked file it wrote on its own; then, for a change worked in its own clone, copies its history into your workspace (`make change-history`). Run again after a merge after the archive, it releases nothing, leaves the row, and appends to `reviews/pull-request.md` rather than redrafting it |
 | Orchestration | `change-orchestrate` | `make orchestrate CHANGE=<change>` | the change's clone and branch, `orchestrator` and `round` lines in the workflow log — your directions among them, on your word — the conversion of a change's records on your word, the owner's notes on a round, the ledger line of a waived design review, or of a recommended waiver of one you declined, workflow commits on your word, its own observations of the tooling |
 
 Every step but the review opens an interactive Claude Code session. With
@@ -87,24 +93,23 @@ leaves no line.
 Every step that commits — design, planning, implementation, triage, closeout, and
 archive cleanup — pushes each commit right after through `scripts/change-workflow
 push` (`make push-branch`), the guarded push of exactly `HEAD`, the only push a step may make. A pushed branch
-starts nothing: validation dispatches the end-to-end pipeline itself.
+starts nothing: validation dispatches what it needs itself.
 
 **The repository's hooks.** What a step runs of the repository's own — its checks,
 suites, relock, validation parts, and their cleanup — is declared in
 `.agents/workflow.toml`, and a skill runs it through `scripts/change-workflow run`,
 which, in an unattended run, holds each hook to the steps the engine allows it —
-an interactive session, `make check-change` included, is unrestricted — and ends
+an interactive session is unrestricted — and ends
 each with one
 closing line naming the hook, the commit, the result, and each failed command with
 its exit status. Before each commit a step runs `run pre-commit <change>`: when the
-worktree changes a path outside the configuration's inert paths (here `openspec/`,
-`docs/`, and every `README.md`), it runs `after-functional-change` (here `make lock`), then
-`pre-commit-functional` (`make dist-clean`, `make check-packaging`, `make test`),
-then `pre-commit`; otherwise `pre-commit` alone. The step stages what the hooks rebuilt. Closeout runs
-`run pre-archive <change>` (`make check-packaging`, `make check-architecture-change`)
-before the archive; validation learns its parts from `scripts/change-workflow config
-parts <change>` and runs its preflight (`make check-uv-version`) and then each part
-through `run validation`; archive cleanup runs `run
+worktree changes a path outside the configuration's inert paths, it runs
+`after-functional-change`, such as a relock, then `pre-commit-functional`, such as
+the packaging checks and every suite, then `pre-commit`; otherwise `pre-commit`
+alone. The step stages what the hooks rebuilt. Closeout runs
+`run pre-archive <change>` before the archive; validation learns its parts from
+`scripts/change-workflow config parts <change>` and runs its preflight and then
+each part through `run validation`; archive cleanup runs `run
 cleanup <change>`. The skills read the documents `scripts/change-workflow config
 load <step>` prints, and run OpenSpec as `scripts/change-workflow openspec
 <arguments>`, through the configuration's `openspec.command`. No step may edit the
@@ -113,27 +118,15 @@ session's on your word.
 
 Validation dispatches CI workflows too, for evidence only a run of one produces,
 through its owed `ci` part: `run validation <change> ci start --owed <file>`
-dispatches a workflow on the current branch, `make run-ci WORKFLOW=<file>` here,
-which ends with the newest run of it there before the dispatch, the marker the
-engine keeps; it refuses any workflow `scripts/ci_evidence.py` does not list, naming
-the list, which holds `tests.yml` and nothing that publishes, and only you extend
-it. Its collect, `make validate-ci WORKFLOW=<file> CI_AFTER_RUN=<marker>` here,
-waits for the dispatch's run of `HEAD` newer than that one, keeps its job logs under
-`.snapshot/validation/<short commit>/ci/`, and classes each failure — a failing test's
-ID and exception type from pytest's short summary, or a failing step with its
-error lines — against the
-same job in the latest completed `dev` run of the workflow whose commit the branch
-contains: `inherited` when that run fails it the same way, `new`, or
-`uncomparable`.
-
-A change's Helm part runs in its own namespace, `validate-<change>`, on images
-tagged for the change (`docs/development/DEPLOYMENT_AND_CONFIG.md`, "Validation
-namespaces"). `make validate-parallel CLONES="<clone> <clone>"` checks that
-isolation on the development cluster: it runs two clones' Helm parts at the same
-moment and reports whether each kept to its own namespace, tags, and scenario pod,
-and left the other's release, volumes, and pods untouched, under
-`.snapshot/parallel-validation/<time>/`. It deploys two changes' releases, so it is
-a check of the tooling run by hand, not part of any change's validation.
+dispatches a workflow on the current branch, ending with the newest run of it there
+before the dispatch, the marker the engine keeps; the repository's command refuses
+any workflow its fixed list does not name, a list holding nothing that publishes,
+which only you extend. Its collect waits for the dispatch's run of `HEAD` newer than
+that one, keeps its job logs with the validation's evidence, and classes each
+failure — a failing test's ID and exception type, or a failing step with its error
+lines — against the same job in the latest completed run of the workflow on the
+landing branch whose commit the branch contains: `inherited` when that run fails it
+the same way, `new`, or `uncomparable`.
 
 The order is the one the phases give: design and its review until the design
 review's triage advances the change; planning; then, per implementation round,
@@ -179,58 +172,31 @@ the merge, closeout, and archive cleanup ask the next-step computation as they
 start, and go on only when it names them — archive cleanup also when it names a validation
 before it, which it then checks for your waiver.
 
-`make check-change CHANGE=<change> [CHANGE_BASE=<branch>]` is your complete closing
-check: it runs `scripts/change-workflow run pre-commit <change>` as a step does,
-the functional hooks first when the worktree changes a path outside the inert paths.
-`pre-commit` runs the
-workflow's default checks — the change index, the task list, the agent skills, and
-the strict OpenSpec validation of the change, or of every specification for an
-archived change — each skipped only where the configuration's `defaults.disable`
-names it with a reason; then this repository's `make check-repository
-CHANGE=<change> CHANGE_BASE=<branch>` (`scripts/check_change.py`), printing only
-failures and one pass line: comment hygiene, the change's citations, each indexed
-capability's `spec.md` against its `index.md` with the change's deltas counted
-(`make check-spec-index`), and five written rules the change's own work keeps.
-`scripts/change-workflow check change <change>` runs the default checks alone. The
-five rules:
-
-- each `### D<n>` decision under `design.md`'s `## Decisions` has a bullet starting
-  `D<n>` in `proposal.md`'s "Knowledge to promote", `D<n>: no permanent destination
-  — <reason>` where it has nothing to promote (`make check-decision-destinations`);
-- no comment or docstring line the change's diff adds in a `.py`, `.toml`, `.yml`,
-  or `.yaml` file says "previously", "formerly", "used to", "no longer", "moved
-  from", "was renamed", or "originally" (`make check-history-wording`);
-- each `pyproject.toml` version the diff changes is one SemVer step from its version
-  at the merge-base (`make check-version-bumps`);
-- each import the diff adds inside a function has a comment giving its reason
-  (`make check-local-imports`);
-- every capability with a `spec.md` has a row in `openspec/specs/README.md`, and
-  every row links one (`make check-capability-index`).
-
-None has an exception marker: a false positive is reworded, or the rule amended
-(`AGENTS.md`, "Amend a rule or comply"). The three that read the diff compare with
-its merge-base with the branch the change lands on: the one its clone recorded,
-which `scripts/change-workflow find --json` prints as `base`, unless `CHANGE_BASE`
-names another, and refused, naming how to give it, for a change with neither, such as
-one worked in your workspace with no clone. A change branched from another change's
-branch lands on that branch, or the other change's commits read as its own. `make check-tasks CHANGE=<change>` fails
-when a numbered task sits under another section's heading; the steps that act on a
-task list run it first.
+`pre-commit` runs the workflow's default checks — the change index, the task list,
+the agent skills, and the strict OpenSpec validation of the change, or of every
+specification for an archived change — each skipped only where the configuration's
+`defaults.disable` names it with a reason; then the repository's own closing checks,
+which its guidance describes. `scripts/change-workflow check change <change>` runs
+the default checks alone. A check that reads the change's diff compares with its
+merge-base with the branch the change lands on, the `{base}` the hook is given; a
+change branched from another change's branch lands on that branch, or the other
+change's commits read as its own. `make check-tasks CHANGE=<change>` fails when a
+numbered task sits under another section's heading; the steps that act on a task
+list run it first.
 
 Ask the owner questions in prose, never through a multiple-choice selector
-(`AGENTS.md`, "Asking the owner").
+([The working model, "Asking the owner"](../guidance/workflow/working-model.md#asking-the-owner)).
 
 One change is implemented per branch. Recording an open question or a note in
 another active change's documents, or writing the proposal of a follow-up change,
 on the current branch is not working that change; the edit lands with the current
-change. A *prerequisite* — a change this one must wait for — is proposed from `dev`
-instead (`change-design`, "When the design needs another change first"), since it
-must land first.
+change. A *prerequisite* — a change this one must wait for — is proposed from the
+branch the change lands on instead (`change-design`, "When the design needs another
+change first"), since it must land first.
 
 A skill that restates a rule from the guidance restates it briefly where its step
 applies it, and cites it; it is never stricter than its source. A step that needs a
-stricter rule proposes amending the guidance (`AGENTS.md`, "Amend a rule or
-comply").
+stricter rule proposes amending the guidance.
 
 ## The engine's command
 
@@ -311,8 +277,8 @@ argument forms, are public; `hook post-compaction` and `convert` are provisional
 person carries no promise; and the make targets and `CHANGE_WORKFLOW_*` variables
 are a convenience outside the surface, changed without a compatibility promise. A
 change to the workflow names, in its proposal, each public interface it changes and
-whether the change is compatible (`openspec/README.md`, "Change documentation
-requirements").
+whether the change is compatible
+([A change's documents, "Change documentation requirements"](../guidance/workflow/changes.md#change-documentation-requirements)).
 
 ## Orchestrating a change
 
@@ -322,7 +288,8 @@ each unattended through its `make` target, shows each step's message as written,
 and sends your reply back as written. It forms no view of a finding or a design
 question. It commits nothing while a step runs. It also creates the change's clone
 and branch (below), and on your word commits changes to the workflow itself —
-skills, the step table — anything else you instruct, and merges of `dev`, in the
+skills, the step table — anything else you instruct, and merges of the branch the
+change lands on, in the
 change's clone, on its branch, so they take effect for its next step and land with
 it; it never writes the change's feature work of its own accord. It stops for you
 at the design discussion's questions, your
@@ -499,7 +466,7 @@ it through its step's target, several rules separated by `;`, each passed to the
 command as its own `--allow`:
 
 ```text
-make validate CHANGE=<change> UNATTENDED=1 ALLOW='Bash(gh run download *);Bash(make check-packaging)'
+make validate CHANGE=<change> UNATTENDED=1 ALLOW='Bash(gh run download *);Bash(gh run view *)'
 ```
 
 A resumed run takes it as `--allow` on `scripts/change-workflow resume`.
@@ -517,8 +484,7 @@ session to commit to a separate work-in-progress branch; one stopped by a refusi
 guard or a moved `HEAD` commits nothing. Work left uncommitted after a step finished is that
 step's defect: the orchestrating session brings it to you and commits it only on
 your word. The branch is the guard against unfinished work: a change's branch
-is not protected; only the configuration's protected branches, `main` and `dev`,
-are.
+is not protected; only the configuration's protected branches are.
 
 **The merge before closeout.** Once the pre-closeout triage advances the change,
 the merge step (`change-merge`) brings the branch the change lands on into the
@@ -554,7 +520,7 @@ archived: its index row stays `archived`, with every other row from the landing
 branch, and a row the landing branch brought that depends on the change released as
 archive cleanup releases one; its archived directory as its branch has it; both
 sides in `openspec/specs/`, each `index.md`, and the permanent documents, every id
-unique; the capacity figure measured later; and a note appended to
+unique; a figure a validation part's cleanup records, as measured later; and a note appended to
 `reviews/pull-request.md` on what it merged and how its `HEAD` is to be validated,
 never a redraft. It judges for itself whether its resolutions need a merge review — a
 conflict outside the mechanical files, a reconciliation of the change's code or
@@ -569,8 +535,8 @@ change's design, the merge asks you, leaving the merge in progress, and you reso
 it as you direct, land the change and follow up in a new change, or take it off the
 workflow.
 
-**Merging `dev` at other times.** On your word, the orchestrating session merges
-`dev` into the change's branch between steps — never while a round view is open, nor between a
+**Merging the landing branch at other times.** On your word, the orchestrating
+session merges the branch the change lands on into the change's branch between steps — never while a round view is open, nor between a
 round's sections being committed and that round's triage, so a merge never moves
 the commit a round's validation and review describe. It resolves conflicts in the
 change index, change documents, the step table, and skills itself, and brings a
@@ -611,11 +577,6 @@ the prompt cache, or read it, with the misses and the gap before each. Dollars a
 could not be told from its session's other turns show as a range. The figures are
 the harness's list prices.
 
-**Completing names.** Source `scripts/completions/make-change.bash` from your
-`~/.bashrc`, after bash-completion, to complete `CHANGE=` with the active changes —
-the archived ones after `archive-cleanup`, and both after `merge` — and `KIND=`
-with the review kinds.
-
 ## A change in its own clone
 
 Each change can be worked in a clone of your workspace of its own, so several
@@ -623,8 +584,8 @@ changes run at once without moving each other's branch: your workspace — your
 editor project — meets a change's workflow only when you read one of its rounds.
 Clones live beside the workspace, one directory per change under
 `<workspace>.changes/<change>/`. A clone holds the change's branch, its
-`reviews/` with the workflow log and transcripts, its wheelhouse and
-environments, `.snapshot/`, and its step sessions.
+`reviews/` with the workflow log and transcripts, its builds and
+environments, its validation evidence, and its step sessions.
 
 **Creating it.** `make orchestrate CHANGE=<change>`, started in the workspace,
 creates the clone when the change's branch is checked out neither there nor in a
@@ -636,13 +597,13 @@ workspace's checked-out branch, refusing a detached workspace given none — and
 keeps that record on every rerun. It clones the workspace locally, with a
 `workspace` remote naming the workspace, and adds the change's push remote — the
 remote your workspace's branch of the change tracks, else the one the landing
-branch tracks, `origin` here — and the landing branch's upstream remote, each under
+branch tracks — and the landing branch's upstream remote, each under
 its name in your workspace. It checks out the branch — the existing one, or a new
 one from the landing branch — at its furthest point between the workspace's copy
 and the push remote's, refusing one where the two have diverged; the branch tracks
 its own name on the push remote, never the workspace. It links
 the clone's `.claude/settings.local.json` to the workspace's and starts the
-configuration's `post-clone`, `make init` here, in the background. It is safe to run again: it finishes a clone left incomplete, restarts
+configuration's `post-clone` in the background. It is safe to run again: it finishes a clone left incomplete, restarts
 a failed bootstrap, and refuses, deleting nothing, a directory that is not a clone
 of the workspace, has another branch checked out, or has uncommitted changes.
 
@@ -692,9 +653,8 @@ on the round.
 **History and removal.** A change's records and evidence are untracked, so no
 merge carries them out of its clone. Archive cleanup, as its last act, runs `make
 change-history CHANGE=<change>` in the clone, which copies the archived change's
-`reviews/` and the validation evidence its records name
-(`.snapshot/validation/<commit>/`, `.snapshot/e2e-logs/<run>/`) into your
-workspace at the same paths. Your workspace therefore holds the history of every
+`reviews/` and the validation evidence its records name, in the evidence
+directories the validation parts declare, into your workspace at the same paths. Your workspace therefore holds the history of every
 cleaned-up change, and a session working another change finds it with
 `scripts/change-workflow find --records <change>`, which looks in its own checkout first,
 then in your workspace. The copy is safe to run again: it copies what is missing,
@@ -730,11 +690,11 @@ a clone by hand:
 
 1. Settle any run waiting on an answer, in the workspace, since its session is
    keyed to the workspace's path.
-2. Merge `dev` into the change's branch, so its tooling knows clones.
+2. Merge the branch the change lands on into the change's branch, so its tooling
+   knows clones.
 3. Run `make change-clone CHANGE=<change>` in the workspace.
-4. Copy the change's `reviews/`, and the validation evidence its records name
-   (`.snapshot/validation/<commit>/`, `.snapshot/e2e-logs/<run>/`), to the same
-   paths in the clone; check with `diff -r` that the copies are identical, then
+4. Copy the change's `reviews/`, and the validation evidence its records name, to
+   the same paths in the clone; check with `diff -r` that the copies are identical, then
    remove the workspace's.
 
 ## Reviews
@@ -776,9 +736,9 @@ beside `End-to-end:`: `Owed by validation:`, the workflow, the job, and what the
 job must show. It gates no task. Once every task of the section is checked, every
 validation of the change dispatches the workflow and judges the job, and its record
 gains a `ci` part on its `Parts` line, a `**CI:**` line, and a `## CI` section:
-each owed job and its observation with its result, the `dev` baseline run and its
-commit, and every other failing job's failures with their class. An `inherited`
-failure is already failing on `dev` and is no finding; a `new` one is diagnosed
+each owed job and its observation with its result, the landing branch's baseline run
+and its commit, and every other failing job's failures with their class. An
+`inherited` failure is already failing on the landing branch and is no finding; a `new` one is diagnosed
 like any failure, and an `uncomparable` one is of unknown cause, so triaged. With
 nothing owed, the part reads `ci not owed`. Closeout records the owed observations
 from the latest passing validation's `## CI`.
@@ -838,7 +798,7 @@ The default acceptances reach the owner in one table, under "Accepted by default
 
 | Finding | Severity | The finding | Outcome |
 |---|---|---|---|
-| 04 F5 | should | design.md cites a ROADMAP heading that was renamed | edit: cite `#goal-8-post-commitment-lifecycle` |
+| 04 F5 | should | design.md cites a companion heading that was renamed | edit: cite `#current-limits` |
 ```
 
 It rides on the triage's last question — its last discussed finding, or whether
@@ -927,8 +887,8 @@ with `--next archive-cleanup` and no `--kind` when the merge named archive clean
 For the others, a waiver may be recommended when:
 
 - the commits the guard would validate differ from validated ones only in paths no
-  part of validation exercises — `openspec/`, `docs/`, the change's records — naming
-  the paths;
+  part of validation exercises — the configuration's inert paths, the change's
+  records — naming the paths;
 - a failure is a known environmental one, already diagnosed in an earlier
   validation record of this change, naming that record;
 - a review and a validation name different commits whose difference is records or
@@ -941,19 +901,19 @@ the step recommends no waiver. Only the owner waives, and a waiver a step
 recommended is a ledger line whether the owner takes it or not ("The ledger",
 below), so a guidance review counts recommendations and acceptances by criterion.
 
-**Waiving parts of validation.** Any part of validation — local, Helm, the
-pipeline, or the CI an owed observation dispatches — may be waived, by the owner
+**Waiving parts of validation.** Any part of validation — a part the configuration
+declares, or the CI an owed observation dispatches — may be waived, by the owner
 alone: a waived part is an omission of evidence, neither passed, failed, nor
 inconclusive, recorded as `waived` and counted in no result, which is judged on
 the parts that ran. An environmental failure the owner waives rather than remedies
-is waived so. A waiver for later validations — "the Helm and pipeline parts, for
-the rest of this change, while nothing it touches affects the services they
-validate" — is the owner's decision in the change's workflow log, naming the parts
-and the condition; under orchestration the orchestrating session records it, and
-otherwise the owner does:
+is waived so. A waiver for later validations — "the deployment part, for the rest
+of this change, while nothing it touches affects the services it deploys" — is the
+owner's decision in the change's workflow log, naming the parts and the condition;
+under orchestration the orchestrating session records it, and otherwise the owner
+does:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --decision "waive the helm and pipeline parts of validation for the rest of this change, while nothing it touches affects the services they validate" --reason "<the owner's words>"
+scripts/change-workflow note <change> orchestrator --by owner --decision "waive the deployment part of validation for the rest of this change, while nothing it touches affects the services it deploys" --reason "<the owner's words>"
 ```
 
 Validation reads such decisions before running any part, never an instruction in
@@ -988,7 +948,7 @@ an entry with `"finding": "next"`. Whether it came before or after the fix is in
 workflow log, where a revisit after it has its `--resumes` direction:
 
 ```json
-{"review": "04-design", "finding": "F5", "section": null, "lens": "documentation", "basis": "evidence", "severity": "should", "agent_position": "agree: the heading was renamed; accepted by default", "owner_disposition": "revisits default acceptance: cite the goal's row in ROADMAP's table instead, which survives renames", "summary": "Default-accepted citation fix redirected to a stable target"}
+{"review": "04-design", "finding": "F5", "section": null, "lens": "documentation", "basis": "evidence", "severity": "should", "agent_position": "agree: the heading was renamed; accepted by default", "owner_disposition": "revisits default acceptance: cite the requirement by its id instead, which survives renames", "summary": "Default-accepted citation fix redirected to a stable target"}
 ```
 
 A waiver a step recommended is a line whose `agent_position` names the

@@ -332,13 +332,13 @@ prefix and four random characters from `[a-z0-9]` — and an id MUST NOT be reus
 
 ## Evidence
 
-- Canonical contributor workflow and capability index: `openspec/README.md`.
+- Canonical contributor workflow: `docs/guidance/workflow/working-model.md`; this repository's OpenSpec guide and capability index: `openspec/README.md`.
 - Artifact-generation context and quality rules: `openspec/config.yaml`.
 - Role-owned operational guidance: `docs/buyer-quickstart.md`, `docs/seller-quickstart.md`, `docs/indexer-quickstart.md`, `docs/domain-authoring/README.md`, and `e2e-tests/tests/e2e/roles/README.md`.
 - Repository-wide architecture, operational, and directional separation: `docs/development/ARCHITECTURE.md`, `docs/development/ROADMAP.md`, and `openspec/changes/README.md` — the current system, the goals being pursued, and delivery readiness respectively, each naming the other two's jurisdiction.
 - The single permitted directional roadmap and its no-tasks/no-acceptance-criteria/no-status constraints: `docs/development/ROADMAP.md`.
-- Roadmap currency owed at change completion: `openspec/README.md#plan-closeout-requirements`, part 5.
-- Campaign index currency owed at change completion: `openspec/README.md#plan-closeout-requirements`, part 6.
-- Packaging check at change closeout: `openspec/README.md#plan-closeout-requirements`, part 7; `make check-packaging`, which runs `make check-architecture`; a change's own exception rows: `make check-architecture-change CHANGE=<name>`.
+- Roadmap currency owed at change completion: `docs/guidance/workflow/closeout.md#roadmap-currency`.
+- Campaign index currency owed at change completion: `docs/guidance/workflow/closeout.md#campaign-index-currency`.
+- Packaging check at change closeout: `openspec/README.md#packaging`, among this repository's closeout parts; `make check-packaging`, which runs `make check-architecture`; a change's own exception rows: `make check-architecture-change CHANGE=<name>`.
 
 Strict OpenSpec validation checks artifact structure. Evidence strength, current-versus-proposed classification, coherent change boundaries, and stale inline-note disposition still require code-aware review.

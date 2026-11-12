@@ -141,7 +141,8 @@ you have seen it before —
 the files are what the implementer will see:
 
 - the change's `proposal.md`, `design.md`, `specs/`, and current `tasks.md`;
-- `openspec/README.md#plan-closeout-requirements`, and `openspec/config.yaml`'s
+- `docs/guidance/workflow/closeout.md`, the repository's own closeout parts
+  (`openspec/README.md#this-repositorys-closeout-parts`), and `openspec/config.yaml`'s
   rules for tasks;
 - `scripts/change-workflow openspec instructions tasks --change <change>` for the
   tasks template; every OpenSpec command runs so, through the command the
@@ -260,7 +261,8 @@ and say so in the report; the owner is asked for each round as it starts.
 
 **Every task is traceable.** Each names what it answers to — a design decision, a
 delta requirement, or a repository obligation such as the verification, packaging,
-promotion, and closeout work `openspec/README.md` and `openspec/config.yaml` require,
+promotion, and closeout work the workflow's guidance (`docs/guidance/workflow/changes.md`,
+`docs/guidance/workflow/closeout.md`), `openspec/README.md`, and `openspec/config.yaml` require,
 cited — and the evidence that proves it. A feature task with nothing to trace to is
 either missing from the design or not part of this change.
 
@@ -277,9 +279,10 @@ companion, and `docs/development/ARCHITECTURE.md` where the design says so.
 Provisional destinations the design delegated to planning are settled here; tell
 the owner which you moved and why.
 
-**End with the closeout task**, its eleven parts from
-`openspec/README.md#plan-closeout-requirements` in that order, each made specific
-to this change:
+**End with the closeout task**, its parts from `docs/guidance/workflow/closeout.md`
+in that order, the repository's own parts
+(`openspec/README.md#this-repositorys-closeout-parts`) at the position it gives
+them, each named by its heading and made specific to this change:
 the roadmap goal and gap row it closes, its index row, the end-to-end scenarios
 that exercise it, the permanent documents it promotes, and the archive's merge or
 `--skip-specs`. Dependents are released at archive cleanup, not by a closeout
@@ -293,7 +296,7 @@ Before presenting it:
   task, and every task maps back to a decision, a requirement, or a cited
   repository obligation;
 - no open question has its answer prescribed by a task
-  (`openspec/README.md#open-questions-and-prescribed-tasks`);
+  (`docs/guidance/workflow/changes.md#open-questions-and-prescribed-tasks`);
 - every section has a verification point, its covering end-to-end scenarios or a
   statement that none covers it, and a size its verification point can prove;
 - `scripts/change-workflow run pre-commit <change>` reports no failure but its

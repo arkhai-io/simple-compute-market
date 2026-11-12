@@ -923,9 +923,9 @@ values to confirm the mount renders and the document is not placed in a Secret.
 
 ## 11. Closeout
 
-Per `openspec/README.md#plan-closeout-requirements`.
+Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 
-Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/closeout.md`'s order.
 
 - [x] 11.1 **Comment hygiene.** `make check-comment-hygiene` from the
       repository root, then read the touched files for what the target cannot

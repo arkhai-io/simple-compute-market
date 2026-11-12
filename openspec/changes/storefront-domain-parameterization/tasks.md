@@ -27,9 +27,9 @@
 
 ## 5. Repository closeout
 
-Per `openspec/README.md#plan-closeout-requirements`.
+Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 
-Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/closeout.md`'s order.
 
 - [x] 5.1 **Comment hygiene:** direct review retained only current-state rationale; `make check-comment-hygiene` passed.
 - [x] 5.2 **Import placement:** inspect imports added or touched by this change, move them to module level wherever safe, and retain a local import only after proving a real circular import or deliberate lazy-load need with the owning VM storefront tests; do not broaden this into unrelated import cleanup.

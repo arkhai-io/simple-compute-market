@@ -17,12 +17,16 @@ revises it. Everything under "Open questions" is undecided.
   `change-archive-cleanup`. The other skills have a few or none. That search
   undercounts: skills also cite this repository's documents and make targets,
   which the capability contract and the guidance layering handle.
-- **The closeout parts.** `openspec/README.md`'s "Plan closeout requirements"
-  lists eleven parts: comment hygiene, import placement, documentation
-  compliance, narrative compression, roadmap currency, campaign index currency,
-  packaging, end-to-end pipeline, promotion, documentation citations, and
-  archival. The owner's view is that several are company engineering concerns,
-  some are workflow concerns, and a few are this repository's.
+- **The closeout parts.** The closeout list held eleven parts when this design
+  was opened: comment hygiene, import placement, documentation compliance,
+  narrative compression, roadmap currency, campaign index currency, packaging,
+  end-to-end pipeline, promotion, documentation citations, and archival. The
+  owner's view is that several are company engineering concerns, some are
+  workflow concerns, and a few are this repository's. `layer-engineering-guidance`
+  divides them: the workflow's parts, guidance placement added, in
+  `docs/guidance/workflow/closeout.md`, and this repository's — packaging and
+  end-to-end pipeline — in `openspec/README.md`'s "This repository's closeout
+  parts".
 
 ## Starting direction
 

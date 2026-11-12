@@ -303,7 +303,7 @@ def test_a_double_backtick_span_leaves_the_spans_after_it_whole() -> None:
 
 
 def test_a_path_is_rooted_in_the_repository() -> None:
-    assert paths("openspec/README.md#plan-closeout-requirements, notes.md:57",
+    assert paths("openspec/README.md#this-repositorys-closeout-parts, notes.md:57",
                  ROOT_OF_TEST) == ["openspec/README.md"]
     assert paths("Edit(docs/**)", ROOT_OF_TEST) == ["docs/**"]
     assert paths(".agents/change-outcome.schema.json AGENTS.md.", ROOT_OF_TEST) == [

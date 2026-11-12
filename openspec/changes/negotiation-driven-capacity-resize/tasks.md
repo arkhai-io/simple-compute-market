@@ -112,7 +112,7 @@ deployment boundary.
 
 ## 3. Closeout
 
-Per `openspec/README.md#plan-closeout-requirements`. This change's implementation predates the closeout task becoming a planning requirement. The parts are recorded here so each carries an explicit disposition rather than an assumed one; confirm and tick each rather than treating the change as closed.
+Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`. This change's implementation predates the closeout task becoming a planning requirement. The parts are recorded here so each carries an explicit disposition rather than an assumed one; confirm and tick each rather than treating the change as closed.
 
 - [ ] 3.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
       the comments this change added for any that narrate the review or migration that

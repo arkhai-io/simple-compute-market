@@ -621,7 +621,7 @@ check-doc-citations: ## Fail if a document cites a path that is absent or tombst
 	@python3 scripts/check_doc_citations.py "$(CHANGE)"
 
 # An indexed capability's spec.md held to its index.md
-# (openspec/README.md#capability-documentation-pattern). With CHANGE=<name> that
+# (openspec/README.md#the-index-check). With CHANGE=<name> that
 # change's deltas count as its archive will leave them, since closeout writes the
 # index before the archive merges them.
 check-spec-index: ## Fail if an indexed capability's spec.md and index.md disagree on its requirement ids (CHANGE=<name> counts its deltas)

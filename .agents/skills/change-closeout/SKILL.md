@@ -1,14 +1,16 @@
 ---
 name: change-closeout
-description: Close out an OpenSpec change whose pre-closeout review's triage advanced it — work through the eleven parts of its closeout task in order, confirming the code checks and reporting every judgement made, promote its durable knowledge, check its citations, archive it last so its spec deltas merge into openspec/specs, and commit, so the closeout review reads the archived change. Use when a change is `ready for closeout` or `in closeout` in openspec/changes/README.md, or when the owner says "close out <change>".
+description: Close out an OpenSpec change whose pre-closeout review's triage advanced it — work through the parts of its closeout task in order, the workflow's and the repository's own, confirming the code checks and reporting every judgement made, promote its durable knowledge, check its citations, archive it last so its spec deltas merge into openspec/specs, and commit, so the closeout review reads the archived change. Use when a change is `ready for closeout` or `in closeout` in openspec/changes/README.md, or when the owner says "close out <change>".
 ---
 
 # Closing out an OpenSpec change
 
 Closeout turns a change into the permanent record of what the system now is. It
-works through the change's closeout task — the eleven parts in
-`openspec/README.md#plan-closeout-requirements`, which the plan made specific to
-this change as its last `tasks.md` section — and ends by archiving the change:
+works through the change's closeout task — the workflow's parts in
+`docs/guidance/workflow/closeout.md`, with the repository's own parts at the
+position it gives them (`openspec/README.md#this-repositorys-closeout-parts`), which
+the plan made specific to this change as its last `tasks.md` section — and ends by
+archiving the change:
 OpenSpec's archive merges the change's spec deltas into `openspec/specs/` and moves
 the change under `openspec/changes/archive/`. Archival is the last step, so the
 closeout review that follows reads the change, and the specifications, as they will
@@ -161,9 +163,11 @@ Read in full, even if you believe you know it:
 
 ## 3. Work through the closeout task
 
-Take the parts in the order `openspec/README.md#plan-closeout-requirements` gives
-them, which is the order the closeout section lists them in; this step covers parts
-1 to 8, and step 4 the last three. Mark each `[x]` when its evidence holds, with a
+Take the parts in the order `docs/guidance/workflow/closeout.md` gives them, with
+the repository's own parts where it places them, which is the order the closeout
+section lists them in; this step covers comment hygiene through the repository's own
+parts, and step 4 promotion, guidance placement, documentation citations, and
+archival. Mark each `[x]` when its evidence holds, with a
 short note: what was run and its result, or what was decided and why. Never delete
 or rewrite a completed task; amend it with a correction note. An older plan may
 list its parts in another order; work in this order, and note it on the section.
@@ -176,7 +180,9 @@ list its parts in another order; work in this order, and note it on the section.
   local without a recorded reason. Do not move one: if one should move, stop as for
   comment hygiene.
 - **Documentation compliance.** Check every accepted decision in `design.md`
-  against `openspec/README.md#documentation-placement`, and the permanent documents
+  against the placement rules —
+  `docs/guidance/workflow/openspec-documentation.md#documentation-placement` and
+  the repository's table, `openspec/README.md#documentation-placement` — and the permanent documents
   against the code they describe.
 - **Narrative compression.** Shorten completed-task notes to final behaviour,
   material evidence, deferrals, and destinations. Move what is worth keeping —
@@ -188,7 +194,7 @@ list its parts in another order; work in this order, and note it on the section.
   dependency graph. Leave every other row's `Depends on` and status as they are:
   the change lands, and its dependents are released, only at archive cleanup after
   the closeout review's triage advances it
-  (`openspec/README.md#plan-closeout-requirements` part 6). The
+  (`docs/guidance/workflow/closeout.md#campaign-index-currency`). The
   status stays `in closeout`: archive cleanup writes `archived`. Run
   `scripts/change-workflow check index` after the edit.
 - **Packaging.** Run `scripts/change-workflow run pre-archive <change>`, the
@@ -226,13 +232,22 @@ location, as a heading anchor where one exists. A `spec.md` the change's deltas
 cover is written by the archive, not by hand; the record names it all the same.
 
 In a capability organized by an `index.md`
-(`openspec/README.md#capability-documentation-pattern`), promotion also writes the
+(`docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index`),
+promotion also writes the
 index before the archive merges the deltas: an entry for each id the change's deltas
 add — its link to the requirement's heading in `spec.md` and its summary line, under
 the part and group it belongs to — and, for each requirement the deltas remove, its
 id moved to the retired ids with where its rule went. The repository's closing
 checks run the index check with the change's deltas counted, so an id a delta adds
 is accepted before the archive puts it in `spec.md`.
+
+**Guidance placement.** Read each guidance section the change added, moved, or
+rewrote — promoted text included — against the layer test, adjacency, and exception
+placement (`docs/guidance/workflow/closeout.md#guidance-placement`); move what is
+misplaced and re-point its citations, then run the repository's guidance check where
+its closeout parts name one. Report a placement that needs a decision for the
+closeout review; never settle it yourself. A change that touched no guidance records
+that.
 
 **Checks against the promoted state.** Now that every document the change cites
 exists:

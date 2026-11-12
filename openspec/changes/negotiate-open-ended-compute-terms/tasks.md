@@ -118,7 +118,8 @@ option is shown as making no delivery promise, not refused for lacking one (D3).
 
 ## 5. Closeout
 
-Documentation-only, in `openspec/README.md#plan-closeout-requirements` order;
+Documentation-only, in `docs/guidance/workflow/closeout.md` order, with this
+repository's parts in `openspec/README.md#this-repositorys-closeout-parts`;
 anything requiring code returns to implementation. These are future implementation
 closeout tasks, not authorization to promote unimplemented behavior now.
 

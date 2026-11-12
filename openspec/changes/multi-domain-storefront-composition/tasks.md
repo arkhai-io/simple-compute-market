@@ -100,9 +100,9 @@
 
 ## 10. Closeout
 
-Per `openspec/README.md#plan-closeout-requirements`, complete this section only after Section 9 proves the behavior.
+Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`, complete this section only after Section 9 proves the behavior.
 
-Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/closeout.md`'s order.
 
 - [ ] 10.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read the comments this change added for any that narrate the review or migration that introduced them — directly read every changed comment/docstring around registry selection, migration, site routing, and recovery for change/task/history wording, temporary commentary, obsolete singleton/fallback explanations, and review tombstones. Do not edit code here: anything to rewrite returns the change to implementation.
 - [ ] 10.2 **Import placement — confirm.** Check the imports this change added across core and both contributions for any still local without a recorded reason, and confirm core/kit/domain dependency direction including `TYPE_CHECKING`. One that should move returns the change to implementation.

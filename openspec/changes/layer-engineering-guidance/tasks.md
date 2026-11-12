@@ -34,7 +34,10 @@ they exist — and of the hard-case sample's provisional destinations in `design
 which closeout's citation part resolves (task 10.11) — and the specification index,
 which wants `change-workflow/index.md` entries for CW-g7lt, CW-d2rw, CW-p9sa,
 CW-x4ex, CW-n6dm, and CW-r8cg, entries closeout's promotion writes (task 10.9). Any
-other failure is the section's to fix.
+other failure is the section's to fix. Correction, section 3: from section 3 on, the
+citations check also reports the change's own `design.md`, `inventory.md`, and
+`tasks.md` citing `docs/agents/domain.md`, which section 3 removes; they are change
+history, resolved with the rest at closeout (task 10.11).
 
 ## 1. Inventory of the root and workflow documents
 
@@ -362,7 +365,7 @@ removed, every citation re-pointed. Files: `docs/guidance/workflow/*.md` (new);
 (Evidence only); `.agents/skills/change-*/SKILL.md`,
 `.agents/skills/guidance-review/SKILL.md`; `.agents/workflow.toml`.
 
-- [ ] 3.1 Write `docs/guidance/workflow/README.md`: frontmatter `tags: [workflow]`;
+- [x] 3.1 Write `docs/guidance/workflow/README.md`: frontmatter `tags: [workflow]`;
   the layer model — the three layers, D1's test, and the link direction, citing
   CW-g7lt and CW-d2rw (D18 as recorded); what the layer holds and how its files are
   organized (flat, organization carrying no meaning, D19, CW-n6dm); and its
@@ -372,7 +375,15 @@ removed, every citation re-pointed. Files: `docs/guidance/workflow/*.md` (new);
   left out and listed in the section's notes, the open question the round's triage
   settles. Verify every tag a workflow file carries is in the table, and every table
   row is carried.
-- [ ] 3.2 Write `docs/guidance/workflow/closeout.md` (D8 as amended, D16):
+  Note: the table holds `workflow`, `openspec`, `changes`, and `closeout`, each
+  carried (`openspec-documentation.md`, `changes.md`, `closeout.md`; `workflow` by
+  all seven). `change-references.md` carries `comments` and `terms.md` `terms`,
+  engineering tags a workflow file may use (D18): they belong in the engineering
+  README's table, which section 4 writes and section 5 completes, so until then they
+  are in no table. The README cites the ids by name, unlinked, since they reach
+  `spec.md` only at the archive. Evidence: inspected (Grep over the frontmatter);
+  no test applies.
+- [x] 3.2 Write `docs/guidance/workflow/closeout.md` (D8 as amended, D16):
   frontmatter; the ordered list of the workflow's parts — comment hygiene, import
   placement, documentation compliance, narrative compression, roadmap currency,
   campaign index currency, the repository's own closeout parts as its root guidance
@@ -386,7 +397,25 @@ removed, every citation re-pointed. Files: `docs/guidance/workflow/*.md` (new);
   and the promotion story from `AGENTS.md`'s "Cross-references must resolve" (D6).
   Verify no make target, no repository path, and no link to a file the inventory
   tags `repository` appears in it.
-- [ ] 3.3 Move the rest of the workflow material to the files the corrected
+  Note: ten workflow parts under their headings, the repository's own parts listed
+  at position 7 by role. Grep finds no `make `, `docs/development`, `AGENTS`,
+  `ROADMAP`, `ARCHITECTURE`, `.snapshot`, `dev`, or `openspec/README` in any
+  workflow file; the paths it names are OpenSpec's layout (`openspec/specs/`,
+  `openspec/changes/archive/`) and the engine's command, both workflow material
+  (D1). Checks are named by role: "the repository's comment check", "index check",
+  "citation check", "guidance check"; `openspec/README.md` names the commands (task
+  3.4). Engineering rules a part confirms are named, not linked, since their files
+  do not exist until sections 4 and 5: comments describing the current system
+  (Comment hygiene), citations resolving (Campaign index currency, Documentation
+  citations). Part 8's engineering reason stays with part 8 in `openspec/README.md`
+  for section 4 to move. Part 2's import rule itself is engineering, Python (row
+  219): parked in `AGENTS.md`'s "Package and dependency discipline", which section
+  5 moves to `dependencies-python.md`; the part keeps its per-section scoping.
+  Part 6's account of the index check merges into the guide's "The review
+  directory", which it duplicated, and the part cites it. Part 10's tombstone
+  account went to `market-change-workflow`'s "The closing checks" (row 229).
+  Evidence: inspected; no test applies.
+- [x] 3.3 Move the rest of the workflow material to the files the corrected
   inventory names — `working-model.md`, `openspec-documentation.md`, `changes.md`,
   `change-references.md`, and `terms.md` — each with the frontmatter "Files and
   their tags" gives, the roadmap's and the capability index's roles among them
@@ -394,18 +423,50 @@ removed, every citation re-pointed. Files: `docs/guidance/workflow/*.md` (new);
   `docs/agents/domain.md`, keeping in place, under their final headings, what the
   inventory leaves there. Verify each workflow row of the inventory sits in its
   destination and no longer in its source.
-- [ ] 3.4 Leave this repository's closeout parts — packaging and end-to-end pipeline
+  Note: every workflow row of the four source tables (Grep for `| workflow |`) is in
+  its destination and gone from its source. What the inventory leaves in place:
+  `AGENTS.md` keeps a "Working model" heading pointing to `working-model.md`, with
+  this repository's completion criteria (packaging and typing checks, `make
+  check-comment-hygiene`, `make check-packaging`, `ARCHITECTURE.md`) and two
+  engineering criteria for sections 4–5; "Documentation ownership" keeps its
+  repository bullets and the provenance bullet; "Python comments and docstrings"
+  keeps the neutral rule, the check, and the Prefer example; "Deferred work" and
+  "Domain docs" keep their repository rows. Engineering rows of moved sections are
+  parked in `AGENTS.md` until sections 4–5 move them: `domain.md`'s rule for terms
+  (row 250, "Domain docs") and part 2's import rule (above). `openspec/README.md`
+  keeps the pin, its placement table (the provenance row with it, for section 5),
+  "The index check" (row 211, a new heading for the check's paragraph), "This
+  repository's closeout parts", and "Current capability documentation", which takes
+  the capability index check (row 151). "Implementation completion checklist" and
+  "Contributor workflow" are merged into `working-model.md` and gone. Evidence:
+  inspected; no test applies.
+- [x] 3.4 Leave this repository's closeout parts — packaging and end-to-end pipeline
   evidence — in `openspec/README.md` under `## This repository's closeout parts`,
   naming the commands each runs; and add to `AGENTS.md` the rows naming that section
   and this repository's roadmap, `docs/development/ROADMAP.md`, so closeout,
   planning, and review find both through the root guidance before section 6
   rewrites it (D8 as amended). Verify both rows' links resolve, the first to its
   heading.
-- [ ] 3.5 Remove `docs/agents/domain.md` once its rows have moved (31 O1e), and
+  Note: the section also tables the commands the workflow's parts name by role
+  (comment hygiene, campaign index currency, promotion's index check, documentation
+  citations), only those the parts named before; section 6 adds `make
+  check-guidance`. `AGENTS.md` gains "Where the guidance lives", a three-row table
+  (the workflow's guidance, this repository's closeout parts, its roadmap) that
+  section 6 extends into the layer table. Both links resolve: the heading
+  `## This repository's closeout parts` slugs to `#this-repositorys-closeout-parts`,
+  and `docs/development/ROADMAP.md` exists. Evidence: inspected; no test applies.
+- [x] 3.5 Remove `docs/agents/domain.md` once its rows have moved (31 O1e), and
   re-point its citations, `AGENTS.md`'s "Domain docs" included. Verify the file is
   gone and `grep -rn 'docs/agents/domain.md'` over the tracked tree outside
   `openspec/changes/` finds nothing.
-- [ ] 3.6 Give `docs/agents/change-workflow.md` frontmatter tagging it `workflow`,
+  Note: removed with `git rm`; Grep outside `openspec/changes/` finds nothing.
+  Outside the plan: `align-package-paths-with-layers`' design and proposal cited it
+  five times, which the unscoped citations check then failed; they now say "the
+  domain docs (since removed)" without a path. Their content was already stale
+  before this section: they describe a "platform context" that `domain.md` had not
+  held since an earlier change, a contradiction left for that change's design.
+  Evidence: inspected; `make check-doc-citations CHANGE=` (below).
+- [x] 3.6 Give `docs/agents/change-workflow.md` frontmatter tagging it `workflow`,
   and move what the inventory finds of this repository in it — its links to
   `market-change-workflow`, its step table's validation parts, `dev`, the hook
   commands, the CI baseline, the clone's remote and evidence paths, and the rest the
@@ -413,12 +474,40 @@ removed, every citation re-pointed. Files: `docs/guidance/workflow/*.md` (new);
   stating it there in this repository's terms, and neutralize the guide's text
   (D1's direction). Verify the guide links to no file the inventory tags
   `repository`.
-- [ ] 3.7 Deduplicate the workflow material as the preamble says (31 O1b): merge
+  Note: every repository row of the guide's table (rows 259–281) is neutralized in
+  the guide. Most instances were already stated in `market-change-workflow`'s
+  README; it gains the evidence paths (`.snapshot/validation/<commit>/`, the `ci`
+  part's `<short commit>/ci/`, `.snapshot/e2e-logs/<run>/`), `make
+  validate-parallel`, `dev` as the base a prerequisite is proposed from, the
+  orchestrator's merges, and the CI baseline, the completion script, the hook
+  commands in its provisions table, `make check-change`'s unrestricted run, and the
+  five closing rules with their targets, which the README had pointed to the guide
+  for. Neutral examples replace the `ROADMAP` default-acceptance finding (a renamed
+  companion heading), the ledger's ROADMAP redirection (cite the requirement by
+  id), the `ALLOW` rule (`Bash(gh run view *)`), and the Helm-and-pipeline waiver
+  ("the deployment part"). Also neutralized, beyond the rows: "validation
+  dispatches the end-to-end pipeline itself" and the clone's "wheelhouse" and
+  `.snapshot/`. The guide's citations of `AGENTS.md`'s "Amend a rule or comply" are
+  dropped, not re-pointed: the guide may not cite `AGENTS.md`, and
+  `engineering/rules.md` is section 5's, which should add them. Grep finds no
+  `AGENTS.md`, `openspec/README`, `docs/development`, `market-change-workflow`,
+  `ROADMAP`, `dev`, `.snapshot`, `make check-change `, or Helm in the guide. Evidence:
+  inspected; `test_change_workflow_assumptions.py` (unit, below).
+- [x] 3.7 Deduplicate the workflow material as the preamble says (31 O1b): merge
   agreeing copies, and list in the section's notes each differing pair the
   inventory's `Ambiguous` cells name for this layer, with both forms and the
   proposed text, and each contradiction a non-guidance document now holds. Verify
   every duplicate row this section moves is merged or listed.
-- [ ] 3.8 Re-point every citation of moved workflow material, by name and never by
+  Note: the five `Ambiguous` duplicates for this section (rows 149, 187, 199, 235,
+  240) and part 6's index-check account are merged or listed under "Section 3's
+  differing pairs" below, with the wording changes the move made beyond the
+  inventory's neutralizations. Non-guidance documents: the root `README.md`'s
+  "OpenSpec contributor workflow" link now names the working model and this
+  repository's OpenSpec guide; `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md` cite
+  `openspec/README.md` (documentation placement), which stays; no other
+  contradiction found (Grep for closeout part counts, "Contributor workflow",
+  `domain.md`, "Asking the owner"). Evidence: inspected; no test applies.
+- [x] 3.8 Re-point every citation of moved workflow material, by name and never by
   part number (D8): the skills, from the inventory's restatements table, including
   `change-closeout`'s count of the parts and their order; `change-workflow`'s README
   and spec text; `openspec/specs/planning-governance/spec.md`'s Evidence, outside
@@ -427,20 +516,168 @@ removed, every citation re-pointed. Files: `docs/guidance/workflow/*.md` (new);
   skills' restatements stay as they are (D11). Verify `grep -rn` over the tracked
   tree outside `openspec/changes/archive/` and `docs/prompts/` finds no citation of
   a heading this section removed.
-- [ ] 3.9 Add each new `docs/guidance/workflow/` file to `load.common` in
+  Note: re-pointed, from the restatements table and a Grep for every removed heading
+  and anchor: the eight workflow skills (`change-closeout` now counts the workflow's
+  parts and the repository's by name, covers comment hygiene through the
+  repository's parts in its step 3 and promotion, guidance placement, citations, and
+  archival in step 4, and gains a brief guidance placement paragraph);
+  `planning-governance`'s Evidence (part numbers to `closeout.md`'s headings and
+  `openspec/README.md#packaging`); `openspec/specs/README.md`; `BUILD_AND_PACKAGING.md`;
+  the root `README.md`; the change index's history note; the docstrings of
+  `scripts/check_spec_index.py`, `check_decision_destinations.py`, and
+  `check_local_imports.py`; a `Makefile` comment; a fixture string in
+  `test_change_workflow_assumptions.py`; and, by a helper subagent, the 48 citations
+  in 47 other changes' `tasks.md`, plus eight "in `openspec/README.md`'s order"
+  lines and `add-skill-extension-points`' design and proposal. `change-workflow`'s
+  README and spec cited none. Citations of `openspec/README.md`'s "Documentation
+  placement", which stays, were left. The Grep over the tracked tree outside the
+  archive, `docs/prompts/`, and this change's own directory finds no citation of a
+  removed heading; this change's own documents cite them as history. Evidence:
+  inspected; `make check-agent-skills` OK.
+- [x] 3.9 Add each new `docs/guidance/workflow/` file to `load.common` in
   `.agents/workflow.toml` by path, keeping its comment current, so later sessions on
   the branch read them (design, "Implementation cadence"); and add each repository
   path a skill now names to `openspec/specs/market-change-workflow/README.md`'s "How
   this repository provides the workflow's roles". Verify `scripts/change-workflow
   config load common` prints the new files, and `pytest -q
   scripts/tests/test_change_workflow_assumptions.py` (unit) passes.
-- [ ] 3.10 Verify the section: `make check-agent-skills`; `make check-doc-citations`
+  Note (in progress): the README's provisions name the new files ("The guidance
+  documents every step reads", and `docs/guidance/` with `docs/guidance/workflow/`
+  under "Where specifications and documentation live", which the test required once
+  `change-review` named them), and the unit tests pass. The edit of
+  `.agents/workflow.toml` was refused: the step table denies every step that file,
+  so this task's `load.common` edit is the owner's or the orchestrator's, as a
+  `.claude/` edit is. The edit wanted: append to `common`, after
+  `"openspec/README.md"`, the seven paths `docs/guidance/workflow/README.md`,
+  `working-model.md`, `openspec-documentation.md`, `changes.md`,
+  `change-references.md`, `terms.md`, and `closeout.md` (each with its
+  `docs/guidance/workflow/` prefix), and add to its comment that the workflow's
+  guidance files follow the root and cross-system documents, each by path. Sections
+  4, 5, and 9 edit the same file and meet the same refusal.
+  Correction: the owner confirmed the refusal stands, and the orchestrating session
+  made the edit on their word, as named above; it is committed with the section.
+  `scripts/change-workflow config load common` prints the five documents before and
+  the seven new files after them; `test_change_workflow_assumptions.py`,
+  `test_change_workflow_config.py`, and `test_post_compaction_context.py` (unit): 91
+  passed.
+- [x] 3.10 Verify the section: `make check-agent-skills`; `make check-doc-citations`
   run unscoped reports nothing it did not report before the section; `pytest -q
   scripts/tests/test_change_workflow_assumptions.py scripts/tests/test_change_workflow_config.py`
   (unit); and `scripts/change-workflow run pre-commit layer-engineering-guidance`,
   whose functional hooks run every suite, reports no failure but the two the
   preamble expects. End-to-end: none; no pipeline scenario reads guidance, and none is
   owed.
+  Note: `make check-agent-skills` OK. `make check-doc-citations CHANGE=` (unscoped)
+  reports, outside this change's own documents, only failures older than the section
+  (other changes citing scripts and an `architecture.md` that no longer exist); the
+  section's breaks — `align-package-paths-with-layers` citing `domain.md`, and a
+  placeholder path in `changes.md` — were fixed. The unit suites (unit): 91 passed.
+  `scripts/change-workflow run pre-commit layer-engineering-guidance`:
+  `after-functional-change` (relock) passed and changed no lock;
+  `pre-commit-functional` (`make dist-clean`, `make check-packaging`, `make test`,
+  every suite) passed; `pre-commit`'s default checks — change index, tasks, skills,
+  strict OpenSpec validation — passed, and `make check-repository` failed only on
+  the two the preamble expects: citations of files the change creates, with the
+  change's own `domain.md` citations as the preamble's correction says, and the six
+  `CW-*` entries `index.md` lacks. End-to-end scenarios covering the section: none
+  confirmed, as planned. Owed by validation: nothing.
+
+Section 3's differing pairs (31 O1b), for the round's triage — each the source
+forms, then the text the section wrote:
+
+- **When the documents are promoted (rows 149, 235, 240).** `AGENTS.md`'s Implement
+  made implementation complete only once behaviour was in `spec.md`, rationale in
+  the companion, and architecture in `ARCHITECTURE.md`, and "Documentation
+  ownership" said durable knowledge is promoted "before a change is considered
+  implemented"; `openspec/README.md`'s checklist said the same ("Subsystem-specific
+  durable knowledge is present in `openspec/specs`"). Its "Contributor workflow"
+  (step 5), `AGENTS.md`'s Plan ("Promotion happens post code-review"), and the
+  closeout parts had the documents written at closeout. Proposed, taking the
+  closeout side, which is what the workflow does: `working-model.md`'s Implement
+  completes the code, the decisions' classification and the promotion record, no
+  change references, and the checks run or disclosed, and a paragraph says closeout
+  writes the documents; `openspec-documentation.md` says knowledge is promoted
+  "before a change is archived … at closeout, after the code's last review".
+- **The completion list (rows 235, 240).** Implement's and the checklist's items
+  merged into one list; the checklist's classification of each decision
+  (permanent, temporary, superseded, rejected) and "satisfy the change
+  specification" joined it, and its validation evidence is "run and their
+  validation evidence recorded, or any unrun check disclosed". The kinds of check
+  ("packaging, and typing"; "package, typing") are neutralized to "the checks the
+  plan names — focused, integration, and the repository's own", the kinds staying
+  in `AGENTS.md`'s "Working model" (row 143). "Contributor workflow"'s steps merged
+  into Discuss and Plan (read the root guidance and architecture; audit the delta;
+  identify permanent documentation impact; plan only once the design is ready).
+- **When citations are checked (rows 182, 184; part 10).** `AGENTS.md`'s
+  "Cross-references must resolve" said to run a cross-reference check "before
+  promoting documentation"; part 10 runs the citation check after promotion "so the
+  documents it wrote are there to resolve". Proposed, part 10's order:
+  `closeout.md`'s Promotion tells the story, its `dev` neutralized and "this has
+  happened in this repository" generalized, and says the citation check catches
+  it; `AGENTS.md` keeps the engineering rule and cites the two parts.
+- **OpenSpec's layout (rows 149, 199).** `AGENTS.md`'s bullets and
+  `openspec/README.md`'s introduction agreed; merged as the union of their
+  descriptions. The capability index bullets agreed; merged as the role ("a
+  canonical capability documentation index, through which a reader finds every
+  normative contract and companion"), the path and its check going to
+  `openspec/README.md`'s "Current capability documentation" (row 151).
+- **A change's records (row 187).** `AGENTS.md`'s paragraph agreed with the guide's
+  "History and removal"; removed from `AGENTS.md`, whose pointer to the guide now
+  names the records.
+- **The index check (part 6).** Part 6's account agreed with the guide's "The
+  review directory", which adds that each dependency is listed and not archived;
+  merged into the guide, which `closeout.md` cites.
+- **Wording the move changed beyond the inventory's neutralizations.** The import
+  rule parked in `AGENTS.md` says "the change's own diff" for the source's "the
+  section's own diff" (row 219: the engineering file reads "what a change adds"),
+  and the closeout part keeps the per-section scoping. `closeout.md`'s comment
+  hygiene names the rules it confirms rather than citing `AGENTS.md`; its archival
+  says a hand-made promotion "before archival became closeout's last part" for
+  "before this rule"; the diagrams line in `openspec-documentation.md` says "each
+  diagram's source and its export" for ".drawio source and .svg export", draw.io
+  being this repository's selection (row 161). `changes.md`'s promotion-record
+  example and template checkbox are neutral (rows 212, 232). `terms.md`'s third
+  row, the repository's terms "in the home the repository's root guidance names",
+  stands for the market's row. The guide's opening no longer names this
+  repository's own part.
+
+Section 3 notes (handoff):
+
+- The `.agents/workflow.toml` edit (task 3.9) was refused, as the step table denies
+  every step that file; the owner confirmed the refusal stands, and the orchestrating
+  session made the edit on their word. Sections 4, 5, and 9 edit the same file: the
+  plan should give those edits to the orchestrator, as it gives `.claude/` edits,
+  and each section checks the edit is in its worktree before committing.
+- Open for the triage, as task 3.1 asks: no workflow file carries a step or role tag
+  (`design`, `plan`, `implement`, `review`, `triage`, `validate`, `archive-cleanup`,
+  `orchestrate`, `owner`, `skills`, `engine`, `records`), so the README's table
+  leaves them out; they return only if a later section splits `working-model.md` or
+  the guide by step.
+- Engineering material parked in `AGENTS.md` for later sections, beside what was
+  there: the rule for terms from `domain.md` (section 5, `engineering/terms.md`),
+  part 2's import rule (section 5, `dependencies-python.md`), the engineering
+  completion criteria under "Working model" (section 5, `documentation.md` and
+  `comments.md`). Section 4 moves part 8's reason, still in `openspec/README.md`.
+- Places in workflow files where an engineering rule is named, unlinked, until its
+  file exists: `closeout.md`'s Comment hygiene (comments describe the current
+  system), Campaign index currency and Documentation citations (citations
+  resolve), and Import placement ("the repository's guidance on imports");
+  `changes.md`'s "Defects found during a change" (composition from one component,
+  `engineering/implementation.md`); the guide's two dropped citations of "Amend a
+  rule or comply" (`engineering/rules.md`). Sections 4–5 add the links.
+- The fresh-context check found, and the section fixed: unlisted wording changes
+  (listed above, or reverted where they added guidance — `change-references.md`
+  widened to code and configuration, `changes.md` adding a change's records,
+  `openspec/README.md` naming two checks the parts never named, a sentence added to
+  `working-model.md`); `terms.md` stating "one home per term" (engineering, row
+  250); duplicates inside the workflow layer (deferred work, "production code does
+  not depend on `openspec/changes/`"); row 151's check left in `AGENTS.md`; the
+  guide's `make check-change` statement left unrestated; an inconsistent waiver
+  example; eight other changes' "in `openspec/README.md`'s order" lines; and a
+  false re-pointing in `align-package-paths-with-layers`. Declined: the duplicate
+  "not a harmless forward reference" across `AGENTS.md` and `closeout.md` was
+  resolved by trimming `closeout.md`'s copy, not by moving the engineering rule,
+  which is section 5's.
 
 ## 4. The engineering layer: testing
 

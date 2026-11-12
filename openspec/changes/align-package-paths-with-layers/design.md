@@ -14,7 +14,7 @@ The alternative was layer-first: `kit/`, `specialization/<scope>/`,
 `composition/<scope>/`. It was rejected because it scatters each domain across two
 trees to save a label, and because "everything about VMs is one directory" is how
 the repository is navigated and how its documentation contexts
-(`docs/agents/domain.md`) are drawn. The tree stays scope-first — `core/`, `kit/`,
+(the domain docs, since removed) are drawn. The tree stays scope-first — `core/`, `kit/`,
 `domains/<scope>/`, plus one directory for repository-wide compositions — and the
 kind rides in the project name, which is the convention `kit/site-client`,
 `kit/resource-pools-contracts`, and `domains/vms/storefront` already follow.
@@ -59,7 +59,7 @@ unbuildable between the two.
   `core/registry` need a home for repository-wide compositions. `roles/` matches
   the architecture document's own word for the buyer and storefront
   ("role implementations"), though the registry is a service rather than a role.
-  `platform/` matches `docs/agents/domain.md`'s "platform context" but that context
+  `platform/` matches the domain docs' "platform context" but that context
   also contains `core/` and `kit/`. `services/` describes the registry and not the
   buyer. `roles/` is the working assumption; decide before the second move.
 - **Vocabulary placement.** Three vocabulary projects sit at their scope directory's
@@ -77,7 +77,7 @@ unbuildable between the two.
   `domains/apicredits/middleware-python` is a navigability choice. Decide with the
   vocabulary question, since both are about what `domains/<scope>/` may contain
   besides projects.
-- **`CONTEXT.md` and the platform context.** `docs/agents/domain.md` draws the
+- **`CONTEXT.md` and the platform context.** The domain docs draw the
   platform context as `core/`, `kit/`, and `provisioning/`. After the moves the
   compute family kit is under `domains/compute/` but is still platform-context
   material by that document's own rule ("code that serves a single domain belongs

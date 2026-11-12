@@ -236,8 +236,8 @@ Work through the section's tasks in order. For each:
   change's stated scope, and recorded in the section's notes as outside the plan,
   so the round's review and the owner's reading see it; one that is large, or not
   understood well enough to fix without a design of its own, is recorded where
-  `AGENTS.md`'s "Deferred work" says
-  (`openspec/README.md#defects-found-during-a-change`).
+  deferred work goes (`docs/guidance/workflow/working-model.md#deferred-work`,
+  `docs/guidance/workflow/changes.md#defects-found-during-a-change`).
 - A task the plan gives the orchestrator — an edit under `.claude/`, which every
   step is denied — is never attempted: check that its edit is in the worktree and
   commit it with the section. When it is missing, stop and name the edit.
@@ -248,11 +248,13 @@ Work through the section's tasks in order. For each:
   never editable sibling paths.
 - Comments describe the current system: an invariant, a constraint, a reason a
   simpler implementation is wrong. Never a change name, a task number, a review, or
-  what the code used to be (`AGENTS.md`, "Python comments and docstrings").
+  what the code used to be (`AGENTS.md`, "Python comments and docstrings";
+  `docs/guidance/workflow/change-references.md`).
 - Imports the section adds go at module level, unless one has a reason to stay
   local that you verified by attempting the move — a circular import that fails, or
   a deliberate lazy load — and recorded beside it
-  (`openspec/README.md#plan-closeout-requirements`, part 2). Closeout only confirms
+  (`AGENTS.md`, "Package and dependency discipline";
+  `docs/guidance/workflow/closeout.md#import-placement`). Closeout only confirms
   comments and imports; it never edits code, so this is where they are done.
 - Mark the task `[x]` when its evidence passes, with a short note: each suite, its
   level as `TESTING.md` defines them — unit, library integration (a real component

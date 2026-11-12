@@ -149,13 +149,13 @@ checks your understanding here before reading anything that rests on it. Then:
    change implements, with a WHEN/THEN scenario, and does the delta modify every
    existing requirement its behavior contradicts rather than only adding new ones?
    Does any open question have its
-   answer prescribed elsewhere (`openspec/README.md#open-questions-and-prescribed-tasks`)?
+   answer prescribed elsewhere (`docs/guidance/workflow/changes.md#open-questions-and-prescribed-tasks`)?
    Does every cited path resolve?
 5. **`scope`** — Has the scope grown beyond the original proposal? Growth that is a
    small, understood defect fix, or unification the architecture favours, stays;
    work that is large, or not understood well enough to fix without a design of its
    own, should be its own change
-   (`openspec/README.md#defects-found-during-a-change`). Does anything give the
+   (`docs/guidance/workflow/changes.md#defects-found-during-a-change`). Does anything give the
    change a prerequisite it could close out without?
 6. **`readiness`** — Are there related changes that must land first? Is the design
    ready for planning? If the change already has a `tasks.md`, does it describe the
@@ -177,7 +177,9 @@ checks your understanding here before reading anything that rests on it. Then:
    the level it claims — is a finding, not only a remark in this answer: a gap
    stated only in prose is never triaged.
 3. **`documentation`** — Does the code and documentation comply with `AGENTS.md`,
-   `ARCHITECTURE.md`, and `openspec/README.md`: comments describing the current system,
+   `ARCHITECTURE.md`, `openspec/README.md`, and the workflow's guidance under
+   `docs/guidance/workflow/`: comments describing the current system and naming no
+   change (`docs/guidance/workflow/change-references.md`),
    permanent documents describing current state, promotion where the change says it
    happened?
 4. **`architecture`** — Is the code organized by `ARCHITECTURE.md`'s layers? Is
@@ -186,7 +188,7 @@ checks your understanding here before reading anything that rests on it. Then:
 5. **`consistency`** — Does the implementation do what the design and delta specs
    say, and only that, beyond a small, understood defect fixed outside the plan and
    recorded in the task notes or a triage record
-   (`openspec/README.md#defects-found-during-a-change`)? An unrecorded one is a
+   (`docs/guidance/workflow/changes.md#defects-found-during-a-change`)? An unrecorded one is a
    finding.
 
 ### Pre-closeout review
@@ -197,17 +199,18 @@ checks your understanding here before reading anything that rests on it. Then:
 2. **`scope`** — What scope crept in during implementation? Review anything new under
    the implementation review's questions. A small, understood defect fixed in place
    belongs in the change; large or vague work belongs in its own change or an
-   unowned gap (`openspec/README.md#defects-found-during-a-change`). Changes are
+   unowned gap (`docs/guidance/workflow/changes.md#defects-found-during-a-change`). Changes are
    rarely split at this stage, so say what the new scope needs rather than only that
    it exists.
 3. **`documentation`** — Are the change's comments and imports as closeout will
    confirm them? Closeout edits no code, so this is the last review that can ask
    for a code change. Read the comments the change added for any naming the review,
    migration, or task that introduced them, or describing history rather than the
-   current system (`AGENTS.md`, "Python comments and docstrings"); and check each
-   import the change added or touched that is local rather than at module level for
-   a recorded reason to stay local
-   (`openspec/README.md#plan-closeout-requirements`, parts 1 and 2).
+   current system (`AGENTS.md`, "Python comments and docstrings";
+   `docs/guidance/workflow/change-references.md`); and check each import the change
+   added or touched that is local rather than at module level for a recorded reason
+   to stay local (`AGENTS.md`, "Package and dependency discipline";
+   `docs/guidance/workflow/closeout.md`, "Comment hygiene" and "Import placement").
 4. **`readiness`** — Is the change ready for promotion and closeout?
 5. **`consistency`**, after the merge before closeout — when the workflow log's last
    run before this review is a `merge` run, the merge of the branch the change
@@ -226,7 +229,8 @@ Closeout has already archived the change: its spec deltas are merged into
 specifications as they now stand, not the deltas.
 
 1. **`documentation`** — Does the change comply with the documentation guidance?
-   Check each part of `openspec/README.md#plan-closeout-requirements` against the
+   Check each part of `docs/guidance/workflow/closeout.md`, and the repository's own
+   parts (`openspec/README.md#this-repositorys-closeout-parts`), against the
    files and the closeout task's recorded evidence, and the design-promotion record
    against the permanent documents it names. Did the archive's merge leave each
    permanent `spec.md` saying what the change's deltas meant?
@@ -282,8 +286,9 @@ and why it holds. The reader must be able to tell "no issue" from "not examined"
 **Basis** — what the finding rests on:
 
 - `specification` — a requirement in `openspec/specs/` or the change's own delta; cite it.
-- `guidance` — a written rule in `AGENTS.md`, `docs/development/`, or
-  `openspec/README.md`; cite the document and heading.
+- `guidance` — a written rule in `AGENTS.md`, `docs/guidance/`, `docs/development/`,
+  `docs/agents/change-workflow.md`, or `openspec/README.md`; cite the document and
+  heading.
 - `evidence` — a claim in the change that the files contradict; cite the files.
 - `judgement` — your view, resting on no written rule. Say so plainly; these are
   often the most valuable findings.
