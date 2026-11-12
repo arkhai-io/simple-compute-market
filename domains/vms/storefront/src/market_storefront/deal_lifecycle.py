@@ -235,13 +235,21 @@ class VmDealLifecycle:
             observe_retention=seller_retention(self.path, deal.negotiation_id, clock=self.clock),
         )
 
-    async def interrupt(self, negotiation_id, *, actor, operation_key, reason, dry_run=False):
+    async def interrupt(self, negotiation_id, *, actor, operation_key, reason, interruption_kind=None, dry_run=False):
         agreement, _ = await asyncio.to_thread(self.accepted, negotiation_id)
         terms = decode_terms(agreement["settlement"].get("lifecycle"))
         entitled = bool(terms and terms.early_termination and "payee" in terms.early_termination.entitlements)
+        if interruption_kind is None:
+            if agreement["settlement"]["settlement"].get("period") is not None:
+                raise ValueError("rate interruption requires interruption_kind: preemption or failure")
+            interruption_kind = "failure"
+        if interruption_kind not in {"preemption", "failure"}:
+            raise ValueError("unknown interruption kind")
+        if interruption_kind == "preemption" and not entitled:
+            raise ValueError("accepted option has no payee entitlement; preemption refused")
         command = LifecycleCommand(
             negotiation_id=negotiation_id, operation_key=operation_key,
-            kind="stop" if entitled else "delivery_end",
+            kind="notice" if interruption_kind == "preemption" else "delivery_end",
         )
         if not reason or not reason.strip():
             raise ValueError("administrator interruption requires a reason")
@@ -257,7 +265,7 @@ class VmDealLifecycle:
                     "administrator": actor.model_dump(mode="json"), "reason": reason,
                 })),
             )))
-        if entitled:
+        if command.kind == "notice":
             outcome = await self.seller.submit(command, actor=actor, reason=reason)
             # Only a verified authority stop may set an entitled delivery end.
             return command.kind, outcome, (await asyncio.to_thread(self.seller.delivery_read, negotiation_id)).delivery
