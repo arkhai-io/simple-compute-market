@@ -11,6 +11,7 @@ from market_arkhai_payments import ArkhaiPaymentsConfig
 from market_arkhai_payments.models import AccountId
 from market_identity import Identity, TrustedIdentitySet
 from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry, dispute_config
+from market_settlement_runtime.terms_policy import TermsPolicySelection, terms_policy_selection
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _CONFIG_ENV = "BARE_METAL_BUYER_CONFIG"
@@ -31,6 +32,8 @@ class BareMetalBuyerConfig(BaseModel):
     arkhai_payments: ArkhaiPaymentsConfig | None = None
     disputes: DisputeConfig = Field(default_factory=DisputeConfig)
     dispute_authorities_by_registry: dict[str, tuple[DisputeEntry, ...]] = Field(default_factory=dict)
+    # The root terms_policy key, read beside [bare_metal] as the dispute entries are.
+    terms_policy: TermsPolicySelection = Field(default_factory=TermsPolicySelection)
 
     @field_validator("payer_account")
     @classmethod
@@ -78,6 +81,7 @@ def load_bare_metal_buyer_config(
         raise ValueError("bare-metal buyer config requires [bare_metal]")
     section = dict(section)
     section["disputes"] = dispute_config(payload, role="buyer")
+    section["terms_policy"] = terms_policy_selection(payload)
     principals = section.get("registry_principals")
     if isinstance(principals, list):
         section["registry_principals"] = tuple(principals)

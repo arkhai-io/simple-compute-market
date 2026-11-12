@@ -70,6 +70,7 @@ from market_policy.listing_source import ListingSourceVerdict
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_settlement_runtime import AcceptedObligationArtifacts
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
+from market_settlement_runtime.terms_policy import selection_refusal, seller_selection
 from market_settlement_runtime.horizon import RateTermProjections, ResolvedHorizon, resolve_horizon
 from market_storefront_kit import TradingPause
 
@@ -394,6 +395,8 @@ def build_bare_metal_negotiation_runtime(
     seller_stages: SettlementStageTable[Any] = SELLER_STAGES,
     rate_servicing: RateServicing | None = None,
     rate_term_projections: RateTermProjections | None = None,
+    terms_policy: Any = None,
+    selection_clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> NegotiationRuntime:
     """Compose bare metal's hooks onto the kit's negotiation runtime.
 
@@ -573,14 +576,35 @@ def build_bare_metal_negotiation_runtime(
             pinned = _authorized_escrow(opening, request.listing_record).model_dump(
                 mode="json", exclude_none=True
             )
+        decision = result.decision
+        if decision.action != "reject":
+            # An escrow proposal selects an accepted escrow, not an option.
+            decision = admitted(request, None, decision)
         return RoundEvaluation(
             our_amount=int(result.our_amount),
             strategy_label=result.strategy_label,
-            decision=result.decision,
+            decision=decision,
             pinned_proposal=pinned,
             uses_scalar_amount=bool(state.get("uses_scalar_amount", True)),
             buyer_amount=buyer_amount,
             domain_state=state,
+        )
+
+    def admitted(
+        request: RoundRequest, selected: Mapping[str, Any] | None,
+        decision: NegotiationDecision,
+    ) -> NegotiationDecision:
+        """The decision, or a rejection when the seller's terms policy refuses.
+
+        Asked last, about a selection every other check of the round has let
+        through and from a buyer the runtime authenticated.
+        """
+        refusal = selection_refusal(terms_policy, seller_selection(
+            selected, buyer=request.buyer_principal,
+            listing=request.listing_record, at=selection_clock(),
+        ))
+        return decision if refusal is None else NegotiationDecision(
+            action="reject", reason=refusal,
         )
 
     async def evaluate_exact_selection(
@@ -754,7 +778,10 @@ def build_bare_metal_negotiation_runtime(
         return RoundEvaluation(
             our_amount=agreed_amount,
             strategy_label=EXACT_SELECTION_STRATEGY,
-            decision=NegotiationDecision(action="accept", proposal=accepted_proposal),
+            decision=admitted(
+                request, selected_option.model_dump(mode="json"),
+                NegotiationDecision(action="accept", proposal=accepted_proposal),
+            ),
             pinned_proposal=accepted_proposal,
             uses_scalar_amount=bool(agreed_amount),
             buyer_amount=agreed_amount,

@@ -41,6 +41,7 @@ from market_settlement_runtime import (
     SettlementConfig,
     SettlementConfigurationRegistry,
 )
+from market_negotiation_runtime import OfferUnfulfillableError
 from market_storefront_kit import TradingPause
 from pydantic import BaseModel, ConfigDict
 
@@ -184,7 +185,7 @@ class _Opening:
         return NegotiateNewResponse(**result)
 
 
-async def _service(tmp_path) -> tuple[_Opening, dict[str, Any]]:
+async def _service(tmp_path, terms_policy: Any = None) -> tuple[_Opening, dict[str, Any]]:
     domain = get_market_domain_contract()
     migrate_storefront_database(tmp_path / "storefront.db")
     db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
@@ -221,6 +222,7 @@ async def _service(tmp_path) -> tuple[_Opening, dict[str, Any]]:
         plan_builder=lambda **kwargs: {},
         accepted_obligation_dispatch=_intro_dispatch(),
         seller_stages=_intro_stages(),
+        terms_policy=terms_policy,
     )
     return _Opening(db, runtime), option
 
@@ -515,3 +517,50 @@ async def test_a_duration_the_option_prices_at_zero_is_refused_and_nothing_is_ke
         with pytest.raises(BareMetalNegotiationRefusal, match="at zero"):
             await service.open(request=request, buyer_principal=BUYER_SIGNER.identity)
     await _nothing_accepted(service, calls)
+
+
+class _TermsPolicy:
+    def __init__(self, *reasons: str) -> None:
+        self.reasons = reasons
+        self.asked: list[Any] = []
+
+    def admit(self, selection: Any) -> tuple[str, ...]:
+        self.asked.append(selection)
+        return self.reasons
+
+
+async def test_the_terms_policy_is_asked_about_an_exact_selection_it_admits(tmp_path) -> None:
+    policy = _TermsPolicy()
+    service, option = await _service(tmp_path, policy)
+
+    response = await service.open(request=_request(option), buyer_principal=BUYER_SIGNER.identity)
+
+    assert response.action == "accept"
+    (asked,) = policy.asked
+    assert asked.option.model_dump(mode="json") == option
+    assert asked.buyer == BUYER_SIGNER.identity
+    assert asked.listing["listing_id"] == "intro-listing"
+
+
+async def test_a_terms_policy_refusal_refuses_an_exact_selection(tmp_path) -> None:
+    policy = _TermsPolicy("this seller does not serve this buyer")
+    service, option = await _service(tmp_path, policy)
+
+    with pytest.raises(
+        OfferUnfulfillableError,
+        match="^seller_terms_policy_refusal: this seller does not serve this buyer$",
+    ):
+        await service.open(request=_request(option), buyer_principal=BUYER_SIGNER.identity)
+
+
+async def test_the_terms_policy_never_sees_a_selection_the_listing_does_not_offer(tmp_path) -> None:
+    policy = _TermsPolicy("never reached")
+    service, option = await _service(tmp_path, policy)
+
+    with pytest.raises(BareMetalNegotiationRefusal):
+        await service.open(
+            request=_request({**option, "option_id": "0" * 64}),
+            buyer_principal=BUYER_SIGNER.identity,
+        )
+
+    assert policy.asked == []

@@ -172,7 +172,9 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         arkhai_payments_stage: object = None,
         rate_servicing: object = None,
         rate_term_projections: object = None,
+        terms_policy: object = None,
     ):
+        assert terms_policy is built["settlement_composition"].terms_policy
         registration = registry.resolve_registration(binding)
         assert registry is built["registry"]
         assert registration.contract is domain
@@ -213,6 +215,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
             arkhai_payments_stage=None,
             rate_servicing=RateServicing(),
             rate_term_projections={},
+            terms_policy=object(),
             payments_coordinator=None,
             settlement_config=SimpleNamespace(priority=()),
             disputes=SimpleNamespace(refresh=AsyncMock()),

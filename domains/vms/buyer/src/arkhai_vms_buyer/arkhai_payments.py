@@ -14,6 +14,7 @@ from market_arkhai_payments.models import AccountId
 from market_config.config_loader import load_user_config
 from market_core.schemas import AgreedPrice, Agreement
 from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, Pending
+from market_settlement_runtime.buyer_terms import BuyerTermsAdmission
 
 from .evidence import evidence_store
 from .lifecycle import buyer_lifecycle, run_sync
@@ -53,6 +54,11 @@ def payment_buyer(policy) -> PaymentApproval:
             policy.config.mechanism_config("arkhai_payments")
         ),
         AccountId.model_validate(section.get("payer_account")).root,
+        # Approval asks the policy that admitted the option at selection.
+        terms_policy=(
+            policy.option_preference.policy
+            if isinstance(policy.option_preference, BuyerTermsAdmission) else None
+        ),
     )
 
 

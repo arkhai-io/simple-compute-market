@@ -7,7 +7,7 @@ from a peer's promise.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
@@ -15,37 +15,102 @@ from market_core.schemas import AgreedPrice, Agreement, SettlementOption
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import PARTIAL_PERIOD, TermContext, decode_terms
 
-from .rate_publication import default_buyer_refusals
 from .configuration import SettlementConfigurationRegistry
+from .rate_publication import default_buyer_refusals
+from .terms_policy import (
+    BuyerTermsOffer, BuyerTermsPolicy, DefaultBuyerTermsPolicy, preferred_options,
+)
 
 
-class BuyerTermsPolicy:
-    """Compose the same recommendations sellers diagnose with authority ranking."""
+class BuyerTermsAdmission:
+    """Ask the buyer's terms policy, then admit and rank the dispute authority.
+
+    The policy can only add refusals. Authority acceptance and term validation
+    run for every option it does not refuse, and a policy that fails refuses.
+    What the policy refused and what was admitted are kept, so a command that
+    finds nothing to buy can say that its own policy is why.
+    """
 
     def __init__(
-        self, authority: AuthoritySelection, *, allow_unprotected_terms: bool = False,
+        self, authority: AuthoritySelection, policy: BuyerTermsPolicy | None = None,
     ) -> None:
         self.authority = authority
-        self.allow_unprotected_terms = allow_unprotected_terms
+        self.policy: BuyerTermsPolicy = policy if policy is not None else DefaultBuyerTermsPolicy()
+        self.policy_refused: dict[str, tuple[str, ...]] = {}
+        self.admitted: set[str] = set()
 
-    def rank(self, option: SettlementOption, *, registry_url: str = "") -> int:
+    def _has_adapter(self, option: SettlementOption) -> bool:
         context = self.authority.contexts.get(option.settlement_schema)
-        refusals = default_buyer_refusals(
-            decode_terms(option.lifecycle),
-            has_adapter=context.has_adapter if context is not None else False,
+        return context.has_adapter if context is not None else False
+
+    def rank(
+        self, option: SettlementOption, *, registry_url: str = "",
+        listing: Mapping[str, Any] | None = None,
+    ) -> int:
+        refusals = policy_refusals(
+            self.policy, option, has_adapter=self._has_adapter(option),
+            registry_url=registry_url, listing=listing,
         )
-        if refusals and not self.allow_unprotected_terms:
+        if refusals:
+            self.policy_refused[option.option_id] = refusals
             raise ValueError("; ".join(refusals))
-        return self.authority.rank(
+        rank = self.authority.rank(
             option.settlement_schema, option.lifecycle, registry_url=registry_url,
         )
+        self.admitted.add(option.option_id)
+        return rank
 
     def __call__(self, option: SettlementOption, listing: Mapping[str, Any]) -> int | None:
         try:
-            return self.rank(option, registry_url=str(listing.get("source_registry_url") or ""))
+            return self.rank(
+                option, registry_url=str(listing.get("source_registry_url") or ""),
+                listing=listing,
+            )
         except ValueError as exc:
             self.authority.report(str(exc))
             return None
+
+    def order(
+        self, options: Sequence[SettlementOption], listing: Mapping[str, Any],
+    ) -> tuple[SettlementOption, ...]:
+        """One listing's admitted options in the policy's preference order."""
+        registry_url = str(listing.get("source_registry_url") or "")
+        return tuple(offer.option for offer in preferred_options(self.policy, [
+            BuyerTermsOffer(
+                option, decode_terms(option.lifecycle), self._has_adapter(option),
+                registry_url, listing,
+            )
+            for option in options
+        ]))
+
+    def policy_refusal_report(self) -> tuple[str, ...]:
+        """Why nothing was selectable, when the terms policy refused options
+        and none was admitted; empty otherwise."""
+        if self.admitted or not self.policy_refused:
+            return ()
+        return tuple(
+            f"option {option_id}: " + "; ".join(reasons)
+            for option_id, reasons in self.policy_refused.items()
+        )
+
+
+def policy_refusals(
+    policy: BuyerTermsPolicy, option: SettlementOption, *, has_adapter: bool,
+    registry_url: str = "", listing: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    """One policy's refusals of one option; a failing policy is a refusal.
+
+    A policy that only orders options leaves refusing to the packaged default.
+    """
+    if not callable(getattr(policy, "refusals", None)):
+        policy = DefaultBuyerTermsPolicy()
+    try:
+        return tuple(str(reason) for reason in policy.refusals(BuyerTermsOffer(
+            option, decode_terms(option.lifecycle), has_adapter, registry_url,
+            listing or {},
+        )))
+    except Exception as exc:  # noqa: BLE001 - installed code; fail closed
+        return (f"buyer terms policy failed ({type(exc).__name__}: {exc})",)
 
 
 def option_quote(

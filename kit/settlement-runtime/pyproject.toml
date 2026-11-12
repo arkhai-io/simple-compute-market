@@ -12,6 +12,13 @@ dependencies = [
     "pydantic>=2.7",
 ]
 
+[project.entry-points."market.buyer_terms_policies"]
+default = "market_settlement_runtime.terms_policy:default_buyer_terms_policy"
+permissive = "market_settlement_runtime.terms_policy:permissive_buyer_terms_policy"
+
+[project.entry-points."market.seller_terms_policies"]
+default = "market_settlement_runtime.terms_policy:default_seller_terms_policy"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

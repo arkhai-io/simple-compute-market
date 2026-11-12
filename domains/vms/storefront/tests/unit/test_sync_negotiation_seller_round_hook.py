@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -57,6 +57,7 @@ _TOKEN = "0x0000000000000000000000000000000000000001"
 _RECIPIENT = "0x" + "44" * 20
 _ESCROW = "0x" + "11" * 20
 _DOMAIN = build_vm_storefront_domain()
+_SELECTED_AT = datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc)
 
 
 async def _noop_reconcile(_context) -> None:
@@ -309,6 +310,7 @@ async def _start(
     seller_round_hook=None,
     capacity_runtime=None,
     listing_source_check=None,
+    terms_policy=None,
 ):
     registration = sqlite_client.domain_registry.resolve_mode("vm")
     runtime = build_vm_negotiation_runtime(
@@ -319,6 +321,8 @@ async def _start(
         site_projections=await _policy_projections(),
         seller_round_hook=seller_round_hook,
         listing_source_check=listing_source_check or _source_matches,
+        terms_policy=terms_policy,
+        selection_clock=lambda: _SELECTED_AT,
     )
     proposal_wire = (
         proposal.model_dump(mode="json")
@@ -389,8 +393,9 @@ def _countering_hook() -> AsyncMock:
     ))
 
 
-async def _open_shape_priced(db, hook):
+async def _open_shape_priced(db, hook, terms_policy=None):
     return await _start(
+        terms_policy=terms_policy,
         sqlite_client=db, our_listing_id="L-hook",
         buyer_principal=_BUYER, seller_principal=_SELLER,
         proposal=_selected_proposal(9_000),
@@ -868,3 +873,110 @@ async def test_negotiation_runtime_continuation_uses_injected_seller_round_hook(
         negotiation_id=opened["negotiation_id"]
     )
     assert db.domain_registry.resolve(thread_binding.binding) is _DOMAIN
+
+
+class _RecordingTermsPolicy:
+    """A seller terms policy that records what it is asked and answers as told."""
+
+    def __init__(self, *reasons: str) -> None:
+        self.reasons = reasons
+        self.asked: list = []
+
+    def admit(self, selection):
+        self.asked.append(selection)
+        return self.reasons
+
+
+@pytest.mark.asyncio
+async def test_the_terms_policy_is_asked_about_the_listings_own_option_and_the_verified_buyer(db):
+    await _reprice(db, _structure(_BEFORE))
+    policy = _RecordingTermsPolicy()
+
+    opened = await _open_shape_priced(db, _countering_hook(), policy)
+
+    assert opened["action"] == "counter"
+    (asked,) = policy.asked
+    listed = (await db.load_listing(listing_id="L-hook"))["settlement_options"]
+    listed = json.loads(listed) if isinstance(listed, str) else listed
+    assert asked.option.model_dump(mode="json") == listed[0]
+    assert asked.buyer == _BUYER
+    assert asked.listing["listing_id"] == "L-hook"
+    assert asked.at == _SELECTED_AT
+
+
+@pytest.mark.asyncio
+async def test_a_terms_policy_refusal_refuses_the_opening_with_its_reason(db):
+    await _reprice(db, _structure(_BEFORE))
+    policy = _RecordingTermsPolicy("this seller does not serve this buyer")
+
+    with pytest.raises(
+        OfferUnfulfillableError,
+        match="^seller_terms_policy_refusal: this seller does not serve this buyer$",
+    ):
+        await _open_shape_priced(db, _countering_hook(), policy)
+
+    assert len(policy.asked) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_terms_policy_refusal_ends_a_continuation_as_a_rejection(db):
+    await _reprice(db, _structure(_BEFORE))
+    policy = _RecordingTermsPolicy()
+    hook = _countering_hook()
+    opened = await _open_shape_priced(db, hook, policy)
+    policy.reasons = ("no longer served",)
+
+    registration = db.domain_registry.resolve_mode("vm")
+    runtime = build_vm_negotiation_runtime(
+        registration.contract, registry=db.domain_registry, binding=registration.binding,
+        capacity_runtime=_capacity_runtime(), site_projections=await _policy_projections(),
+        seller_round_hook=hook, listing_source_check=_source_matches, terms_policy=policy,
+    )
+    response = await runtime.continue_negotiation(
+        repository=db, negotiation_id=opened["negotiation_id"], buyer_action="counter",
+        buyer_proposal=_selected_proposal(9_500), buyer_reason=None,
+        buyer_principal=_BUYER, actor_principal=_BUYER, actor_role="buyer",
+    )
+
+    assert response["action"] == "reject"
+    assert response["reason"] == "seller_terms_policy_refusal: no longer served"
+
+
+@pytest.mark.asyncio
+async def test_the_terms_policy_is_not_asked_about_a_selection_the_round_already_refused(db):
+    await _reprice(db, _structure(_BEFORE))
+    policy = _RecordingTermsPolicy("never reached")
+    refusing = AsyncMock(return_value=SellerRoundResult(
+        our_amount=0, strategy_label="maximize", direction="maximize", chain_label="guard",
+        decision=NegotiationDecision(action="reject", reason="guard_refused"),
+    ))
+
+    with pytest.raises(OfferUnfulfillableError, match="^guard_refused$"):
+        await _open_shape_priced(db, refusing, policy)
+
+    assert policy.asked == []
+
+
+@pytest.mark.asyncio
+async def test_an_escrow_opening_reaches_the_terms_policy_with_no_option(db):
+    policy = _RecordingTermsPolicy()
+
+    async def hook(**_kwargs):
+        return SellerRoundResult(
+            our_amount=123, strategy_label="maximize", direction="maximize", chain_label="custom",
+            decision=NegotiationDecision(action="counter", proposal=_proposal(123).model_dump()),
+        )
+
+    response = await _start(
+        sqlite_client=db, our_listing_id="L-hook", buyer_principal=_BUYER,
+        seller_principal=_SELLER, proposal=_proposal(50),
+        provision_terms=ProvisionTerms(kind="compute.v1", version=1, payload={
+            "duration_seconds": 3600, "ssh_public_key": "ssh-rsa AAAA",
+        }),
+        our_base_url="http://test-seller:8001", their_agent_url="http://buyer:9000",
+        seller_round_hook=hook, terms_policy=policy,
+    )
+
+    assert response["action"] == "counter"
+    (asked,) = policy.asked
+    assert (asked.option, asked.lifecycle, asked.buyer) == (None, None, _BUYER)

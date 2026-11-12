@@ -140,7 +140,6 @@ class TermContext:
     compute: bool = False
     buyer: bool = False
     accepted_authorities: tuple[DisputeAuthority, ...] = ()
-    allow_missing_delivery_deadline: bool = False
 
 
 def decode_terms(value: object) -> LifecycleTerms | None:
@@ -182,9 +181,9 @@ def validate_terms(value: object, context: TermContext) -> LifecycleTerms | None
         raise ValueError("unaccepted dispute authority identity or params")
     minimum_window = requirement.minimum_dispute_window_seconds
     if context.compute:
+        # Whether a buyer takes an option with no deadline is its terms
+        # policy's decision; validation only sizes the window a stated one needs.
         minimum_window += terms.delivery_deadline_seconds or 0
-        if context.buyer and terms.delivery_deadline_seconds is None and not context.allow_missing_delivery_deadline:
-            raise ValueError("compute option has no delivery_deadline_seconds")
     if adjudication.dispute_window_seconds < minimum_window:
         raise ValueError("dispute window is below the delivery deadline plus the authority minimum")
     cap, minimum_cap = adjudication.case_hold_max_seconds, requirement.minimum_case_hold_seconds

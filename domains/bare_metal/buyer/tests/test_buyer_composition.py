@@ -18,11 +18,13 @@ from arkhai_bare_metal_buyer.cli import (
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from arkhai_bare_metal_buyer.plugin import domain
+from arkhai_bare_metal_buyer.settlement_composition import validate_authority
 from core_buyer.cli import build_app
 from core_buyer.introductions import IntroductionPayloadsDeleted
 from market_core import DomainCapability
 from typer.testing import CliRunner
 from market_identity import IdentityScheme, TrustedIdentitySet, create_signer
+from market_settlement_runtime.terms_policy import DefaultBuyerTermsPolicy, PermissiveBuyerTermsPolicy
 from pydantic import BaseModel
 from registry_client import FilterSpecResponse
 
@@ -317,3 +319,59 @@ def test_a_field_the_registry_does_not_declare_is_refused_before_any_read() -> N
         bare_metal_listing_params(
             _SpecClient(), "region=us-west", registry_url="https://registry"
         )
+
+# --- the buyer's terms policy --------------------------------------------------
+
+
+def _terms_policy_config(tmp_path: Path, root: str = "") -> Path:
+    # Development fixtures: a placeholder service identity and accounts, never
+    # for use on a public network.
+    path = tmp_path / "buyer.toml"
+    path.write_text(
+        f"""{root}
+[bare_metal]
+registry_url = "https://registry.example"
+registry_authority = "registry-prod"
+registry_principals = [{{scheme = "ed25519", identifier = "{PRINCIPAL}"}}]
+payer_account = "11111111-1111-4111-8111-111111111111"
+
+[bare_metal.arkhai_payments]
+enabled = true
+service_url = "http://127.0.0.1:9"
+service_identity = {{scheme = "ed25519", identifier = "{PRINCIPAL}"}}
+fee_bps = 250
+development_auth = true
+""".strip(),
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.parametrize(("root", "expected"), [
+    ("", DefaultBuyerTermsPolicy),
+    ('terms_policy = "permissive"\n', PermissiveBuyerTermsPolicy),
+])
+def test_the_root_terms_policy_key_reaches_payment_approval(
+    tmp_path: Path, root: str, expected: type,
+) -> None:
+    config = load_bare_metal_buyer_config(_terms_policy_config(tmp_path, root))
+    assert type(cli.payment_approval(config).terms_policy) is expected
+
+
+def test_an_uninstalled_terms_policy_refuses_the_option(tmp_path: Path) -> None:
+    config = load_bare_metal_buyer_config(
+        _terms_policy_config(tmp_path, 'terms_policy = "cautious"\n')
+    )
+    with pytest.raises(ValueError, match="'cautious' is not installed"):
+        validate_authority(SimpleNamespace(), config)
+
+
+def test_the_flag_is_refused_beside_an_installed_terms_policy(tmp_path: Path) -> None:
+    path = _terms_policy_config(tmp_path, 'terms_policy = "cautious"\n')
+    result = CliRunner().invoke(build_app(domains=[domain]), [
+        "bare-metal", "buy", "listing-1", "--option-id", "option-1",
+        "--ssh-public-key", "ssh-ed25519 AAAA", "--allow-unprotected-terms",
+        "--config", str(path),
+    ])
+    assert result.exit_code == 2, result.output
+    assert "cautious" in result.output

@@ -94,6 +94,14 @@ name = "market.storefront_contributions"
 name = "market.delivery_sinks"
 owner = "arkhai-kit-delivery"
 
+[[plugin_groups]]
+name = "market.buyer_terms_policies"
+owner = "arkhai-kit-settlement-runtime"
+
+[[plugin_groups]]
+name = "market.seller_terms_policies"
+owner = "arkhai-kit-settlement-runtime"
+
 # The kind allowlists: what a package of each light kind may depend on. A
 # dependency is on the allowlist when its layer, kind, or distribution is
 # listed, or, with family_vocabulary, when it is the vocabulary of a family in

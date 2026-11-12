@@ -11,8 +11,8 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from market_core.schemas import Agreement, SettlementOption
-from market_settlement_runtime.buyer_terms import BuyerTermsPolicy
-from market_settlement_runtime.rate_publication import default_buyer_refusals
+from market_settlement_runtime.buyer_terms import policy_refusals
+from market_settlement_runtime.terms_policy import BuyerTermsPolicy, DefaultBuyerTermsPolicy
 from pydantic import ValidationError
 
 from market_arkhai_payments.agreement import (
@@ -58,7 +58,9 @@ class PaymentApproval:
                 "payments fee policy and service identity are required"
             )
         self.config = config
-        self.terms_policy = terms_policy
+        self.terms_policy: BuyerTermsPolicy = (
+            terms_policy if terms_policy is not None else DefaultBuyerTermsPolicy()
+        )
         self.payer_account = AccountId.model_validate(payer_account).root
         self._client_for_owner: ClientForOwner = client_for_owner or (
             lambda owner: payments_client_for_owner(config, owner)
@@ -88,12 +90,14 @@ class PaymentApproval:
         )
         check(data.mandate, agreement, policy)
         if policy.option.period is not None:
-            if self.terms_policy is not None:
-                self.terms_policy.rank(SettlementOption.model_validate(agreement["settlement"]))
-            else:
-                refusals = default_buyer_refusals(policy.lifecycle, has_adapter=True)
-                if refusals:
-                    raise MandatePolicyError("; ".join(refusals))
+            # The buyer's own policy, asked again about the accepted option. It
+            # runs after the mandate check and cannot stand in for it.
+            refusals = policy_refusals(
+                self.terms_policy, SettlementOption.model_validate(agreement["settlement"]),
+                has_adapter=True,
+            )
+            if refusals:
+                raise MandatePolicyError("; ".join(refusals))
         return agreement, data
 
     def approve(

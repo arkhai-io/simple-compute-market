@@ -8,7 +8,7 @@ import json
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from arkhai_vms.capability_shapes import (
@@ -62,6 +62,8 @@ from market_core.schemas import (
     settlement_option_schema,
 )
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
+from market_settlement_runtime.terms_policy import selection_refusal, seller_selection
+from market_policy.scalar_policies import pinned_proposal
 from market_settlement_runtime.horizon import RateTermProjections, resolve_horizon
 from market_identity import Identity
 from market_negotiation_runtime import (
@@ -1009,6 +1011,8 @@ def build_vm_negotiation_runtime(
     source_confirmation_clock: Callable[[], datetime] | None = None,
     rate_servicing: RateServicing | None = None,
     rate_term_projections: RateTermProjections | None = None,
+    terms_policy: Any = None,
+    selection_clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
 ) -> NegotiationRuntime:
     """Compose the shared lifecycle with the exact registered VM contract.
 
@@ -1258,11 +1262,25 @@ def build_vm_negotiation_runtime(
                 "commercial_feasibility": "checked" if shape is not None else "not requested",
             },
         }
+        decision = result.decision
+        opening = pinned_proposal(list(request.history))
+        selected = vm_storefront_round._selected_option(request.listing_record, opening)
+        if decision.action != "reject" and selected is not None:
+            # The seller's terms policy is asked last, about a selection the
+            # shape, servicing and policy-chain guards have already let through
+            # and from a buyer the runtime authenticated. It can only refuse;
+            # everything after this round's decision still runs.
+            refusal = selection_refusal(terms_policy, seller_selection(
+                selected, buyer=request.buyer_principal,
+                listing=request.listing_record, at=selection_clock(),
+            ))
+            if refusal is not None:
+                decision = NegotiationDecision(action="reject", reason=refusal)
         pinned = state.get("accepted_escrow_proposal")
         return RoundEvaluation(
             our_amount=int(result.our_amount),
             strategy_label=result.strategy_label,
-            decision=result.decision,
+            decision=decision,
             pinned_proposal=(dict(pinned) if isinstance(pinned, Mapping) else None),
             uses_scalar_amount=bool(state.get("uses_scalar_amount", True)),
             buyer_amount=(

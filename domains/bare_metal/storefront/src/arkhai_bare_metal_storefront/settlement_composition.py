@@ -9,13 +9,16 @@ import logging
 from types import MappingProxyType
 from typing import Any
 
-from market_deal_lifecycle.terms import LifecycleTerms
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
 from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_term_timing
 from market_settlement_runtime.horizon import RateTermProjections
 from market_settlement_runtime.rate_publication import (
-    RatePresetHelper, RatePresetRefusal, default_buyer_refusals,
+    RatePresetHelper, RatePresetRefusal,
     derive_rate_preset, effective_delivery_deadline,
+)
+from market_settlement_runtime.terms_policy import (
+    DefaultSellerTermsPolicy, SellerTermsPolicy,
+    penalty_periods, review_for_publication,
 )
 
 from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
@@ -137,6 +140,9 @@ class BareMetalStorefrontSettlementComposition:
         default_factory=lambda: {ARKHAI_PAYMENTS_MECHANISM: PaymentsRatePresetHelper()}, repr=False,
     )
     rate_term_projections: RateTermProjections = field(default_factory=dict, repr=False)
+    # Decides the unstated on-demand penalty and whether a derived option is
+    # published; it sees options only after derivation has validated them.
+    terms_policy: SellerTermsPolicy = field(default_factory=DefaultSellerTermsPolicy, repr=False)
     delivery_deadline_for_pool: Callable[[str, str | None], int | None] = field(
         default=lambda _site, _pool: None, repr=False,
     )
@@ -177,6 +183,7 @@ class BareMetalStorefrontSettlementComposition:
         resources: Mapping[str, Any] | None = None,
         payments_client_for_owner: ClientForOwner | None = None,
         disputes: RegistryDisputePolicy | None = None,
+        terms_policy: SellerTermsPolicy | None = None,
     ) -> "BareMetalStorefrontSettlementComposition":
         registry = build_bare_metal_settlement_registry()
         return cls(
@@ -184,6 +191,7 @@ class BareMetalStorefrontSettlementComposition:
             config=registry.resolve(raw_settlement, role="seller"),
             resources={**(resources or {}), **({"disputes": disputes} if disputes is not None else {})},
             disputes=disputes or RegistryDisputePolicy.from_document({}),
+            terms_policy=terms_policy or DefaultSellerTermsPolicy(),
             payments_client_for_owner=payments_client_for_owner,
         )
 
@@ -289,7 +297,8 @@ class BareMetalStorefrontSettlementComposition:
                     max_duration_seconds=max_duration_seconds,
                     available_until_utc=candidate.get("available_until_utc"),
                     delivery_deadline_seconds=deadline,
-                    now=datetime.now(UTC), default_penalty_periods=24,
+                    now=datetime.now(UTC),
+                    default_penalty_periods=penalty_periods(self.terms_policy),
                 )
                 if isinstance(result, RatePresetRefusal):
                     diagnose({"code": result.code, "detail": result.detail, "mechanism": clause.mechanism})
@@ -332,9 +341,8 @@ class BareMetalStorefrontSettlementComposition:
                 except RateServicingUnavailable as exc:
                     diagnose({"code": "rate_servicing_undeclared", "detail": str(exc), "mechanism": option.settlement_schema})
                     continue
-                terms = LifecycleTerms.model_validate(option.lifecycle) if option.lifecycle is not None else None
-                for detail in default_buyer_refusals(terms, has_adapter=terms is not None):
-                    diagnose({"code": "default_buyer_refusal", "detail": detail, "mechanism": option.settlement_schema, "option_id": option.option_id})
+                if not review_for_publication(self.terms_policy, option, diagnose):
+                    continue
                 settlement_options.append(option.model_dump(mode="json"))
 
         if not accepted_escrows and not settlement_options:

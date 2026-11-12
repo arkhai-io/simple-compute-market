@@ -951,6 +951,20 @@
             "null"
           ]
         },
+        "^[tT][eE][rR][mM][sS]_[pP][oO][lL][iI][cC][yY]$": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "^[rR][eE][gG][iI][sS][tT][rR][yY]$": {
           "additionalProperties": false,
           "type": [

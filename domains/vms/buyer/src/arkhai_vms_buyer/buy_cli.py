@@ -46,8 +46,10 @@ from .buy_orchestrator import (
 )
 from .buyer_client import ResumeState, negotiate_with_seller
 from .cli_helpers import (
+    buyer_terms_selection,
     emit_buyer_explanation,
     emit_lifecycle_disclosure,
+    emit_terms_policy_refusals,
 )
 from .cli_helpers import (
     resolve_prices_from_matches as _resolve_prices_from_matches,
@@ -368,7 +370,7 @@ def register(app: typer.Typer) -> None:
         ),
         allow_unprotected_terms: bool = typer.Option(
             False, "--allow-unprotected-terms",
-            help="Explicitly waive default delivery-deadline, penalty and returned-period recommendations. Does not waive codec capabilities or authority acceptance.",
+            help="Shorthand for the packaged 'permissive' terms policy, which declines no option: the default delivery-deadline, penalty and returned-period refusals are not made. Does not waive codec capabilities or authority acceptance. Refused beside a configured terms_policy of your own.",
         ),
         explain: bool = typer.Option(
             False,
@@ -483,9 +485,12 @@ def register(app: typer.Typer) -> None:
         signer = identity.signer
         ssh = None if explain else resolve_ssh_public_key(override=ssh_public_key)
         try:
+            terms_selection = buyer_terms_selection(
+                allow_unprotected_terms=allow_unprotected_terms,
+            )
             settlement_policy = resolve_buyer_settlement_policy(
                 identity=identity, registry_urls=registry_urls,
-                allow_unprotected_terms=allow_unprotected_terms,
+                terms_policy=terms_selection,
             )
         except ValueError as exc:
             typer.secho(str(exc), err=True, fg=typer.colors.RED)
@@ -593,6 +598,7 @@ def register(app: typer.Typer) -> None:
                 err=True,
                 fg=typer.colors.YELLOW,
             )
+            emit_terms_policy_refusals(settlement_policy)
             raise typer.Exit(0)
         if requested_shape is not None:
             excess = [
@@ -750,7 +756,7 @@ def register(app: typer.Typer) -> None:
 
         run_log = RunLog.start(
             command="market buy",
-            allow_unprotected_compute_terms=allow_unprotected_terms,
+            terms_policy=terms_selection.name,
             profile_id=identity.profile_id,
             principal=identity.principal,
             registry_urls=reg_urls,

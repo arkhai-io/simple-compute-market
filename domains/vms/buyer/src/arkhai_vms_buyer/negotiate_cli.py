@@ -26,7 +26,10 @@ from rich.table import Table
 
 from .buy_orchestrator import fetch_listing_dict
 from .buyer_client import ResumeState, load_buyer_chain, negotiate_with_seller
-from .cli_helpers import emit_lifecycle_disclosure, resolve_prices_from_matches
+from .cli_helpers import (
+    buyer_terms_selection, emit_lifecycle_disclosure, emit_terms_policy_refusals,
+    resolve_prices_from_matches,
+)
 from .common import resolve_negotiation_config
 from .deal_helpers import (
     load_negotiation_resume_point,
@@ -138,7 +141,7 @@ def register(app: typer.Typer) -> None:
         ),
         allow_unprotected_terms: bool = typer.Option(
             False, "--allow-unprotected-terms",
-            help="Explicitly waive default delivery-deadline, penalty and returned-period recommendations. Does not waive codec capabilities or authority acceptance.",
+            help="Shorthand for the packaged 'permissive' terms policy, which declines no option: the default delivery-deadline, penalty and returned-period refusals are not made. Does not waive codec capabilities or authority acceptance. Refused beside a configured terms_policy of your own.",
         ),
         duration_hours: float | None = typer.Option(
             None,
@@ -251,13 +254,19 @@ def register(app: typer.Typer) -> None:
         settlement_policy = None
         settlement_clauses: tuple[CompiledSettlementClause, ...] = ()
         resolved_ssh_public_key: str | None = None
+        try:
+            terms_selection = buyer_terms_selection(
+                allow_unprotected_terms=allow_unprotected_terms,
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
         if resume_state is None:
             try:
                 settlement_policy = resolve_buyer_settlement_policy(
                     identity=identity,
                     action_capable=True,
                     registry_urls=registry_urls,
-                    allow_unprotected_terms=allow_unprotected_terms,
+                    terms_policy=terms_selection,
                 )
             except ValueError as exc:
                 raise typer.BadParameter(str(exc)) from exc
@@ -399,6 +408,7 @@ def register(app: typer.Typer) -> None:
             except ValueError as exc:
                 raise typer.BadParameter(str(exc)) from exc
             if selected_settlement is None:
+                emit_terms_policy_refusals(settlement_policy)
                 raise typer.BadParameter(
                     f"listing {listing_id!r} has no installed, enabled, compatible "
                     "settlement option"
@@ -489,7 +499,7 @@ def register(app: typer.Typer) -> None:
             listing_record = None
         run_log = RunLog.start(
             command="market negotiate",
-            allow_unprotected_compute_terms=allow_unprotected_terms,
+            terms_policy=terms_selection.name,
             profile_id=identity.profile_id,
             principal=identity.principal,
             seller_url=seller_url,
