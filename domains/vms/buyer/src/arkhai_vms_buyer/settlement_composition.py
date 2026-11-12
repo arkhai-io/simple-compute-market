@@ -18,6 +18,7 @@ from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
 from market_arkhai_payments import create_arkhai_payments_registration
+from market_arkhai_payments.buyer import approvable_terms
 from market_contact_exchange import (
     create_contact_command_group,
     create_contact_exchange_registration,
@@ -89,11 +90,12 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
 
 
 def buyer_term_context(mechanism: str, *, allow_unprotected_terms: bool = False) -> TermContext:
-    return TermContext(
+    context = TermContext(
         mechanism=mechanism, has_adapter=mechanism == "arkhai.payments.v1", compute=True,
         dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
         allow_missing_delivery_deadline=allow_unprotected_terms,
     )
+    return approvable_terms(context) if mechanism == "arkhai.payments.v1" else context
 
 
 def buyer_lifecycle_disclosure(option):

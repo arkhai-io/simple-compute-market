@@ -16,11 +16,9 @@ from market_settlement_runtime.presentation import amount_rate_quote
 from market_settlement_runtime.rate_publication import RatePresetPricing, RatePresetRequest, RatePresetRefusal
 
 from .contracts import get_contract
-from .mandates import PaymentsOptionParams, duration_seconds
+from .mandates import SUPPORTED_PARTIAL_PERIODS, PaymentsOptionParams, duration_seconds
 from .models import AccountId
 from .settlement_config import ARKHAI_PAYMENTS_MECHANISM, ArkhaiPaymentsPublicationInput, payments_billing_basis
-
-SUPPORTED_PARTIAL_PERIODS = frozenset({"charged", "returned", "prorated", "chosen"})
 
 
 def rate_contract_revision() -> str:

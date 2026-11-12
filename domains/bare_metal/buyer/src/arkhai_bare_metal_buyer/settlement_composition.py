@@ -4,6 +4,7 @@ from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_core import SettlementStageTable
 from market_settlement_runtime import SettlementConfigurationRegistry
 from market_arkhai_payments import create_arkhai_payments_registration
+from market_arkhai_payments.buyer import approvable_terms
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext
@@ -15,11 +16,12 @@ BUYER_STAGES = SettlementStageTable({ARKHAI_PAYMENTS_MECHANISM: PaymentStage()})
 
 
 def buyer_term_context(mechanism: str, *, allow_unprotected_terms: bool = False) -> TermContext:
-    return TermContext(
+    context = TermContext(
         mechanism=mechanism, has_adapter=mechanism == ARKHAI_PAYMENTS_MECHANISM, compute=True,
         dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
         allow_missing_delivery_deadline=allow_unprotected_terms,
     )
+    return approvable_terms(context) if mechanism == ARKHAI_PAYMENTS_MECHANISM else context
 
 
 def buyer_settlement_registry():

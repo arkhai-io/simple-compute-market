@@ -23,6 +23,9 @@ PAYMENTS_NONCE = "arkhai.payments.v1"
 # A stop takes effect with no notice, and a hold is never extended.
 IMMEDIATE = "P0D"
 STOP_CHARGES_PARTIAL_PERIOD = "charged"
+# The final partial-period treatments the vendored contract can encode on a
+# stop entry or a rate end; a term mapping to any other is unexpressible.
+SUPPORTED_PARTIAL_PERIODS = frozenset({"charged", "returned", "prorated", "chosen"})
 _ACCOUNT_ID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _ASSET = r"^[A-Z][A-Z0-9]{0,16}(\/\d{1,6})?$"
 _FIXED_DURATION = re.compile(
@@ -156,12 +159,11 @@ def derive_part_terms(
         dispute = policy.dispute_authority
         if re.fullmatch(_ACCOUNT_ID, dispute) is None:
             raise ValueError("dispute authority requires a payments account")
-        supported = frozenset({"charged", "returned", "prorated", "chosen"})
         stops = derive_stop_authorities(
             lifecycle.early_termination if kind == "rate" else None,
             payer=policy.buyer_account,
             payee=policy.option.payee_account, dispute=dispute,
-            stoppable=kind == "rate", supported_partial_periods=supported,
+            stoppable=kind == "rate", supported_partial_periods=SUPPORTED_PARTIAL_PERIODS,
         )
         adjudication = lifecycle.adjudication
         cap = adjudication.case_hold_max_seconds
@@ -178,7 +180,7 @@ def derive_part_terms(
         if kind == "rate":
             authorities["start"] = [policy.option.payee_account]
         treatment = (
-            partial_period(lifecycle.early_termination.settles_through, supported)
+            partial_period(lifecycle.early_termination.settles_through, SUPPORTED_PARTIAL_PERIODS)
             if kind == "rate" and lifecycle.early_termination is not None else "returned"
         )
         return {
