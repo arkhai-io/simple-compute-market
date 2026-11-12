@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from arkhai_vms import normalize_vm_provision_terms, vm_listing_resource_shape
+from arkhai_vms_listings.models import registry_rate_structure
 from arkhai_vms_negotiation.amounts import (
     quote_from_multiplier, rate_structure_digest, selected_billing_basis,
 )
@@ -16,6 +17,8 @@ from market_identity import (
     AuthenticatedRequest, AuthenticatedResponse, Identity, TrustedIdentitySet,
     verify_request, verify_response,
 )
+
+from .registry_listing import domain_listing_record
 
 
 def retained_pricing_record(listing: Mapping[str, Any]) -> dict[str, Any]:
@@ -40,6 +43,10 @@ def verified_pricing_publication(record: Mapping[str, Any]) -> dict[str, Any]:
     Historical evidence is not a live request and has no transport-freshness
     window. Accepted trust and signed bytes must remain together; a current
     registry listing cannot replace either the publication or its pricing.
+
+    The signed body is the publication as the registry accepted it, its family
+    rates in ``pricing.rate_structure``; the retained record is the buyer's
+    domain record, which holds the same rates in ``rate_structure``.
     """
     try:
         proof = record["publisher_publication"]
@@ -53,9 +60,21 @@ def verified_pricing_publication(record: Mapping[str, Any]) -> dict[str, Any]:
         )
         if not checked.verified:
             raise ValueError(f"seller publication verification failed: {checked.code.value}")
-        for key in ("listing_id", "storefront_url", "listing_resource", "rate_structure", "settlement_options"):
+        # A registry refuses a publication carrying family rates beside its
+        # pricing object, so one that does was never served by a registry.
+        if "rate_structure" in body:
+            raise ValueError(
+                "seller publication carries a top-level rate_structure; "
+                "family rates are published as pricing.rate_structure"
+            )
+        for key in ("listing_id", "storefront_url", "listing_resource", "settlement_options"):
             if key not in body or body[key] != record.get(key):
                 raise ValueError(f"retained pricing differs from seller publication: {key}")
+        published = registry_rate_structure(body)
+        if published is None or published != record.get("rate_structure"):
+            raise ValueError(
+                "retained pricing differs from seller publication: pricing.rate_structure"
+            )
         return body
     except (KeyError, TypeError) as exc:
         raise ValueError("accepted pricing requires retained seller publication proof and trust") from exc
@@ -65,7 +84,7 @@ def verify_pricing_reply(record: Mapping[str, Any], reply: Mapping[str, Any]) ->
     if reply.get("action") not in {"counter", "accept"}:
         return
     publication = verified_pricing_publication(record)
-    digest = rate_structure_digest(publication)
+    digest = rate_structure_digest(domain_listing_record(publication))
     if digest is None or reply.get("rate_structure_digest") != digest:
         raise ValueError("seller round changed the published rate-structure identity")
 
