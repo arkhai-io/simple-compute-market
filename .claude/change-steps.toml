@@ -146,7 +146,7 @@ allow = [
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
   "Bash(scripts/change-workflow push)",
-  "Bash(git pull --ff-only workspace *)",
+  "Bash(git pull --ff-only workspace *)", "Bash(git config --get-regexp remote)",
   "Bash(make -C * dist*)", "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)",
   "Bash(helm version*)", "Bash(make helm-values-schema)",
 ]
