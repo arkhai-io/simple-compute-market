@@ -1055,6 +1055,15 @@ planning (2026-11-12) to split it into sections that each fit one session, still
 reviewed as one round. Each session ends at its section's verification point and
 commits it; the round's review and validation follow its last section.
 
+Round 3 is one section, 12a, the version pass. The first closeout attempt found the
+packages this change edits not versioned as `docs/development/RELEASING.md`,
+"Versioning policy", requires (`tasks.md` 13.7's note), and closeout edits no code.
+The owner confirmed the return to implementation and directed (2026-11-12) that
+planning add the version pass as a section before closeout, run as a one-section round
+whose validation and implementation review are waived, since a version, pin and lock
+change alters no behaviour the round's validation and review have not already judged;
+the change then goes to closeout.
+
 Part B of the record compares this change with the Goal 8 MVP replan on
 `goal-8-mvp-design`. The owner decided that this change is finished and merged as
 built, judged on its own design, and the replan refactored afterwards around what

@@ -17,7 +17,10 @@ the design review this change never had; its decisions are in `design.md` D1–D
 the code they need, with review 04's F1 and F2, is round 2: first planned as section 5,
 then split at the owner's direction into sections 5–12, one session each but 5 and 6
 together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–12
-are done; the round's validation, review and triage follow. Verification levels follow `docs/development/TESTING.md`;
+are done and were validated, reviewed and triaged. The first closeout attempt found the
+packages unversioned for the change's edits; section 12a, the version pass, is round 3,
+a one-section round whose validation and review the owner waived, before closeout
+resumes at 13.3. Verification levels follow `docs/development/TESTING.md`;
 every behaviour this change adds gets permanent tests at the level it assigns (owner
 record 01, R2).
 
@@ -2026,6 +2029,49 @@ suites, the VM buyer and the change's probes.
 - Round 2 (sections 5–12) is complete; next are validation and one implementation
   review of the round, run side by side, the owner's reading, then the triage.
 
+## 12a. The version pass
+
+Delivers the package versions, exact pins, lower bounds and locks
+`docs/development/RELEASING.md`, "Versioning policy", requires for the sources this
+change edits (repository obligation; found at the first closeout attempt, `tasks.md`
+13.7's note; D12 for the release-compatibility principle). Touches the `pyproject.toml`
+and lock of each package bumped and of each package pinning one: `core`, `core/buyer`,
+`kit/alkahest`, `kit/negotiation-runtime`, `kit/arkhai-payments`, `kit/config`,
+`domains/vms/domain`, `domains/vms/negotiation`, `domains/bare_metal`,
+`domains/apicredits/buyer`, and their consumers. Changes no source behaviour. Planned
+at the owner's direction (2026-11-12) as round 3, a one-section round whose validation
+and implementation review are waived (`design.md`, "Implementation cadence").
+
+- [ ] 12a.1 **Audit against the policy's base:** measure every package whose sources
+  the change edits against its version on `origin/dev`, the branch it merges into, as
+  the policy says, starting from 13.7's list: still at the released version —
+  `arkhai-core` 0.5.0, `arkhai-kit-alkahest` 0.11.0, `arkhai-kit-negotiation-runtime`
+  0.5.2, `arkhai-vms` 0.8.0, `arkhai-bare-metal` 0.15.0, `arkhai-vms-negotiation` 0.6.0,
+  `arkhai-apicredits-buyer` 0.8.0; patch-bumped on `dev` while this change adds API —
+  `arkhai-kit-arkhai-payments` 0.6.2, `arkhai-core-buyer` 0.6.2, `arkhai-kit-config`
+  0.5.2. Confirm no other package the diff from `origin/dev` touches was missed. For
+  each, record in this task's note the bump the policy gives (minor for new public API
+  or, before 1.0.0, an incompatible change; patch for a fix or internal change) and
+  why, including the `arkhai-kit-config` schema table, which 13.7 left to this round.
+  A package already bumped on `dev` is bumped again only where the change needs a
+  larger bump than it has.
+- [ ] 12a.2 **Bump and move the pins:** set each version 12a.1 records in its
+  `pyproject.toml`; move every exact pin on a bumped package (13.7 names those on
+  `arkhai-core`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-arkhai-payments` and
+  `arkhai-core-buyer`) and raise the lower bound of each consumer that imports the new
+  API (the `>=0.11.0` bounds on `arkhai-kit-alkahest` in the API-credits and VM buyers,
+  and any other consumer of an API this change added).
+- [ ] 12a.3 **Relock:** `make dist`, then refresh every lock the bumps and pins change,
+  as `docs/development/BUILD_AND_PACKAGING.md` directs, deriving each from its project.
+- [ ] 12a.4 **Verify:** `make check-packaging` (locks current with their projects and
+  the wheels, layers, dependencies), `make check-version-bumps CHANGE_BASE=dev` (no
+  version more than one SemVer step from the merge-base), `make check-comment-hygiene`
+  and `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms`, whose
+  functional hooks run the packaging check and every suite (unit, library integration
+  and application integration) against the relocked environments. End-to-end: none; the
+  pass changes no behaviour any scenario observes, and the owner waived this round's
+  validation, so none is owed.
+
 ## 13. Closeout
 
 Documentation-only, in `openspec/README.md#plan-closeout-requirements` order;
@@ -2035,6 +2081,8 @@ anything requiring code returns to implementation. Former numbers 6.1–6.11 are
 Closeout stopped 2026-11-12, at `7be0d48b8`, for a version pass in implementation
 (13.7's note). 13.1 and 13.2 are confirmed; 13.7's checks pass, but the packages are
 not versioned as the change's edits require. Nothing else in this section has started.
+Section 12a is the version pass; closeout resumes at 13.3, and confirms 13.7 again on
+the relocked tree.
 
 - [x] 13.1 **Comment hygiene:** run `make check-comment-hygiene`; confirm the comments
   rounds 1 and 2 added describe current invariants, not change provenance.
