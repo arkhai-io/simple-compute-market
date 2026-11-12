@@ -1,6 +1,7 @@
 """Exact rate/setup derivation and buyer agreement checks at the pure boundary."""
 
 from copy import deepcopy
+from datetime import datetime, timezone
 import json
 
 import pytest
@@ -82,6 +83,19 @@ def test_unencodable_rate_terms_refuse(mutation):
         raw["settlement"]["lifecycle"]["bond"] = {"amount": "1"}
     with pytest.raises((MandatePolicyError, ValueError)):
         rate_data(raw)
+
+
+@pytest.mark.parametrize("start_offset,minimum", [(0, 150), (3600, 90)])
+@pytest.mark.parametrize("delta", [-1, 0, 1])
+def test_runway_meets_both_approval_expiry_and_a_later_service_start(start_offset, minimum, delta):
+    raw = rate_agreement()
+    raw["start_utc"] = datetime.fromtimestamp(NOW + start_offset, timezone.utc).isoformat().replace("+00:00", "Z")
+    raw["duration_seconds"] = minimum + delta
+    if delta < 0:
+        with pytest.raises(MandatePolicyError, match="runway"):
+            rate_data(raw)
+    else:
+        assert rate_data(raw).mandate.parts[1].root.end.at == NOW + start_offset + minimum + delta
 
 
 def test_entitlement_object_order_does_not_change_derived_permission_order():

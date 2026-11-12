@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from market_deal_lifecycle.authorities import derive_stop_authorities
 from market_deal_lifecycle.terms import LifecycleTerms, partial_period
+from market_settlement_runtime.horizon import minimum_rate_duration_seconds
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -220,7 +221,12 @@ def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Man
     if rate:
         assert policy.option.period is not None
         period_seconds = duration_seconds(policy.option.period)
-        if start_utc + policy.duration_seconds < expires + (policy.lifecycle.delivery_deadline_seconds or 0) + period_seconds:
+        minimum = minimum_rate_duration_seconds(
+            start=start_utc, approval_expiry=expires,
+            delivery_deadline_seconds=policy.lifecycle.delivery_deadline_seconds or 0,
+            period_seconds=period_seconds,
+        )
+        if policy.duration_seconds < minimum:
             raise MandatePolicyError("rate term leaves insufficient approval and delivery runway")
     parts: list[dict[str, Any]] = []
     if rate:

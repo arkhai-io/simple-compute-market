@@ -50,6 +50,12 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **THEN** both derive setup once followed by rate, with the same amounts, asset, end, afterStop hold, maxHoldExtension and per-part authorities
 - **AND** neither reads Agreement.amount as a direct charge
 
+#### Scenario: Service starts after the approval window
+- **GIVEN** a rate mandate whose service start is later than approval expiry
+- **WHEN** its finite duration is derived or checked
+- **THEN** its end MUST leave the delivery deadline and one whole period after max(approval expiry, start_utc)
+- **AND** acceptance horizon resolution and mandate derivation use the same runway calculation
+
 #### Scenario: On-demand has no seller stop entitlement
 - **GIVEN** an accepted option with no seller early-termination entitlement
 - **WHEN** the buyer checks a mandate containing a seller stop entry
