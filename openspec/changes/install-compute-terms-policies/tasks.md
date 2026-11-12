@@ -17,6 +17,13 @@
 
 - [x] 4.1 `docs/terms-policy-authoring.md` and `kit/settlement-runtime/examples/terms_policies.py`; a unit test loads the example through `load_terms_policy` from the entry-point values the document states.
 
+## 4b. Selection admission, preference and refusal reporting
+
+- [x] 4b.1 `market_settlement_runtime.terms_policy`: `SellerTermsAdmission`, `SellerTermsSelection`, `BuyerTermsPreference`, `selection_refusal`, `seller_selection`, `preferred_options`, `penalty_periods`; the loader accepts a policy implementing any of its role's methods (D9, D10). `BuyerTermsAdmission` orders and keeps what the policy refused (D11). Unit tests in `kit/settlement-runtime/tests/unit/test_terms_policy.py`.
+- [x] 4b.2 `core/buyer` `BuyerSettlementPolicy.option_order`, with unit tests; the VM buyer passes the admission's order and prints policy refusals when `market buy` or `market negotiate` selects nothing.
+- [x] 4b.3 VM storefront `negotiation_runtime.py` and `server.py`, bare-metal storefront `negotiation_runtime.py` and `runtime.py`: ask the policy at the end of round evaluation (D9). Tests: the policy sees the listing's option and the buyer; a refusal refuses an opening and rejects a continuation with its reason; a selection another check refuses never reaches it.
+- [x] 4b.4 `docs/terms-policy-authoring.md` and the example: a seller that refuses listed buyers, a buyer that prefers spot, both loaded by the unit tests.
+
 ## 5. Validation
 
 - [x] 5.1 Suites of `kit/settlement-runtime`, `kit/deal-lifecycle`, `kit/arkhai-payments`, the VM and bare-metal buyers and storefronts; typing where configured; `make check-comment-hygiene`; `make check-packaging`; `make check-change CHANGE=install-compute-terms-policies`. Result: the seven suites pass except one VM storefront integration test, `test_a_buyer_selection_of_a_priced_alkahest_option_reaches_acceptance[True]`, which fails identically on the base this change branches from; `kit/arkhai-payments` type-checks; comment hygiene and packaging pass; `check-change` passes its index, task, skill, validation and repository checks and stops in `make test` at that same test.

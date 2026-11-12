@@ -44,7 +44,7 @@ class BuyerTermsPolicy(Protocol):
 
 `BuyerTermsOffer` carries the option, its decoded lifecycle terms, whether the mechanism has a lifecycle adapter, and the source registry URL. An empty result accepts. `default` returns `default_buyer_refusals`; `permissive` returns nothing.
 
-Alternative: return a rank. Rejected for now: order is mechanism priority then authority preference, and a third ordering needs a stated precedence nobody has asked for.
+Ordering is a separate method (D10), so a policy implements either.
 
 ### D5 A policy can only refuse
 
@@ -75,19 +75,56 @@ class SellerTermsPolicy(Protocol):
 
 The policy does not rewrite an option: an option's encoding and identity are the mechanism's, and a rewrite after derivation would skip the validation derivation ran. What a seller offers beyond these two choices is already its own, as publication clauses per listing.
 
-Alternative: a decision when a buyer selects an option. Rejected: no lifecycle term is negotiable on the wire, so the seller would be deciding whether to honour its own advertisement; a seller that will not serve an option withholds it at publication.
+Publication cannot see who is buying or when, so a seller also decides at selection (D9).
 
 ### D8 The flag is shorthand in the buyer command
 
 `--allow-unprotected-terms` selects `permissive` for that run. With a configured policy other than `default` or `permissive` the command refuses the combination, since replacing a policy the buyer installed with one that refuses nothing is not what a convenience flag should do unasked. The compositions take a selection, not a boolean.
 
+### D9 The seller admits a selection last, and can only refuse it
+
+```python
+class SellerTermsAdmission(Protocol):
+    def admit(self, selection: SellerTermsSelection) -> Sequence[str]: ...
+```
+
+`SellerTermsSelection` carries the listing's own copy of the selected option and its decoded terms, the buyer's identity, the listing record, and the time. The call sits at the end of each compute domain's round evaluation, the hook the negotiation runtime calls for every seller decision:
+
+- The buyer is the one the runtime authenticated: `start` and `continue_negotiation` refuse an actor that is not the claimed buyer before any hook runs.
+- VM: after the selected option's rate-servicing check, the shape checks, the reserved-duration check and the seller round hook, whose middleware chain holds the opening guards; the policy is asked only when that chain did not reject and the opening selects something the listing offers. Bare metal: at the end of exact-selection evaluation, after the mechanism, exact-match, servicing, admission, plan and amount checks; and, for an escrow opening, after the listing authorizes the escrow.
+- Everything after the round's decision still runs whatever the policy answers: the runtime's own listing-source enforcement, the Agreement, the artifacts, the capacity hold.
+
+A refusal becomes the round's `reject` decision with reason `seller_terms_policy_refusal: <the policy's reasons>`. The runtime already carries a reject: at an opening as `OfferUnfulfillableError`, which both storefronts answer with 409 `{"error": "offer_unfulfillable", "reason": …}`, and at a continuation as a terminal `reject` response with its `reason`. The reason field is free text on that wire and existing reasons are a code, sometimes followed by a colon and detail (`pinned_option_withdrawn: …`, `shape_exceeds_advertised: …`, `listing_not_open (status=…)`), so the refusal follows that form and adds no message type or field. The policy's text therefore reaches the buyer; a policy that raises refuses with a fixed text and its exception is logged, not sent.
+
+An escrow opening selects an accepted escrow and no settlement option, so the selection's option is absent there. The policy is asked each round, since the time and its own state may have changed; a refusal mid-negotiation ends the thread as any seller rejection does.
+
+Alternatives: a middleware in the negotiation chain. Rejected: the chain is operator-ordered and file-loadable, sees no verified buyer identity, and a policy placed in it could run before the guards. A new refusal error or status. Rejected: the buyer and any client reading `offer_unfulfillable` already handle this one.
+
+### D10 A buyer preference orders one listing's acceptable options
+
+```python
+class BuyerTermsPreference(Protocol):
+    def prefer(self, offers: Sequence[BuyerTermsOffer]) -> Sequence[BuyerTermsOffer]: ...
+```
+
+The core buyer's selection gains `option_order`: after the clause filter, compatibility and the admission's refusals, one listing's survivors are sorted as today (mechanism priority, dispute-authority rank, option identity) and handed to the preference; the core selects the first of what it returns. The packaged policies return their input, so the default rule is unchanged. Ordering cannot refuse or introduce: an offer left out follows the returned ones, an offer not given is an error, and a preference that raises fails the command, since a silent fallback would buy something the buyer's policy did not choose.
+
+A policy implements any of its role's methods and the packaged default answers for the rest; the loader requires at least one. That keeps refusing and ordering separate without making an author write both.
+
+What it does not order: listings. Across listings the first matching clause, then the highest-priority mechanism any listing's selection uses, then the best authority rank still filter, and the aggregation policy orders what remains and moves to the next listing when one fails. A preference for an option of a lower-priority mechanism therefore holds within a listing and can lose the listing to that filter when another listing selected a higher-priority mechanism. The bare-metal buyer buys one option by its identity and consults no preference.
+
+### D11 A buyer is told when its own policy is why nothing matched
+
+The admission keeps what the policy refused and what it admitted. When `market buy` finds no listing, or `market negotiate` no option, and the policy refused at least one option while admitting none, the command prints each refused option with the policy's reasons.
+
 ## Risks / Trade-offs
 
 - A policy package runs in the buyer's or storefront's process with its privileges. That is what installing a package means; the protocol hands it no credentials.
+- A seller policy's refusal reasons are sent to the buyer. The authoring guide says so.
 - `validate_terms` no longer refuses a missing deadline for a caller that sets `buyer=True, compute=True` and consults no policy. No such caller exists; API credits is not compute.
 - The `lifecycle_disclosure` rows named "Default buyer policy" still show the default's view, whatever policy is selected. They are disclosure, not a decision.
 
 ## Open questions
 
-- Whether a buyer policy should also order acceptable options (D4).
+- Whether a preference should also reach across listings, which means deciding its precedence against mechanism priority and the aggregation policy (D10).
 - Whether disclosure should show the selected policy's refusals beside the default's.

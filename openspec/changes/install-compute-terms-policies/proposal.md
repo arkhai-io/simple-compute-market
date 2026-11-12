@@ -10,6 +10,9 @@ A compute buyer's stance on an option's lifecycle terms is one fixed function, `
 - The buyer's selected policy also runs at payment approval. Today approval always applies the default refusals to a recurring option, so a recurring option taken under the flag is selected and negotiated and then refused at approval; with this change approval follows the policy that selected it.
 - The missing-delivery-deadline refusal moves out of term validation into the buyer policy, which already makes the same refusal first. Term validation keeps only what the codec and the authority require.
 - The seller policy takes the two choices the compositions hard-code at publication: the penalty a recurring preset gets when its clause names none, and whether a derived option is published.
+- The seller policy is also asked when a buyer selects an advertised option, after every other check of the round, and can refuse the selection with a reason the buyer receives as an ordinary `offer_unfulfillable` refusal or rejection.
+- A buyer policy may order one listing's acceptable options; the packaged policies keep the order mechanism priority, authority preference and option identity give.
+- A buyer whose terms policy refused every option it was offered is told the policy's reasons, where it was told only that no listing matched.
 - Document writing and installing a policy package, with an example a test exercises.
 
 ## Capabilities
@@ -26,14 +29,15 @@ None.
 ## Non-Goals
 
 - API credits. Its buyer ranks options by dispute authority alone and never consults the compute rights refusals, so it does not share the path.
-- A seller decision at negotiation time. A buyer selects an advertised option by its identity and cannot counter its lifecycle terms, so the seller has no term decision to make there; its price rounds stay with the negotiation middleware chain.
-- Policy-supplied ordering among acceptable options. A buyer policy refuses or does not; order stays with mechanism priority and dispute-authority preference.
+- A seller policy that alters an option, at publication or at selection. Composing options belongs to publication clauses, presets and the composition; price rounds stay with the negotiation middleware chain.
+- Ordering across listings, which stays with clause order, mechanism priority and the buyer's aggregation policy. A preference orders the options of one listing.
+- A second attempt on the same listing with the next preferred option when the first fails. The buyer moves to the next listing, as it does now.
 - File-based policy discovery, which the negotiation middleware and aggregation policies have. A terms policy is installed.
 - No wire, database or deployment change. A run log records `terms_policy` (the selected name) in place of `allow_unprotected_compute_terms`.
 
 ## Impact
 
-`kit/settlement-runtime` (protocols, loader, packaged policies), `kit/deal-lifecycle` (`TermContext` loses `allow_missing_delivery_deadline`), `kit/arkhai-payments` (`PaymentApproval` takes the protocol), the VM and bare-metal buyers and storefronts, `docs/development/ARCHITECTURE.toml` (two plugin groups). `BuyerTermsPolicy` in `market_settlement_runtime.buyer_terms`, the class composing refusals with authority ranking, is renamed `BuyerTermsAdmission`; the name now belongs to the protocol.
+`kit/settlement-runtime` (protocols, loader, packaged policies), `core/buyer` (`BuyerSettlementPolicy.option_order`), the VM and bare-metal storefronts' negotiation runtimes, `kit/deal-lifecycle` (`TermContext` loses `allow_missing_delivery_deadline`), `kit/arkhai-payments` (`PaymentApproval` takes the protocol), the VM and bare-metal buyers and storefronts, `docs/development/ARCHITECTURE.toml` (two plugin groups). `BuyerTermsPolicy` in `market_settlement_runtime.buyer_terms`, the class composing refusals with authority ranking, is renamed `BuyerTermsAdmission`; the name now belongs to the protocol.
 
 ## Permanent documentation impact
 
@@ -52,3 +56,6 @@ None.
 - D6: `openspec/specs/settlement-configuration/spec.md` by the archive.
 - D7: `openspec/specs/settlement-configuration/architecture.md`, "Terms policies": where a seller's term choices are made and why the seam is at publication.
 - D8: `docs/buyer-quickstart.md`: the flag as shorthand for the `permissive` policy.
+- D9: `openspec/specs/settlement-configuration/architecture.md`, "Terms policies": where selection is admitted and how the refusal is carried; `openspec/specs/settlement-configuration/spec.md` by the archive.
+- D10: `openspec/specs/settlement-configuration/architecture.md`, "Terms policies": what a preference orders and what it does not; `spec.md` by the archive.
+- D11: `openspec/specs/settlement-configuration/spec.md` by the archive.
