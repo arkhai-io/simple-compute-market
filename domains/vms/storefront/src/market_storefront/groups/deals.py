@@ -1,0 +1,40 @@
+"""Seller notice commands through the signed lifecycle API."""
+
+from __future__ import annotations
+
+import contextlib
+from collections.abc import Iterator
+
+import typer
+from market_deal_lifecycle_client import SyncSellerLifecycleClient
+
+from ..cli_common import (
+    STOREFRONT_FAILURES, admin_client, resolve_storefront_url, storefront_failure_message,
+)
+
+deals_app = typer.Typer(no_args_is_help=True)
+
+
+@contextlib.contextmanager
+def lifecycle_client(storefront_url: str | None) -> Iterator[SyncSellerLifecycleClient]:
+    with admin_client(resolve_storefront_url(storefront_url, default_port=8001)) as core:
+        yield SyncSellerLifecycleClient(core)
+
+
+@deals_app.command("preempt")
+def preempt(
+    negotiation_id: str,
+    operation_key: str = typer.Option(..., "--operation-key", help="Keep this key and --at unchanged on retry."),
+    at: int | None = typer.Option(None, "--at", min=0, help="Requested Unix second; the authority enforces notice."),
+    storefront_url: str | None = typer.Option(None, "--storefront-url", "-a"),
+) -> None:
+    """Submit seller notice; only the authority's returned records establish an end."""
+    try:
+        with lifecycle_client(storefront_url) as client:
+            result = client.notice(negotiation_id, operation_key=operation_key, at=at)
+    except STOREFRONT_FAILURES as exc:
+        typer.secho(storefront_failure_message(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(1) from exc
+    typer.echo(result.model_dump_json(indent=2))
+    if result.outcome.status == "rejected":
+        raise typer.Exit(1)

@@ -14,6 +14,7 @@ dependencies = [
     "arkhai-kit-deal-servicing>=0.2.0",
     "arkhai-kit-deal-lifecycle>=0.3.0",
     "arkhai-kit-deal-lifecycle-contracts>=0.1.0",
+    "arkhai-kit-deal-lifecycle-client>=0.1.0",
     "arkhai-compute-provisioning-contracts>=0.11.0",
     "arkhai-kit-resource-pools-contracts>=0.2.0",
     "arkhai-core-registry-client>=0.12.1",
@@ -81,9 +82,6 @@ dev = [
     # The production VM buyer and its introduction client, which the
     # introduction integration tests drive over loopback.
     "arkhai-vms-buyer>=0.9.0",
-    # The canonical lifecycle client the lifecycle integration tests read and
-    # commit deals through.
-    "arkhai-kit-deal-lifecycle-client>=0.1.0",
     # Validates documents against the generated Helm values schema, and
     # published listings against the compute registry's listing schema.
     "jsonschema>=4.0",

@@ -224,7 +224,7 @@ second preemption endpoint or a local payment-stop scheduler.
       buyer stop, immutable retry identity and the authority's notice minimum.
       On-demand refusal points to delivery_end only for seller non-delivery,
       not a self-interested override or automatic seller-fault filing after a lawful end.
-- [ ] 4.3 Add the typed notice method and recommended deals preempt CLI verb to
+- [x] 4.3 Add the typed notice method and recommended deals preempt CLI verb to
       both domains, taking negotiation ID, operation key and optional --at.
       Delegate through lifecycle submit and its existing seller authentication.
       Output authority status/time, including unknown; do not report local
@@ -272,6 +272,18 @@ surrender, hint failure, payment-authority outage and both-authorities-down retr
 First use runs deals preempt against a double-backed approved spot fixture and
 reads pending stop while asserting delivery is refused without the rate hook.
 Before convergence lands, this proves command and authority record, not teardown.
+
+## Section 4 seller checkpoint and restart
+
+- 4.1–4.2: accepted payee entitlement admission in seller servicing; hosted notice expands into explicit per-rate-part stops, with every descriptor persisted through the foundation operation store before I/O. Read/list preserve verified payment-part observations and controlling pending/final stops. VM registrations distinguish once-only from rate commitments.
+- 4.3: async/sync typed seller lifecycle clients and both storefronts\' `deals preempt NEGOTIATION_ID --operation-key KEY [--at UNIX_SECOND]` reuse administrator authentication and the existing submit route. Output is the unchanged authority outcome and effective stop record; no scheduler or bespoke route was added.
+- 4.4 is partial: the committed `domains/vms/storefront/examples/preempt.py --domain vms|bare_metal` fixture invokes each production CLI against signed lifecycle routes, an approved payment-authority double and a mediation double. It has paired on-demand/spot options, explicit authorities, test mode, setup opt-out, explicit charged-term buyer acceptance and separate default-buyer refusal. Missing rate-hook materialization refuses. Deployed lane-profile preparation remains open.
+- First use passes for both domains: lost response is unknown, read/list retain pending notice, identical retry recovers the authority time, changed retry and wrong actor refuse, on-demand refuses before payment effect, and an earlier payer stop remains the winner. Evidence and runnable setup: `docs/attachments/spot-deals-section-4/index.md`.
+- Existing suites pass: lifecycle contracts 37, client 2, seller servicing 70, buyer lifecycle 20, payments 221; seller-servicing/payments typing passes. Focused VM lifecycle/operator suites: 126 pass. Focused bare-metal lifecycle/operator suites: 29 pass. Comment hygiene and packaging pass. No permanent tests added; compose VM end-to-end remains unrun at this checkpoint.
+- Resolved fixture attempts: the default receipt helper seeded a later approval instant than the invocation clock, so an explicit authority `fund`/`approve` now prepares the actual current approval. A requested past stop is refused by the producer; the first use requests now + 1 and observes the enforced now + 30 minimum. Reinitializing the VM environment after rebuilding wheels loads the new bare-metal CLI. Lock refresh includes both storefronts and end-to-end because the typed lifecycle client is now a runtime dependency.
+- Resume at 4.5/4.5a. The current buyer half has only immediate `end_delivery`; `ending.py` sends stop then surrender/case, and the VM buyer composition still selects the once-only `PaymentAdapter`, which cannot open a rate commitment. Implement the normal rate stop-then-hint flow before using it for watchdog stops; retain the foundation\'s immediate-surrender/outage ownership. VM `buy` currently resumes with `--from`, has no watchdog flags, and returns after ready. Watchdog needs the profile-persisted settings, injected access probe, foreground lock/liveness/read state and restart-safe stop/evidence journal described by D6a. Bare-metal watchdog wiring has not been assessed; finish VM first.
+- 4.6 requires a foundation fix: the VM admin branch still selects bare `stop` from accepted payee entitlement, and otherwise `delivery_end`; it has no emergency/failure selector. Lawful rate interruptions must delegate `notice`; seller-caused emergency failure, including spot hardware failure, must retain the foundation cause classification and filing path. No second classification switch was added here. Existing admin tests pass but inject a stop-only notice fake and do not prove hosted rate delegation.
+- Before section completion, run the required compose VM end-to-end once with mock provisioning, obtain its real exit code and stop the owned stack. Permanent promotion remains post-review closeout. No branch push, PR or canonical branch mutation has occurred at this checkpoint.
 
 ## 5. Proposed declarations and identity re-anchoring
 
