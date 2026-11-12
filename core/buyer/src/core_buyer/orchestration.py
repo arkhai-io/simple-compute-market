@@ -89,6 +89,13 @@ AdvertisedPlanValidatorFn = Callable[
     [dict[str, Any]],
     Callable[[SettlementPlan], None] | None,
 ]
+# Per candidate listing: the domain's check of an accepted outcome against what
+# that listing advertised, such as its capacity bounds, run after
+# ``validate_acceptance`` and before the acceptance is observed; None for none.
+AcceptanceValidatorFn = Callable[
+    [dict[str, Any]],
+    Callable[[NegotiationOutcome], None] | None,
+]
 
 
 def _opaque_payload_dict(value: Any) -> dict[str, Any]:
@@ -423,6 +430,7 @@ def make_negotiate_hook(
     accepted_listing_record: AcceptedListingRecordFn | None = None,
     amount_codec_factory: Callable[[Any, Any], NegotiationAmountCodec | None] | None = None,
     capture: EnvelopeCapture | None = None,
+    acceptance_validator: AcceptanceValidatorFn | None = None,
 ) -> NegotiateFn:
     """Build the schema-instantiated negotiate hook.
 
@@ -460,6 +468,7 @@ def make_negotiate_hook(
             amount_codec_factory=amount_codec_factory,
             capture=capture,
             on_event=on_event,
+            acceptance_validator=acceptance_validator,
         )
 
     return _hook
@@ -486,6 +495,7 @@ def _negotiate_matches(
     accepted_listing_record: AcceptedListingRecordFn | None = None,
     amount_codec_factory: Callable[[Any, Any], NegotiationAmountCodec | None] | None = None,
     capture: EnvelopeCapture | None = None,
+    acceptance_validator: AcceptanceValidatorFn | None = None,
 ) -> NegotiationResult:
     attempts: list[dict[str, Any]] = []
 
@@ -664,6 +674,14 @@ def _negotiate_matches(
             listing_record=listing_record,
         )
 
+        match_validator = acceptance_validator(match) if acceptance_validator is not None else None
+
+        def _validate_acceptance(accepted: NegotiationOutcome) -> None:
+            if validate_acceptance is not None:
+                validate_acceptance(accepted)
+            if match_validator is not None:
+                match_validator(accepted)
+
         # negotiate_with_seller is sync (blocking urllib); to_thread lets
         # policies run multiple negotiations in parallel via asyncio.gather.
         try:
@@ -686,11 +704,15 @@ def _negotiate_matches(
                 on_round=_on_round,
                 chain=chain,
                 policy_params=negotiation_policy_params,
-                validate_acceptance=validate_acceptance,
+                validate_acceptance=(
+                    _validate_acceptance
+                    if validate_acceptance is not None or match_validator is not None else None
+                ),
                 amount_codec=(
                     amount_codec_factory(match, settlement_proposal)
                     if amount_codec_factory is not None else None
-                ),                validate_advertised_plan=(
+                ),
+                validate_advertised_plan=(
                     advertised_plan_validator(match)
                     if advertised_plan_validator is not None
                     else None

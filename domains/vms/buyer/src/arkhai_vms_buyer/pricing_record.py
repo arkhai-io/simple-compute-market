@@ -100,7 +100,10 @@ def verify_pricing_acceptance(
         raise ValueError("accepted pricing requires the exact published settlement option")
     price = agreed_price(agreement, record, project_billing=project_billing)
     terms = normalize_vm_provision_terms(agreement.provision_terms)
-    if terms.duration_seconds != agreement.duration_seconds:
+    # The seller keeps the buyer's provision terms as signed; they carry a
+    # duration only when the buyer named one. An omitted horizon is the seller's
+    # to resolve, and the buyer's accepted-horizon check holds it to the bounds.
+    if terms.duration_seconds is not None and terms.duration_seconds != agreement.duration_seconds:
         raise ValueError("Agreement duration differs from accepted provision terms")
     proposal = {"settlement_selection": {
         "option_id": agreement.settlement.option_id,

@@ -20,6 +20,7 @@ from market_deal_lifecycle.terms import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
+from .horizon import bound_seconds, parse_utc
 from .rate_servicing import RateServicing, RateServicingDeclaration, RateServicingUnavailable
 
 Amount = Annotated[str, Field(pattern=r"^(0|[1-9][0-9]*)$")]
@@ -149,26 +150,16 @@ def derive_rate_preset(
             return RatePresetRefusal("setup_delivery_end_unsupported", "setup requires the vendored delivery_end revision and vectors")
         if now.tzinfo is None or now.utcoffset() != UTC.utcoffset(now):
             raise ValueError("publication time must be aware UTC")
-        # Use one whole-second resolved start for the approval expiry and bound.
+        # Use one whole-second resolved start for the approval expiry and bound;
+        # the default horizon is floored to whole seconds as acceptance floors it.
         start = now.replace(microsecond=0)
-        limits = []
-        if max_duration_seconds is not None and max_duration_seconds > 0:
-            limits.append(max_duration_seconds)
-        if isinstance(available_until_utc, str):
-            available_until_utc = datetime.fromisoformat(available_until_utc.replace("Z", "+00:00"))
         if available_until_utc is not None:
-            if not isinstance(available_until_utc, datetime):
-                raise ValueError("available_until_utc must be an aware UTC timestamp")
-            if available_until_utc.tzinfo is None or available_until_utc.utcoffset() != UTC.utcoffset(available_until_utc):
-                raise ValueError("available_until_utc must be aware UTC")
-            # Do not round a fractional capacity end to a different promise.
-            remaining = available_until_utc - start
-            if remaining.microseconds:
-                raise ValueError("recurring default horizon must be whole seconds")
-            limits.append(remaining.days * 86400 + remaining.seconds)
-        if not limits:
+            available_until_utc = parse_utc(available_until_utc, "available_until_utc")
+        bound = bound_seconds(start, max_duration_seconds=max_duration_seconds,
+                              available_until_utc=available_until_utc)
+        if bound is None:
             return RatePresetRefusal("recurring_horizon_unbounded", "recurring publication requires a finite capacity bound")
-        horizon = min(limits)
+        horizon = bound
         if horizon < period:
             return RatePresetRefusal("recurring_horizon_too_short", "default horizon leaves less than one whole period")
         minimum = pricing.approval_window_seconds + (deadline or 0) + period

@@ -51,7 +51,7 @@ from .settlement_composition import (
     buyer_settlement_stages,
     resolve_buyer_settlement_policy,
     advertised_plan_validator,
-    validate_buyer_acceptance,
+    listing_acceptance_validator,
 )
 from .settlement_stages import BuyerStageContext
 from .negotiation_amounts import amount_codec, priced_unit_count
@@ -89,7 +89,9 @@ def make_legacy_negotiate_hook(
         derive_prices=derive_prices,
         chain=chain,
         revalidate_settlement=revalidate_settlement,
-        validate_acceptance=validate_buyer_acceptance,
+        # Each match's own validator: the horizon is checked against the listing
+        # the buyer selected, beside the stage's acceptance check.
+        acceptance_validator=listing_acceptance_validator(provision.duration_seconds),
         advertised_plan_validator=advertised_plan_validator,
         accepted_listing_record=accepted_listing_record,
         amount_codec_factory=codec_for,

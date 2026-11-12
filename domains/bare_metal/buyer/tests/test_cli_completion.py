@@ -99,11 +99,13 @@ def _introduction_plan() -> SettlementPlan:
 
 
 def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: SettlementOption,
-             outcome: NegotiationOutcome, *, accept_inside: bool = False) -> dict[str, Any]:
+             outcome: NegotiationOutcome, *, accept_inside: bool = False,
+             bounds: dict[str, Any] | None = None) -> dict[str, Any]:
     """Replace the command's collaborators; the returned record names what each saw.
 
     With ``accept_inside`` the negotiator calls the command's acceptance check on the
-    accepted outcome before returning it, as the real negotiator does.
+    accepted outcome before returning it, as the real negotiator does. ``bounds`` are
+    the listing's advertised capacity bounds.
     """
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     config = BareMetalBuyerConfig(
@@ -121,6 +123,7 @@ def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: Settlement
         publisher_principals=TrustedIdentitySet(identities=(_SELLER.identity,)),
         publisher_id=7,
         settlement_options=[option.model_dump(mode="json")],
+        **(bounds or {}),
     )
 
     @contextmanager
@@ -286,6 +289,33 @@ def test_an_agreement_off_the_quote_ends_the_run_before_approval(
     assert ended["reason"].startswith("agreement_off_quote: seller Agreement")
     assert ended["negotiation_id"] == "negotiation-1"
     assert [e["event"] for e in events].count("run_ended") == 1
+
+
+@pytest.mark.parametrize("accept_inside", [True, False], ids=["inside-negotiation", "after-return"])
+@pytest.mark.parametrize(
+    ("bounds", "refusal"),
+    [
+        # The Agreement runs 7200 seconds from 2030-01-01T00:00:00Z.
+        ({"max_duration_seconds": 3600}, "exceeds the listing's bound of 3600"),
+        ({"available_until_utc": "2030-01-01T01:00:00Z"}, "exceeds the listing's bound of 3600"),
+    ],
+    ids=["above-the-relative-bound", "past-absolute-availability"],
+)
+def test_a_signed_horizon_outside_the_listing_bounds_ends_the_run_before_approval(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    bounds: dict[str, Any], refusal: str, accept_inside: bool,
+) -> None:
+    signed = _payment_outcome(amount=2_000_000, duration_seconds=7200)
+    seen = _compose(monkeypatch, tmp_path, _PAYMENT, signed, accept_inside=accept_inside, bounds=bounds)
+
+    result = _buy(7200)
+
+    assert result.exit_code == 1, result.output
+    assert seen["acceptances"] == [] and seen["settlements"] == []
+    ended = _run_ended(tmp_path)
+    assert ended["status"] == "exited"
+    assert ended["reason"].startswith("agreement_off_quote: accepted duration_seconds 7200")
+    assert refusal in ended["reason"]
 
 
 @pytest.mark.parametrize(

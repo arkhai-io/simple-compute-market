@@ -38,6 +38,70 @@ class ResolvedHorizon:
     duration_seconds: int
 
 
+def parse_utc(value: str | datetime, name: str) -> datetime:
+    """Read an aware UTC instant; another offset or a naive value is refused."""
+    instant = datetime.fromisoformat(value.strip().replace("Z", "+00:00")) if isinstance(value, str) else value
+    if not isinstance(instant, datetime) or instant.tzinfo is None or instant.utcoffset() != timedelta(0):
+        raise ValueError(f"{name} must be aware UTC")
+    return instant
+
+
+def bound_seconds(
+    start: datetime, *, max_duration_seconds: int | None,
+    available_until_utc: str | datetime | None,
+) -> int | None:
+    """The longest duration both listing bounds allow from ``start``, or ``None``.
+
+    A nonpositive relative bound states no limit. The absolute bound is floored to
+    whole seconds: a whole-second duration never ends after it, and the Agreement's
+    duration is whole seconds. A bound already passed yields a nonpositive value.
+    """
+    limits: list[int] = []
+    if max_duration_seconds is not None and max_duration_seconds > 0:
+        limits.append(max_duration_seconds)
+    if available_until_utc is not None:
+        remaining = parse_utc(available_until_utc, "available_until_utc") - start
+        # A timedelta normalizes microseconds to be nonnegative, so this floors.
+        limits.append(remaining.days * 86400 + remaining.seconds)
+    return min(limits) if limits else None
+
+
+def check_accepted_horizon(
+    *, start_utc: str, duration_seconds: int, requested_duration_seconds: int | None,
+    max_duration_seconds: int | None, available_until_utc: str | datetime | None,
+) -> None:
+    """Refuse a signed horizon the buyer did not ask for or the listing did not offer.
+
+    The buyer runs this on the counterparty's signed Agreement before approval, so
+    it holds whatever the seller's own resolver did: the duration fits both bounds
+    at the Agreement's start, equals an explicit request, and, when the buyer named
+    none, equals the default bound the seller was to resolve.
+    """
+    start = parse_utc(start_utc, "Agreement start_utc")
+    if type(duration_seconds) is not int or duration_seconds <= 0:
+        raise ValueError("accepted duration_seconds must be positive whole seconds")
+    bound = bound_seconds(start, max_duration_seconds=max_duration_seconds,
+                          available_until_utc=available_until_utc)
+    if bound is not None and duration_seconds > bound:
+        raise ValueError(
+            f"accepted duration_seconds {duration_seconds} exceeds the listing's bound "
+            f"of {bound} at the Agreement's start"
+        )
+    if requested_duration_seconds is not None:
+        if duration_seconds != requested_duration_seconds:
+            raise ValueError(
+                f"accepted duration_seconds {duration_seconds} differs from the requested "
+                f"{requested_duration_seconds}"
+            )
+    elif bound is None:
+        raise ValueError("an omitted horizon needs a finite listing bound to resolve to")
+    elif duration_seconds != bound:
+        raise ValueError(
+            f"accepted duration_seconds {duration_seconds} differs from the default "
+            f"horizon {bound} for an omitted request"
+        )
+
+
 def resolve_horizon(
     *, requested_duration_seconds: int | None, requested_start_utc: str | None,
     accepted_at: datetime, max_duration_seconds: int | None,
@@ -78,32 +142,21 @@ def resolve_horizon(
         start = start.replace(tzinfo=UTC) if start.tzinfo is None else start.astimezone(UTC)
     if recurring and start.microsecond:
         raise ValueError("recurring start_utc must be whole seconds")
-    limits: list[int] = []
-    if max_duration_seconds is not None and max_duration_seconds > 0:
-        limits.append(max_duration_seconds)
-    if available_until_utc is not None:
-        until = (datetime.fromisoformat(available_until_utc.replace("Z", "+00:00"))
-                 if isinstance(available_until_utc, str) else available_until_utc)
-        if until.tzinfo is None or until.utcoffset() != timedelta(0):
-            raise ValueError("available_until_utc must be aware UTC")
-        remaining = until - start
-        # An integer duration is bounded exactly, even by a fractional date.
-        # Only an omitted default must equal the bound, so it cannot be rounded.
-        if (requested_duration_seconds is None and recurring and remaining.microseconds
-                and (not limits or remaining < timedelta(seconds=min(limits)))):
-            raise ValueError("default recurring horizon must be whole seconds; state a shorter horizon")
-        limits.append(remaining.days * 86400 + remaining.seconds)
+    # The default horizon is the bound floored to whole seconds, so a fractional
+    # absolute bound yields a default that ends just before it.
+    bound = bound_seconds(start, max_duration_seconds=max_duration_seconds,
+                          available_until_utc=available_until_utc)
     duration = requested_duration_seconds
     if duration is None:
         if not recurring:
             raise ValueError("reserved duration_seconds is required")
-        if not limits:
+        if bound is None:
             raise ValueError("recurring horizon requires a finite listing bound")
-        duration = min(limits)
+        duration = bound
     if type(duration) is not int or duration <= 0:
         raise ValueError("duration_seconds must be positive whole seconds; horizon may have expired")
-    if limits and duration > min(limits):
-        raise ValueError(f"duration_seconds exceeds listing bound: maximum is {min(limits)}")
+    if bound is not None and duration > bound:
+        raise ValueError(f"duration_seconds exceeds listing bound: maximum is {bound}")
     if min_duration_seconds is not None and duration < min_duration_seconds:
         raise ValueError(f"duration_seconds below listing minimum: {min_duration_seconds}")
     if timing is not None:

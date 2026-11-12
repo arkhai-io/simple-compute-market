@@ -17,6 +17,7 @@ from market_identity import EnvelopeCapture
 
 import dataclasses
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Callable, Optional
 
 from core_buyer.negotiation_client import (  # noqa: F401 — re-exports
@@ -36,7 +37,7 @@ from market_core.schemas import SettlementPlan, SettlementSelection
 from market_policy.negotiation_middleware import NegotiationMiddleware
 from market_identity import Identity, Signer, TrustedIdentitySet
 
-from arkhai_vms import VmProvisionTerms
+from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 
 from .common import chain_address_books
 from .escrow_client import encode_escrow_proposal
@@ -174,6 +175,17 @@ def negotiate_with_seller(
         )
         if proposal_for_amount is not None else None
     )
+    if validate_acceptance is validate_buyer_acceptance and listing is not None:
+        # A purchase holds the signed horizon to the authenticated listing's
+        # bounds and to what the buyer opened with; a resumed run opened with the
+        # seller's round-zero echo of the buyer's terms.
+        opening = opening_terms.model_dump(mode="json") if hasattr(opening_terms, "model_dump") else opening_terms
+        validate_acceptance = partial(
+            validate_buyer_acceptance, listing=listing,
+            requested_duration_seconds=(
+                normalize_vm_provision_terms(opening).duration_seconds if opening is not None else None
+            ),
+        )
     core_outcome = _core_negotiate_with_seller(
         seller_url=seller_url,
         principal=principal,

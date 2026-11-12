@@ -64,6 +64,7 @@ from .settlement_composition import (
     buyer_settlement_registry, validate_authority,
 )
 from market_settlement_runtime.buyer_terms import option_quote
+from market_settlement_runtime.horizon import check_accepted_horizon
 from .settlement_stages import purchase_quote, require_quoted_agreement
 
 # The commands build their collaborators through the factories below: a Typer
@@ -488,12 +489,13 @@ def buy_bare_metal(
         amount = purchase_quote(selected, duration_seconds, registry=registry)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+    bounds = {
+        "max_duration_seconds": getattr(listing, "max_duration_seconds", None),
+        "available_until_utc": getattr(listing, "available_until_utc", None),
+    }
     typer.echo(f"Selected option {selected.option_id}: price, horizon and lifecycle terms", err=True)
     for name, value in buyer_compute_disclosure(
-        selected, listing={
-            "max_duration_seconds": getattr(listing, "max_duration_seconds", None),
-            "available_until_utc": getattr(listing, "available_until_utc", None),
-        }, duration_seconds=duration_seconds,
+        selected, listing=bounds, duration_seconds=duration_seconds,
     ) + buyer_lifecycle_disclosure(selected):
         typer.echo(f"  {name}: {value}", err=True)
     approval = payment_approval(buyer_config)
@@ -504,6 +506,13 @@ def buy_bare_metal(
                 raise ValueError("seller Agreement changed the selected option")
             require_quoted_agreement(
                 accepted, amount=amount, duration_seconds=duration_seconds, quote=quote, registry=registry,
+            )
+            # The seller's resolver guards only the seller's own mistakes; the
+            # buyer holds the signed horizon to what it asked and was offered.
+            check_accepted_horizon(
+                start_utc=accepted.agreement.start_utc,
+                duration_seconds=accepted.agreement.duration_seconds,
+                requested_duration_seconds=duration_seconds, **bounds,
             )
         except ValueError as exc:
             raise AgreementOffQuote(str(exc), accepted.negotiation_id) from exc

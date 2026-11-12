@@ -15,7 +15,8 @@ disclosure. Task 4.2 adds mixed-publication first use through both buyer command
 The owner's record of round 1 (`reviews/01-implementation-owner.md`) stood in for
 the design review this change never had; its decisions are in `design.md` D1–D12, and
 the code they need, with review 04's F1 and F2, is section 5, implemented as round 2.
-**Restart at section 5.** Verification levels follow `docs/development/TESTING.md`;
+**Section 5 returns to planning** to be split into session-sized sections (its
+round-2 session checkpoint); implementation resumes at 5.5's work. Verification levels follow `docs/development/TESTING.md`;
 every behaviour this change adds gets permanent tests at the level it assigns (owner
 record 01, R2).
 
@@ -621,10 +622,16 @@ decision it implements; `design.md` holds the rationale. Before changing an inte
 triage follows.
 
 - [ ] 5.1 **Remove the amount-read guard (R6):** delete
-  `scripts/check_agreement_amount_reads.py`, `scripts/agreement_amount_reads.json`,
+  the guard's script and its JSON inventory under `scripts/`,
   their wiring in the `Makefile`, `scripts/check_change.py` and
   `scripts/tests/test_check_change.py`, and `amount_read_probe.py`. Cover each money
   consumer with a per-period Agreement instead (task 5.2).
+  Done: the two scripts and the probe removed with `git rm`; the `Makefile`,
+  `scripts/check_change.py` and `scripts/tests/test_check_change.py` are byte-identical
+  to `origin/dev`'s again (`git diff origin/dev` on them is empty). The money-consumer
+  tests are task 5.2's. `docs/attachments/negotiate-open-ended-compute-terms/reader-guard-checkpoint.md`
+  still describes the removed guard as round-1 evidence; closeout's narrative
+  compression decides its fate.
 - [ ] 5.2 **Permanent tests (R2)** at the levels `docs/development/TESTING.md` assigns.
   Unit: the accessor and each installed registration's projection; capacity-bound
   validation and tier selection; `resolve_horizon` and the runway, including R9's
@@ -652,10 +659,44 @@ triage follows.
   when the buyer requested one (F2). Test at each buyer's acceptance boundary: a signed
   21-hour duration under a 20-hour bound, an end past `available_until_utc`, and a
   production-client integration case where an omitted VM horizon reaches acceptance.
+  Partly done; left unchecked for its integration case. `check_accepted_horizon` and
+  the shared `bound_seconds`/`parse_utc` arithmetic are in `horizon.py`, which
+  `resolve_horizon` and `derive_rate_preset` now also use. Bare metal calls it inside
+  `buy`'s `validate_acceptance`, after the quote check, so a refusal ends the run as
+  `agreement_off_quote` before approval. VM: `validate_buyer_acceptance` takes the
+  listing and requested duration; `buyer_client.negotiate_with_seller` binds them when
+  it runs the purchase guard with a listing (a resume opens with the seller's echo of
+  the buyer's terms), and the core-orchestrated `market buy` path binds them per match
+  through a new `acceptance_validator` factory on core's `make_negotiate_hook` (the
+  core guard receives only the outcome, so the listing had no other way in).
+  `accepted_listing_record` now retains both bounds, so a resumed run checks against
+  what was advertised. F2: `verify_pricing_acceptance` compares a provision duration
+  only when one is present. Evidence: `make -C kit/settlement-runtime test` (unit)
+  208 passed, including `tests/unit/test_horizon.py`'s buyer-check cases (21-hour
+  signed duration under a 20-hour bound, end past availability, explicit/omitted
+  requests); `make -C domains/vms/buyer test` (unit; `test_buy_orchestrator.py`
+  drives the core orchestrator and the VM composition with a stubbed seller
+  transport) 258 passed, including two new refusals before any escrow; `make -C
+  domains/bare_metal/buyer test` (unit; the `buy` command with replaced factories)
+  37 passed, including four new refusals before approval; `make -C core/buyer test`
+  (unit) 168 passed. One kept VM orchestrator fixture advertised a 3600-second bound
+  under a 7200-second deal; the check now refuses that, so the fixture advertises
+  7200. Still owed: the production-client integration case (an omitted VM horizon
+  reaching acceptance through the served storefront) and an F2 case at the pin
+  boundary; both need a recurring option in the VM storefront's integration world,
+  whose servicing declaration task 5.5 reshapes, so they are written after 5.5 with
+  5.2's pin tests.
 - [ ] 5.4 **The horizon floor and the acceptance hook (R9):** when the buyer names no
   horizon and the limiting bound is a fractional-second `available_until_utc`, floor the
   default horizon to whole seconds instead of refusing, at acceptance
   (`resolve_horizon`) and at publication (R10).
+  Done through the one `bound_seconds` both call (a `timedelta`'s normalized days and
+  seconds floor it). Evidence: `make -C kit/settlement-runtime test` (unit) 208 passed:
+  `test_horizon.py` binds 72000 seconds under a bound 72000.4 seconds away and covers
+  the runway's 50-minute spec case, the refusals and a nonpositive relative bound;
+  the new `test_rate_publication.py` floors the published default horizon the same
+  way and reports no-runway and unbounded candidates. Its `FixtureHelper` is the
+  start of 5.2's derivation tests.
 - [ ] 5.5 **The servicing declaration (R15, R16, R19):** replace `RateServicing`'s
   revision map, `published`/`proposed` status and `proposed_lane` with a table per
   mechanism of qualified `settles_through` treatments and `setup`
@@ -708,6 +749,35 @@ triage follows.
   where the owner waives the pipeline part (R23) — covering the protected purchases and
   the VM listing-shape lane. `make check-packaging`, `make check-comment-hygiene`, and
   `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms`.
+
+### Round-2 session checkpoint (2026-11-12)
+
+- One session took 5.1, 5.3 (all but its integration case) and 5.4, then stopped at
+  this verified point rather than compact: section 5 spans about a dozen packages and
+  every task below is a slice of comparable size, more than one session holds.
+- The owner chose to return the change to planning (2026-11-12) to split section 5
+  into sections that each fit one session, still reviewed as one round. The work is
+  committed as one work-in-progress commit with no task checked: 5.1 and 5.4 are
+  implemented and their evidence passes, 5.3 lacks its integration case. The replan
+  decides where these land; their notes above give the evidence. The owner accepted
+  the Edit-tool reversion of the `Makefile`, `scripts/check_change.py` and
+  `scripts/tests/test_check_change.py` after `git checkout origin/dev -- <paths>` was
+  denied.
+- Also passing on this state: `make -C domains/vms/storefront test` (unit 1180
+  passed, 1 skipped; integration 575 passed), `make -C domains/bare_metal/storefront
+  test` (611 passed), `make check-comment-hygiene`, `make check-doc-citations
+  CHANGE=negotiate-open-ended-compute-terms`, `make check-tasks`. Not yet run: the
+  fresh-context compliance check and `scripts/change-workflow run pre-commit`.
+- Rebuild before testing a consumer of a changed kit: the domains install kits from
+  wheels, so `make dist` first, then each package's `make -C <package> test`, which
+  reinstalls them. Run a package's tests through its `make` target; `uv run pytest`
+  in a buyer directory fails to resolve its split environments.
+- Restart at 5.5 (it reshapes `RateServicing`, which the owed 5.3 integration case
+  and 5.2's declaration tests both inject), then 5.3's remainder, 5.6–5.10, 5.2's
+  remaining tests and 5.11. `kit/settlement-runtime/tests/unit/test_rate_publication.py`'s
+  `FixtureHelper` is the place to grow 5.2's derivation tests (servicing, penalty
+  multiple, deadline, setup gate); `test_horizon.py` already covers `resolve_horizon`
+  and the runway.
 
 ## 6. Closeout
 

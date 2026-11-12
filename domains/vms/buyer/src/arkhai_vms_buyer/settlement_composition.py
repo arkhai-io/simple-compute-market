@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import replace
+from functools import partial
 from typing import Any
 
 import typer
@@ -14,6 +15,7 @@ from market_deal_lifecycle.configuration import authorities_by_registry, dispute
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext
 from market_settlement_runtime.buyer_terms import BuyerTermsPolicy, compute_disclosure, lifecycle_disclosure
+from market_settlement_runtime.horizon import check_accepted_horizon
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
@@ -76,7 +78,9 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
     The entry is the match's selected settlement option, from which the
     buyer's proposal was built. A shape-priced match also records what its
     amount codec reads, its family rates keyed as the domain record keys them,
-    so a resumed run converts its bounds against the same rates.
+    so a resumed run converts its bounds against the same rates. The listing's
+    capacity bounds are kept so a resumed run checks the signed horizon against
+    what was advertised, not a current listing.
     """
     selected = match.get("_selected_settlement")
     if not isinstance(selected, SelectedSettlementOption):
@@ -85,7 +89,8 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
     record = buyer_stage(selected.selection.settlement_schema).listing_record(match)
     if match.get("rate_structure"):
         record = {**record, **retained_pricing_record(match)}
-    return record
+    return {**record, **{key: match[key] for key in ("max_duration_seconds", "available_until_utc")
+                         if match.get(key) is not None}}
 
 
 def buyer_term_context(mechanism: str, *, allow_unprotected_terms: bool = False) -> TermContext:
@@ -112,11 +117,42 @@ def disclose_accepted_agreement(agreement) -> None:
     )
 
 
-def validate_buyer_acceptance(outcome) -> None:
+def validate_buyer_acceptance(
+    outcome, *, listing: Mapping[str, Any] | None = None,
+    requested_duration_seconds: int | None = None,
+) -> None:
+    """Check a seller's acceptance before its Agreement is observed or approved.
+
+    With the advertised ``listing``, the signed horizon is held to its capacity
+    bounds at the Agreement's start and to the buyer's request, or to the default
+    bound when the buyer named none: the seller's own resolver protects only
+    against the seller's mistakes, not a counterparty signing other terms.
+    """
     if outcome.agreement is None or outcome.agreement.settlement is None:
         raise RuntimeError("accepted work has no Agreement settlement option")
+    if listing is not None:
+        try:
+            check_accepted_horizon(
+                start_utc=outcome.agreement.start_utc,
+                duration_seconds=outcome.agreement.duration_seconds,
+                requested_duration_seconds=requested_duration_seconds,
+                max_duration_seconds=listing.get("max_duration_seconds"),
+                available_until_utc=listing.get("available_until_utc"),
+            )
+        except ValueError as exc:
+            raise RuntimeError(f"accepted horizon refused: {exc}") from exc
     buyer_stage(outcome.agreement.settlement.settlement_schema).validate_acceptance(outcome)
     disclose_accepted_agreement(outcome.agreement)
+
+
+def listing_acceptance_validator(requested_duration_seconds: int | None):
+    """Bind :func:`validate_buyer_acceptance` to each candidate listing."""
+    def for_match(match: Mapping[str, Any]):
+        return partial(
+            validate_buyer_acceptance, listing=match,
+            requested_duration_seconds=requested_duration_seconds,
+        )
+    return for_match
 
 
 def _alkahest_command_group():
