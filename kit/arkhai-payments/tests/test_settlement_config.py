@@ -9,6 +9,7 @@ from typing import Any
 import market_arkhai_payments.settlement_config as settlement_config
 import pytest
 from market_arkhai_payments import PaymentsClient
+from market_core.schemas import PriceBasis, SettlementOption, derive_settlement_option_id
 from market_arkhai_payments.settlement_config import (
     ARKHAI_PAYMENTS_MECHANISM,
     ArkhaiPaymentsConfig,
@@ -23,6 +24,8 @@ from market_identity import Ed25519Signer, Eip191Signer
 from market_deal_lifecycle.configuration import DisputeEntry
 from market_arkhai_payments.fixtures import dispute_lifecycle
 from market_settlement_runtime import SettlementPublicationClause
+
+import payment_terms
 
 BUYER = "00000000-0000-4000-8000-000000000011"
 PAYEE = "00000000-0000-4000-8000-000000000012"
@@ -277,6 +280,39 @@ def test_publication_builder_preserves_option_identity_and_rate_units(
     }
 
 
+@pytest.mark.parametrize(("compute", "pool", "configured", "published"), [
+    (True, None, 900, 900),
+    (True, 1200, 900, 1200),
+    (True, 1200, None, 1200),
+    (True, None, None, None),
+    # Only a compute option takes the pool's deadline.
+    (False, 1200, 900, 900),
+    (False, 1200, None, None),
+], ids=["compute-clause", "compute-pool-wins", "compute-pool", "compute-neither",
+        "non-compute-clause", "non-compute-none"])
+def test_publication_builder_publishes_the_pool_deadline_else_the_clause_s(
+    monkeypatch: pytest.MonkeyPatch, compute, pool, configured, published,
+) -> None:
+    monkeypatch.setenv(API_KEY_ENV, "test-secret")
+    config = _config()
+    readiness = asyncio.run(arkhai_payments_preflight(config, {}, "seller"))
+    clause = SettlementPublicationClause.model_validate({
+        "mechanism": ARKHAI_PAYMENTS_MECHANISM, "asset": "USD/2", "rate": "1.25", "per": "hour",
+        "mechanism_input": {
+            "payee_account": PAYEE, "asset": "USD/2", "window": "P7D",
+            "dispute_window_seconds": 604800,
+            **({"delivery_deadline_seconds": configured} if configured is not None else {}),
+        },
+    })
+    resources = {**_resources(clause), "compute": compute, "delivery_deadline_seconds": pool}
+
+    (option,) = arkhai_payments_option_builder(config, readiness, resources, "seller")["settlement_options"]
+
+    assert option["lifecycle"].get("delivery_deadline_seconds") == published
+    # The deadline is a lifecycle term, never a settlement parameter.
+    assert "delivery_deadline_seconds" not in option["settlement"]
+
+
 def test_publication_builder_rejects_precision_loss_and_fractional_base_units(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -370,6 +406,35 @@ def test_registration_has_no_client_factory_or_settlement_lifecycle() -> None:
     assert registration.client_factory is None
     assert registration.accepted_obligation_builder is None
     assert registration.settlement_verifier is None
+
+
+def _with_params(option: SettlementOption, **changes: Any) -> SettlementOption:
+    raw = option.model_dump(mode="json", exclude_none=True)
+    raw.pop("option_id")
+    raw["settlement"] = {**raw["settlement"], **changes}
+    return SettlementOption(option_id=derive_settlement_option_id(**raw), **raw)
+
+
+def test_the_installed_projection_bills_a_once_option_as_one_total() -> None:
+    project = create_arkhai_payments_registration().project_billing
+    assert project is not None
+    assert project(payment_terms.option()) == PriceBasis(unit="total")
+    with pytest.raises(ValueError, match="requires an Arkhai payments option"):
+        project(_with_params(payment_terms.option(), schema="fixture.other.v1"))
+
+
+@pytest.mark.parametrize("params", [
+    {"period": "PT15M"}, {"period": "PT1M", "reserve_ahead_seconds": 1800}, {"setup_amount": "500"},
+])
+def test_the_installed_projection_refuses_rate_parameters_rather_than_label_them_a_total(
+    params: dict[str, Any],
+) -> None:
+    # The installed adapter services once parts only; a rate option labelled a
+    # total would be charged its one period's price for the whole term.
+    project = create_arkhai_payments_registration().project_billing
+    assert project is not None
+    with pytest.raises(ValueError, match="Extra inputs"):
+        project(_with_params(payment_terms.option(), **params))
 
 
 def test_attach_agreement_is_a_buyer_setting(monkeypatch: pytest.MonkeyPatch) -> None:

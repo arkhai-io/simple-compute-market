@@ -8,10 +8,12 @@ import pytest
 from arkhai_vms import make_vm_provision_terms
 from arkhai_vms_negotiation.amounts import shape_hourly_amount
 from core_buyer.policy_surface import derive_scalar_prices
-from market_core.schemas import RateValue, derive_settlement_option_id
+from market_core.schemas import PriceBasis, RateValue, derive_settlement_option_id
 from rich.console import Console
 
-from arkhai_vms_buyer.negotiation_amounts import amount_codec, priced_at_opening_shape
+from arkhai_vms_buyer.negotiation_amounts import (
+    amount_codec, priced_at_opening_shape, priced_unit_count,
+)
 from identity_helpers import SELLER_SIGNER
 
 #: Deterministic development values; never a token or escrow on a public network.
@@ -59,6 +61,15 @@ def shape_priced_listing() -> dict:
     }
 
 
+def with_advertised_rate(listing: dict, value: str) -> None:
+    """Re-advertise the listing's option at ``value``, under its new canonical ID."""
+    option = listing["settlement_options"][0]
+    option["price"]["rates"][0]["value"] = value
+    option["option_id"] = derive_settlement_option_id(
+        price=option["price"], settlement=option["settlement"],
+    )
+
+
 def selection(listing: dict) -> dict:
     return {
         "option_id": listing["settlement_options"][0]["option_id"],
@@ -67,7 +78,7 @@ def selection(listing: dict) -> dict:
     }
 
 
-def _terms(duration_seconds: int = 3600, **compute) -> dict:
+def _terms(duration_seconds: int | None = 3600, **compute) -> dict:
     return make_vm_provision_terms(
         duration_seconds=duration_seconds, ssh_public_key="",
         compute_resource=compute or None,
@@ -133,6 +144,52 @@ def test_the_ceiling_admits_the_quotes_one_upward_rounding():
     assert codec.payment_from_scalar(10_000, accepted) == math.ceil(800 * 1801 / 3600) == 401
 
 
+#: A recurring option's billing basis, as its mechanism projects it.
+QUARTER_HOUR = PriceBasis(unit="per_period", period="PT15M", period_seconds=900)
+
+
+def _billed(basis: PriceBasis):
+    return lambda _option: basis
+
+
+@pytest.mark.parametrize("horizon", [3600, 7200, 172_800, None])
+def test_a_recurring_payment_is_one_period_s_price_whatever_the_horizon(horizon):
+    listing = shape_priced_listing()
+    codec = amount_codec(listing, selection(listing), project_billing=_billed(QUARTER_HOUR))
+    # 1,000 an hour is 250 a quarter hour, never 250 per hour of the horizon.
+    assert codec.payment_from_scalar(10_000, _terms(horizon)) == 250
+    minute = PriceBasis(unit="per_period", period="PT1M", period_seconds=60)
+    codec = amount_codec(listing, selection(listing), project_billing=_billed(minute))
+    # 1,000 x 60 / 3,600 is 16.67: rounded up once to 17.
+    assert codec.payment_from_scalar(10_000, _terms(horizon)) == 17
+
+
+def test_a_recurring_ceiling_caps_one_period_not_the_horizon():
+    listing = shape_priced_listing()
+    codec = amount_codec(
+        listing, selection(listing), opening_terms=_terms(None, vcpu_count=4), max_price=800,
+        project_billing=_billed(QUARTER_HOUR),
+    )
+    accepted = _terms(172_800, gpu_model="H200", gpu_count=1, vcpu_count=4)
+    # 800 an hour over one quarter-hour period is 200, the whole limit.
+    assert codec.payment_from_scalar(10_000, accepted) == 200
+    larger = _terms(172_800, gpu_model="H200", gpu_count=1, vcpu_count=8)
+    with pytest.raises(RuntimeError, match=r"ceiling of 200 \(800 per hour for 900s\)"):
+        codec.payment_from_scalar(10_000, larger)
+
+
+def test_bounds_scale_by_one_period_for_a_recurring_selection():
+    listing = shape_priced_listing()
+    for horizon in (None, 7200, 172_800):
+        assert priced_unit_count(
+            listing, selection(listing), horizon, project_billing=_billed(QUARTER_HOUR),
+        ) == 0.25
+    whole_term = _billed(PriceBasis(unit="total"))
+    assert priced_unit_count(listing, selection(listing), 7200, project_billing=whole_term) == 2.0
+    with pytest.raises(ValueError, match="reserved selections require an explicit positive duration"):
+        priced_unit_count(listing, selection(listing), None, project_billing=whole_term)
+
+
 def test_without_a_ceiling_payment_is_not_checked():
     listing = shape_priced_listing()
     codec = amount_codec(listing, selection(listing), opening_terms=_terms(vcpu_count=4))
@@ -149,7 +206,7 @@ def test_a_negative_bound_is_refused():
 
 def test_a_price_for_the_opening_shape_scales_the_selected_option_and_rounds_up():
     listing = shape_priced_listing()
-    listing["settlement_options"][0]["price"]["rates"][0]["value"] = "999"
+    with_advertised_rate(listing, "999")
     priced = priced_at_opening_shape(listing, {"vcpu_count": 4})
     # 999 x 80/100 is 799.2: rounded up, so the derived ceiling converts to at
     # least the advertised minimum for the opening shape.
@@ -162,7 +219,7 @@ def test_a_price_for_the_opening_shape_scales_the_selected_option_and_rounds_up(
 
 def test_a_large_derived_price_keeps_every_base_unit():
     listing = shape_priced_listing()
-    listing["settlement_options"][0]["price"]["rates"][0]["value"] = str(10**18 + 3)
+    with_advertised_rate(listing, str(10**18 + 3))
     priced = priced_at_opening_shape(listing, {"vcpu_count": 4})
     initial, ceiling = derive_scalar_prices(
         params={}, matches=[priced], console=Console(quiet=True),

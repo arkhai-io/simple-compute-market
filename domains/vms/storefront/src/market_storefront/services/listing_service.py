@@ -55,6 +55,7 @@ from market_storefront.services.publication_service import publish_order_to_regi
 from market_storefront.services.publication_terms import (
     configured_alkahest_section,
 )
+from market_storefront.utils import config as storefront_config
 from market_storefront.utils.config import (
     CHAINS,
     chain_address_book,
@@ -101,6 +102,7 @@ class DerivedVmListing:
     #: listing as a published term of sale; ``None`` for a
     #: flat-priced listing.
     rate_structure: Mapping[str, Any] | None = None
+    publication_diagnostics: tuple[dict[str, Any], ...] = ()
 
     def publication_clauses(self) -> list[dict[str, Any]]:
         return [
@@ -375,6 +377,7 @@ class ListingService:
         clauses: tuple[SettlementPublicationClause, ...] | None = None,
         composition: Any | None = None,
         origin: str,
+        publication_diagnostic: Callable[[dict[str, Any]], None] = lambda _entry: None,
     ) -> tuple[
         list[dict[str, Any]], list[dict[str, Any]], tuple[MechanismReadiness, ...]
     ]:
@@ -396,6 +399,10 @@ class ListingService:
             # The site the listing's binding records, so a mechanism resolving
             # anything per origin sees the value the negotiation will inherit.
             "origin": origin,
+            "pool_id": request.capacity_source.pool_id,
+            "max_duration_seconds": request.max_duration_seconds,
+            "available_until_utc": request.available_until_utc,
+            "publication_diagnostic": publication_diagnostic,
         }
         try:
             accepted, options, readiness = await composition.publication_artifacts(
@@ -596,7 +603,8 @@ class ListingService:
         return accepted_escrows, list(kept_options), tuple(kept_clauses), demands
 
     async def derive_listing(
-        self, request: VmCreateListingRequest
+        self, request: VmCreateListingRequest,
+        *, publication_diagnostic: Callable[[dict[str, Any]], None] = lambda _entry: None,
     ) -> DerivedVmListing:
         """Derive everything a create request would persist, persisting nothing.
 
@@ -604,10 +612,6 @@ class ListingService:
         listing's terms with what its source and configuration now yield, so a
         refreshed listing and a newly created one cannot disagree about terms.
         """
-        from arkhai_vms_listings.models import Listing
-
-        from market_storefront.utils.config import BASE_URL_OVERRIDE
-
         composition = self._settlement_composition_provider()
         canonical_clauses = self._compile_publication_clauses(
             request,
@@ -619,6 +623,13 @@ class ListingService:
         # Read first: the source's site becomes the listing binding's origin,
         # and options are built for exactly that origin.
         capacity_source = request.capacity_source.model_dump(mode="json")
+        diagnostics: list[dict[str, Any]] = []
+
+        def diagnose(entry: dict[str, Any]) -> None:
+            diagnostics.append(entry)
+            publication_diagnostic(entry)
+            logger.warning("[PUBLICATION] %s: %s", entry["code"], entry["detail"])
+
         (
             accepted_escrows,
             settlement_options,
@@ -628,6 +639,7 @@ class ListingService:
             clauses=canonical_clauses,
             composition=composition,
             origin=str(capacity_source["site_id"]),
+            publication_diagnostic=diagnose,
         )
         # Derived after readiness, under the readiness the options were built
         # with, for every escrow published whether a clause compiled it or the
@@ -710,13 +722,14 @@ class ListingService:
 
         listing = Listing(
             listing_id=str(uuid.uuid4()),
-            storefront_url=BASE_URL_OVERRIDE,
+            storefront_url=storefront_config.BASE_URL_OVERRIDE,
             seller_principal=self._marketplace_signer.identity,
             listing_resource=listing_resource,
             accepted_escrows=accepted_escrows,
             settlement_options=settlement_options,
             demands=demands,
             max_duration_seconds=request.max_duration_seconds,
+            available_until_utc=request.available_until_utc,
             oracle_address=None,
         )
         binding = prepare_vm_listing_binding(
@@ -731,6 +744,7 @@ class ListingService:
             listing=listing,
             clauses=tuple(canonical_clauses),
             binding=binding,
+            publication_diagnostics=tuple(diagnostics),
         )
 
     async def create_listing(
@@ -776,6 +790,7 @@ class ListingService:
                 demands=listing_dict.get("demands"),
                 fulfillment_resource=None,
                 max_duration_seconds=listing_dict.get("max_duration_seconds"),
+                available_until_utc=listing_dict.get("available_until_utc"),
                 storefront_url=listing.storefront_url,
                 seller_principal=listing.seller_principal,
                 oracle_address=listing_dict.get("oracle_address"),
@@ -820,8 +835,6 @@ class ListingService:
         resources: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Refresh one listing's ready options without touching accepted Terms."""
-        from arkhai_vms_listings.models import Listing
-
         stored = await self._db.load_listing(listing_id=listing_id)
         if stored is None:
             raise ValueError(f"listing {listing_id!r} does not exist")
@@ -835,6 +848,12 @@ class ListingService:
             # A listing with no durable binding has no origin to resolve
             # per-origin terms for, so it is offered none.
             "origin": binding.site_id if binding is not None else None,
+            "pool_id": binding.pool_id if binding is not None else None,
+            "max_duration_seconds": stored.get("max_duration_seconds"),
+            "available_until_utc": stored.get("available_until_utc"),
+            "publication_diagnostic": lambda entry: logger.warning(
+                "[PUBLICATION] %s: %s", entry["code"], entry["detail"],
+            ),
         }
         if resources:
             option_resources.update(resources)

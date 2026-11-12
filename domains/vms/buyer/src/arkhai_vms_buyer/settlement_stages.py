@@ -20,6 +20,7 @@ from core_buyer.orchestration import (
     wait_for_settlement,
 )
 from market_alkahest.plans import require_escrow_terms_fund_plan
+from market_alkahest.settlement_config import alkahest_billing_basis
 from market_alkahest import alkahest_address_book
 from market_alkahest.proposals import (
     ReleaseConditionError,
@@ -446,7 +447,7 @@ def derive_resumed_escrow_terms(
         return derive_accepted_escrow_terms(
             accepted_proposal=deal.accepted_escrow_proposal,
             listing_record=deal.listing_record,
-            agreed_amount=exact_agreed_amount(deal),
+            agreed_amount=exact_agreed_amount(deal, project_billing=alkahest_billing_basis),
             duration_seconds=int(duration_seconds),
             settlement_plan=deal.settlement_plan,
             addr_config_path=addr_config_path,
@@ -523,7 +524,9 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
     header.add_row("Run ID", run_id)
     header.add_row("Seller", deal.seller_url)
     header.add_row("Negotiation", deal.negotiation_id)
-    header.add_row("Agreed price (per hour)", str(deal.agreed_amount))
+    header.add_row("Agreed price (total)", str(
+        exact_agreed_amount(deal, project_billing=alkahest_billing_basis)
+    ))
     header.add_row("Duration (seconds)", str(effective_duration))
     if chain.token_contract:
         header.add_row(

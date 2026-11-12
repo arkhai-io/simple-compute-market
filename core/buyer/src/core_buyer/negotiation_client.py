@@ -852,11 +852,17 @@ def _authenticated_json(
 
 @dataclass(frozen=True)
 class NegotiationAmountCodec:
-    """Domain conversion between policy scalars and monetary settlement amounts."""
+    """Domain conversion and verification of authenticated pricing replies.
+
+    Reply/acceptance validators run before an accepted round is observed or
+    passed to settlement. Conversion alone cannot authenticate pricing inputs.
+    """
 
     scalar_from_price: Callable[[Any], int]
     payment_from_scalar: Callable[[int, Any], int]
     effective_terms: Callable[[Any, Mapping[str, Any] | None], Any] | None = None
+    validate_reply: Callable[[Mapping[str, Any]], None] | None = None
+    validate_accepted: Callable[[NegotiationOutcome, Mapping[str, Any]], None] | None = None
 
 
 @dataclass
@@ -976,6 +982,8 @@ def negotiate_with_seller(
             buyer_principal=principal,
             trusted_seller_principals=trusted_seller_principals,
         )
+        if amount_codec is not None and amount_codec.validate_accepted is not None:
+            amount_codec.validate_accepted(outcome, reply)
         if validate_acceptance is not None:
             validate_acceptance(outcome)
         if on_round:
@@ -1257,6 +1265,8 @@ def negotiate_with_seller(
             capture=capture,
         )
 
+        if amount_codec is not None and amount_codec.validate_reply is not None:
+            amount_codec.validate_reply(reply)
         raw_neg_id = reply.get("negotiation_id")
         neg_id = raw_neg_id if isinstance(raw_neg_id, str) and raw_neg_id else None
         seller_action = reply.get("action")
@@ -1474,6 +1484,8 @@ def negotiate_with_seller(
             capture=capture,
         )
 
+        if amount_codec is not None and amount_codec.validate_reply is not None:
+            amount_codec.validate_reply(reply)
         revision = (next_move.proposal or {}).get("provision_terms")
         if (
             revision is not None and reply.get("action") in {"counter", "accept"}

@@ -139,7 +139,7 @@ def _member_available_units(
 VM_OFFERING_MODE = "vm"
 
 #: The VM market's override terms, flattened beside shapes and clauses.
-VM_OVERRIDE_TERMS = ("sla", "max_duration_seconds", "pricing")
+VM_OVERRIDE_TERMS = ("sla", "max_duration_seconds", "available_until_utc", "pricing")
 
 #: Override terms the VM market does not read. A stored override may carry
 #: them; derivation reports them rather than holding the pool.
@@ -371,6 +371,7 @@ class _SiteDerivationReport:
     members_without_resource_type: dict[str, str] = field(default_factory=dict)
     pools_without_default_shapes: set[str] = field(default_factory=set)
     unreadable_shapes: dict[str, list[str]] = field(default_factory=dict)
+    unreadable_capacity_bounds: dict[str, list[str]] = field(default_factory=dict)
     inadmissible_listing_shapes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     unusable_shape_constraints: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     unreadable_asking_rates: dict[str, list[str]] = field(default_factory=dict)
@@ -395,6 +396,7 @@ class _SiteDerivationReport:
             ),
             "pools_without_default_shapes": sorted(self.pools_without_default_shapes),
             "unreadable_shapes": dict(sorted(self.unreadable_shapes.items())),
+            "unreadable_capacity_bounds": dict(sorted(self.unreadable_capacity_bounds.items())),
             "inadmissible_listing_shapes": dict(
                 sorted(self.inadmissible_listing_shapes.items())
             ),
@@ -425,6 +427,7 @@ class _SiteDerivationReport:
 _POOL_ENTRIES: dict[str, tuple[str, str, str]] = {
     "unresolvable_pools": ("hold", "pool_unresolvable", "problems"),
     "unreadable_shapes": ("hold", "listing_shapes_unreadable", "problems"),
+    "unreadable_capacity_bounds": ("hold", "capacity_bounds_unreadable", "problems"),
     "inadmissible_listing_shapes": ("report", "listing_shape_inadmissible", "findings"),
     "unusable_shape_constraints": ("report", "shape_constraints_unusable", "findings"),
     "unreadable_asking_rates": ("hold", "asking_rates_unreadable", "problems"),
@@ -772,6 +775,7 @@ def _projected_pool_rows(
     )
     storefront_pricing_override = GpuPricingFields(
         max_duration_seconds=_tier("max_duration_seconds"),
+        available_until_utc=_tier("available_until_utc"),
         settlements=_tier("settlements"),
     )
     if override is not None and override.get("retired_terms"):
@@ -859,23 +863,29 @@ def _projected_pool_rows(
 
     # Terms resolve per GPU model because the hint and configured tiers are
     # keyed by model; a listing takes its shape's model's terms. A shape
-    # stating no GPUs groups under ``None``: it resolves only the override's and
-    # the flat default's terms and the unkeyed families' rates, so a pool whose
-    # only terms are per GPU model leaves it with no settlement option.
+    # stating no GPUs groups under ``None``: it resolves only the override's,
+    # the pool-level hint's and the flat default's terms and the unkeyed
+    # families' rates, so a pool whose only clauses are per GPU model, with no
+    # pool-level or flat clauses, leaves it with no settlement option.
     models = sorted(
         {shape.gpu_model for shape in shapes},
         key=lambda model: (model is not None, model or ""),
     )
-    pricing_by_model = {
-        model: resolve_gpu_pricing(
-            policy_tags,
-            gpu_model=model,
-            storefront_override=storefront_pricing_override,
-            config_defaults_by_model=hint_resolution.gpu_pricing_defaults_by_model,
-            flat_default=hint_resolution.gpu_pricing_flat_default,
-        )
-        for model in models
-    }
+    try:
+        pricing_by_model = {
+            model: resolve_gpu_pricing(
+                policy_tags,
+                gpu_model=model,
+                storefront_override=storefront_pricing_override,
+                config_defaults_by_model=hint_resolution.gpu_pricing_defaults_by_model,
+                flat_default=hint_resolution.gpu_pricing_flat_default,
+            )
+            for model in models
+        }
+    except ValueError as exc:
+        report.unreadable_capacity_bounds[pool_id] = [str(exc)]
+        holds.add(("pool", site_id, pool_id))
+        return []
     # Family rates resolve per model for the same reason: the GPU family is
     # keyed by model.
     family_rates_by_model: dict[str | None, Mapping[str, Any]] = {}
@@ -1418,6 +1428,7 @@ def available_compute_slices(
                 "max_duration_seconds": (
                     pricing.max_duration_seconds if pricing else None
                 ),
+                "available_until_utc": pricing.available_until_utc if pricing else None,
                 "listing_cardinality_mode": row.get("listing_cardinality_mode"),
                 "listing_cardinality_mode_explanation": row.get(
                     "listing_cardinality_mode_explanation"

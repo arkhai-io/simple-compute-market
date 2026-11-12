@@ -18,6 +18,7 @@ from arkhai_bare_metal_buyer.cli import (
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from arkhai_bare_metal_buyer.plugin import domain
+from arkhai_bare_metal_buyer.settlement_composition import buyer_term_context
 from core_buyer.cli import build_app
 from core_buyer.introductions import IntroductionPayloadsDeleted
 from market_core import DomainCapability
@@ -317,3 +318,18 @@ def test_a_field_the_registry_does_not_declare_is_refused_before_any_read() -> N
         bare_metal_listing_params(
             _SpecClient(), "region=us-west", registry_url="https://registry"
         )
+
+
+@pytest.mark.parametrize(
+    ("waivers", "allowed"),
+    [
+        (frozenset({"no_delivery_deadline"}), True),
+        (frozenset({"no_penalty", "charged_preemption", "charged_term_end"}), False),
+        (frozenset(), False),
+    ],
+    ids=["deadline-waiver", "every-other-waiver", "none"],
+)
+def test_only_the_deadline_waiver_lets_the_codec_admit_a_missing_deadline(waivers, allowed) -> None:
+    context = buyer_term_context("arkhai.payments.v1", waivers=waivers)
+
+    assert context.allow_missing_delivery_deadline is allowed

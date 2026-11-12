@@ -12,6 +12,7 @@ from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
+    build_bare_metal_settlement_registry,
 )
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
@@ -33,10 +34,15 @@ from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_core.schemas import (
     RateValue,
     SettlementOption,
+    SettlementPrice,
     derive_settlement_option_id,
+)
+from market_deal_lifecycle.terms import (
+    Adjudication, DisputeAuthority, EarlyTermination, Entitlement, LifecycleTerms, encode_terms,
 )
 from market_identity import (
     AuthenticatedResponse,
+    Ed25519Signer,
     Eip191Signer,
     RequestEnvelope,
     TrustedIdentitySet,
@@ -45,9 +51,10 @@ from market_identity import (
     verify_response,
 )
 from market_resource_pools_contracts.backing import UNBACKED
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingDeclaration
 
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
-from settlement_compositions import alkahest_composition
+from settlement_compositions import ALKAHEST_SECTION, alkahest_composition
 from held_loops import held_loop_controller
 from source_sites import (
     SourceSite,
@@ -1265,6 +1272,117 @@ async def test_an_exact_alkahest_selection_is_refused_with_nothing_accepted(
 
     assert refused.value.status_code == 409
     assert "settlement_selection_requires_plan" in str(refused.value)
+    assert threads.count == 0
+    _nothing_accepted(runtime)
+
+
+# ---------------------------------------------------------------------------
+# A cached rate option the servicing declaration in force does not qualify
+# ---------------------------------------------------------------------------
+
+# Arkhai payments added to the storefront's settlement composition: the real
+# registry resolves the seller's payments configuration. Every account, key and
+# address here is a deterministic development value; none may be used on a
+# public network.
+_PAYMENTS = "arkhai.payments.v1"
+_PAYEE = "22222222-2222-4222-8222-222222222222"
+_PAYMENTS_SERVICE = Ed25519Signer(bytes(range(1, 33)))
+# A fictional authority: the origin is a reserved name that resolves nowhere.
+_AUTHORITY = DisputeAuthority(
+    interface="fixture.mediation.v1", origin="https://mediation.invalid",
+    account="fixture-account", record_key="fixture-record", params={},
+)
+
+
+def _payments_runtime(path: str, rate_servicing: RateServicing) -> BareMetalStorefrontRuntime:
+    """The storefront with Arkhai payments composed under ``rate_servicing``.
+
+    No recurring encoder, term timing or billing projection is composed: the
+    selection door refuses an unqualified rate option before reading any of them.
+    """
+    runtime = _runtime(path)
+    configured = runtime.settlement_composition
+    registry = build_bare_metal_settlement_registry()
+    settlement = {
+        "schema_version": 1,
+        "priority": ["alkahest.v1", _PAYMENTS],
+        "alkahest": dict(ALKAHEST_SECTION),
+        "arkhai_payments": {
+            "enabled": True,
+            "service_url": "http://127.0.0.1:9",
+            "service_identity": _PAYMENTS_SERVICE.identity.model_dump(mode="json"),
+            "fee_bps": 250,
+            "development_auth": True,
+        },
+    }
+    return replace(
+        runtime,
+        settlement_composition=replace(
+            configured,
+            registry=registry,
+            config=registry.resolve(settlement, role="seller"),
+            rate_servicing=rate_servicing,
+        ),
+    )
+
+
+def _on_demand_option() -> dict:
+    """A rate option whose payer's stop charges its started period and whose term
+    end returns the last one, as a storefront declaring ``returned`` published it."""
+    lifecycle = encode_terms(LifecycleTerms(
+        adjudication=Adjudication(version=1, dispute=_AUTHORITY, dispute_window_seconds=604800,
+                                  case_hold_max_seconds=None),
+        early_termination=EarlyTermination(version=1, settles_through="last_boundary", entitlements={
+            "payer": Entitlement(notice_seconds=0, settles_through="started_period"),
+        }),
+        delivery_deadline_seconds=1200,
+    ))
+    price = SettlementPrice(asset="USD/6", rates=[RateValue(field="amount", per="hour", value=2_500_000)])
+    settlement = {
+        "schema": _PAYMENTS, "payee_account": _PAYEE, "window": "PT5M",
+        "period": "PT15M", "reserve_ahead_seconds": 1800,
+    }
+    return SettlementOption(
+        option_id=derive_settlement_option_id(price=price, settlement=settlement, lifecycle=lifecycle),
+        price=price, settlement=settlement, lifecycle=lifecycle,
+    ).model_dump(mode="json")
+
+
+async def test_a_cached_rate_option_whose_treatment_is_withdrawn_is_refused_through_the_app(
+    tmp_path,
+) -> None:
+    """The listing record holds a rate option published while ``returned`` was
+    declared, seeded as service-internal state since no installed mechanism
+    publishes one; the storefront now declares only ``charged``. A buyer selecting
+    it is answered with the signed 409 asking for a refetch, and nothing is kept."""
+    narrowed = RateServicing({_PAYMENTS: RateServicingDeclaration(
+        _PAYMENTS, frozenset({"charged"}), False,
+    )})
+    runtime = _payments_runtime(str(tmp_path / "storefront.db"), narrowed)
+    option = _on_demand_option()
+    await _insert_listing(runtime, settlement_options=[option])
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.negotiate_new(
+                    listing_id="listing-1",
+                    initial_amount=625_000,
+                    provision_terms=_opening()["provision_terms"],
+                    settlement_selection={
+                        "option_id": option["option_id"],
+                        "settlement": {"schema": _PAYMENTS, "payer_account": _PAYEE},
+                        "expiration_unix": int(time.time()) + 3600,
+                    },
+                    selection_only=True,
+                )
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            threads = await admin.list_negotiations("listing-1")
+
+    assert refused.value.status_code == 409
+    assert "settlement_option_withdrawn_refetch" in str(refused.value)
+    assert "does not declare returned" in str(refused.value)
     assert threads.count == 0
     _nothing_accepted(runtime)
 

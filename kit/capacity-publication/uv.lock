@@ -35,18 +35,18 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-registry-client"
-version = "0.12.3"
+version = "0.13.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -54,7 +54,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_registry_client-0.12.3-py3-none-any.whl" },
+    { path = "arkhai_core_registry_client-0.13.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -127,7 +127,7 @@ dev = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.5.2"
+version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -138,7 +138,7 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.5.2-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -183,7 +183,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-admissibility" },
@@ -191,7 +191,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools_contracts-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools_contracts-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

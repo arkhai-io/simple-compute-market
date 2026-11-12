@@ -49,7 +49,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.4.0" },
     { name = "arkhai-kit-schema-migrations", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -61,7 +61,7 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 
 [[package]]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-admissibility" },
@@ -69,7 +69,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools_contracts-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools_contracts-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

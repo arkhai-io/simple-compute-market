@@ -108,12 +108,22 @@ publication_interval_seconds = 30
 
 [pricing]
 # Structured settlement publication clauses, each one complete. A pool's
-# storefront override replaces the list for that pool.
+# storefront override, its pricing.gpu.<model> hint, its pricing.settlements
+# hint, or [pricing.defaults.gpu.<model>] below replaces the list whole.
 settlements = []
 # The maximum lease duration a listing publishes, in seconds, unless a pool's
-# override states its own. A pool for which neither states a positive bound is
-# held at publication rather than published without one.
+# override or capacity_bounds.bare_metal hint states its own. A pool resolving
+# no positive relative bound publishes with no relative limit.
 # default_max_duration_seconds = 86400
+# Independent absolute UTC lease-end ceiling; an override or hint replaces it.
+# default_available_until_utc = "2035-01-01T00:00:00Z"
+# An on-demand option's premature-stop penalty, in its periods' price, when its
+# clause states none; a clause's own penalty, even "0", wins. A positive integer.
+default_premature_stop_penalty_periods = 24
+# The clauses for the listings of machines with one GPU model, as its shape
+# names it, replacing `settlements` above for them.
+# [pricing.defaults.gpu.H100]
+# settlements = []
 
 [negotiation]
 # The seller policies run after the required guards; unset runs the default

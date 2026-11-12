@@ -309,6 +309,7 @@ async def _start(
     seller_round_hook=None,
     capacity_runtime=None,
     listing_source_check=None,
+    rate_servicing=None,
 ):
     registration = sqlite_client.domain_registry.resolve_mode("vm")
     runtime = build_vm_negotiation_runtime(
@@ -319,6 +320,7 @@ async def _start(
         site_projections=await _policy_projections(),
         seller_round_hook=seller_round_hook,
         listing_source_check=listing_source_check or _source_matches,
+        rate_servicing=rate_servicing,
     )
     proposal_wire = (
         proposal.model_dump(mode="json")

@@ -239,11 +239,19 @@ class BareMetalStorefrontRuntime:
     negotiation_policies: Any = None
     #: Every registry publication writes to; their reachability is a status check.
     registry_configuration: BareMetalRegistryConfiguration | None = None
-    #: The storefront's publication clauses, which a pool's override replaces.
+    #: The storefront's publication clauses, the lowest tier a listing's clauses
+    #: resolve through.
     publication_clauses: tuple[SettlementPublicationClause, ...] = ()
+    #: The configured clauses per GPU model, ``[pricing.defaults.gpu.<model>]``,
+    #: above ``publication_clauses`` and below the pool's hints.
+    publication_clauses_by_model: Mapping[str, tuple[SettlementPublicationClause, ...]] = field(
+        default_factory=dict
+    )
     #: The maximum lease duration a listing publishes unless its pool's override
-    #: states one; a pool for which neither is positive is held at publication.
+    #: or hint states one; a pool for which none is positive publishes with no
+    #: relative limit.
     default_max_duration_seconds: int | None = None
+    default_available_until_utc: str | None = None
     # Composes one publication cycle for the publication loop's timer and step;
     # None composes it from this runtime through ``compose_publication_cycle``.
     publication_cycle_factory: Callable[["BareMetalStorefrontRuntime"], Any] | None = (
@@ -335,6 +343,14 @@ class BareMetalStorefrontRuntime:
                     else {}
                 ),
                 seller_stages=self.domain.settlement.seller_stages,
+                rate_servicing=(
+                    self.settlement_composition.rate_servicing
+                    if self.settlement_composition is not None else None
+                ),
+                rate_term_projections=(
+                    self.settlement_composition.rate_term_projections
+                    if self.settlement_composition is not None else None
+                ),
             ),
         )
         object.__setattr__(self, "lifecycle", BareMetalLifecycle(self))
@@ -564,6 +580,7 @@ class BareMetalStorefrontRuntime:
         if self.capacity_client is None:
             return None
         state = self.site_projections
+
         return PoolOverrideService(
             store=SQLitePoolOverrideStore(self.db.db_path),
             site_ids=lambda: [binding.site_id for binding in self.site_bindings],
@@ -573,7 +590,7 @@ class BareMetalStorefrontRuntime:
                     BareMetalPoolOverrideContribution(
                         configured_max_duration_seconds=lambda: positive_lease_bound(
                             self.default_max_duration_seconds
-                        )
+                        ),
                     )
                 )
             },
@@ -886,6 +903,7 @@ def build_runtime_from_configuration(
     settlement_composition = BareMetalStorefrontSettlementComposition.from_raw_config(
         settlement_config,
         disputes=RegistryDisputePolicy.from_document(active.model_dump()),
+        default_penalty_periods=active.pricing.default_premature_stop_penalty_periods,
         resources={
             "marketplace_signer": signer,
             "claimant_principal": principal,
@@ -907,6 +925,16 @@ def build_runtime_from_configuration(
         publication_clauses = compile_publication_clauses(active.pricing.settlements)
     except (TypeError, ValueError) as exc:
         raise RuntimeError(f"[pricing].settlements do not compile: {exc}") from exc
+    publication_clauses_by_model: dict[str, tuple[SettlementPublicationClause, ...]] = {}
+    for model, terms in active.pricing.defaults.gpu.items():
+        if terms.settlements is None:
+            continue
+        try:
+            publication_clauses_by_model[model] = compile_publication_clauses(terms.settlements)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"[pricing.defaults.gpu.{model}].settlements do not compile: {exc}"
+            ) from exc
     storefront_url = active.storefront_url
     try:
         site_bindings = parse_site_bindings(
@@ -957,7 +985,9 @@ def build_runtime_from_configuration(
             auth=active.registry_auth(),
         ),
         publication_clauses=publication_clauses,
+        publication_clauses_by_model=publication_clauses_by_model,
         default_max_duration_seconds=active.pricing.default_max_duration_seconds,
+        default_available_until_utc=active.pricing.default_available_until_utc,
         introduction_delivery=introduction_delivery,
         db=db,
         domain=selected_domain,

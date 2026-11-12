@@ -124,9 +124,11 @@ async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCa
     payload = listing.model_dump(mode="json")
     payload["listing_resource"] = listing.published_listing_resource()
     pricing = listing.published_pricing()
-    # Carried opaquely by core publication as a top-level term beside the
-    # common fields, so no registry or core code names a price.
+    # Carried opaquely by core publication as top-level terms beside the
+    # common fields, so no registry or core code names a price or a bound.
     payload["publication_terms"] = {"pricing": pricing} if pricing is not None else {}
+    if listing.available_until_utc is not None:
+        payload["publication_terms"]["available_until_utc"] = listing.available_until_utc
     return PublicationCandidate(listing.listing_id, binding, payload)
 
 
