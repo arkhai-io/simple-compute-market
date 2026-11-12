@@ -53,7 +53,7 @@ From a fresh checkout at this checkpoint:
 make dist-ci
 (cd domains/vms/buyer && make reinit && \
   uv run --frozen --no-sync python \
-  ../../../openspec/changes/negotiate-open-ended-compute-terms/price_probe.py)
+  ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/price_probe.py)
 ```
 
 This command was opened/executed at the changed surface itself. Expected output

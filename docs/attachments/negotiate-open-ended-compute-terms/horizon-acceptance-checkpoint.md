@@ -3,6 +3,12 @@
 Base: d8300a817, draft PR #351. This slice completes terms tasks 3.2–3.3.
 Resume at 4.1. The original stacking on PRs #349/#350 is unchanged.
 
+Two behaviours this records were replaced before the change landed: an omitted
+horizon whose limiting bound is fractional is floored to whole seconds rather than
+refused, and acceptance also refuses a horizon leaving no runway; see
+`openspec/specs/negotiation-protocol/spec.md`, "Compute horizons bind both seller
+bounds". The sections below describe the evidence as observed.
+
 ## Behavior
 
 The shared negotiation runtime fixes one acceptance clock and then calls an
@@ -71,8 +77,8 @@ make -C domains/bare_metal/storefront reinit
 Then run either personally exercised entry point:
 
 ```sh
-(cd domains/vms/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/recurring_publication_probe.py vm --acceptance)
-(cd domains/bare_metal/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/recurring_publication_probe.py bare --acceptance)
+(cd domains/vms/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/recurring_publication_probe.py vm --acceptance)
+(cd domains/bare_metal/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/recurring_publication_probe.py bare --acceptance)
 ```
 
 Readiness is the typed authenticated system-status response before publication.

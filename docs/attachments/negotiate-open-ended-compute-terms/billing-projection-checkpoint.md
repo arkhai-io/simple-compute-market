@@ -44,7 +44,7 @@ make dist-ci
   env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
   -u http_proxy -u https_proxy -u all_proxy \
   uv run --frozen --no-sync python \
-  ../../../openspec/changes/negotiate-open-ended-compute-terms/billing_projection_probe.py)
+  ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/billing_projection_probe.py)
 ```
 
 This exact first-use surface was executed. After the codec probe's four existing
@@ -125,7 +125,7 @@ all passed. They checked wheel/lock/package architecture, comment hygiene and th
 active change. This packet claims no full-suite or deployed E2E result.
 
 Before 2.1b can establish acceptance binding, choose the carrier described in
-`openspec/changes/negotiate-open-ended-compute-terms/design.md` under
+`openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/design.md` under
 “Acceptance-evidence binding question”. The current Agreement listing hash commits
 a full seller database representation that the retained buyer subset/publication
 cannot reconstruct, and resize's pricing pin is seller-local. Historical signature

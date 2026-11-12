@@ -53,10 +53,10 @@ From a fresh checkout:
 make dist-ci
 (cd domains/vms/buyer && make reinit && \
   uv run --frozen --no-sync python \
-  ../../../openspec/changes/negotiate-open-ended-compute-terms/acceptance_pin_probe.py)
+  ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/acceptance_pin_probe.py)
 (cd domains/vms/storefront && make reinit && \
   ENABLE_EVENT_QUEUE=true AGENT_WALLET_ADDRESS='' uv run --frozen --no-sync python \
-  ../../../openspec/changes/negotiate-open-ended-compute-terms/seller_pin_probe.py)
+  ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/seller_pin_probe.py)
 ```
 
 After the codec fixture's existing PASS lines, the first entry point reports:

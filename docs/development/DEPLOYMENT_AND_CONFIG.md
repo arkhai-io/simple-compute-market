@@ -470,11 +470,14 @@ and the URL and never the token. The refusal runs before the storefront opens it
 database or builds a signer, so it leaves no database file and starts no loop.
 Missing storefront-wide terms are not a refusal: an empty `[pricing].settlements` or
 an absent `[pricing].default_max_duration_seconds` leaves the terms to each pool's
-override or hint. A pool that resolves no lease bound is held and reported in system
-status's `publication_derivation`; a candidate whose pool resolves no settlement
+override or hint. A pool that resolves no positive maximum duration from any tier
+publishes with no relative limit; a candidate whose pool resolves no settlement
 clause is refused as `no_settlement_option`, and its open listing is closed through
 reconciliation and reopened under the same identity once a clause resolves (see
-"Storefront listing shapes and pool overrides"). Retired settings are refused under their own
+"Storefront listing shapes and pool overrides"). A stated storefront-wide term that is
+malformed is the operator's own input, so it does refuse:
+`[pricing].default_premature_stop_penalty_periods` that is not a positive integer
+stops either compute storefront, naming the key. Retired settings are refused under their own
 heading, apart from these, since a stale key is not a reason publication is
 impossible. A storefront that only services deals already accepted is not a supported
 deployment. A storefront chart cannot check any of this, which is why each chart's
@@ -1080,7 +1083,8 @@ A registry that publishes the backing field keeps it; an older reader ignores it
 
 The combined storefront's publication loop publishes VM; bare-metal publication
 runs in the dedicated bare-metal storefront's own loop. Storefront-wide terms of sale are configuration — `[pricing].settlements` and the per-model
-`[pricing.defaults.gpu.<model>].settlements`, `default_max_duration_seconds`, and
+`[pricing.defaults.gpu.<model>].settlements`, `default_max_duration_seconds`,
+`default_available_until_utc`, `default_premature_stop_penalty_periods`, and
 the family rates `[pricing.defaults.gpu.<model>].rates` and
 `[pricing.defaults.<family>].rates` (see "Storefront listing shapes and pool
 overrides") — beneath each pool's own `pricing` declaration and the storefront's
@@ -1538,6 +1542,37 @@ system status names the retired keys.
   pool's own hint for that term; a term it omits resolves from the hint, then
   from the storefront's configured defaults. The storefront holds no other
   per-pool record.
+- **Settlement clauses resolve through five tiers, in both compute storefronts.**
+  The override's `settlements`, then the pool hint's `pricing.gpu.<model>.settlements`
+  for the listing's GPU model, then its `pricing.settlements` for the whole pool,
+  then `[pricing.defaults.gpu.<model>].settlements`, then `[pricing].settlements`.
+  The highest tier stating a clause list supplies all of it, and an empty list is
+  a statement that stops the tiers below. A hint list of the wrong shape is read as
+  absent and falls through. A listing whose shape names no GPU resolves only the
+  override, the pool-level hint and the flat configuration. Bare metal's model is
+  its machine's GPU model; its per-model configured clauses are compiled at
+  startup, like the flat ones.
+- **Capacity bounds resolve per bound.** `max_duration_seconds` and
+  `available_until_utc` each resolve from the override, then the pool's
+  `capacity_bounds.<mode>` hint (`vm` or `bare_metal`), then
+  `[pricing].default_max_duration_seconds` and
+  `[pricing].default_available_until_utc`; VM also reads a bound stated in its
+  `pricing.gpu.<model>` hint and its `[pricing.defaults.gpu.<model>]` table, below
+  the mode hint and above the flat default. A maximum that is unset, zero or
+  negative means no relative limit, and stated at a tier it masks the tiers below.
+  `available_until_utc` is an ISO instant in UTC, written with `Z`; a naive time,
+  an epoch number or another offset is refused. The provisioning service refuses a
+  pool write with a malformed bound, and a bound the storefront still cannot read
+  holds the pool as `capacity_bounds_unreadable`. Both bounds publish as top-level
+  listing terms, and a changed bound refreshes the listing in place; an accepted
+  deal keeps the horizon it was accepted with.
+- **An on-demand option's default penalty is configured.** A recurring clause
+  that grants only the payer a stop and states no `premature_stop_penalty` takes
+  the per-period price times `[pricing].default_premature_stop_penalty_periods`
+  (24); a clause's own penalty, `"0"` included, wins. The publication cycle's
+  report names each option a default buyer refuses in a `default_buyer_refusal`
+  entry, "a default buyer refuses this option: <term>"; the option still
+  publishes.
 - **A site whose projection is not loaded holds its listings.** They are neither
   closed nor refreshed until it loads, so a storefront restarting while a site is
   unreachable does not delist that site. Listings derive only from site
@@ -1617,18 +1652,20 @@ storefront answers exits 1 naming the origin it was sent to and the transport
 error's type.
 
 - **A bare-metal override states no shapes.** It states settlement clauses, which
-  replace `[pricing].settlements` for that pool whole; asking rates; and the terms
-  `min_duration_seconds` and `max_duration_seconds`.
-- **Each lease bound replaces its configured counterpart on its own.** The pair a
-  listing would publish must still be ordered: a minimum above the effective
-  maximum (the override's, else `[pricing].default_max_duration_seconds`) is
-  refused at the write. If configuration later falls below an accepted minimum,
-  the next publication cycle holds that pool as `pool_override_terms_conflict`
-  rather than publishing; raise the maximum or correct the override. A pool for
-  which neither the override nor configuration states a positive maximum is held
-  as `pool_lease_bound_missing`. A pool resolving no settlement clause is not
-  held: its candidates have no settlement option, as "A candidate with no
-  settlement option yields no listing" above describes.
+  replace every lower tier's clauses for that pool whole; asking rates; and the
+  terms `min_duration_seconds`, `max_duration_seconds` and `available_until_utc`.
+- **Each lease bound replaces its counterpart on its own.** The pair a listing
+  would publish must still be ordered: a minimum above the effective maximum (the
+  override's, else the pool's `capacity_bounds.bare_metal` hint read from the live
+  projection the write fetches, else `[pricing].default_max_duration_seconds`) is
+  refused at the write. If the hint or configuration later falls below an accepted
+  minimum, the next publication cycle holds that pool as
+  `pool_override_terms_conflict` rather than publishing; raise the maximum or
+  correct the override. A pool for which no tier states a positive maximum
+  publishes with no relative limit, and each reserved deal's own duration is still
+  checked against `available_until_utc` at acceptance. A pool resolving no
+  settlement clause is not held: its candidates have no settlement option, as "A
+  candidate with no settlement option yields no listing" above describes.
 - **A machine the site builds no view for is reported, and its listing held.** The
   site projects a declaration from which it cannot build a bare-metal view — a
   backed one naming no host, no access methods, or no `physical_host_id`, a missing
@@ -1721,6 +1758,26 @@ configuration is a publication blocker. A seller that wants the Agreement on fil
 verifying the receipt and before delivering, whenever the buyer did not. The Agreement
 discloses both principals, the listing, amount, timing, and provision terms, so enable
 either only where that disclosure to the payments service is intended.
+
+A selling composition declares which recurring treatments it services in its
+`[Settlement]` root, one table per installed mechanism, keyed by the mechanism's
+configuration key:
+
+```toml
+[Settlement.rate_servicing.arkhai_payments]
+treatments = ["charged"]   # as the payment authority names them: charged, returned, prorated
+setup = false              # whether a setup charge beside the rate is serviced
+```
+
+Absent or empty means no rate servicing, so no recurring option publishes; that is
+every shipped configuration, since no installed mechanism services a recurring
+option yet. Publication omits an option naming an undeclared treatment or an
+undeclared setup charge, a cached selection of one is refused before acceptance,
+and its mandate is never derived. Withdrawing a treatment stops new offers only:
+accepted deals keep being serviced. A buyer's root refuses `rate_servicing`, and a
+table naming no installed mechanism, an unknown key or an unknown treatment fails
+validation. The storefront charts' values schemas carry the same table definition
+the loader parses.
 
 Stripe consumer settings are rejected with removal diagnostics; they are not migrated to Arkhai accounts, credentials, or transactions. Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
 

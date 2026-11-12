@@ -4,6 +4,12 @@ Base: e33521d02, draft PR #351. This slice completes task 3.1. Resume at
 3.2; the committed fixture also supplies the declaration qualification inputs
 for 3.3, which remains unchecked until the intervening task is complete.
 
+The declaration this records — a contract revision per mechanism with
+`published`/`proposed` status and a lane identity — was replaced before the change
+landed by per-mechanism qualified treatments and `setup`; see
+`openspec/specs/settlement-configuration/spec.md`, "Rate servicing is a composition
+capability". The sections below describe the evidence as observed.
+
 ## Changed behavior
 
 One composition-owned `RateServicing` object selects the adapter-required contract
@@ -63,8 +69,8 @@ make -C domains/bare_metal/storefront reinit
 Then open either runnable surface:
 
 ```sh
-(cd domains/vms/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/recurring_publication_probe.py vm)
-(cd domains/bare_metal/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/recurring_publication_probe.py bare)
+(cd domains/vms/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/recurring_publication_probe.py vm)
+(cd domains/bare_metal/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/recurring_publication_probe.py bare)
 ```
 
 Both commands were personally run. Readiness is the authenticated typed system

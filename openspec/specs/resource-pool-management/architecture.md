@@ -36,7 +36,7 @@ Declarative YAML import is an operator reconciliation surface rather than a seco
 
 Startup refuses stored state it cannot serve, because waiting does not repair it: a stored pool whose declarations are invalid, and a stored pool naming a provider no registered handler serves, each named with its pool and provider. Handlers are fixed by the build and every write refuses an unknown provider, so such a row comes only from outside the service's write paths, and no pool document can repair it; serving it would make every pool list, read, and export fail. Tolerating the row on reads with a problems field was rejected: it would add a pool wire field and an export entry no import accepts.
 
-Validation runs in the order of what each check needs to judge the request. The typed pool models in `kit/resource-pools-contracts` check what the request establishes by itself: mode and backing declarations, and the structure of the hold, SLA, listing-shape, asking-rate and pricing hints. A typed caller and the server therefore refuse a malformed individual write before dispatch or database work, and the server answers HTTP 422. The service checks what needs composition or stored state: handler registration and provider-owned configuration, which need the composed registry the contracts package may not import, and then provider and backing immutability. Those last two are one pure comparison of a stored pool and the proposed values, returning field-specific problems. Individual writes raise its first problem, and documents report every problem prefixed with the entry's submitted index, so the rule has one implementation on every path. Documents carry raw YAML rather than models, so they reuse the same contracts-owned checks with their structured paths and codes. A document with request problems is not compared against stored state, and any problem leaves the whole document unapplied: no entry, no omitted-pool disablement, and, at startup, no new digest. A path is not reordered, and no lookup is added, only to report a different error first.
+Validation runs in the order of what each check needs to judge the request. The typed pool models in `kit/resource-pools-contracts` check what the request establishes by itself: mode and backing declarations, and the structure of the hold, SLA, listing-shape, asking-rate, pricing and capacity-bound hints. A typed caller and the server therefore refuse a malformed individual write before dispatch or database work, and the server answers HTTP 422. The service checks what needs composition or stored state: handler registration and provider-owned configuration, which need the composed registry the contracts package may not import, and then provider and backing immutability. Those last two are one pure comparison of a stored pool and the proposed values, returning field-specific problems. Individual writes raise its first problem, and documents report every problem prefixed with the entry's submitted index, so the rule has one implementation on every path. Documents carry raw YAML rather than models, so they reuse the same contracts-owned checks with their structured paths and codes. A document with request problems is not compared against stored state, and any problem leaves the whole document unapplied: no entry, no omitted-pool disablement, and, at startup, no new digest. A path is not reordered, and no lookup is added, only to report a different error first.
 
 No pool is created implicitly, and no pool name is special: `default` is an ordinary pool, a document need not name it, and it may be disabled like any other. Migration creates no pool, because a migration's result depends only on code and stored data (see the deployment-state requirement "Service-owned migration history"). Startup imports contributed definitions, then the pool document, then seeds a fresh site, then checks stored declarations, then imports host definitions, then capacity definitions, so a site's pools exist with their declared providers before any host or declaration can name them. A configured pool document that is missing or invalid fails startup; the seed never stands in for it.
 
@@ -125,6 +125,27 @@ carries them) from a defective one (some pool lacks them). For the same reason a
 consumer reads them only through the shared resolver, and advertisement membership
 exists only on a resolved declaration: a raw read would turn an absent declaration
 into an empty one and erase that distinction.
+
+## Capacity bounds and listing terms
+
+A pool may state, per offering mode under `capacity_bounds`, the longest deal its
+listings sell (`max_duration_seconds`) and the last instant any lease may end
+(`available_until_utc`). They are publication hints a storefront resolves beneath its
+own override, not site policy: the site never sees commercial terms, holds only each
+lease's agreed end, and admits no deal on a bound. The pool authority validates them
+strictly anyway — an absolute bound must be a timezone-aware UTC instant, and a relative
+one an integer — because a storefront reading a malformed bound holds the pool rather
+than guessing, and refusing the write is cheaper than a held pool. The reading, its
+validation and the tier selection storefronts apply live in `capacity_bounds` in the
+contracts package, so the pool service and every storefront judge a bound by one rule.
+
+The contracts package also holds `listing_terms`, the resolver both compute
+storefronts read a listing's settlement clauses through, from their override down the
+pool's `pricing` hint for a model and for the whole pool to their configuration. It is a
+reader of a hint this package already reads, not pool policy: the pool authority keeps
+treating `pricing` values as the reading domain's to define, and the resolver takes the
+family that keys a model as data, so it names no market's vocabulary (see the
+[storefront publication architecture](../storefront-publication/architecture.md#one-source-for-settlement-clauses)).
 
 ## Current limits
 

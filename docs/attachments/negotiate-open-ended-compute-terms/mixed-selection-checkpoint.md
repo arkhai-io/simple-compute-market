@@ -19,8 +19,8 @@ make -C domains/bare_metal/storefront reinit
 Personally exercised entry points:
 
 ```sh
-(cd domains/vms/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/mixed_selection_probe.py vm)
-(cd domains/bare_metal/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/mixed_selection_probe.py bare)
+(cd domains/vms/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/mixed_selection_probe.py vm)
+(cd domains/bare_metal/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/mixed_selection_probe.py bare)
 ```
 
 Readiness is authenticated typed system status before site projections/publication. The published option bytes and listing bounds reach each buyer's own locked interpreter. Actual Typer commands run from selection, with controlled identity/discovery and proposed mechanism billing/presentation/capability ports. VM stops immediately after selected disclosure; bare metal stops at its approval factory. Neither selection command reaches negotiation, approval or provisioning effects.

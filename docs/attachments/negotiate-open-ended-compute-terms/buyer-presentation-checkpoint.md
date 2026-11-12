@@ -53,8 +53,8 @@ make -C domains/bare_metal/buyer reinit
 Personally exercised entry points, directly opening each diagnostic surface:
 
 ```sh
-(cd domains/vms/buyer && uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/buyer_presentation_probe.py vm)
-(cd domains/bare_metal/buyer && uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/buyer_presentation_probe.py bare)
+(cd domains/vms/buyer && uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/buyer_presentation_probe.py vm)
+(cd domains/bare_metal/buyer && uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/buyer_presentation_probe.py bare)
 ```
 
 Readiness: locked imports and actual mechanism registry construction pass before

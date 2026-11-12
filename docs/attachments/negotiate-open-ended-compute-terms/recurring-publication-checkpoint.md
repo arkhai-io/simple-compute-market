@@ -4,6 +4,13 @@ Observed from base 4be6803d4, draft PR #351. This slice completes task 2.3's
 publication contract and injected qualification, not live recurring servicing.
 Resume at 3.1.
 
+Three behaviours this records were replaced before the change landed: bare metal's
+`pricing.bare_metal.settlements` hint by the shared clause tiers, its reserved hold by
+no relative limit, and the refused fractional default by flooring; see
+`openspec/specs/storefront-publication/spec.md`, "Compute settlement clauses resolve
+from one shared source" and "Unbounded recurring candidates close independently". The
+sections below describe the evidence as observed.
+
 ## Behavior and ownership
 
 - A structured settlement clause may carry recurring with period,
@@ -76,8 +83,8 @@ From repository root:
 
 Then run either directly loadable invocation below:
 
-    (cd domains/vms/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/recurring_publication_probe.py vm)
-    (cd domains/bare_metal/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/recurring_publication_probe.py bare)
+    (cd domains/vms/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/recurring_publication_probe.py vm)
+    (cd domains/bare_metal/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/recurring_publication_probe.py bare)
 
 Both entry points were personally opened and run. Each confirms:
 

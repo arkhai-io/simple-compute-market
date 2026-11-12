@@ -4,6 +4,12 @@ Observed 2026-11-07 from base `752eaf468`, draft PR #351. This completes
 task 2.2 only. Recurring option publication, acceptance-time horizon enforcement
 and buyer disclosure remain in 2.3 onward.
 
+Bare metal's positive-maximum rule for reserved publication, recorded below, was
+replaced before the change landed: in both domains no positive maximum means no
+relative limit; see `openspec/specs/storefront-publication/spec.md`, "Unbounded
+recurring candidates close independently". The sections below describe the evidence
+as observed.
+
 ## Behavior
 
 - Pool HTTP writes and document validation recognize optional
@@ -60,8 +66,8 @@ From the repository root:
 make dist-ci
 make -C domains/vms/storefront reinit
 make -C domains/bare_metal/storefront reinit
-(cd domains/vms/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/capacity_bounds_probe.py vm)
-(cd domains/bare_metal/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/capacity_bounds_probe.py bare)
+(cd domains/vms/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/capacity_bounds_probe.py vm)
+(cd domains/bare_metal/storefront && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/capacity_bounds_probe.py bare)
 ```
 
 Both entry points were personally run. The probe confirms strict parsing,

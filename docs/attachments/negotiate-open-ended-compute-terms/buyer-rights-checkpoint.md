@@ -3,6 +3,11 @@
 Base: fea9455da. Draft PR #351; stacking on #349/#350 is unchanged.
 This slice completes 4.1a only. Restart at 4.1b; 4.1 remains unchecked.
 
+The single run-scoped waiver this records was replaced before the change landed by
+one waiver per refusal, with `--allow-unprotected-terms` as their shorthand; see
+`openspec/specs/buyer-orchestration/spec.md`, "Each default refusal has its own
+waiver". The sections below describe the evidence as observed.
+
 ## Behavior and boundary
 
 Both buyer compositions apply the same default rights recommendations that
@@ -56,8 +61,8 @@ Personally exercised entry points, each landing directly on its diagnostic
 selection/disclosure surface:
 
 ```sh
-(cd domains/vms/buyer && uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/buyer_terms_probe.py vm)
-(cd domains/bare_metal/buyer && uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/buyer_terms_probe.py bare)
+(cd domains/vms/buyer && uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/buyer_terms_probe.py vm)
+(cd domains/bare_metal/buyer && uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/buyer_terms_probe.py bare)
 ```
 
 Both replays select hosted once/on-demand/spot under the proposed context,

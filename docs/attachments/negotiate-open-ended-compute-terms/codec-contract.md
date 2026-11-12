@@ -3,7 +3,7 @@
 Observed 2026-11-06 on the stacked open-ended-terms branch. This is section 1's
 contract freeze and code-level first encounter, not recurring execution or a
 completed terms product. D2a retains monetary Agreement.amount. The implementation
-inputs are in `openspec/changes/negotiate-open-ended-compute-terms/dependency-contracts.md`.
+inputs are in `openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/dependency-contracts.md`.
 
 ## Setup and target
 
@@ -38,7 +38,7 @@ import runpy
 from pathlib import Path
 from arkhai_vms_buyer.settlement_stages import PaymentsBuyerStage
 
-probe = runpy.run_path('../../../openspec/changes/negotiate-open-ended-compute-terms/codec_probe.py')
+probe = runpy.run_path('../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/codec_probe.py')
 outcome, approval, publication = probe['probe']()
 PaymentsBuyerStage().validate_acceptance(outcome)
 approval.check(base64.b64decode(outcome.agreement_bytes), outcome.settlement_data)
@@ -50,14 +50,14 @@ PY
 import runpy
 from arkhai_bare_metal_buyer.settlement_stages import PaymentStage
 
-probe = runpy.run_path('../../../openspec/changes/negotiate-open-ended-compute-terms/codec_probe.py')
+probe = runpy.run_path('../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/codec_probe.py')
 outcome, approval, _ = probe['probe']()
 PaymentStage.validate_acceptance(outcome, approval)
 print('bare-metal pre-approval check: PASS')
 PY
 )
 (cd core/registry && uv run --frozen --no-sync python \
-  ../../openspec/changes/negotiate-open-ended-compute-terms/registry_codec_probe.py \
+  ../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/registry_codec_probe.py \
   /tmp/open-terms-publication.json)
 ```
 

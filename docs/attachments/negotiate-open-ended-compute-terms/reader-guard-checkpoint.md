@@ -47,8 +47,8 @@ removed on exit. These entry points were personally executed:
 
 ```sh
 make dist-ci
-(cd domains/vms/buyer && make reinit && uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/consumer_price_probe.py)
-(cd domains/vms/buyer && uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/acceptance_pin_probe.py)
+(cd domains/vms/buyer && make reinit && uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/consumer_price_probe.py)
+(cd domains/vms/buyer && uv run --frozen --no-sync python ../../../openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/acceptance_pin_probe.py)
 ```
 
 The reader probe derives/re-verifies a once mandate with exact `2**100 + 1`

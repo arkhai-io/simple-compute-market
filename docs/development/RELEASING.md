@@ -221,6 +221,14 @@ migration rules. Neither pre-1.0 allowance applies at or above 1.0.0.
 Incompatibility is signalled by the version numbers and the versioned
 contracts alone; no per-release list of incompatible changes is kept.
 
+Compatibility is owed to what a release has shipped. A decision made on the
+development branch and changed again before any release ships it affects no
+one, so revising it needs no compatibility path, migration or deprecation. A
+change to anything a release has shipped — its API, a wire format, a
+configuration key or a hint it reads — is judged under the rules above, so a key
+a release accepted keeps the meaning it had, or loses it only with the bump an
+incompatible change takes.
+
 A change bumps each package it changes at most once, measured against the
 package's version on the branch the change merges into: that is the version a
 release sees. A package already bumped on the change's branch is bumped again
