@@ -15,8 +15,7 @@ from typing import Any
 
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
-from market_core.schemas import settlement_option_schema
-from market_deal_lifecycle.terms import LifecycleTerms
+from market_core.schemas import SettlementOption, settlement_option_schema
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
 from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_term_timing
 from market_arkhai_payments.settlement_config import ARKHAI_PAYMENTS_MECHANISM

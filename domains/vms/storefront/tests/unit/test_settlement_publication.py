@@ -11,6 +11,10 @@ from market_settlement_runtime import (
     SettlementConfigurationRegistry,
     SettlementPublicationClause,
 )
+from market_core.schemas import SettlementOption, derive_settlement_option_id
+from market_settlement_runtime.terms_policy import (
+    DefaultSellerTermsPolicy, SellerTermsOffer, SellerTermsReview,
+)
 from pydantic import BaseModel, ConfigDict
 
 from market_storefront.settlement_composition import VmSettlementComposition
@@ -31,6 +35,12 @@ _STAGES = SettlementStageTable({
         completes_outside_settlement=False,
     ),
 })
+
+
+_OPTION_PARTS = dict(price={"asset": "usd", "rates": []}, settlement={"schema": "example.payment.v1"})
+_OPTION = SettlementOption(
+    option_id=derive_settlement_option_id(**_OPTION_PARTS, lifecycle=None), **_OPTION_PARTS,
+).model_dump(mode="json")
 
 
 class _Section(BaseModel):
@@ -149,6 +159,7 @@ def _composition(
             rate_preset_helpers={},
             rate_servicing=SimpleNamespace(require_option=lambda _option: None),
             disputes=RegistryDisputePolicy.from_document({}),
+            terms_policy=DefaultSellerTermsPolicy(),
             seller_stages=_STAGES,
         ),
         calls,
@@ -176,7 +187,7 @@ async def test_ready_mechanisms_are_built_in_priority_order(
         alkahest_enabled=alkahest_enabled,
     )
     resources = {
-        "example_options": [{"mechanism": "example.payment.v1"}],
+        "example_options": [_OPTION],
         "alkahest_escrows": [{"mechanism": "alkahest.v1"}],
     }
 
@@ -190,7 +201,7 @@ async def test_ready_mechanisms_are_built_in_priority_order(
         "example.payment.v1" if item == "example" else "alkahest.v1"
         for item in expected
     ]
-    assert options == ([{"mechanism": "example.payment.v1"}] if example_enabled else [])
+    assert options == ([_OPTION] if example_enabled else [])
     assert accepted == ([{"mechanism": "alkahest.v1"}] if alkahest_enabled else [])
 
 
@@ -199,7 +210,7 @@ async def test_ready_mechanisms_are_built_in_priority_order(
     ("example_ready", "alkahest_ready", "expected_options", "expected_escrows"),
     [
         (False, True, [], [{"mechanism": "alkahest.v1"}]),
-        (True, False, [{"mechanism": "example.payment.v1"}], []),
+        (True, False, [_OPTION], []),
     ],
 )
 async def test_one_unready_mechanism_does_not_hide_ready_peer(
@@ -214,7 +225,7 @@ async def test_one_unready_mechanism_does_not_hide_ready_peer(
     accepted, options, _statuses = await VmSettlementComposition.publication_artifacts(
         composition,
         {
-            "example_options": [{"mechanism": "example.payment.v1"}],
+            "example_options": [_OPTION],
             "alkahest_escrows": [{"mechanism": "alkahest.v1"}],
         },
     )
@@ -269,7 +280,7 @@ async def test_explicit_clauses_build_only_requested_mechanisms_in_clause_order(
     accepted, options, _statuses = await VmSettlementComposition.publication_artifacts(
         composition,
         {
-            "example_options": [{"mechanism": "example.payment.v1"}],
+            "example_options": [_OPTION],
             "alkahest_escrows": [{"mechanism": "alkahest.v1"}],
         },
         clauses=clauses,
@@ -279,7 +290,7 @@ async def test_explicit_clauses_build_only_requested_mechanisms_in_clause_order(
         "option:example.payment.v1",
         "option:alkahest.v1",
     ]
-    assert options == [{"mechanism": "example.payment.v1"}]
+    assert options == [_OPTION]
     assert accepted == [{"mechanism": "alkahest.v1"}]
 
 
@@ -385,3 +396,73 @@ async def test_clause_chain_is_available_during_alkahest_preflight() -> None:
 
     assert readiness[0].ready is True
     assert accepted == [{"mechanism": "alkahest.v1"}]
+
+
+def _lifecycle_option(*, delivery_deadline_seconds: int | None) -> dict:
+    lifecycle = {
+        "adjudication": {
+            "version": 1,
+            "dispute": {"interface": "dispute.example.v1", "origin": "https://disputes.example",
+                        "account": "adjudicator", "record_key": "record-key", "params": {}},
+            "dispute_window_seconds": 3600, "case_hold_max_seconds": None,
+        },
+        **({"delivery_deadline_seconds": delivery_deadline_seconds}
+           if delivery_deadline_seconds is not None else {}),
+    }
+    parts = dict(price={"asset": "usd", "rates": []},
+                 settlement={"schema": "example.payment.v1"}, lifecycle=lifecycle)
+    return SettlementOption(
+        option_id=derive_settlement_option_id(**parts), **parts,
+    ).model_dump(mode="json")
+
+
+@pytest.mark.asyncio
+async def test_the_default_terms_policy_publishes_every_option_and_reports_buyer_refusals():
+    composition, _calls = _composition(
+        priority=("example.payment.v1",), example_ready=True,
+        alkahest_ready=False, alkahest_enabled=False,
+    )
+    promised = _lifecycle_option(delivery_deadline_seconds=60)
+    unpromised = _lifecycle_option(delivery_deadline_seconds=None)
+    reported: list[dict] = []
+
+    _accepted, options, _statuses = await VmSettlementComposition.publication_artifacts(
+        composition,
+        {"example_options": [promised, unpromised], "publication_diagnostic": reported.append},
+    )
+
+    assert options == [promised, unpromised]
+    assert reported == [{
+        "code": "default_buyer_refusal",
+        "detail": "a default buyer refuses this option: no delivery deadline",
+        "mechanism": "example.payment.v1", "option_id": unpromised["option_id"],
+    }]
+
+
+@pytest.mark.asyncio
+async def test_a_refusing_terms_policy_withholds_only_the_option_it_refuses():
+    class DeadlineOnly(DefaultSellerTermsPolicy):
+        def review(self, offer: SellerTermsOffer) -> SellerTermsReview:
+            if offer.lifecycle is not None and offer.lifecycle.delivery_deadline_seconds is None:
+                return SellerTermsReview(refusals=("no deadline to promise",))
+            return SellerTermsReview()
+
+    composition, _calls = _composition(
+        priority=("example.payment.v1",), example_ready=True,
+        alkahest_ready=False, alkahest_enabled=False,
+    )
+    composition.terms_policy = DeadlineOnly()
+    promised = _lifecycle_option(delivery_deadline_seconds=60)
+    unpromised = _lifecycle_option(delivery_deadline_seconds=None)
+    reported: list[dict] = []
+
+    _accepted, options, _statuses = await VmSettlementComposition.publication_artifacts(
+        composition,
+        {"example_options": [unpromised, promised], "publication_diagnostic": reported.append},
+    )
+
+    assert options == [promised]
+    assert reported == [{
+        "code": "seller_terms_policy_refusal", "detail": "no deadline to promise",
+        "mechanism": "example.payment.v1", "option_id": unpromised["option_id"],
+    }]

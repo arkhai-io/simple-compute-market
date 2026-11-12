@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 from market_arkhai_payments import resolve_payments_api_key
 from market_identity import Ed25519Signer
+from market_settlement_runtime.terms_policy import terms_policy_selection
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 
 from arkhai_bare_metal_storefront.config import (
@@ -445,3 +446,18 @@ def test_administrators_are_every_subjects_principals(monkeypatch, tmp_path):
     principals = load_storefront_settings().administrator_principals()
 
     assert principals.identities == (ADMIN.identity, SELLER.identity)
+
+@pytest.mark.parametrize(("stated", "expected"), [
+    pytest.param(None, ("default", {}), id="unstated"),
+    pytest.param("default", ("default", {}), id="named"),
+    pytest.param({"name": "example", "penalty_periods": 6}, ("example", {"penalty_periods": 6}), id="table"),
+])
+def test_the_terms_policy_setting_selects_the_seller_policy(monkeypatch, tmp_path, stated, expected):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    if stated is not None:
+        document["terms_policy"] = stated
+    write_configuration(monkeypatch, tmp_path, document)
+
+    selection = terms_policy_selection(load_storefront_settings().model_dump())
+
+    assert (selection.name, dict(selection.settings)) == expected

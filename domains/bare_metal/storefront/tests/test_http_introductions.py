@@ -22,6 +22,9 @@ from market_identity import (
     TrustedIdentitySet,
 )
 from market_settlement_runtime import SettlementPublicationClause, derive_obligation_ref
+from market_settlement_runtime.terms_policy import (
+    DefaultSellerTermsPolicy, SellerTermsOffer, SellerTermsReview,
+)
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.migrations import migrate_storefront_database
@@ -283,6 +286,41 @@ async def test_contact_options_publish_through_the_composition() -> None:
     assert option["settlement"]["schema"] == CONTACT_MECHANISM
     assert option.get("price", {}).get("rates", []) == []
     assert "@capacity_broker" not in str(payload.settlement_options)
+
+
+async def test_a_seller_terms_policy_withholds_the_option_it_refuses() -> None:
+    class Withholding(DefaultSellerTermsPolicy):
+        def review(self, offer: SellerTermsOffer) -> SellerTermsReview:
+            return SellerTermsReview(refusals=("not published here",))
+
+    composition = BareMetalStorefrontSettlementComposition.from_raw_config(
+        {
+            "priority": [CONTACT_MECHANISM],
+            "contact": {
+                "enabled": True,
+                "contact_payload": dict(_SELLER_CONTACT),
+                "profiles": {"default": {"channel": "telegram", "terms": "Net-30."}},
+            },
+        },
+        resources={"claimant_principal": SELLER_SIGNER.identity},
+        terms_policy=Withholding(),
+    )
+    reported: list[dict] = []
+    with pytest.raises(NoSettlementOption):
+        await composition.publication_payload(
+            candidate={"host_id": "machine-1", "site_id": "default"},
+            clauses=[
+                SettlementPublicationClause(
+                    mechanism=CONTACT_MECHANISM,
+                    asset="introduction",
+                    mechanism_input={"profile": "default"},
+                )
+            ],
+            publication_diagnostic=reported.append,
+        )
+    assert [(item["code"], item["detail"]) for item in reported] == [
+        ("seller_terms_policy_refusal", "not published here"),
+    ]
 
 
 async def test_introduction_start_reveals_and_completes(tmp_path) -> None:

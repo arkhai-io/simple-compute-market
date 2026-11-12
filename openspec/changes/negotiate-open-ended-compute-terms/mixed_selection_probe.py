@@ -26,7 +26,7 @@ from market_core.schemas import AgreedPrice, PriceBasis, SettlementOption
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_deal_lifecycle.configuration import DisputeEntry
 from market_deal_lifecycle.selection import AuthoritySelection
-from market_settlement_runtime.buyer_terms import BuyerTermsPolicy
+from market_settlement_runtime.buyer_terms import BuyerTermsAdmission
 from typer.testing import CliRunner
 from market_settlement_runtime import SettlementConfigurationRegistry
 from market_settlement_runtime.presentation import PaymentPresentation, amount_rate_quote
@@ -99,7 +99,7 @@ def consume(domain, path):
         return replace(value, has_stoppable_part=True,
                        supported_partial_periods=frozenset({"charged", "returned"})) if mechanism == MECHANISM else value
 
-    rights = BuyerTermsPolicy(AuthoritySelection(
+    rights = BuyerTermsAdmission(AuthoritySelection(
         {URL: (entry,)}, contexts={MECHANISM: context(MECHANISM)},
     ))
     for option in options:

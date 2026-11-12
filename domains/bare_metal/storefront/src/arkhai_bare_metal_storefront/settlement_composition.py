@@ -9,7 +9,6 @@ import logging
 from types import MappingProxyType
 from typing import Any
 
-from market_deal_lifecycle.terms import LifecycleTerms
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
 from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_term_timing
 from market_settlement_runtime.horizon import RateTermProjections
