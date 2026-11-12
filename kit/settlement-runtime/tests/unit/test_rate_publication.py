@@ -41,10 +41,12 @@ def _declared(*treatments: str, setup: bool = False) -> RateServicing:
 class FixtureHelper:
     """An injected encoder pricing 900-second periods at 625000 base units."""
 
-    def __init__(self, *, supported=frozenset({"charged", "returned"}), setup=False) -> None:
+    def __init__(self, *, supported=frozenset({"charged", "returned"}), setup=False, deadline=None) -> None:
         self.requests = []
         self.supported = supported
         self.setup = setup
+        # The delivery deadline the clause configures, as the mechanism reads it.
+        self.deadline = deadline
 
     def pricing(self, clause, authorities):
         return RatePresetPricing(
@@ -59,6 +61,7 @@ class FixtureHelper:
                 supported_partial_periods=self.supported,
             ),
             supports_setup_delivery_end=self.setup,
+            delivery_deadline_seconds=self.deadline,
         )
 
     def build(self, request):
@@ -253,6 +256,42 @@ def test_a_recurring_clause_is_derived_through_its_helper_and_never_the_registry
     assert diagnostics == []
     registry.build_option.assert_not_called()
     assert helper.requests[0].lifecycle.delivery_deadline_seconds == 1200
+
+
+@pytest.mark.parametrize(("pool", "clause", "published"), [
+    (1200, 600, 1200),
+    (None, 600, 600),
+], ids=["pool-wins", "clause-fallback"])
+def test_a_recurring_option_publishes_the_pool_s_deadline_else_its_clause_s(pool, clause, published):
+    helper = FixtureHelper(deadline=clause)
+    artifacts, diagnostics = _publish(_step(helper=helper), _clause(), deadline=pool)
+    (option,) = artifacts.settlement_options
+    assert option["lifecycle"]["delivery_deadline_seconds"] == published
+    assert diagnostics == []
+
+
+def test_a_recurring_option_with_neither_deadline_publishes_with_its_diagnostic():
+    artifacts, diagnostics = _publish(_step(helper=FixtureHelper()), _clause(), deadline=None)
+    (option,) = artifacts.settlement_options
+    assert "delivery_deadline_seconds" not in option["lifecycle"]
+    assert [entry["detail"] for entry in diagnostics] == [
+        "a default buyer refuses this option: no delivery deadline",
+    ]
+
+
+def test_a_once_clause_s_builder_is_told_the_pool_supplies_no_deadline():
+    # The clause's own deadline is its mechanism's to read (its option builder's).
+    registry = MagicMock()
+    registry.build_option.return_value = {"settlement_options": [_once_option()]}
+    clause = SimpleNamespace(mechanism=MECHANISM, asset="USD/6", recurring=None)
+    _publish(_step(registry=registry), clause, deadline=None)
+    assert registry.build_option.call_args.kwargs["resources"]["delivery_deadline_seconds"] is None
+
+
+@pytest.mark.parametrize("deadline", [0, -1, 1.5, "600"])
+def test_a_clause_deadline_that_is_not_positive_whole_seconds_is_refused(deadline):
+    with pytest.raises(ValueError, match="delivery_deadline_seconds"):
+        FixtureHelper(deadline=deadline).pricing(_clause(), [ENTRY])
 
 
 @pytest.mark.parametrize(("changes", "code"), [

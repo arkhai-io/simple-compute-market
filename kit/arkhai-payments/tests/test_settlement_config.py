@@ -277,6 +277,39 @@ def test_publication_builder_preserves_option_identity_and_rate_units(
     }
 
 
+@pytest.mark.parametrize(("compute", "pool", "configured", "published"), [
+    (True, None, 900, 900),
+    (True, 1200, 900, 1200),
+    (True, 1200, None, 1200),
+    (True, None, None, None),
+    # Only a compute option takes the pool's deadline.
+    (False, 1200, 900, 900),
+    (False, 1200, None, None),
+], ids=["compute-clause", "compute-pool-wins", "compute-pool", "compute-neither",
+        "non-compute-clause", "non-compute-none"])
+def test_publication_builder_publishes_the_pool_deadline_else_the_clause_s(
+    monkeypatch: pytest.MonkeyPatch, compute, pool, configured, published,
+) -> None:
+    monkeypatch.setenv(API_KEY_ENV, "test-secret")
+    config = _config()
+    readiness = asyncio.run(arkhai_payments_preflight(config, {}, "seller"))
+    clause = SettlementPublicationClause.model_validate({
+        "mechanism": ARKHAI_PAYMENTS_MECHANISM, "asset": "USD/2", "rate": "1.25", "per": "hour",
+        "mechanism_input": {
+            "payee_account": PAYEE, "asset": "USD/2", "window": "P7D",
+            "dispute_window_seconds": 604800,
+            **({"delivery_deadline_seconds": configured} if configured is not None else {}),
+        },
+    })
+    resources = {**_resources(clause), "compute": compute, "delivery_deadline_seconds": pool}
+
+    (option,) = arkhai_payments_option_builder(config, readiness, resources, "seller")["settlement_options"]
+
+    assert option["lifecycle"].get("delivery_deadline_seconds") == published
+    # The deadline is a lifecycle term, never a settlement parameter.
+    assert "delivery_deadline_seconds" not in option["settlement"]
+
+
 def test_publication_builder_rejects_precision_loss_and_fractional_base_units(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

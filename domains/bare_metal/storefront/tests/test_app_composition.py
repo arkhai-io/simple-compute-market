@@ -20,6 +20,7 @@ from core_storefront.identity_authority import (
 )
 
 from market_identity import Eip191Signer, TrustedIdentitySet
+from market_settlement_runtime import SettlementPublicationClause
 from settlement_compositions import alkahest_composition
 from arkhai_bare_metal_storefront.alkahest_lifecycle import BareMetalAlkahestLifecycle
 from arkhai_bare_metal_storefront.settlement_stages import DeclinedServicing
@@ -984,6 +985,49 @@ def test_the_configured_penalty_multiple_is_the_compositions(monkeypatch, tmp_pa
     composition = _configured_runtime(monkeypatch, tmp_path, document).settlement_composition
 
     assert composition.default_penalty_periods == 6
+
+
+@pytest.mark.parametrize("pool_deadline", [900, None], ids=["pool", "none"])
+async def test_the_pool_port_s_deadline_for_the_candidate_reaches_the_option_builder(
+    monkeypatch, pool_deadline,
+):
+    """The composition looks the pool's deadline up for the candidate's site and
+    pool and hands it, or ``None``, to the option builder with the compute flag.
+    What a builder does with ``None`` is its mechanism's, tested there."""
+    lookups: list[tuple[str, str | None]] = []
+
+    def deadline(site: str, pool: str | None) -> int | None:
+        lookups.append((site, pool))
+        return pool_deadline
+
+    composition = replace(
+        BareMetalStorefrontSettlementComposition.from_raw_config(
+            {"schema_version": 1, "priority": ["contact-exchange.v1"], "contact": CONTACT_SECTION},
+            resources={"claimant_principal": COMPOSITION_SIGNER.identity},
+        ),
+        delivery_deadline_for_pool=deadline,
+    )
+    built: list[dict] = []
+    build_option = composition.registry.build_option
+
+    def recording(*args, resources, **kwargs):
+        built.append(dict(resources))
+        return build_option(*args, resources=resources, **kwargs)
+
+    monkeypatch.setattr(composition.registry, "build_option", recording)
+
+    await composition.publication_payload(
+        candidate={"host_id": "machine-1", "site_id": "site-a", "pool_id": "pool-1"},
+        clauses=[SettlementPublicationClause(
+            mechanism="contact-exchange.v1", asset="introduction",
+            mechanism_input={"profile": "default"},
+        )],
+        max_duration_seconds=3600,
+    )
+
+    assert lookups == [("site-a", "pool-1")]
+    (resources,) = built
+    assert (resources["compute"], resources["delivery_deadline_seconds"]) == (True, pool_deadline)
 
 
 def test_a_contact_only_root_composes_its_obligation_worker(monkeypatch, tmp_path):

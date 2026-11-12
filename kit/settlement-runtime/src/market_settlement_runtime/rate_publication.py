@@ -55,19 +55,26 @@ class RecurringPublicationPreset(BaseModel):
 
 @dataclass(frozen=True)
 class RatePresetPricing:
-    """Mechanism-owned pricing and enforcement facts for a proposed preset."""
+    """Mechanism-owned pricing and enforcement facts for a proposed preset.
+
+    ``delivery_deadline_seconds`` is the deadline the clause itself configures,
+    read by the mechanism that owns the clause's input; the pool's effective
+    deadline, when the composition supplies one, takes precedence over it.
+    """
 
     quote: AgreedPrice
     approval_window_seconds: int
     adjudication: Adjudication
     context: TermContext
     supports_setup_delivery_end: bool = False
+    delivery_deadline_seconds: int | None = None
 
     def __post_init__(self) -> None:
         if self.quote.unit != "per_period":
             raise ValueError("recurring preset requires a per-period quote")
         if type(self.approval_window_seconds) is not int or self.approval_window_seconds <= 0:
             raise ValueError("approval window must be positive whole seconds")
+        effective_delivery_deadline(self.delivery_deadline_seconds)
 
 
 @dataclass(frozen=True)
@@ -96,9 +103,10 @@ class RatePresetHelper(Protocol):
 
 
 def effective_delivery_deadline(value: Any) -> int | None:
-    """Refuse malformed pool-port facts rather than advertise a guessed promise."""
+    """Refuse a malformed deadline, the pool's or a clause's, rather than
+    advertise a guessed promise."""
     if value is not None and (type(value) is not int or value <= 0):
-        raise ValueError("effective delivery_deadline_seconds must be a positive integer")
+        raise ValueError("delivery_deadline_seconds must be a positive integer")
     return value
 
 
@@ -156,6 +164,10 @@ def derive_rate_preset(
     deadline = effective_delivery_deadline(delivery_deadline_seconds)
     try:
         pricing = helper.pricing(clause, authorities)
+        # The pool's effective deadline, when supplied, wins over the clause's
+        # own, so the published term never disagrees with what the site enforces.
+        if deadline is None:
+            deadline = pricing.delivery_deadline_seconds
         selected_authority = next((entry for entry in authorities if entry.authority == pricing.adjudication.dispute), None)
         if selected_authority is None or selected_authority.requirements != pricing.context.authority:
             raise ValueError("preset helper selected an unoffered dispute authority or different advertisement")
@@ -273,8 +285,14 @@ class ClausePublication:
         builds is then admitted against the servicing declaration and judged
         against the default buyer's policy, every refusal reported through
         ``diagnose`` while the clause's other options and the candidate's other
-        clauses publish. ``delivery_deadline`` looks up the effective deadline
-        the composition supplies for the candidate.
+        clauses publish. ``delivery_deadline`` looks up the pool's effective
+        deadline the composition supplies for the candidate, or ``None``. A
+        supplied value takes precedence over the deadline a clause configures,
+        which only the clause's mechanism reads from the clause's input: the
+        option builder receives the pool's value as its
+        ``delivery_deadline_seconds`` resource and falls back to its clause's
+        own, and a preset helper returns its clause's own through
+        ``RatePresetPricing``.
         """
         deadline = effective_delivery_deadline(delivery_deadline())
         if clause is not None and clause.recurring is not None:

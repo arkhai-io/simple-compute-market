@@ -83,6 +83,8 @@ do not express these products across mechanisms or bound them by an absolute dat
   setup, and its three doors.
 - `buyer-orchestration`: optional recurring horizon, pre-approval display from the
   mechanism's presenter, per-term waivers and duration flags.
+- `deal-lifecycle`: a compute option whose site enforces no delivery deadline carries
+  its settlement clause's configured one, rather than none (D3's deadline source).
 
 ### New Capabilities
 
@@ -159,8 +161,9 @@ upgrade step covers. v0.3.0 VM configurations and hints keep their meaning.
   authority description in `docs/development/ARCHITECTURE.md`.
 - D3: shared-codec consumption, the deadline's source and the configurable penalty
   multiple → `openspec/specs/settlement-configuration/spec.md` and
-  `openspec/specs/storefront-publication/spec.md`; codec and authority ownership
-  remain in `openspec/specs/deal-lifecycle/spec.md`.
+  `openspec/specs/storefront-publication/spec.md`, and the clause fallback into
+  `openspec/specs/deal-lifecycle/spec.md`'s two delivery-deadline requirements; codec
+  and authority ownership remain there.
 - D4: lifecycle placement → `openspec/specs/settlement-configuration/spec.md`,
   referencing the foundation-owned `openspec/specs/deal-lifecycle/spec.md`.
 - D5: listing bounds, tier resolution, the accepted horizon, the acceptance hook, the

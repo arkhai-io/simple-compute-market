@@ -101,6 +101,7 @@ def _option_for(mechanism_input: dict[str, Any]) -> SimpleNamespace:
                 "dispute_window_seconds": mechanism_input["dispute_window_seconds"],
                 "case_hold_max_seconds": mechanism_input.get("case_hold_max_seconds"),
             },
+            "delivery_deadline_seconds": mechanism_input["delivery_deadline_seconds"],
         },
         price_asset="USD/6",
         price_rates=[RateValue(field="amount", per="hour", value=1_000_000)],
@@ -146,10 +147,10 @@ def test_the_vm_listing_refuses_an_invalid_delivery_allowance(configure, value) 
         payments_settlement(seller_account=SELLER_ACCOUNT, dispute_window="P7D")
 
 
-def test_the_vm_purchase_refuses_an_unexpected_delivery_promise(configure) -> None:
+def test_the_vm_purchase_refuses_an_option_with_another_delivery_allowance(configure) -> None:
     configure(VM_DELIVERY_DEADLINE_SECONDS=900, DISPUTE_WINDOW_SECONDS=960)
-    option = _option_for({"window": "P7D", "dispute_window_seconds": 960})
-    option.lifecycle["delivery_deadline_seconds"] = 300
+    option = _option_for({"window": "P7D", "dispute_window_seconds": 960,
+                          "delivery_deadline_seconds": 300})
     with pytest.raises(AssertionError):
         _vm_driver().check_payments_option(option)
 

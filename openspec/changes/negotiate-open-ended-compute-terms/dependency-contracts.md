@@ -111,9 +111,17 @@ the authority against the composition's offered advertisement, derives the
 penalty recommendation/runway and validates lifecycle capabilities before build.
 It then refuses changed mechanism, asset, period, reserve or lifecycle bytes.
 Both compositions expose `rate_preset_helpers` and `delivery_deadline_for_pool`.
-The composition supplies the deadline: that port's value when it gives one, else the
-payments clause's configured `delivery_deadline_seconds`; the helper receives the
-resolved value through `derive_rate_preset` and needs nothing new.
+The deadline is that port's value when it gives one, else the payments clause's
+configured `delivery_deadline_seconds`. The clause's value sits in its
+mechanism-owned input, which neutral publication never parses, so the mechanism
+reads it: the once builder from the clause when the `delivery_deadline_seconds`
+resource is `None`, and a preset helper by returning it as
+`RatePresetPricing.delivery_deadline_seconds` (default `None`), which
+`derive_rate_preset` uses only when the port gives none. What spot's branch must
+follow: its `PaymentsRatePresetHelper.pricing` passes
+`delivery_deadline_seconds=params.delivery_deadline_seconds`; without it a recurring
+option takes only the pool's deadline. The field is additive, so the helper is
+otherwise unchanged.
 The structured clause's `recurring` request is absent for once publication;
 its payer/payee notices derive the class rather than storing one. Servicing
 selection now gates this seam through each composition's `rate_servicing` object;

@@ -57,6 +57,7 @@ from tests.publication_app import (
     settlement_clause,
 )
 from tests.recurring_world import MECHANISM, PAYEE, recurring_world, undeclared
+from tests.recurring_world import clauses as recurring_clauses
 
 pytestmark = pytest.mark.asyncio
 
@@ -2244,6 +2245,31 @@ async def test_an_on_demand_option_stating_no_penalty_publishes_the_configured_m
         for option in _recurring(listing["settlement_options"])
     }
     assert penalties == {False: str(625000 * 6), True: None}
+
+
+@pytest.mark.parametrize(("clause_deadline", "refused"), [(900, 0), (None, 3)],
+                         ids=["clause-configured", "neither"])
+async def test_a_clause_s_deadline_publishes_where_the_pool_supplies_none(
+    tmp_path, clause_deadline, refused,
+):
+    """With no pool deadline, each payment option, once or recurring, publishes the
+    deadline its clause configures and no default buyer's refusal is reported; a
+    clause configuring none publishes no deadline, and each payment option is
+    reported as refused by a default buyer for lacking one."""
+    async with recurring_world(
+        tmp_path, pool_deadline=None, published=recurring_clauses(delivery_deadline_seconds=clause_deadline),
+    ) as world:
+        report = await world.publish()
+        validate_cycle_report(report)
+        ((_listing_id, listing),) = (await _listings(world.app)).items()
+
+    payments = [option for option in listing["settlement_options"]
+                if option["settlement"]["schema"] == MECHANISM]
+    assert len(payments) == 3
+    assert {option["lifecycle"].get("delivery_deadline_seconds") for option in payments} == {clause_deadline}
+    refusals = [item for item in report["actions"] if item.get("reason") == "default_buyer_refusal"]
+    assert len(refusals) == refused
+    assert all(item["detail"].endswith("no delivery deadline") for item in refusals)
 
 
 def _negotiation_rows(db) -> list[tuple]:

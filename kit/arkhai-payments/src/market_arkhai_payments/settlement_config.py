@@ -431,16 +431,20 @@ def arkhai_payments_option_builder(
     if entry is None:
         raise ValueError("no offered dispute authority advertises arkhai.payments.v1")
     AccountId.model_validate(entry.account)
+    # A compute option's deadline is the pool's effective one when the
+    # composition supplies it, so the published term never disagrees with what
+    # the site enforces; otherwise the clause's own, which the seller's servicing
+    # journal files non-delivery at. A compute option with neither publishes
+    # without the term, and the caller reports that a default buyer refuses it.
+    pool_deadline = resources.get("delivery_deadline_seconds") if resources.get("compute") else None
+    deadline = pool_deadline if pool_deadline is not None else params.delivery_deadline_seconds
     lifecycle = LifecycleTerms.model_validate({
         "adjudication": Adjudication(
             version=1, dispute=entry.authority,
             dispute_window_seconds=params.dispute_window_seconds,
             case_hold_max_seconds=params.case_hold_max_seconds,
         ),
-        **({"delivery_deadline_seconds": resources.get("delivery_deadline_seconds")}
-           if resources.get("compute") and resources.get("delivery_deadline_seconds") is not None else
-           {"delivery_deadline_seconds": params.delivery_deadline_seconds}
-           if not resources.get("compute") and params.delivery_deadline_seconds is not None else {}),
+        **({"delivery_deadline_seconds": deadline} if deadline is not None else {}),
     })
     validate_terms(encode_terms(lifecycle), TermContext(
         mechanism=ARKHAI_PAYMENTS_MECHANISM, has_adapter=True,

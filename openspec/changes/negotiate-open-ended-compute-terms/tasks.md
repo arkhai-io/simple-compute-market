@@ -16,8 +16,8 @@ The owner's record of round 1 (`reviews/01-implementation-owner.md`) stood in fo
 the design review this change never had; its decisions are in `design.md` D1–D12, and
 the code they need, with review 04's F1 and F2, is round 2: first planned as section 5,
 then split at the owner's direction into sections 5–12, one session each but 5 and 6
-together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–7
-are done; implementation resumes at section 8. Verification levels follow `docs/development/TESTING.md`;
+together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–8
+are done; implementation resumes at section 9. Verification levels follow `docs/development/TESTING.md`;
 every behaviour this change adds gets permanent tests at the level it assigns (owner
 record 01, R2).
 
@@ -1157,19 +1157,42 @@ Delivers D3's deadline source (R21) and returns both reserved-payment drivers to
 protected purchases (R22). Touches `kit/arkhai-payments`, the shared per-clause step's
 deadline parameter in both compositions, and `e2e-tests`.
 
-- [ ] 8.1 **The deadline's source (D3; R21), from 5.6:** the composition supplies the
+- [x] 8.1 **The deadline's source (D3; R21), from 5.6:** the composition supplies the
   deadline to the shared step — the pool port's value when it gives one
   (`delivery_deadline_for_pool`), else the payments clause's configured
   `delivery_deadline_seconds`; `arkhai_payments_option_builder` in
   `kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py` reads it for
   compute options again. A pool value takes precedence over the clause's.
-- [ ] 8.2 **The protected E2E purchases (R22), from 5.6:** both reserved-payment drivers
+  Done (2026-11-12). The clause's value is in its mechanism-owned input, which the
+  shared step never parses, so the precedence sits where the mechanism reads it
+  (recorded in `design.md` D3): `arkhai_payments_option_builder` takes the
+  `delivery_deadline_seconds` resource (the pool's, which the step passes) for a compute
+  option when it is not `None`, else its clause's own; a non-compute option still takes
+  only its clause's. For recurring clauses, `RatePresetPricing` gains
+  `delivery_deadline_seconds` (default `None`, refused unless positive whole seconds),
+  the clause's value as the helper reads it, which `derive_rate_preset` uses only when
+  the pool gives none. Neither composition changed: both already pass their
+  `delivery_deadline_for_pool` bound to the candidate's site and pool. This adds a
+  field to an interface spot consumes (`origin/spot-deals`' `PaymentsRatePresetHelper`
+  constructs `RatePresetPricing` positionally for its first four fields, so the
+  defaulted field does not break it); `dependency-contracts.md`'s servicing handoff
+  names the one line spot's helper must add.
+- [x] 8.2 **The protected E2E purchases (R22), from 5.6:** both reserved-payment drivers
   (`e2e-tests/tests/e2e/roles/scenarios/vms/purchase_driver.py`,
   `e2e-tests/tests/e2e/roles/scenarios/bare_metal/purchase_driver.py`) drop
   `--allow-unprotected-terms` and assert that the published `delivery_deadline_seconds`
   equals the configured value; `e2e-tests/tests/unit/test_dispute_coverage.py` returns
   to its earlier fixtures (task 4.4's reversal).
-- [ ] 8.3 **Permanent tests (R2):** unit: the payments builder emitting the configured
+  Done (2026-11-12): both drivers no longer pass `--allow-unprotected-terms` and again
+  assert `option.lifecycle["delivery_deadline_seconds"]` equals the configured value
+  (VM: `delivery_deadline_seconds()`, the lane's `VM_DELIVERY_DEADLINE_SECONDS`; bare
+  metal: `DELIVERY_DEADLINE_SECONDS`, which its pool override's payments clause states);
+  `test_dispute_coverage.py`'s `_option_for` again publishes the clause's deadline and
+  its refusal case is again an option with another allowance. `git diff 6f86ac5e6~1 --
+  e2e-tests/tests/` is empty: the three files are as they were before round 1. In both
+  lanes the deadline now publishes through 8.1's clause fallback, since no deployed
+  composition supplies a pool deadline.
+- [x] 8.3 **Permanent tests (R2):** unit: the payments builder emitting the configured
   deadline on a compute option and none where unconfigured
   (`kit/arkhai-payments/tests`); the deadline's resolution in both compositions — pool
   value, clause fallback, neither — through the shared step's lookup
@@ -1178,7 +1201,42 @@ deadline parameter in both compositions, and `e2e-tests`.
   `test_vm_purchase_driver.py`). Application integration through each storefront's typed
   client: a configured clause publishes its deadline on a hosted compute option and a
   default buyer's refusal no longer fires.
-- [ ] 8.4 **Verify:** `make dist`, then `make -C kit/arkhai-payments test` (unit),
+  Done (2026-11-12). Unit, `kit/arkhai-payments/tests/test_settlement_config.py`
+  (`arkhai_payments_option_builder` called directly):
+  `test_publication_builder_publishes_the_pool_deadline_else_the_clause_s` — a compute
+  option takes the clause's 900 with no pool value, the pool's 1200 over the clause's,
+  the pool's alone, and neither; a non-compute option takes its clause's, never the
+  pool's; the deadline is never a settlement parameter. Unit,
+  `kit/settlement-runtime/tests/unit/test_rate_publication.py` (the step with a
+  `MagicMock` registry; `FixtureHelper` gains a clause `deadline`): a recurring option
+  publishes the pool's 1200 over the clause's 600, else the clause's 600; with neither
+  it publishes without the term and with the default buyer's "no delivery deadline"
+  diagnostic; a once clause's builder is handed `None` when the pool gives none; a
+  clause deadline of 0, -1, 1.5 or `"600"` is refused by `RatePresetPricing`. Unit,
+  each composition's lookup: VM `tests/unit/test_settlement_publication.py` and bare
+  metal `tests/test_app_composition.py`,
+  `test_the_pool_port_s_deadline_for_the_candidate_reaches_the_option_builder` — the
+  composition calls `delivery_deadline_for_pool` once with the candidate's site and pool
+  and hands its value, or `None`, to the registry's builder with `compute` set (VM over
+  the file's namespace composition with `build_option` replaced; bare metal through
+  `from_raw_config` over a contact root, `build_option` wrapped). This departs from
+  the plan's line: the composition unit tests prove only the pool's value or `None`
+  reaching the builder, since the clause fallback is the mechanism's, not the
+  composition's; the fallback and the neither case per domain are the integration
+  cases' below, and the payments builder's own matrix above. The e2e unit suites
+  (`make test-e2e-unit`) cover 8.2's fixtures. Application integration through each
+  storefront's typed client over its `tests/recurring_world.py`, which gains
+  `pool_deadline` (bare metal also `clause_deadline`; VM's `clauses()` takes the
+  deadline) and whose fixture helper returns the clause's deadline as a mechanism's
+  would: VM `tests/integration/test_publication_loop.py` and bare-metal
+  `tests/test_http_publication_rates.py`,
+  `test_a_clause_s_deadline_publishes_where_the_pool_supplies_none` — with no pool
+  deadline, the once, on-demand and spot payment options each publish their clause's
+  900 and the cycle reports no `default_buyer_refusal`; with no clause deadline either,
+  none carries the term and the cycle reports three. The once option there is built by
+  the real payments builder; the recurring ones by the world's fixture helper, since no
+  installed mechanism supplies one.
+- [x] 8.4 **Verify:** `make dist`, then `make -C kit/arkhai-payments test` (unit),
   `make -C kit/settlement-runtime test` (unit and library integration),
   `make -C domains/vms/storefront test`,
   `make -C domains/bare_metal/storefront test`, `make test-e2e-unit` (unit),
@@ -1187,6 +1245,65 @@ deadline parameter in both compositions, and `e2e-tests`.
   `bare_metal/test_bare_metal_payment_deal.py` run the protected purchases and assert the
   published deadline; validation's pipeline lanes (e2e-vm, e2e-bare-metal) are the
   evidence for this section.
+  Done (2026-11-12), after `make dist`: `make -C kit/arkhai-payments test` (unit, with
+  mypy, vectors and generated-model checks) 227 passed; `make -C kit/settlement-runtime
+  test` (unit and library integration) 258 passed, rerun after the compliance fixes;
+  `make -C domains/vms/storefront test` unit 1190 passed, 1 skipped, application
+  integration 582 passed; `make -C domains/bare_metal/storefront test` (unit and
+  application integration) 624 passed, rerun on the final code after a fresh `make
+  dist`; `make test-e2e-unit` (unit) 896 passed, 1 skipped; `make check-comment-hygiene`
+  and `make check-doc-citations CHANGE=negotiate-open-ended-compute-terms` passed;
+  `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms` on the
+  final state passed every hook — `after-functional-change` exit 0 (nothing rebuilt),
+  `pre-commit-functional` exit 0 (`make check-packaging` and the whole `make test`),
+  `pre-commit` exit 0 (index, tasks, skills, strict OpenSpec validation including the
+  new `deal-lifecycle` delta, `make check-repository`). End-to-end confirmed as stated:
+  the two purchase scenarios drive the drivers 8.2 restored, so they buy without a
+  waiver and assert the published deadline, which in both lanes is the clause's (no
+  deployed composition wires the pool port); validation's e2e-vm and e2e-bare-metal
+  lanes are the evidence. No marker exercises a pool-supplied deadline or a recurring
+  option's. No `Owed by validation:` evidence: validation dispatches those lanes itself,
+  and no CI workflow a push alone produces bears on this section.
+
+### Section 8 verification and handoff (2026-11-12)
+
+- The fresh-context compliance check found one spec conflict (below), change documents
+  still saying the composition supplies the clause's deadline (D3, D9, the
+  "Reserved-purchase E2E" paragraph, the storefront-publication delta's title), a
+  "yet" in both recurring worlds' docstrings, stale or ambiguous docstrings
+  (`effective_delivery_deadline`, `ClausePublication.publish`, both composition tests)
+  and an 8.3 note not saying it departs from its plan line; all fixed, and its re-check
+  found each resolved and the new delta's text and scenarios complete. Declined: its
+  inability to confirm spot's positional `RatePresetPricing` call, which `git show
+  origin/spot-deals:kit/arkhai-payments/src/market_arkhai_payments/presets.py` confirms.
+  `scripts/change-workflow openspec validate … --strict` was denied in this step;
+  `pre-commit`'s own strict validation stood in for it.
+- Outside the plan, found by the compliance check: the permanent
+  `openspec/specs/deal-lifecycle/spec.md` required a compute option to omit the deadline
+  wherever its site enforces none, which R21's clause fallback contradicts. The change
+  now carries a MODIFIED `deal-lifecycle` delta of its two delivery-deadline
+  requirements; `proposal.md`, D3's promotion row and task 13.9 name it. The round's
+  review should confirm that amending this foundation-owned requirement is what R21
+  meant; R21's own text names only storefront-publication and settlement-configuration.
+  A MODIFIED delta keeps the requirement's title, "…is the site's availability term",
+  which now names only half the rule; a RENAMED entry would fix it, for closeout to
+  weigh.
+- A deviation for the round's triage: R21's up-stack note says spot's helper "needs
+  nothing new". It needs one line here — returning its clause's deadline through
+  `RatePresetPricing.delivery_deadline_seconds` — because the shared step does not parse
+  a mechanism's clause input (D3 records the rejected alternative, the step reading
+  `mechanism_input["delivery_deadline_seconds"]`). Without that line a hosted recurring
+  option takes only the pool's deadline. `dependency-contracts.md` names the line.
+- Versions: `kit/arkhai-payments` (0.6.2) and `kit/settlement-runtime` (0.8.0) are
+  unbumped against `dev`, though both changed here and in round 1; section 6's handoff
+  already asks the triage to confirm whether 0.8.0 is released, and the same question
+  holds for 0.6.2. The repository's version-bump check does not settle it: it refuses
+  only a version moved by more than one step and leaves an unbumped package unchecked.
+- For section 9: nothing in section 8 touches the clause resolver; the bare-metal
+  `reserved_lease_bound_missing` hold still sits in `publication_payload` before the
+  step's call. Both recurring worlds now take `pool_deadline` (bare metal also
+  `clause_deadline`; VM's `clauses()` takes a deadline), and their fixture helpers read
+  a clause's `delivery_deadline_seconds` as a mechanism would.
 
 ## 9. One clause source and one reserved-bound rule
 
@@ -1381,8 +1498,8 @@ anything requiring code returns to implementation. Former numbers 6.1–6.11 are
   `[pricing].default_premature_stop_penalty_periods` with its startup refusal (D3) in
   `docs/development/DEPLOYMENT_AND_CONFIG.md`. The archive
   merges the deltas into `negotiation-protocol`, `storefront-publication`,
-  `resource-pool-management`, `settlement-configuration` and `buyer-orchestration`
-  specs; record destinations and identity decision outcomes. No new capability-index
+  `resource-pool-management`, `settlement-configuration`, `buyer-orchestration` and
+  `deal-lifecycle` specs; record destinations and identity decision outcomes. No new capability-index
   entry is needed.
 - [ ] 13.10 **Documentation citations:** run
   `make check-doc-citations CHANGE=negotiate-open-ended-compute-terms`, resolve all

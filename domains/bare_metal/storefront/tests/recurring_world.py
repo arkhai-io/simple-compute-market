@@ -103,8 +103,9 @@ def _context() -> TermContext:
 class FixtureRateHelper:
     """Stands where the payment mechanism's recurring encoder would.
 
-    It prices a clause's hourly rate per period, rounding up, and encodes the
-    option the way the mechanism's builder would.
+    It prices a clause's hourly rate per period, rounding up, reads the delivery
+    deadline the clause configures, and encodes the option the way the
+    mechanism's builder would.
     """
 
     def pricing(self, clause: Any, authorities: Any) -> RatePresetPricing:
@@ -125,6 +126,7 @@ class FixtureRateHelper:
                 case_hold_max_seconds=None,
             ),
             context=_context(),
+            delivery_deadline_seconds=clause.mechanism_input.get("delivery_deadline_seconds"),
         )
 
     def build(self, request: Any) -> SettlementOption:
@@ -159,8 +161,14 @@ def term_timing(_option: Any) -> RateTermTiming:
     )
 
 
-def payment_clause(rate: str = "2.5", *, recurring: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """One payments publication clause, recurring when ``recurring`` is given."""
+def payment_clause(
+    rate: str = "2.5",
+    *,
+    recurring: Mapping[str, Any] | None = None,
+    delivery_deadline_seconds: int | None = None,
+) -> dict[str, Any]:
+    """One payments publication clause, recurring when ``recurring`` is given,
+    configuring ``delivery_deadline_seconds`` when it is given."""
     return {
         "mechanism": MECHANISM,
         "asset": "USD/6",
@@ -171,6 +179,8 @@ def payment_clause(rate: str = "2.5", *, recurring: Mapping[str, Any] | None = N
             "payee_account": PAYEE,
             "window": "PT5M",
             "dispute_window_seconds": 604800,
+            **({"delivery_deadline_seconds": delivery_deadline_seconds}
+               if delivery_deadline_seconds is not None else {}),
         },
         **({"recurring": dict(recurring)} if recurring is not None else {}),
     }
@@ -179,12 +189,14 @@ def payment_clause(rate: str = "2.5", *, recurring: Mapping[str, Any] | None = N
 _PAYER = {"period": PERIOD, "reserve_ahead_seconds": 1800}
 
 
-def payment_clauses() -> list[dict[str, Any]]:
-    """A once payment, an on-demand and a spot preset."""
+def payment_clauses(*, delivery_deadline_seconds: int | None = None) -> list[dict[str, Any]]:
+    """A once payment, an on-demand and a spot preset, each configuring
+    ``delivery_deadline_seconds`` when it is given."""
+    deadline = {"delivery_deadline_seconds": delivery_deadline_seconds}
     return [
-        payment_clause(),
-        payment_clause(recurring=_PAYER),
-        payment_clause("1.5", recurring={**_PAYER, "payee_notice_seconds": 120}),
+        payment_clause(**deadline),
+        payment_clause(recurring=_PAYER, **deadline),
+        payment_clause("1.5", recurring={**_PAYER, "payee_notice_seconds": 120}, **deadline),
     ]
 
 
@@ -246,6 +258,8 @@ async def recurring_world(
     *,
     treatments: frozenset[str] | None = QUALIFIED,
     default_penalty_periods: int = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
+    pool_deadline: int | None = DELIVERY_DEADLINE_SECONDS,
+    clause_deadline: int | None = None,
 ) -> AsyncIterator[RecurringWorld]:
     """The running bare-metal app over one bounded pool, publishing the configured
     Alkahest clause beside the three payment clauses of ``payment_clauses``.
@@ -253,6 +267,9 @@ async def recurring_world(
     ``treatments`` is the payments declaration the composition starts with;
     ``None`` declares none, as a deployed composition does.
     ``default_penalty_periods`` is the composition's configured penalty multiple.
+    ``pool_deadline`` is the pool's effective delivery deadline, ``None`` where
+    the pool supplies none, as in a deployed composition, which wires no pool port;
+    ``clause_deadline`` is the one each payment clause configures.
     """
     declarations: dict[str, RateServicingDeclaration] = {}
     site = Site(pool(POOL_ID, member("r1", POOL_ID), policy_tags={"capacity_bounds": {
@@ -274,12 +291,12 @@ async def recurring_world(
             rate_servicing=RateServicing(declarations),
             rate_preset_helpers={MECHANISM: FixtureRateHelper()},
             rate_term_projections={MECHANISM: term_timing},
-            delivery_deadline_for_pool=lambda _site, _pool: DELIVERY_DEADLINE_SECONDS,
+            delivery_deadline_for_pool=lambda _site, _pool: pool_deadline,
             default_penalty_periods=default_penalty_periods,
         )
         clauses = [
             *(clause.model_dump(mode="json", exclude_none=True) for clause in runtime.publication_clauses),
-            *payment_clauses(),
+            *payment_clauses(delivery_deadline_seconds=clause_deadline),
         ]
         runtime = dataclasses.replace(
             runtime,

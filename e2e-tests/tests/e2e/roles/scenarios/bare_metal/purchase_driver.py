@@ -178,7 +178,6 @@ class BareMetalPurchaseParts:
         return [
             "bare-metal", "buy", listing_id,
             "--option-id", option_id,
-            "--allow-unprotected-terms",
             "--ssh-public-key", self.buyer_config["ssh_public_key"],
             "--duration-seconds", str(DURATION_HOURS * 3600),
             "--payment-timeout-seconds", str(PAYMENT_TIMEOUT_SECONDS),
@@ -277,7 +276,7 @@ class BareMetalPurchaseDriver(BareMetalPurchaseParts, BareMetalComputeDealDriver
             delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
         ), option
         assert adjudication["case_hold_max_seconds"] is None, option
-        assert "delivery_deadline_seconds" not in option.lifecycle, option
+        assert option.lifecycle["delivery_deadline_seconds"] == DELIVERY_DEADLINE_SECONDS
         assert compute_rate_total(option.price_rates[0], 3600) == HOURLY_GROSS, option
 
     def assert_delivery(self, deal_state: Any) -> None:

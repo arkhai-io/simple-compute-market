@@ -132,15 +132,24 @@ Keep the foundation's exact shapes and names:
   `dispute = {interface, origin, account, record_key, params}`.
 - `premature_stop_penalty` is a nonnegative integer amount in the option asset's minor units, encoded as a canonical decimal string; absent/zero means none. It applies to an unentitled seller end, including a spot emergency without notice, not an entitled notice stop. On-demand presets with no stated penalty default to the quoted per-period price times the storefront setting `[pricing].default_premature_stop_penalty_periods`, which defaults to 24; a penalty stated on a clause, including an explicit `"0"`, wins, and spot carries none by default (owner record 01, R11). Buyer default acceptance refuses on-demand without a positive penalty because the buyer benefits and enforces it, like partialPeriod. Expose seller override and explicit buyer opt-out; never silently downgrade the default. The number is a ceiling, not a guarantee: the remedy takes `min(penalty, earned amounts still held)` after the refunds, and early in a deal what is earned and held is the setup charge alone — an on-demand VM pulled minutes after activation, with its started period returned, leaves nothing else to take, and zero with no setup charge. A seller-funded stake that makes the ceiling collectible is the reserved `bond` term (foundation D5), not this change's.
 - `bond` stays reserved where the mechanism cannot hold a seller-funded stake.
-- `delivery_deadline_seconds` is supplied by the composition and published under that
-  name on every compute option whose mechanism has a lifecycle adapter, recurring or
-  once: the pool port's value (`delivery_deadline_for_pool`) when it gives one, else the
+- `delivery_deadline_seconds` is published under that name on every compute option
+  whose mechanism has a lifecycle adapter, recurring or once: the pool port's value the
+  composition supplies (`delivery_deadline_for_pool`) when it gives one, else the
   payments clause's configured `delivery_deadline_seconds` (owner record 01, R21).
   Pool-first precedence keeps the site and the published term from disagreeing once
   `renewable-compute-lease-deadlines` enables the pool's tag and the site enforces it.
   The clause value is not an unenforced raw tag: the seller's deal-servicing journal
   files non-delivery at whatever deadline the deal accepted
   (`kit/deal-servicing/src/market_deal_servicing/journal.py`).
+  The clause's value is in its mechanism-owned input, which the shared per-clause step
+  (D9) never parses, so the precedence is applied where the mechanism reads it: the
+  step hands the pool's value, or `None`, to the once option builder as the
+  `delivery_deadline_seconds` resource, which falls back to its clause's own; and a
+  recurring preset helper returns its clause's value as
+  `RatePresetPricing.delivery_deadline_seconds`, which `derive_rate_preset` takes only
+  when the pool gives none. Rejected: the step reading
+  `mechanism_input["delivery_deadline_seconds"]`, which would make neutral publication
+  parse a mechanism's field.
   A compute option with neither yields an option without the term, and the default
   buyer refuses such an option without it — the buyer benefits and enforces it, with an
   explicit opt-out — so the derivation log and listing diagnostics name it like the
@@ -425,14 +434,15 @@ change displays setup pricing; the rate change derives it.
 A settlement clause may carry an optional mechanism-neutral `recurring` request
 (`RecurringPublicationPreset`); each clause resolves whole (owner record 01, R10). The
 injected `RatePresetHelper` supplies the per-period quote, approval window,
-adjudication and capabilities and encodes the option; the common derivation checks the
+adjudication, capabilities and the clause's configured delivery deadline (D3), and
+encodes the option; the common derivation checks the
 authority, derives the penalty (D3), checks the default horizon's runway (D5) and
 validates the lifecycle, and refuses an encoder that changes mechanism, asset, period,
 reserve or lifecycle. A missing helper, undeclared servicing or an unbounded horizon
 omits only that recurring option, with a diagnostic; reserved peers and capacity
 identity are unaffected.
 
-That per-clause step — deadline resolution (D3), the recurring-or-once branch,
+That per-clause step — the pool's deadline lookup (D3), the recurring-or-once branch,
 `derive_rate_preset`, the diagnostics and the penalty setting — is one
 `kit/settlement-runtime` function both compositions call; the `compute` flag and the
 deadline lookup are parameters, so it knows no family (owner record 01, R26). Each
@@ -983,9 +993,9 @@ which none wires, while the payments builder ignored the clause's configured
 `delivery_deadline_seconds` for compute options. No deployed seller published a
 deadline, every default buyer refused every hosted compute option, and the
 reserved-payment E2E drivers passed `--allow-unprotected-terms` to get through.
-The owner's round-1 review settled the source (record 01, R21, R22): the composition
-supplies the pool port's value when it gives one, else the clause's configured value
-(D3). The drivers then drop `--allow-unprotected-terms` and again assert that the
+The owner's round-1 review settled the source (record 01, R21, R22): the pool port's
+value when the composition supplies one, else the clause's configured value, which the
+clause's mechanism reads (D3). The drivers then drop `--allow-unprotected-terms` and again assert that the
 published `delivery_deadline_seconds` equals the configured value, and
 `e2e-tests/tests/unit/test_dispute_coverage.py` returns to its earlier fixtures. That
 work is in the round-2 sections of `tasks.md`; `renewable-compute-lease-deadlines` later
@@ -1029,7 +1039,7 @@ Destinations are planned, not claims of implemented behavior.
 | Accepted decision | Permanent location |
 |---|---|
 | D1, D2/D2a/D2b classes, monetary quote unit, tested money readers and acceptance pricing pin | `docs/development/ARCHITECTURE.md` (with the authority description); `openspec/specs/negotiation-protocol/spec.md` |
-| D3 penalty preset default and its setting, the deadline's source, buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` (the storefront-wide `[pricing]` terms of sale: `default_premature_stop_penalty_periods` and its startup refusal); foundation-owned lifecycle contract |
+| D3 penalty preset default and its setting, the deadline's source, buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/deal-lifecycle/spec.md` (the clause fallback in its two delivery-deadline requirements, through the archive's delta); `docs/development/DEPLOYMENT_AND_CONFIG.md` (the storefront-wide `[pricing]` terms of sale: `default_premature_stop_penalty_periods` and its startup refusal); foundation-owned lifecycle contract |
 | D5 the horizon as the Agreement's, listing bounds, the acceptance hook, the floored default, the buyer's check and its seams, and the reserved-bound rule | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md`; `openspec/specs/buyer-orchestration/architecture.md` (the per-listing acceptance validator and the bounds a resumed run keeps); `docs/operator-handbook.md` (bare-metal upgrade step) |
 | D6 servicing declaration and its three doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` (with the storefronts' integration fixtures at the composition ports no installed mechanism supplies); `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Settlement consumer configuration and cutover": the seller root's `rate_servicing` tables) |
 | D7, D8 display, the mechanism's presenter, the default buyer's policy and seller-policy distinction | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |

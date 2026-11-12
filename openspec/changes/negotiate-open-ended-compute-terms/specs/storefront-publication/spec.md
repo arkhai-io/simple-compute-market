@@ -97,11 +97,12 @@ support for setup delivery end and the composition's declaration sets `setup` fo
 - **WHEN** a recurring clause states a setup amount and the composition's declaration for its mechanism has `setup = false`
 - **THEN** that option is omitted with a diagnostic and the listing's other options publish
 
-### Requirement: The composition supplies each compute option's delivery deadline
+### Requirement: A compute option's delivery deadline is its pool's, else its clause's
 
 A compute option whose mechanism has a lifecycle adapter MUST publish
-`lifecycle.delivery_deadline_seconds` from its composition: the pool port's value when the
-port gives one, else the payments clause's configured `delivery_deadline_seconds`. A compute
+`lifecycle.delivery_deadline_seconds`: the value the composition's pool port gives for the
+candidate's site and pool when it gives one, else the payments clause's configured
+`delivery_deadline_seconds`, which the clause's mechanism reads. A compute
 option with neither MUST publish without the term and with the diagnostic "a default buyer
 refuses this option: no delivery deadline". On such an option the adjudication's
 `dispute_window_seconds` MUST be at least the delivery deadline plus the authority's advertised

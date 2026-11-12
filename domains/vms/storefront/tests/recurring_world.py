@@ -115,8 +115,9 @@ def _context() -> TermContext:
 class FixtureRateHelper:
     """Stands where the payment mechanism's recurring encoder would.
 
-    It prices a clause's hourly rate per period, rounding up, and encodes the
-    option the way the mechanism's builder would. A shape-priced listing's clause
+    It prices a clause's hourly rate per period, rounding up, reads the delivery
+    deadline the clause configures, and encodes the option the way the
+    mechanism's builder would. A shape-priced listing's clause
     states no rate, its rate coming from the pool's family rates; it is quoted at
     ``SHAPE_RATE``, the one family rate the shape-priced tests set.
     """
@@ -139,6 +140,7 @@ class FixtureRateHelper:
                 case_hold_max_seconds=None,
             ),
             context=_context(),
+            delivery_deadline_seconds=clause.mechanism_input.get("delivery_deadline_seconds"),
         )
 
     def build(self, request: Any) -> SettlementOption:
@@ -189,10 +191,14 @@ class AcceptedDataPlaceholder:
 
 
 def payment_clause(
-    rate: str | None = "2.5", *, recurring: Mapping[str, Any] | None = None,
+    rate: str | None = "2.5",
+    *,
+    recurring: Mapping[str, Any] | None = None,
+    delivery_deadline_seconds: int | None = None,
 ) -> dict[str, Any]:
     """One payments publication clause, recurring when ``recurring`` is given,
-    stating no rate of its own when ``rate`` is ``None``."""
+    stating no rate of its own when ``rate`` is ``None``, and configuring
+    ``delivery_deadline_seconds`` when it is given."""
     return {
         "mechanism": MECHANISM,
         "asset": "USD/6",
@@ -202,6 +208,8 @@ def payment_clause(
             "payee_account": PAYEE,
             "window": "PT5M",
             "dispute_window_seconds": 604800,
+            **({"delivery_deadline_seconds": delivery_deadline_seconds}
+               if delivery_deadline_seconds is not None else {}),
         },
         **({"recurring": dict(recurring)} if recurring is not None else {}),
     }
@@ -210,13 +218,15 @@ def payment_clause(
 _PAYER = {"period": PERIOD, "reserve_ahead_seconds": 1800}
 
 
-def clauses() -> list[dict[str, Any]]:
-    """A reserved Alkahest clause, a once payment, an on-demand and a spot preset."""
+def clauses(*, delivery_deadline_seconds: int | None = None) -> list[dict[str, Any]]:
+    """A reserved Alkahest clause, a once payment, an on-demand and a spot preset,
+    each payment clause configuring ``delivery_deadline_seconds`` when it is given."""
+    deadline = {"delivery_deadline_seconds": delivery_deadline_seconds}
     return [
         settlement_clause("1"),
-        payment_clause(),
-        payment_clause(recurring=_PAYER),
-        payment_clause("1.5", recurring={**_PAYER, "payee_notice_seconds": 120}),
+        payment_clause(**deadline),
+        payment_clause(recurring=_PAYER, **deadline),
+        payment_clause("1.5", recurring={**_PAYER, "payee_notice_seconds": 120}, **deadline),
     ]
 
 
@@ -281,6 +291,7 @@ async def recurring_world(
     pricing: Mapping[str, Any] | None = None,
     published: list[dict[str, Any]] | None = None,
     default_penalty_periods: int = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
+    pool_deadline: int | None = DELIVERY_DEADLINE_SECONDS,
 ) -> AsyncIterator[RecurringWorld]:
     """The VM storefront with one bounded pool publishing ``published``, by
     default the four clauses of ``clauses``.
@@ -289,6 +300,8 @@ async def recurring_world(
     ``None`` declares none, as a deployed composition does. ``pricing`` is the
     pool's family rates, which make its listing shape-priced.
     ``default_penalty_periods`` is the composition's configured penalty multiple.
+    ``pool_deadline`` is the pool's effective delivery deadline, ``None`` where
+    the pool supplies none, as in a deployed composition, which wires no pool port.
     """
     helper = FixtureRateHelper()
     declarations: dict[str, RateServicingDeclaration] = {}
@@ -316,7 +329,7 @@ async def recurring_world(
             rate_servicing=RateServicing(declarations),
             rate_preset_helpers={MECHANISM: helper},
             rate_term_projections={MECHANISM: term_timing},
-            delivery_deadline_for_pool=lambda _site, _pool: DELIVERY_DEADLINE_SECONDS,
+            delivery_deadline_for_pool=lambda _site, _pool: pool_deadline,
             default_penalty_periods=default_penalty_periods,
         )
 

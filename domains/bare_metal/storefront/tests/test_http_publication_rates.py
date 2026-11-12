@@ -30,7 +30,7 @@ from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_registry
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from held_loops import held_loop_controller
-from recurring_world import recurring_world, undeclared
+from recurring_world import MECHANISM, recurring_world, undeclared
 from test_http_system import ADMIN_SIGNER, SELLER_SIGNER, _app, _runtime
 from test_publication_cycle import (
     REGISTRY_URL,
@@ -320,6 +320,27 @@ async def test_publication_omits_recurring_options_whose_treatments_are_undeclar
     refusals = undeclared(report)
     assert len(refusals) == 2
     assert all("does not declare returned" in item["detail"] for item in refusals)
+
+
+@pytest.mark.parametrize(("clause_deadline", "refused"), [(900, 0), (None, 3)],
+                         ids=["clause-configured", "neither"])
+async def test_a_clause_s_deadline_publishes_where_the_pool_supplies_none(
+    tmp_path, clause_deadline, refused,
+):
+    """With no pool deadline, each payment option, once or recurring, publishes the
+    deadline its clause configures and no default buyer's refusal is reported; a
+    clause configuring none publishes no deadline, and each payment option is
+    reported as refused by a default buyer for lacking one."""
+    async with recurring_world(tmp_path, pool_deadline=None, clause_deadline=clause_deadline) as world:
+        report = await world.publish()
+        published = (await world.admin.get_listing(_listing_id(report))).extra["settlement_options"]
+
+    payments = [option for option in published if option["settlement"]["schema"] == MECHANISM]
+    assert len(payments) == 3
+    assert {option["lifecycle"].get("delivery_deadline_seconds") for option in payments} == {clause_deadline}
+    refusals = [item for item in report["actions"] if item.get("reason") == "default_buyer_refusal"]
+    assert len(refusals) == refused
+    assert all(item["detail"].endswith("no delivery deadline") for item in refusals)
 
 
 async def test_an_on_demand_option_stating_no_penalty_publishes_the_configured_multiple(tmp_path):

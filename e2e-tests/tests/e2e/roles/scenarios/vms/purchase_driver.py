@@ -133,7 +133,7 @@ class VmPurchaseParts:
         assert adjudication["dispute_window_seconds"] == dispute_window_seconds(
             delivery_deadline_seconds=deadline,
         ), option
-        assert "delivery_deadline_seconds" not in option.lifecycle, option
+        assert option.lifecycle["delivery_deadline_seconds"] == deadline
         assert option.price_asset == "USD/6", option
         assert option.price_rates[0].per == "hour", option
         assert compute_rate_total(option.price_rates[0], 3600) == HOURLY_GROSS, option
@@ -153,7 +153,6 @@ class VmPurchaseParts:
             "--max-price", str(HOURLY_GROSS),
             "--duration-hours", str(DURATION_HOURS),
             "--max-matches", "1",
-            "--allow-unprotected-terms",
             "--poll-interval", str(SETTLEMENT_POLL_SECONDS),
             "--settlement-timeout", str(max(SETTLEMENT_TIMEOUT_SECONDS, delivery_deadline_seconds())),
             "--ssh-public-key", self.buyer_config["ssh_public_key"],
