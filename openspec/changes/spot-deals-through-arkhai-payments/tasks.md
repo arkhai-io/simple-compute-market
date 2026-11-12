@@ -129,9 +129,9 @@ publication configuration/builders and their focused publication suites.
       buy` printed "No listings matched" with exit 0. Authority selection now keeps
       each distinct refusal; VM `buy`, `negotiate` and `listing list` print them
       when nothing was selectable, and `buy` exits 2. Tests: payments
-      test_buyer.py (the presets' options pass only with the helper's context),
-      deal-lifecycle test_selection.py, VM test_recurring_option_selection.py,
-      bare-metal test_buyer_composition.py. An in-process VM `market buy` trial
+      test_buyer_term_context.py (the presets' options pass only with the helper's
+      context), deal-lifecycle test_selection.py, VM
+      test_recurring_option_selection.py, bare-metal test_recurring_options.py. An in-process VM `market buy` trial
       with a fixture-only servicing declaration selected, disclosed, negotiated,
       validated acceptance and approved both options, then stopped at commit: the
       buyer lifecycle builds the once-only payment adapter for a rate mandate,
