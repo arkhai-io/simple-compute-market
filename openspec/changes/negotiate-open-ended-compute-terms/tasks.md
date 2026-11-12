@@ -20,7 +20,8 @@ together, reviewed as one round (`design.md`, "Implementation cadence"). Section
 are done and were validated, reviewed and triaged. The first closeout attempt found the
 packages unversioned for the change's edits; section 12a, the version pass, is round 3,
 a one-section round whose validation and review the owner waived, before closeout
-resumes at 13.3. Verification levels follow `docs/development/TESTING.md`;
+resumes at 13.3. The second closeout attempt returned for the owner's answers in 13.3's
+note that need code. Verification levels follow `docs/development/TESTING.md`;
 every behaviour this change adds gets permanent tests at the level it assigns (owner
 record 01, R2).
 
@@ -2272,6 +2273,11 @@ not versioned as the change's edits require. Nothing else in this section has st
 Section 12a is the version pass; closeout resumes at 13.3, and confirms 13.7 again on
 the relocked tree.
 
+Closeout stopped again 2026-11-12, at `1738eec49`, in 13.3: two of the owner's answers
+to its questions need code (13.3's note). Its documentation outcomes are recorded: D6,
+D10 and D11 in `design.md`, the `deal-lifecycle` rename and the `buyer-orchestration`
+default in the deltas. Closeout resumes at 13.3 after the fix round.
+
 - [x] 13.1 **Comment hygiene:** run `make check-comment-hygiene`; confirm the comments
   rounds 1 and 2 added describe current invariants, not change provenance.
   Confirmed (2026-11-12): `make check-comment-hygiene` passed. I read the comments and
@@ -2293,24 +2299,58 @@ the relocked tree.
   Agreement's refinement; verify each permanent home and no duplicated codec/authority
   ownership. Confirm or move D10's shared clause resolver out of
   `kit/resource-pools-contracts`.
-  Open, with questions found at the first closeout attempt (2026-11-12). The next
-  closeout puts these to the owner unless their answer to the return already settles
-  them:
-  - The resolver. My recommendation is to confirm it where it is: `listing_terms.py`
-    takes the family key as data and names no compute concept, and `ARCHITECTURE.md`,
-    "Kit areas", already says the contracts package holds the pool's "declaration
-    hints and their shared resolver".
-  - A testing-rule conflict. Both storefronts' `tests/recurring_world.py` put fixtures
-    at composition ports that no installed mechanism supplies. `TESTING.md`,
-    "Integration Tests", allows a mock only at the external I/O boundary, and D6
-    records the practice as kept. `AGENTS.md`, "Amend a rule or comply", forbids that
-    kind of private exception.
-  - The `deal-lifecycle` delta's title, "The delivery deadline is the site's
-    availability term", now describes only half the rule. A RENAMED entry would fix
-    it (section 8's handoff).
-  - `BareMetalBuyerConfig.default_duration_seconds` is validated but read by nothing,
-    as in `marketplace-v0.3.0` (section 10's handoff). The options are to honour it,
-    retire it, or record it as an unowned gap.
+  Questions found at the first closeout attempt, put to the owner at the second
+  (2026-11-12), and their answers:
+  - The resolver: confirmed in `kit/resource-pools-contracts` (`listing_terms.py`
+    takes the family key as data and names no compute concept). Recorded in D10.
+    Promotion names it in `ARCHITECTURE.md`'s "Kit areas" paragraph, whose "shared
+    resolver" today means the offering-mode resolver in `hints.py`.
+  - The testing-rule conflict: `TESTING.md` stays as written; it is what keeps a test
+    of functionality that does not exist yet from merging. Recorded in D6. **Needs
+    code; returns to implementation.** Both storefronts' `tests/recurring_world.py`
+    put fixtures at the recurring encoder, term-timing and billing-projection ports,
+    which no installed mechanism implements. The tests built on it:
+    - `domains/vms/storefront/tests/integration/test_publication_loop.py`:
+      `test_one_listing_offers_reserved_on_demand_and_spot_on_its_capacity_identity`,
+      `test_publication_omits_recurring_options_whose_treatments_are_undeclared`,
+      `test_an_on_demand_option_stating_no_penalty_publishes_the_configured_multiple`,
+      `test_a_clause_s_deadline_publishes_where_the_pool_supplies_none`,
+      `test_a_cached_recurring_selection_whose_treatment_is_withdrawn_is_refused`;
+    - `domains/vms/storefront/tests/integration/test_buyer_selection_negotiation.py`:
+      `test_an_omitted_horizon_is_accepted_at_the_default_bound_the_buyer_checks`,
+      `test_a_buyer_that_named_no_duration_verifies_the_accepted_pricing`,
+      `test_a_horizon_leaving_no_runway_is_refused_naming_the_minimum_that_passes`;
+    - `domains/bare_metal/storefront/tests/test_http_publication_rates.py`: the same
+      four publication cases as VM's file;
+    - `domains/bare_metal/storefront/tests/test_http_negotiation.py`:
+      `test_a_cached_recurring_selection_whose_treatment_is_withdrawn_is_refused`,
+      `test_a_horizon_leaving_no_runway_is_refused_naming_the_minimum_that_passes`.
+
+    The owner named two ways out: a comment at the top of each file saying the tests
+    are not runnable yet and why, or deleting them here and keeping their copy in the
+    change that implements the missing ports. Recommended: the second, with the copies
+    in `spot-deals-through-arkhai-payments`, which supplies the recurring encoder. A
+    commented file still merges a test of functionality that does not exist, which is
+    what the owner's answer refuses. The fix round checks each case: one whose
+    behaviour needs no unimplemented port (a once option's clause deadline, perhaps)
+    is rewritten without the fixture rather than moved; each door keeps a test at the
+    lowest level that proves it without one. The world modules go once nothing uses
+    them.
+  - The `deal-lifecycle` delta's title: renamed by a RENAMED entry to "The delivery
+    deadline is the availability term the site or the clause sets"; the MODIFIED body
+    is unchanged. Strict validation passes.
+  - `BareMetalBuyerConfig.default_duration_seconds`: honour it. Recorded in D11 and in
+    the `buyer-orchestration` delta ("Recurring purchase may omit a horizon"). **Needs
+    code; returns to implementation.** `bare-metal buy`'s reserved default reads the
+    configured value instead of `RESERVED_DEFAULT_DURATION_SECONDS` in
+    `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/settlement_stages.py`; the
+    `--duration-seconds` help in `cli.py` stops naming 3600 as the default; a unit test
+    covers a configured value reaching the disclosure and the provision terms, and a
+    recurring option ignoring it. `arkhai-bare-metal-buyer` is already bumped to 0.8.0
+    on `dev`, so no further version moves.
+
+  D1–D12's classification and the check of their permanent homes run when closeout
+  resumes, after the fix round.
 - [ ] 13.4 **Narrative compression:** reduce completed-task notes to behavior, material
   evidence, residual work and permanent destinations; retain reasoning in design. Fold
   `design.md`'s dated implementation sections into D1–D12 and remove their narrative;

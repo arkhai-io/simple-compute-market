@@ -1,6 +1,11 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: The delivery deadline is the site's availability term`
+- TO: `### Requirement: The delivery deadline is the availability term the site or the clause sets`
+
 ## MODIFIED Requirements
 
-### Requirement: The delivery deadline is the site's availability term
+### Requirement: The delivery deadline is the availability term the site or the clause sets
 
 `delivery_deadline_seconds` MUST be a positive integer: the seconds after the later of the commitment instant and the Agreement start within which the resource is available to the buyer, as the storefront's durable `available` record. A compute option whose mechanism has a lifecycle adapter MUST carry the deadline its site enforces where the site enforces one; where it enforces none, it MUST carry the deadline its settlement clause configures, which the seller's deal-servicing journal files non-delivery at, and MUST omit the term where the clause configures none. A default buyer MUST refuse such an option without it, unless explicitly opted out.
 

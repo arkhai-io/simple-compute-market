@@ -348,12 +348,18 @@ The tables live in the seller's `[Settlement]` root, keyed by each installed
 mechanism's configuration key; a buyer's root refuses them, since only a selling
 composition services a rate. Their one definition is settlement-runtime's typed table
 model, which the configuration loader parses and the values schema renders, so the Helm
-schema and the loader cannot disagree on the table's keys or treatment names. The
-storefronts' integration tests run the real composition with the declaration injected
-and, since no installed mechanism supplies a recurring encoder, term timing or billing
-projection, a fixture at each of those composition ports, standing where the payment
-mechanism's code would; what they prove is the two doors and the served acceptance, not
-a mechanism's encoding.
+schema and the loader cannot disagree on the table's keys or treatment names.
+
+No installed mechanism supplies a recurring encoder, term timing or billing projection,
+so no storefront integration test drives a recurring option through the served
+composition. A fixture at one of those composition ports would be a mock inside the
+codebase, which `docs/development/TESTING.md`, "Integration Tests", forbids: it permits
+a mock only at the external I/O boundary. That rule stays as written (owner, closeout,
+2026-11-12): it is what keeps a test of functionality that does not exist yet from
+merging. Each door keeps a test at the lowest level that proves it without such a
+fixture. The storefront integration cases that needed one leave this change: their
+copies are kept in the change that installs the recurring mechanism, which adds them
+once its code stands at those ports.
 
 1. Publication omits a recurring candidate naming any undeclared treatment on an
    entitlement or at the term end, or a setup charge where `setup` is not declared,
@@ -465,11 +471,11 @@ R28). Bounds keep D5's order, with `capacity_bounds.<mode>` ahead of the model h
 A v0.3.0 VM configuration or hint means what it meant; an older VM storefront ignores
 the pool-level key. Bare metal's unreleased `pricing.bare_metal.settlements` hint is
 replaced, needing no compatibility path (D12). VM's family rates stay VM's. One shared
-resolver, moved out of `arkhai_vms_listings.pricing_resolution`, lives provisionally in
+resolver, moved out of `arkhai_vms_listings.pricing_resolution`, lives in
 `kit/resource-pools-contracts` beside `capacity_bounds.py` and `raw_pricing`, taking the
-`gpu` key from the compute vocabulary as data; closeout's documentation-compliance step
-confirms or moves it, since it is compute-family resolution and no compute family kit
-exists yet.
+`gpu` key from the compute vocabulary as data. Closeout confirmed it there (owner,
+2026-11-12): it resolves the pool's `pricing` hint, which the contracts package already
+reads, names no compute concept, and needs no compute-family kit.
 
 The resolver (`market_resource_pools_contracts.listing_terms`) resolves the settlement
 terms — the clause list and VM's legacy accepted-escrow list — and not the bounds, which
@@ -499,8 +505,11 @@ R14). A single blanket waiver made the E2E drivers waive all four protections to
 one missing term.
 
 Duration is optional for recurring and required for reserved in both CLIs.
-`bare-metal buy` keeps v0.3.0's 3600-second default for reserved options only, shown as
-the buyer's default in the disclosure, never for recurring ones. VM's `market
+`bare-metal buy` gives a reserved option without a duration its configured
+`default_duration_seconds` (3600 unless configured), shown as the buyer's default in the
+disclosure, never for recurring ones. v0.3.0 validated that setting and read nothing
+from it, using a constant 3600; the owner chose at closeout (2026-11-12) to honour it
+rather than retire a key a release shipped. VM's `market
 buy`/`negotiate` gain `--duration-seconds` beside `--duration-hours`; giving both is an
 error naming the conflict (owner record 01, R18).
 
@@ -1084,10 +1093,10 @@ Destinations are planned, not claims of implemented behavior.
 | D1, D2/D2a/D2b classes, monetary quote unit, tested money readers and acceptance pricing pin | `docs/development/ARCHITECTURE.md` (with the authority description); `openspec/specs/negotiation-protocol/spec.md` |
 | D3 penalty preset default and its setting, the deadline's source, buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/deal-lifecycle/spec.md` (the clause fallback in its two delivery-deadline requirements, through the archive's delta); `docs/development/DEPLOYMENT_AND_CONFIG.md` (the storefront-wide `[pricing]` terms of sale: `default_premature_stop_penalty_periods` and its startup refusal); foundation-owned lifecycle contract |
 | D5 the horizon as the Agreement's, listing bounds, the acceptance hook, the floored default, the buyer's check and its seams, and the reserved-bound rule | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md` (its "Missing defaults" paragraph still names the retired hold); `openspec/specs/resource-pool-management/spec.md`; `openspec/specs/buyer-orchestration/architecture.md` (the per-listing acceptance validator and the bounds a resumed run keeps); `docs/operator-handbook.md` (bare-metal upgrade step, written in implementation); `docs/development/DEPLOYMENT_AND_CONFIG.md` (the bare-metal override bullet that still names `pool_lease_bound_missing`) |
-| D6 servicing declaration and its three doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` (with the storefronts' integration fixtures at the composition ports no installed mechanism supplies); `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Settlement consumer configuration and cutover": the seller root's `rate_servicing` tables) |
+| D6 servicing declaration and its three doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` (why no storefront integration test drives a recurring option until a mechanism implements its ports); `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Settlement consumer configuration and cutover": the seller root's `rate_servicing` tables) |
 | D7, D8 display, the mechanism's presenter, the default buyer's policy and seller-policy distinction | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |
 | D9 recurring publication and the shared per-clause step | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |
-| D10 the unified clause source | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md`; `docs/development/ARCHITECTURE.md` (what `kit/resource-pools-contracts` holds, under "Kit areas", once closeout confirms or moves the resolver); `docs/development/DEPLOYMENT_AND_CONFIG.md` (bare metal's `[pricing.defaults.gpu.<model>].settlements` and the pool's `pricing` hint tiers); `docs/operator-handbook.md` (bare-metal upgrade step, written in implementation) |
+| D10 the unified clause source | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md`; `docs/development/ARCHITECTURE.md` (what `kit/resource-pools-contracts` holds, under "Kit areas": the listing-terms resolver, confirmed there at closeout); `docs/development/DEPLOYMENT_AND_CONFIG.md` (bare metal's `[pricing.defaults.gpu.<model>].settlements` and the pool's `pricing` hint tiers); `docs/operator-handbook.md` (bare-metal upgrade step, written in implementation) |
 | D11 per-term waivers and duration flags | `openspec/specs/buyer-orchestration/spec.md` (the waivers, the recorded waivers a resumed run uses, the duration flags, bare metal's reserved default); `openspec/specs/buyer-orchestration/architecture.md` (one waiver table for every buyer command, why a resumed run reads its run log rather than its flags, the billing projection deciding bare metal's reserved default) |
 | D12 compatibility owed to releases; sibling domains alike | `docs/development/RELEASING.md` ("Versioning policy"); `docs/development/ARCHITECTURE.md` ("Family kits") |
 | Goal/dependency currency | `docs/development/ROADMAP.md`; `openspec/changes/README.md` at integration/closeout |

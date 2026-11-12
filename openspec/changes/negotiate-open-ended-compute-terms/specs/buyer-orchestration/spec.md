@@ -61,8 +61,8 @@ Buyer acceptance policy SHOULD refuse an on-demand option without positive early
 
 Compute buyers MUST permit omitted duration for recurring selections and use the
 seller-bound horizon returned in the final accepted terms. Reserved selections
-MUST carry a duration: the buyer's, or, for `bare-metal buy` alone, its 3600-second
-default. Both domains MUST permit recurring purchases without a
+MUST carry a duration: the buyer's, or, for `bare-metal buy` alone, its configured
+`default_duration_seconds`, 3600 unless configured. Both domains MUST permit recurring purchases without a
 protocol minimum-spend term; setup fees and churn refusal MUST be represented as
 seller pricing/policy.
 
@@ -79,7 +79,7 @@ seller pricing/policy.
 #### Scenario: A bare-metal reserved purchase names no duration
 
 - **WHEN** `bare-metal buy` selects a reserved option without a duration
-- **THEN** it uses 3600 seconds, shown in the disclosure as the buyer's default, and never applies that default to a recurring option
+- **THEN** it uses its configured `default_duration_seconds`, 3600 seconds unless configured, shown in the disclosure as the buyer's default, and never applies that default to a recurring option
 
 ### Requirement: Both buyer CLIs take a duration in seconds
 
