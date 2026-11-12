@@ -116,6 +116,9 @@ settlements = []
 # default_max_duration_seconds = 86400
 # Independent absolute UTC lease-end ceiling; an override or hint replaces it.
 # default_available_until_utc = "2035-01-01T00:00:00Z"
+# An on-demand option's premature-stop penalty, in its periods' price, when its
+# clause states none; a clause's own penalty, even "0", wins. A positive integer.
+default_premature_stop_penalty_periods = 24
 
 [negotiation]
 # The seller policies run after the required guards; unset runs the default

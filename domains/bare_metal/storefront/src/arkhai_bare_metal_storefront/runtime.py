@@ -896,6 +896,7 @@ def build_runtime_from_configuration(
     settlement_composition = BareMetalStorefrontSettlementComposition.from_raw_config(
         settlement_config,
         disputes=RegistryDisputePolicy.from_document(active.model_dump()),
+        default_penalty_periods=active.pricing.default_premature_stop_penalty_periods,
         resources={
             "marketplace_signer": signer,
             "claimant_principal": principal,

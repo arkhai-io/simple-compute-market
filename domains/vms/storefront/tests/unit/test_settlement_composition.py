@@ -613,6 +613,24 @@ def test_the_configured_rate_servicing_declaration_is_the_compositions(tmp_path)
     assert (declared.treatments, declared.setup) == (frozenset({"charged", "returned"}), False)
 
 
+def test_the_configured_penalty_multiple_is_the_compositions(tmp_path):
+    domain = build_vm_storefront_domain()
+    db = _client(tmp_path / "vm-settlement.db", build_vm_storefront_registry(domain))
+    settlement = {"schema_version": 1, "priority": [], "alkahest": {"enabled": False}}
+
+    with replaced_setting("settlement", settlement), replaced_setting(
+        "pricing.default_premature_stop_penalty_periods", 6,
+    ):
+        composition = build_vm_settlement_composition(
+            domain=db.domain_registry.resolve_mode("vm").contract,
+            sqlite_client=db,
+            alkahest_clients={},
+            marketplace_signer=_SELLER_SIGNER,
+        )
+
+    assert composition.default_penalty_periods == 6
+
+
 @pytest.mark.asyncio
 async def test_persist_outcome_records_the_ready_projection_and_no_credential(db):
     prepared = _prepared(db)

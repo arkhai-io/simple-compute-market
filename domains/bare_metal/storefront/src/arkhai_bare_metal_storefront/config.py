@@ -46,6 +46,10 @@ from market_config.registry_url import normalize_registry_url
 from market_config.setting_types import PositiveSeconds, positive_seconds
 from market_identity import Identity, Signer, TrustedIdentitySet
 from market_resource_pools_contracts import UtcAvailability
+from market_settlement_runtime.rate_publication import (
+    DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
+    PenaltyPeriods,
+)
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -220,16 +224,21 @@ class CapacitySettings(_Section):
 
 
 class PricingSettings(_Section):
-    """``[pricing]``: the storefront's publication clauses and default lease bound.
+    """``[pricing]``: the storefront's publication clauses, default lease bounds,
+    and default premature-stop penalty multiple.
 
-    A pool's override replaces either for that pool; a pool whose maximum lease
-    duration resolves to nothing positive from either tier is held at
-    publication, so neither is required here.
+    A pool's override replaces the clauses or a bound for that pool; a pool whose
+    maximum lease duration resolves to nothing positive from either tier is held
+    at publication, so neither is required here. An on-demand option whose clause
+    states no premature-stop penalty is published with its per-period price
+    times ``default_premature_stop_penalty_periods``; a clause's own penalty,
+    even ``"0"``, wins.
     """
 
     settlements: list[dict[str, Any]] = Field(default_factory=list)
     default_max_duration_seconds: StrictInt | None = None
     default_available_until_utc: UtcAvailability | None = None
+    default_premature_stop_penalty_periods: PenaltyPeriods = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS
 
     @field_validator("settlements", mode="before")
     @classmethod

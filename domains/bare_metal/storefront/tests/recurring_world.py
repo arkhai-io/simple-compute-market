@@ -40,7 +40,10 @@ from market_deal_lifecycle.terms import Adjudication, TermContext, encode_terms
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime import SettlementPublicationClause
 from market_settlement_runtime.horizon import RateTermTiming
-from market_settlement_runtime.rate_publication import RatePresetPricing
+from market_settlement_runtime.rate_publication import (
+    DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
+    RatePresetPricing,
+)
 from market_settlement_runtime.rate_servicing import (
     RateServicing,
     RateServicingDeclaration,
@@ -239,13 +242,17 @@ def undeclared(report: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 
 @contextlib.asynccontextmanager
 async def recurring_world(
-    tmp_path: Path, *, treatments: frozenset[str] | None = QUALIFIED,
+    tmp_path: Path,
+    *,
+    treatments: frozenset[str] | None = QUALIFIED,
+    default_penalty_periods: int = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
 ) -> AsyncIterator[RecurringWorld]:
     """The running bare-metal app over one bounded pool, publishing the configured
     Alkahest clause beside the three payment clauses of ``payment_clauses``.
 
     ``treatments`` is the payments declaration the composition starts with;
     ``None`` declares none, as a deployed composition does.
+    ``default_penalty_periods`` is the composition's configured penalty multiple.
     """
     declarations: dict[str, RateServicingDeclaration] = {}
     site = Site(pool(POOL_ID, member("r1", POOL_ID), policy_tags={"capacity_bounds": {
@@ -268,6 +275,7 @@ async def recurring_world(
             rate_preset_helpers={MECHANISM: FixtureRateHelper()},
             rate_term_projections={MECHANISM: term_timing},
             delivery_deadline_for_pool=lambda _site, _pool: DELIVERY_DEADLINE_SECONDS,
+            default_penalty_periods=default_penalty_periods,
         )
         clauses = [
             *(clause.model_dump(mode="json", exclude_none=True) for clause in runtime.publication_clauses),

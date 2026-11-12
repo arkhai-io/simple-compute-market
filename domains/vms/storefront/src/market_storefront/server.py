@@ -77,6 +77,7 @@ from market_storefront.utils.config import (
     AGENT_ID,
     CHAINS,
     chain_address_books,
+    default_premature_stop_penalty_periods,
     get_evm_wallet_address,
     get_evm_wallet_private_key,
     get_service_peer_configs,
@@ -361,9 +362,11 @@ def _build_vm_services(
     # Alkahest unready instead. A retired address-book key is refused before
     # the release model resolves the section, which would refuse it only as
     # an unknown key. A multiplier floor above the advertised rates is refused
-    # here too, rather than at the first shape-priced negotiation.
+    # here too, rather than at the first shape-priced negotiation, and so is a
+    # default penalty multiple that is not a positive integer.
     admissibility_default = parse_configured_admissibility_default()
     negotiation_multiplier_floor()
+    default_premature_stop_penalty_periods()
     refuse_retired_address_book_keys()
     require_coherent_release_model()
     seams.startup_refusal()

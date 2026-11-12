@@ -437,8 +437,13 @@ That per-clause step — deadline resolution (D3), the recurring-or-once branch,
 `kit/settlement-runtime` function both compositions call; the `compute` flag and the
 deadline lookup are parameters, so it knows no family (owner record 01, R26). Each
 `resolve_acceptance` hook keeps only its domain's artifact rebuilding over
-`resolve_horizon`. The older differences between the domains are unified in this change:
-the reserved-bound rule (D5) and the clause source (D10).
+`resolve_horizon`. The step, `ClausePublication`, holds what is fixed per composition
+— registry, configuration, servicing declaration, helpers, authorities, the `compute`
+flag and the penalty multiple — and publishes one ready mechanism's clause per call;
+readiness and which clauses reach it stay the composition's. It publishes each option
+as its builder built it, the bytes its ID was derived from, after the servicing
+declaration's check has validated it whole. The older differences between the domains
+are unified in this change: the reserved-bound rule (D5) and the clause source (D10).
 
 ### D10. One source for compute settlement clauses
 
@@ -1024,7 +1029,7 @@ Destinations are planned, not claims of implemented behavior.
 | Accepted decision | Permanent location |
 |---|---|
 | D1, D2/D2a/D2b classes, monetary quote unit, tested money readers and acceptance pricing pin | `docs/development/ARCHITECTURE.md` (with the authority description); `openspec/specs/negotiation-protocol/spec.md` |
-| D3 penalty preset default and its setting, the deadline's source, buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/spec.md`; foundation-owned lifecycle contract |
+| D3 penalty preset default and its setting, the deadline's source, buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` (the storefront-wide `[pricing]` terms of sale: `default_premature_stop_penalty_periods` and its startup refusal); foundation-owned lifecycle contract |
 | D5 the horizon as the Agreement's, listing bounds, the acceptance hook, the floored default, the buyer's check and its seams, and the reserved-bound rule | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md`; `openspec/specs/buyer-orchestration/architecture.md` (the per-listing acceptance validator and the bounds a resumed run keeps); `docs/operator-handbook.md` (bare-metal upgrade step) |
 | D6 servicing declaration and its three doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` (with the storefronts' integration fixtures at the composition ports no installed mechanism supplies); `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Settlement consumer configuration and cutover": the seller root's `rate_servicing` tables) |
 | D7, D8 display, the mechanism's presenter, the default buyer's policy and seller-policy distinction | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |

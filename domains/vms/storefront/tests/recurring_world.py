@@ -41,7 +41,10 @@ from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
 from market_deal_lifecycle.terms import Adjudication, TermContext, encode_terms
 from market_identity import Ed25519Signer
 from market_settlement_runtime.horizon import RateTermTiming
-from market_settlement_runtime.rate_publication import RatePresetPricing
+from market_settlement_runtime.rate_publication import (
+    DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
+    RatePresetPricing,
+)
 from market_settlement_runtime.rate_servicing import (
     RateServicing,
     RateServicingDeclaration,
@@ -277,6 +280,7 @@ async def recurring_world(
     treatments: frozenset[str] | None = QUALIFIED,
     pricing: Mapping[str, Any] | None = None,
     published: list[dict[str, Any]] | None = None,
+    default_penalty_periods: int = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
 ) -> AsyncIterator[RecurringWorld]:
     """The VM storefront with one bounded pool publishing ``published``, by
     default the four clauses of ``clauses``.
@@ -284,6 +288,7 @@ async def recurring_world(
     ``treatments`` is the payments declaration the composition starts with;
     ``None`` declares none, as a deployed composition does. ``pricing`` is the
     pool's family rates, which make its listing shape-priced.
+    ``default_penalty_periods`` is the composition's configured penalty multiple.
     """
     helper = FixtureRateHelper()
     declarations: dict[str, RateServicingDeclaration] = {}
@@ -312,6 +317,7 @@ async def recurring_world(
             rate_preset_helpers={MECHANISM: helper},
             rate_term_projections={MECHANISM: term_timing},
             delivery_deadline_for_pool=lambda _site, _pool: DELIVERY_DEADLINE_SECONDS,
+            default_penalty_periods=default_penalty_periods,
         )
 
     with patch.dict("os.environ", {"XDG_CACHE_HOME": _token_cache(tmp_path)}), \

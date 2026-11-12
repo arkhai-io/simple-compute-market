@@ -16,8 +16,8 @@ The owner's record of round 1 (`reviews/01-implementation-owner.md`) stood in fo
 the design review this change never had; its decisions are in `design.md` D1–D12, and
 the code they need, with review 04's F1 and F2, is round 2: first planned as section 5,
 then split at the owner's direction into sections 5–12, one session each but 5 and 6
-together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5 and
-6 are done; implementation resumes at section 7. Verification levels follow `docs/development/TESTING.md`;
+together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–7
+are done; implementation resumes at section 8. Verification levels follow `docs/development/TESTING.md`;
 every behaviour this change adds gets permanent tests at the level it assigns (owner
 record 01, R2).
 
@@ -1017,7 +1017,7 @@ Delivers D9's shared per-clause step (R26) and D3's configurable penalty multipl
 settlement compositions and `resolve_acceptance` hooks, and both storefronts'
 configuration readers.
 
-- [ ] 7.1 **The shared per-clause step (D9; R26), from 5.9:** extract the per-clause
+- [x] 7.1 **The shared per-clause step (D9; R26), from 5.9:** extract the per-clause
   publication step — deadline resolution, the recurring-or-once branch,
   `derive_rate_preset`, the diagnostics and the penalty setting — from
   `publication_artifacts` (VM `settlement_composition.py`) and `publication_payload`
@@ -1027,16 +1027,82 @@ configuration readers.
   compositions call it; each `resolve_acceptance` hook keeps only its domain's artifact
   rebuilding over `resolve_horizon`. Behaviour is unchanged: the existing publication
   suites pass with their assertions unchanged.
-- [ ] 7.2 **The penalty setting (D3; R11), from 5.8:** replace the hard-coded
+  Done (2026-11-12): `ClausePublication` in `rate_publication.py`, a frozen dataclass of
+  what is fixed per composition (registry, configuration, servicing declaration, preset
+  helpers, dispute authorities and interfaces, `compute`, the penalty multiple, an
+  injected clock) whose `publish(status, clause, *, resources, delivery_deadline,
+  max_duration_seconds, available_until_utc, diagnose)` resolves the deadline through
+  the `delivery_deadline` lookup, branches recurring (`derive_rate_preset`) or once
+  (`registry.build_option` with the dispute, compute, deadline and clause resources),
+  then admits each built option against the declaration and reports default-buyer
+  refusals, returning `ClauseArtifacts`. A `clause` of `None` is VM's no-clauses path,
+  built from the mechanism's section. Both compositions construct it inline in
+  `publication_artifacts`/`publication_payload` and keep readiness, the enabled/ready
+  filtering and, in bare metal, the `reserved_lease_bound_missing` hold before the step
+  (section 9 retires it). The resolve-acceptance hooks were already only domain artifact
+  rebuilding over `resolve_horizon`; nothing moved there. Two choices made to keep
+  behaviour: the step publishes each option as its builder built it (VM's form; bare
+  metal re-dumped its validated model, the same canonical option since its ID is checked
+  against its payload), validation being the servicing check's `require_option`, which
+  validates every option whole in production; and a builder returning no mapping raises
+  `ValueError` (bare metal's) where VM raised `RuntimeError` — VM's listing creation
+  converts both to `ValueError`, while `reconcile_settlement_options`, which no
+  production path calls, now raises `ValueError` there; no installed builder returns
+  anything but a mapping. VM's readiness no longer receives the deadline, dispute
+  and compute keys, which no readiness reads (only the payments option builder does).
+  The deadline lookup now runs per published clause rather than once per candidate.
+  `clause` stays typed `Any`: `publication.py` imports `rate_publication`, so naming
+  `SettlementPublicationClause` there would be a cycle. Existing suites: the only edit
+  to them is `default_penalty_periods=24` on the two namespace compositions
+  `tests/unit/test_settlement_publication.py` passes as `self`; no assertion changed.
+- [x] 7.2 **The penalty setting (D3; R11), from 5.8:** replace the hard-coded
   `default_penalty_periods=24` with `[pricing].default_premature_stop_penalty_periods`
   (default 24), read in both storefronts' configuration and passed to the shared step;
   a penalty stated on a clause still wins. Validate it as a positive integer at load.
-- [ ] 7.3 **Permanent tests (R2):** unit, in `test_rate_publication.py`: the shared
+  Done (2026-11-12): `DEFAULT_PREMATURE_STOP_PENALTY_PERIODS = 24` and the shared
+  setting type `PenaltyPeriods` (strict int, > 0) in `rate_publication.py`. VM:
+  `utils/config.py` `default_premature_stop_penalty_periods()` reads the Dynaconf key,
+  refused by key unless a positive integer, called among `server.py`'s startup refusals
+  and by `build_vm_settlement_composition`, which sets the composition's new
+  `default_penalty_periods`. Bare metal: `PricingSettings.default_premature_stop_penalty_periods:
+  PenaltyPeriods = 24`, refused by `load_storefront_settings` naming the key; `runtime.py`
+  passes it to `from_raw_config(default_penalty_periods=...)`. Both packaged
+  `settings.toml` state 24. Outside the plan's file list, as the bare-metal settings model
+  renders the chart's schema: `make helm-values-schema` regenerated
+  `helm/charts/bare-metal-storefront/values.schema.json` (VM's `[pricing]` is untyped in
+  its schema). The change's storefront-publication delta now states the startup refusal,
+  with a scenario.
+- [x] 7.3 **Permanent tests (R2):** unit, in `test_rate_publication.py`: the shared
   step's once and recurring branches, its diagnostics for a missing helper, undeclared
   servicing and an unbounded horizon, the default multiple, a configured multiple and a
   clause's own penalty winning; each storefront's configuration test for the setting's
   default, a configured value and a refused nonpositive one.
-- [ ] 7.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit and
+  Done (2026-11-12). Unit, `kit/settlement-runtime/tests/unit/test_rate_publication.py`
+  (the step with a `MagicMock` registry and the file's `FixtureHelper`): a once clause
+  built by the registry with exactly the composition's resources; a mechanism with no
+  clause built without one; a once option lacking a deadline published with its
+  default-buyer diagnostic; a built rate option the declaration withholds omitted; a
+  recurring clause derived through its helper, never the registry; missing helper,
+  undeclared servicing and unbounded horizon each omitted with its diagnostic; the
+  default 24-period multiple, a configured 6, a clause's own `"0"` and `"1000"` winning,
+  spot carrying none. Configuration, unit: VM `tests/unit/test_config_loader.py`
+  (packaged and unstated default 24, a stated 6, and 0, -1, 1.5, `"24"`, `True` refused
+  by key with no exception context); bare metal `tests/test_config_loader.py` (packaged
+  default in the defaults test, a stated 6 through the files, 0, -3 and 1.5 refused by
+  key). Bare metal's refusal is its startup path's, `load_storefront_settings`; VM's
+  tests cover the reader, not its call among `server.py`'s startup refusals, which no
+  test drives (the multiplier floor's call is untested the same way). Builder to composition, unit: VM `tests/unit/test_settlement_composition.py` and
+  bare metal `tests/test_app_composition.py`,
+  `test_the_configured_penalty_multiple_is_the_compositions` (bare metal through
+  `build_runtime_from_configuration`). Added beyond the plan, application integration
+  through each storefront's typed client over its `tests/recurring_world.py` (which
+  gains a `default_penalty_periods` argument): VM `test_publication_loop.py` and
+  bare-metal `test_http_publication_rates.py`,
+  `test_an_on_demand_option_stating_no_penalty_publishes_the_configured_multiple`: under
+  a multiple of 6 the published on-demand option carries 6 × 625000 and spot none, which
+  proves the composition hands its multiple to the step (the composition is built by the
+  world, so configuration reaching it is the unit tests').
+- [x] 7.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit and
   library integration),
   `make -C domains/vms/storefront test` (unit and application integration, including
   `test_publication_loop.py`, `test_pool_overrides_api.py` and
@@ -1046,6 +1112,44 @@ configuration readers.
   End-to-end: `vms/test_listing_shapes.py`, `bare_metal/test_bare_metal_publication.py`
   and the two reserved purchases read options the shared step now publishes; none
   exercises a recurring option or the penalty, and none is owed (the per-period gap row).
+  Done (2026-11-12): `make dist`; `make -C kit/settlement-runtime test` (unit and library
+  integration) 250 passed; `make -C domains/vms/storefront test` unit 1188 passed, 1
+  skipped, application integration 580 passed (including `test_publication_loop.py`,
+  `test_pool_overrides_api.py`, `test_listing_identity_carryover.py`); `make -C
+  domains/bare_metal/storefront test` (unit and application integration) 620 passed,
+  after `make helm-values-schema`; `make check-comment-hygiene` passed;
+  `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms` passed every
+  hook (see the handoff below). End-to-end confirmed as stated: no marker in
+  `e2e-tests/` names a recurring option, a premature-stop penalty or the setting; the
+  four scenarios exercise once and reserved options through the shared step's once
+  branch. No `Owed by validation:` evidence: no CI workflow a push alone produces bears
+  on this section.
+
+### Section 7 verification and handoff (2026-11-12)
+
+- Pre-commit on the section's code: `after-functional-change` exit 0 (nothing rebuilt),
+  `pre-commit-functional` exit 0 (`make check-packaging` and the whole `make test`),
+  `pre-commit` exit 0 (index, tasks, skills, strict OpenSpec validation, `make
+  check-repository` with version bumps against `dev`). Rerun after the compliance fixes
+  below, on the final code: every hook passed again, each exit 0.
+- The fresh-context compliance check found nothing blocking. Fixed: `ClausePublication`'s
+  docstring claimed every storefront composes it (API credits still calls
+  `build_option` itself; it publishes no recurring option); 7.1's note overstated the
+  `ValueError` conversion; 7.3's note now says VM's startup call of the reader is
+  untested; the deployment guide's storefront-wide `[pricing]` keys
+  (`docs/development/DEPLOYMENT_AND_CONFIG.md`) became a destination for the setting in
+  D3's promotion row and task 13.9; a reflowed D9 line. Declined: nothing.
+- For the next sections: section 8's deadline source belongs in `ClausePublication.publish`'s
+  deadline resolution (today `effective_delivery_deadline(delivery_deadline())`), where
+  the clause is at hand for its configured fallback; both compositions pass their
+  `delivery_deadline_for_pool` bound to the candidate's site and pool as the lookup, so
+  the precedence can live in the step without either composition changing. The
+  payments builder's once-branch resources already carry `compute` and
+  `delivery_deadline_seconds`; `arkhai_payments_option_builder` currently publishes the
+  clause's own deadline only for non-compute options. Section 9 removes bare metal's
+  `reserved_lease_bound_missing` hold, which sits in `publication_payload` just before
+  the step's call. The recurring worlds take `default_penalty_periods`; tests construct
+  the step with an injected `clock`.
 
 ## 8. The delivery deadline's source and the protected E2E purchases
 
@@ -1272,8 +1376,10 @@ anything requiring code returns to implementation. Former numbers 6.1–6.11 are
   ("Versioning policy", D12), `openspec/specs/storefront-publication/architecture.md`
   (D5, D6, D9, D10), `openspec/specs/buyer-orchestration/architecture.md` (D5's buyer-check
   seams, D7, D8) and
-  the bare-metal upgrade step in `docs/operator-handbook.md` (D5, D10) and the seller
-  root's `rate_servicing` tables in `docs/development/DEPLOYMENT_AND_CONFIG.md` (D6). The archive
+  the bare-metal upgrade step in `docs/operator-handbook.md` (D5, D10), the seller
+  root's `rate_servicing` tables (D6) and the storefront-wide
+  `[pricing].default_premature_stop_penalty_periods` with its startup refusal (D3) in
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`. The archive
   merges the deltas into `negotiation-protocol`, `storefront-publication`,
   `resource-pool-management`, `settlement-configuration` and `buyer-orchestration`
   specs; record destinations and identity decision outcomes. No new capability-index

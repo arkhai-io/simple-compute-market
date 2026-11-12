@@ -148,6 +148,7 @@ def _composition(
             delivery_deadline_for_pool=lambda _site, _pool: None,
             rate_preset_helpers={},
             rate_servicing=SimpleNamespace(require_option=lambda _option: None),
+            default_penalty_periods=24,
             disputes=RegistryDisputePolicy.from_document({}),
             seller_stages=_STAGES,
         ),
@@ -365,6 +366,7 @@ async def test_clause_chain_is_available_during_alkahest_preflight() -> None:
         delivery_deadline_for_pool=lambda _site, _pool: None,
         rate_preset_helpers={},
         rate_servicing=SimpleNamespace(require_option=lambda _option: None),
+        default_penalty_periods=24,
         disputes=RegistryDisputePolicy.from_document({}),
         seller_stages=_STAGES,
     )

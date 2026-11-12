@@ -1,9 +1,11 @@
-"""Recurring option derivation from a publication clause (``derive_rate_preset``)."""
+"""Recurring option derivation from a publication clause (``derive_rate_preset``)
+and the per-clause publication step both storefronts compose (``ClausePublication``)."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from market_core.schemas import (
@@ -11,7 +13,9 @@ from market_core.schemas import (
 )
 from market_deal_lifecycle.configuration import DisputeEntry
 from market_deal_lifecycle.terms import Adjudication, TermContext, encode_terms
+from market_settlement_runtime import MechanismReadiness
 from market_settlement_runtime.rate_publication import (
+    DEFAULT_PREMATURE_STOP_PENALTY_PERIODS, ClauseArtifacts, ClausePublication,
     RatePresetPricing, RatePresetRefusal, RecurringPublicationPreset, derive_rate_preset,
 )
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingDeclaration
@@ -146,3 +150,145 @@ def test_a_default_horizon_without_runway_is_a_close_reason():
 def test_an_unbounded_recurring_candidate_is_omitted():
     refusal = _derive(FixtureHelper(), max_duration_seconds=None)
     assert isinstance(refusal, RatePresetRefusal) and refusal.code == "recurring_horizon_unbounded"
+
+
+# The shared per-clause step (``ClausePublication.publish``).
+
+READY = MechanismReadiness(mechanism=MECHANISM, configured=True, enabled=True, ready=True)
+CONFIG = object()
+
+
+def _once_option(*, lifecycle=None):
+    price = SettlementPrice(asset="USD/6", rates=[RateValue(field="amount", per="hour", value=2500000)])
+    settlement = {"schema": MECHANISM}
+    return SettlementOption(
+        option_id=derive_settlement_option_id(price=price, settlement=settlement, lifecycle=lifecycle),
+        price=price, settlement=settlement, lifecycle=lifecycle,
+    ).model_dump(mode="json")
+
+
+def _step(*, helper=None, registry=None, servicing=SERVICING, **changes):
+    return ClausePublication(
+        registry=registry or MagicMock(), config=CONFIG, servicing=servicing,
+        helpers={MECHANISM: helper} if helper is not None else {},
+        authorities=[ENTRY], dispute_interfaces=frozenset({ENTRY.interface}), compute=True,
+        clock=lambda: NOW, **changes,
+    )
+
+
+def _clause(**preset):
+    recurring = RecurringPublicationPreset(period="PT15M", reserve_ahead_seconds=1800, **preset)
+    return SimpleNamespace(mechanism=MECHANISM, asset="USD/6", recurring=recurring)
+
+
+def _publish(step, clause, *, deadline=1200, max_duration_seconds=7200):
+    diagnostics = []
+    artifacts = step.publish(
+        READY, clause, resources={"origin": "site-a"}, delivery_deadline=lambda: deadline,
+        max_duration_seconds=max_duration_seconds, available_until_utc=None,
+        diagnose=diagnostics.append,
+    )
+    return artifacts, diagnostics
+
+
+def test_a_once_clause_is_built_by_its_registry_with_the_composition_s_inputs():
+    registry = MagicMock()
+    registry.build_option.return_value = {
+        "accepted_escrows": [{"chain_name": "fixture-chain"}],
+        "settlement_options": [_once_option()],
+    }
+    clause = SimpleNamespace(mechanism=MECHANISM, asset="USD/6", recurring=None)
+    artifacts, diagnostics = _publish(_step(registry=registry), clause)
+    assert artifacts.accepted_escrows == ({"chain_name": "fixture-chain"},)
+    assert artifacts.settlement_options == (_once_option(),)
+    assert diagnostics == []
+    (status, config), kwargs = registry.build_option.call_args
+    assert status is READY and config is CONFIG and kwargs["role"] == "seller"
+    assert kwargs["resources"] == {
+        "origin": "site-a", "dispute_authorities": [ENTRY],
+        "dispute_interfaces": frozenset({ENTRY.interface}), "compute": True,
+        "delivery_deadline_seconds": 1200, "publication_clause": clause,
+    }
+
+
+def test_a_mechanism_with_no_clause_is_built_from_its_section_alone():
+    registry = MagicMock()
+    registry.build_option.return_value = {"settlement_options": [_once_option()]}
+    artifacts, _ = _publish(_step(registry=registry), None)
+    assert artifacts.settlement_options == (_once_option(),)
+    assert "publication_clause" not in registry.build_option.call_args.kwargs["resources"]
+
+
+def test_a_once_option_lacking_a_default_buyer_term_publishes_with_its_diagnostic():
+    # A hosted once option's adjudication alone: no delivery deadline.
+    adjudication = {key: value for key, value in _derive(FixtureHelper()).lifecycle.items()
+                    if key == "adjudication"}
+    registry = MagicMock()
+    registry.build_option.return_value = {"settlement_options": [_once_option(lifecycle=adjudication)]}
+    clause = SimpleNamespace(mechanism=MECHANISM, asset="USD/6", recurring=None)
+    artifacts, diagnostics = _publish(_step(registry=registry), clause)
+    assert len(artifacts.settlement_options) == 1
+    assert diagnostics == [{
+        "code": "default_buyer_refusal", "mechanism": MECHANISM,
+        "detail": "a default buyer refuses this option: no delivery deadline",
+        "option_id": artifacts.settlement_options[0]["option_id"],
+    }]
+
+
+def test_a_built_rate_option_the_servicing_declaration_withholds_is_omitted():
+    registry = MagicMock()
+    registry.build_option.return_value = {"settlement_options": [_derive(FixtureHelper()).model_dump(mode="json")]}
+    clause = SimpleNamespace(mechanism=MECHANISM, asset="USD/6", recurring=None)
+    artifacts, diagnostics = _publish(_step(registry=registry, servicing=_declared("charged")), clause)
+    assert artifacts.settlement_options == ()
+    assert [entry["code"] for entry in diagnostics] == ["rate_servicing_undeclared"]
+
+
+def test_a_recurring_clause_is_derived_through_its_helper_and_never_the_registry():
+    registry, helper = MagicMock(), FixtureHelper()
+    artifacts, diagnostics = _publish(_step(helper=helper, registry=registry), _clause())
+    (option,) = artifacts.settlement_options
+    assert option["settlement"] == {"schema": MECHANISM, "period": "PT15M", "reserve_ahead_seconds": 1800}
+    assert artifacts.accepted_escrows == ()
+    assert diagnostics == []
+    registry.build_option.assert_not_called()
+    assert helper.requests[0].lifecycle.delivery_deadline_seconds == 1200
+
+
+@pytest.mark.parametrize(("changes", "code"), [
+    ({"helper": None}, "rate_helper_missing"),
+    ({"servicing": RateServicing()}, "rate_servicing_undeclared"),
+    ({"max_duration_seconds": None}, "recurring_horizon_unbounded"),
+], ids=["missing-helper", "undeclared-servicing", "unbounded-horizon"])
+def test_a_recurring_clause_that_cannot_publish_is_omitted_with_its_diagnostic(changes, code):
+    step_changes = {key: value for key, value in changes.items() if key in ("helper", "servicing")}
+    step = _step(**{"helper": FixtureHelper(), **step_changes})
+    artifacts, diagnostics = _publish(
+        step, _clause(), max_duration_seconds=changes.get("max_duration_seconds", 7200),
+    )
+    assert artifacts == ClauseArtifacts()
+    assert [(entry["code"], entry["mechanism"]) for entry in diagnostics] == [(code, MECHANISM)]
+
+
+def _penalty(step, clause):
+    (option,) = _publish(step, clause)[0].settlement_options
+    return option["lifecycle"]["early_termination"].get("premature_stop_penalty")
+
+
+def test_on_demand_with_no_stated_penalty_takes_the_default_multiple_of_its_period_price():
+    assert DEFAULT_PREMATURE_STOP_PENALTY_PERIODS == 24
+    assert _penalty(_step(helper=FixtureHelper()), _clause()) == str(625000 * 24)
+
+
+def test_a_configured_multiple_replaces_the_default():
+    assert _penalty(_step(helper=FixtureHelper(), default_penalty_periods=6), _clause()) == str(625000 * 6)
+
+
+@pytest.mark.parametrize("stated", ["0", "1000"])
+def test_a_penalty_stated_on_the_clause_wins_over_any_multiple(stated):
+    step = _step(helper=FixtureHelper(), default_penalty_periods=6)
+    assert _penalty(step, _clause(premature_stop_penalty=stated)) == stated
+
+
+def test_spot_carries_no_default_penalty():
+    assert _penalty(_step(helper=FixtureHelper()), _clause(payee_notice_seconds=0)) is None

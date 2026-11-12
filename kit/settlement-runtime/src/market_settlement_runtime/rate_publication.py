@@ -7,12 +7,14 @@ No runtime helper or service readiness is inferred from a readable preset.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, Protocol
 
-from market_core.schemas import AgreedPrice, SettlementOption
+from market_core.schemas import (
+    AgreedPrice, SettlementOption, settlement_option_lifecycle, settlement_option_schema,
+)
 from market_deal_lifecycle.configuration import DisputeEntry
 from market_deal_lifecycle.terms import (
     PARTIAL_PERIOD, Adjudication, EarlyTermination, Entitlement, LifecycleTerms,
@@ -20,11 +22,20 @@ from market_deal_lifecycle.terms import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
+from .configuration import MechanismReadiness, SettlementConfig, SettlementConfigurationRegistry
 from .horizon import bound_seconds, parse_utc
 from .rate_servicing import RateServicing, RateServicingDeclaration, RateServicingUnavailable
 
 Amount = Annotated[str, Field(pattern=r"^(0|[1-9][0-9]*)$")]
 Seconds = Annotated[int, Field(strict=True, ge=0)]
+
+#: How many of its periods' price an on-demand option's premature-stop penalty
+#: is when its clause states none, unless the storefront configures another.
+DEFAULT_PREMATURE_STOP_PENALTY_PERIODS = 24
+
+#: A storefront's configured default penalty multiple: a whole number of periods,
+#: at least one, since a default of none is stated per clause as ``"0"``.
+PenaltyPeriods = Annotated[int, Field(strict=True, gt=0)]
 
 
 class RecurringPublicationPreset(BaseModel):
@@ -211,3 +222,108 @@ def derive_rate_preset(
         return option
     except ValueError as exc:
         return RatePresetRefusal("recurring_preset_unusable", str(exc))
+
+
+@dataclass(frozen=True)
+class ClauseArtifacts:
+    """What one clause publishes: its accepted escrows and settlement options."""
+
+    accepted_escrows: tuple[dict[str, Any], ...] = ()
+    settlement_options: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class ClausePublication:
+    """The per-clause publication step the VM and bare-metal storefronts compose.
+
+    It holds what is fixed for a composition — the installed registry and its
+    configuration, the servicing declaration, the preset helpers, the dispute
+    authorities offered, whether the options are compute options, and the
+    default penalty multiple — and names no market family: a domain differs
+    only in the resources and bounds it passes per candidate.
+    """
+
+    registry: SettlementConfigurationRegistry
+    config: SettlementConfig
+    servicing: RateServicing
+    helpers: Mapping[str, RatePresetHelper]
+    authorities: Sequence[DisputeEntry]
+    dispute_interfaces: frozenset[str]
+    compute: bool
+    default_penalty_periods: int = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS
+    clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
+
+    def publish(
+        self,
+        status: MechanismReadiness,
+        clause: Any | None,
+        *,
+        resources: Mapping[str, Any],
+        delivery_deadline: Callable[[], Any],
+        max_duration_seconds: int | None,
+        available_until_utc: datetime | str | None,
+        diagnose: Callable[[dict[str, Any]], None],
+    ) -> ClauseArtifacts:
+        """Publish one ready mechanism's clause, or its configured option.
+
+        ``clause`` is the compiled publication clause, or ``None`` where the
+        candidate states no clauses and the mechanism builds from its section.
+        A recurring clause is derived through its mechanism's preset helper; any
+        other through the registry's option builder. Each option either path
+        builds is then admitted against the servicing declaration and judged
+        against the default buyer's policy, every refusal reported through
+        ``diagnose`` while the clause's other options and the candidate's other
+        clauses publish. ``delivery_deadline`` looks up the effective deadline
+        the composition supplies for the candidate.
+        """
+        deadline = effective_delivery_deadline(delivery_deadline())
+        if clause is not None and clause.recurring is not None:
+            result = derive_rate_preset(
+                clause, helper=self.helpers.get(clause.mechanism),
+                servicing=self.servicing, authorities=self.authorities,
+                max_duration_seconds=max_duration_seconds,
+                available_until_utc=available_until_utc,
+                delivery_deadline_seconds=deadline, now=self.clock(),
+                default_penalty_periods=self.default_penalty_periods,
+            )
+            if isinstance(result, RatePresetRefusal):
+                diagnose({"code": result.code, "detail": result.detail, "mechanism": clause.mechanism})
+                return ClauseArtifacts()
+            envelope: Any = {"settlement_options": [result.model_dump(mode="json")]}
+        else:
+            envelope = self.registry.build_option(
+                status, self.config, role="seller",
+                resources={
+                    **resources,
+                    "dispute_authorities": self.authorities,
+                    "dispute_interfaces": self.dispute_interfaces,
+                    "compute": self.compute,
+                    "delivery_deadline_seconds": deadline,
+                    **({"publication_clause": clause} if clause is not None else {}),
+                },
+            )
+        if not isinstance(envelope, Mapping):
+            raise ValueError(f"settlement option builder {status.mechanism} returned no envelope")
+        built_escrows = envelope.get("accepted_escrows", ())
+        built_options = envelope.get("settlement_options", ())
+        if not isinstance(built_escrows, (list, tuple)) or not isinstance(built_options, (list, tuple)):
+            raise ValueError("settlement option builder returned invalid carriers")
+        options: list[dict[str, Any]] = []
+        for item in built_options:
+            # The declaration's check validates the option whole, so a builder
+            # cannot publish a malformed one; what publishes is the option as
+            # built, its bytes the ones its ID was derived from.
+            try:
+                self.servicing.require_option(item)
+            except RateServicingUnavailable as exc:
+                diagnose({"code": "rate_servicing_undeclared", "detail": str(exc), "mechanism": settlement_option_schema(item)})
+                continue
+            lifecycle = settlement_option_lifecycle(item)
+            terms = LifecycleTerms.model_validate(lifecycle) if lifecycle is not None else None
+            for detail in default_buyer_refusals(terms, has_adapter=terms is not None):
+                diagnose({"code": "default_buyer_refusal", "detail": detail, "mechanism": settlement_option_schema(item), "option_id": item["option_id"]})
+            options.append(dict(item))
+        return ClauseArtifacts(
+            accepted_escrows=tuple(dict(item) for item in built_escrows),
+            settlement_options=tuple(options),
+        )

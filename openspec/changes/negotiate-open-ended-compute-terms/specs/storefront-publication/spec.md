@@ -35,7 +35,7 @@ Unsupported lifecycle promises MUST NOT be synthesized for the Alkahest splitter
 
 ### Requirement: Recurring presets expose the premature-stop penalty
 
-Terms publication MUST resolve the penalty preset default and seller override before invoking the helper. An on-demand preset with no stated penalty MUST default to the quoted per-period price times the storefront setting `[pricing].default_premature_stop_penalty_periods`, which defaults to 24; a penalty stated on the clause, including an explicit `"0"`, MUST win, and spot carries none by default. The injected helper MUST encode only the supplied early_termination.premature_stop_penalty through the foundation codec into candidate identity. A missing helper MUST omit recurring candidates with a named refusal rather than reconstruct mechanism params; reserved candidates MUST remain independent.
+Terms publication MUST resolve the penalty preset default and seller override before invoking the helper. An on-demand preset with no stated penalty MUST default to the quoted per-period price times the storefront setting `[pricing].default_premature_stop_penalty_periods`, which defaults to 24 and which the storefront MUST refuse at startup unless it is a positive integer; a penalty stated on the clause, including an explicit `"0"`, MUST win, and spot carries none by default. The injected helper MUST encode only the supplied early_termination.premature_stop_penalty through the foundation codec into candidate identity. A missing helper MUST omit recurring candidates with a named refusal rather than reconstruct mechanism params; reserved candidates MUST remain independent.
 
 #### Scenario: A default on-demand preset is emitted
 
@@ -46,6 +46,11 @@ Terms publication MUST resolve the penalty preset default and seller override be
 
 - **WHEN** `[pricing].default_premature_stop_penalty_periods` is 12 and an on-demand clause states no penalty
 - **THEN** its candidate carries 12 periods' price, while a clause stating its own penalty keeps it
+
+#### Scenario: A penalty multiple that is not a positive integer is refused
+
+- **WHEN** `[pricing].default_premature_stop_penalty_periods` is 0, negative or fractional
+- **THEN** the storefront refuses to start, naming the key
 
 ### Requirement: Unbounded recurring candidates close independently
 

@@ -977,6 +977,15 @@ def test_the_configured_rate_servicing_declaration_is_the_compositions():
     assert (declared.treatments, declared.setup) == (frozenset({"charged", "returned"}), False)
 
 
+def test_the_configured_penalty_multiple_is_the_compositions(monkeypatch, tmp_path):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["pricing"] = {**document.get("pricing", {}), "default_premature_stop_penalty_periods": 6}
+
+    composition = _configured_runtime(monkeypatch, tmp_path, document).settlement_composition
+
+    assert composition.default_penalty_periods == 6
+
+
 def test_a_contact_only_root_composes_its_obligation_worker(monkeypatch, tmp_path):
     runtime = _configured_runtime(monkeypatch, tmp_path)
 

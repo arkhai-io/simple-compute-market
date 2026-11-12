@@ -2228,6 +2228,24 @@ async def test_publication_omits_recurring_options_whose_treatments_are_undeclar
     assert all("does not declare returned" in item["detail"] for item in refusals)
 
 
+async def test_an_on_demand_option_stating_no_penalty_publishes_the_configured_multiple(
+    tmp_path,
+):
+    """The on-demand preset states no premature-stop penalty, so it publishes its
+    per-period price, 625000 at 2.5 an hour per 15 minutes, times the composition's
+    configured multiple; spot, which carries a seller stop, publishes none."""
+    async with recurring_world(tmp_path, default_penalty_periods=6) as world:
+        validate_cycle_report(await world.publish())
+        ((_listing_id, listing),) = (await _listings(world.app)).items()
+
+    penalties = {
+        "payee" in option["lifecycle"]["early_termination"]["entitlements"]:
+            option["lifecycle"]["early_termination"].get("premature_stop_penalty")
+        for option in _recurring(listing["settlement_options"])
+    }
+    assert penalties == {False: str(625000 * 6), True: None}
+
+
 def _negotiation_rows(db) -> list[tuple]:
     with sqlite3.connect(db.db_path) as connection:
         return connection.execute(
