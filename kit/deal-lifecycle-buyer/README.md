@@ -110,6 +110,19 @@ under the original key before fixing a case claim; a transient loss does not
 commit the buyer to contested observation time. When the acknowledgement selects
 an earlier non-surrender end, the half skips automatic payer filing.
 
+`BuyerDeal.rate` comes from the accepted option's recurring billing basis.
+`end(id)` uses the existing durable end journal to submit the payer stop and
+then a stable-key hint for a rate deal. Service is retained until watch observes
+the effective authority stop, including nonzero payer notice. A lost stop is
+retried under the same key; hint acknowledgement is independent. Progress exposes
+`mode=normal_stop`, the authority's payment records and the separate `hint`.
+`end(id, surrender=True)` and `end_delivery(id)` use the receipt-time surrender
+and case path. Escalating a normal stop to surrender reuses its original stop.
+Once-only deals retain that immediate-surrender behavior. The VM `market end`
+and bare-metal `market bare-metal teardown` commands select ordinary end by
+default; `--end-now-regardless` explicitly gives up service before paid notice
+expires. No foreground probe or buyer watchdog is installed.
+
 Reproduce the injected first-use journey after rebuilding wheels:
 
 ```sh

@@ -1,4 +1,4 @@
-"""Receipt-time VM surrender and signed delivery reports through the buyer half."""
+"""Notice-preserving VM stop or receipt-time surrender through the buyer half."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from .settlement_composition import buyer_stage, resolve_buyer_settlement_policy
 from .settlement_stages import BuyerResumeContext
 
 
-def run_end_from_log(*, run_id, wait_timeout=0, poll_interval=1, identity=None):
+def end_context(run_id, *, poll_interval, identity):
     identity = identity or common.resolve_recovery_buyer_identity(run_id)
     deal = load_deal_context(run_id, signer=identity.signer)
     stage = buyer_stage(accepted_settlement_mechanism(deal))
@@ -32,17 +32,28 @@ def run_end_from_log(*, run_id, wait_timeout=0, poll_interval=1, identity=None):
         poll_interval=poll_interval, timeout=60, console=Console(),
     )
 
+    return deal, log, stage.lifecycle(context)
+
+
+def run_end_from_log(*, run_id, wait_timeout=0, poll_interval=1, identity=None, surrender=False):
+    deal, log, lifecycle_context = end_context(run_id, poll_interval=poll_interval, identity=identity)
+
     async def end():
-        async with stage.lifecycle(context) as lifecycle:
-            progress = await lifecycle.end_delivery(deal.negotiation_id)
+        async with lifecycle_context as lifecycle:
+            progress = await lifecycle.end(deal.negotiation_id, surrender=surrender)
             log.event("delivery_end", **progress.model_dump(mode="json"))
             delivery = progress.acknowledgement.delivery if progress.acknowledgement else None
             deadline = time.monotonic() + wait_timeout
+            delivery_read_error = None
             while wait_timeout > 0:
                 # Direct signed delivery reads are independent of payment or
                 # mediation availability; an unreachable authority cannot hide
                 # site evidence or block proof of capacity return.
-                observed = await lifecycle.peer.read(deal.negotiation_id)
+                try:
+                    observed = await lifecycle.peer.read(deal.negotiation_id)
+                except Exception:
+                    delivery_read_error = "storefront delivery read unavailable; authority outcome is retained"
+                    break
                 delivery = observed.delivery
                 if delivery.progress == "released" or time.monotonic() >= deadline:
                     break
@@ -51,6 +62,7 @@ def run_end_from_log(*, run_id, wait_timeout=0, poll_interval=1, identity=None):
                 "progress": progress.model_dump(mode="json"),
                 "delivery_view": delivery.model_dump(mode="json") if delivery else None,
                 "capacity_released": delivery is not None and delivery.progress == "released",
+                "delivery_read_error": delivery_read_error,
             }
 
     result = run_sync(end)
@@ -64,8 +76,12 @@ def register(app):
         run_id: str = typer.Option(..., "--from", "--run", "-r"),
         wait_timeout: float = typer.Option(0, "--wait-timeout", min=0),
         poll_interval: float = typer.Option(1, "--poll-interval", min=0.01),
+        surrender: bool = typer.Option(False, "--end-now-regardless", help="Surrender service now, even while paid notice remains."),
     ):
-        """End VM delivery now; report payment, receipt, case and capacity separately.
+        """Stop rate billing and retain service through notice; otherwise surrender.
+
+        --end-now-regardless surrenders before any paid notice expires.
+        Report payment, receipt, case and capacity separately.
 
         There is no historical end-time flag. Once-only and Alkahest surrender
         invent no refund; a queued teardown is never reported as released.
@@ -73,12 +89,13 @@ def register(app):
         """
         try:
             result = run_end_from_log(
-                run_id=run_id, wait_timeout=wait_timeout, poll_interval=poll_interval,
+                run_id=run_id, wait_timeout=wait_timeout, poll_interval=poll_interval, surrender=surrender,
             )
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
         typer.echo(json.dumps(result, sort_keys=True))
-        if result["progress"]["delivery"]["status"] != Accepted().status:
+        outcome = "payment" if result["progress"]["mode"] == "normal_stop" else "delivery"
+        if result["progress"][outcome]["status"] != Accepted().status:
             raise typer.Exit(1)
         if wait_timeout > 0 and not result["capacity_released"]:
             raise typer.Exit(1)

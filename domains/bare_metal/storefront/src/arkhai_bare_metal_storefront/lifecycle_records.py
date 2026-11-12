@@ -70,5 +70,6 @@ def register_agreement(conn, agreement_bytes: bytes, settlement_data=None, *, ca
         dispute=terms.adjudication.dispute if terms else None,
         entitlements=(terms.early_termination.model_dump(mode="json")["entitlements"]
                       if terms and terms.early_termination else {}),
-        once_only=True,
+        once_only=(option.settlement_schema != ARKHAI_PAYMENTS_MECHANISM
+                   or all(part.root.kind == "once" for part in PaymentSettlementData.parse(settlement_data).mandate.parts)),
     ))
