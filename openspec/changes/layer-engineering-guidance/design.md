@@ -1,7 +1,8 @@
 # Design: layer engineering guidance
 
 Status: design settled and reviewed; design review 19's findings are settled in D5,
-D21, and D22. Planning follows.
+D21, and D22. Round 1's triage amended D8 and D10 and settled the decisions under
+"Settled at round 1's triage".
 
 ## Context
 
@@ -115,7 +116,7 @@ Destinations are provisional file names; round 1 confirms them.
 | `AGENTS.md` "Tests and diagnostics" | split: engineering, testing; repository (`make check-packaging`) | `engineering/testing.md`; `AGENTS.md` | |
 | `AGENTS.md` "Public repository discipline" and its three first subsections | engineering, repository-content (D6), with this repository's choice of the public case at the root (D9) | `engineering/repository-content.md`; `AGENTS.md` | the workflow runs in private repositories too |
 | `AGENTS.md` "Cross-references must resolve" | split: engineering, documentation (citations resolve); workflow, closeout (the promotion story; check before promoting) | `engineering/documentation.md`; `workflow/closeout.md` | |
-| `AGENTS.md` "Deferred work" | split: workflow, planning (owning change, unowned gap in the index); repository (`ROADMAP.md`, no GitHub Issues, the discovery harness) | `working-model.md`; `AGENTS.md` | |
+| `AGENTS.md` "Deferred work" | split: workflow, planning (owning change, unowned gap in the index, the roadmap's role, 31 O1f); repository (the `ROADMAP.md` path, no GitHub Issues, the discovery harness) | `working-model.md`; `AGENTS.md` | |
 | `AGENTS.md` "Domain docs", `docs/agents/domain.md` | split: workflow (the workflow's terms in its specification); repository (the market's homes) | `workflow/terms.md`; `AGENTS.md` | Ambiguous: whether "one home per term" is engineering |
 | `openspec/README.md` introduction and validator pin | split: workflow, documentation (the OpenSpec layout); repository (the pin and its command) | `openspec-documentation.md`; `openspec/README.md` | |
 | `openspec/README.md` "Documentation placement" | split: workflow (spec, companion, change rows); repository (rows naming `docs/development/`) | both | |
@@ -142,7 +143,7 @@ Destinations are provisional file names; round 1 confirms them.
 | `DEPLOYMENT_AND_CONFIG.md` "Marketplace identity configuration" | repository, configuration | `openspec/specs/marketplace-identity/configuration.md` | Ambiguous: overlap with the operator handbook |
 | `DEPLOYMENT_AND_CONFIG.md` "Kubernetes: ConfigMap and Secret mounting" | repository, deployment | stays | cross-system |
 | `docs/agents/change-workflow.md` | workflow; its step table's validation parts and links to `market-change-workflow` split out | `docs/agents/change-workflow.md`; `openspec/specs/market-change-workflow/README.md` | the direction rule |
-| `VALIDATION_RUNBOOK.md`, `RELEASING.md` | repository, document-level tags | stay whole (D10) | procedures |
+| `VALIDATION_RUNBOOK.md`, `RELEASING.md` | repository, document-level tags | stay whole (D10), but for `RELEASING.md`'s versioning policy, which moves to engineering (D10 as amended) | procedures |
 | `openspec/config.yaml` | outside the guidance set; its restatements as rows | stays (D23) | |
 | `docs/prompts/` | outside the guidance set | untouched (D12) | |
 
@@ -243,10 +244,13 @@ Every closeout part is workflow material: closeout exists only in the workflow, 
 engineering guidance may not cite it. What a part confirms may be a rule of any
 layer, and the command it runs is the repository's. The workflow's parts — comment
 hygiene, import placement, documentation compliance, narrative compression,
-campaign index currency, promotion, guidance placement (D16), documentation
-citations, archival — move to `docs/guidance/workflow/closeout.md`, each under its
-own heading, in order, archival last, with the position at which the repository's
-own parts run. This repository's parts — roadmap currency, packaging, end-to-end
+roadmap currency, campaign index currency, promotion, guidance placement (D16),
+documentation citations, archival — move to `docs/guidance/workflow/closeout.md`,
+each under its own heading, in order, archival last, with the position at which the
+repository's own parts run. Roadmap currency is the workflow's because every
+adopting repository keeps a roadmap as this one does; the part says "the
+repository's roadmap", and this repository's guidance names its path (amended at
+round 1's triage, 31 O1f). This repository's parts — packaging and end-to-end
 pipeline evidence — move to `openspec/README.md`'s "This repository's closeout
 parts", which `AGENTS.md`'s layer table names, so closeout, planning, and review
 find them through the root guidance without the workflow naming a repository path.
@@ -292,8 +296,12 @@ general method moves to engineering with neutral examples, its capability sectio
 beside their capabilities, and its cross-system deployment stays; overlap with the
 operator handbook is flagged in the inventory rather than settled by the agent.
 `VALIDATION_RUNBOOK.md` and `RELEASING.md` are procedures and stay whole, with
-document-level tags. `BUILD_AND_PACKAGING.md` stays repository material, any uv
-convention that holds anywhere moving out tagged `tool`.
+document-level tags; a section of one that states policy rather than a step is
+classified by D1 like any other, so `RELEASING.md`'s versioning policy moves to
+engineering, its repository reasons staying and citing it (amended at round 1's
+triage, 31 O1e). The runbook is not guidance and moves nothing.
+`BUILD_AND_PACKAGING.md` stays repository material, any uv convention that holds
+anywhere moving out tagged `tool`.
 
 Rejected: extracting procedures too, which scatters runbooks nobody follows in
 pieces.
@@ -482,6 +490,58 @@ capability's guidance into every step; folding capability guidance into companio
 It is configuration the OpenSpec tool reads as one context block. Round 1's
 inventory lists its restatements as rows; round 2 onward re-points only what would
 go stale.
+
+### Settled at round 1's triage
+
+The owner settled these while correcting the inventory; the inventory's "Rules from
+round 1's triage" applies them row by row.
+
+- **31 O1a — General rules stated in this repository's terms.** Guidance compatible
+  with other systems of its kind is engineering, moved with a neutral example, even
+  where many repositories have no clients or no end-to-end tests; the repository's
+  statement stays as its instance and cites it. A description of this system — its
+  architecture, one capability's mechanism, a workaround tied to its environment —
+  stays repository material, or goes to the capability's companion. A form that
+  differs by language is a matter of tagging, not layering.
+- **31 O1b — Deduplication, reviewed.** The change deduplicates the guidance. Copies
+  that agree merge into one home. Where copies differ, or a merge would change what
+  the guidance says, the section moving them proposes one text and lists the pair,
+  and that round's triage reviews both forms with the owner; no change to what
+  guidance says is assumed. The operator handbook, the runbook, and other
+  non-guidance documents do not move, but are brought in line where the decided
+  guidance contradicts them. No change-index row records the pairs.
+- **31 O1c — Tags are atoms, selected conjunctively.** The partition assumes a later
+  loader reads a file when a session carries every tag the file carries; there are
+  no compound tags. A file carries only the tags its content needs, and content
+  needing another tag set goes in another file. A tool a developer, build, or
+  deployment runs has a tool tag; a library code imports carries its language's tag.
+  "This repository uses X" is repository material; how to use X well is engineering
+  tagged X, for any X. The loader change inherits or revises this assumption.
+- **31 O1d — Multi-capability sections.** A section goes beside the capability whose
+  specification owns what it governs, not the service that reads or enforces it;
+  parts with different owners split where they separate cleanly, and otherwise stay
+  cross-system; a capability-named example of a shared rule stays with the rule.
+- **31 O1e — Exceptions and the diagram case.** "Amend a rule or comply" is reworded
+  as a framework for when an exception is expected: once guidance is shared and
+  other repositories change it, "never" is too strong, while the rule's purpose —
+  stopping an owner from declaring everything an exception — stays. Section 4 drafts
+  the wording and its triage reviews it. The change workflow's hand-laid graph is a
+  temporary `overrides` row in `AGENTS.md`'s exceptions table against the diagrams
+  rule, until the "Current limits" bullet on generating it closes.
+  `docs/agents/domain.md` is removed once its rows move.
+- **31 O1f — The roadmap and the capability index.** Every adopting repository keeps
+  the roadmap and the OpenSpec change organization this repository uses, so the
+  roadmap's role, the capability index's role, and what goes to each are workflow
+  material; their paths and contents are this repository's (D8 amended). Scripts and
+  checks stay where they are: moving them is `extract-change-workflow-repository`'s.
+- **31 O1g — Within a layer.** Each row keeps the file its layer gives it, with two
+  rows the rules above decide: the principle that work is not complete because its
+  own suites pass is engineering testing guidance (31 O1a), and the operator-control
+  rule splits into a production half in `implementation.md` and a test half in
+  `test-seams.md` (31 O1c).
+- **29 F1 — The project layout.** `BUILD_AND_PACKAGING.md`'s "Project layout" splits
+  into its Python rules, its uv rules, its Hatchling form (each engineering, tagged
+  with its tool), and this repository's selection of Hatchling, which stays.
 
 ### Implementation cadence
 

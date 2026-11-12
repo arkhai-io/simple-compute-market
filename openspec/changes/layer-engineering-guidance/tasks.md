@@ -274,6 +274,44 @@ Section 2 notes (handoff):
   `VALIDATION_RUNBOOK.md` beyond its opening, failure diagnostics, and section 29,
   whose other sections are classified by heading as procedure.
 
+Round 1's triage (reviews 29–31, the orchestrator's record 27):
+
+- Fix, 31 O1 / 29 F1: the inventory is corrected by the owner's rules, stated in its
+  "Rules from round 1's triage" and in `design.md`, "Settled at round 1's triage":
+  general rules move to engineering (31 O1a), duplicates are deduplicated with each
+  wording change reviewed (31 O1b), tags are atoms selected conjunctively and files
+  partitioned to match (31 O1c), the project-layout row splits into Python, uv,
+  Hatchling, and repository rows (29 F1), multi-capability sections go beside their
+  owner (31 O1d), the settled-decision rows are decided (31 O1e), the roadmap's and
+  capability index's roles are the workflow's (31 O1f), and the within-layer
+  placements stand (31 O1g). 429 rows; the `Ambiguous` column now holds only what a
+  later triage settles: 21 duplicate pairs (31 O1b), the exceptions framework's
+  wording (31 O1e), and the route pattern's Python form.
+- The dispositions amend D8 (roadmap currency is a workflow part) and D10 (policy
+  inside a procedure moves), so tasks 3.2, 3.4, and 9.6, and closeout's order, no
+  longer match the design; sections 3–6 owe the deduplication and its review
+  (31 O1b), section 3 the removal of `docs/agents/domain.md`, section 4 the
+  exceptions framework, section 5 the diagram exception row (31 O1e); and the
+  engineering layer now names 40 files, against section 4's one session. The plan
+  is amended after the next implementation review's triage, which the owner chose
+  before any return to planning.
+- Open for section 3's triage: under the conjunctive model, no workflow file carries
+  a step or role tag (`design`, `plan`, …), since `working-model.md` and the guide
+  serve every step; D18 removes a table row no file uses unless a file is split by
+  step. Open for section 5's triage: no repository document as a whole carries the
+  repository tag `checks`, whose passages lie across five documents.
+- Evidence: inspected; no test applies to a change document. `scripts/change-workflow
+  run pre-commit layer-engineering-guidance` fails only on the two failures the
+  preamble expects (citations of files the change creates, none from `inventory.md`;
+  the six `CW-*` index entries); the index, tasks, skills, and strict OpenSpec checks
+  pass. A fresh-context check of the diff found the design's settled list missing
+  31 O1g and 29 F1, two stale hard-case sample rows, a `versioning.md` citation the
+  rows did not carry, `RELEASING.md`'s document tags, workflow rows tagged beyond
+  their file's set, and no carrier named for `architecture` and `checks`; all fixed,
+  `checks` recorded as open above. An inline `python3 -I -c` listing destination
+  files' tags was denied (no rule allows it); the check was made with Grep and the
+  fresh-context subagent.
+
 ## 3. The workflow layer
 
 Delivers the workflow layer (D1, D3, D8, D16–D19): `docs/guidance/workflow/` with

@@ -59,8 +59,8 @@ cites guidance held elsewhere.
 - **Engineering guidance for private and public repositories.** What may enter a
   repository is described for both; this repository applies the public case.
 - **The closeout parts by layer.** The workflow's parts move to
-  `docs/guidance/workflow/closeout.md`, cited by name; this repository's parts —
-  roadmap currency, packaging, pipeline evidence — stay in its own guide. A new
+  `docs/guidance/workflow/closeout.md`, cited by name, roadmap currency among them;
+  this repository's parts — packaging and pipeline evidence — stay in its own guide. A new
   workflow part, guidance placement, checks and fixes where promoted guidance sits.
 - **`AGENTS.md` rewritten** as the entry: the layers and where each lives, this
   repository's own rules, its tags, and its multi-system exceptions.
@@ -114,9 +114,13 @@ As `openspec/README.md`'s change documentation requirements ask:
   paths and selects nothing.
 - **Do not remove the skills' restatements of guidance.** The inventory lists them
   for the loader change.
-- **Do not change what the guidance says** beyond what a split requires: a neutral
-  example, a restated scope. The one exception is engineering guidance's
-  description of what a private repository may hold.
+- **Do not change what the guidance says without review.** A split may give a
+  neutral example or restate a scope; deduplicating the guidance may change what it
+  says, but each such change, and every contradiction between copies, is reviewed
+  with the owner in the triage of the round making it. A document built on changed
+  guidance, such as the operator handbook, is brought in line rather than left
+  contradicting it. Engineering guidance's description of what a private repository
+  may hold is new.
 - **Do not touch `docs/prompts/`.** The prompts are deprecated and stay outside the
   guidance set.
 
