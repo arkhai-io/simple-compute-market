@@ -16,8 +16,8 @@ The owner's record of round 1 (`reviews/01-implementation-owner.md`) stood in fo
 the design review this change never had; its decisions are in `design.md` D1–D12, and
 the code they need, with review 04's F1 and F2, is round 2: first planned as section 5,
 then split at the owner's direction into sections 5–12, one session each but 5 and 6
-together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–11
-are done; implementation resumes at section 12. Verification levels follow `docs/development/TESTING.md`;
+together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–12
+are done; the round's validation, review and triage follow. Verification levels follow `docs/development/TESTING.md`;
 every behaviour this change adds gets permanent tests at the level it assigns (owner
 record 01, R2).
 
@@ -1819,26 +1819,140 @@ pin tests and the retained-record confirmation (D2b), the probes' conversion (R2
 and the round's validation. Touches the VM and bare-metal storefronts' integration
 suites, the VM buyer and the change's probes.
 
-- [ ] 12.1 **Publication and acceptance through the typed client (D1, D5; R2):** each
+- [x] 12.1 **Publication and acceptance through the typed client (D1, D5; R2):** each
   storefront with real SQLite: mixed publication on one capacity identity (reserved,
   on-demand, spot with an injected declaration); a horizon refusal naming the minimum
   that passes the runway.
-- [ ] 12.2 **The retained pricing record and pin tests (D2b; R4), from 5.10:** confirm no
+  Done (2026-11-12), application integration over each storefront's
+  `tests/recurring_world.py`, through the typed admin and buyer clients with real
+  SQLite. Mixed publication: VM `tests/integration/test_publication_loop.py` and
+  bare-metal `tests/test_http_publication_rates.py`,
+  `test_one_listing_offers_reserved_on_demand_and_spot_on_its_capacity_identity` — the
+  pool publishes under no declaration (the deployed default: the reserved Alkahest and
+  once payment options), then under the declaration the same listing (VM: the only
+  listing; bare metal: no new `publish` action) keeps its listing resource, publishes
+  both top-level bounds and gains the on-demand and spot options, four separately
+  identified options whose classes, derived in the test from billing and entitlements
+  per D1, are Alkahest reserved, payments reserved, on-demand and spot, none carrying a
+  stored class. Runway: VM `tests/integration/test_buyer_selection_negotiation.py` and
+  bare-metal `tests/test_http_negotiation.py`,
+  `test_a_horizon_leaving_no_runway_is_refused_naming_the_minimum_that_passes` — 2399
+  seconds on the on-demand option is refused naming "minimum duration_seconds is 2400"
+  (approval window 300 + deadline 1200 + period 900) with `negotiation_threads`
+  unchanged; on VM the re-proposed 2400 is accepted at 2400. Bare metal stops at the
+  refusal: its acceptance would capture a rate mandate, which the world's fixtures do
+  not supply (the horizon-acceptance checkpoint above).
+- [x] 12.2 **The retained pricing record and pin tests (D2b; R4), from 5.10:** confirm no
   other buyer read compares a top-level `rate_structure` with a signed body (the
   triage's V1 fix covered `pricing_record.py`); application integration through the VM
   storefront's typed client: pin production and verification against a dev-shaped
   publication whose `pricing` object carries the rate structure, a changed pin refused,
   and a legacy record without proof failing closed for multiplier pricing.
-- [ ] 12.3 **The probes (R2, R7):** convert the change's probes under
+  Done (2026-11-12). Confirmed by reading every `rate_structure` read in the buyers
+  (`domains/*/buyer/src`, `core/buyer/src`): only `pricing_record.py` compares with a
+  signed body, through `registry_rate_structure(body)`; every other read is of the
+  lifted copy, which `registry_listing.domain_listing_record` makes wherever a buyer
+  command receives a registry listing (`negotiate_cli`, `buy_cli`,
+  `accepted_listing_record`); bare metal and core read none. Application integration,
+  VM `test_buyer_selection_negotiation.py`
+  `test_the_signed_pricing_pin_binds_the_registry_publication_at_acceptance_and_on_resume`:
+  the listing is the body the storefront published (asserted to carry no top-level
+  `rate_structure`) beside a publication proof the test signs with the seller's key
+  and the publisher trust, standing for what a registry keeps — no registry runs —
+  lifted by `domain_listing_record`; the production buyer client
+  (`negotiate_with_seller`) over loopback against the served storefront opens at 90%
+  of the listed rate, so the seller counters, and reaches acceptance, its amount codec
+  verifying the pin as it accepts (the refusal is shown by the direct call below); the
+  buyer's evidence store (its own
+  `evidence_store()` under a test profile root) archives every signed reply, each
+  naming the published digest, a counter among them, and the acceptance's
+  `pricing_pin` binding the negotiated multiplier; the record
+  `accepted_listing_record` keeps verifies again through `verify_recovered_pricing`,
+  as a resumed run does; a pin with another multiplier is refused by
+  `verify_pricing_acceptance`, and a record without its publication proof fails
+  closed. The shared Alkahest setup moved into helpers the existing priced-Alkahest
+  case now uses (its assertions unchanged). The other pin refusals, the archive
+  altered after signing and the record's per-input refusals are unit tests of 12.3,
+  one representative refusal staying here per behaviour. The negotiated option is the
+  shape-priced pool's Alkahest option, the pin being the listing's whatever the
+  option: the production buyer client cannot open a recurring payments negotiation
+  (6.2's note).
+- [x] 12.3 **The probes (R2, R7):** convert the change's probes under
   `openspec/changes/negotiate-open-ended-compute-terms/` that drive real seams into
   tests at the level `docs/development/TESTING.md` assigns, where 11.1–12.2 and sections
   6–10 do not already cover them; task 1.2's codec probe becomes a test or is dropped
   where a `kit/deal-lifecycle` suite covers the round trip. The rest stay as closeout
   evidence; record which went where in this task's note.
-- [ ] 12.4 **Verify the section:** `make dist`, then `make -C domains/vms/storefront test`
+  Done (2026-11-12). Converted, where nothing covered them:
+  - `capacity_bounds_probe.py`'s app paths: VM `test_publication_loop.py`
+    `test_each_capacity_bound_resolves_from_its_own_tier_onto_the_published_listing`
+    (a hint's bounds published; an override of the end alone keeps the hint's
+    relative bound and reaches the registry body as a top-level term, not in the
+    listing resource; a 0 relative override masks the tiers below; a malformed hint
+    holds the listing unchanged with `capacity_bounds_unreadable`) and
+    `test_withdrawn_capacity_bounds_are_cleared_from_the_listing_and_its_publication`;
+    bare metal `test_http_publication_rates.py`, the first test's name, without the
+    masking step (both application integration, the typed admin client, real
+    SQLite). Its pure part is 11.2's; its bare-metal `pool_lease_bound_missing` step
+    is retired (9.2).
+  - `acceptance_pin_probe.py`'s record and archive checks: VM buyer
+    `tests/test_pricing_record.py` (new, unit; a real seller-signed publication from
+    `test_per_period_acceptance.py`'s fixtures and a real `FileEvidenceStore` of
+    signed envelopes, nothing replaced) — each record input differing from the signed
+    publication refused by name (`listing_id`, `storefront_url`, `listing_resource`,
+    `pricing`, `settlement_options`, the lifted `rate_structure`), a proof for another
+    operation or publisher refused, a record without proof failing closed; an
+    acceptance pinning another multiplier, another digest or a non-canonical
+    multiplier refused; `verify_recovered_pricing` admitting an immediate acceptance
+    and an accept of a counter at the countered 10000 rather than the opening 9000,
+    and refusing an acceptance altered after signing (the signed-response check), one
+    without its archived buyer request, and an archive without one.
+  Dropped as covered: `codec_probe.py` (task 1.2) by `kit/deal-lifecycle`'s
+  `test_terms.py` (codec round trip, the option ID following the terms, a no-adapter
+  option refused its terms), `kit/arkhai-payments`' `test_agreement.py` (the mandate
+  reading the Agreement's lifecycle) and 8.3/12.1's published options, all but its
+  registry leg (below); `price_probe.py`,
+  `billing_projection_probe.py` and `consumer_price_probe.py` by 11.1 and 11.3, the
+  retained record's round trip through `accepted_listing_record` by 12.2;
+  `seller_pin_probe.py` by 12.2 (the served seller's digest on its counter and
+  acceptance, and its pin, through the HTTP carrier) and `test_vm_multiplier.py`'s
+  digest unit test; `horizon_probe.py` by `test_horizon.py` (5.3, 5.4), 6.2 and 12.1;
+  `recurring_publication_probe.py` by 6.3's declaration tests, 7.3's step tests, 8.3's
+  deadline tests, 5.4's runway and unbounded publication tests and 12.1;
+  `buyer_terms_probe.py` by 10.3 and 11.2.
+  Stay as closeout evidence: `mixed_selection_probe.py` (the buyer commands' first use
+  of a mixed listing with proposed mechanism ports, which replaces names inside the
+  commands — a shape `TESTING.md`'s command-module convention admits for no new test)
+  and `buyer_presentation_probe.py`'s `market settle --from` replay (the same patching;
+  its pieces are 11.2, 11.3 and `test_term_waivers.py`'s); and `registry_codec_probe.py`
+  with `codec_probe.py`'s registry leg: `core/registry`'s
+  `test_settled_envelope_across_specs.py` publishes an option through the typed
+  registry client and reads it back unchanged, but its lifecycle holds only a
+  deadline, so no test sends a full `early_termination`/`adjudication` through a real
+  registry — the registry carries an option as opaque JSON, and the codec's round trip
+  and that carriage are tested apart. Once archived, the buyer commands' first use of
+  a mixed listing has no permanent test of its own: the gap is the command-module
+  seams `docs/development/ROADMAP.md` already records for every CLI but bare metal's,
+  which a permanent CLI-level test would need. No probe file was removed:
+  the round-1 attachments under `docs/attachments/negotiate-open-ended-compute-terms/`
+  cite them by path, and closeout (13.4) decides both together.
+- [x] 12.4 **Verify the section:** `make dist`, then `make -C domains/vms/storefront test`
   and `make -C domains/bare_metal/storefront test` (unit and application integration),
   `make -C domains/vms/buyer test` (unit), and any suite 12.3's conversions land in.
-- [ ] 12.5 **Validate the round (R23), from 5.11:** every suite sections 5–12 named,
+  Done (2026-11-12), after `make dist`: `make -C domains/vms/storefront test` unit 1192
+  passed, 1 skipped, application integration 589 passed (the five new cases among
+  them); `make -C domains/bare_metal/storefront test` (unit and application
+  integration) 632 passed (three new); `make -C domains/vms/buyer test` (unit) 312
+  passed (13 new, `test_pricing_record.py`). 12.3's conversions land only in those
+  three suites. Rerun after the compliance fixes and the relock below: VM storefront
+  1192/589 and VM buyer 315 passed (three pin refusals moved to unit level); bare
+  metal changed only docstrings since its 632, and passed again in the pre-commit
+  run's `make test`.
+  Outside the plan's file list: the VM storefront's `dev` group now declares
+  `arkhai-core-buyer`, which its tests import (the buyer-selection case for the
+  profile root its evidence store lives under; four introduction test files already
+  did), relocked by `make lock`.
+- [x] 12.5 **Validate the round (R23), from 5.11:** every suite sections 5–12 named,
   `make check-packaging`, `make check-comment-hygiene`, `make check-architecture-change
   CHANGE=negotiate-open-ended-compute-terms` and `scripts/change-workflow run pre-commit
   negotiate-open-ended-compute-terms`. End-to-end: validation's VM and bare-metal lanes —
@@ -1846,6 +1960,66 @@ suites, the VM buyer and the change's probes.
   covering the protected purchases (`vms/test_vm_payment_purchase.py`,
   `bare_metal/test_bare_metal_payment_deal.py`) and the VM listing-shape lane
   (`vms/test_listing_shapes.py`); an unrun lane is a blocker at closeout.
+  Done locally (2026-11-12): `scripts/change-workflow run pre-commit
+  negotiate-open-ended-compute-terms` passed every hook — `after-functional-change`
+  exit 0 (`make lock`), `pre-commit-functional` exit 0 (`make dist-clean`, `make
+  check-packaging` and the whole `make test`, which runs every package suite sections
+  5–12 named: core, the kits — settlement-runtime, arkhai-payments, alkahest,
+  contact-exchange, resource-pools-contracts, config — both buyers, both storefronts
+  and the e2e unit suite), `pre-commit` exit 0 (index, tasks, skills, strict OpenSpec
+  validation, `make check-repository`). On the final state, after the re-check's
+  wording fixes, a second run passed `after-functional-change`, `make dist-clean`,
+  `make check-packaging` and `pre-commit` (every change check among them), while `make
+  test` failed once in `test-release-tooling` on
+  `scripts/tests/test_change_clone.py::test_the_bootstrap_failed` (`ChildProcessError:
+  No child processes` waiting on its spawned bootstrap), the workflow-tooling flake the
+  round-1 triage recorded, unrelated to this diff; rerun, `make
+  test-deployment-packaging` (release tooling 2867 passed, then its Helm contracts) and
+  the targets the failure left unrun (`test-frp-grant-admission`,
+  `test-lane-double-controls`, `test-payments-lane-double`,
+  `test-mediation-lane-double`) all passed. `make check-comment-hygiene` passed; `make
+  check-architecture-change CHANGE=negotiate-open-ended-compute-terms` passed (the
+  change owns no architecture row). End-to-end is validation's: it dispatches the
+  pipeline's e2e-vm and e2e-bare-metal lanes for this round's commit, which run the
+  protected purchases and `vms/test_listing_shapes.py`; no marker in `e2e-tests/`
+  exercises section 12's behaviour beyond them (no deployed composition publishes a
+  recurring option or a shape-priced registry listing a buyer resumes). No `Owed by
+  validation:` evidence: no CI workflow a push alone produces bears on this section.
+
+### Section 12 verification and handoff (2026-11-12)
+
+- The fresh-context compliance check found three medium findings, all fixed: 12.3's
+  note dropped `seller_pin_probe.py` though 12.2's case accepted at once (it now opens
+  below the floor, so the seller counters, and asserts the digest on every archived
+  reply); it dropped `registry_codec_probe.py` as covered (it now stays as closeout
+  evidence with the gap stated: no test sends a full lifecycle through a real
+  registry); and the integration case ran pure refusals a unit test should hold (the
+  digest and non-canonical multiplier refusals moved to `test_pricing_record.py`, one
+  changed-pin refusal and the legacy record staying, as 12.2's text asks). Its low
+  findings were fixed too: the publication proof's wording (signed in the test, no
+  registry running), a citation, docstrings claiming unasserted behaviour, the
+  undeclared `arkhai-core-buyer` test import (now in the VM storefront's `dev` group,
+  relocked), the mixed-selection first-use gap tied to the ROADMAP's command-module
+  row, and nits (a section comment, private constants, redundant report validation,
+  distinct counter multipliers). Its re-check found the fixes holding and six wording
+  slips, fixed: the registry probe listed both dropped and kept, two "only" claims of a
+  refusal path the case does not run, "the same bounds" where only the published ones
+  are read, a docstring's "anything written", a constant's placement and two long
+  lines. Declined: importing helpers from sibling test modules (these suites' practice:
+  bare-metal tests and both recurring worlds import from `test_http_system`,
+  `test_publication_cycle` and `publication_app`); `_derived_class` restating D1's rule
+  in the tests (production's class comes from `compute_disclosure`, which needs a
+  registry and a presenter; the tests check the published shapes D1 reads); the
+  duplicate `_negotiation_rows` helper in two test modules.
+- `uv run pytest` on one storefront test file was denied in this step (with or without
+  `--find-links`), so every run here was the whole package target.
+- For the round's review and triage: the probes all remain in the change directory,
+  since the round-1 attachments cite them; 12.3 says which tests supersede each and
+  which stay as closeout evidence, for 13.4 to decide with the attachments. Bare
+  metal's runway case stops at the refusal (no rate-mandate fixture). The VM
+  storefront's `dev` group gained `arkhai-core-buyer`, outside the plan's file list.
+- Round 2 (sections 5–12) is complete; next are validation and one implementation
+  review of the round, run side by side, the owner's reading, then the triage.
 
 ## 13. Closeout
 

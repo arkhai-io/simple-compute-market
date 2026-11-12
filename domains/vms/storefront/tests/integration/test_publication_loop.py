@@ -56,7 +56,15 @@ from tests.publication_app import (
     publication_app,
     settlement_clause,
 )
-from tests.recurring_world import MECHANISM, PAYEE, recurring_world, undeclared
+from tests.recurring_world import (
+    AVAILABLE_UNTIL,
+    MAX_DURATION_SECONDS,
+    MECHANISM,
+    PAYEE,
+    QUALIFIED,
+    recurring_world,
+    undeclared,
+)
 from tests.recurring_world import clauses as recurring_clauses
 
 pytestmark = pytest.mark.asyncio
@@ -2235,11 +2243,151 @@ async def test_only_the_admissible_mechanisms_of_a_mixed_list_are_classified(tmp
     )
 
 
+# The listing's two capacity bounds, each resolved from its own tier.
+
+_HINT_END = "2035-01-02T00:00:00Z"
+_OVERRIDE_END = "2035-01-01T00:00:00Z"
+_DEFAULT_END = "2035-01-03T00:00:00Z"
+_BOUNDS_ADDRESS = {"site_id": "site-a", "pool_id": "bounded", "offering_mode": "vm"}
+
+
+def _hinted_pool() -> dict:
+    return pool("bounded", backing="backed", capacity_bounds={
+        "vm": {"max_duration_seconds": 7200, "available_until_utc": _HINT_END},
+    })
+
+
+@pytest.fixture
+async def bounded_world(tmp_path):
+    """One backed pool whose hint states both bounds, over configured defaults
+    of a day and a later availability end."""
+    with replaced_setting("pricing.defaults", {}), \
+            replaced_setting("pricing.default_max_duration_seconds", 86400), \
+            replaced_setting("pricing.default_available_until_utc", _DEFAULT_END):
+        async with publication_app(tmp_path) as app:
+            app.pools.append(_hinted_pool())
+            await app.client.get_system_status()
+            yield app
+
+
+async def test_each_capacity_bound_resolves_from_its_own_tier_onto_the_published_listing(
+    bounded_world,
+):
+    """An override stating only the availability end replaces the hint's end and
+    keeps its relative bound; both travel as top-level listing terms, never in the
+    listing resource. A nonpositive relative override states no limit and masks
+    the tiers below it. A malformed hint holds the listing as it stood, reporting
+    its bounds unreadable, rather than guessing a default."""
+    world = bounded_world
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+    hinted = await _listing(world, listing_id)
+    overrides = PoolOverrideClient(world.client)
+
+    await overrides.put_pool_override({**_BOUNDS_ADDRESS, "terms": {"available_until_utc": _OVERRIDE_END}})
+    await _cycle(world)
+    overridden = await _listing(world, listing_id)
+    sent = world.registries.to("publish", listing_id)[-1][1]
+
+    await overrides.put_pool_override({**_BOUNDS_ADDRESS, "terms": {"max_duration_seconds": 0}})
+    await _cycle(world)
+    unlimited = await _listing(world, listing_id)
+
+    world.pools[0]["pool_metadata"]["policy_tags"]["capacity_bounds"]["vm"][
+        "available_until_utc"
+    ] = "not-a-date"
+    held = await _cycle(world)
+
+    assert (hinted["max_duration_seconds"], hinted["available_until_utc"]) == (7200, _HINT_END)
+    assert (overridden["max_duration_seconds"], overridden["available_until_utc"]) == (
+        7200, _OVERRIDE_END,
+    )
+    assert sent["available_until_utc"] == _OVERRIDE_END
+    assert "available_until_utc" not in sent["listing_resource"]
+    assert "max_duration_seconds" not in sent["listing_resource"]
+    assert (unlimited["max_duration_seconds"], unlimited["available_until_utc"]) == (None, _HINT_END)
+    assert any(item.get("reason") == "capacity_bounds_unreadable" for item in held["actions"])
+    assert await _listing(world, listing_id) == unlimited
+    assert list(await _listings(world)) == [listing_id]
+
+
+async def test_withdrawn_capacity_bounds_are_cleared_from_the_listing_and_its_publication(
+    bounded_world,
+):
+    """With the hint and both defaults withdrawn, republication clears both stored
+    bounds, and the availability end leaves the publication, rather than keeping
+    the last ones published."""
+    world = bounded_world
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+    bounded = await _listing(world, listing_id)
+
+    del world.pools[0]["pool_metadata"]["policy_tags"]["capacity_bounds"]
+    with replaced_setting("pricing.default_max_duration_seconds", 0), \
+            replaced_setting("pricing.default_available_until_utc", None):
+        await _cycle(world)
+        withdrawn = await _listing(world, listing_id)
+    sent = world.registries.to("publish", listing_id)[-1][1]
+
+    assert (bounded["max_duration_seconds"], bounded["available_until_utc"]) == (7200, _HINT_END)
+    assert (withdrawn["max_duration_seconds"], withdrawn["available_until_utc"]) == (None, None)
+    assert "available_until_utc" not in sent
+
+
 # The servicing declaration at the publication and cached-acceptance doors.
 
 
 def _recurring(options: list[dict]) -> list[dict]:
     return [option for option in options if "period" in option["settlement"]]
+
+
+def _derived_class(option: dict) -> str:
+    """The class a buyer reads off an option: billed once is reserved; billed per
+    period, a payee entitlement makes it spot and its absence on-demand."""
+    if "period" not in option["settlement"]:
+        return "reserved"
+    entitlements = option["lifecycle"]["early_termination"]["entitlements"]
+    return "spot" if "payee" in entitlements else "on-demand"
+
+
+async def test_one_listing_offers_reserved_on_demand_and_spot_on_its_capacity_identity(
+    tmp_path,
+):
+    """Declaring rate servicing adds the on-demand and spot options to the
+    listing the pool already publishes, beside its reserved Alkahest and once
+    payment options: the same listing and shape, publishing both bounds, each
+    option separately identified, and the class each derives from its billing
+    and entitlements, never a stored field."""
+    async with recurring_world(tmp_path, treatments=None) as world:
+        validate_cycle_report(await world.publish())
+        ((listing_id, dark),) = (await _listings(world.app)).items()
+
+        world.declare(QUALIFIED)
+        validate_cycle_report(await world.publish())
+        listings = await _listings(world.app)
+        listing = await _listing(world.app, listing_id)
+
+    assert [_derived_class(option) for option in dark["settlement_options"]] == ["reserved"] * 2
+    assert list(listings) == [listing_id]
+    assert listing["listing_resource"] == dark["listing_resource"]
+    assert (listing["max_duration_seconds"], listing["available_until_utc"]) == (
+        MAX_DURATION_SECONDS, AVAILABLE_UNTIL,
+    )
+    options = listing["settlement_options"]
+    assert {option["option_id"] for option in dark["settlement_options"]} < {
+        option["option_id"] for option in options
+    }
+    assert sorted(
+        (option["settlement"]["schema"], _derived_class(option)) for option in options
+    ) == [
+        ("alkahest.v1", "reserved"),
+        (MECHANISM, "on-demand"),
+        (MECHANISM, "reserved"),
+        (MECHANISM, "spot"),
+    ]
+    assert len({option["option_id"] for option in options}) == 4
+    assert all("class" not in option and "class" not in option.get("lifecycle", {})
+               for option in options)
 
 
 async def test_publication_omits_recurring_options_whose_treatments_are_undeclared(

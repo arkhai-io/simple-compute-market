@@ -49,7 +49,14 @@ from market_resource_pools_contracts.backing import UNBACKED
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from settlement_compositions import alkahest_composition
 from held_loops import held_loop_controller
-from recurring_world import MECHANISM as RECURRING_MECHANISM, PAYEE, recurring_world
+from recurring_world import (
+    APPROVAL_WINDOW_SECONDS,
+    DELIVERY_DEADLINE_SECONDS,
+    MECHANISM as RECURRING_MECHANISM,
+    PAYEE,
+    PERIOD_SECONDS,
+    recurring_world,
+)
 from source_sites import (
     SourceSite,
     SourceSites,
@@ -1605,5 +1612,55 @@ async def test_a_cached_recurring_selection_whose_treatment_is_withdrawn_is_refu
         assert refused.value.status_code == 409
         assert "settlement_option_withdrawn_refetch" in str(refused.value)
         assert "does not declare returned" in str(refused.value)
+        assert _negotiation_rows(world.db) == before
+
+
+#: The shortest recurring horizon the runway admits for a buyer naming no start:
+#: the approval window, then the delivery deadline, then one whole period.
+_MINIMUM_HORIZON = APPROVAL_WINDOW_SECONDS + DELIVERY_DEADLINE_SECONDS + PERIOD_SECONDS
+
+
+async def test_a_horizon_leaving_no_runway_is_refused_naming_the_minimum_that_passes(
+    tmp_path,
+) -> None:
+    """A recurring horizon must leave the delivery deadline and one period after
+    the latest approval the option permits: 300 + 1200 + 900 seconds here. One
+    second short is refused before any negotiation is written, naming that
+    minimum so the buyer can re-propose it."""
+    async with recurring_world(tmp_path) as world:
+        report = await world.publish()
+        (listing_id,) = [
+            item["listing_id"] for item in report["actions"] if item["action"] == "publish"
+        ]
+        options = (await world.admin.get_listing(listing_id)).extra["settlement_options"]
+        on_demand = next(
+            option for option in options
+            if "period" in option["settlement"]
+            and "payee" not in option["lifecycle"]["early_termination"]["entitlements"]
+        )
+        before = _negotiation_rows(world.db)
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await world.buyer.negotiate_new(
+                listing_id=listing_id,
+                # One period at the clause's 2.5 an hour, in base units.
+                initial_amount=625_000,
+                provision_terms={"kind": "bare_metal.v2", "version": 1, "payload": {
+                    "duration_seconds": _MINIMUM_HORIZON - 1,
+                    "ssh_public_key": "ssh-ed25519 fixture",
+                    "access_method": "ssh",
+                }},
+                settlement_selection={
+                    "option_id": on_demand["option_id"],
+                    "expiration_unix": 2_147_483_647,
+                    "settlement": {"schema": RECURRING_MECHANISM, "payer_account": PAYEE},
+                },
+                selection_only=True,
+            )
+
+        assert (
+            f"The horizon leaves no runway: minimum duration_seconds is {_MINIMUM_HORIZON}"
+            in str(refused.value)
+        )
         assert _negotiation_rows(world.db) == before
 

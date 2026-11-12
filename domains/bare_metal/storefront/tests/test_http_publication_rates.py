@@ -12,6 +12,7 @@ fetches, and each refreshes the same listing in place.
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 from pathlib import Path
 
@@ -30,7 +31,14 @@ from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_registry
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from held_loops import held_loop_controller
-from recurring_world import MECHANISM, recurring_world, undeclared
+from recurring_world import (
+    AVAILABLE_UNTIL,
+    MAX_DURATION_SECONDS,
+    MECHANISM,
+    QUALIFIED,
+    recurring_world,
+    undeclared,
+)
 from test_http_system import (
     ADMIN_SIGNER,
     SELLER_SIGNER,
@@ -332,8 +340,110 @@ async def test_pool_level_clauses_publish_below_a_model_hint(tmp_path, monkeypat
     ]
 
 
+_HINT_END = "2035-01-02T00:00:00Z"
+_OVERRIDE_END = "2035-01-01T00:00:00Z"
+_DEFAULT_END = "2035-01-03T00:00:00Z"
+
+
+async def test_each_capacity_bound_resolves_from_its_own_tier_onto_the_published_listing(
+    tmp_path, monkeypatch,
+):
+    """An override stating only the availability end replaces the hint's end and
+    keeps its relative bound; both travel as top-level listing terms, never in the
+    listing resource. A malformed hint holds the listing as it stood, reporting
+    its bounds unreadable, rather than guessing a default."""
+    hinted = pool("pool-1", member("r1", "pool-1"), policy_tags={"capacity_bounds": {
+        "bare_metal": {"max_duration_seconds": 7200, "available_until_utc": _HINT_END},
+    }})
+    site = Site(hinted)
+    runtime = _derivation_runtime(
+        tmp_path, monkeypatch, {SITE: site},
+        default_max_duration_seconds=86400, default_available_until_utc=_DEFAULT_END,
+        capacity_client=_Sites(site),
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            listing_id = _listing_id(await admin.admin_run_lifecycle_cycle("publication"))
+            declared = await admin.get_listing(listing_id)
+
+            await PoolOverrideClient(admin).put_pool_override({
+                "site_id": SITE, "pool_id": "pool-1", "offering_mode": "bare_metal",
+                "terms": {"available_until_utc": _OVERRIDE_END},
+            })
+            await admin.admin_run_lifecycle_cycle("publication")
+            overridden = await admin.get_listing(listing_id)
+            sent = runtime.registry_configuration.recording.sent[-1][3]
+
+            broken = copy.deepcopy(hinted)
+            broken["pool_metadata"]["policy_tags"]["capacity_bounds"]["bare_metal"][
+                "available_until_utc"
+            ] = "not-a-date"
+            site.serve(broken)
+            await admin.admin_run_lifecycle_cycle("site-projections")
+            held = await admin.admin_run_lifecycle_cycle("publication")
+            after = await admin.get_listing(listing_id)
+
+    assert (declared.max_duration_seconds, declared.extra["available_until_utc"]) == (7200, _HINT_END)
+    assert (overridden.max_duration_seconds, overridden.extra["available_until_utc"]) == (
+        7200, _OVERRIDE_END,
+    )
+    assert sent["available_until_utc"] == _OVERRIDE_END
+    assert "available_until_utc" not in sent["listing_resource"]
+    assert "max_duration_seconds" not in sent["listing_resource"]
+    assert any(item.get("reason") == "capacity_bounds_unreadable" for item in held["actions"])
+    assert after == overridden
+
+
 def _recurring(options: list[dict]) -> list[dict]:
     return [option for option in options if "period" in option["settlement"]]
+
+
+def _derived_class(option: dict) -> str:
+    """The class a buyer reads off an option: billed once is reserved; billed per
+    period, a payee entitlement makes it spot and its absence on-demand."""
+    if "period" not in option["settlement"]:
+        return "reserved"
+    entitlements = option["lifecycle"]["early_termination"]["entitlements"]
+    return "spot" if "payee" in entitlements else "on-demand"
+
+
+async def test_one_listing_offers_reserved_on_demand_and_spot_on_its_capacity_identity(tmp_path):
+    """Declaring rate servicing adds the on-demand and spot options to the
+    listing the pool already publishes, beside its reserved Alkahest and once
+    payment options: the same listing and machine, publishing both bounds, each
+    option separately identified, and the class each derives from its billing
+    and entitlements, never a stored field."""
+    async with recurring_world(tmp_path, treatments=None) as world:
+        listing_id = _listing_id(await world.publish())
+        dark = await world.admin.get_listing(listing_id)
+
+        world.declare(QUALIFIED)
+        report = await world.publish()
+        listing = await world.admin.get_listing(listing_id)
+
+    assert [_derived_class(option) for option in dark.extra["settlement_options"]] == ["reserved"] * 2
+    assert [item for item in report["actions"] if item["action"] == "publish"] == []
+    assert listing.status == "open"
+    assert listing.listing_resource == dark.listing_resource
+    assert (listing.max_duration_seconds, listing.extra["available_until_utc"]) == (
+        MAX_DURATION_SECONDS, AVAILABLE_UNTIL,
+    )
+    options = listing.extra["settlement_options"]
+    assert {option["option_id"] for option in dark.extra["settlement_options"]} < {
+        option["option_id"] for option in options
+    }
+    assert sorted(
+        (option["settlement"]["schema"], _derived_class(option)) for option in options
+    ) == [
+        ("alkahest.v1", "reserved"),
+        (MECHANISM, "on-demand"),
+        (MECHANISM, "reserved"),
+        (MECHANISM, "spot"),
+    ]
+    assert len({option["option_id"] for option in options}) == 4
+    assert all("class" not in option and "class" not in option.get("lifecycle", {})
+               for option in options)
 
 
 async def test_publication_omits_recurring_options_whose_treatments_are_undeclared(tmp_path):

@@ -78,9 +78,13 @@ dev = [
     "pytest-asyncio>=0.23.8,<1.0.0",
     "nest-asyncio>=1.6.0,<2.0.0",
     "wandb>=0.23.0",
-    # The production VM buyer and its introduction client, which the
-    # introduction integration tests drive over loopback.
+    # The production VM buyer, its introduction client and its acceptance-bound
+    # pricing checks, which the introduction and buyer-selection integration
+    # tests drive over loopback.
     "arkhai-vms-buyer>=0.9.0",
+    # The buyer core those tests compose with: its settlement selection and its
+    # profile root, under which the VM buyer keeps its evidence.
+    "arkhai-core-buyer>=0.6.0",
     # The canonical lifecycle client the lifecycle integration tests read and
     # commit deals through.
     "arkhai-kit-deal-lifecycle-client>=0.1.0",
