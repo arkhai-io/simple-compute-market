@@ -3,6 +3,10 @@
 Observed 2026-11-07 from base `41ca62783`, draft PR #351. This completes 2.1c
 and the quote/read boundary in 2.1, not the open-ended terms feature.
 
+The direct-read guard this records was later removed by the owner's round-1
+decision (record 01, R6); its script, inventory, `make` target and probe no longer
+exist, and the sections naming them below describe the evidence as observed.
+
 ## Behavior
 
 - Payments Agreement-to-mandate derivation and stored-mandate/buyer checks use
@@ -23,13 +27,13 @@ and the quote/read boundary in 2.1, not the open-ended terms feature.
 - The AST guard inventories every production amount attribute/mapping/reflection
   read without trusting receiver names/types. It covers key/getter/reflection
   aliases and wrappers containing reads. Exact path, function, expression,
-  occurrence count and reason are recorded in `scripts/agreement_amount_reads.json`;
+  occurrence count and reason were recorded in the guard's JSON inventory;
   unknown reads, changed counts and stale entries fail. New untracked production
   files are included. The only raw Agreement read outside the accessor is generic
   negotiation's equality check against codec-derived expected money, not financial
   interpretation. Other entries classify quote, obligation, event, resource,
   wire-parser and proposal-scalar reads.
-- `make check-agreement-amount-reads` runs in packaging and change checks. This
+- The guard's `make` target ran in packaging and change checks. This
   syntactic repository rule is not a proof about runtime-generated Python or an
   authentication boundary.
 
@@ -43,7 +47,6 @@ removed on exit. These entry points were personally executed:
 
 ```sh
 make dist-ci
-python3 openspec/changes/negotiate-open-ended-compute-terms/amount_read_probe.py
 (cd domains/vms/buyer && make reinit && uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/consumer_price_probe.py)
 (cd domains/vms/buyer && uv run --frozen --no-sync python ../../../openspec/changes/negotiate-open-ended-compute-terms/acceptance_pin_probe.py)
 ```

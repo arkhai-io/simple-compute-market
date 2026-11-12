@@ -1,4 +1,4 @@
-"""Recurring option derivation by the shared per-clause step."""
+"""Recurring option derivation from a publication clause (``derive_rate_preset``)."""
 
 from __future__ import annotations
 

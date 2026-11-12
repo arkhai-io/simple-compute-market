@@ -169,7 +169,9 @@ upgrade step covers. v0.3.0 VM configurations and hints keep their meaning.
   `openspec/specs/storefront-publication/spec.md`,
   `openspec/specs/storefront-publication/architecture.md`,
   `openspec/specs/resource-pool-management/spec.md` and the bare-metal upgrade step in
-  `docs/operator-handbook.md`.
+  `docs/operator-handbook.md`; the buyer check's seams (core's per-listing acceptance
+  validator and the bounds a resumed run keeps) →
+  `openspec/specs/buyer-orchestration/architecture.md`.
 - D6: the servicing declaration and its doors →
   `openspec/specs/settlement-configuration/spec.md` and
   `openspec/specs/storefront-publication/architecture.md`.

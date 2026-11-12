@@ -289,6 +289,18 @@ terms (review 04 F1). A buyer that named no horizon compares a provision duratio
 the Agreement's only where it requested one: the seller keeps the buyer's signed
 provision terms, which carry no duration, beside the resolved one (review 04 F2).
 
+The buyer's check needs the listing the buyer selected, which core's acceptance guard
+does not receive: the guard sees only the outcome. Core's negotiate hook therefore takes
+an optional per-listing `acceptance_validator`, a factory from the candidate listing to a
+check of the accepted outcome, run after the stage's own acceptance check and before the
+acceptance is observed; core knows nothing of bounds, and a domain binds them. The VM
+buyer's direct negotiation binds the listing it was given and the duration it opened
+with — on a resume, the seller's round-zero echo of the buyer's terms. The VM
+acceptance record keeps both bounds, so a resumed run checks against what was
+advertised, never a current listing. A record written before it kept bounds checks the
+duration against the buyer's request only; a v0.3.0 VM run always named a duration, so
+no released run reaches the omitted-horizon branch without bounds, which refuses.
+
 An unbounded recurring candidate yields no option and a derivation close reason,
 not a hold merely for being unbounded; valid reserved candidates remain. In both
 domains no positive relative maximum means no relative limit: bare metal's reserved
@@ -1002,7 +1014,7 @@ Destinations are planned, not claims of implemented behavior.
 |---|---|
 | D1, D2/D2a/D2b classes, monetary quote unit, tested money readers and acceptance pricing pin | `docs/development/ARCHITECTURE.md` (with the authority description); `openspec/specs/negotiation-protocol/spec.md` |
 | D3 penalty preset default and its setting, the deadline's source, buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/spec.md`; foundation-owned lifecycle contract |
-| D5 the horizon as the Agreement's, listing bounds, the acceptance hook, the floored default, the buyer's check and the reserved-bound rule | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md`; `docs/operator-handbook.md` (bare-metal upgrade step) |
+| D5 the horizon as the Agreement's, listing bounds, the acceptance hook, the floored default, the buyer's check and its seams, and the reserved-bound rule | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md`; `openspec/specs/buyer-orchestration/architecture.md` (the per-listing acceptance validator and the bounds a resumed run keeps); `docs/operator-handbook.md` (bare-metal upgrade step) |
 | D6 servicing declaration and its three doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` |
 | D7, D8 display, the mechanism's presenter, the default buyer's policy and seller-policy distinction | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |
 | D9 recurring publication and the shared per-clause step | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |

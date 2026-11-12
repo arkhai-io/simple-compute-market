@@ -640,7 +640,7 @@ its F2 pin-boundary case moved to 6.2; 5.2's tests are split by behaviour across
 and 10.2; 5.8 → 7.2; 5.9 → 7.1, 9.1 and 9.2; 5.10 → 12.2; 5.11 → 12.5. Section 5's own
 verification is the new 5.5.
 
-- [ ] 5.1 **Remove the amount-read guard (R6):** delete
+- [x] 5.1 **Remove the amount-read guard (R6):** delete
   the guard's script and its JSON inventory under `scripts/`,
   their wiring in the `Makefile`, `scripts/check_change.py` and
   `scripts/tests/test_check_change.py`, and `amount_read_probe.py`. Cover each money
@@ -650,8 +650,11 @@ verification is the new 5.5.
   to `origin/dev`'s again (`git diff origin/dev` on them is empty). The money-consumer
   tests are task 11.3's. `docs/attachments/negotiate-open-ended-compute-terms/reader-guard-checkpoint.md`
   still describes the removed guard as round-1 evidence; closeout's narrative
-  compression decides its fate. Implemented; checked once 5.5 passes.
-- [ ] 5.3 **The buyer's accepted-horizon check (review 04 F1, F2):** one pure function
+  compression decides its fate. Implemented; checked once 5.5 passes. Corrected in 5.5:
+  that attachment cited the removed script, inventory, target and probe by path, which
+  `AGENTS.md`'s cross-reference rule makes a blocking defect; it now says the guard was
+  removed and names them without paths.
+- [x] 5.3 **The buyer's accepted-horizon check (review 04 F1, F2):** one pure function
   in `kit/settlement-runtime/src/market_settlement_runtime/horizon.py`, sharing
   `resolve_horizon`'s bound arithmetic, taking the Agreement's `start_utc` and
   `duration_seconds`, the buyer's requested horizon and the selected listing's
@@ -690,8 +693,19 @@ verification is the new 5.5.
   (unit) 168 passed. One kept VM orchestrator fixture advertised a 3600-second bound
   under a 7200-second deal; the check now refuses that, so the fixture advertises
   7200. The production-client integration case and the F2 pin-boundary case are
-  task 6.2's.
-- [ ] 5.4 **The horizon floor and the acceptance hook (R9):** when the buyer names no
+  task 6.2's. Corrected in 5.5: the kit suite runs unit and library integration
+  tests (its new cases are unit); the VM orchestrator case drives core's orchestrator
+  with the seller transport and registry query patched, an orchestration path rather
+  than a unit test in `TESTING.md`'s sense. 5.5 added the lower-level and untested
+  seams' tests: `domains/vms/buyer/tests/test_accepted_horizon.py` (unit:
+  `validate_buyer_acceptance` refusing out-of-bound, off-request and off-default
+  horizons before the stage check; the per-listing validator binding its listing;
+  `accepted_listing_record` keeping both bounds), two `test_buyer_client.py` cases
+  (fresh negotiation refused against the given listing's bound; a resume held to the
+  duration it opened with, through the file's patched transport), and core's
+  `test_selected_option_negotiation.py` case for `acceptance_validator` alone and
+  after the stage's check. The seams' rationale is in `design.md` D5.
+- [x] 5.4 **The horizon floor and the acceptance hook (R9):** when the buyer names no
   horizon and the limiting bound is a fractional-second `available_until_utc`, floor the
   default horizon to whole seconds instead of refusing, at acceptance
   (`resolve_horizon`) and at publication (R10).
@@ -702,8 +716,10 @@ verification is the new 5.5.
   the new `test_rate_publication.py` floors the published default horizon the same
   way and reports no-runway and unbounded candidates. Its `FixtureHelper` is the
   start of the derivation tests 6.3, 7.3 and 8.3 grow. Implemented; checked once 5.5
-  passes.
-- [ ] 5.5 **Verify the groundwork** (repository obligation: AGENTS.md "Tests and
+  passes. Corrected in 5.5: the kit suite is unit and library integration (the new
+  cases are unit); the runway case asserts the refusal below 3000 seconds and the
+  admission at 3000, not the last-instant approval clause of the spec scenario.
+- [x] 5.5 **Verify the groundwork** (repository obligation: AGENTS.md "Tests and
   diagnostics"; the implementation skill's compliance check). The work is committed in
   `999f2f4d8` without its compliance check or pre-commit run. Rerun on the current
   state: `make -C kit/settlement-runtime test` (unit), `make -C domains/vms/buyer test`
@@ -720,6 +736,29 @@ verification is the new 5.5.
   check with an explicit reserved duration; none exercises an omitted recurring horizon,
   since no deployed composition publishes a per-period option (the unowned gap in
   `openspec/changes/README.md`), and none is owed by this section.
+  Done (2026-11-12), after `make dist`: `make -C kit/settlement-runtime test` (unit and
+  library integration) 208 passed; `make -C domains/bare_metal/buyer test` (unit, the
+  `buy` command with replaced factories) 37 passed; `make -C domains/vms/storefront test`
+  unit 1180 passed, 1 skipped, application integration 575 passed;
+  `make -C domains/bare_metal/storefront test` (unit and application integration) 611
+  passed. The fresh-context compliance check found seven problems, fixed as the 5.1,
+  5.3 and 5.4 corrections record: suite labels, the orchestration case's level, the
+  runway claim, three seams without tests, the attachment's dead citations, the buyer
+  check's seams without a decision or destination (now `design.md` D5 and the promotion
+  record), and a test docstring naming a planned step. After the fixes `make -C
+  domains/vms/buyer test` (unit; two cases through the file's patched seller transport)
+  266 passed and `make -C core/buyer test` (unit) 170 passed. Its re-check found them
+  resolved. Declined: its note that the new `test_buyer_client.py` and core cases
+  patch module names, as each file's existing cases do — `TESTING.md` records that the
+  CLIs other than bare metal's still replace imported names, and the new direct unit
+  tests in `test_accepted_horizon.py` patch nothing; and its observation that the
+  `validate_acceptance is validate_buyer_acceptance` test in `buyer_client.py` would
+  skip a wrapped guard, since production passes only the default or None
+  (`introduction_cli.py`). `make check-comment-hygiene` passed;
+  `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms` passed
+  every hook (`after-functional-change`, `pre-commit-functional` with `make
+  check-packaging` and the whole `make test`, `pre-commit`), and again on the final
+  state before the commit.
 
 ### Round-2 session checkpoint (2026-11-12)
 
@@ -737,8 +776,8 @@ verification is the new 5.5.
 - Also passing on this state: `make -C domains/vms/storefront test` (unit 1180
   passed, 1 skipped; integration 575 passed), `make -C domains/bare_metal/storefront
   test` (611 passed), `make check-comment-hygiene`, `make check-doc-citations
-  CHANGE=negotiate-open-ended-compute-terms`, `make check-tasks`. Not yet run: the
-  fresh-context compliance check and `scripts/change-workflow run pre-commit`.
+  CHANGE=negotiate-open-ended-compute-terms`, `make check-tasks`. The fresh-context
+  compliance check and `scripts/change-workflow run pre-commit` then ran under 5.5.
 - Rebuild before testing a consumer of a changed kit: the domains install kits from
   wheels, so `make dist` first, then each package's `make -C <package> test`, which
   reinstalls them. Run a package's tests through its `make` target; `uv run pytest`
@@ -791,7 +830,8 @@ settlement compositions, negotiation runtimes and configuration, and their tests
   and `test_http_negotiation.py`): publication omits the undeclared candidate while its
   reserved peer and capacity identity stay; a cached undeclared selection gets the signed
   409/refetch with no negotiation rows written.
-- [ ] 6.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit),
+- [ ] 6.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit and
+  library integration),
   `make -C domains/vms/storefront test` (unit and application integration),
   `make -C domains/bare_metal/storefront test` (unit and application integration),
   `make -C domains/vms/buyer test` (unit), `make check-comment-hygiene` and
@@ -827,7 +867,8 @@ configuration readers.
   servicing and an unbounded horizon, the default multiple, a configured multiple and a
   clause's own penalty winning; each storefront's configuration test for the setting's
   default, a configured value and a refused nonpositive one.
-- [ ] 7.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit),
+- [ ] 7.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit and
+  library integration),
   `make -C domains/vms/storefront test` (unit and application integration, including
   `test_publication_loop.py`, `test_pool_overrides_api.py` and
   `test_listing_identity_carryover.py`), `make -C domains/bare_metal/storefront test`
@@ -865,7 +906,8 @@ deadline parameter in both compositions, and `e2e-tests`.
   client: a configured clause publishes its deadline on a hosted compute option and a
   default buyer's refusal no longer fires.
 - [ ] 8.4 **Verify:** `make dist`, then `make -C kit/arkhai-payments test` (unit),
-  `make -C kit/settlement-runtime test` (unit), `make -C domains/vms/storefront test`,
+  `make -C kit/settlement-runtime test` (unit and library integration),
+  `make -C domains/vms/storefront test`,
   `make -C domains/bare_metal/storefront test`, `make test-e2e-unit` (unit),
   `make check-comment-hygiene` and `scripts/change-workflow run pre-commit
   negotiate-open-ended-compute-terms`. End-to-end: `vms/test_vm_payment_purchase.py` and
@@ -937,7 +979,8 @@ Delivers D11 (R14, R18) in both buyers. Touches `kit/settlement-runtime`
   `domains/bare_metal/buyer/tests`): the flags parsed, recorded in run metadata and named
   in the disclosure; the bare-metal reserved default shown as the buyer's and absent for
   a recurring option; both VM duration flags refused together.
-- [ ] 10.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit),
+- [ ] 10.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit and
+  library integration),
   `make -C domains/vms/buyer test` (unit), `make -C domains/bare_metal/buyer test`
   (unit), `make -C core/buyer test` (unit), `make check-comment-hygiene` and
   `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms`.
@@ -1058,7 +1101,8 @@ anything requiring code returns to implementation. Former numbers 6.1–6.11 are
   "Design promotion record": `docs/development/ARCHITECTURE.md` (D1, D2/D2a/D2b with the
   authority description; D12 under "Family kits"), `docs/development/RELEASING.md`
   ("Versioning policy", D12), `openspec/specs/storefront-publication/architecture.md`
-  (D5, D6, D9, D10), `openspec/specs/buyer-orchestration/architecture.md` (D7, D8) and
+  (D5, D6, D9, D10), `openspec/specs/buyer-orchestration/architecture.md` (D5's buyer-check
+  seams, D7, D8) and
   the bare-metal upgrade step in `docs/operator-handbook.md` (D5, D10). The archive
   merges the deltas into `negotiation-protocol`, `storefront-publication`,
   `resource-pool-management`, `settlement-configuration` and `buyer-orchestration`
