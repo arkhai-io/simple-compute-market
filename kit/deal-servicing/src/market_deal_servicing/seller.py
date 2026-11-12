@@ -169,7 +169,8 @@ class SellerServicing:
             outcome=outcome,
             state="repair_required" if missing or repair or rejected is not None else payment.state if payment else None,
             payouts=payment.payouts if payment else None,
-            events=payment.events if payment else [], disputes=dispute.disputes if dispute else [],
+            events=payment.events if payment else [], parts=payment.parts if payment else [],
+            disputes=dispute.disputes if dispute else [],
             cases=dispute.cases if dispute else [], extensions=payment.extensions if payment else [],
             deadline=payment.deadline if payment else None,
         )
@@ -229,7 +230,7 @@ class SellerServicing:
                 negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
                 domain=deal.domain, mechanism=deal.payment.mechanism, entitlements=deal.entitlements,
                 state=state, deadline=selected.ended_at if selected else authority.deadline or delivery.term_end,
-                has_open_extension=bool(authority.extensions),
+                parts=authority.parts, has_open_extension=bool(authority.extensions),
                 open_cases=[case.case_ref for case in authority.cases if case.state != "closed"],
                 filings=self._filings(deal.negotiation_id),
             ))
@@ -239,6 +240,8 @@ class SellerServicing:
         self, command: LifecycleCommand, *, actor: Identity, reason: str | None = None,
     ) -> LifecycleOutcome:
         deal = await asyncio.to_thread(self._deal, command.negotiation_id)
+        if command.kind == "notice" and "payee" not in deal.entitlements:
+            return Rejected(reason="accepted option has no payee entitlement; actual seller non-delivery uses delivery_end")
         if command.kind == "delivery_end":
             if not reason or not reason.strip():
                 return Rejected(reason="an operator delivery end requires its administrator reason")

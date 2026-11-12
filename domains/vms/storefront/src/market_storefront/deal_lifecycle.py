@@ -130,7 +130,8 @@ class VmDealLifecycle:
                 negotiation_id=agreement["negotiation_id"], commitment_ref=data.transaction_id,
                 domain="vms", buyer=Identity.model_validate(agreement["buyer"]),
                 payment=PaymentSelector("arkhai.payments.v1"),
-                dispute=terms.adjudication.dispute if terms else None, once_only=True,
+                dispute=terms.adjudication.dispute if terms else None,
+                once_only=all(part.root.kind == "once" for part in data.mandate.parts),
                 entitlements=terms.early_termination.model_dump(mode="json")["entitlements"]
                 if terms and terms.early_termination else {},
             ))

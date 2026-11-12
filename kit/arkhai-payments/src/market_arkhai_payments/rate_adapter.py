@@ -34,7 +34,7 @@ class RatePaymentAdapter(PaymentAdapter):
     is always freshly verified against the caller's durable sequence floor.
     """
 
-    supported_commands = frozenset({"start", "stop", "reverse"})
+    supported_commands = frozenset({"start", "stop", "notice", "reverse"})
 
     def __init__(self, agreement: Mapping[str, Any], data: PaymentSettlementData, *,
                  account: str, client_for_owner: ClientForAccount, verify_snapshot: SnapshotVerifier,
@@ -70,6 +70,16 @@ class RatePaymentAdapter(PaymentAdapter):
             return super().validate(command)
         if command.negotiation_id != self.negotiation_id:
             return Rejected(reason="command negotiation does not match payment commitment")
+        if command.kind == "notice":
+            if self.account != self.data.mandate.to.root:
+                return Rejected(reason="seller notice requires the accepted payee account")
+            if command.payload:
+                return Rejected(reason="notice derives all affected rate parts from the accepted mandate")
+            for stop in self._notice_stops(command):
+                refusal = self.validate(stop)
+                if refusal is not None:
+                    return refusal
+            return None
         part = command.payload.get("part")
         if part not in self.rate_parts:
             return Rejected(reason="command requires an explicit rate part")
@@ -113,6 +123,8 @@ class RatePaymentAdapter(PaymentAdapter):
         return event
 
     def describe(self, command: LifecycleCommand, keys: OperationKeys) -> PaymentOperation:
+        if command.kind == "notice":
+            raise ValueError("notice expands into journaled per-part stops through submit")
         refusal = self.validate(command)
         if refusal is not None:
             raise ValueError(refusal.reason)
@@ -123,7 +135,42 @@ class RatePaymentAdapter(PaymentAdapter):
 
     async def submit(self, command: LifecycleCommand, keys: OperationKeys, *,
                      journaled_digest: str | None = None) -> LifecycleOutcome:
+        if command.kind == "notice":
+            return await self._notice(command, keys)
         return await asyncio.to_thread(self.submit_now, command, keys, journaled_digest=journaled_digest)
+
+    def _notice_stops(self, command: LifecycleCommand) -> tuple[LifecycleCommand, ...]:
+        return tuple(command.model_copy(update={"kind": "stop", "payload": {"part": part}})
+                     for part in self.rate_parts)
+
+    async def _notice(self, command: LifecycleCommand, keys: OperationKeys) -> LifecycleOutcome:
+        refusal = self.validate(command)
+        if refusal is not None:
+            return refusal
+        if (keys.negotiation_id, keys.operation_key) != (command.negotiation_id, command.operation_key):
+            return Rejected(reason="operation keys do not match the command")
+        if keys.store is None:
+            return Rejected(reason="notice requires the caller's durable operation store")
+        stops = self._notice_stops(command)
+        operations = tuple(self.describe(stop, keys) for stop in stops)
+        # Persist every descriptor before the first part is submitted. The same
+        # journal and derived keys recover a partially acknowledged command.
+        for operation in operations:
+            if not await keys.store.check_and_record(
+                command.negotiation_id, keys.part_event(operation.part, "stop-descriptor"), operation.digest,
+            ):
+                return Rejected(reason="operation key retry changes the stop descriptor")
+        for stop, operation in zip(stops, operations, strict=True):
+            outcome = await self.submit(stop, keys, journaled_digest=operation.digest)
+            if not isinstance(outcome, Accepted):
+                return outcome
+        view = await self.read()
+        if not isinstance(view.outcome, Accepted):
+            return view.outcome
+        records = [part.final_stop or part.pending_stop for part in view.parts]
+        if any(record is None for record in records):
+            return Unknown(reason="notice awaits a verified controlling stop for every rate part")
+        return Accepted(records=[record for record in records if record is not None])
 
     def submit_now(self, command: LifecycleCommand, keys: OperationKeys, *,
                    journaled_digest: str | None = None) -> LifecycleOutcome:
