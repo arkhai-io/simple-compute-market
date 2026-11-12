@@ -12,6 +12,7 @@ from market_arkhai_mediation.client import MediationClient, MediationCredential,
 from market_arkhai_mediation.contract import INTERFACE
 from market_arkhai_payments import PaymentSettlementData
 from market_arkhai_payments.adapter import PaymentAdapter
+from market_arkhai_payments.rate_adapter import RatePaymentAdapter
 from market_arkhai_payments.receipts import verify_snapshot
 from market_config.config_loader import load_user_config
 from market_core.schemas import Agreement
@@ -114,7 +115,8 @@ async def buyer_lifecycle(
         if approval is not None:
             if approval.payer_account != data.mandate.from_.root:
                 raise ValueError("payment credential names another accepted payer")
-            payment = PaymentAdapter(
+            adapter = RatePaymentAdapter if any(part.root.kind == "rate" for part in data.mandate.parts) else PaymentAdapter
+            payment = adapter(
                 raw, data, account=approval.payer_account, client_for_owner=approval._client_for_owner,
                 verify_snapshot=lambda signed, floor: verify_snapshot(
                     signed, approval.config.receipt_trust, mandate=data.mandate, agreement_json=raw,
@@ -137,6 +139,7 @@ async def buyer_lifecycle(
         agreement.negotiation_id, commitment_ref,
         PaymentBinding(agreement.negotiation_id, PaymentSelector(mechanism)), dispute,
         Identity.model_validate(agreement.buyer), Identity.model_validate(agreement.seller),
+        rate=option.settlement.get("period") is not None,
     )
     try:
         async with _EvidencePeer(

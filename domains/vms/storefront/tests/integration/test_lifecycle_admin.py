@@ -69,7 +69,7 @@ class Notice:
         return AuthorityView(outcome=Accepted(), events=events)
 
 
-def approve_rate(h, *, entitled):
+def approve_rate(h, *, entitled, payer_notice=300):
     """Lane-only approved command fixture; the installed delivery hook stays closed."""
     agreement, _ = h.lifecycle.accepted(NEGOTIATION)
     now = h.lifecycle.clock()
@@ -78,7 +78,7 @@ def approve_rate(h, *, entitled):
     option = agreement["settlement"]
     option["settlement"].update(period="PT60S", reserve_ahead_seconds=120, approval_window="PT60S")
     option["price"]["rates"] = [{"field": "amount", "per": "hour", "value": 6000}]
-    rights = {"payer": {"notice_seconds": 300, "settles_through": "started_period"}}
+    rights = {"payer": {"notice_seconds": payer_notice, "settles_through": "started_period"}}
     if entitled:
         rights["payee"] = {"notice_seconds": 120, "settles_through": "started_period"}
     option["lifecycle"]["early_termination"] = {

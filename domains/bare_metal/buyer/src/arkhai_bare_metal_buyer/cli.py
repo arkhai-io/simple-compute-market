@@ -341,14 +341,15 @@ def delivery_status(
 def teardown_fulfillment(
     run_id: str = typer.Option(...),
     config: str | None = typer.Option(None, "--config"),
+    surrender: bool = typer.Option(False, "--end-now-regardless", help="Surrender service before paid notice expires."),
 ) -> None:
-    """Revoke buyer access and converge physical capacity release."""
+    """Stop rate billing through notice; --end-now-regardless gives up service now."""
 
     deal, context = _lifecycle_for_run(run_id, config)
 
     async def end():
         async with context as lifecycle:
-            progress = await lifecycle.end_delivery(deal.negotiation_id)
+            progress = await lifecycle.end(deal.negotiation_id, surrender=surrender)
             # Retain the signed delivery read and its embedded site reports even
             # without an independently configured site trust root on the buyer.
             try:

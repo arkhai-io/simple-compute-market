@@ -70,8 +70,8 @@ class RatePaymentAdapter(PaymentAdapter):
             return super().validate(command)
         if command.negotiation_id != self.negotiation_id:
             return Rejected(reason="command negotiation does not match payment commitment")
-        if command.kind == "notice":
-            if self.account != self.data.mandate.to.root:
+        if command.kind == "notice" or (command.kind == "stop" and not command.payload):
+            if command.kind == "notice" and self.account != self.data.mandate.to.root:
                 return Rejected(reason="seller notice requires the accepted payee account")
             if command.payload:
                 return Rejected(reason="notice derives all affected rate parts from the accepted mandate")
@@ -123,8 +123,8 @@ class RatePaymentAdapter(PaymentAdapter):
         return event
 
     def describe(self, command: LifecycleCommand, keys: OperationKeys) -> PaymentOperation:
-        if command.kind == "notice":
-            raise ValueError("notice expands into journaled per-part stops through submit")
+        if command.kind == "notice" or (command.kind == "stop" and not command.payload):
+            raise ValueError("deal stop expands into journaled per-part stops through submit")
         refusal = self.validate(command)
         if refusal is not None:
             raise ValueError(refusal.reason)
@@ -135,7 +135,7 @@ class RatePaymentAdapter(PaymentAdapter):
 
     async def submit(self, command: LifecycleCommand, keys: OperationKeys, *,
                      journaled_digest: str | None = None) -> LifecycleOutcome:
-        if command.kind == "notice":
+        if command.kind == "notice" or (command.kind == "stop" and not command.payload):
             return await self._notice(command, keys)
         return await asyncio.to_thread(self.submit_now, command, keys, journaled_digest=journaled_digest)
 
@@ -150,7 +150,7 @@ class RatePaymentAdapter(PaymentAdapter):
         if (keys.negotiation_id, keys.operation_key) != (command.negotiation_id, command.operation_key):
             return Rejected(reason="operation keys do not match the command")
         if keys.store is None:
-            return Rejected(reason="notice requires the caller's durable operation store")
+            return Rejected(reason="deal stop requires the caller's durable operation store")
         stops = self._notice_stops(command)
         operations = tuple(self.describe(stop, keys) for stop in stops)
         # Persist every descriptor before the first part is submitted. The same
@@ -169,7 +169,7 @@ class RatePaymentAdapter(PaymentAdapter):
             return view.outcome
         records = [part.final_stop or part.pending_stop for part in view.parts]
         if any(record is None for record in records):
-            return Unknown(reason="notice awaits a verified controlling stop for every rate part")
+            return Unknown(reason="deal stop awaits a verified controlling stop for every rate part")
         return Accepted(records=[record for record in records if record is not None])
 
     def submit_now(self, command: LifecycleCommand, keys: OperationKeys, *,

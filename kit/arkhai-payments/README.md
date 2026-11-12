@@ -394,7 +394,10 @@ stops using that same command key, persists all descriptor digests through the
 caller's operation store before the first authority call, and returns verified
 controlling pending/final stops. A same-key retry recovers a lost response and
 never postpones an earlier payer stop. Notice carries no treatment override or
-local scheduling promise.
+local scheduling promise. An ordinary deal-level payer `stop` with an empty
+payload uses the same expansion and journal contract; each derived stop retains
+the accepted payer notice. Explicit part commands still require their exact
+caller-journaled descriptor digest.
 
 `authorize` is read-only for commit, dispatch, physical start and disclose.
 Disclosure additionally requires `billing_operation_key` and a matching verified
