@@ -580,6 +580,11 @@ no Alkahest purchase, an unowned gap in `openspec/changes/README.md`.
   `docs/development/RELEASING.md` listing `arkhai-kit-resource-pools-contracts` for
   `arkhai-vms`; the VM architecture test permitting core carriers, where #350's
   import-guard alignment was kept at the replay.
+- Workflow maintenance outside the scope, small and read-only (pre-closeout review 36,
+  F1): `adf435188` adds `Bash(git config --get-regexp remote)` to triage's allowlist in
+  `.claude/change-steps.toml`. Round 1's triage was denied that call while checking
+  whether this clone names a `workspace` remote, and the owner decided to add it to the
+  step table once the round was triaged.
 - V1 fix (validation 05 V1, owner record 01 R4's adaptation, made in the triage):
   `domains/vms/buyer/src/arkhai_vms_buyer/pricing_record.py` retains the listing's
   `pricing` object, compares it whole with the signed publication body, requires the
