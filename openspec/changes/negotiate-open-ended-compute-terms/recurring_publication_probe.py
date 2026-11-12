@@ -147,25 +147,23 @@ def options(listing):
     return listing.extra["settlement_options"]
 
 
+QUALIFIED = RateServicingDeclaration(MECHANISM, frozenset({"charged", "returned"}))
+
+
 def qualify_selector():
-    required = {MECHANISM: "fixture-rate-v1"}
-    proposed = RateServicingDeclaration(MECHANISM, "fixture-rate-v1", "proposed", "terms-probe")
-    published = RateServicingDeclaration(MECHANISM, "fixture-rate-v1", "published")
-    for declared, lane, allowed in (
-        ({}, None, False), ({MECHANISM: published}, None, True),
-        ({MECHANISM: proposed}, None, False),
-        ({MECHANISM: proposed}, "another-lane", False),
-        ({MECHANISM: proposed}, "terms-probe", True),
-        ({MECHANISM: replace(published, contract_revision="different")}, None, False),
-        ({MECHANISM: replace(published, mechanism="different")}, None, False),
+    for declared, allowed in (
+        ({}, False), ({MECHANISM: QUALIFIED}, True),
+        ({MECHANISM: replace(QUALIFIED, treatments=frozenset({"charged"}))}, False),
+        ({MECHANISM: replace(QUALIFIED, treatments=frozenset())}, False),
+        ({MECHANISM: replace(QUALIFIED, mechanism="different")}, False),
     ):
         try:
-            selected = RateServicing(required, declared, lane).select(MECHANISM)
+            selected = RateServicing(declared).require(MECHANISM, {"charged", "returned"}, setup=False)
         except RateServicingUnavailable:
             assert not allowed
         else:
             assert allowed and selected is declared[MECHANISM]
-    print("published/proposed/absent/wrong revision/wrong mechanism/exact lane selection: PASS")
+    print("declared/absent/undeclared treatment/empty/wrong mechanism selection: PASS")
 
 
 def acceptance_snapshot(db):
@@ -219,8 +217,8 @@ async def exercise(admin, state, *, buyer, db, mode, clauses, address):
         await horizons(buyer, db, identity, on_demand, mode, state.get("preview"), reserved)
 
     declaration = state["declarations"][MECHANISM]
-    for invalid in (None, replace(declaration, contract_revision="different"),
-                    replace(declaration, lane_identity="another-lane")):
+    for invalid in (None, replace(declaration, treatments=frozenset({"charged"})),
+                    replace(declaration, treatments=frozenset())):
         if invalid is None:
             state["declarations"].clear()
         else:
@@ -231,12 +229,7 @@ async def exercise(admin, state, *, buyer, db, mode, clauses, address):
         assert sum(item.get("reason") == "rate_servicing_undeclared" for item in report["actions"]) == 2
         state["declarations"][MECHANISM] = declaration
         await admin.admin_run_lifecycle_cycle("publication")
-    print(mode, "absent/wrong revision/wrong lane: cached signed 409/refetch with no negotiation writes; publication keeps reserved identity: PASS")
-    state["declarations"][MECHANISM] = RateServicingDeclaration(MECHANISM, "fixture-rate-v1", "published")
-    await admin.admin_run_lifecycle_cycle("publication")
-    assert len(options(await admin.get_listing(identity))) == 4
-    state["declarations"][MECHANISM] = declaration
-    print(mode, "matching published declaration also permits recurring publication: PASS")
+    print(mode, "absent/undeclared returned/empty: cached signed 409/refetch with no negotiation writes; publication keeps reserved identity: PASS")
 
     overrides = PoolOverrideClient(admin)
     adjusted = deepcopy(clauses)
@@ -279,9 +272,9 @@ async def exercise(admin, state, *, buyer, db, mode, clauses, address):
     await overrides.put_pool_override({**address, "settlements": setup})
     report = await admin.admin_run_lifecycle_cycle("publication")
     assert len(options(await admin.get_listing(identity))) == 3
-    assert any(item.get("reason") == "setup_delivery_end_unsupported" for item in report["actions"])
+    assert any(item.get("reason") == "rate_servicing_undeclared" and "setup" in item["detail"] for item in report["actions"])
     await overrides.delete_pool_override(**address)
-    print(mode, "unsupported returned treatment and unvendored setup fail closed: PASS")
+    print(mode, "unsupported returned treatment and undeclared setup fail closed: PASS")
 
     state["deadline"] = None
     report = await admin.admin_run_lifecycle_cycle("publication")
@@ -325,10 +318,9 @@ async def vm(path):
 
     from horizon_probe import timing, billing, ProposedPayments  # Lazy: selected VM diagnostic.
     helper = ProposedHelper()
-    declarations = {MECHANISM: RateServicingDeclaration(MECHANISM, "fixture-rate-v1", "proposed", "terms-probe")}
+    declarations = {MECHANISM: QUALIFIED}
     state = {"helper": helper, "helpers": {MECHANISM: helper}, "deadline": 1200,
-             "declarations": declarations,
-             "servicing": RateServicing({MECHANISM: "fixture-rate-v1"}, declarations, "terms-probe")}
+             "declarations": declarations, "servicing": RateServicing(declarations)}
     raw = root_configuration({**SETTLEMENT["alkahest"], "release_models": ["recipient"]})
 
     def factory(_fulfillment):
@@ -377,10 +369,9 @@ async def bare(path):
     from horizon_probe import timing, ProposedSellerStage  # Lazy: selected bare-metal diagnostic.
     from market_core import SettlementStageTable  # Lazy: bare-metal fixture composition.
     helper = ProposedHelper()
-    declarations = {MECHANISM: RateServicingDeclaration(MECHANISM, "fixture-rate-v1", "proposed", "terms-probe")}
+    declarations = {MECHANISM: QUALIFIED}
     state = {"helper": helper, "helpers": {MECHANISM: helper}, "deadline": 1200,
-             "declarations": declarations,
-             "servicing": RateServicing({MECHANISM: "fixture-rate-v1"}, declarations, "terms-probe")}
+             "declarations": declarations, "servicing": RateServicing(declarations)}
     site = Site(pool("pool-1", member("r1", "pool-1"), policy_tags={"capacity_bounds": {
         "bare_metal": {"max_duration_seconds": 7200, "available_until_utc": END},
     }}))

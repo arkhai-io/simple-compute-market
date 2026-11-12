@@ -30,6 +30,7 @@ from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_registry
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from held_loops import held_loop_controller
+from recurring_world import recurring_world, undeclared
 from test_http_system import ADMIN_SIGNER, SELLER_SIGNER, _app, _runtime
 from test_publication_cycle import (
     REGISTRY_URL,
@@ -289,3 +290,33 @@ async def test_a_pool_resolving_no_lease_bound_is_held_through_the_running_app(t
     assert _holds(held) == {"pool_lease_bound_missing"}
     assert [item for item in held["actions"] if item["action"] == "publish"] == []
     assert listing.status == "open"
+
+
+def _recurring(options: list[dict]) -> list[dict]:
+    return [option for option in options if "period" in option["settlement"]]
+
+
+async def test_publication_omits_recurring_options_whose_treatments_are_undeclared(tmp_path):
+    """A recurring option publishes only under a declaration qualifying every
+    treatment it names. Narrowing the declaration omits both recurring options on
+    the next step, each with its diagnostic, while the reserved and once options
+    keep the listing's capacity identity."""
+    async with recurring_world(tmp_path) as world:
+        report = await world.publish()
+        listing_id = _listing_id(report)
+        published = (await world.admin.get_listing(listing_id)).extra["settlement_options"]
+        recurring = _recurring(published)
+        assert (len(published), len(recurring)) == (4, 2)
+        assert not undeclared(report)
+        peers = {option["option_id"] for option in published if option not in recurring}
+
+        world.declare(frozenset({"charged"}))
+        report = await world.publish()
+        listing = await world.admin.get_listing(listing_id)
+
+    assert listing.status == "open"
+    assert [item for item in report["actions"] if item["action"] == "publish"] == []
+    assert {option["option_id"] for option in listing.extra["settlement_options"]} == peers
+    refusals = undeclared(report)
+    assert len(refusals) == 2
+    assert all("does not declare returned" in item["detail"] for item in refusals)

@@ -15,8 +15,8 @@ from typing import Annotated, Any, Literal, Protocol
 from market_core.schemas import AgreedPrice, SettlementOption
 from market_deal_lifecycle.configuration import DisputeEntry
 from market_deal_lifecycle.terms import (
-    Adjudication, EarlyTermination, Entitlement, LifecycleTerms, SettlesThrough,
-    TermContext, encode_terms, validate_terms,
+    PARTIAL_PERIOD, Adjudication, EarlyTermination, Entitlement, LifecycleTerms,
+    SettlesThrough, TermContext, encode_terms, validate_terms,
 )
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -127,8 +127,17 @@ def derive_rate_preset(
     preset = clause.recurring
     if preset is None:
         raise ValueError("a recurring publication clause is required")
+    # The payer's stop always charges its started period; the payee's stop and
+    # the term end are the preset's. Each must be a treatment the composition
+    # has qualified, as must a setup charge.
+    named = ["started_period", preset.settles_through]
+    if preset.payee_notice_seconds is not None:
+        named.append(preset.payee_settles_through)
     try:
-        declaration = servicing.select(clause.mechanism)
+        declaration = servicing.require(
+            clause.mechanism, (PARTIAL_PERIOD[value] for value in named),
+            setup=preset.setup_amount is not None,
+        )
     except RateServicingUnavailable as exc:
         return RatePresetRefusal("rate_servicing_undeclared", str(exc))
     if helper is None:

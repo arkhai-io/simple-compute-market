@@ -588,6 +588,31 @@ async def test_a_release_model_the_domain_cannot_deliver_refuses_composition(tmp
         )
 
 
+def test_the_configured_rate_servicing_declaration_is_the_compositions(tmp_path):
+    """The seller root's ``rate_servicing`` tables are the one declaration
+    publication and acceptance read."""
+    domain = build_vm_storefront_domain()
+    db = _client(tmp_path / "vm-settlement.db", build_vm_storefront_registry(domain))
+    settlement = {
+        "schema_version": 1,
+        "priority": [],
+        "alkahest": {"enabled": False},
+        "rate_servicing": {"arkhai_payments": {"treatments": ["charged", "returned"]}},
+    }
+
+    with replaced_setting("settlement", settlement):
+        composition = build_vm_settlement_composition(
+            domain=db.domain_registry.resolve_mode("vm").contract,
+            sqlite_client=db,
+            alkahest_clients={},
+            marketplace_signer=_SELLER_SIGNER,
+        )
+
+    assert composition.rate_servicing is composition.settlement_config.rate_servicing
+    declared = composition.rate_servicing.select("arkhai.payments.v1")
+    assert (declared.treatments, declared.setup) == (frozenset({"charged", "returned"}), False)
+
+
 @pytest.mark.asyncio
 async def test_persist_outcome_records_the_ready_projection_and_no_credential(db):
     prepared = _prepared(db)

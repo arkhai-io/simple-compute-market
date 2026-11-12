@@ -168,9 +168,11 @@ class BareMetalStorefrontSettlementComposition:
         disputes: RegistryDisputePolicy | None = None,
     ) -> "BareMetalStorefrontSettlementComposition":
         registry = build_bare_metal_settlement_registry()
+        config = registry.resolve(raw_settlement, role="seller")
         return cls(
             registry=registry,
-            config=registry.resolve(raw_settlement, role="seller"),
+            config=config,
+            rate_servicing=config.rate_servicing,
             resources={**(resources or {}), **({"disputes": disputes} if disputes is not None else {})},
             disputes=disputes or RegistryDisputePolicy.from_document({}),
             payments_client_for_owner=payments_client_for_owner,

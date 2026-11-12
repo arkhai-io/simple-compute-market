@@ -168,7 +168,11 @@ def test_settlement_is_closed_to_registered_mechanisms(definition) -> None:
     settlement = _section(definition, "Settlement")
     assert settlement["additionalProperties"] is False
     assert _allowed(
-        settlement, "schema_version", "priority", "alkahest", "arkhai_payments", "contact"
+        settlement, "schema_version", "priority", "alkahest", "arkhai_payments", "contact",
+        "rate_servicing",
+    )
+    assert _allowed(
+        _field(settlement, "rate_servicing"), "alkahest", "arkhai_payments", "contact"
     )
 
 

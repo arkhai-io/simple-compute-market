@@ -78,12 +78,20 @@ One composition-owned declaration lists, per mechanism, the `settles_through`
 treatments the composition has qualified and whether it services setup
 (`[settlement.rate_servicing.<mechanism>] treatments = [...]`, `setup = ...`);
 absent or empty means no rate servicing. The neutral contract is `RateServicing` in
-`kit/settlement-runtime`'s `rate_servicing.py`. Round 1 implemented an earlier form —
-an adapter-required revision map, `published`/`proposed` declarations and a
-`proposed_lane` identity — which round 2 (section 6) replaces with the treatments
-table; spot's materialization gate then checks the option's treatments and `setup`
-against the declaration instead of calling `select()`. A refusal keeps the
-withdrawn-option/refetch semantics.
+`kit/settlement-runtime`'s `rate_servicing.py`, read from the seller's `[Settlement]`
+root into `SettlementConfig.rate_servicing` and handed by each composition to
+publication and negotiation. Round 1 implemented an earlier form — an
+adapter-required revision map, `published`/`proposed` declarations and a
+`proposed_lane` identity — which round 2 replaces with the treatments table.
+Spot's materialization gate calls `require_option(option)`, which checks the
+option's entitlement and term-end treatments and a `setup_amount` against the
+declaration. What spot's branch must follow: `RateServicingDeclaration` is now
+`(mechanism, treatments, setup)`, with no `contract_revision`, `publication` or
+`lane_identity`, so its encoder's revision check and its example's declaration go;
+`RateServicing` takes only `declarations`; `select(mechanism)` still returns the
+declaration, refusing an absent or empty one. `RatePresetPricing` keeps
+`supports_setup_delivery_end`: a setup charge needs both it and the declaration's
+`setup`. A refusal keeps the withdrawn-option/refetch semantics.
 
 Publication, cached-option acceptance and materialization all consume that same
 contract, never an option-local assertion. Absence omits recurring publication and

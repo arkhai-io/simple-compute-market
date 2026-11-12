@@ -335,6 +335,17 @@ not say which treatments were qualified; it is removed. Tests inject declaration
 directly. Deployed compositions declare no treatments, so recurring offers stay dark
 (R16). No additional minimum-spend primitive gates it.
 
+The tables live in the seller's `[Settlement]` root, keyed by each installed
+mechanism's configuration key; a buyer's root refuses them, since only a selling
+composition services a rate. Their one definition is settlement-runtime's typed table
+model, which the configuration loader parses and the values schema renders, so the Helm
+schema and the loader cannot disagree on the table's keys or treatment names. The
+storefronts' integration tests run the real composition with the declaration injected
+and, since no installed mechanism supplies a recurring encoder, term timing or billing
+projection, a fixture at each of those composition ports, standing where the payment
+mechanism's code would; what they prove is the two doors and the served acceptance, not
+a mechanism's encoding.
+
 1. Publication omits a recurring candidate naming any undeclared treatment on an
    entitlement or at the term end, or a setup charge where `setup` is not declared,
    using existing no-settlement-option diagnostics if none remain.
@@ -1015,7 +1026,7 @@ Destinations are planned, not claims of implemented behavior.
 | D1, D2/D2a/D2b classes, monetary quote unit, tested money readers and acceptance pricing pin | `docs/development/ARCHITECTURE.md` (with the authority description); `openspec/specs/negotiation-protocol/spec.md` |
 | D3 penalty preset default and its setting, the deadline's source, buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/spec.md`; foundation-owned lifecycle contract |
 | D5 the horizon as the Agreement's, listing bounds, the acceptance hook, the floored default, the buyer's check and its seams, and the reserved-bound rule | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md`; `openspec/specs/buyer-orchestration/architecture.md` (the per-listing acceptance validator and the bounds a resumed run keeps); `docs/operator-handbook.md` (bare-metal upgrade step) |
-| D6 servicing declaration and its three doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` |
+| D6 servicing declaration and its three doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` (with the storefronts' integration fixtures at the composition ports no installed mechanism supplies); `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Settlement consumer configuration and cutover": the seller root's `rate_servicing` tables) |
 | D7, D8 display, the mechanism's presenter, the default buyer's policy and seller-policy distinction | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |
 | D9 recurring publication and the shared per-clause step | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |
 | D10 the unified clause source | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md` |

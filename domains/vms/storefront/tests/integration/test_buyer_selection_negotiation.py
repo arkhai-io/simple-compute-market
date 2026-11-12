@@ -4,6 +4,10 @@ A fresh VM negotiation names its settlement option explicitly, and a selection
 carries no shape of its own: whether it bargains an amount is read from the
 option it selects. The production buyer client and the served storefront must
 agree on that, or the seller refuses the buyer's opening for a missing amount.
+
+A buyer that names no horizon on a recurring option leaves it to the seller to
+resolve; the buyer's own checks on the signed acceptance must then admit what the
+served storefront signed.
 """
 
 from __future__ import annotations
@@ -11,19 +15,22 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from dataclasses import asdict
 
 import pytest
 
 from arkhai_vms import make_vm_provision_terms
 from arkhai_vms_buyer.buyer_client import negotiate_with_seller
+from arkhai_vms_buyer.pricing_record import retained_pricing_record, verify_pricing_acceptance
 from arkhai_vms_buyer.settlement_composition import (
     buyer_settlement_registry,
     buyer_stage,
 )
 from core_buyer.settlement import SelectedSettlementOption
 from market_alkahest.dev_chain import anvil_address_book_path
-from market_core.schemas import SettlementOption, SettlementSelection
+from market_core.schemas import Agreement, SettlementOption, SettlementSelection
 from market_identity import RequestEnvelope, TrustedIdentitySet, canonical_body_hash, sign_request
+from market_settlement_runtime.horizon import check_accepted_horizon
 
 from tests._settings_overrides import settings_overrides, replaced_setting
 from market_storefront.utils import config as storefront_config
@@ -31,6 +38,16 @@ from tests.fake_site import TEST_MARKETPLACE_SIGNER
 from tests.introduction_deals import publish
 from tests.loopback import serving
 from tests.publication_app import BUYER_SIGNER, pool, publication_app, settlement_clause
+from tests.recurring_world import (
+    MAX_DURATION_SECONDS,
+    MECHANISM,
+    PAYEE,
+    PERIOD,
+    SHAPE_PRICING,
+    billing,
+    payment_clause,
+    recurring_world,
+)
 
 # VM may publish Alkahest for an unbacked pool in this composition double.
 _ALKAHEST_PUBLISHABLE = {"alkahest.v1": False, "arkhai.payments.v1": True}
@@ -51,6 +68,30 @@ def _buyer_chain(tmp_path, monkeypatch, address_book) -> None:
         f'address_books = {{ anvil = "{address_book}" }}\n'
     )
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_dir.parent))
+
+
+def _as_published(world, listing: dict) -> dict:
+    """The listing as a registry returns it: the seller's signed publication
+    with its trust. A storefront's local listing alone cannot prove a published
+    rate."""
+    publication = world.registries.to("publish", listing["listing_id"])[0][1]
+    request = sign_request(signer=TEST_MARKETPLACE_SIGNER, envelope=RequestEnvelope(
+        principal=TEST_MARKETPLACE_SIGNER.identity, role="seller", method="POST",
+        operation="listing.publish", resource="listings",
+        request_id="buyer-selection-publication", timestamp=1_793_966_340,
+        body_hash=canonical_body_hash(publication),
+    ))
+    return {
+        **listing,
+        **publication,
+        "publisher_principals": TrustedIdentitySet(
+            identities=(TEST_MARKETPLACE_SIGNER.identity,)
+        ).model_dump(mode="json"),
+        "publisher_publication": {
+            "body_base64": base64.b64encode(json.dumps(publication).encode()).decode(),
+            "request": request.model_dump(mode="json"),
+        },
+    }
 
 
 @pytest.mark.parametrize("shape_priced", [False, True])
@@ -88,23 +129,7 @@ async def test_a_buyer_selection_of_a_priced_alkahest_option_reaches_acceptance(
             listing = (await publish(world))["broker-a"]
         listing_id = listing["listing_id"]
         if shape_priced:
-            # A registry returns the seller's signed publication with its trust;
-            # a storefront's local listing alone cannot prove a published rate.
-            publication = world.registries.to("publish", listing_id)[0][1]
-            listing = {**listing, **publication}
-            request = sign_request(signer=TEST_MARKETPLACE_SIGNER, envelope=RequestEnvelope(
-                principal=TEST_MARKETPLACE_SIGNER.identity, role="seller", method="POST",
-                operation="listing.publish", resource="listings",
-                request_id="buyer-selection-publication", timestamp=1_793_966_340,
-                body_hash=canonical_body_hash(publication),
-            ))
-            listing["publisher_principals"] = TrustedIdentitySet(
-                identities=(TEST_MARKETPLACE_SIGNER.identity,)
-            ).model_dump(mode="json")
-            listing["publisher_publication"] = {
-                "body_base64": base64.b64encode(json.dumps(publication).encode()).decode(),
-                "request": request.model_dump(mode="json"),
-            }
+            listing = _as_published(world, listing)
         raw_options = [
             option
             for option in listing["settlement_options"]
@@ -177,3 +202,97 @@ async def test_a_buyer_selection_of_a_priced_alkahest_option_reaches_acceptance(
     assert outcome.settlement_selection.option_id == option.option_id
     assert outcome.accepted_escrow_proposal is not None
     assert rounds[-1][1] == "accept"
+
+
+# A buyer naming no horizon on a recurring option. The production buyer client
+# cannot open such a negotiation: it sizes its bounds through the installed
+# payments projection, which refuses rate parameters. These cases therefore open
+# through the storefront's typed client and run the buyer's own acceptance checks
+# on the signed reply.
+
+#: The buyer's provision terms, naming no duration.
+_NO_HORIZON = {"kind": "compute.v1", "version": 1, "payload": {"ssh_public_key": ""}}
+
+
+async def _published(world) -> dict:
+    """The world's one listing after a publication cycle, as one mapping."""
+    await world.publish()
+    (summary,) = (await world.app.client.list_listings(status="open")).listings
+    listing = await world.app.client.get_listing(summary.listing_id)
+    return {**listing.extra, **{key: value for key, value in asdict(listing).items() if key != "extra"}}
+
+
+def _on_demand(listing: dict) -> dict:
+    return next(
+        option for option in listing["settlement_options"]
+        if "period" in option["settlement"]
+        and "payee" not in option["lifecycle"]["early_termination"]["entitlements"]
+    )
+
+
+def _recurring_selection(option: dict) -> dict:
+    return {
+        "option_id": option["option_id"],
+        "expiration_unix": 2_147_483_647,
+        "settlement": {"schema": MECHANISM, "payer_account": PAYEE},
+    }
+
+
+async def test_an_omitted_horizon_is_accepted_at_the_default_bound_the_buyer_checks(
+    tmp_path,
+) -> None:
+    """The served storefront resolves an omitted horizon to the listing's default
+    bound and signs it; the buyer's accepted-horizon check admits that signed
+    default against the bounds the served listing advertises."""
+    async with recurring_world(tmp_path) as world:
+        listing = await _published(world)
+        option = _on_demand(listing)
+        reply = await world.app.buyer.negotiate_new(
+            listing_id=listing["listing_id"],
+            # One period at the clause's 2.5 an hour, in base units.
+            initial_amount=625_000,
+            provision_terms=_NO_HORIZON,
+            settlement_selection=_recurring_selection(option),
+            selection_only=True,
+        )
+
+    assert reply["action"] == "accept"
+    agreement = reply["agreement"]
+    assert listing["max_duration_seconds"] == MAX_DURATION_SECONDS
+    assert agreement["duration_seconds"] == MAX_DURATION_SECONDS
+    assert "duration_seconds" not in agreement["provision_terms"]["payload"]
+    assert agreement["settlement"] == option
+    check_accepted_horizon(
+        start_utc=agreement["start_utc"],
+        duration_seconds=agreement["duration_seconds"],
+        requested_duration_seconds=None,
+        max_duration_seconds=listing["max_duration_seconds"],
+        available_until_utc=listing["available_until_utc"],
+    )
+
+
+async def test_a_buyer_that_named_no_duration_verifies_the_accepted_pricing(tmp_path) -> None:
+    """At the pricing pin: a shape-priced recurring acceptance whose buyer named
+    no duration passes the buyer's pricing verification against the Agreement's
+    resolved duration, since the provision terms it signed carry none to compare."""
+    on_demand = payment_clause(None, recurring={"period": PERIOD, "reserve_ahead_seconds": 1800})
+    async with recurring_world(tmp_path, pricing=SHAPE_PRICING, published=[on_demand]) as world:
+        listing = _as_published(world.app, await _published(world))
+        (option,) = listing["settlement_options"]
+        reply = await world.app.buyer.negotiate_new(
+            listing_id=listing["listing_id"],
+            # The listed rates exactly, as basis points of them.
+            initial_amount=10_000,
+            provision_terms=_NO_HORIZON,
+            settlement_selection=_recurring_selection(option),
+            selection_only=True,
+        )
+
+    assert listing.get("rate_structure")
+    assert reply["action"] == "accept"
+    agreement = Agreement.model_validate(reply["agreement"])
+    assert agreement.duration_seconds == MAX_DURATION_SECONDS
+    verify_pricing_acceptance(
+        retained_pricing_record(listing), agreement, reply,
+        multiplier=10_000, project_billing=billing,
+    )

@@ -960,6 +960,23 @@ def test_a_disabled_section_is_still_configured():
     assert composition.configures("contact-exchange.v1")
 
 
+def test_the_configured_rate_servicing_declaration_is_the_compositions():
+    """The seller root's ``rate_servicing`` tables are the one declaration
+    publication and acceptance read."""
+    root = {
+        "schema_version": 1,
+        "priority": ["contact-exchange.v1"],
+        "contact": CONTACT_SECTION,
+        "rate_servicing": {"arkhai_payments": {"treatments": ["charged", "returned"]}},
+    }
+
+    composition = BareMetalStorefrontSettlementComposition.from_raw_config(root)
+
+    assert composition.rate_servicing is composition.config.rate_servicing
+    declared = composition.rate_servicing.select("arkhai.payments.v1")
+    assert (declared.treatments, declared.setup) == (frozenset({"charged", "returned"}), False)
+
+
 def test_a_contact_only_root_composes_its_obligation_worker(monkeypatch, tmp_path):
     runtime = _configured_runtime(monkeypatch, tmp_path)
 

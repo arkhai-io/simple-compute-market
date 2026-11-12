@@ -40,6 +40,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
+from market_settlement_runtime.rate_servicing import RateServicingTable
 from pydantic import BaseModel
 
 # Annotation keywords that describe a value rather than constrain it. Defaults
@@ -187,18 +188,28 @@ def settlement_fragment(
 
     The settlement runtime refuses any other root key, so closing it here
     refuses nothing the service would accept. A mechanism that does not apply
-    to ``role`` is refused whole.
+    to ``role`` is refused whole. A seller's root also takes ``rate_servicing``,
+    one table per mechanism that applies to it.
     """
     fields: dict[str, Any] = {
         "schema_version": {"type": "integer"},
         "priority": {"type": "array", "items": {"type": "string"}},
     }
+    servicing: dict[str, Any] = {}
     for mechanism in mechanisms:
+        applies = role in mechanism.roles
         fields[mechanism.config_key] = (
-            model_fragment(mechanism.config_model, role=role)
-            if role in mechanism.roles
-            else False
+            model_fragment(mechanism.config_model, role=role) if applies else False
         )
+        if applies:
+            servicing[mechanism.config_key] = model_fragment(RateServicingTable, role=role)
+    if role == "seller":
+        # Only a seller declares the rate treatments it has qualified.
+        fields["rate_servicing"] = {
+            "type": "object",
+            "additionalProperties": False,
+            "patternProperties": any_case_fields(servicing),
+        }
     return {
         "type": "object",
         "additionalProperties": False,

@@ -31,6 +31,7 @@ from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_pool_overrides import PoolOverrideClient
 from market_settlement_runtime import ReadinessBlocker
+from storefront_client import StorefrontClientError
 
 import market_storefront.container as container
 from market_storefront import lifecycle
@@ -55,6 +56,7 @@ from tests.publication_app import (
     publication_app,
     settlement_clause,
 )
+from tests.recurring_world import MECHANISM, PAYEE, recurring_world, undeclared
 
 pytestmark = pytest.mark.asyncio
 
@@ -2188,3 +2190,80 @@ async def test_only_the_admissible_mechanisms_of_a_mixed_list_are_classified(tmp
         "no_settlement_option",
         [CONTACT_MECHANISM],
     )
+
+
+# The servicing declaration at the publication and cached-acceptance doors.
+
+
+def _recurring(options: list[dict]) -> list[dict]:
+    return [option for option in options if "period" in option["settlement"]]
+
+
+async def test_publication_omits_recurring_options_whose_treatments_are_undeclared(
+    tmp_path,
+):
+    """A recurring option publishes only under a declaration qualifying every
+    treatment it names. Narrowing the declaration omits both recurring options on
+    the next cycle, each with its diagnostic, while the reserved and once options
+    keep the listing's capacity identity."""
+    async with recurring_world(tmp_path) as world:
+        report = await world.publish()
+        validate_cycle_report(report)
+        ((listing_id, listing),) = (await _listings(world.app)).items()
+        published = listing["settlement_options"]
+        recurring = _recurring(published)
+        assert (len(published), len(recurring)) == (4, 2)
+        assert not undeclared(report)
+        peers = {option["option_id"] for option in published if option not in recurring}
+
+        world.declare(frozenset({"charged"}))
+        report = await world.publish()
+        validate_cycle_report(report)
+        listings = await _listings(world.app)
+
+    assert list(listings) == [listing_id]
+    assert {option["option_id"] for option in listings[listing_id]["settlement_options"]} == peers
+    refusals = undeclared(report)
+    assert len(refusals) == 2
+    assert all("does not declare returned" in item["detail"] for item in refusals)
+
+
+def _negotiation_rows(db) -> list[tuple]:
+    with sqlite3.connect(db.db_path) as connection:
+        return connection.execute(
+            "SELECT * FROM negotiation_threads ORDER BY negotiation_id"
+        ).fetchall()
+
+
+async def test_a_cached_recurring_selection_whose_treatment_is_withdrawn_is_refused(
+    tmp_path,
+):
+    """A buyer holding a recurring option published under the full declaration
+    selects it after the storefront stops declaring one of its treatments: the
+    seller answers the signed 409 asking for a refetch, and writes no negotiation."""
+    async with recurring_world(tmp_path) as world:
+        await world.publish()
+        ((listing_id, listing),) = (await _listings(world.app)).items()
+        on_demand = next(
+            option for option in _recurring(listing["settlement_options"])
+            if "payee" not in option["lifecycle"]["early_termination"]["entitlements"]
+        )
+        world.declare(frozenset({"charged"}))
+        before = _negotiation_rows(world.app.db)
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await world.app.buyer.negotiate_new(
+                listing_id=listing_id,
+                initial_amount=1,
+                provision_terms=_vm_provision(3600),
+                settlement_selection={
+                    "option_id": on_demand["option_id"],
+                    "settlement": {"schema": MECHANISM, "payer_account": PAYEE},
+                },
+                selection_only=True,
+            )
+
+        assert refused.value.status_code == 409
+        assert "settlement_option_withdrawn_refetch" in str(refused.value)
+        assert "does not declare returned" in str(refused.value)
+        assert _negotiation_rows(world.app.db) == before

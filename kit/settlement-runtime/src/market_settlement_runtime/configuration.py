@@ -36,6 +36,7 @@ from market_core.schemas import (
 from market_deal_lifecycle.projections import LIFECYCLE_QUERY_FIELDS
 from .ports import ConditionalEscrowClient
 from .presentation import PaymentPresentation, PaymentPresenter
+from .rate_servicing import RateServicing
 
 SETTLEMENT_CONFIG_SCHEMA_VERSION = 1
 SettlementRole = Literal["buyer", "seller"]
@@ -141,11 +142,16 @@ class MechanismReadiness(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class SettlementConfig:
-    """One resolved settlement root with typed installed mechanism sections."""
+    """One resolved settlement root with typed installed mechanism sections.
+
+    ``rate_servicing`` is a seller's declaration of the rate treatments it has
+    qualified; a buyer's root has none, and an empty one services no rate.
+    """
 
     schema_version: int = SETTLEMENT_CONFIG_SCHEMA_VERSION
     priority: tuple[str, ...] = ()
     mechanisms: Mapping[str, BaseModel] = field(default_factory=dict)
+    rate_servicing: RateServicing = field(default_factory=RateServicing)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "priority", tuple(self.priority))
@@ -554,6 +560,8 @@ class SettlementConfigurationRegistry:
         if role not in ("buyer", "seller"):
             raise SettlementConfigurationError(f"unknown settlement role {role!r}")
         known_root = {"schema_version", "priority", *self._config_keys}
+        if role == "seller":
+            known_root.add("rate_servicing")
         unknown_root = sorted(str(key) for key in raw if key not in known_root)
         if unknown_root:
             raise SettlementConfigurationError(
@@ -602,11 +610,21 @@ class SettlementConfigurationRegistry:
                 raise SettlementConfigurationError(
                     f"invalid Settlement.{config_key}"
                 ) from None
+        servicing = raw.get("rate_servicing", {})
+        if not isinstance(servicing, Mapping):
+            raise SettlementConfigurationError("Settlement.rate_servicing must be a table")
+        try:
+            rate_servicing = RateServicing.from_tables(servicing, mechanism_for={
+                key: mechanism_id for key, mechanism_id in self._config_keys.items()
+            })
+        except ValueError as exc:
+            raise SettlementConfigurationError(f"invalid Settlement.rate_servicing: {exc}") from None
         return self.validate(
             SettlementConfig(
                 schema_version=schema_version,
                 priority=priority,
                 mechanisms=typed,
+                rate_servicing=rate_servicing,
             ),
             role=role,
         )

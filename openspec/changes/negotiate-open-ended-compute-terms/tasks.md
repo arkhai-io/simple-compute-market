@@ -16,8 +16,8 @@ The owner's record of round 1 (`reviews/01-implementation-owner.md`) stood in fo
 the design review this change never had; its decisions are in `design.md` D1–D12, and
 the code they need, with review 04's F1 and F2, is round 2: first planned as section 5,
 then split at the owner's direction into sections 5–12, one session each but 5 and 6
-together, reviewed as one round (`design.md`, "Implementation cadence"). Implementation
-resumes at 5.5. Verification levels follow `docs/development/TESTING.md`;
+together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5 and
+6 are done; implementation resumes at section 7. Verification levels follow `docs/development/TESTING.md`;
 every behaviour this change adds gets permanent tests at the level it assigns (owner
 record 01, R2).
 
@@ -796,7 +796,7 @@ doors, and the served-storefront cases review 04's F1 and F2 left owed (D5). Tou
 `kit/settlement-runtime` (`rate_servicing.py`, `rate_publication.py`), both storefronts'
 settlement compositions, negotiation runtimes and configuration, and their tests.
 
-- [ ] 6.1 **The servicing declaration (D6; R15, R16, R19):** in
+- [x] 6.1 **The servicing declaration (D6; R15, R16, R19):** in
   `kit/settlement-runtime/src/market_settlement_runtime/rate_servicing.py`, replace
   `RateServicing`'s revision map, `published`/`proposed` status and `proposed_lane`
   with a table per mechanism of qualified `settles_through` treatments and `setup`
@@ -812,7 +812,42 @@ settlement compositions, negotiation runtimes and configuration, and their tests
   a treatment and the composition declares it. Deployed compositions declare nothing;
   accepted-deal continuation never reads the declaration. Remove the lane opt-in and its
   fixtures' proposed-revision form.
-- [ ] 6.2 **The served-storefront horizon and pin cases (D5; review 04 F1, F2), moved
+  Implemented, uncommitted (2026-11-12); checked once 6.4 passes. `rate_servicing.py`:
+  `RateServicingDeclaration(mechanism, treatments, setup)`, treatments named as the
+  payment authority names them (`charged`, `returned`, `prorated`, through
+  `PARTIAL_PERIOD`); `RateServicing(declarations)` with `from_tables`, `select`
+  (refusing absent or empty), `require(mechanism, treatments, setup=)` and
+  `require_option`, which reads the option's entitlement and term-end treatments from
+  its lifecycle and treats `setup_amount` beside a rate marker as a setup charge.
+  `derive_rate_preset` checks the preset's treatments (the payer's `started_period`,
+  the payee's and the term end's) and setup with `require` before the helper runs;
+  the helper's `supports_setup_delivery_end` is kept, so setup needs both. The
+  configuration: the seller's `[Settlement]` root takes `rate_servicing` (a buyer's
+  refuses it), read into `SettlementConfig.rate_servicing`; the VM builder and bare
+  metal's `from_raw_config` pass it to the composition's `rate_servicing`. Neither
+  negotiation runtime needed a change: both already call `require_option`. Outside the
+  plan's file list, as the configuration key requires: `kit/config`'s
+  `settlement_fragment` adds the seller's `rate_servicing` to the generated values
+  schema, and `make helm-values-schema` regenerated `helm/values.schema.json` and both
+  storefront charts' schemas; both storefronts' values-schema tests name the key. The
+  change's `recurring_publication_probe.py` uses the new declaration (not run here).
+  `dependency-contracts.md`'s "Servicing handoff" names what spot's branch must follow.
+  Corrected after the compliance check (2026-11-12): the table's shape had two
+  hand-written copies, the loader's and the values schema's; it is now one typed model,
+  `RateServicingTable` in `rate_servicing.py` (`treatments` a list of the authority's
+  names as a `Literal`, `setup` a strict boolean, extra keys forbidden), which
+  `from_tables` validates against and `settlement_fragment` renders with
+  `model_fragment`, so the regenerated Helm schemas enumerate the treatment names.
+  The seller-only table, its keys and its refusals are now in the change's
+  settlement-configuration delta (a buyer-root scenario added) and in D6, which also
+  records the integration worlds' fixtures at the composition ports no installed
+  mechanism supplies. The builder path from a configured table to the composition is
+  tested: `domains/vms/storefront/tests/unit/test_settlement_composition.py` and
+  `domains/bare_metal/storefront/tests/test_app_composition.py`, each
+  `test_the_configured_rate_servicing_declaration_is_the_compositions` (unit: the
+  builder given a raw seller root with a `rate_servicing` table; the composition's
+  declaration is the configuration's object and selects the declared treatments).
+- [x] 6.2 **The served-storefront horizon and pin cases (D5; review 04 F1, F2), moved
   from 5.3:** with a declaration injected into the VM storefront's integration world, an
   application-integration case in
   `domains/vms/storefront/tests/integration/test_buyer_selection_negotiation.py` where a
@@ -820,7 +855,35 @@ settlement compositions, negotiation runtimes and configuration, and their tests
   storefront and the buyer's `check_accepted_horizon` admits the signed default; and an
   F2 case at the pricing-pin boundary where a buyer that requested no duration passes
   `verify_pricing_acceptance` against the Agreement's resolved `duration_seconds`.
-- [ ] 6.3 **Permanent tests of the declaration (R2):** unit, in
+  Found while planning it: the production VM buyer client cannot open a
+  recurring payments negotiation — `negotiate_with_seller` sizes its bounds with
+  `priced_unit_count`, which projects through the installed buyer registry, and the
+  installed payments projection refuses rate parameters (D2's projection). So the
+  omitted-horizon case drives the served storefront through its typed client, as
+  `horizon_probe.py`'s `exercise` does with an injected `billing`/`timing` and
+  `ProposedPayments`, and runs `check_accepted_horizon` on the signed Agreement with
+  the listing's bounds; the F2 case calls `verify_pricing_acceptance` with an
+  injected per-period projection on a served shape-priced reply. Record this in the
+  note as the case's actual reach.
+  Done (2026-11-12), at that reach: two application-integration cases in
+  `test_buyer_selection_negotiation.py` over `tests/recurring_world.py` (below, 6.3).
+  `test_an_omitted_horizon_is_accepted_at_the_default_bound_the_buyer_checks` opens a
+  recurring on-demand option with no duration through the buyer's typed
+  `StorefrontClient` against the served app; the seller signs 7200 seconds (the pool's
+  relative bound), the signed provision terms carry no duration, and
+  `check_accepted_horizon` admits it with `requested_duration_seconds=None` against the
+  served listing's bounds (its refusals are the unit suites' of 5.3).
+  `test_a_buyer_that_named_no_duration_verifies_the_accepted_pricing` publishes a
+  shape-priced recurring option (the pool's H100 family rate, the clause rateless,
+  since a shape-priced listing refuses a clause's own rate), opens at 10000 basis
+  points with no duration, and passes `verify_pricing_acceptance` on the served
+  accepting reply, with the record `retained_pricing_record` keeps from the
+  registry-shaped listing (the signed publication the existing shape-priced case
+  builds, now its shared `_as_published` helper) and the world's per-period
+  projection. The provision-duration comparison F2 made conditional would refuse it,
+  since the signed provision terms carry no duration (read from the code, not run).
+  Neither case runs the production buyer client or its core guard, for the reason above.
+- [x] 6.3 **Permanent tests of the declaration (R2):** unit, in
   `kit/settlement-runtime/tests/unit/test_servicing.py` and `test_rate_publication.py`
   (grow its `FixtureHelper`): table parsing, absent and empty, an undeclared
   entitlement treatment, an undeclared term-end treatment, a setup charge without
@@ -830,7 +893,53 @@ settlement compositions, negotiation runtimes and configuration, and their tests
   and `test_http_negotiation.py`): publication omits the undeclared candidate while its
   reserved peer and capacity identity stay; a cached undeclared selection gets the signed
   409/refetch with no negotiation rows written.
-- [ ] 6.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit and
+  Unit part done, uncommitted: `kit/settlement-runtime/tests/unit/test_rate_servicing.py`
+  (a new file: `test_servicing.py` already holds the servicing worker's tests) covers
+  table parsing, absent/no-treatments/empty, malformed tables, a once option, declared
+  admission, an undeclared entitlement and term-end treatment, setup without `setup`
+  and either rate marker alone; `test_rate_publication.py`'s `FixtureHelper` takes
+  supported treatments and setup support, with cases for each undeclared treatment and
+  setup (the helper never builds an option), a declared charged term end, a declared treatment
+  the helper cannot enforce and declared setup without the helper's support;
+  `test_configuration.py` covers the seller root's table and the buyer's refusal;
+  `kit/config`'s values-schema test covers both roles. Evidence on this state:
+  `make -C kit/settlement-runtime test` (unit and library integration) 236 passed;
+  `make -C kit/config test` (unit) 273 passed; after `make dist`, `make -C
+  domains/vms/storefront test` unit 1180 passed, 1 skipped, application integration
+  575 passed; `make -C domains/bare_metal/storefront test` 611 passed; `make
+  check-comment-hygiene` passed. Application-integration cases not started: build a
+  recurring world from `recurring_publication_probe.py`'s `vm`/`bare` factories (a real
+  composition with `rate_servicing`, a fixture helper, `rate_term_projections` and the
+  deadline port) as a shared module in each storefront's tests.
+  Application-integration part done (2026-11-12). Each storefront's tests gain a
+  `recurring_world.py`: the real settlement composition over the running app (VM:
+  `publication_app` with a `VmSettlementComposition`; bare metal: `_derivation_runtime`
+  with its composition replaced), with a mutable payments declaration, a fixture preset
+  helper, the term timing and the pool's deadline injected, and one pool bounded at
+  7200 seconds publishing a reserved Alkahest clause, a once payment, an on-demand and
+  a spot preset. VM `test_publication_loop.py` and bare-metal
+  `test_http_publication_rates.py`:
+  `test_publication_omits_recurring_options_whose_treatments_are_undeclared` publishes
+  four options under the full declaration, then, declaring `charged` alone, the next
+  cycle keeps the listing's identity with exactly its reserved and once options and
+  reports two `rate_servicing_undeclared` refusals naming the undeclared `returned`.
+  VM `test_publication_loop.py` and bare-metal `test_http_negotiation.py`:
+  `test_a_cached_recurring_selection_whose_treatment_is_withdrawn_is_refused` selects
+  the published on-demand option after the declaration narrows: the typed client
+  raises the signed 409 `settlement_option_withdrawn_refetch` naming the undeclared
+  `returned`, and `negotiation_threads` is unchanged. The absent/empty declaration and
+  the setup-charge refusal stay at unit level (one representative integration case per
+  behaviour, `TESTING.md`). Changing the injected declaration mid-test stands for a
+  restart under a narrower one: publication and negotiation share the one object the
+  composition holds; the configured table reaching that object is the unit tests' of
+  6.1's correction.
+  Evidence on the final state, after `make dist` and `make helm-values-schema`: `make
+  -C kit/settlement-runtime test` (unit and library integration) 237 passed; `make -C
+  kit/config test` (unit) 273 passed; `make -C domains/vms/storefront test` unit 1181
+  passed, 1 skipped, application integration 579 passed (the four new cases of 6.2 and
+  6.3 among them); `make -C domains/bare_metal/storefront test` (unit and application
+  integration) 614 passed; `make -C domains/vms/buyer test` (unit) 266 passed.
+- [x] 6.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit and
   library integration),
   `make -C domains/vms/storefront test` (unit and application integration),
   `make -C domains/bare_metal/storefront test` (unit and application integration),
@@ -840,6 +949,66 @@ settlement compositions, negotiation runtimes and configuration, and their tests
   publish under the deployed compositions, which declare no servicing, so they show the
   declaration's dark default; none exercises an admitted declaration, and none is owed
   while no deployed composition declares one.
+  Done (2026-11-12): every suite named passed, with `make -C kit/config test` added for
+  the values-schema change; comment hygiene and every pre-commit hook passed (the
+  section's "verification and handoff" notes below). End-to-end confirmed as stated: no
+  marker in `e2e-tests/` exercises an admitted declaration; the two publication
+  scenarios exercise the empty deployed declaration. No `Owed by validation:` evidence:
+  no CI workflow a push alone produces bears on this section.
+
+### Section 6 verification and handoff (2026-11-12)
+
+- 6.4's evidence on the final code: `make dist`, then the suites in 6.3's last note (all
+  passed); `make check-comment-hygiene` passed; `scripts/change-workflow run pre-commit
+  negotiate-open-ended-compute-terms` passed every hook — `after-functional-change` exit
+  0, `pre-commit-functional` exit 0 (`make check-packaging` and the whole `make test`),
+  `pre-commit` exit 0 (index, tasks, skills, strict OpenSpec validation, `make
+  check-repository` with its version-bump check against `dev`), and again, every hook
+  passing, after `design.md`'s promotion row and these notes changed.
+- The fresh-context compliance check found eight problems and six overstated claims;
+  6.1's correction and 6.2/6.3's notes record the fixes. Its re-check found them
+  resolved but two:
+  - The integration worlds put fixtures at composition ports (the preset helper, term
+    timing, billing projection, accepted payment data) rather than only at external
+    I/O (`TESTING.md`, "Integration Tests"). No installed mechanism supplies those ports,
+    and `tests/publication_app.py` already stands a composition double where the
+    mechanism clients would. Kept, recorded in D6 and given a destination in its
+    promotion row; whether `TESTING.md` should name the practice is the round's review's
+    to judge.
+  - Versions: no package this change touched is bumped against `dev` (settlement-runtime
+    is 0.8.0 on both), though `RateServicing` changed incompatibly and `kit/config`'s
+    `values_schema.py` now imports `RateServicingTable`, which a released 0.8.0 lacks,
+    under its exact pin `arkhai-kit-settlement-runtime==0.8.0`. The repository's
+    version-bump check passes, so 0.8.0 is presumably still unreleased on `dev`
+    (`docs/development/RELEASING.md`, "Versioning policy": an unreleased version is not
+    bumped again); the round's triage should confirm it, and if 0.8.0 is released, bump
+    settlement-runtime a minor version and move that pin and the others on it.
+- For the next sections: each storefront's `tests/recurring_world.py` is the recurring
+  world the later integration cases (7.3's shared step, 8.3's deadline, 12.1, 12.2) can
+  grow. The VM world's `published`/`pricing` arguments make a shape-priced listing; a
+  shape-priced listing refuses a clause that states its own rate, so its recurring
+  clause is rateless and the fixture helper quotes `SHAPE_RATE`. Both worlds hold the
+  deadline at 1200 seconds through `delivery_deadline_for_pool`, which section 8's
+  deadline source replaces. Running a single test file is denied here: the storefronts'
+  `uv run pytest` cannot resolve their split environments, and only the whole `make -C
+  <package> test`/`test-integration` targets run (about 30 seconds for VM integration,
+  50 for bare metal). Each storefront environment must be reinstalled (its `test`
+  target) after `make dist` before `make helm-values-schema`, which runs with
+  `--no-sync` and otherwise renders the old `kit/config`.
+
+### Section 6 session checkpoint (2026-11-12)
+
+- The session that verified section 5 implemented 6.1 and 6.3's unit tests, then
+  stopped at this verified point rather than compact: sections 5 and 6 together grew
+  past what one session holds, the cadence's own risk. Nothing of section 6 is
+  committed; its worktree changes are the section's.
+- Restart: 6.3's application-integration cases, then 6.2 (see its note for the
+  production client's limit), then 6.4: `make dist`, the suites it names,
+  `make check-packaging` (the regenerated Helm schemas and `kit/config`'s change),
+  the fresh-context compliance check over the section's diff from `dfa8871fb`, and
+  `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms`.
+- Never edit files while a background `make test` or `pre-commit` runs: the wheels it
+  builds and the suites it reads can pick up a half-made edit.
 
 ## 7. One shared per-clause publication step and the penalty setting
 
@@ -1103,7 +1272,8 @@ anything requiring code returns to implementation. Former numbers 6.1–6.11 are
   ("Versioning policy", D12), `openspec/specs/storefront-publication/architecture.md`
   (D5, D6, D9, D10), `openspec/specs/buyer-orchestration/architecture.md` (D5's buyer-check
   seams, D7, D8) and
-  the bare-metal upgrade step in `docs/operator-handbook.md` (D5, D10). The archive
+  the bare-metal upgrade step in `docs/operator-handbook.md` (D5, D10) and the seller
+  root's `rate_servicing` tables in `docs/development/DEPLOYMENT_AND_CONFIG.md` (D6). The archive
   merges the deltas into `negotiation-protocol`, `storefront-publication`,
   `resource-pool-management`, `settlement-configuration` and `buyer-orchestration`
   specs; record destinations and identity decision outcomes. No new capability-index

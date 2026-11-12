@@ -11,7 +11,12 @@ term end, or bearing a setup charge where `setup` is not declared. An option is 
 where the mechanism's helper supports a treatment and the composition declares it.
 Materialization and continuation consumers MUST receive the same declaration, not an
 option-local copy; accepted-deal continuation MUST NOT read it. Continuation execution remains
-the servicing consumer's responsibility.
+the servicing consumer's responsibility. A seller's `[Settlement]` root holds the declaration as
+`rate_servicing`, one table per installed mechanism keyed by its configuration key
+(`[Settlement.rate_servicing.arkhai_payments]`), holding `treatments`, named as the payment
+authority names them (`charged`, `returned`, `prorated`), and `setup`, false when absent. A
+buyer's root MUST refuse `rate_servicing`, and a table naming no installed mechanism, an unknown
+key or an unknown treatment MUST fail validation.
 
 #### Scenario: A treatment the composition has not qualified
 
@@ -27,6 +32,11 @@ the servicing consumer's responsibility.
 
 - **WHEN** a composition declares no rate servicing
 - **THEN** no recurring option publishes, and accepted deals continue to be serviced
+
+#### Scenario: A buyer's root declares rate servicing
+
+- **WHEN** a buyer's `[Settlement]` root contains a `rate_servicing` table
+- **THEN** configuration fails validation naming the unknown key
 
 ### Requirement: Terms expose servicing declaration without enabling rate execution
 
