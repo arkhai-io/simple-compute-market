@@ -45,24 +45,22 @@ def _time_price(option: Any) -> Any:
     return amount_rates[0]
 
 
-#: The lease ``bare-metal buy`` requests for a reserved option when the buyer
-#: names none: v0.3.0 shipped this default, so its reserved scripts keep buying
-#: an hour. A recurring option never takes it; its horizon is the seller's bound.
-RESERVED_DEFAULT_DURATION_SECONDS = 3600
-
-
 def requested_duration(
     option: Any, duration_seconds: int | None, *, registry: SettlementConfigurationRegistry,
+    default_duration_seconds: int,
 ) -> tuple[int | None, bool]:
     """The duration a purchase requests, and whether it is the reserved default.
 
-    The option's installed mechanism says whether it bills once for the whole
-    term; the buyer reads no payment field to decide it.
+    A reserved option the buyer names no duration for takes
+    ``default_duration_seconds``, the buyer's configured default. A recurring
+    option never takes it: its omitted horizon is the seller's finite bound. The
+    option's installed mechanism says whether it bills once for the whole term;
+    the buyer reads no payment field to decide it.
     """
     if duration_seconds is not None:
         return duration_seconds, False
     if registry.project_billing(option).unit == "total":
-        return RESERVED_DEFAULT_DURATION_SECONDS, True
+        return default_duration_seconds, True
     return None, False
 
 

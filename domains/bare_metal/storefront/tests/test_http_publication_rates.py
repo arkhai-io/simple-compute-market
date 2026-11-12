@@ -21,24 +21,24 @@ import pytest
 import yaml
 from core_storefront.publication_runner import PublicationPayload
 from jsonschema import Draft202012Validator
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
+from market_arkhai_payments.fixtures import dispute_lifecycle
 from market_core.schemas import derive_settlement_option_id
-from market_identity import TrustedIdentitySet
+from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
+from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_pool_overrides import PoolOverrideClient
+from market_settlement_runtime import SettlementPublicationClause
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from storefront_client import StorefrontClient
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_registry
+from arkhai_bare_metal_storefront.settlement_composition import (
+    build_bare_metal_settlement_registry,
+)
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from held_loops import held_loop_controller
-from recurring_world import (
-    AVAILABLE_UNTIL,
-    MAX_DURATION_SECONDS,
-    MECHANISM,
-    QUALIFIED,
-    recurring_world,
-    undeclared,
-)
 from test_http_system import (
     ADMIN_SIGNER,
     SELLER_SIGNER,
@@ -395,115 +395,94 @@ async def test_each_capacity_bound_resolves_from_its_own_tier_onto_the_published
     assert after == overridden
 
 
-def _recurring(options: list[dict]) -> list[dict]:
-    return [option for option in options if "period" in option["settlement"]]
+# A once payment option's delivery deadline, through the running app's settlement
+# composition with Arkhai payments added to its configuration: the real registry
+# resolves the seller's payments configuration, its once builder builds the
+# option, and a dispute authority is configured. No rate servicing is declared,
+# no recurring encoder is installed, and the pool port supplies no deadline, as in
+# every deployed composition, so the deadline can come only from the clause. Every
+# account, key and address here is a deterministic development value; none may be
+# used on a public network.
+
+_PAYMENTS = "arkhai.payments.v1"
+_PAYEE = "22222222-2222-4222-8222-222222222222"
+_PAYMENTS_SERVICE = Ed25519Signer(bytes(range(1, 33)))
+_DISPUTE_ENTRY = DisputeEntry.model_validate({
+    **dispute_lifecycle("33333333-3333-4333-8333-333333333333")["adjudication"]["dispute"],
+    "interface": MEDIATION_INTERFACE,
+    "advertisement": {
+        "mechanisms": [_PAYMENTS],
+        "minimum_dispute_window_seconds": 60,
+        "minimum_case_hold_seconds": None,
+    },
+})
 
 
-def _derived_class(option: dict) -> str:
-    """The class a buyer reads off an option: billed once is reserved; billed per
-    period, a payee entitlement makes it spot and its absence on-demand."""
-    if "period" not in option["settlement"]:
-        return "reserved"
-    entitlements = option["lifecycle"]["early_termination"]["entitlements"]
-    return "spot" if "payee" in entitlements else "on-demand"
-
-
-async def test_one_listing_offers_reserved_on_demand_and_spot_on_its_capacity_identity(tmp_path):
-    """Declaring rate servicing adds the on-demand and spot options to the
-    listing the pool already publishes, beside its reserved Alkahest and once
-    payment options: the same listing and machine, publishing both bounds, each
-    option separately identified, and the class each derives from its billing
-    and entitlements, never a stored field."""
-    async with recurring_world(tmp_path, treatments=None) as world:
-        listing_id = _listing_id(await world.publish())
-        dark = await world.admin.get_listing(listing_id)
-
-        world.declare(QUALIFIED)
-        report = await world.publish()
-        listing = await world.admin.get_listing(listing_id)
-
-    assert [_derived_class(option) for option in dark.extra["settlement_options"]] == ["reserved"] * 2
-    assert [item for item in report["actions"] if item["action"] == "publish"] == []
-    assert listing.status == "open"
-    assert listing.listing_resource == dark.listing_resource
-    assert (listing.max_duration_seconds, listing.extra["available_until_utc"]) == (
-        MAX_DURATION_SECONDS, AVAILABLE_UNTIL,
-    )
-    options = listing.extra["settlement_options"]
-    assert {option["option_id"] for option in dark.extra["settlement_options"]} < {
-        option["option_id"] for option in options
+def _payments_settlement(alkahest: dict) -> dict:
+    return {
+        "schema_version": 1,
+        "priority": ["alkahest.v1", _PAYMENTS],
+        "alkahest": alkahest,
+        "arkhai_payments": {
+            "enabled": True,
+            "service_url": "http://127.0.0.1:9",
+            "service_identity": _PAYMENTS_SERVICE.identity.model_dump(mode="json"),
+            "fee_bps": 250,
+            "development_auth": True,
+        },
     }
-    assert sorted(
-        (option["settlement"]["schema"], _derived_class(option)) for option in options
-    ) == [
-        ("alkahest.v1", "reserved"),
-        (MECHANISM, "on-demand"),
-        (MECHANISM, "reserved"),
-        (MECHANISM, "spot"),
-    ]
-    assert len({option["option_id"] for option in options}) == 4
-    assert all("class" not in option and "class" not in option.get("lifecycle", {})
-               for option in options)
 
 
-async def test_publication_omits_recurring_options_whose_treatments_are_undeclared(tmp_path):
-    """A recurring option publishes only under a declaration qualifying every
-    treatment it names. Narrowing the declaration omits both recurring options on
-    the next step, each with its diagnostic, while the reserved and once options
-    keep the listing's capacity identity."""
-    async with recurring_world(tmp_path) as world:
-        report = await world.publish()
-        listing_id = _listing_id(report)
-        published = (await world.admin.get_listing(listing_id)).extra["settlement_options"]
-        recurring = _recurring(published)
-        assert (len(published), len(recurring)) == (4, 2)
-        assert not undeclared(report)
-        peers = {option["option_id"] for option in published if option not in recurring}
-
-        world.declare(frozenset({"charged"}))
-        report = await world.publish()
-        listing = await world.admin.get_listing(listing_id)
-
-    assert listing.status == "open"
-    assert [item for item in report["actions"] if item["action"] == "publish"] == []
-    assert {option["option_id"] for option in listing.extra["settlement_options"]} == peers
-    refusals = undeclared(report)
-    assert len(refusals) == 2
-    assert all("does not declare returned" in item["detail"] for item in refusals)
+def _once_payment_clause(delivery_deadline_seconds: int | None) -> SettlementPublicationClause:
+    return SettlementPublicationClause.model_validate({
+        "mechanism": _PAYMENTS,
+        "asset": "USD/6",
+        "rate": "2.5",
+        "per": "hour",
+        "mechanism_input": {
+            "asset": "USD/6",
+            "payee_account": _PAYEE,
+            "window": "PT5M",
+            "dispute_window_seconds": 604800,
+            **({"delivery_deadline_seconds": delivery_deadline_seconds}
+               if delivery_deadline_seconds is not None else {}),
+        },
+    })
 
 
-@pytest.mark.parametrize(("clause_deadline", "refused"), [(900, 0), (None, 3)],
+@pytest.mark.parametrize(("clause_deadline", "refused"), [(900, 0), (None, 1)],
                          ids=["clause-configured", "neither"])
-async def test_a_clause_s_deadline_publishes_where_the_pool_supplies_none(
-    tmp_path, clause_deadline, refused,
+async def test_a_once_payment_option_publishes_its_clause_s_deadline_where_the_pool_supplies_none(
+    tmp_path, monkeypatch, clause_deadline, refused,
 ):
-    """With no pool deadline, each payment option, once or recurring, publishes the
-    deadline its clause configures and no default buyer's refusal is reported; a
-    clause configuring none publishes no deadline, and each payment option is
-    reported as refused by a default buyer for lacking one."""
-    async with recurring_world(tmp_path, pool_deadline=None, clause_deadline=clause_deadline) as world:
-        report = await world.publish()
-        published = (await world.admin.get_listing(_listing_id(report))).extra["settlement_options"]
+    """With no pool deadline, a once payment option publishes the deadline its
+    clause configures and no default buyer's refusal is reported; a clause
+    configuring none publishes no deadline, and the option is reported as refused
+    by a default buyer for lacking one."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    runtime = _derivation_runtime(tmp_path, monkeypatch, {SITE: site}, capacity_client=_Sites(site))
+    configured = runtime.settlement_composition
+    registry = build_bare_metal_settlement_registry()
+    settlement = _payments_settlement(configured.config.mechanisms["alkahest"].model_dump(mode="json"))
+    runtime = dataclasses.replace(
+        runtime,
+        settlement_composition=dataclasses.replace(
+            configured,
+            registry=registry,
+            config=registry.resolve(settlement, role="seller"),
+            disputes=RegistryDisputePolicy(DisputeConfig(entries=[_DISPUTE_ENTRY])),
+        ),
+        publication_clauses=(*runtime.publication_clauses, _once_payment_clause(clause_deadline)),
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            report = await admin.admin_run_lifecycle_cycle("publication")
+            published = (await admin.get_listing(_listing_id(report))).extra["settlement_options"]
 
-    payments = [option for option in published if option["settlement"]["schema"] == MECHANISM]
-    assert len(payments) == 3
-    assert {option["lifecycle"].get("delivery_deadline_seconds") for option in payments} == {clause_deadline}
+    (payment,) = [option for option in published if option["settlement"]["schema"] == _PAYMENTS]
+    assert "period" not in payment["settlement"]
+    assert payment["lifecycle"].get("delivery_deadline_seconds") == clause_deadline
     refusals = [item for item in report["actions"] if item.get("reason") == "default_buyer_refusal"]
     assert len(refusals) == refused
     assert all(item["detail"].endswith("no delivery deadline") for item in refusals)
-
-
-async def test_an_on_demand_option_stating_no_penalty_publishes_the_configured_multiple(tmp_path):
-    """The on-demand preset states no premature-stop penalty, so it publishes its
-    per-period price, 625000 at 2.5 an hour per 15 minutes, times the composition's
-    configured multiple; spot, which carries a seller stop, publishes none."""
-    async with recurring_world(tmp_path, default_penalty_periods=6) as world:
-        listing_id = _listing_id(await world.publish())
-        published = (await world.admin.get_listing(listing_id)).extra["settlement_options"]
-
-    penalties = {
-        "payee" in option["lifecycle"]["early_termination"]["entitlements"]:
-            option["lifecycle"]["early_termination"].get("premature_stop_penalty")
-        for option in _recurring(published)
-    }
-    assert penalties == {False: str(625000 * 6), True: None}

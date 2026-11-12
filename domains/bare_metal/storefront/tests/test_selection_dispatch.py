@@ -41,6 +41,7 @@ from market_settlement_runtime import (
     SettlementConfig,
     SettlementConfigurationRegistry,
 )
+from market_settlement_runtime.rate_servicing import RateServicing
 from market_storefront_kit import TradingPause
 from pydantic import BaseModel, ConfigDict
 
@@ -351,13 +352,18 @@ def _payment_stages():
 
 
 async def _payment_service(
-    tmp_path, settlement_data_calls: list, *, hourly: int = 100
+    tmp_path, settlement_data_calls: list, *, hourly: int = 100,
+    option: dict[str, Any] | None = None, rate_servicing: RateServicing | None = None,
 ) -> tuple[_Opening, dict[str, Any]]:
-    """A listing offering one mechanism that settles from the Agreement alone."""
+    """A listing offering one mechanism that settles from the Agreement alone.
+
+    ``option`` replaces the listing's once option priced at ``hourly``;
+    ``rate_servicing`` is the composition's servicing declaration, none by default.
+    """
     domain = get_market_domain_contract()
     migrate_storefront_database(tmp_path / "storefront.db")
     db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
-    option = _payment_option(hourly)
+    option = option if option is not None else _payment_option(hourly)
     await db.upsert_bare_metal_listing(
         listing_id="intro-listing",
         status="open",
@@ -397,6 +403,7 @@ async def _payment_service(
         accepted_obligation_dispatch={PAYMENT_MECHANISM: None},
         settlement_data_dispatch={PAYMENT_MECHANISM: settlement_data},
         seller_stages=_payment_stages(),
+        rate_servicing=rate_servicing,
     )
     return _Opening(db, runtime), option
 

@@ -432,8 +432,9 @@ def buy_bare_metal(
     ssh_public_key: str = typer.Option(..., "--ssh-public-key"),
     duration_seconds: int | None = typer.Option(
         None, min=1,
-        help="Lease duration in seconds. A reserved option defaults to 3600; a recurring "
-        "option takes the seller's finite bound when omitted.",
+        help="Lease duration in seconds. A reserved option defaults to the buyer "
+        "configuration's default_duration_seconds; a recurring option takes the seller's "
+        "finite bound when omitted.",
     ),
     allow_no_delivery_deadline: bool = typer.Option(
         False, WAIVERS_BY_TERM["no_delivery_deadline"].flag,
@@ -511,6 +512,7 @@ def buy_bare_metal(
         registry = buyer_settlement_registry()
         duration_seconds, default_duration = requested_duration(
             selected, duration_seconds, registry=registry,
+            default_duration_seconds=buyer_config.default_duration_seconds,
         )
         quote = option_quote(selected, duration_seconds, registry=registry)
         amount = purchase_quote(selected, duration_seconds, registry=registry)

@@ -105,12 +105,14 @@ def _introduction_plan() -> SettlementPlan:
 
 def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: SettlementOption,
              outcome: NegotiationOutcome, *, accept_inside: bool = False,
-             bounds: dict[str, Any] | None = None) -> dict[str, Any]:
+             bounds: dict[str, Any] | None = None,
+             default_duration_seconds: int | None = None) -> dict[str, Any]:
     """Replace the command's collaborators; the returned record names what each saw.
 
     With ``accept_inside`` the negotiator calls the command's acceptance check on the
     accepted outcome before returning it, as the real negotiator does. ``bounds`` are
-    the listing's advertised capacity bounds.
+    the listing's advertised capacity bounds. ``default_duration_seconds`` is the
+    buyer's configured reserved default, left unconfigured when ``None``.
     """
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     config = BareMetalBuyerConfig(
@@ -122,6 +124,8 @@ def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: Settlement
         registry_authority="registry-test",
         default_max_rounds=3,
         timeout_seconds=5.0,
+        **({"default_duration_seconds": default_duration_seconds}
+           if default_duration_seconds is not None else {}),
     )
     listing = SimpleNamespace(
         storefront_url="https://seller.example",
@@ -345,12 +349,22 @@ def _run_started(tmp_path: Path) -> dict[str, Any]:
     return next(event for event in _events(tmp_path) if event["event"] == "run_started")
 
 
-def test_a_reserved_buy_naming_no_duration_requests_the_buyer_s_default_hour(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+# The option's synthetic rate is 1000000 base units of USD/6 an hour.
+@pytest.mark.parametrize(
+    ("configured", "requested", "quote"),
+    [(None, 3600, 1_000_000), (5400, 5400, 1_500_000)],
+    ids=["unconfigured-hour", "configured"],
+)
+def test_a_reserved_buy_naming_no_duration_requests_the_buyer_s_configured_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    configured: int | None, requested: int, quote: int,
 ) -> None:
+    """The reserved default is the buyer configuration's ``default_duration_seconds``,
+    an hour where it is not configured; it reaches the provision terms, the quote,
+    the disclosure before approval and the run log."""
     seen = _compose(
-        monkeypatch, tmp_path, _PAYMENT, _payment_outcome(amount=1_000_000, duration_seconds=3600),
-        accept_inside=True,
+        monkeypatch, tmp_path, _PAYMENT, _payment_outcome(amount=quote, duration_seconds=requested),
+        accept_inside=True, default_duration_seconds=configured,
     )
 
     result = CliRunner().invoke(cli.bare_metal_app, [
@@ -359,11 +373,14 @@ def test_a_reserved_buy_naming_no_duration_requests_the_buyer_s_default_hour(
 
     assert result.exit_code == 0, result.output
     (negotiation,) = seen["negotiations"]
-    assert negotiation["provision_terms"].payload["duration_seconds"] == 3600
-    assert (negotiation["initial_price"], negotiation["max_price"]) == (1_000_000, 1_000_000)
-    assert "Requested horizon: 3600 seconds, this buyer's default for a reserved option" in result.output
+    assert negotiation["provision_terms"].payload["duration_seconds"] == requested
+    assert (negotiation["initial_price"], negotiation["max_price"]) == (quote, quote)
+    assert (
+        f"Requested horizon: {requested} seconds, this buyer's default for a reserved option"
+        in result.output
+    )
     started = _run_started(tmp_path)
-    assert (started["duration_seconds"], started["default_duration"]) == (3600, True)
+    assert (started["duration_seconds"], started["default_duration"]) == (requested, True)
     assert _run_ended(tmp_path)["status"] == "agreed"
 
 
@@ -383,7 +400,7 @@ def test_a_named_duration_is_not_shown_as_the_default(
 @pytest.mark.parametrize(
     ("unit", "named", "requested"),
     [
-        ("total", None, (3600, True)),
+        ("total", None, (5400, True)),
         ("total", 600, (600, False)),
         ("per_period", None, (None, False)),
         ("per_period", 600, (600, False)),
@@ -397,7 +414,9 @@ def test_the_reserved_default_never_applies_to_a_recurring_option(
     # stands for a mechanism that bills a recurring option.
     basis = {"unit": unit, **({"period": "PT15M", "period_seconds": 900} if unit == "per_period" else {})}
     registry = SimpleNamespace(project_billing=lambda _option: PriceBasis.model_validate(basis))
-    assert requested_duration(_PAYMENT, named, registry=registry) == requested
+    assert requested_duration(
+        _PAYMENT, named, registry=registry, default_duration_seconds=5400,
+    ) == requested
 
 
 _NO_DEADLINE = _option(

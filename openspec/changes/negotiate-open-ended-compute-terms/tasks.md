@@ -2275,7 +2275,7 @@ composition and tests). Planned at the owner's direction (2026-11-12) as round 4
 one-section round whose validation and implementation review are owed (`design.md`,
 "Implementation cadence").
 
-- [ ] 12b.1 **Sort the fixture-port cases (D6):** for each of the fourteen tests 13.3's
+- [x] 12b.1 **Sort the fixture-port cases (D6):** for each of the fourteen tests 13.3's
   note lists — VM `tests/integration/test_publication_loop.py` (5),
   `tests/integration/test_buyer_selection_negotiation.py` (3), bare-metal
   `tests/test_http_publication_rates.py` (4) and `tests/test_http_negotiation.py` (2) —
@@ -2289,7 +2289,56 @@ one-section round whose validation and implementation review are owed (`design.m
   refusal naming the minimum) — `kit/settlement-runtime/tests/unit` (`test_servicing.py`,
   `test_rate_publication.py`, `test_horizon.py`), the buyers' unit suites — and add one
   where none exists. Record the sorting in this task's note.
-- [ ] 12b.2 **Carry and delete (D6):** copy each carried test, with the world module it
+  Done (2026-11-12). All fourteen are carried, since each publishes a recurring option
+  for at least part of what it shows, which needs the encoder, and most need term
+  timing or a billing projection too. Where a part needs no port, it is tested in place
+  as well: the cached-selection door (below), and the once half of the two
+  clause-deadline cases (VM and bare metal), which needs none of those ports: the real payments once
+  builder reads the clause's `delivery_deadline_seconds`, and the composition's default
+  pool port supplies no deadline. So each is rewritten in place as
+  `test_a_once_payment_option_publishes_its_clause_s_deadline_where_the_pool_supplies_none`,
+  with no world. In it, the real registry resolves a payments configuration and the
+  payments once builder builds the option, with a dispute authority configured. As in
+  a deployed composition, there is no declaration, no helper and no pool deadline. VM
+  builds the composition class directly, with no persistence or workers. Bare metal
+  adds payments to the running app's test composition.
+  The lowest-level test of each carried door:
+  - Publication omission: `kit/settlement-runtime` `test_rate_publication.py`
+    (`test_an_undeclared_treatment_or_setup_omits_the_recurring_candidate`,
+    `test_a_built_rate_option_the_servicing_declaration_withholds_is_omitted`) and
+    `test_rate_servicing.py`.
+  - The listing offering all three classes:
+    `test_a_declared_preset_is_encoded_with_the_selected_declaration` and
+    `test_a_recurring_clause_is_derived_through_its_helper_and_never_the_registry`.
+  - The penalty multiple: `test_on_demand_with_no_stated_penalty_takes_the_default_multiple_of_its_period_price`,
+    `test_a_configured_multiple_replaces_the_default` and
+    `test_spot_carries_no_default_penalty`.
+  - A recurring option's clause deadline:
+    `test_a_recurring_option_publishes_the_pool_s_deadline_else_its_clause_s` and
+    `test_a_recurring_option_with_neither_deadline_publishes_with_its_diagnostic`.
+  - The omitted horizon at the default bound: `test_horizon.py`
+    (`test_an_omitted_recurring_horizon_binds_the_earliest_bound_at_a_whole_second_start`,
+    `test_the_buyer_accepts_the_default_bound_for_an_omitted_horizon`).
+  - The pricing check when the buyer requested no duration: the VM buyer's
+    `test_per_period_acceptance.py`
+    (`test_accepted_per_period_money_matches_one_signed_period_quote`, whose
+    provision terms name no duration).
+  - The runway refusal naming the minimum: `test_the_horizon_leaves_no_runway`.
+  - The cached-selection refusal: `test_rate_servicing.py` proves the declaration's
+    check, but no remaining test proved either storefront's door. Neither door reads a
+    port first: bare metal's exact-selection hook checks the declaration before
+    `horizon_for` and term timing, and VM's `evaluate` checks it first. So each
+    storefront gains `test_selected_rate_servicing.py` (VM `tests/unit/`, bare metal
+    `tests/`). It drives the real negotiation runtime over a real database whose
+    listing record is seeded with a rate option, as service-internal state. It shows
+    the refusal under a narrowed declaration and under none, and shows nothing is
+    kept: bare metal through `test_selection_dispatch.py`'s `_nothing_accepted`, VM
+    through the thread count and a seller round hook never awaited. The harnesses
+    gained a declaration argument: bare metal's `_payment_service` also takes the
+    seeded option, and VM's `_start` in `test_sync_negotiation_seller_round_hook.py`.
+    The carried case still covers what these do not: publishing the option first,
+    and the signed HTTP answer.
+- [x] 12b.2 **Carry and delete (D6):** copy each carried test, with the world module it
   uses, into `openspec/changes/spot-deals-through-arkhai-payments/carried-tests/`
   (`vms/` and `bare_metal/`), with a `README.md` saying what each case proves, which
   ports it needs, and that the change installing them restores the cases to the
@@ -2297,7 +2346,23 @@ one-section round whose validation and implementation review are owed (`design.m
   row Notes in `openspec/changes/README.md` pointing at the directory. Then delete the
   carried tests from the storefront suites, and each `tests/recurring_world.py` once
   nothing imports it; remove helpers only they used.
-- [ ] 12b.3 **The configured reserved default (D11):** `bare-metal buy` gives a reserved
+  Done (2026-11-12). `carried-tests/vms/` and `carried-tests/bare_metal/` each hold the
+  storefront's `recurring_world.py` as it was. Beside it, one file per source module
+  holds the carried cases with the source module's helpers they use, repeated as they
+  stood. `carried-tests/README.md` gives, for each case, what it proves, the
+  storefronts that carry it and the lowest-level test that remains (12b.1), and says
+  which ports each world fixes. It also says the installing change restores the cases
+  once its code implements those ports. The spot row's Notes in
+  `openspec/changes/README.md` link the directory. The carried tests, both world
+  modules (`git rm`) and the helpers only they used are gone from the suites: VM
+  `_recurring`, `_derived_class` and `_negotiation_rows` in `test_publication_loop.py`,
+  and `_NO_HORIZON`, `_published`, `_on_demand`, `_recurring_selection`, `_horizon`
+  and `_negotiation_rows` in `test_buyer_selection_negotiation.py`, whose module
+  docstring loses its horizon paragraph; bare metal `_recurring` and `_derived_class`
+  in `test_http_publication_rates.py`, and `_negotiation_rows` in
+  `test_http_negotiation.py`. Imports were trimmed to match. Nothing in `domains/`
+  names `recurring_world` now.
+- [x] 12b.3 **The configured reserved default (D11):** `bare-metal buy` gives a reserved
   option without a duration the loaded `BareMetalBuyerConfig.default_duration_seconds`
   in place of `RESERVED_DEFAULT_DURATION_SECONDS` in
   `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/settlement_stages.py`, still
@@ -2307,7 +2372,24 @@ one-section round whose validation and implementation review are owed (`design.m
   disclosure and the provision terms, the 3600 default when unconfigured, and a recurring
   option ignoring it. Confirm with `make check-version-bumps CHANGE_BASE=dev` that
   `arkhai-bare-metal-buyer`'s 0.8.0 on `dev` already carries the bump this needs.
-- [ ] 12b.4 **Verify:** `make dist`, then `make -C domains/vms/storefront test` (unit
+  Done (2026-11-12). `requested_duration` takes a required keyword,
+  `default_duration_seconds`, which `buy_bare_metal` passes from the loaded
+  configuration. The constant is gone, so the 3600 default lives only in the
+  configuration field, which now has a comment saying what reads it. The
+  `--duration-seconds` help names `default_duration_seconds`. Unit tests in
+  `test_cli_completion.py`:
+  - `test_a_reserved_buy_naming_no_duration_requests_the_buyer_s_configured_default`,
+    parametrized: unconfigured gives 3600, and a configured 5400 reaches the provision
+    terms, the quote (1500000), the disclosure and the run log's
+    `duration_seconds`/`default_duration`.
+  - `test_the_reserved_default_never_applies_to_a_recurring_option`, now with a
+    configured 5400: a per-period basis still requests no duration.
+
+  `make -C domains/bare_metal/buyer test` (unit): 64 passed. `make check-version-bumps
+  CHANGE_BASE=dev`: OK. `arkhai-bare-metal-buyer` 0.8.0, against 0.7.2 released, already
+  carries the minor bump. The section changes no other package's sources; the
+  storefronts change only tests.
+- [x] 12b.4 **Verify:** `make dist`, then `make -C domains/vms/storefront test` (unit
   and application integration through its typed client), `make -C
   domains/bare_metal/storefront test` (unit and application integration),
   `make -C kit/settlement-runtime test` (unit), `make -C domains/bare_metal/buyer test`
@@ -2317,6 +2399,63 @@ one-section round whose validation and implementation review are owed (`design.m
   option with an explicit `--duration-seconds`, so it does not exercise the configured
   default; no scenario drives a recurring option (the per-period gap row), and none is
   owed — the default is the buyer's own resolution, which the unit tests prove.
+  Done (2026-11-12). `make dist` exit 0. On the final tree:
+  - `make -C domains/vms/storefront test`: unit 1194 passed, 1 skipped. That includes
+    the two door tests, which run the VM negotiation runtime over a real SQLite
+    database, without the app, beside the harness they reuse in `tests/unit/`.
+    Application integration through the typed client: 582 passed, including both
+    cases of the once-deadline test.
+  - `make -C domains/bare_metal/storefront test`: 629 passed. That is 632, less the 7
+    carried, plus the 2 once-deadline cases through the app and typed client, plus the
+    2 door tests over the runtime and a real database.
+  - `make -C kit/settlement-runtime test` (unit): 302 passed.
+  - `make -C domains/bare_metal/buyer test` (unit): 64 passed.
+  - `make check-comment-hygiene`: OK. `make check-version-bumps CHANGE_BASE=dev`: OK.
+  - `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms`: every
+    hook exit 0. `after-functional-change` (`make lock`) changed no lock.
+    `pre-commit-functional` ran `make check-packaging` and the whole `make test`.
+    `pre-commit` ran the index, tasks, skills and strict OpenSpec validation, and
+    `make check-repository`. Its first run failed one check: history wording, on a
+    docstring saying "no longer". That docstring went with the reverted refactor
+    (12b.1), and the rerun passed.
+
+  Afterwards only this file's notes changed, and `make check-tasks` passed. End-to-end:
+  none, as planned. No marker in `e2e-tests/` exercises the configured default or the
+  moved tests' behaviour, and no `Owed by validation:` line applies.
+
+### Section 12b verification and handoff (2026-11-12)
+
+- The fresh-context check found one real gap. The cached-selection door was carried
+  on the encoder reason, but neither storefront's door reads a port first, and the
+  replacement unit tests proved only the helper, not the wiring or that nothing is
+  kept. The fix: door tests through each storefront's real negotiation runtime over a
+  seeded listing record (12b.1). The bare-metal helper extraction first made for a
+  unit test was reverted, so no storefront source changes in this section. It also
+  found overstated wording, all fixed: "as a deployment composes it" for the
+  once-deadline tests' compositions, docstrings claiming the hooks were exercised, and
+  the README row. Its re-check found no remaining break. One last wording point in
+  12b.1's opening sentence is fixed.
+- Declined:
+  - the bare-metal door test's flat placement in `tests/`, which is that package's
+    existing layout;
+  - recording the restore obligation in the spot change's own design or plan, which
+    is for that change's design reverification, now that its index row links
+    `carried-tests/`;
+  - updating earlier sections' notes that cite the deleted storefront tests as
+    evidence (for example 6.x, 7.x, 8.x and 12.x). Closeout 13.4's narrative
+    compression owes that, and the carried-tests README says where each case went.
+- The once-deadline tests build Arkhai payments into a real composition without the
+  world. VM's composes `VmSettlementComposition` with a token cache in
+  `XDG_CACHE_HOME`, which payments readiness needs. Bare metal's swaps the payments
+  configuration and a dispute policy into `_derivation_runtime`'s composition and
+  needs no token cache. Payments' once builder refuses with no dispute authority, so
+  both configure one.
+- In this checkout `uv run pytest` inside the VM storefront cannot resolve without the
+  wheelhouse, and its Makefile passes `--find-links`; use `make -C
+  domains/vms/storefront test`. The bare-metal storefront's `uv run pytest` works once
+  `make test` has synced it.
+- Next: validation and one implementation review side by side, then the round's
+  triage. Closeout resumes at 13.3, and confirms 13.7 again.
 
 ## 13. Closeout
 
