@@ -2032,15 +2032,49 @@ Documentation-only, in `openspec/README.md#plan-closeout-requirements` order;
 anything requiring code returns to implementation. Former numbers 6.1–6.11 are now
 13.1–13.11.
 
-- [ ] 13.1 **Comment hygiene:** run `make check-comment-hygiene`; confirm the comments
+Closeout stopped 2026-11-12, at `7be0d48b8`, for a version pass in implementation
+(13.7's note). 13.1 and 13.2 are confirmed; 13.7's checks pass, but the packages are
+not versioned as the change's edits require. Nothing else in this section has started.
+
+- [x] 13.1 **Comment hygiene:** run `make check-comment-hygiene`; confirm the comments
   rounds 1 and 2 added describe current invariants, not change provenance.
-- [ ] 13.2 **Import placement:** confirm the imports the change added are module-level
+  Confirmed (2026-11-12): `make check-comment-hygiene` passed. I read the comments and
+  docstrings the change added in `.py`, `.toml`, `.yml` and `.yaml` files against
+  `origin/dev`. None names a review, round, owner record, decision number or migration.
+  The only matches for "legacy" describe a current data shape: a raw escrow acceptance
+  that names no option.
+- [x] 13.2 **Import placement:** confirm the imports the change added are module-level
   unless an experimentally verified circularity or deliberate lazy-load reason is
   recorded, including those of the modules sections 7 and 9 moved.
+  Confirmed (2026-11-12): the production diff against `origin/dev` adds exactly one
+  function-local import. It is in `domains/vms/buyer/src/arkhai_vms_buyer/deal_helpers.py`
+  `load_deal_context`, which widens an existing local import of
+  `.settlement_composition` to also take `buyer_settlement_registry`. The adjacent
+  comment keeps the composition import-cycle reason. Every other import the change
+  added is module-level, including those in `listing_terms.py` and `rate_publication.py`.
+  The probes under the change directory are not production code.
 - [ ] 13.3 **Documentation compliance:** classify D1–D12, including the horizon as the
   Agreement's refinement; verify each permanent home and no duplicated codec/authority
   ownership. Confirm or move D10's shared clause resolver out of
   `kit/resource-pools-contracts`.
+  Open, with questions found at the first closeout attempt (2026-11-12). The next
+  closeout puts these to the owner unless their answer to the return already settles
+  them:
+  - The resolver. My recommendation is to confirm it where it is: `listing_terms.py`
+    takes the family key as data and names no compute concept, and `ARCHITECTURE.md`,
+    "Kit areas", already says the contracts package holds the pool's "declaration
+    hints and their shared resolver".
+  - A testing-rule conflict. Both storefronts' `tests/recurring_world.py` put fixtures
+    at composition ports that no installed mechanism supplies. `TESTING.md`,
+    "Integration Tests", allows a mock only at the external I/O boundary, and D6
+    records the practice as kept. `AGENTS.md`, "Amend a rule or comply", forbids that
+    kind of private exception.
+  - The `deal-lifecycle` delta's title, "The delivery deadline is the site's
+    availability term", now describes only half the rule. A RENAMED entry would fix
+    it (section 8's handoff).
+  - `BareMetalBuyerConfig.default_duration_seconds` is validated but read by nothing,
+    as in `marketplace-v0.3.0` (section 10's handoff). The options are to honour it,
+    retire it, or record it as an unowned gap.
 - [ ] 13.4 **Narrative compression:** reduce completed-task notes to behavior, material
   evidence, residual work and permanent destinations; retain reasoning in design. Fold
   `design.md`'s dated implementation sections into D1–D12 and remove their narrative;
@@ -2061,6 +2095,43 @@ anything requiring code returns to implementation. Former numbers 6.1–6.11 are
   all failures/owned exceptions. If the change touched `.agents/`, `.claude/` or
   `.codex/`, confirm the agent-skills check of `scripts/change-workflow run pre-commit`
   passes.
+  Checks pass, versions do not (2026-11-12, closeout at `7be0d48b8`):
+  `scripts/change-workflow run pre-archive negotiate-open-ended-compute-terms` passed,
+  exit 0. That run covered `make check-packaging` (locks, wheels, layers, scope,
+  dependencies, kinds) and `make check-architecture-change`, which reports that the
+  change owns no architecture row. Neither check reads versions against the last
+  release. Sections 6, 8, 9 and 10 left version questions for "the round's triage",
+  but review 28 raised no findings, so they were never dispositioned. Compared with
+  `marketplace-v0.3.0` (the same versions as `origin/main`) and with
+  `docs/development/RELEASING.md`, "Versioning policy", the change edits these
+  packages' sources without the bump that policy requires:
+  - Still at their released version:
+    - `arkhai-core` 0.5.0: new public API in `market_core.schemas` (`PriceBasis`,
+      `AgreedPrice`, `BillingProjection`, `agreed_price`). `kit/arkhai-payments`,
+      `kit/settlement-runtime`, `kit/alkahest`, `kit/contact-exchange`, `kit/policy`,
+      `core/registry` and `core/registry-client` pin `arkhai-core==0.5.0`. Wheels that
+      import `agreed_price` and are built against PyPI's 0.5.0 would fail.
+    - `arkhai-kit-alkahest` 0.11.0: the new `alkahest_billing_basis` projection.
+      `arkhai-apicredits-buyer` and the VM buyer import it under `>=0.11.0`.
+    - `arkhai-kit-negotiation-runtime` 0.5.2: `NegotiationDomainHooks.resolve_acceptance`.
+      The three storefronts pin `==0.5.2`.
+    - `arkhai-vms` 0.8.0 and `arkhai-bare-metal` 0.15.0: listing bounds in their
+      schemas and provision terms. Bare metal also stops copying the relative maximum
+      into the resource.
+    - `arkhai-vms-negotiation` 0.6.0: the amount codec takes a `PriceBasis`.
+    - `arkhai-apicredits-buyer` 0.8.0: exact escrow recovery projects through Alkahest.
+  - A patch bump on `dev`, while this change adds API:
+    - `arkhai-kit-arkhai-payments` 0.6.2, against 0.6.1 released:
+      `RatePresetPricing.delivery_deadline_seconds` and the compute deadline fallback.
+      Bare metal's buyer and storefront pin `==0.6.2`.
+    - `arkhai-core-buyer` 0.6.2: `make_negotiate_hook`'s `acceptance_validator`.
+      The bare-metal buyer pins `==0.6.2`.
+    - `arkhai-kit-config` 0.5.2: the seller's `rate_servicing` table in its generated
+      values schema. Whether that is a minor bump is the fix round's call.
+
+  The edits are versions, exact pins, consumers' lower bounds and locks, which is
+  code, so closeout returns the change to implementation for a version pass. The fix
+  round then reruns `make check-packaging` and the suites the relock touches.
 - [ ] 13.8 **End-to-end pipeline:** record the pipeline run/result and the scenarios
   exercising this change: `vms/test_listing_shapes.py`, `vms/test_vm_payment_purchase.py`
   and `bare_metal/test_bare_metal_payment_deal.py` (protected purchases asserting the
