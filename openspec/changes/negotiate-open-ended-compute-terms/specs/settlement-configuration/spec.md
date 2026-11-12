@@ -2,15 +2,31 @@
 
 ### Requirement: Rate servicing is a composition capability
 
-The composition MUST declare whether it services rate parts and which contract it
-implements. Publication and acceptance MUST read that one declaration; materialization and
-continuation consumers MUST receive the same declaration contract, not an option-local copy. A proposed contract MUST be usable only in an explicitly opted-in test
-lane. Continuation execution remains the servicing consumer's responsibility.
+The composition MUST declare, per mechanism, the `settles_through` treatments it has qualified
+against that mechanism's payment authority, and whether it services a setup charge (`setup`).
+An absent or empty declaration means no rate servicing. All three doors — publication,
+acceptance of a cached selection before persistence, and materialization — MUST read that one
+declaration and refuse an option naming any undeclared treatment on an entitlement or at the
+term end, or bearing a setup charge where `setup` is not declared. An option is admitted only
+where the mechanism's helper supports a treatment and the composition declares it.
+Materialization and continuation consumers MUST receive the same declaration, not an
+option-local copy; accepted-deal continuation MUST NOT read it. Continuation execution remains
+the servicing consumer's responsibility.
 
-#### Scenario: Proposed contract outside a lane
+#### Scenario: A treatment the composition has not qualified
 
-- **WHEN** a non-lane composition declares only proposed rate servicing
-- **THEN** recurring publication and acceptance are refused
+- **WHEN** a composition declares `treatments = ["charged"]` for `arkhai_payments` and a recurring option's payee entitlement settles through `last_boundary`
+- **THEN** publication omits the option, and a cached selection of it is refused before acceptance persists
+
+#### Scenario: Setup is not yet declared
+
+- **WHEN** the declaration for a mechanism has `setup = false` and an option carries a setup charge
+- **THEN** each of the three doors refuses it
+
+#### Scenario: No declaration
+
+- **WHEN** a composition declares no rate servicing
+- **THEN** no recurring option publishes, and accepted deals continue to be serviced
 
 ### Requirement: Terms expose servicing declaration without enabling rate execution
 

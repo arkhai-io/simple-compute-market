@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from arkhai_vms import normalize_vm_provision_terms, vm_listing_resource_shape
+from arkhai_vms_listings.models import registry_rate_structure
 from arkhai_vms_negotiation.amounts import (
     quote_from_multiplier, rate_structure_digest, selected_billing_basis,
 )
@@ -27,7 +28,7 @@ def retained_pricing_record(listing: Mapping[str, Any]) -> dict[str, Any]:
     """
     return deepcopy({key: listing[key] for key in (
         "listing_id", "storefront_url", "seller_principal", "listing_resource",
-        "rate_structure", "settlement_options",
+        "pricing", "rate_structure", "settlement_options",
         "accepted_escrows", "publisher_publication", "publisher_updates",
         "publisher_principals", "publisher_id", "source_registry_url",
         "source_registry_authority",
@@ -40,6 +41,12 @@ def verified_pricing_publication(record: Mapping[str, Any]) -> dict[str, Any]:
     Historical evidence is not a live request and has no transport-freshness
     window. Accepted trust and signed bytes must remain together; a current
     registry listing cannot replace either the publication or its pricing.
+
+    A publication carries its listing-level prices in one ``pricing`` object,
+    so the whole object is compared, its asking rate with its family rates. The
+    record's ``rate_structure`` is the copy the amount codec reads, lifted from
+    ``pricing.rate_structure``; it must equal the signed one, or a quote could
+    derive from rates the seller never published.
     """
     try:
         proof = record["publisher_publication"]
@@ -53,9 +60,11 @@ def verified_pricing_publication(record: Mapping[str, Any]) -> dict[str, Any]:
         )
         if not checked.verified:
             raise ValueError(f"seller publication verification failed: {checked.code.value}")
-        for key in ("listing_id", "storefront_url", "listing_resource", "rate_structure", "settlement_options"):
+        for key in ("listing_id", "storefront_url", "listing_resource", "pricing", "settlement_options"):
             if key not in body or body[key] != record.get(key):
                 raise ValueError(f"retained pricing differs from seller publication: {key}")
+        if registry_rate_structure(body) != record.get("rate_structure"):
+            raise ValueError("retained pricing differs from seller publication: rate_structure")
         return body
     except (KeyError, TypeError) as exc:
         raise ValueError("accepted pricing requires retained seller publication proof and trust") from exc
@@ -65,7 +74,7 @@ def verify_pricing_reply(record: Mapping[str, Any], reply: Mapping[str, Any]) ->
     if reply.get("action") not in {"counter", "accept"}:
         return
     publication = verified_pricing_publication(record)
-    digest = rate_structure_digest(publication)
+    digest = rate_structure_digest({"rate_structure": registry_rate_structure(publication)})
     if digest is None or reply.get("rate_structure_digest") != digest:
         raise ValueError("seller round changed the published rate-structure identity")
 

@@ -8,8 +8,10 @@ its unit, `total` or `per_period`, with the selected period available for displa
 Before acceptance, prepaid quotes MUST use Agreement duration and recurring quotes
 one selected option period, preserving upward rounding once and asset amount limits.
 The multiplier MUST remain negotiation-transcript state; the accessor MUST return
-the accepted amount and label it using the selected option's acceptance-bound billing kind. Direct reads of `Agreement.amount` outside the accessor and
-explicit raw negotiation hooks MUST fail the repository check.
+the accepted amount and label it using the selected option's acceptance-bound billing kind. Every
+consumer that spends, caps, displays, recovers or confirms accepted money MUST read it through
+the accessor, and each such consumer MUST be tested with a per-period Agreement; no repository
+check inventories reads of `Agreement.amount`.
 
 #### Scenario: Sub-hour recurring quote
 
@@ -28,19 +30,20 @@ explicit raw negotiation hooks MUST fail the repository check.
 - **THEN** the accessor returns the accepted monetary amount with the accepted option's unit, and the agreed price does not change
 - **AND** recovery and buyer mandate checks verify it against the acceptance-bound rate structure and transcript multiplier, never the current listing
 
-#### Scenario: A consumer bypasses the accessor
+#### Scenario: A money consumer reads a per-period Agreement
 
-- **WHEN** a price consumer directly reads Agreement amount outside a declared raw negotiation hook
-- **THEN** the repository check fails rather than accepting an unclassified reader
+- **WHEN** mandate derivation, a buyer cap or display, recovery or confirmation reads an accepted recurring Agreement
+- **THEN** each treats `Agreement.amount` as one period's price, as the accessor labels it, never as the deal's total
 
 ### Requirement: Acceptance pins the published rate identity
 
 A multiplier-priced compute acceptance MUST bind the agreed multiplier and the same
 rate-structure digest pinned at opening in the seller-signed response. Every round
-MUST refer to that digest. The buyer MUST verify it against the as-published rate
-structure in the registry's retained seller-signed publication, with historical
-signature/context, listing identity, exact selected option and transcript-price
-checks before accepted recovery or mandate use. Missing evidence MUST fail closed.
+MUST refer to that digest, computed over the publication's `pricing.rate_structure`. The buyer
+MUST verify it against the registry's retained seller-signed publication, with historical
+signature/context, listing identity, the publication's whole `pricing` object, exact selected
+option and transcript-price checks before accepted recovery or mandate use. Missing evidence
+MUST fail closed.
 
 #### Scenario: Opening, rounds and acceptance use one publication
 
@@ -57,7 +60,12 @@ checks before accepted recovery or mandate use. Missing evidence MUST fail close
 
 - **WHEN** recovery lacks retained publication proof or the signed acceptance pricing pin
 - **THEN** it fails closed rather than substituting a current listing or a seller-returned snapshot
-- **AND** Agreement.listing_hash keeps its existing database-listing meaning
+- **AND** Agreement.listing_hash keeps its existing database-listing meaning, a known gap recorded in `openspec/changes/README.md`
+
+#### Scenario: Retained pricing differs from the signed publication
+
+- **WHEN** the retained listing's `pricing` object, or the family rates the buyer reads, differ from the seller-signed publication's `pricing`
+- **THEN** the buyer refuses the acceptance before persistence or funding
 
 ### Requirement: Compute horizons bind both seller bounds
 
@@ -66,7 +74,7 @@ Reserved duration MUST be positive and fit both bounds.
 #### Scenario: The full policy is enforced
 
 - **WHEN** a recurring negotiation resolves its final duration
-- **THEN** Reserved duration MUST be positive and fit both bounds. Recurring horizons MAY be omitted; default is the least stated relative bound or absolute availability minus resolved start. Accepted duration/max term MUST equal that default or a shorter selection without rounding, and MUST include at least one whole period. Acceptance MUST refuse expired, excessive or sub-period selections. For a recurring option, acceptance MUST also refuse a horizon whose term end is earlier than `max(floor(accepted_at) + approval_window, start_utc) + delivery_deadline_seconds + period`, naming the minimum horizon that passes, and derivation MUST apply the same inequality to the default horizon so that no advertised recurring option fails it at its default selection.
+- **THEN** Reserved duration MUST be positive and fit both bounds. Recurring horizons MAY be omitted; default is the least stated relative bound or absolute availability minus resolved start, floored to whole seconds when the limiting bound is a fractional-second `available_until_utc`. Accepted duration/max term MUST equal that default or a shorter selection without rounding, and MUST include at least one whole period. Acceptance MUST refuse expired, excessive or sub-period selections. For a recurring option, acceptance MUST also refuse a horizon whose term end is earlier than `max(floor(accepted_at) + approval_window, start_utc) + delivery_deadline_seconds + period`, naming the minimum horizon that passes, and derivation MUST apply the same inequality to the default horizon so that no advertised recurring option fails it at its default selection.
 
 #### Scenario: The horizon leaves no runway
 
@@ -83,7 +91,12 @@ Reserved duration MUST be positive and fit both bounds.
 
 - **WHEN** the effective seller bound or shorter buyer horizon is 125 seconds for a 60-second period
 - **THEN** duration and max term bind 125 seconds before signature, without rounding
-- **AND** the term end carries its own `settles_through` under the foundation codec: compute presets use `last_boundary` mapped to `end.partialPeriod: returned`, and fail closed until vendored
+- **AND** the term end carries its own `settles_through` under the foundation codec: compute presets use `last_boundary` mapped to `end.partialPeriod: returned`, admitted where the mechanism supports it and the composition declares it qualified
+
+#### Scenario: The limiting absolute bound has fractional seconds
+
+- **WHEN** a recurring buyer names no horizon and the limiting bound is an `available_until_utc` 72000.4 seconds after the resolved start
+- **THEN** the default horizon binds 72000 seconds rather than being refused
 
 #### Scenario: Reserved term exceeds availability
 
@@ -109,6 +122,28 @@ A recurring selection MUST resolve its horizon into `Agreement.duration_seconds`
 
 - **WHEN** a signed acceptance carries `duration_seconds` of 21 hours under an advertised 20-hour bound
 - **THEN** the buyer refuses to commit
+
+#### Scenario: A horizon ends after absolute availability
+
+- **WHEN** a signed acceptance's `start_utc + duration_seconds` falls after the listing's `available_until_utc`
+- **THEN** the buyer refuses to commit
+
+#### Scenario: The seller resolves an omitted horizon
+
+- **WHEN** a buyer names no horizon and the signed acceptance carries the default bound at its `start_utc`, while its provision terms carry no duration
+- **THEN** the buyer accepts, comparing a provision duration with the Agreement's only where the buyer requested one
+
+### Requirement: The negotiation runtime resolves acceptance through a domain hook
+
+The schema-opaque negotiation runtime MUST fix one acceptance instant and, on every acceptance
+path, call the optional `resolve_acceptance` domain hook with it before building artifacts or
+writing acceptance. The hook MAY refine the Agreement's start and duration and MAY refuse; the
+runtime MUST NOT interpret the domain's terms itself.
+
+#### Scenario: A counter is accepted
+
+- **WHEN** a buyer accepts a seller's counter on a recurring option
+- **THEN** the runtime calls the domain hook with its fixed acceptance instant before any artifact is built or acceptance persisted, and a refusal leaves no acceptance written
 
 ### Requirement: Recurring starts resolve before signature
 

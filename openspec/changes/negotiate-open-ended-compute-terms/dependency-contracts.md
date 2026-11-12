@@ -1,8 +1,10 @@
 # Frozen dependency contracts
 
 These are implementation inputs for terms and its consumers, not claims that the
-interfaces or rate execution exist. D2a is decided by webapp owner 2026-11-06,
-pending maintainer review. D-a–D-e of resize/registry are unchanged.
+interfaces or rate execution exist. The owner's round-1 review (record 01) settled
+the design these contracts rest on; where it amended one, the entry below states the
+settled contract, which the round-2 section of `tasks.md` implements. D-a–D-e of
+resize/registry are unchanged.
 
 ## Price and accepted evidence
 
@@ -16,7 +18,9 @@ pending maintainer review. D-a–D-e of resize/registry are unchanged.
   `total` or `per_period`, plus the selected period for presentation. It must not
   multiply the already accepted amount by duration or by the multiplier again.
   The billing-kind interpretation is of the accepted option, not a current offer.
-- Carrier: top-level registry `rate_structure`, verified against retained
+- Carrier: the registry listing's `pricing` object, retained whole and compared
+  with the signed body; the family rates the buyer reads are a copy of
+  `pricing.rate_structure` and must equal the signed ones. Verified against retained
   `publisher_publication.body_base64` and its complete authenticated request.
   Verify the historical signature at its signed timestamp, seller trust, listing
   identity and `listing.publish` context. A legacy row without proof fails closed
@@ -58,8 +62,11 @@ injects a helper; live rate support is not inferred from a successful fixture.
 - Additional `setup_amount` is a positive canonical minor-unit string in the
   option asset; omission means no setup part. It is not part of the recurring
   quote. VM may resolve zero to omission; bare-metal has no invented setup price.
-- Setup-bearing presets wait for foundation 12.1's vendored delivery_end revision
-  and both signature vectors. Setup-free candidates remain independently eligible.
+- The `delivery_end` revision is vendored in the mediation contract, but the hosted
+  mediation service still runs an older one: a setup-bearing preset publishes only
+  where the helper declares `supports_setup_delivery_end` and the servicing
+  declaration sets `setup` for its mechanism. Setup-free candidates remain
+  independently eligible.
 - Bounds remain listing-level. The accepted horizon is the unrounded Agreement
   `duration_seconds`; no maximum term is inserted into an option or its identity.
 - Unsupported `settles_through` fails closed through the foundation codec. The
@@ -67,15 +74,16 @@ injects a helper; live rate support is not inferred from a successful fixture.
 
 ## Servicing handoff
 
-One composition-owned declaration identifies the serviced mechanism and contract
-revision and whether it is published or proposed. A proposed declaration requires
-an explicitly opted-in test lane; it is not production readiness. The neutral
-contract is `RateServicing` in `kit/settlement-runtime`'s `rate_servicing.py`.
-Its adapter-required revision map and current declaration map select the exact
-mechanism/revision; `proposed_lane` must equal the declaration's stable lane identity.
-`select(mechanism)` returns that declaration or raises `RateServicingUnavailable`
-with withdrawn-option/refetch semantics. Spot layers exact payments
-service identity and `livemode=false` checks on its lane materialization path.
+One composition-owned declaration lists, per mechanism, the `settles_through`
+treatments the composition has qualified and whether it services setup
+(`[settlement.rate_servicing.<mechanism>] treatments = [...]`, `setup = ...`);
+absent or empty means no rate servicing. The neutral contract is `RateServicing` in
+`kit/settlement-runtime`'s `rate_servicing.py`. Round 1 implemented an earlier form —
+an adapter-required revision map, `published`/`proposed` declarations and a
+`proposed_lane` identity — which the round-2 section replaces with the treatments
+table; spot's materialization gate then checks the option's treatments and `setup`
+against the declaration instead of calling `select()`. A refusal keeps the
+withdrawn-option/refetch semantics.
 
 Publication, cached-option acceptance and materialization all consume that same
 contract, never an option-local assertion. Absence omits recurring publication and
@@ -94,9 +102,10 @@ returns a canonical option or `RatePresetRefusal`. The common derivation checks
 the authority against the composition's offered advertisement, derives the
 penalty recommendation/runway and validates lifecycle capabilities before build.
 It then refuses changed mechanism, asset, period, reserve or lifecycle bytes.
-Both compositions expose `rate_preset_helpers` and `delivery_deadline_for_pool`;
-the latter reads site/pool facts, defaulting to no enforced deadline until the
-effective pool-facts port is wired. A raw clause value cannot stand in for it.
+Both compositions expose `rate_preset_helpers` and `delivery_deadline_for_pool`.
+The composition supplies the deadline: that port's value when it gives one, else the
+payments clause's configured `delivery_deadline_seconds`; the helper receives the
+resolved value through `derive_rate_preset` and needs nothing new.
 The structured clause's `recurring` request is absent for once publication;
 its payer/payee notices derive the class rather than storing one. Servicing
 selection now gates this seam through each composition's `rate_servicing` object;
@@ -125,7 +134,8 @@ convergence must not rederive either from current listing edits or new-offer gat
 
 ## Ownership and implementation sequence
 
-Task 2.1 implements the accessor, accepted snapshot retention and reader guard.
+Task 2.1 implements the accessor and accepted snapshot retention; the round-2
+section removes its reader guard in favour of tests at each money consumer.
 Task 2.3 consumes the injected helper in both publication compositions. Task 3.1
 implements the neutral declaration and its two terms-owned gates (now qualified
 by the committed publication diagnostic). Consumers may

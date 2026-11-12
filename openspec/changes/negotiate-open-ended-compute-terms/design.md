@@ -36,7 +36,7 @@ migrates flags to `release_models`, and retains bare metal's unsupported-splitte
 refusal. Read the accepted release condition for display; do not invent lifecycle
 terms for a mechanism with no lifecycle adapter.
 
-### D2. Quote once with its unit; guard every read
+### D2. Quote once with its unit; test every money reader
 
 `Agreement.amount` is the accepted monetary quote, following the implemented
 resize carrier (D2a), never the negotiation multiplier. Billing kind changes the
@@ -46,7 +46,7 @@ refusal.
 
 #### D2a. Keep the signed Agreement monetary
 
-**decided by webapp owner 2026-11-06, pending maintainer review**
+Settled by the owner's round-1 review (record 01, R3).
 
 The signed Agreement is what both parties commit to, and payment mandates bind
 money. A buyer or verifier must be able to read what is owed from the Agreement
@@ -71,22 +71,29 @@ not hidden in the recurring quote. At 2,500,000 USD/6 per hour and 10,000 bps,
 two-hour prepaid is 5,000,000 total; PT15M is 625,000 per period; PT1M is 41,667.
 Recovery and buyer mandate checks use the signed-acceptance-bound rate structure and selected option, never a current or registry-cached listing. `negotiation-driven-capacity-resize` task 2.1a's carrier decision gates this accessor: retain the bound structure or its verifiable digest in accepted evidence before approval.
 
-A fail-closed repository check refuses direct `Agreement.amount` reads outside the
-accessor and declared raw negotiation hooks. Cover actual attribute/mapping reads
-and aliases/wrappers; an unclassified reader fails rather than escaping detection.
-Model declaration/serialization is not price interpretation. Each hook allowlist
-entry records why it negotiates the scalar instead of spending it.
-Recommendation: an AST-based guard using the existing architecture-check pattern,
-with positive/negative fixtures in its owning script tests; use the smallest
-implementation that rejects every repository reader found during migration.
+After this change `Agreement.amount` means a total for a reserved deal and one
+period's price for a recurring one, so a reader assuming a total charges or caps a
+recurring deal wrongly. Every consumer that spends, caps, displays, recovers or
+confirms accepted money reads it through the accessor, and each is tested with a
+per-period Agreement: mandate derivation, buyer caps and display, recovery and
+confirmation. No static check inventories `amount` reads (owner record 01, R6): a
+syntactic inventory of every read named `amount` cannot tell money from the many
+other amounts, and a two-party misread fails loudly in an end-to-end run that
+produces a per-period Agreement. No such run exists yet; it is recorded as a gap for
+this change's or `spot-deals-through-arkhai-payments`' planning.
 
 #### D2b. Signed-acceptance pricing pin
 
-Status: decided by webapp owner 2026-11-06, pending maintainer review.
+Settled by the owner's round-1 review (record 01, R4, amended).
 
 The seller-signed acceptance binds the agreed multiplier and the rate-structure
-digest: the same digest D-e pins at opening, computed over `rate_structure` as
-published (D-b) and seller-signed in the registry's retained publication (D-c).
+digest: the same digest D-e pins at opening, computed by
+`negotiation-driven-capacity-resize`'s single function over the publication's
+`pricing.rate_structure` and seller-signed in the registry's retained publication (D-c).
+The buyer retains the publication's whole `pricing` object and compares it with the
+signed body, which verifies `asking_rate` along with the family rates; the family
+rates the amount codec reads are a copy lifted from `pricing.rate_structure` and
+must equal the signed ones.
 Opening, every round and acceptance refer to this one rate identity. The buyer
 verifies it against the retained seller-signed registry publication, never a
 snapshot supplied by the seller. Historical publication verification, exact option
@@ -96,8 +103,9 @@ Legacy records missing bound evidence fail closed; fresh listings cannot repair 
 Rejected: returning the full seller database snapshot under the existing hash.
 That would turn a private storage shape into a public contract.
 `Agreement.listing_hash` remains unchanged: it commits the seller's database
-listing rather than the published document. This known mismatch must be revisited
-with the maintainer, not repaired by this change.
+listing rather than the published document, and nothing verifies it. This change
+does not depend on it; the mismatch is an unowned gap in `openspec/changes/README.md`
+(owner record 01, R5).
 
 Permanent destinations after review: `openspec/specs/negotiation-protocol/spec.md`
 and the authority description in `docs/development/ARCHITECTURE.md`.
@@ -113,19 +121,27 @@ Keep the foundation's exact shapes and names:
   `last_boundary` ↔ returned, `stop` ↔ prorated. Seller presets offer payer charged and
   payee returned; the buyer's default acceptance policy refuses a payee entitlement
   or term end that is not returned (the buyer benefits, so the buyer enforces it in
-  negotiation), and a buyer may loosen it. Until the vendored contract expresses
-  returned, interim rate options explicitly offer charged treatment, which default buyers refuse. Publication and acceptance fail closed on any
-  unsupported treatment. `exposure_seconds` and `stop+exposure` are retired.
+  negotiation), and a buyer may loosen it. `returned` is vendored
+  (`kit/arkhai-payments/schema/payments.schema.json`, `partialPeriod`): presets default
+  the payee stop and the term end to `last_boundary`, and a seller may state
+  `started_period`, which is disclosed and refused by default buyers. A treatment is
+  admitted where the mechanism's helper declares support for it and the composition's
+  servicing declaration qualifies it (D6, owner record 01, R13). Publication and
+  acceptance fail closed on any unsupported treatment. `exposure_seconds` and `stop+exposure` are retired.
 - `adjudication = {version, dispute, dispute_window_seconds, case_hold_max_seconds}`;
   `dispute = {interface, origin, account, record_key, params}`.
-- `premature_stop_penalty` is a nonnegative integer amount in the option asset's minor units, encoded as a canonical decimal string; absent/zero means none. It applies to an unentitled seller end, including a spot emergency without notice, not an entitled notice stop. Recommendation: on-demand presets default to 24 periods' price (calculated through the agreed-price accessor), and buyer default acceptance refuses on-demand without a positive penalty because the buyer benefits and enforces it, like partialPeriod. Expose seller override and explicit buyer opt-out; never silently downgrade the default. The number is a ceiling, not a guarantee: the remedy takes `min(penalty, earned amounts still held)` after the refunds, and early in a deal what is earned and held is the setup charge alone — an on-demand VM pulled minutes after activation, with its started period returned, leaves nothing else to take, and zero with no setup charge. A seller-funded stake that makes the ceiling collectible is the reserved `bond` term (foundation D5), not this change's.
+- `premature_stop_penalty` is a nonnegative integer amount in the option asset's minor units, encoded as a canonical decimal string; absent/zero means none. It applies to an unentitled seller end, including a spot emergency without notice, not an entitled notice stop. On-demand presets with no stated penalty default to the quoted per-period price times the storefront setting `[pricing].default_premature_stop_penalty_periods`, which defaults to 24; a penalty stated on a clause, including an explicit `"0"`, wins, and spot carries none by default (owner record 01, R11). Buyer default acceptance refuses on-demand without a positive penalty because the buyer benefits and enforces it, like partialPeriod. Expose seller override and explicit buyer opt-out; never silently downgrade the default. The number is a ceiling, not a guarantee: the remedy takes `min(penalty, earned amounts still held)` after the refunds, and early in a deal what is earned and held is the setup charge alone — an on-demand VM pulled minutes after activation, with its started period returned, leaves nothing else to take, and zero with no setup charge. A seller-funded stake that makes the ceiling collectible is the reserved `bond` term (foundation D5), not this change's.
 - `bond` stays reserved where the mechanism cannot hold a seller-funded stake.
-- `delivery_deadline_seconds` is the pool's effective `delivery_deadline_seconds` tag
-  (`renewable-compute-lease-deadlines` D3), read from the pool at derivation like the
-  bound hints and published under the same name on every compute option whose
-  mechanism has a lifecycle adapter, recurring or once; the site enforces exactly that
-  value from the deal's commitment instant (foundation D5, "Delivery has a deadline").
-  A pool that enforces no deadline yields an option without the term, and the default
+- `delivery_deadline_seconds` is supplied by the composition and published under that
+  name on every compute option whose mechanism has a lifecycle adapter, recurring or
+  once: the pool port's value (`delivery_deadline_for_pool`) when it gives one, else the
+  payments clause's configured `delivery_deadline_seconds` (owner record 01, R21).
+  Pool-first precedence keeps the site and the published term from disagreeing once
+  `renewable-compute-lease-deadlines` enables the pool's tag and the site enforces it.
+  The clause value is not an unenforced raw tag: the seller's deal-servicing journal
+  files non-delivery at whatever deadline the deal accepted
+  (`kit/deal-servicing/src/market_deal_servicing/journal.py`).
+  A compute option with neither yields an option without the term, and the default
   buyer refuses such an option without it — the buyer benefits and enforces it, with an
   explicit opt-out — so the derivation log and listing diagnostics name it like the
   penalty: "a default buyer refuses this option: no delivery deadline". An Alkahest
@@ -148,7 +164,7 @@ the end and files with the dispute authority; the seller sends no stop or revers
 Arkhai mediation rules payee-agreed delivery_end under its mapping/time/replay guards; the cause=payee branch is the standard self-penalty (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); the terms this change publishes are what that
 ruling reads — the penalty, the on-demand returned treatment, the setup charge — and
 the display explains them against it (D7). A buyer contesting the account files a case;
-mediation triages claims lacking payee agreement or failing its mapping/time/replay guards; matching receipt-backed payer claims rule automatically. There is no compensation enum. Setup-bearing presets wait for foundation 12.1 to vendor the proposed delivery_end signature/concurrence revision and vectors, not another payments wire change; setup-free presets remain independently eligible.
+mediation triages claims lacking payee agreement or failing its mapping/time/replay guards; matching receipt-backed payer claims rule automatically. There is no compensation enum. The `delivery_end` revision is vendored in the mediation contract (`kit/arkhai-mediation/src/market_arkhai_mediation/contract_data/`), but the hosted mediation service still runs an older revision, so a setup-bearing option is admitted only where the composition's declaration sets `setup` for its mechanism (D6, owner record 01, R19); setup-free presets remain independently eligible.
 Entitled rate stops follow the committed per-stopper `settles_through`, computed by the
 payment authority, not a later storefront refund or promise to prorate every end.
 
@@ -178,7 +194,7 @@ keyed per offered preset like its rate. These are seller choices, not a protocol
 requirement to price identically. Recommendation: shipped recurring presets have
 a payer entitlement with `notice_seconds: 0` — a buyer who stops is charged to the started
 period and nothing after, and a seller who wants a tail prices it as a number the buyer sees —
-and a setup once part; spot adds a payee entitlement. Omission
+and a setup once part only where the seller states its amount (D8); spot adds a payee entitlement. Omission
 never grants the payee an implicit entitlement. The foundation owns validation and
 identity inclusion; do not create a second hash rule or require early_termination
 on every compute option. Terms injects a preset-helper interface: selected quote/unit,
@@ -196,16 +212,23 @@ for the other's execution.
 
 `max_duration_seconds` is the longest deal from its start; `available_until_utc` is
 the last possible lease end. Both are listing capacity facts, not option copies or
-`listing_resource` fields. Resolve through override > pool hint > configured
-default per offering mode. Nonpositive/unset relative bound means no relative
-limit; a stated absolute bound is timezone-aware UTC. Malformed bounds hold
-derivation with a diagnostic, not a guessed default.
+`listing_resource` fields. Each resolves independently through override > pool hint
+`policy_tags.capacity_bounds.<mode>` > configured default, VM keeping its per-model
+tiers below the mode hint (D10). Nonpositive/unset relative bound means no relative
+limit and masks lower tiers; a stated absolute bound is strict timezone-aware UTC.
+Malformed bounds hold the pool with a diagnostic, not a guessed default; override
+checks use the live projection. Both are published as top-level listing fields
+(owner record 01, R8). The site and watchdog hold only each lease's
+`lease_end_utc`, written at commit from the Agreement's start plus duration; neither
+bound is copied to them, and neither expresses the other.
 
 At resolved `start_utc`, let `B = min(positive max_duration_seconds,
 available_until_utc - start_utc)` over stated bounds. Default recurring selection
 binds `duration_seconds = B`.
 If one bound is absent use the other. Require at least one whole period, but do not
-round the horizon. Bind an explicit shorter buyer horizon unchanged, show the
+round the horizon to periods. When the buyer names no horizon and the limiting bound
+is a fractional-second `available_until_utc`, floor *B* to whole seconds, at
+acceptance and at publication, rather than refusing (owner record 01, R9). Bind an explicit shorter buyer horizon unchanged, show the
 effective horizon before signature, and refuse a longer, expired or sub-period
 selection. Every reserved duration must fit both bounds.
 
@@ -236,11 +259,11 @@ while the payments end is absolute: horizon rounding cannot align that end to a
 billing boundary. Foundation D5 therefore gives the term end its own
 `settles_through`, mapped to the rate part's `end.partialPeriod` with the same
 values as stop authorities. Compute presets use `last_boundary` (returned), so
-billing never runs past the agreed maximum. Publication and acceptance fail
-closed until that treatment is vendored. Interim recommendation: publish rate
-options with an absolute end and a charged final partial period, disclosed in
-the option as term-end `started_period`, not as the returned preset. Exhaustion
-needs no separate rule: reserve-ahead places it on a period boundary.
+billing never runs past the agreed maximum; `returned` is vendored, and the
+treatment is admitted where the composition's declaration qualifies it (D6). A
+seller may state term-end `started_period`, which is disclosed and refused by
+default buyers. Exhaustion needs no separate rule: reserve-ahead places it on a
+period boundary.
 
 Recurring start_utc must resolve to whole-second precision before the final signature;
 refuse a fractional rate start rather than round signed bytes. Preserve once-only
@@ -252,25 +275,61 @@ buyer checks against both listing bounds at the agreed start. The rate part's en
 `start_utc + duration_seconds` (spot D2). No option is minted at acceptance and no
 identity changes.
 
+The schema-opaque negotiation runtime fixes one acceptance instant and calls the
+optional `resolve_acceptance` domain hook before artifacts or writes, on all four
+acceptance paths; `resolve_horizon` binds the buyer's horizon unchanged or the
+default *B* and refuses longer, expired, sub-period, no-runway and missing-reserved
+horizons (owner record 01, R9). The buyer's check is one shared pure function beside
+`resolve_horizon` in `kit/settlement-runtime`, sharing its bound arithmetic, which
+both buyers call before approval: it refuses a duration above either bound at the
+Agreement's start, holds an explicit horizon to the buyer's request and an omitted one
+to the default bound. The seller's resolver protects only against the seller's own
+mistakes; the buyer's check is what holds against a counterparty that signs other
+terms (review 04 F1). A buyer that named no horizon compares a provision duration with
+the Agreement's only where it requested one: the seller keeps the buyer's signed
+provision terms, which carry no duration, beside the resolved one (review 04 F2).
+
 An unbounded recurring candidate yields no option and a derivation close reason,
-not a hold merely for being unbounded; valid reserved candidates remain. Bare
-metal's existing positive-bound rule for reserved candidates remains. A later
+not a hold merely for being unbounded; valid reserved candidates remain. In both
+domains no positive relative maximum means no relative limit: bare metal's reserved
+hold (`pool_lease_bound_missing`, `reserved_lease_bound_missing`) is retired, and
+every reserved deal carries the buyer's explicit duration, checked at acceptance
+against both bounds (owner record 01, R27). A bare-metal pool previously held for
+lack of a maximum now publishes reserved options with none; the operator handbook's
+upgrade step says to set `default_max_duration_seconds`, an override or a hint to
+keep a ceiling. A later
 listing-date edit never extends an accepted lease. The shared delivery change
 uses accepted start plus duration in both domains, not `now`. Here remove VM's
 round-zero missing-reserved-duration fallback; delivery owns its resume fallbacks.
 
 ### D6. Three doors read one servicing declaration
 
-Composition, not a listing or buyer, declares rate servicing and its contract:
-deployed published revision, or `proposed` only in an explicitly opted-in test
-lane. No additional minimum-spend primitive gates it.
+Composition, not a listing or buyer, declares rate servicing (owner record 01, R15,
+R19). The declaration lists, per mechanism, the `settles_through` treatments the
+composition has qualified against that mechanism's payment authority, and whether it
+services a setup charge:
 
-1. Publication omits recurring candidates if servicing is undeclared, using existing
-   no-settlement-option diagnostics if none remain.
-2. Acceptance refuses cached recurring selections when servicing is now undeclared,
-   using the withdrawn-option/refetch outcome before persisting acceptance.
-3. Materialization refuses to derive a rate mandate without the declaration, even
-   across an acceptance/restart gap.
+```toml
+[settlement.rate_servicing.arkhai_payments]
+treatments = ["charged"]
+setup = false        # true once the hosted mediation service rules delivery_end
+```
+
+Absent or empty means no rate servicing. An option is admitted only where the
+mechanism's helper supports a treatment (D3) and the composition declares it. The
+earlier form — a contract revision per mechanism, `published`/`proposed` status and a
+proposed-lane identity — served an unvendored contract that no longer exists and could
+not say which treatments were qualified; it is removed. Tests inject declarations
+directly. Deployed compositions declare no treatments, so recurring offers stay dark
+(R16). No additional minimum-spend primitive gates it.
+
+1. Publication omits a recurring candidate naming any undeclared treatment on an
+   entitlement or at the term end, or a setup charge where `setup` is not declared,
+   using existing no-settlement-option diagnostics if none remain.
+2. Acceptance refuses such a cached selection, using the withdrawn-option/refetch
+   outcome before persisting acceptance.
+3. Materialization refuses to derive a rate mandate for such an option, even across
+   an acceptance/restart gap.
 
 Startup additionally refuses to strand accepted rate deals without their
 continuation. Disabling offers never disables accepted-deal servicing.
@@ -296,6 +355,22 @@ recovers none of it. Values come from the selected option, not a stored class. A
 The seller's side of the same display is the default-buyer refusal diagnostic (D3), so
 seller and buyer read one policy.
 
+The mechanism owns the numbers (owner record 01, R17):
+`MechanismRegistration.present_payment(option, requested_duration, accepted_quote)`
+returns `PaymentPresentation {quote, setup_once, initial_reserve}` in the quote's asset
+and minor units, zero meaning none and null undetermined; the registry checks basis and
+asset and that accepted money is unchanged, and a missing presenter refuses. Both buyers
+render these with the class, price unit, asking rate, bounds, horizon and lifecycle rows
+on stderr; accepted displays read only the Agreement. VM's public price bounds stay
+hourly and are scaled to one period for a recurring option; the ceiling is compared per
+period for a recurring option and per term for a reserved one.
+
+The default buyer's policy (owner record 01, R12) is `default_buyer_refusals`, which
+refuses, on an option whose mechanism has a lifecycle adapter: no
+`delivery_deadline_seconds`; on-demand with no positive penalty; a payee stop or term
+end whose `settles_through` is not `last_boundary`. Both buyers compose
+`BuyerTermsPolicy` over the foundation's `AuthoritySelection`, refusals before ranking.
+
 Explain rate start as a journaled effect after lease activation, distinct from buyer
 credential disclosure; explain each stopper's started-period charge/return/proration,
 the one priced notice, authority-hosted pending stops and adjudication for
@@ -314,11 +389,83 @@ owed from approval; a payment stop alone does not reverse it. A qualified delive
 
 ### D8. Churn is seller pricing/policy, not a protocol gate
 
-Neither domain requires minimum spend. Presets default to an honestly named setup
-once charge beside the rate. Sellers may price differently or refuse churners,
-including by principal blacklist, without claiming resistance to identity rotation.
-No new minimum-spend request goes to payments. This change displays setup pricing;
-the rate change derives it.
+Neither domain requires minimum spend. A setup once charge beside the rate is the
+seller's choice: `setup_amount` is optional, there is no amount to default to, and an
+honestly named setup part is published only where the seller states one and the
+servicing declaration sets `setup` (D6, owner record 01, R19). Sellers may price
+differently or refuse churners, including by principal blacklist, without claiming
+resistance to identity rotation. No new minimum-spend request goes to payments. This
+change displays setup pricing; the rate change derives it.
+
+### D9. Recurring options are derived by one shared per-clause step
+
+A settlement clause may carry an optional mechanism-neutral `recurring` request
+(`RecurringPublicationPreset`); each clause resolves whole (owner record 01, R10). The
+injected `RatePresetHelper` supplies the per-period quote, approval window,
+adjudication and capabilities and encodes the option; the common derivation checks the
+authority, derives the penalty (D3), checks the default horizon's runway (D5) and
+validates the lifecycle, and refuses an encoder that changes mechanism, asset, period,
+reserve or lifecycle. A missing helper, undeclared servicing or an unbounded horizon
+omits only that recurring option, with a diagnostic; reserved peers and capacity
+identity are unaffected.
+
+That per-clause step — deadline resolution (D3), the recurring-or-once branch,
+`derive_rate_preset`, the diagnostics and the penalty setting — is one
+`kit/settlement-runtime` function both compositions call; the `compute` flag and the
+deadline lookup are parameters, so it knows no family (owner record 01, R26). Each
+`resolve_acceptance` hook keeps only its domain's artifact rebuilding over
+`resolve_horizon`. The older differences between the domains are unified in this change:
+the reserved-bound rule (D5) and the clause source (D10).
+
+### D10. One source for compute settlement clauses
+
+Both domains resolve settlement clauses and listing terms field by field: override >
+pool hint per GPU model (`pricing.gpu.<model>`) > pool hint for the pool
+(`pricing.settlements`, new) > configuration per model
+(`[pricing.defaults.gpu.<model>]`) > flat configuration (`[pricing]`) (owner record 01,
+R28). Bounds keep D5's order, with `capacity_bounds.<mode>` ahead of the model hint.
+A v0.3.0 VM configuration or hint means what it meant; an older VM storefront ignores
+the pool-level key. Bare metal's unreleased `pricing.bare_metal.settlements` hint is
+replaced, needing no compatibility path (D12). VM's family rates stay VM's. One shared
+resolver, moved out of `arkhai_vms_listings.pricing_resolution`, lives provisionally in
+`kit/resource-pools-contracts` beside `capacity_bounds.py` and `raw_pricing`, taking the
+`gpu` key from the compute vocabulary as data; closeout's documentation-compliance step
+confirms or moves it, since it is compute-family resolution and no compute family kit
+exists yet.
+
+### D11. The buyer waives each default refusal on its own, and names its duration once
+
+One flag per default refusal, in both buyers (`market buy`/`negotiate`, `bare-metal
+buy`): `--allow-no-delivery-deadline`, `--allow-no-penalty`,
+`--allow-charged-preemption`, `--allow-charged-term-end`, each waiving exactly its term;
+the foundation's `allow_missing_delivery_deadline` is set only by the first.
+`--allow-unprotected-terms` stays as shorthand for all four. Every waiver used, singly
+or through the shorthand, is recorded in run metadata and named in the pre-approval
+disclosure; codec, capability and authority checks are never waived (owner record 01,
+R14). A single blanket waiver made the E2E drivers waive all four protections to pass
+one missing term.
+
+Duration is optional for recurring and required for reserved in both CLIs.
+`bare-metal buy` keeps v0.3.0's 3600-second default for reserved options only, shown as
+the buyer's default in the disclosure, never for recurring ones. VM's `market
+buy`/`negotiate` gain `--duration-seconds` beside `--duration-hours`; giving both is an
+error naming the conflict (owner record 01, R18).
+
+### D12. Compatibility is owed to releases; sibling domains behave alike
+
+Two principles the owner's round-1 review settled (record 01, R29), promoted with this
+change:
+
+- Compatibility is owed to what an official release has shipped. A decision made on
+  `dev` and changed again before any release ships it affects no one, so revising it
+  needs no compatibility path, migration or deprecation; a change to anything a release
+  has shipped is judged as an incompatible change under `docs/development/RELEASING.md`'s
+  rules.
+- Sibling domains of one family behave alike unless a reason specific to one of them is
+  stated where the difference lives. A difference with no stated reason is a defect to
+  reconcile, and the reconciled behaviour moves to the family's shared code under the
+  scope rule; similar-looking code with genuinely different domain meaning stays in its
+  domains.
 
 ## Rejected alternatives
 
@@ -343,6 +490,10 @@ the rate change derives it.
 - Publication-only/materialization-only gates: either permits an unserviceable accepted deal.
 - Reserve-ahead as worst-case buyer-loss cap: guarantees require authority actions, holds and evidence.
 - Prorating every buyer end/prepaid provisioning time here: changes pricing outside this reconciliation.
+- A static inventory of `Agreement.amount` reads, or renaming the attribute behind the wire alias so a raw read fails in the type: a syntactic guard over every read named `amount` cannot tell money from other amounts; tested consumers and an end-to-end per-period run catch the misread (D2, owner record 01, R6).
+- One run-scoped waiver of every default refusal: to pass one missing term it waives all four (D11).
+- A servicing declaration naming a contract revision and `published`/`proposed` status with a lane identity: it cannot say which treatments are qualified (D6).
+- Dropping VM's per-model bound tiers: `marketplace-v0.3.0` ships them (D5, owner record 01, R8).
 
 ## Dependency gates and sequence
 
@@ -489,7 +640,7 @@ D2b resolves the carrier gap: the signed acceptance carries the agreed multiplie
 and D-e's rate-structure digest. The digest uses the published rate structure;
 verification uses D-c's retained seller-signed registry publication. The buyer does
 not authenticate seller database snapshots. The existing Agreement hash mismatch
-is retained as a maintainer follow-up, with no change to its semantics here.
+is an unowned gap in `openspec/changes/README.md`, with no change to its semantics here.
 Implementation and focused evidence belong to 2.1b before reader migration in 2.1c.
 
 ## Accepted-reader and guard continuation (2026-11-07)
@@ -797,31 +948,42 @@ Both command surfaces consume actual mixed published options using proposed mech
 
 Both prescribed-provider E2E setups fail before readiness. The existing Compose-assembly gap carries the reproductions; this does not qualify deployed rate servicing or permanent live capabilities. Full setup/results are in `docs/attachments/negotiate-open-ended-compute-terms/mixed-selection-checkpoint.md`.
 
-## Reserved-purchase E2E and open deadline hole
+## Reserved-purchase E2E and the deadline source
 
-The deployed VM and bare-metal compositions do not inject
-`delivery_deadline_for_pool`; its default returns no enforced deadline. D3 and
-`dependency-contracts.md` require that result to omit the published deadline,
-including for once-only options. A raw clause value cannot replace the pool fact.
+Round 1 left the deployed compositions reading only `delivery_deadline_for_pool`,
+which none wires, while the payments builder ignored the clause's configured
+`delivery_deadline_seconds` for compute options. No deployed seller published a
+deadline, every default buyer refused every hosted compute option, and the
+reserved-payment E2E drivers passed `--allow-unprotected-terms` to get through.
+The owner's round-1 review settled the source (record 01, R21, R22): the composition
+supplies the pool port's value when it gives one, else the clause's configured value
+(D3). The drivers then drop `--allow-unprotected-terms` and again assert that the
+published `delivery_deadline_seconds` equals the configured value, and
+`e2e-tests/tests/unit/test_dispute_coverage.py` returns to its earlier fixtures. That
+work is the round-2 section of `tasks.md`; `renewable-compute-lease-deadlines` later
+supplies the pool port, which takes precedence.
 
-The reserved-payment E2E scenarios explicitly pass `--allow-unprotected-terms`
-and assert that no delivery deadline is promised. Their dispute-coverage, payment,
-fulfillment and release checks remain in place. A reserved-payment purchase from
-these deployed sellers therefore needs `--allow-unprotected-terms`.
+## Round-1 triage
 
-**Open hole and intended direction:** deployed sellers publish no delivery
-deadline until the effective pool-facts port, `delivery_deadline_for_pool`, is
-wired. [`renewable-compute-lease-deadlines`](../renewable-compute-lease-deadlines/)
-closes the hole: the deadline is a pool policy tag that the site enforces at
-commit and reclaims on expiry. That change is planned to land before the Goal 8
-release. This terms change's remaining step is to wire each composition's
-`delivery_deadline_for_pool` to read the pool's effective value, then return the
-reserved-payment scenarios to protected purchases. Their
-`--allow-unprotected-terms` opt-out is interim until then.
+The owner's record of round 1 (`reviews/01-implementation-owner.md`) stood in for the
+design review this change never had. Its accepted decisions are recorded above: R3 in
+D2a; R4 and R5 in D2b; R6 in D2; R7 in D1 and D4; R8, R9 and R27 in D5; R10 and R26 in
+D9; R11, R13 and R21 in D3; R12 and R17 in D7; R14 and R18 in D11; R15, R16 and R19 in
+D6 and D8; R28 in D10; R29 in D12. Review 04's F1 and F2 are recorded in D5, and
+validation 05's V1 was R4's adaptation of the retained pricing record to the
+publication's `pricing` object, fixed in that triage. The code each decision needs is
+the round-2 section of `tasks.md`.
 
-Whether a seller-configured deadline should be the interim source remains open
-with the maintainer; D3 is unchanged, and this repair introduces no raw-clause
-fallback.
+Part B of the record compares this change with the Goal 8 MVP replan on
+`goal-8-mvp-design`. The owner decided that this change is finished and merged as
+built, judged on its own design, and the replan refactored afterwards around what
+landed; each contradiction's default outcome is an amendment to the replan, which this
+change records but does not make. The triage found none of this change's behaviour
+wrong on its own terms, so every contradiction (C1–C11: the deadline's source, the
+servicing declaration's `setup` entry, the default buyer's penalty refusal and its
+defaults, the presets' payee and term-end treatments, setup on bare metal, the
+`max_duration_seconds` rule, the duration flags, the multiplier reading, the amount
+guard and the reserved-bound rule) is left to the replan's amendment.
 
 ## Design promotion record
 
@@ -829,9 +991,13 @@ Destinations are planned, not claims of implemented behavior.
 
 | Accepted decision | Permanent location |
 |---|---|
-| D1, D2/D2a/D2b classes, monetary quote unit and acceptance pricing pin | `docs/development/ARCHITECTURE.md`; `openspec/specs/negotiation-protocol/spec.md` |
-| D3 penalty preset default (24 periods) and buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; foundation-owned lifecycle contract |
-| D5 the horizon as the Agreement's, listing bounds and omission | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
-| D6 servicing doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` |
-| D7, D8 display and seller-policy distinction | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md` |
+| D1, D2/D2a/D2b classes, monetary quote unit, tested money readers and acceptance pricing pin | `docs/development/ARCHITECTURE.md` (with the authority description); `openspec/specs/negotiation-protocol/spec.md` |
+| D3 penalty preset default and its setting, the deadline's source, buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/spec.md`; foundation-owned lifecycle contract |
+| D5 the horizon as the Agreement's, listing bounds, the acceptance hook, the floored default, the buyer's check and the reserved-bound rule | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md`; `docs/operator-handbook.md` (bare-metal upgrade step) |
+| D6 servicing declaration and its three doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` |
+| D7, D8 display, the mechanism's presenter, the default buyer's policy and seller-policy distinction | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |
+| D9 recurring publication and the shared per-clause step | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |
+| D10 the unified clause source | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
+| D11 per-term waivers and duration flags | `openspec/specs/buyer-orchestration/spec.md` |
+| D12 compatibility owed to releases; sibling domains alike | `docs/development/RELEASING.md` ("Versioning policy"); `docs/development/ARCHITECTURE.md` ("Family kits") |
 | Goal/dependency currency | `docs/development/ROADMAP.md`; `openspec/changes/README.md` at integration/closeout |

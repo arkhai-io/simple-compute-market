@@ -45,7 +45,7 @@ The buyer's acceptance policy MUST by default refuse an option whose payee entit
 
 ### Requirement: Default acceptance requires an on-demand seller penalty
 
-Buyer acceptance policy SHOULD refuse an on-demand option without positive early_termination.premature_stop_penalty and a compute option whose mechanism has a lifecycle adapter without `delivery_deadline_seconds`, and SHOULD expose explicit buyer opt-out for each; an option without a lifecycle adapter MUST be shown as making no delivery promise rather than refused for lacking one.
+Buyer acceptance policy SHOULD refuse an on-demand option without positive early_termination.premature_stop_penalty and a compute option whose mechanism has a lifecycle adapter without `delivery_deadline_seconds`, and MUST expose an explicit buyer waiver for each, as "Each default refusal has its own waiver" gives them; an option without a lifecycle adapter MUST be shown as making no delivery promise rather than refused for lacking one.
 
 #### Scenario: The full policy is enforced
 
@@ -61,7 +61,8 @@ Buyer acceptance policy SHOULD refuse an on-demand option without positive early
 
 Compute buyers MUST permit omitted duration for recurring selections and use the
 seller-bound horizon returned in the final accepted terms. Reserved selections
-MUST require duration. Both domains MUST permit recurring purchases without a
+MUST carry a duration: the buyer's, or, for `bare-metal buy` alone, its 3600-second
+default. Both domains MUST permit recurring purchases without a
 protocol minimum-spend term; setup fees and churn refusal MUST be represented as
 seller pricing/policy.
 
@@ -72,5 +73,59 @@ seller pricing/policy.
 
 #### Scenario: Missing reserved duration
 
-- **WHEN** a fresh reserved selection omits duration
+- **WHEN** a fresh reserved VM selection omits duration
 - **THEN** the buyer refuses rather than substituting an hour or listing maximum
+
+#### Scenario: A bare-metal reserved purchase names no duration
+
+- **WHEN** `bare-metal buy` selects a reserved option without a duration
+- **THEN** it uses 3600 seconds, shown in the disclosure as the buyer's default, and never applies that default to a recurring option
+
+### Requirement: Both buyer CLIs take a duration in seconds
+
+`market buy`, `market negotiate` and `bare-metal buy` MUST accept `--duration-seconds`; the VM
+commands MUST also keep `--duration-hours`. Giving both MUST be an error naming the conflict.
+
+#### Scenario: Both duration flags are given
+
+- **WHEN** a buyer runs `market buy --duration-seconds 3600 --duration-hours 1`
+- **THEN** the command refuses before selection, naming both flags
+
+### Requirement: Each default refusal has its own waiver
+
+Both compute buyers MUST offer one waiver per default refusal — `--allow-no-delivery-deadline`,
+`--allow-no-penalty`, `--allow-charged-preemption` and `--allow-charged-term-end` — each waiving
+exactly its term, with `--allow-unprotected-terms` as shorthand for all four. The foundation's
+missing-deadline allowance MUST be set only by the deadline waiver or the shorthand. Every
+waiver used, singly or through the shorthand, MUST be recorded in run metadata and named in
+the pre-approval disclosure. Codec, capability and authority checks MUST NOT be waivable.
+
+#### Scenario: One term is waived
+
+- **WHEN** a buyer passes `--allow-no-penalty` and selects an on-demand option with no penalty and a charged term end
+- **THEN** the penalty refusal is waived, the charged term end is still refused by name, and the run's metadata and disclosure name the one waiver
+
+### Requirement: The mechanism supplies the numbers a buyer is shown
+
+Each installed mechanism registration MUST supply
+`present_payment(option, requested_duration, accepted_quote)`, returning the quote, a separate
+setup once charge and the initial reserve in the quote's asset and minor units, zero meaning
+none and null undetermined. The registry MUST check the billing basis and asset and that an
+accepted quote is returned unchanged, and MUST refuse a registration with no presenter. Buyers
+MUST render these values and MUST NOT parse a mechanism's payment fields themselves.
+
+#### Scenario: A presenter changes accepted money
+
+- **WHEN** a mechanism's presenter returns a quote different from the accepted accessor quote
+- **THEN** the registry refuses the presentation before any display or approval
+
+### Requirement: The bare-metal buyer purchases hosted options only
+
+`bare-metal buy` MUST purchase only the hosted options its installed stages support; its shared
+rights policy and disclosure MUST still admit an Alkahest peer on the same listing as making no
+delivery promise, without a fabricated purchase stage.
+
+#### Scenario: A mixed bare-metal listing
+
+- **WHEN** a default bare-metal buyer views a listing with a hosted on-demand option carrying a delivery deadline and an Alkahest reserved option
+- **THEN** the hosted option is checked for its terms and can be bought, and the Alkahest option is shown as making no delivery promise but is not offered for purchase

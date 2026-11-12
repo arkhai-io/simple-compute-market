@@ -11,10 +11,13 @@ declaration and publication/cached-acceptance gates. Tasks 3.2–3.3 add accepta
 horizon checks and qualify the terms-owned declaration doors. Task 4.1a adds shared
 buyer rights policy and lifecycle disclosure. Task 4.1b adds mechanism-owned
 numerical presentation, optional recurring horizon plumbing and accepted recovery
-disclosure. Task 4.2 adds mixed-publication first use through both buyer commands. Task 4.3 runs focused application regressions and records failed E2E readiness as unobservable. Rebase onto origin/dev and final focused validation are complete. Restart at section 5's review/workflow gate; do not redo 4.2 or 4.3 unless fixing a review finding. Verification levels follow
-`docs/development/TESTING.md`. New acceptance test implementation requires the
-maintainer's approval; the scenarios below are the intended contract, not tests
-added by this reconciliation.
+disclosure. Task 4.2 adds mixed-publication first use through both buyer commands. Task 4.3 runs focused application regressions and records failed E2E readiness as unobservable. Sections 1–4 were replayed onto dev as round 1 (`6f86ac5e6`).
+The owner's record of round 1 (`reviews/01-implementation-owner.md`) stood in for
+the design review this change never had; its decisions are in `design.md` D1–D12, and
+the code they need, with review 04's F1 and F2, is section 5, implemented as round 2.
+**Restart at section 5.** Verification levels follow `docs/development/TESTING.md`;
+every behaviour this change adds gets permanent tests at the level it assigns (owner
+record 01, R2).
 
 ## 1. Freeze dependency contracts and decision gates
 
@@ -24,8 +27,8 @@ added by this reconciliation.
   2.1a's accepted rate-structure carrier before recovery/mandate reads; retain its bound evidence,
   never substitute a current listing after restart or repricing.
 - [x] 1.2 With `agreed-evidence-and-early-termination`, once `kit/deal-lifecycle` exists,
-  run a replayable regression diagnostic (rather than a new permanent acceptance
-  test, per the standing owner instruction) that the option's top-level `lifecycle` round-trips through
+  run a replayable regression diagnostic (section 5 converts it into a test, or drops
+  it where a foundation suite covers it) that the option's top-level `lifecycle` round-trips through
   hosted publication, the registry carrier and both buyer commitment checks by the same
   codec (D4), and that an Alkahest option carries none and is refused if it does (the
   binding rule). Do not implement a mechanism-specific term codec. `placement-probe.md`
@@ -35,14 +38,14 @@ added by this reconciliation.
   freeze the injected preset-helper interface (D3), `period`, `reserve_ahead_seconds`, separate setup pricing, accessor unit and
   servicing-declaration contracts. The option carries no maximum term: the horizon
   is resolved into `duration_seconds` at acceptance and the option's ID is unchanged
-  from the registry to the Agreement (D5). Setup-bearing preset publication and acceptance wait for foundation 12.1's delivery_end revision and vectors, not another payments wire change; preserve valid setup-free options while it is pending.
+  from the registry to the Agreement (D5). Setup-bearing preset publication and acceptance were gated on the helper's declared setup capability, with valid setup-free options unaffected. Amended by the owner's round-1 review (record 01, R19): the delivery_end revision is already vendored in the mediation contract, so the gate is the servicing declaration's `setup` entry instead (task 5.5).
 
 ### Dependency-contract checkpoint (2026-11-06)
 
 - Base: `ba77a3b30` (`resize-multiplier`, PR #350); merged
   `registry-as-published` (PR #349) as `faa339eea`. D-a–D-e remain accepted
-  for implementation, pending maintainer review. The webapp owner authorized
-  implementation before design review; the campaign row records that disposition.
+  for implementation. Implementation started before a design review; the owner's
+  round-1 record later reviewed the design in its place.
 - At this initial checkpoint, task 1.1 was exercised but left unchecked because the observed contract
   contradicts D2: resize negotiates basis points but writes the **derived monetary
   total** to `Agreement.amount`. The multiplier remains in the transcript and
@@ -82,7 +85,7 @@ added by this reconciliation.
   in-process app with real SQLite. Alkahest with no lifecycle is admitted, while
   attaching lifecycle is refused. Early-termination identity/round-trip is structural
   only, not a claim of hosted recurring support. The probes are temporary change
-  evidence, not new permanent acceptance tests.
+  evidence.
 - Existing focused suites passed: lifecycle terms (unit, 47), payments agreement/
   buyer/config (unit, 51), registry listings (application integration through its
   typed client, 17), VM stage-dispatch/orchestrator (unit, 21), bare-metal composition/
@@ -116,8 +119,8 @@ added by this reconciliation.
 - `price_probe.py` exercises the actual VM acceptance-record hook, JSON recovery,
   historical seller-signature verification and isolation from later source edits.
   It also drives the core accessor with prepaid and injected sub-hour recurring
-  projections. This is a temporary diagnostic, not a new permanent acceptance test
-  or proof of supported hosted recurring mandates.
+  projections. This is a temporary diagnostic, not proof of supported hosted
+  recurring mandates.
 - Focused validation and replay instructions:
   `docs/attachments/negotiate-open-ended-compute-terms/price-checkpoint.md`.
   No deployed first use, E2E, promotion, archival or independent review is claimed.
@@ -156,7 +159,7 @@ added by this reconciliation.
   strict OpenSpec validation passed. No E2E marker proves the injected recurring
   projection or acceptance-proof binding; deployed listing/reserved regressions
   remain in 4.3. No push-only evidence is owed for this slice.
-  No permanent acceptance tests were added. The initial diagnostic fixture lacked
+  The initial diagnostic fixture lacked
   required seller/pool identity; the corrected fixture passes. An existing helper
   caller exposed a new mandatory projector argument; preserving the helper's default
   installed projection repaired that regression.
@@ -173,11 +176,10 @@ added by this reconciliation.
 
 ### Signed-acceptance pin checkpoint (2026-11-07)
 
-- D2b is decided by webapp owner 2026-11-06, pending maintainer review, and listed
-  in PR #351's Decisions to review. It binds the multiplier and D-e's published
-  rate-structure digest, not a digest of a new seller snapshot. The DB-listing
-  meaning of `Agreement.listing_hash` is unchanged, with its mismatch to the
-  published document retained for maintainer follow-up.
+- D2b binds the multiplier and D-e's published rate-structure digest, not a digest
+  of a new seller snapshot (settled in owner record 01, R4). The DB-listing meaning
+  of `Agreement.listing_hash` is unchanged; its mismatch to the published document is
+  an unowned gap in `openspec/changes/README.md` (R5).
 - Opening, continuation counters and acceptance now expose that one digest;
   acceptance includes `pricing_pin` in the signed response. Core's HTTP carriers
   preserve it. VM amount-codec validators authenticate the retained publication,
@@ -192,8 +194,8 @@ added by this reconciliation.
 - Replay and focused evidence: `docs/attachments/negotiate-open-ended-compute-terms/acceptance-pin-checkpoint.md`.
   The committed diagnostics exercise installed once pricing, injected PT1M pricing,
   signed immediate and continuation acceptance recovery, refusal cases, real-SQLite
-  seller pin production and HTTP-carrier round trips. No permanent tests were added
-  or assertions weakened; these are invocation-local diagnostics, not deployed E2E.
+  seller pin production and HTTP-carrier round trips. No assertions were weakened;
+  these are invocation-local diagnostics, not deployed E2E.
 - **Restart at 2.1c, not 2.2:** finish both-domain readers/caps/check migration,
   mandate-reader migration and the fail-closed direct-read guard. Parent 2.1 and
   all later tasks stay unchecked. PR stays draft. Hosted recurring execution,
@@ -238,7 +240,7 @@ added by this reconciliation.
   stale held generation. Both bounds can be withdrawn from persisted VM listings.
 - Focused regression, first-use and typing evidence, exact setup, resolved probe
   mistakes and limits: `docs/attachments/negotiate-open-ended-compute-terms/capacity-bounds-checkpoint.md`.
-  No permanent tests added; kept expectations follow deliberate D5 semantics.
+  Kept expectations follow deliberate D5 semantics.
 - **Restart at 2.3**, then continue in order. No recurring helper, servicing
   declaration/gates, horizon acceptance, complete buyer disclosure or deployed E2E
   is implemented/claimed by this slice. Bare-metal listing decoding now merges
@@ -266,7 +268,7 @@ added by this reconciliation.
   penalty override, missing helper, runway, unbounded/absolute-only horizons,
   unsupported treatments/setup, evidence/results and resolved attempts:
   `docs/attachments/negotiate-open-ended-compute-terms/recurring-publication-checkpoint.md`.
-  No permanent tests added. Existing app/fixture seams follow the new contract.
+  Existing app/fixture seams follow the new contract.
 - Two small encountered baseline repairs are separate commits: the VM architecture
   test now permits core carriers as the permanent layering rule does (retaining
   role/composition bans), and the bare-metal introduction fixture uses a rateless
@@ -302,7 +304,7 @@ added by this reconciliation.
   compositions remain undeclared; accepted once-deal servicing regressions pass.
 - Setup, replayable fixtures, exact focused targets/results and limits:
   `docs/attachments/negotiate-open-ended-compute-terms/servicing-declaration-checkpoint.md`.
-  No permanent tests added. A separate fixture repair gives the kept shape-priced
+  A separate fixture repair gives the kept shape-priced
   buyer integration scenario a signed as-published body and publisher trust rather
   than weakening D2b's accepted-pricing verification.
 - **Restart at 3.2**: acceptance-time resolved start/bounds, optional recurring
@@ -338,7 +340,7 @@ added by this reconciliation.
   selected policy/app suites: 70 passed; bare storefront: 106 passed. Targeted
   horizon typing, `make check-packaging`, `make check-change
   CHANGE=negotiate-open-ended-compute-terms` and pinned strict OpenSpec validation
-  pass. No permanent tests added or assertions weakened.
+  pass. No assertions weakened.
 - The VM fixture commits signed resolved horizon artifacts with an injected data
   placeholder. Bare metal validates valid Agreement/physical artifacts through the
   no-write opening plan: its actual rate-mandate capture remains spot-owned and
@@ -374,8 +376,7 @@ added by this reconciliation.
 - Existing suites: settlement runtime 175 passed, VM buyer 215 passed (including
   18 focused buy/explain/standalone-dispatch tests), bare-metal buyer 32 passed.
   Targeted typing is one shared module, not repository-wide typing. Packaging,
-  check-change and pinned strict OpenSpec validation pass. No permanent tests added
-  and no assertions weakened.
+  check-change and pinned strict OpenSpec validation pass. No assertions weakened.
 - At this checkpoint the next slice was **4.1b** (now completed below), leaving
   4.1 unchecked pending full selection qualification: optional recurring horizons and the
   class/unit-bearing price/setup/reserve/bounds/effective-horizon display remain.
@@ -414,9 +415,9 @@ added by this reconciliation.
   Alkahest registration 84 passed; payments configuration/agreement/buyer 51 passed.
   Both proposed presentation replays pass. Targeted mypy passes for two shared
   presentation/disclosure modules. Packaging, check-change (including comment/import
-  hygiene and citations) and pinned strict OpenSpec validation pass. No permanent
-  acceptance tests were added; the duration assertion follows the new contract,
-  and two schema-opaque fixture callbacks are explicitly scoped as recorded in design.
+  hygiene and citations) and pinned strict OpenSpec validation pass. The duration
+  assertion follows the new contract, and two schema-opaque fixture callbacks are
+  explicitly scoped as recorded in design.
 - **Restart at 4.2.** Prepare the full mixed-listing publication/selection fixture in
   each buyer, including reserved/on-demand/spot, both bounds, omitted and shorter
   horizons, displayed treatments and cached-option refusal. Inject proposed mechanism
@@ -441,7 +442,7 @@ added by this reconciliation.
     unsupported projections and injected sub-hour period quotes using the committed
     diagnostic and existing configuration/multiplier/buyer suites.
   - [x] 2.1b Implement D2b's signed-acceptance pin binding the multiplier and D-e's
-    published rate-structure digest (owner decided 2026-11-06; maintainer review pending).
+    published rate-structure digest (settled in owner record 01, R4).
     Implement historical seller-proof,
     exact option/context, transcript multiplier and accepted Agreement verification
     before recovery or buyer mandate reads. Never substitute a current listing.
@@ -486,8 +487,10 @@ added by this reconciliation.
   (verify: "The horizon leaves no runway"), and
   refuse expired/excessive horizons and missing reserved duration. Carry term-end
   `settles_through` into payments `end.partialPeriod` through the foundation codec;
-  compute presets use returned and fail closed until vendored. Interim recommendation:
-  absolute end with a charged final partial period disclosed in the option. Remove only VM's
+  compute presets use `last_boundary` (returned), refused where the mechanism cannot
+  enforce it. Amended by the owner's round-1 review (record 01, R13): `returned` is
+  already vendored, so no interim charged term end is recommended, and admission by the
+  servicing declaration's qualified treatments is task 5.5. Remove only VM's
   round-zero fallback here. Unit targets: domain terms/policy suites;
   app integration: `domains/vms/storefront/tests/integration/test_buyer_selection_negotiation.py`
   and bare-metal negotiation tests. `unify-compute-delivery-path` gates using the same
@@ -505,7 +508,10 @@ added by this reconciliation.
 First use includes one mixed listing per domain with a hosted on-demand option carrying
 `delivery_deadline_seconds` and an Alkahest reserved option carrying no `lifecycle`,
 selected by a default buyer: the hosted option is checked for the term and the Alkahest
-option is shown as making no delivery promise, not refused for lacking one (D3).
+option is shown as making no delivery promise, not refused for lacking one (D3). What
+was proved for bare metal is narrower (owner record 01, R20): its buy command uses the
+hosted options, and its shared policy admits the Alkahest peer; the bare-metal buyer has
+no Alkahest purchase, an unowned gap in `openspec/changes/README.md`.
 
 - [x] 4.1 Update both buyer CLIs and policies: optional recurring horizon, required
   reserved duration and D7's display of class/price unit/setup/reserve/terms, including
@@ -544,55 +550,204 @@ option is shown as making no delivery promise, not refused for lacking one (D3).
 ### Mixed-selection and integration checkpoint (2026-11-07)
 
 - 4.1/4.2: both actual buyer commands select a mixed publication's reserved/on-demand/spot peers, with both bounds, omitted/2401-second horizons and default rights/disclosure. VM additionally selects Alkahest and shows no delivery promise. Bare metal's installed payment buy command has no Alkahest purchase stage; its shared rights/disclosure admits the option without inventing a stage. Proposed mechanism ports remain diagnostic only. Cached signed refusals and acceptance artifacts replay alongside publication.
-- Committed setup, exact entry points/results and limits: `docs/attachments/negotiate-open-ended-compute-terms/mixed-selection-checkpoint.md`. No new permanent acceptance tests. The kept bare-metal reserved buyer integration now explicitly requests its intended 3600 seconds; assertions unchanged.
+- Committed setup, exact entry points/results and limits: `docs/attachments/negotiate-open-ended-compute-terms/mixed-selection-checkpoint.md`. The kept bare-metal reserved buyer integration now explicitly requests its intended 3600 seconds; assertions unchanged.
 - 4.3: VM storefront application targets 140 passed; VM buyer 215 passed; bare-metal buyer 32 passed. Bare-metal targets initially found the missing-duration fixture; repaired payment-client target 16 passed, final combined rerun **185 passed**. Packaging, check-change and pinned strict OpenSpec validation pass.
 - E2E readiness with the required Podman provider fails before any service starts: VM included env file resolves outside the checkout; bare metal raises `RuntimeError: volume [domains/bare_metal/../../shared-env] not defined in top level`. The packet preserves exact commands/errors (host prefix redacted under public-content rules). Listing-shape and both reserved-deal scenarios are **unobservable/unrun**, not passed. The existing campaign Compose-assembly gap records the reproduction. No resources remain.
 - Rebased with preserved dependency merge onto `origin/dev` (`cf4db5b7f`). Conflict resolution keeps dev's workflow pre-commit delegation and this change's Agreement amount guard; the existing check-runner suite passes (18). Final packaging and both-domain focused tests/first use are re-run against fresh locked wheels after rebase. `make check-change CHANGE=negotiate-open-ended-compute-terms CHANGE_BASE=origin/dev`, comment hygiene, architecture-change, citations and pinned strict OpenSpec validation pass. No architecture exception belongs to this change.
-- **Restart at section 5's gate.** `scripts/change-workflow next negotiate-open-ended-compute-terms` currently returns `step: clone`, expecting `feat/negotiate-open-ended-compute-terms`, rather than recognizing the owner-requested `open-ended-terms` PR/worktree. The closeout skill requires the route to name closeout and pre-closeout review/triage (or a recorded owner direction) before starting; neither an archived change nor a passing review is claimed. Reconcile that workflow branch/route with the existing PR, without opening a new PR. Complete pre-closeout review/triage, then section 5 in order; leave promotion after review as requested, and mark #351 ready only at the intended boundary. All section-5 boxes remain unchecked rather than certifying closeout from implementation checks alone.
-- Task 4.3 is checked for the required attempt/disclosure, not E2E success. 5.8 must retain the explicit readiness/pipeline blocker in the packet. Keep installed recurring servicing disabled. PR #351 stays draft at this clean checkpoint.
+- The workflow route was reconciled when sections 1–4 were replayed onto dev as round 1, on the review branch the owner chose; the restart is section 5.
+- Task 4.3 is checked for the required attempt/disclosure, not E2E success. Its "unobservable" disposition is replaced (owner record 01, R23): the E2E evidence comes from validation, whose pipeline run 43118309706 at `6f86ac5e6` ran the VM and bare-metal lanes (validation 05), and an unrun lane at closeout is a blocker. Keep installed recurring servicing disabled.
 
 - [x] 4.4 Align the canonical VM and bare-metal reserved-payment purchase drivers
   with the absent effective pool deadline: explicitly opt into unprotected terms,
   assert no published delivery promise, and retain dispute/payment/delivery/release
   checks. Update the existing dispute-coverage fixture and run its focused suite,
-  packaging, comment hygiene and E2E qualification. The open pool-facts-port hole
-  and unresolved interim source remain in `design.md`; D3 is unchanged.
+  packaging, comment hygiene and E2E qualification. Reversed by the owner's round-1
+  review (record 01, R21, R22): the composition now supplies the deadline (D3), and
+  task 5.6 returns both drivers to protected purchases.
 
-## 5. Closeout
+### Round-1 triage (2026-11-12)
+
+- Reviews and evidence triaged together: review 04 (F1, F2), validation 05 (V1) and
+  the owner's record 01 (R1–R30, C1–C11). The decisions are `design.md` D1–D12; its
+  "Round-1 triage" section maps each R point to its decision and records Part B's
+  contradictions as amendments for the Goal 8 replan, not this change.
+- Small repairs outside the scope, each understood and small beside the change
+  (owner record 01, R24): VM confirmation scaling an already-total payment by duration
+  a second time; Alkahest's projector accepting explicit negotiated `EscrowProposal`
+  parameters; the bare-metal introduction fixture using a rateless current option;
+  `docs/development/RELEASING.md` listing `arkhai-kit-resource-pools-contracts` for
+  `arkhai-vms`; the VM architecture test permitting core carriers, where #350's
+  import-guard alignment was kept at the replay.
+- V1 fix (validation 05 V1, owner record 01 R4's adaptation, made in the triage):
+  `domains/vms/buyer/src/arkhai_vms_buyer/pricing_record.py` retains the listing's
+  `pricing` object, compares it whole with the signed publication body, requires the
+  lifted `rate_structure` to equal the body's `pricing.rate_structure`, and digests
+  that for the round pin. R4's permanent tests are task 5.2. Evidence: VM storefront
+  integration suite (integration, `make -C domains/vms/storefront test-integration`)
+  575 passed, including `test_buyer_selection_negotiation.py::…reaches_acceptance[True]`,
+  which failed at `6f86ac5e6`; VM buyer suite (unit,
+  `make -C domains/vms/buyer test`) 256 passed. `scripts/change-workflow run pre-commit`:
+  `after-functional-change` passed, exit 0; `pre-commit-functional` ran `make
+  check-packaging` (passed) and `make test`, which passed every suite through
+  `test-e2e-unit` and then failed once in `test-release-tooling` on
+  `scripts/tests/test_change_clone.py::test_the_bootstrap_failed`
+  (`ChildProcessError: No child processes` waiting on its spawned bootstrap), a
+  workflow-tooling flake unrelated to this diff: rerun, `make test-release-tooling`
+  passed 2868, and the targets the failure left unrun (`test-deployment-packaging`,
+  `test-frp-grant-admission`, `test-lane-double-controls`, `test-payments-lane-double`,
+  `test-mediation-lane-double`) all passed; `pre-commit` passed, exit 0 (index, tasks,
+  skills, strict OpenSpec validation, `make check-repository`). The fresh-context
+  compliance check found nothing blocking; its findings were fixed: completed tasks 1.3
+  and 3.2 keep their text with amendment notes, the shared clause source states that a
+  clause list still resolves whole, the ledger lines name record 01, and the proposal's
+  Impact and D12's destination heading were corrected. A second
+  `scripts/change-workflow run pre-commit` on the final state passed every hook:
+  `after-functional-change` exit 0, `pre-commit-functional` exit 0 (`make
+  check-packaging` and the whole `make test`, `test-release-tooling` 2868 passed), and
+  `pre-commit` exit 0. The commit's validation runs every local suite and the e2e-vm
+  lane.
+- Documentation corrections the record assigns to the triage (R30's cadence): the
+  index row and "pending maintainer review" banners (R1); the `listing_hash` and
+  bare-metal Alkahest gap rows (R5, R20); the vendoring premises (R13, R19); the
+  tracker sentence in the Compose gap row and the Goal 8 stack's fix-pass attachment,
+  whose provenance belongs in Git history (R23); the spec deltas (R25); the `design.md` decisions and `proposal.md`'s scope
+  and "Knowledge to promote" (R30).
+
+## 5. Round 2: the owner's corrections, permanent tests and review fixes
+
+Implemented as round 2 and reviewed as an implementation round. Each task names the
+decision it implements; `design.md` holds the rationale. Before changing an interface
+`spot-deals-through-arkhai-payments` consumes, compare with `origin/spot-deals`; its
+triage follows.
+
+- [ ] 5.1 **Remove the amount-read guard (R6):** delete
+  `scripts/check_agreement_amount_reads.py`, `scripts/agreement_amount_reads.json`,
+  their wiring in the `Makefile`, `scripts/check_change.py` and
+  `scripts/tests/test_check_change.py`, and `amount_read_probe.py`. Cover each money
+  consumer with a per-period Agreement instead (task 5.2).
+- [ ] 5.2 **Permanent tests (R2)** at the levels `docs/development/TESTING.md` assigns.
+  Unit: the accessor and each installed registration's projection; capacity-bound
+  validation and tier selection; `resolve_horizon` and the runway, including R9's
+  floor; the servicing declaration (R15, R19); `default_buyer_refusals`, disclosure and
+  `present_payment`; the deadline's resolution in both compositions and the payments
+  builder (R21); the unified clause resolver (R28); the configurable penalty multiple
+  (R11); every money consumer driven with a per-period Agreement — mandate derivation,
+  buyer caps and display, recovery, confirmation (R6). Integration, through each
+  storefront's typed client with real SQLite: mixed publication on one capacity
+  identity; the cached-option 409 with no writes; horizon refusal naming the minimum;
+  pin production and verification against a dev-shaped publication, including legacy
+  records failing closed (R4). Convert the change's probes that drive real seams into
+  these tests; the rest stay as closeout evidence. Task 1.2's probe becomes a test or is
+  dropped where a foundation suite covers it (R7).
+- [ ] 5.3 **The buyer's accepted-horizon check (review 04 F1, F2):** one pure function
+  in `kit/settlement-runtime/src/market_settlement_runtime/horizon.py`, sharing
+  `resolve_horizon`'s bound arithmetic, taking the Agreement's `start_utc` and
+  `duration_seconds`, the buyer's requested horizon and the selected listing's
+  `max_duration_seconds` and `available_until_utc`. It refuses a duration above either
+  bound at that start, holds an explicit horizon to the request and an omitted one to the
+  default bound (floored per R9). Both buyers call it before payment approval: the VM
+  accepted-listing seam (`settlement_composition.py`, `validate_buyer_acceptance`) and
+  bare metal's acceptance check (`cli.py`, `validate_acceptance`). In the VM buyer's
+  `verify_pricing_acceptance`, compare the provision duration with the Agreement's only
+  when the buyer requested one (F2). Test at each buyer's acceptance boundary: a signed
+  21-hour duration under a 20-hour bound, an end past `available_until_utc`, and a
+  production-client integration case where an omitted VM horizon reaches acceptance.
+- [ ] 5.4 **The horizon floor and the acceptance hook (R9):** when the buyer names no
+  horizon and the limiting bound is a fractional-second `available_until_utc`, floor the
+  default horizon to whole seconds instead of refusing, at acceptance
+  (`resolve_horizon`) and at publication (R10).
+- [ ] 5.5 **The servicing declaration (R15, R16, R19):** replace `RateServicing`'s
+  revision map, `published`/`proposed` status and `proposed_lane` with a table per
+  mechanism of qualified `settles_through` treatments and `setup`
+  (`[settlement.rate_servicing.<mechanism>]`). Publication, cached-acceptance refusal
+  before persistence and materialization refuse an option naming any undeclared
+  treatment on an entitlement or at the term end, or a setup charge without `setup`.
+  Admit only where the helper supports a treatment and the composition declares it.
+  Tests inject declarations; accepted-deal continuation never reads it.
+- [ ] 5.6 **The delivery deadline's source and the E2E drivers (R21, R22):** the
+  composition supplies the deadline — the pool port's value when it gives one, else the
+  payments clause's configured `delivery_deadline_seconds`
+  (`kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py`,
+  `arkhai_payments_option_builder`, reads it for compute options again). Both
+  reserved-payment drivers
+  (`e2e-tests/tests/e2e/roles/scenarios/vms/purchase_driver.py`,
+  `e2e-tests/tests/e2e/roles/scenarios/bare_metal/purchase_driver.py`) drop
+  `--allow-unprotected-terms` and assert that the published `delivery_deadline_seconds`
+  equals the configured value; `e2e-tests/tests/unit/test_dispute_coverage.py` returns
+  to its earlier fixtures.
+- [ ] 5.7 **Buyer waivers and durations (R14, R18):** in both buyers, one flag per
+  refusal — `--allow-no-delivery-deadline`, `--allow-no-penalty`,
+  `--allow-charged-preemption`, `--allow-charged-term-end` — with
+  `--allow-unprotected-terms` as shorthand; the foundation's
+  `allow_missing_delivery_deadline` is set only by the first or the shorthand; every
+  waiver used is recorded in run metadata and named in the disclosure. `bare-metal buy`
+  restores the 3600-second default for reserved options only, shown as the buyer's
+  default; VM's `market buy`/`negotiate` gain `--duration-seconds` beside
+  `--duration-hours`, both together an error naming the conflict.
+- [ ] 5.8 **The penalty setting (R11):** replace the hard-coded
+  `default_penalty_periods=24` in both compositions with
+  `[pricing].default_premature_stop_penalty_periods` (default 24), read by the shared
+  per-clause step; a penalty stated on a clause still wins.
+- [ ] 5.9 **Unify VM and bare-metal publication (R26, R27, R28):** extract the
+  per-clause step (deadline resolution, the recurring-or-once branch,
+  `derive_rate_preset`, diagnostics, the penalty setting) into one
+  `kit/settlement-runtime` function both compositions call, with the `compute` flag and
+  the deadline lookup as parameters; each `resolve_acceptance` hook keeps only its
+  domain's artifact rebuilding. In both domains no positive relative maximum means no
+  relative limit: retire `pool_lease_bound_missing` and `reserved_lease_bound_missing`,
+  and add the bare-metal upgrade step to `docs/operator-handbook.md`. Both domains
+  resolve clauses and listing terms through one shared resolver moved out of
+  `arkhai_vms_listings.pricing_resolution` into `kit/resource-pools-contracts`, with the
+  order D10 gives and the new pool-level `pricing.settlements` hint, replacing bare
+  metal's `pricing.bare_metal.settlements`.
+- [ ] 5.10 **The retained pricing record (R4):** confirm no other buyer read compares
+  a top-level `rate_structure` with a signed body (the triage's V1 fix covered
+  `pricing_record.py`), and cover the adaptation with task 5.2's pin tests.
+- [ ] 5.11 **Validate the round:** the affected unit and integration suites, then
+  validation's VM and bare-metal E2E lanes — the pipeline, or a locally deployed stack
+  where the owner waives the pipeline part (R23) — covering the protected purchases and
+  the VM listing-shape lane. `make check-packaging`, `make check-comment-hygiene`, and
+  `scripts/change-workflow run pre-commit negotiate-open-ended-compute-terms`.
+
+## 6. Closeout
 
 Documentation-only, in `openspec/README.md#plan-closeout-requirements` order;
 anything requiring code returns to implementation. These are future implementation
 closeout tasks, not authorization to promote unimplemented behavior now.
 
-- [ ] 5.1 **Comment hygiene:** run `make check-comment-hygiene`; confirm touched
+- [ ] 6.1 **Comment hygiene:** run `make check-comment-hygiene`; confirm touched
   comments describe current invariants, not change provenance.
-- [ ] 5.2 **Import placement:** confirm touched imports are module-level unless an
+- [ ] 6.2 **Import placement:** confirm touched imports are module-level unless an
   experimentally verified circularity or deliberate lazy-load reason is recorded.
-- [ ] 5.3 **Documentation compliance:** classify D1–D8, including the horizon as the Agreement's
+- [ ] 6.3 **Documentation compliance:** classify D1–D12, including the horizon as the Agreement's
   refinement; verify each permanent home and no duplicated codec/authority ownership.
-- [ ] 5.4 **Narrative compression:** reduce completed-task notes to behavior, material
-  evidence, residual work and permanent destinations; retain reasoning in design.
-- [ ] 5.5 **Roadmap currency:** update Goal 8 terms/display/bounds gap and current state
+  Confirm or move D10's shared clause resolver out of `kit/resource-pools-contracts`.
+- [ ] 6.4 **Narrative compression:** reduce completed-task notes to behavior, material
+  evidence, residual work and permanent destinations; retain reasoning in design. Fold
+  `design.md`'s dated implementation sections into D1–D12 and remove their narrative.
+- [ ] 6.5 **Roadmap currency:** update Goal 8 terms/display/bounds gap and current state
   in `docs/development/ROADMAP.md`; record the disposition in the promotion record.
-- [ ] 5.6 **Campaign index currency:** update this row/dependency graph in
+- [ ] 6.6 **Campaign index currency:** update this row/dependency graph in
   `openspec/changes/README.md` and run `make check-change-index`. The integrating
   owner coordinates the shared campaign; this reconciliation supplies row text only.
-- [ ] 5.7 **Packaging:** run `make check-packaging` and
+- [ ] 6.7 **Packaging:** run `make check-packaging` and
   `make check-architecture-change CHANGE=negotiate-open-ended-compute-terms`; resolve
   all failures/owned exceptions. Run agent-skill checks if instructions were touched.
-- [ ] 5.8 **End-to-end pipeline:** record the pipeline run/result and scenarios proving
+- [ ] 6.8 **End-to-end pipeline:** record the pipeline run/result and scenarios proving
   both domains' classes, bounds, display and the declaration/publication/acceptance gates.
   Materialization and startup/continuation pipeline evidence belongs to spot and convergence,
   respectively, not this change's closeout. Readiness/dependency
   failures are explicit blockers, never passing evidence or live-deployment claims.
-- [ ] 5.9 **Promotion:** after code review, promote D1–D8 to the destinations in the
-  design-promotion table, including publication/buyer architecture companions and
-  architecture vocabulary. Archive merges deltas into negotiation, publication,
+- [ ] 6.9 **Promotion:** after code review, promote D1–D12 to the destinations in the
+  design-promotion table, including publication/buyer architecture companions,
+  architecture vocabulary, D12's principles in `docs/development/RELEASING.md` and
+  `docs/development/ARCHITECTURE.md`, and the bare-metal upgrade step in
+  `docs/operator-handbook.md`. Archive merges deltas into negotiation, publication,
   resource-pool, settlement-configuration and buyer specs; record destinations and
   identity decision outcomes. No new capability-index entry is needed.
-- [ ] 5.10 **Documentation citations:** run
+- [ ] 6.10 **Documentation citations:** run
   `make check-doc-citations CHANGE=negotiate-open-ended-compute-terms`, resolve all
   matches, then `bunx @fission-ai/openspec@1.14.0 validate negotiate-open-ended-compute-terms --strict`.
-- [ ] 5.11 **Archival:** last, run
+- [ ] 6.11 **Archival:** last, run
   `bunx @fission-ai/openspec@1.14.0 archive negotiate-open-ended-compute-terms -y`
   and link the campaign row to the resulting archive.
