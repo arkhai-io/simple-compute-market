@@ -110,24 +110,55 @@ def effective_delivery_deadline(value: Any) -> int | None:
     return value
 
 
-def default_buyer_refusals(
+#: The terms a default buyer refuses an option for lacking, each named so a
+#: buyer can waive it alone and a seller's diagnostic names the same term.
+DefaultRefusal = Literal["no_delivery_deadline", "no_penalty", "charged_preemption", "charged_term_end"]
+
+DEFAULT_REFUSAL_REASONS: Mapping[DefaultRefusal, str] = {
+    "no_delivery_deadline": "no delivery deadline",
+    "no_penalty": "on-demand has no positive premature-stop penalty",
+    "charged_preemption": "payee stop does not return the final partial period",
+    "charged_term_end": "term end does not return the final partial period",
+}
+
+
+def default_buyer_refused_terms(
     lifecycle: LifecycleTerms | None, *, has_adapter: bool,
-) -> tuple[str, ...]:
-    """The conservative rights a default buyer needs, independent of schema."""
+) -> tuple[DefaultRefusal, ...]:
+    """The conservative rights a default buyer needs, independent of schema.
+
+    An option whose mechanism has no lifecycle adapter makes no promise to
+    refuse it for: it is shown as making none instead.
+    """
     if not has_adapter:
         return ()
-    reasons = []
+    terms: list[DefaultRefusal] = []
     if lifecycle is None or lifecycle.delivery_deadline_seconds is None:
-        reasons.append("no delivery deadline")
+        terms.append("no_delivery_deadline")
     early = lifecycle.early_termination if lifecycle else None
     if early is not None:
         if "payee" not in early.entitlements and early.penalty <= 0:
-            reasons.append("on-demand has no positive premature-stop penalty")
+            terms.append("no_penalty")
         if "payee" in early.entitlements and early.entitlements["payee"].settles_through != "last_boundary":
-            reasons.append("payee stop does not return the final partial period")
+            terms.append("charged_preemption")
         if early.settles_through != "last_boundary":
-            reasons.append("term end does not return the final partial period")
-    return tuple(f"a default buyer refuses this option: {reason}" for reason in reasons)
+            terms.append("charged_term_end")
+    return tuple(terms)
+
+
+def default_buyer_refusal(term: DefaultRefusal) -> str:
+    """The one wording seller diagnostics and buyer refusals share for a term."""
+    return f"a default buyer refuses this option: {DEFAULT_REFUSAL_REASONS[term]}"
+
+
+def default_buyer_refusals(
+    lifecycle: LifecycleTerms | None, *, has_adapter: bool,
+) -> tuple[str, ...]:
+    """Each term a default buyer refuses the option for, as a seller reads it."""
+    return tuple(
+        default_buyer_refusal(term)
+        for term in default_buyer_refused_terms(lifecycle, has_adapter=has_adapter)
+    )
 
 
 def derive_rate_preset(

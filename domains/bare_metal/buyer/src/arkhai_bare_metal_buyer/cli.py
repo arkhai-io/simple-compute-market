@@ -63,9 +63,12 @@ from .settlement_composition import (
     BUYER_STAGES, buyer_compute_disclosure, buyer_lifecycle_disclosure,
     buyer_settlement_registry, validate_authority,
 )
-from market_settlement_runtime.buyer_terms import option_quote
+from market_settlement_runtime.buyer_terms import (
+    UNPROTECTED_TERMS_FLAG, UNPROTECTED_TERMS_HELP, WAIVERS_BY_TERM, option_quote, term_waivers,
+    waiver_flags,
+)
 from market_settlement_runtime.horizon import check_accepted_horizon
-from .settlement_stages import purchase_quote, require_quoted_agreement
+from .settlement_stages import purchase_quote, require_quoted_agreement, requested_duration
 
 # The commands build their collaborators through the factories below: a Typer
 # command has no constructor to inject through, so these are the seam a test
@@ -428,16 +431,37 @@ def buy_bare_metal(
     option_id: str = typer.Option(...),
     ssh_public_key: str = typer.Option(..., "--ssh-public-key"),
     duration_seconds: int | None = typer.Option(
-        None, min=1, help="Required for reserved; optional finite horizon for recurring options.",
+        None, min=1,
+        help="Lease duration in seconds. A reserved option defaults to 3600; a recurring "
+        "option takes the seller's finite bound when omitted.",
+    ),
+    allow_no_delivery_deadline: bool = typer.Option(
+        False, WAIVERS_BY_TERM["no_delivery_deadline"].flag,
+        help=WAIVERS_BY_TERM["no_delivery_deadline"].help,
+    ),
+    allow_no_penalty: bool = typer.Option(
+        False, WAIVERS_BY_TERM["no_penalty"].flag, help=WAIVERS_BY_TERM["no_penalty"].help,
+    ),
+    allow_charged_preemption: bool = typer.Option(
+        False, WAIVERS_BY_TERM["charged_preemption"].flag,
+        help=WAIVERS_BY_TERM["charged_preemption"].help,
+    ),
+    allow_charged_term_end: bool = typer.Option(
+        False, WAIVERS_BY_TERM["charged_term_end"].flag,
+        help=WAIVERS_BY_TERM["charged_term_end"].help,
     ),
     allow_unprotected_terms: bool = typer.Option(
-        False, "--allow-unprotected-terms",
-        help="Explicitly waive default delivery-deadline, penalty and returned-period recommendations. Does not waive codec capabilities or authority acceptance.",
+        False, UNPROTECTED_TERMS_FLAG, help=UNPROTECTED_TERMS_HELP,
     ),
     payment_timeout_seconds: float = typer.Option(300.0, min=1.0, max=3600.0),
     config: str | None = typer.Option(None, "--config"),
 ) -> None:
     """Approve one exact Arkhai option and provision after its receipt verifies."""
+    waivers = term_waivers(
+        no_delivery_deadline=allow_no_delivery_deadline, no_penalty=allow_no_penalty,
+        charged_preemption=allow_charged_preemption, charged_term_end=allow_charged_term_end,
+        unprotected_terms=allow_unprotected_terms,
+    )
     buyer_config = load_bare_metal_buyer_config(config)
     if buyer_config.payer_account is None:
         raise typer.BadParameter("bare-metal buyer config requires payer_account")
@@ -478,13 +502,16 @@ def buy_bare_metal(
     try:
         stage = BUYER_STAGES[selected.settlement_schema]
         stage.validate_option(selected)
-        validate_authority(selected, buyer_config, allow_unprotected_terms=allow_unprotected_terms)
+        validate_authority(selected, buyer_config, waivers=waivers)
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(
             f"buy requires a supported priced settlement option: {exc}"
         ) from exc
     try:
         registry = buyer_settlement_registry()
+        duration_seconds, default_duration = requested_duration(
+            selected, duration_seconds, registry=registry,
+        )
         quote = option_quote(selected, duration_seconds, registry=registry)
         amount = purchase_quote(selected, duration_seconds, registry=registry)
     except ValueError as exc:
@@ -496,7 +523,8 @@ def buy_bare_metal(
     typer.echo(f"Selected option {selected.option_id}: price, horizon and lifecycle terms", err=True)
     for name, value in buyer_compute_disclosure(
         selected, listing=bounds, duration_seconds=duration_seconds,
-    ) + buyer_lifecycle_disclosure(selected):
+        default_duration=default_duration,
+    ) + buyer_lifecycle_disclosure(selected, waivers=waivers):
         typer.echo(f"  {name}: {value}", err=True)
     approval = payment_approval(buyer_config)
 
@@ -524,7 +552,8 @@ def buy_bare_metal(
         listing_id=listing_id,
         option_id=option_id,
         duration_seconds=duration_seconds,
-        allow_unprotected_compute_terms=allow_unprotected_terms,
+        default_duration=default_duration,
+        compute_term_waivers=list(waiver_flags(waivers)),
         seller_url=listing.storefront_url,
         storefront_url=listing.storefront_url,
         publisher_id=str(listing.publisher_id),
@@ -596,7 +625,7 @@ def buy_bare_metal(
     typer.echo("Accepted Agreement: price, horizon and lifecycle terms before approval", err=True)
     for name, value in buyer_compute_disclosure(
         outcome.agreement.settlement, agreement=outcome.agreement,
-    ) + buyer_lifecycle_disclosure(outcome.agreement.settlement):
+    ) + buyer_lifecycle_disclosure(outcome.agreement.settlement, waivers=waivers):
         typer.echo(f"  {name}: {value}", err=True)
     transaction, fulfillment = stage.settle(
         outcome=outcome,

@@ -13,7 +13,7 @@ from dataclasses import replace
 
 from market_core.schemas import SettlementOption, derive_settlement_option_id
 from market_deal_lifecycle.selection import AuthoritySelection
-from market_settlement_runtime.buyer_terms import BuyerTermsPolicy, lifecycle_disclosure
+from market_settlement_runtime.buyer_terms import ALL_TERM_WAIVERS, BuyerTermsPolicy, lifecycle_disclosure
 
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_arkhai_payments.fixtures import dispute_lifecycle
@@ -61,14 +61,15 @@ def main():
     args = ARGS
     # These are proposed fixture capabilities, not an installed hosted rate lane.
     def policy(*, waive=False, support=True):
+        waivers = ALL_TERM_WAIVERS if waive else frozenset()
         context = replace(
-            buyer_term_context(MECHANISM, allow_unprotected_terms=waive),
+            buyer_term_context(MECHANISM, waivers=waivers),
             has_stoppable_part=True,
             supported_partial_periods=frozenset({"charged", "returned"}) if support else frozenset({"charged"}),
         )
         return BuyerTermsPolicy(
             AuthoritySelection({"": (ENTRY,)}, contexts={MECHANISM: context}),
-            allow_unprotected_terms=waive,
+            waivers=waivers,
         )
 
     early = {

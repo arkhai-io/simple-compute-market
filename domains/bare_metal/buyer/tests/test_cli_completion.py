@@ -1,5 +1,7 @@
 """Both bare-metal negotiating commands complete an agreed negotiation, and ``buy``
-pays exactly the quote its option names for the requested duration.
+pays exactly the quote its option names for the requested duration: the buyer's,
+or for a reserved option its one-hour default. ``buy`` refuses what a default buyer
+refuses unless that term's own waiver is given, and records and names every waiver.
 
 A negotiation outcome carries the accepted terms decoded, or as the plain
 dictionary the seller echoed when the client was given no decoder; each
@@ -24,10 +26,11 @@ from arkhai_bare_metal_buyer import cli
 from arkhai_bare_metal_buyer.config import BareMetalBuyerConfig
 from market_arkhai_payments import ArkhaiPaymentsConfig
 from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
-from arkhai_bare_metal_buyer.settlement_stages import purchase_quote
+from arkhai_bare_metal_buyer.settlement_stages import purchase_quote, requested_duration
 from core_buyer.negotiation_client import NegotiationOutcome
 from market_core.schemas import (
     Agreement,
+    PriceBasis,
     RateValue,
     SettlementObligation,
     SettlementOption,
@@ -56,7 +59,9 @@ _ACCEPTED_TERMS = {
 }
 
 
-def _option(mechanism: str, asset: str, rates: list[dict[str, Any]]) -> SettlementOption:
+def _option(
+    mechanism: str, asset: str, rates: list[dict[str, Any]], *, deadline: bool = True,
+) -> SettlementOption:
     values = [RateValue.model_validate(rate) for rate in rates]
     body = {"price": {"asset": asset, "rates": values}, "settlement": {"schema": mechanism}}
     if mechanism == "arkhai.payments.v1":
@@ -64,7 +69,7 @@ def _option(mechanism: str, asset: str, rates: list[dict[str, Any]]) -> Settleme
         body["lifecycle"] = {"adjudication": {
             "version": 1, "dispute": {key: _DISPUTE[key] for key in ("interface", "origin", "account", "record_key", "params")},
             "dispute_window_seconds": 120, "case_hold_max_seconds": None,
-        }, "delivery_deadline_seconds": 60}
+        }, **({"delivery_deadline_seconds": 60} if deadline else {})}
     return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
 
@@ -189,7 +194,9 @@ def test_buy_records_dictionary_terms_when_the_deal_is_agreed(
     assert ended["transaction_id"] == "transaction-1"
 
 
-def _payment_outcome(*, amount: int, duration_seconds: int) -> NegotiationOutcome:
+def _payment_outcome(
+    *, amount: int, duration_seconds: int, option: SettlementOption = _PAYMENT,
+) -> NegotiationOutcome:
     """An agreed payment negotiation whose Agreement pays ``amount`` for ``duration_seconds``."""
 
     return NegotiationOutcome(
@@ -198,8 +205,8 @@ def _payment_outcome(*, amount: int, duration_seconds: int) -> NegotiationOutcom
         agreed_amount=amount,
         accepted_provision_terms=dict(_ACCEPTED_TERMS),
         settlement_selection=SettlementSelection(
-            option_id=_PAYMENT.option_id,
-            settlement={"schema": _PAYMENT.settlement_schema, "payer_account": "buyer-account"},
+            option_id=option.option_id,
+            settlement={"schema": option.settlement_schema, "payer_account": "buyer-account"},
         ),
         agreement=Agreement(
             negotiation_id="negotiation-1",
@@ -207,10 +214,10 @@ def _payment_outcome(*, amount: int, duration_seconds: int) -> NegotiationOutcom
             listing_hash="0" * 64,
             buyer=_BUYER.identity.model_dump(mode="json"),
             seller=_SELLER.identity.model_dump(mode="json"),
-            settlement=_PAYMENT,
+            settlement=option,
             settlement_params={"payer_account": "buyer-account"},
             amount=amount,
-            asset=_PAYMENT.price_asset,
+            asset=option.price_asset,
             duration_seconds=duration_seconds,
             start_utc="2030-01-01T00:00:00Z",
             accepted_at="2030-01-01T00:00:00Z",
@@ -218,10 +225,11 @@ def _payment_outcome(*, amount: int, duration_seconds: int) -> NegotiationOutcom
     )
 
 
-def _buy(duration_seconds: int, option: SettlementOption = _PAYMENT) -> Any:
+def _buy(duration_seconds: int, option: SettlementOption = _PAYMENT, *flags: str) -> Any:
     return CliRunner().invoke(cli.bare_metal_app, [
         "buy", "listing-1", "--option-id", option.option_id,
         "--ssh-public-key", "ssh-ed25519 AAAA", "--duration-seconds", str(duration_seconds),
+        *flags,
     ])
 
 
@@ -331,6 +339,139 @@ def test_an_option_charging_another_field_is_refused(rates: list[dict[str, Any]]
     option = _option("arkhai.payments.v1", "USD/6", rates)
     with pytest.raises(ValueError, match="only an amount rate"):
         purchase_quote(option, 1800)
+
+
+def _run_started(tmp_path: Path) -> dict[str, Any]:
+    return next(event for event in _events(tmp_path) if event["event"] == "run_started")
+
+
+def test_a_reserved_buy_naming_no_duration_requests_the_buyer_s_default_hour(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen = _compose(
+        monkeypatch, tmp_path, _PAYMENT, _payment_outcome(amount=1_000_000, duration_seconds=3600),
+        accept_inside=True,
+    )
+
+    result = CliRunner().invoke(cli.bare_metal_app, [
+        "buy", "listing-1", "--option-id", _PAYMENT.option_id, "--ssh-public-key", "ssh-ed25519 AAAA",
+    ])
+
+    assert result.exit_code == 0, result.output
+    (negotiation,) = seen["negotiations"]
+    assert negotiation["provision_terms"].payload["duration_seconds"] == 3600
+    assert (negotiation["initial_price"], negotiation["max_price"]) == (1_000_000, 1_000_000)
+    assert "Requested horizon: 3600 seconds, this buyer's default for a reserved option" in result.output
+    started = _run_started(tmp_path)
+    assert (started["duration_seconds"], started["default_duration"]) == (3600, True)
+    assert _run_ended(tmp_path)["status"] == "agreed"
+
+
+def test_a_named_duration_is_not_shown_as_the_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _compose(monkeypatch, tmp_path, _PAYMENT, _payment_outcome(amount=500_000, duration_seconds=1800))
+
+    result = _buy(1800)
+
+    assert result.exit_code == 0, result.output
+    assert "Requested horizon: 1800 seconds (not rounded to periods)" in result.output
+    assert "buyer's default" not in result.output
+    assert _run_started(tmp_path)["default_duration"] is False
+
+
+@pytest.mark.parametrize(
+    ("unit", "named", "requested"),
+    [
+        ("total", None, (3600, True)),
+        ("total", 600, (600, False)),
+        ("per_period", None, (None, False)),
+        ("per_period", 600, (600, False)),
+    ],
+    ids=["reserved-default", "reserved-named", "recurring-omitted", "recurring-named"],
+)
+def test_the_reserved_default_never_applies_to_a_recurring_option(
+    unit: str, named: int | None, requested: tuple[int | None, bool],
+) -> None:
+    # The installed payments projection bills only once, so a per-period basis
+    # stands for a mechanism that bills a recurring option.
+    basis = {"unit": unit, **({"period": "PT15M", "period_seconds": 900} if unit == "per_period" else {})}
+    registry = SimpleNamespace(project_billing=lambda _option: PriceBasis.model_validate(basis))
+    assert requested_duration(_PAYMENT, named, registry=registry) == requested
+
+
+_NO_DEADLINE = _option(
+    "arkhai.payments.v1", "USD/6", [{"field": "amount", "value": "1000000", "per": "hour"}],
+    deadline=False,
+)
+
+
+@pytest.mark.parametrize("flags", [[], ["--allow-no-penalty"], ["--allow-charged-term-end"]],
+                         ids=["no-waiver", "another-term's-waiver", "a-third-term's-waiver"])
+def test_an_option_without_a_deadline_is_refused_unless_its_waiver_is_given(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, flags: list[str],
+) -> None:
+    seen = _compose(
+        monkeypatch, tmp_path, _NO_DEADLINE,
+        _payment_outcome(amount=1_000_000, duration_seconds=3600, option=_NO_DEADLINE),
+    )
+
+    result = _buy(3600, _NO_DEADLINE, *flags)
+
+    assert result.exit_code == 2
+    # The usage error's panel wraps its message across bordered lines.
+    plain = " ".join(result.output.replace("│", " ").split())
+    assert "a default buyer refuses this option: no delivery deadline" in plain
+    assert seen["negotiations"] == []
+
+
+@pytest.mark.parametrize(
+    ("flags", "recorded"),
+    [
+        (["--allow-no-delivery-deadline"], ["--allow-no-delivery-deadline"]),
+        (["--allow-no-delivery-deadline", "--allow-no-penalty"],
+         ["--allow-no-delivery-deadline", "--allow-no-penalty"]),
+        (["--allow-unprotected-terms"], [
+            "--allow-no-delivery-deadline", "--allow-no-penalty",
+            "--allow-charged-preemption", "--allow-charged-term-end",
+        ]),
+    ],
+    ids=["its-own-waiver", "with-another", "the-shorthand"],
+)
+def test_each_waiver_used_is_recorded_and_named_before_approval(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, flags: list[str], recorded: list[str],
+) -> None:
+    seen = _compose(
+        monkeypatch, tmp_path, _NO_DEADLINE,
+        _payment_outcome(amount=1_000_000, duration_seconds=3600, option=_NO_DEADLINE),
+        accept_inside=True,
+    )
+
+    result = _buy(3600, _NO_DEADLINE, *flags)
+
+    assert result.exit_code == 0, result.output
+    assert len(seen["negotiations"]) == 1
+    assert _run_started(tmp_path)["compute_term_waivers"] == recorded
+    # Both disclosures before approval, the selected option's and the accepted
+    # Agreement's, mark the waived refusal and name every waiver in force.
+    selected, accepted = result.output.split("Accepted Agreement")
+    for disclosure in (selected, accepted):
+        assert ("Default buyer policy: a default buyer refuses this option: no delivery deadline; "
+                "waived by --allow-no-delivery-deadline") in disclosure
+        (named,) = [line for line in disclosure.splitlines() if "Waivers in force:" in line]
+        assert [flag for flag in recorded if flag in named] == recorded
+
+
+def test_a_run_without_waivers_records_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _compose(monkeypatch, tmp_path, _PAYMENT, _payment_outcome(amount=1_000_000, duration_seconds=3600))
+
+    result = _buy(3600)
+
+    assert result.exit_code == 0, result.output
+    assert _run_started(tmp_path)["compute_term_waivers"] == []
+    assert "Waivers in force" not in result.output
 
 
 def test_request_introduction_records_dictionary_terms_when_the_deal_is_agreed(

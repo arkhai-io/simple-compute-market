@@ -29,11 +29,14 @@ from core_buyer.deal_helpers import (
 )
 
 from arkhai_vms_negotiation.amounts import has_rate_structure
+from market_settlement_runtime.buyer_terms import waivers_from_flags
+from market_settlement_runtime.rate_publication import DefaultRefusal
 
 from .common import chain_address_book
 from .evidence import evidence_store
 from .lifecycle import run_sync
 from .pricing_record import verify_recovered_pricing
+from .run_log import read_run
 
 if TYPE_CHECKING:
     from market_config.config_loader import ChainConfig
@@ -92,6 +95,18 @@ def _publisher_trust_refresh(signer):
             ) from exc
 
     return refresh
+
+
+def recorded_waivers(run_id: str, *, signer) -> frozenset[DefaultRefusal]:
+    """The default refusals a run was started under, as its run log records them.
+
+    A resumed or recovered run discloses the waivers its selection was made
+    under, not flags given to the later command. A log that records none, as one
+    written before waivers were recorded, has none.
+    """
+    started = next((event for event in read_run(run_id, signer=signer)
+                    if event.get("event") == "run_started"), {})
+    return waivers_from_flags(started.get("compute_term_waivers") or ())
 
 
 def load_deal_context(run_id: str, *, signer):

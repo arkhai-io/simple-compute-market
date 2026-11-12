@@ -504,6 +504,25 @@ the buyer's default in the disclosure, never for recurring ones. VM's `market
 buy`/`negotiate` gain `--duration-seconds` beside `--duration-hours`; giving both is an
 error naming the conflict (owner record 01, R18).
 
+Each default refusal is a named term (`no_delivery_deadline`, `no_penalty`,
+`charged_preemption`, `charged_term_end`) in `kit/settlement-runtime`'s publication
+module, so the seller's diagnostic and the buyer's refusal read one wording per term;
+`buyer_terms` holds the four waivers with their flags and help, the shorthand's
+expansion and the rule that only the deadline's waiver sets the foundation's
+allowance, and the three buyer commands declare the flags from that one table. The
+run metadata records the waivers in force by flag (`compute_term_waivers`), the
+shorthand recorded as all four. Both disclosures before approval — the selected
+option's, before negotiation, and the accepted Agreement's — name each waiver in force
+and mark the refusal it waives, so an accepted option is never shown as refused
+without its waiver beside it. A resumed or recovered VM run (`market buy --from`,
+`market negotiate --from`, `market settle --from`) reads the waivers from its run log's
+`compute_term_waivers`, the ones its selection was made under, and refuses waiver
+flags given to the resuming command, as it refuses a new shape or settlement clause.
+Whether a reserved option takes bare metal's default is the mechanism's billing
+projection (`unit` of `total`), never a payment field the buyer reads; the run records
+`default_duration`. VM's conflict and positivity checks run before any identity or
+registry read, on fresh and resumed runs alike.
+
 ### D12. Compatibility is owed to releases; sibling domains behave alike
 
 Two principles the owner's round-1 review settled (record 01, R29), promoted with this
@@ -1060,6 +1079,6 @@ Destinations are planned, not claims of implemented behavior.
 | D7, D8 display, the mechanism's presenter, the default buyer's policy and seller-policy distinction | `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/buyer-orchestration/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |
 | D9 recurring publication and the shared per-clause step | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/settlement-configuration/spec.md` |
 | D10 the unified clause source | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md`; `docs/development/ARCHITECTURE.md` (what `kit/resource-pools-contracts` holds, under "Kit areas", once closeout confirms or moves the resolver); `docs/development/DEPLOYMENT_AND_CONFIG.md` (bare metal's `[pricing.defaults.gpu.<model>].settlements` and the pool's `pricing` hint tiers); `docs/operator-handbook.md` (bare-metal upgrade step, written in implementation) |
-| D11 per-term waivers and duration flags | `openspec/specs/buyer-orchestration/spec.md` |
+| D11 per-term waivers and duration flags | `openspec/specs/buyer-orchestration/spec.md` (the waivers, the recorded waivers a resumed run uses, the duration flags, bare metal's reserved default); `openspec/specs/buyer-orchestration/architecture.md` (one waiver table for every buyer command, why a resumed run reads its run log rather than its flags, the billing projection deciding bare metal's reserved default) |
 | D12 compatibility owed to releases; sibling domains alike | `docs/development/RELEASING.md` ("Versioning policy"); `docs/development/ARCHITECTURE.md` ("Family kits") |
 | Goal/dependency currency | `docs/development/ROADMAP.md`; `openspec/changes/README.md` at integration/closeout |

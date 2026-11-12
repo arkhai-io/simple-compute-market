@@ -19,6 +19,7 @@ from .deal_helpers import (
     load_deal_context,
     make_deal_publisher_trust_resolver,
     open_run_log,
+    recorded_waivers,
 )
 from .settlement_composition import (
     buyer_stage,
@@ -43,13 +44,14 @@ def run_settle_from_log(
     try:
         deal = load_deal_context(run_id, signer=signer)
         stage = buyer_stage(accepted_settlement_mechanism(deal))
+        waivers = recorded_waivers(run_id, signer=signer)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     log = open_run_log(run_id, signer=signer, profile_id=identity.profile_id)
     if getattr(deal, "agreement_bytes", None) is not None:
         disclose_accepted_agreement(Agreement.model_validate_json(
             base64.b64decode(deal.agreement_bytes, validate=True),
-        ))
+        ), waivers=waivers)
     log.event("settle_resumed", resumed_from=run_id)
     return stage.resume(BuyerResumeContext(
         run_id=run_id, deal=deal, log=log, signer=signer,

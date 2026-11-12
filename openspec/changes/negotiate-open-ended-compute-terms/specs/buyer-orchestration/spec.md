@@ -99,11 +99,18 @@ exactly its term, with `--allow-unprotected-terms` as shorthand for all four. Th
 missing-deadline allowance MUST be set only by the deadline waiver or the shorthand. Every
 waiver used, singly or through the shorthand, MUST be recorded in run metadata and named in
 the pre-approval disclosure. Codec, capability and authority checks MUST NOT be waivable.
+A resumed or recovered run MUST use the waivers its run metadata recorded, and MUST refuse
+waiver flags given to the resuming command.
 
 #### Scenario: One term is waived
 
 - **WHEN** a buyer passes `--allow-no-penalty` and selects an on-demand option with no penalty and a charged term end
 - **THEN** the penalty refusal is waived, the charged term end is still refused by name, and the run's metadata and disclosure name the one waiver
+
+#### Scenario: A resumed run keeps its waivers
+
+- **WHEN** a VM run started with `--allow-no-delivery-deadline` is resumed with `market settle --from`, and another resume passes `--allow-no-penalty` with `market buy --from`
+- **THEN** the first resume's accepted disclosure names `--allow-no-delivery-deadline` from the run's metadata, and the second is refused before any negotiation, naming that waivers apply only to fresh runs
 
 ### Requirement: The mechanism supplies the numbers a buyer is shown
 

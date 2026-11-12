@@ -14,8 +14,12 @@ from core_buyer.registry_config import registry_descriptors, resolve_indexer_url
 from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext
-from market_settlement_runtime.buyer_terms import BuyerTermsPolicy, compute_disclosure, lifecycle_disclosure
+from market_settlement_runtime.buyer_terms import (
+    BuyerTermsPolicy, allows_missing_delivery_deadline, compute_disclosure, lifecycle_disclosure,
+    waiver_flags,
+)
 from market_settlement_runtime.horizon import check_accepted_horizon
+from market_settlement_runtime.rate_publication import DefaultRefusal
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
@@ -93,26 +97,33 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
                          if match.get(key) is not None}}
 
 
-def buyer_term_context(mechanism: str, *, allow_unprotected_terms: bool = False) -> TermContext:
+def buyer_term_context(
+    mechanism: str, *, waivers: frozenset[DefaultRefusal] = frozenset(),
+) -> TermContext:
     return TermContext(
         mechanism=mechanism, has_adapter=mechanism == "arkhai.payments.v1", compute=True,
         dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
-        allow_missing_delivery_deadline=allow_unprotected_terms,
+        allow_missing_delivery_deadline=allows_missing_delivery_deadline(waivers),
     )
 
 
-def buyer_lifecycle_disclosure(option):
-    return lifecycle_disclosure(option, context=buyer_term_context(option.settlement_schema))
+def buyer_lifecycle_disclosure(option, *, waivers: frozenset[DefaultRefusal] = frozenset()):
+    return lifecycle_disclosure(
+        option, context=buyer_term_context(option.settlement_schema), waivers=waivers,
+    )
 
 
 def buyer_compute_disclosure(option, **kwargs):
     return compute_disclosure(option, registry=buyer_settlement_registry(), **kwargs)
 
 
-def disclose_accepted_agreement(agreement) -> None:
+def disclose_accepted_agreement(
+    agreement, *, waivers: frozenset[DefaultRefusal] = frozenset(),
+) -> None:
+    """Show the accepted terms before approval, naming the run's waivers."""
     emit_lifecycle_disclosure(
         buyer_compute_disclosure(agreement.settlement, agreement=agreement)
-        + buyer_lifecycle_disclosure(agreement.settlement),
+        + buyer_lifecycle_disclosure(agreement.settlement, waivers=waivers),
         title="Accepted Agreement: price, horizon and lifecycle terms before approval",
     )
 
@@ -120,6 +131,7 @@ def disclose_accepted_agreement(agreement) -> None:
 def validate_buyer_acceptance(
     outcome, *, listing: Mapping[str, Any] | None = None,
     requested_duration_seconds: int | None = None,
+    waivers: frozenset[DefaultRefusal] = frozenset(),
 ) -> None:
     """Check a seller's acceptance before its Agreement is observed or approved.
 
@@ -127,6 +139,7 @@ def validate_buyer_acceptance(
     bounds at the Agreement's start and to the buyer's request, or to the default
     bound when the buyer named none: the seller's own resolver protects only
     against the seller's mistakes, not a counterparty signing other terms.
+    ``waivers`` are the run's, named in the accepted disclosure.
     """
     if outcome.agreement is None or outcome.agreement.settlement is None:
         raise RuntimeError("accepted work has no Agreement settlement option")
@@ -142,15 +155,17 @@ def validate_buyer_acceptance(
         except ValueError as exc:
             raise RuntimeError(f"accepted horizon refused: {exc}") from exc
     buyer_stage(outcome.agreement.settlement.settlement_schema).validate_acceptance(outcome)
-    disclose_accepted_agreement(outcome.agreement)
+    disclose_accepted_agreement(outcome.agreement, waivers=waivers)
 
 
-def listing_acceptance_validator(requested_duration_seconds: int | None):
+def listing_acceptance_validator(
+    requested_duration_seconds: int | None, *, waivers: frozenset[DefaultRefusal] = frozenset(),
+):
     """Bind :func:`validate_buyer_acceptance` to each candidate listing."""
     def for_match(match: Mapping[str, Any]):
         return partial(
             validate_buyer_acceptance, listing=match,
-            requested_duration_seconds=requested_duration_seconds,
+            requested_duration_seconds=requested_duration_seconds, waivers=waivers,
         )
     return for_match
 
@@ -225,9 +240,12 @@ def resolve_buyer_settlement_policy(
     identity: ResolvedBuyerIdentity | None = None,
     action_capable: bool = True,
     registry_urls: str | None = None,
-    allow_unprotected_terms: bool = False,
+    waivers: frozenset[DefaultRefusal] = frozenset(),
 ) -> BuyerSettlementPolicy:
-    """Strictly resolve the common buyer ``[Settlement]`` hierarchy."""
+    """Strictly resolve the common buyer ``[Settlement]`` hierarchy.
+
+    ``waivers`` are the default refusals this run waives, each by its own flag.
+    """
 
     document = dict(load_user_config() if config is None else config)
     if "settlement" in document:
@@ -261,13 +279,11 @@ def resolve_buyer_settlement_policy(
         registry=registry,
         stages=buyer_settlement_stages(),
         option_preference=BuyerTermsPolicy(AuthoritySelection(authorities, contexts={
-            "arkhai.payments.v1": buyer_term_context(
-                "arkhai.payments.v1", allow_unprotected_terms=allow_unprotected_terms,
-            ),
-        }, report=logging.getLogger(__name__).info), allow_unprotected_terms=allow_unprotected_terms),
+            "arkhai.payments.v1": buyer_term_context("arkhai.payments.v1", waivers=waivers),
+        }, report=logging.getLogger(__name__).info), waivers=waivers),
         public_context={
             "dispute_authorities_by_registry": authorities,
-            "allow_unprotected_compute_terms": allow_unprotected_terms,
+            "compute_term_waivers": list(waiver_flags(waivers)),
         },
     )
 

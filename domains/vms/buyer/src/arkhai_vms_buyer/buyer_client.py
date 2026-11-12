@@ -36,6 +36,7 @@ from market_alkahest.schemas import EscrowProposal
 from market_core.schemas import SettlementPlan, SettlementSelection
 from market_policy.negotiation_middleware import NegotiationMiddleware
 from market_identity import Identity, Signer, TrustedIdentitySet
+from market_settlement_runtime.rate_publication import DefaultRefusal
 
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 
@@ -132,6 +133,7 @@ def negotiate_with_seller(
     | None = validate_buyer_acceptance,
     capture: EnvelopeCapture | None = None,
     listing: dict[str, Any] | None = None,
+    waivers: frozenset[DefaultRefusal] = frozenset(),
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -144,7 +146,8 @@ def negotiate_with_seller(
 
     ``validate_acceptance`` defaults to the purchase table's entry guard. An
     introduction has no purchase entry and passes None; its command checks
-    the accepted plan itself.
+    the accepted plan itself. ``waivers`` are the run's default-refusal waivers,
+    which that guard names in the accepted disclosure.
     """
     duration_seconds: Optional[float] = None
     if resume is None:
@@ -175,17 +178,23 @@ def negotiate_with_seller(
         )
         if proposal_for_amount is not None else None
     )
-    if validate_acceptance is validate_buyer_acceptance and listing is not None:
-        # A purchase holds the signed horizon to the authenticated listing's
-        # bounds and to what the buyer opened with; a resumed run opened with the
-        # seller's round-zero echo of the buyer's terms.
-        opening = opening_terms.model_dump(mode="json") if hasattr(opening_terms, "model_dump") else opening_terms
-        validate_acceptance = partial(
-            validate_buyer_acceptance, listing=listing,
-            requested_duration_seconds=(
-                normalize_vm_provision_terms(opening).duration_seconds if opening is not None else None
-            ),
-        )
+    if validate_acceptance is validate_buyer_acceptance:
+        if listing is not None:
+            # A purchase holds the signed horizon to the authenticated listing's
+            # bounds and to what the buyer opened with; a resumed run opened with
+            # the seller's round-zero echo of the buyer's terms.
+            opening = opening_terms.model_dump(mode="json") if hasattr(opening_terms, "model_dump") else opening_terms
+            validate_acceptance = partial(
+                validate_buyer_acceptance, listing=listing,
+                requested_duration_seconds=(
+                    normalize_vm_provision_terms(opening).duration_seconds if opening is not None else None
+                ),
+                waivers=waivers,
+            )
+        else:
+            # Without a listing there are no bounds to hold the horizon to, but
+            # the accepted disclosure still names the run's waivers.
+            validate_acceptance = partial(validate_buyer_acceptance, waivers=waivers)
     core_outcome = _core_negotiate_with_seller(
         seller_url=seller_url,
         principal=principal,

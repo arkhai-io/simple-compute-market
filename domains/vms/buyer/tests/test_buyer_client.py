@@ -323,6 +323,33 @@ def test_round_0_seller_accepts_immediately(mock_urlopen):
     assert outcome.negotiation_id == "neg-1"
 
 
+@pytest.mark.parametrize("listing", [None, {"listing_id": "seller-1", "max_duration_seconds": 7200}],
+                         ids=["without-a-listing", "with-a-listing"])
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_the_accepted_disclosure_names_the_run_s_waivers(mock_urlopen, listing, capsys):
+    mock_urlopen.side_effect = _urlopen_fake(
+        [{"negotiation_id": "neg-1", "action": "accept", "proposal": _seller_proposal(50)}]
+    )
+    outcome = negotiate_with_seller(
+        seller_url="http://seller:8001",
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+        resolve_seller_principals=seller_principals,
+        listing_id="seller-1",
+        initial_price=50,
+        max_price=100,
+        provision_terms=_provision(3600),
+        escrow_proposal=_escrow_proposal(),
+        listing=listing,
+        waivers=frozenset({"no_penalty"}),
+    )
+
+    assert outcome.status == "agreed"
+    shown = capsys.readouterr().err
+    assert "Accepted Agreement" in shown
+    assert "Waivers in force: --allow-no-penalty" in shown
+
+
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
 def test_round_0_example_selection_is_pinned_and_returned(mock_urlopen):
     seen_body = {}

@@ -16,8 +16,8 @@ The owner's record of round 1 (`reviews/01-implementation-owner.md`) stood in fo
 the design review this change never had; its decisions are in `design.md` D1–D12, and
 the code they need, with review 04's F1 and F2, is round 2: first planned as section 5,
 then split at the owner's direction into sections 5–12, one session each but 5 and 6
-together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–9
-are done; implementation resumes at section 10. Verification levels follow `docs/development/TESTING.md`;
+together, reviewed as one round (`design.md`, "Implementation cadence"). Sections 5–10
+are done; implementation resumes at section 11. Verification levels follow `docs/development/TESTING.md`;
 every behaviour this change adds gets permanent tests at the level it assigns (owner
 record 01, R2).
 
@@ -1464,28 +1464,134 @@ pool-override models, and `docs/operator-handbook.md`.
 Delivers D11 (R14, R18) in both buyers. Touches `kit/settlement-runtime`
 (`buyer_terms.py`), the VM buyer (`buy_cli.py`, `negotiate_cli.py`,
 `settlement_composition.py`) and the bare-metal buyer (`cli.py`,
-`settlement_composition.py`).
+`settlement_composition.py`). As built, also `rate_publication.py` (the named refusal
+terms), the VM buyer's `cli_helpers.py` (the duration flags), and `buy_orchestrator.py`,
+`buyer_client.py`, `deal_helpers.py` and `settle_cli.py` (the waivers reaching the
+accepted disclosure on fresh, resumed and recovered runs), and bare metal's
+`settlement_stages.py` (the reserved default).
 
-- [ ] 10.1 **Per-term waivers (D11; R14), from 5.7:** in both buyers, one flag per
+- [x] 10.1 **Per-term waivers (D11; R14), from 5.7:** in both buyers, one flag per
   default refusal — `--allow-no-delivery-deadline`, `--allow-no-penalty`,
   `--allow-charged-preemption`, `--allow-charged-term-end` — with
   `--allow-unprotected-terms` as shorthand for all four, composed in `BuyerTermsPolicy`;
   the foundation's `allow_missing_delivery_deadline` is set only by the first or the
   shorthand; every waiver used is recorded in run metadata and named in the
   pre-approval disclosure. Codec, capability and authority checks are never waived.
-- [ ] 10.2 **Durations (D11; R18), from 5.7:** `bare-metal buy` restores the
+  Done (2026-11-12). `rate_publication.py`: the refusals are named terms
+  (`DefaultRefusal`: `no_delivery_deadline`, `no_penalty`, `charged_preemption`,
+  `charged_term_end`) from `default_buyer_refused_terms`, worded once by
+  `default_buyer_refusal`; `default_buyer_refusals`, which publication diagnoses with,
+  keeps its strings. `buyer_terms.py`: `TERM_WAIVERS` (term, flag, help),
+  `WAIVERS_BY_TERM`, `UNPROTECTED_TERMS_FLAG`/`_HELP`, `term_waivers(...)` (the shorthand
+  expanding to all four), `waiver_flags` and `allows_missing_delivery_deadline`;
+  `BuyerTermsPolicy(authority, waivers=...)` refuses only unwaived terms and refuses an
+  unknown waiver; `lifecycle_disclosure(..., waivers=)` marks a waived refusal "waived
+  by <flag>" and adds a "Waivers in force" row, in the no-adapter branch too. Both buyer
+  compositions' `buyer_term_context(mechanism, waivers=)` set the foundation's
+  `allow_missing_delivery_deadline` through `allows_missing_delivery_deadline`;
+  `validate_authority` (bare metal) and `resolve_buyer_settlement_policy` (VM) take
+  `waivers`. `market buy`, `market negotiate` and `bare-metal buy` declare the four flags
+  and the shorthand from the kit's table; each run's `run_started` records
+  `compute_term_waivers` (the flags in force, in the table's order), replacing round 1's
+  `allow_unprotected_compute_terms` boolean, which nothing read and no release shipped;
+  VM's `public_context` carries the same list. Both disclosures before approval name
+  them, in both domains: the selected option's, and the accepted Agreement's (bare
+  metal's `buy`; VM's `validate_buyer_acceptance`/`disclose_accepted_agreement`, given
+  the waivers by `listing_acceptance_validator`, `make_legacy_negotiate_hook` and
+  `buyer_client.negotiate_with_seller`). A resumed or recovered VM run reads them from
+  its run log (`deal_helpers.recorded_waivers`, over the kit's `waivers_from_flags`,
+  which refuses an unknown recorded flag): `buy --from`, `negotiate --from` and `settle
+  --from`, and `buy`/`negotiate --from` refuse waiver flags. Corrected after the
+  compliance check: the accepted disclosure first named no waiver, so the last block
+  before approval showed a waived refusal unmarked, and `market settle --from` named
+  none at all. The change's `buyer_terms_probe.py` follows the new signatures (not run
+  here).
+- [x] 10.2 **Durations (D11; R18), from 5.7:** `bare-metal buy` restores the
   3600-second default for reserved options only, shown as the buyer's default in the
   disclosure, never for recurring ones; VM's `market buy`/`negotiate` gain
   `--duration-seconds` beside `--duration-hours`, both together an error naming the
   conflict.
-- [ ] 10.3 **Permanent tests (R2):** unit, in `kit/settlement-runtime/tests/unit`: each
+  Done (2026-11-12). Bare metal: `settlement_stages.py`
+  `RESERVED_DEFAULT_DURATION_SECONDS = 3600` and `requested_duration(option, duration,
+  registry=)`, which takes the buyer's duration, else 3600 where the mechanism's
+  `project_billing` says `total`, else none; `buy` calls it before quoting, the
+  disclosure's "Requested horizon" row says "this buyer's default for a reserved
+  option" (`compute_disclosure(..., default_duration=)`), and `run_started` records
+  `default_duration`. v0.3.0's default was the command option's own `3600`, not
+  `BareMetalBuyerConfig.default_duration_seconds`, which nothing reads (the section's
+  handoff records it for the triage).
+  VM: `cli_helpers.requested_duration_seconds` resolves `--duration-seconds` or
+  `--duration-hours`, refusing both together ("Pass --duration-seconds or
+  --duration-hours, not both.") and a nonpositive value, as the first step of `buy` and
+  `negotiate`, before identity, registry or resume handling; the two commands' later
+  hours-only checks are removed.
+- [x] 10.3 **Permanent tests (R2):** unit, in `kit/settlement-runtime/tests/unit`: each
   flag waiving exactly its refusal, the shorthand waiving all four, the foundation flag
   set only by the deadline waiver or the shorthand. Each buyer's CLI suites
   (`domains/vms/buyer/tests/test_buy_resume_cli.py`, `test_explain_cli.py`;
   `domains/bare_metal/buyer/tests`): the flags parsed, recorded in run metadata and named
   in the disclosure; the bare-metal reserved default shown as the buyer's and absent for
   a recurring option; both VM duration flags refused together.
-- [ ] 10.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit and
+  Done (2026-11-12). Unit, `kit/settlement-runtime/tests/unit/test_buyer_terms.py` (new;
+  `BuyerTermsPolicy` over a real `AuthoritySelection` and the codec, with one option per
+  refusal): each refused alone by a default buyer; each single flag waiving exactly its
+  term and no other; the shorthand all four; a waiver not bypassing an unsupported
+  treatment or a missing authority; the foundation allowance set only by the deadline
+  waiver or the shorthand, and the codec still refusing a missing deadline when the
+  policy's waiver is given without it; an unknown waiver refused; `waiver_flags`' order;
+  the disclosure marking a waived refusal, naming waivers an option does not need and
+  in the no-adapter branch, and naming none without waivers; a recorded run's flags
+  reading back to its waivers, and an unknown recorded flag refused. Bare metal, the `buy`
+  command through `CliRunner` (`tests/test_cli_completion.py`'s `_compose`, unit level):
+  it replaces the four factories and also, as the file's existing cases do, the imported
+  `load_bare_metal_buyer_config` and `negotiate_with_seller` and the `BUYER_STAGES` table
+  with a stub stage, so the payment stage's own option and acceptance checks do not run
+  — the module-name replacement `TESTING.md`'s command-module convention records as a
+  gap (`docs/development/ROADMAP.md`); the payments registration, the rights policy, the
+  codec and the run log are real. A reserved
+  buy naming no duration negotiates 3600 seconds and its quote, shows the buyer's
+  default and records it; a named duration is not shown as the default;
+  `requested_duration` per billing basis (a stub `project_billing`: the installed
+  payments projection bills once only, so a per-period basis stands for a mechanism
+  billing a recurring option — the CLI itself cannot reach a recurring option today);
+  an option without a deadline refused by name with no waiver or another term's,
+  bought with its own waiver, with another, or the shorthand, each run's
+  `compute_term_waivers` recorded and both the selected-option and the accepted
+  disclosure marking the waived refusal and naming every flag; a run without waivers
+  records none.
+  `tests/test_buyer_composition.py`: `buyer_term_context`'s allowance only under the
+  deadline waiver. VM, `tests/test_buy_resume_cli.py` (the CLI through `CliRunner`,
+  with the registry query, `run_buy`, the negotiate hook factory and the user
+  configuration replaced by module name, as the file's existing cases do — the same
+  recorded gap, which the new cases extend rather than close): both duration flags
+  refused, exit 2, before any identity read, for `buy` and `negotiate`; a nonpositive
+  `--duration-seconds` refused for both; `buy --from` and `negotiate --from` refusing a
+  waiver flag; a fresh `buy` with `--duration-seconds 5400` and two waivers, or the
+  shorthand, records the duration and the waivers and names each in the selected-option
+  disclosure (an Alkahest option, so through the no-adapter branch); the existing
+  fresh-buy case now also asserts no waivers recorded or named.
+  `tests/test_term_waivers.py` (new, unit, nothing replaced): the accepted disclosure
+  marking a waived refusal over a real payments option and Agreement, and naming none
+  without waivers; `listing_acceptance_validator` binding the waivers;
+  `recorded_waivers` reading a real run log (two, none, not recorded) and refusing an
+  unknown flag. `tests/test_vm_settlement_helpers.py`:
+  `resolve_buyer_settlement_policy(waivers=)` hands the policy its waivers, the payments
+  context its allowance only under the deadline waiver, and `public_context` the flags.
+  Departs from the plan's line: nothing was added to `test_explain_cli.py`, which tests
+  `market listing`; `market buy --explain` stops before the disclosure, and selection
+  under waivers is the kit's tests'. No VM test drives a payments option through `market
+  buy`'s selected-option disclosure (its fresh-buy world is Alkahest), `market
+  negotiate`'s fresh waivers past the duration check, the resumes' hand-off of their
+  recorded waivers (`buy --from`'s `resumed_waivers`, `negotiate --from`'s reassignment),
+  `make_legacy_negotiate_hook(waivers=)`, or `market settle --from`'s call of
+  `recorded_waivers`; the commands share the kit's table, `term_waivers`, the
+  composition, `recorded_waivers` and `listing_acceptance_validator` the tests above
+  cover. `tests/test_buyer_client.py`
+  `test_the_accepted_disclosure_names_the_run_s_waivers` (unit, the file's patched
+  seller transport) covers `negotiate_with_seller(waivers=)` reaching the accepted
+  disclosure with and without a listing — the second added after the compliance
+  re-check found the waivers bound only when a listing was given.
+- [x] 10.4 **Verify:** `make dist`, then `make -C kit/settlement-runtime test` (unit and
   library integration),
   `make -C domains/vms/buyer test` (unit), `make -C domains/bare_metal/buyer test`
   (unit), `make -C core/buyer test` (unit), `make check-comment-hygiene` and
@@ -1493,6 +1599,55 @@ Delivers D11 (R14, R18) in both buyers. Touches `kit/settlement-runtime`
   End-to-end: the reserved purchases buy without waivers since section 8; none passes a
   per-term flag, and none is owed, since a flag's effect is the buyer's own policy,
   which the unit suites prove.
+  Done (2026-11-12), after `make dist`: `make -C kit/settlement-runtime test` (unit and
+  library integration) 283 passed; `make -C domains/vms/buyer test` (unit) 286 passed;
+  `make -C domains/bare_metal/buyer test` (unit) 53 passed; `make -C core/buyer test`
+  (unit) 170 passed (run before the compliance fixes, which touched no core code);
+  `make check-comment-hygiene` passed; `scripts/change-workflow run pre-commit
+  negotiate-open-ended-compute-terms` passed every hook (see the handoff below).
+  End-to-end confirmed as stated: no marker in `e2e-tests/` passes a waiver flag, or
+  `--duration-seconds` to `market buy`/`negotiate` (the VM scenarios use
+  `--duration-hours`); the bare-metal purchase driver names its duration with
+  `--duration-seconds`, so the reserved default is not exercised deployed. The bare-metal and VM purchase
+  scenarios run the commands whose flags changed, so validation's e2e-vm and
+  e2e-bare-metal lanes show the commands still parse and buy without waivers. No
+  `Owed by validation:` evidence: no CI workflow a push alone produces bears on this
+  section.
+
+### Section 10 verification and handoff (2026-11-12)
+
+- The fresh-context compliance check found one medium finding: the accepted-Agreement
+  disclosure, the last block before approval, named no waiver, and `market settle
+  --from` named none at all. Fixed in both domains (10.1's correction). Its five low
+  findings were also fixed: D11's promotion row gains `buyer-orchestration/architecture.md`;
+  the 10.3 note now lists what `_compose` and the VM CLI tests replace; the kit test
+  asserts each refusal's own wording; the test name; and this handoff records the
+  unread configuration key (below). Its re-check found five more low findings, all
+  fixed: the waivers bound only when a listing was given (now always, with a
+  `buyer_client` case for both); the resume rules missing from the buyer-orchestration
+  delta (a requirement sentence and the scenario "A resumed run keeps its waivers");
+  the 10.3 note not listing every untested resume hand-off; a test name; and the
+  section's file list. Declined: nothing.
+- For the round's triage: `BareMetalBuyerConfig.default_duration_seconds`
+  (`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/config.py`, default 3600) is
+  validated and tested but read by nothing, in `marketplace-v0.3.0` as now: v0.3.0's
+  3600-second default was `buy`'s option default, and this section restores it as
+  `RESERVED_DEFAULT_DURATION_SECONDS`. A buyer who sets the key to 7200 still gets
+  3600. Honouring it (the reserved default reading the key) or retiring it is a choice
+  under D12, since a release shipped the key; this section left it, as R18 named the
+  3600 default only.
+- Versions: `kit/settlement-runtime` changed public API again (`BuyerTermsPolicy`'s
+  `waivers` replacing `allow_unprotected_terms`, and the new names in `buyer_terms` and
+  `rate_publication`); it is 0.8.0, unreleased (section 9's handoff), so it needs no
+  bump. The VM and bare-metal buyers changed their commands; their versions are
+  unbumped against `dev` here, as in the earlier sections, for the triage's version
+  pass.
+- For the next sections: 11.2 owns `default_buyer_refusals`' and `lifecycle_disclosure`'s
+  remaining unit tests — `test_buyer_terms.py` now covers the waiver rows of
+  `lifecycle_disclosure` and the policy, not the other disclosure rows or
+  `present_payment`. `compute_disclosure(default_duration=)` is tested only through bare
+  metal's `buy`. The change's `buyer_terms_probe.py` follows the new signatures but was
+  not run; 12.3 decides its conversion.
 
 ## 11. Permanent unit tests of round 1's behaviour
 
@@ -1608,7 +1763,7 @@ anything requiring code returns to implementation. Former numbers 6.1–6.11 are
   authority description; D12 under "Family kits"), `docs/development/RELEASING.md`
   ("Versioning policy", D12), `openspec/specs/storefront-publication/architecture.md`
   (D5, D6, D9, D10), `openspec/specs/buyer-orchestration/architecture.md` (D5's buyer-check
-  seams, D7, D8) and
+  seams, D7, D8, D11) and
   the bare-metal upgrade step in `docs/operator-handbook.md` (D5, D10; written in 9.2,
   confirmed here), the seller
   root's `rate_servicing` tables (D6), the storefront-wide

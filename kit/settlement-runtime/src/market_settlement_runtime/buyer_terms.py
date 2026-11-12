@@ -1,13 +1,14 @@
 """Buyer-local recommendations and codec-derived lifecycle disclosure.
 
-Recommendations may be waived explicitly; codec capabilities and authority
-acceptance remain mandatory. No payment records, stops or refunds are inferred
-from a peer's promise.
+Each recommendation may be waived explicitly and alone; codec capabilities and
+authority acceptance remain mandatory. No payment records, stops or refunds are
+inferred from a peer's promise.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
@@ -15,27 +16,112 @@ from market_core.schemas import AgreedPrice, Agreement, SettlementOption
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import PARTIAL_PERIOD, TermContext, decode_terms
 
-from .rate_publication import default_buyer_refusals
+from .rate_publication import (
+    DEFAULT_REFUSAL_REASONS, DefaultRefusal, default_buyer_refusal, default_buyer_refused_terms,
+)
 from .configuration import SettlementConfigurationRegistry
+
+
+@dataclass(frozen=True)
+class TermWaiver:
+    """A buyer's command-line waiver of exactly one default refusal."""
+
+    term: DefaultRefusal
+    flag: str
+    help: str
+
+
+#: One waiver per default refusal, in the order buyers show them. Every buyer
+#: command offers all four under these names, so a run's waivers read alike in
+#: each domain's run metadata and disclosure.
+TERM_WAIVERS: tuple[TermWaiver, ...] = (
+    TermWaiver("no_delivery_deadline", "--allow-no-delivery-deadline",
+               "Accept a compute option that promises no delivery deadline."),
+    TermWaiver("no_penalty", "--allow-no-penalty",
+               "Accept an on-demand option with no positive premature-stop penalty."),
+    TermWaiver("charged_preemption", "--allow-charged-preemption",
+               "Accept a seller stop that charges its started period instead of returning it."),
+    TermWaiver("charged_term_end", "--allow-charged-term-end",
+               "Accept a term end that charges its started period instead of returning it."),
+)
+UNPROTECTED_TERMS_FLAG = "--allow-unprotected-terms"
+UNPROTECTED_TERMS_HELP = (
+    "Shorthand for all four --allow-no-delivery-deadline, --allow-no-penalty, "
+    "--allow-charged-preemption and --allow-charged-term-end. No waiver bypasses "
+    "codec, payment capability or dispute authority checks."
+)
+
+WAIVERS_BY_TERM: Mapping[DefaultRefusal, TermWaiver] = {waiver.term: waiver for waiver in TERM_WAIVERS}
+ALL_TERM_WAIVERS: frozenset[DefaultRefusal] = frozenset(WAIVERS_BY_TERM)
+
+
+def term_waivers(
+    *, no_delivery_deadline: bool = False, no_penalty: bool = False,
+    charged_preemption: bool = False, charged_term_end: bool = False,
+    unprotected_terms: bool = False,
+) -> frozenset[DefaultRefusal]:
+    """The default refusals a run waives: those named, or all four by the shorthand."""
+    if unprotected_terms:
+        return ALL_TERM_WAIVERS
+    named: dict[DefaultRefusal, bool] = {
+        "no_delivery_deadline": no_delivery_deadline, "no_penalty": no_penalty,
+        "charged_preemption": charged_preemption, "charged_term_end": charged_term_end,
+    }
+    return frozenset(term for term, waived in named.items() if waived)
+
+
+def waiver_flags(waivers: Collection[DefaultRefusal]) -> tuple[str, ...]:
+    """Each waiver in force by its flag, in the order buyers show them."""
+    return tuple(waiver.flag for waiver in TERM_WAIVERS if waiver.term in waivers)
+
+
+def waivers_from_flags(flags: Iterable[str]) -> frozenset[DefaultRefusal]:
+    """The waivers a run recorded by flag, as a resumed or recovered run reads them.
+
+    An unknown flag is refused rather than dropped, so a recovered run never
+    shows fewer waivers than it was bought under.
+    """
+    flags = tuple(flags)
+    by_flag = {waiver.flag: waiver.term for waiver in TERM_WAIVERS}
+    unknown = sorted(set(flags) - set(by_flag))
+    if unknown:
+        raise ValueError(f"unknown recorded waivers: {unknown}")
+    return frozenset(by_flag[flag] for flag in flags)
+
+
+def allows_missing_delivery_deadline(waivers: Collection[DefaultRefusal]) -> bool:
+    """Whether the foundation's codec may admit a compute option without a deadline.
+
+    The codec refuses one for a buyer on its own, so the policy's waiver would
+    be moot without this; only the deadline's waiver, singly or through the
+    shorthand, sets it, so waiving another term never admits a missing deadline.
+    """
+    return "no_delivery_deadline" in waivers
 
 
 class BuyerTermsPolicy:
     """Compose the same recommendations sellers diagnose with authority ranking."""
 
     def __init__(
-        self, authority: AuthoritySelection, *, allow_unprotected_terms: bool = False,
+        self, authority: AuthoritySelection, *, waivers: Collection[DefaultRefusal] = frozenset(),
     ) -> None:
+        unknown = set(waivers) - ALL_TERM_WAIVERS
+        if unknown:
+            raise ValueError(f"unknown default-refusal waivers: {sorted(unknown)}")
         self.authority = authority
-        self.allow_unprotected_terms = allow_unprotected_terms
+        self.waivers = frozenset(waivers)
 
     def rank(self, option: SettlementOption, *, registry_url: str = "") -> int:
         context = self.authority.contexts.get(option.settlement_schema)
-        refusals = default_buyer_refusals(
-            decode_terms(option.lifecycle),
-            has_adapter=context.has_adapter if context is not None else False,
-        )
-        if refusals and not self.allow_unprotected_terms:
-            raise ValueError("; ".join(refusals))
+        refused = [
+            term for term in default_buyer_refused_terms(
+                decode_terms(option.lifecycle),
+                has_adapter=context.has_adapter if context is not None else False,
+            )
+            if term not in self.waivers
+        ]
+        if refused:
+            raise ValueError("; ".join(default_buyer_refusal(term) for term in refused))
         return self.authority.rank(
             option.settlement_schema, option.lifecycle, registry_url=registry_url,
         )
@@ -58,12 +144,14 @@ def option_quote(
 def compute_disclosure(
     option: SettlementOption, *, registry: SettlementConfigurationRegistry,
     listing: Mapping[str, Any] | None = None, duration_seconds: int | None = None,
-    agreement: Agreement | None = None,
+    agreement: Agreement | None = None, default_duration: bool = False,
 ) -> tuple[tuple[str, str], ...]:
     """Show selected asks or exact accepted money, never reprice accepted work.
 
     The supplied listing is used only for pre-negotiation bounds. Accepted end
     and horizon come from the retained Agreement, even if offers have changed.
+    ``default_duration`` says the requested horizon is the buyer command's own
+    default rather than one the buyer named, so the buyer sees it was chosen.
     """
     if agreement is None and not option.price_rates:
         return (("Price", "No scalar amount price; see the selected mechanism's terms."),)
@@ -103,8 +191,13 @@ def compute_disclosure(
         rows.extend((
             ("Maximum duration", f"{relative} seconds" if relative is not None else "Not stated"),
             ("Available until", str(absolute) if absolute is not None else "Not stated"),
-            ("Requested horizon", f"{duration_seconds} seconds (not rounded to periods)" if duration_seconds is not None
-             else "Omitted; seller resolves the finite bound at the agreed start; review the accepted horizon before approval."),
+            ("Requested horizon", (
+                "Omitted; seller resolves the finite bound at the agreed start; review the accepted horizon before approval."
+                if duration_seconds is None else
+                f"{duration_seconds} seconds, this buyer's default for a reserved option; "
+                "name a duration to request another (not rounded to periods)"
+                if default_duration else f"{duration_seconds} seconds (not rounded to periods)"
+            )),
         ))
     else:
         start = datetime.fromisoformat(agreement.start_utc.replace("Z", "+00:00"))
@@ -117,11 +210,22 @@ def compute_disclosure(
     return tuple(rows)
 
 
-def lifecycle_disclosure(option: SettlementOption, *, context: TermContext) -> tuple[tuple[str, str], ...]:
+def _waiver_rows(waivers: Collection[DefaultRefusal]) -> list[tuple[str, str]]:
+    return [("Waivers in force", "; ".join(
+        f"{waiver.flag} ({DEFAULT_REFUSAL_REASONS[waiver.term]})"
+        for waiver in TERM_WAIVERS if waiver.term in waivers
+    ) + ". This run accepts these terms a default buyer refuses.")] if waivers else []
+
+
+def lifecycle_disclosure(
+    option: SettlementOption, *, context: TermContext,
+    waivers: Collection[DefaultRefusal] = frozenset(),
+) -> tuple[tuple[str, str], ...]:
     """Describe only the selected codec values, not a stored product label.
 
     The caller validates authority acceptance and installed capabilities before
     selecting. Disclosure does not turn unaccepted terms into selectable ones.
+    Every waiver the run carries is named, and a refusal it waives says so.
     """
     if context.mechanism != option.settlement_schema:
         raise ValueError("disclosure context names another mechanism")
@@ -132,6 +236,7 @@ def lifecycle_disclosure(option: SettlementOption, *, context: TermContext) -> t
         return (
             ("Delivery promise", "None: this option has no lifecycle adapter and makes no delivery promise."),
             ("Adjudication", "No lifecycle adjudication is promised by this option."),
+            *_waiver_rows(waivers),
         )
     if terms is None:
         raise ValueError("a lifecycle adapter requires adjudication")
@@ -197,5 +302,11 @@ def lifecycle_disclosure(option: SettlementOption, *, context: TermContext) -> t
         ("Evidence retention", "Keep signed bytes through at least the dispute window after the latest "
          "delivery end, last payout or case close. Guarantees depend on authority records and retained evidence."),
     ))
-    rows.extend(("Default buyer policy", reason) for reason in default_buyer_refusals(terms, has_adapter=True))
+    rows.extend(
+        ("Default buyer policy", default_buyer_refusal(term) + (
+            f"; waived by {WAIVERS_BY_TERM[term].flag}" if term in waivers else ""
+        ))
+        for term in default_buyer_refused_terms(terms, has_adapter=True)
+    )
+    rows.extend(_waiver_rows(waivers))
     return tuple(rows)

@@ -43,6 +43,7 @@ from core_buyer.orchestration import (
 )
 from core_buyer.policy_surface import extract_seller_min_price  # noqa: F401
 from market_alkahest.schemas import EscrowProposal
+from market_settlement_runtime.rate_publication import DefaultRefusal
 
 from .arkhai_payments import AgreedTerms  # noqa: F401 — public VM summary
 from .escrow_client import BuildEscrowTermsFn, CreateEscrowFn, encode_escrow_proposal
@@ -68,8 +69,13 @@ def make_legacy_negotiate_hook(
     chain: Optional[list[Any]],
     revalidate_settlement: RevalidateSettlementFn | None = None,
     capture: EnvelopeCapture | None = None,
+    waivers: frozenset[DefaultRefusal] = frozenset(),
 ) -> NegotiateFn:
-    """Build the compute-instantiated negotiate hook over the core stage."""
+    """Build the compute-instantiated negotiate hook over the core stage.
+
+    ``waivers`` are the run's default-refusal waivers, named again in each
+    accepted Agreement's disclosure before approval.
+    """
 
     def codec_for(match: dict[str, Any], proposal: Any):
         # The same ceiling the core stage negotiates this match under.
@@ -91,7 +97,7 @@ def make_legacy_negotiate_hook(
         revalidate_settlement=revalidate_settlement,
         # Each match's own validator: the horizon is checked against the listing
         # the buyer selected, beside the stage's acceptance check.
-        acceptance_validator=listing_acceptance_validator(provision.duration_seconds),
+        acceptance_validator=listing_acceptance_validator(provision.duration_seconds, waivers=waivers),
         advertised_plan_validator=advertised_plan_validator,
         accepted_listing_record=accepted_listing_record,
         amount_codec_factory=codec_for,
