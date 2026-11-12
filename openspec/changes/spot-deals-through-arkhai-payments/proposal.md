@@ -178,18 +178,24 @@ domain or the persistence-owning servicing kit.
 
 ### Knowledge to promote
 
-- Rate-part derivation, holds, authorities, arithmetic and re-anchoring:
-  `openspec/specs/settlement-servicing/spec.md` and its architecture companion.
-- Servicing declarations and identity-overlap configuration:
-  `openspec/specs/settlement-configuration/spec.md` and
-  `docs/development/DEPLOYMENT_AND_CONFIG.md`.
-- Preset helpers, setup pricing and their terms-owned publication integration:
+- D1: preset helpers, setup pricing and their terms-owned publication integration →
   `openspec/specs/storefront-publication/spec.md` and its architecture companion.
-- The seller notice command, pending-stop observation and the rate buyer end: the
-  foundation-created `deal-lifecycle` `spec.md` (see its
+- D2: rate-part derivation, holds, authorities and the buyer's exact check →
+  `openspec/specs/settlement-servicing/spec.md` and its architecture companion.
+- D3: external payment contract context and guarantee limits →
+  `openspec/specs/deal-lifecycle/architecture.md`.
+- D4: pure rate authorization, envelope consumption and operation identity →
+  `openspec/specs/settlement-servicing/spec.md` and its architecture companion.
+- D5: authority-priced `partialPeriod`, period arithmetic and the journaled
+  exceptional-end filing → `openspec/specs/settlement-servicing/spec.md` and its
+  architecture companion.
+- D6: the seller notice command, pending-stop observation and, from D6a, the rate
+  buyer end → the foundation-created `deal-lifecycle` `spec.md` (see its
   [delta](../archive/2026-11-03-agreed-evidence-and-early-termination/specs/deal-lifecycle/spec.md))
   and its architecture companion.
-- External payment contract context and guarantee limits:
-  `openspec/specs/deal-lifecycle/architecture.md`.
-- Vectors and evidence classification: `openspec/specs/test-compatibility/spec.md`
-  and its architecture companion.
+- D7: servicing declarations, identity-overlap configuration and re-anchoring →
+  `openspec/specs/settlement-configuration/spec.md`,
+  `openspec/specs/settlement-servicing/spec.md` and
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+- D8: vectors and evidence classification →
+  `openspec/specs/test-compatibility/spec.md` and its architecture companion.
