@@ -49,7 +49,9 @@ How to read it:
 - **Documents classified at document level.** `BUILD_AND_PACKAGING.md`,
   `VALIDATION_RUNBOOK.md`, and `RELEASING.md` open with a document-level row giving
   the document's tags (D10); every heading then has a row, most of them `stays`, and
-  a section holding general method has a row of its own for it.
+  a section holding general method has a row of its own for it. The runbook is
+  outside the guidance set (48 F1): its document row gives it no frontmatter and no
+  layer-table row, and its rows' tags record only what each passage concerns.
 - **Section 2's further tables.** After the sections: the restatements of guidance
   in the skills and `openspec/config.yaml` (D11, D23), the proposed vocabulary (D18),
   and the draft classification of the checks (D13), and the files each shared layer
@@ -101,11 +103,13 @@ How to read it:
   reworded as a framework for when an exception is expected, since shared guidance
   that other repositories change makes exceptions expected; its wording is reviewed
   in section 4's triage. The hand-laid change-workflow graph is a temporary
-  exception in `AGENTS.md`'s table until its generator exists. `docs/agents/domain.md`
+  exception until its generator exists, its row in a new guidance file beside the
+  capability, `openspec/specs/change-workflow/diagrams.md` (CW-x4ex, 48 F2). `docs/agents/domain.md`
   is removed once its rows move. D10 is amended: a procedure stays whole, but a
   section of one stating policy rather than a step is classified by D1, so
   `RELEASING.md`'s versioning policy moves to engineering. The validation runbook is
-  not guidance and nothing moves out of it.
+  not guidance and nothing moves out of it; it carries no frontmatter and no
+  layer-table row (48 F1).
 - **31 O1f — Workflow or repository until the extraction decides.** Scripts and
   checks this repository provides stay repository material; migrating them is the
   extraction's work, and workflow text names each by role. Every adopting repository
@@ -152,7 +156,7 @@ How to read it:
 | `## Python comments and docstrings`, `make check-comment-hygiene` and its file types (`.py`, `.toml`, `.yml`, `.yaml`); `docs/` exempt because naming the change that owns a gap is the roadmap's job | repository | repository, comments, checks | `AGENTS.md`, this repository's own rules; its row in "What each check enforces" (D13) | names this repository's check, file types, and roadmap | |
 | `## Python comments and docstrings`, the Prefer example (fulfillment's dependency boundary, lines 98–100) | repository | repository, comments | `AGENTS.md`, as local illustration of the comment rule | names a capability; `comments.md` takes a neutral example (D7, task 4.2); it illustrates a shared rule rather than guiding work on fulfillment, so it stays with the rule's repository instance (31 O1d) | |
 | `## Diagrams`, the principle (a diagram is held to code only when generated deterministically from a structured source; otherwise it is documentation maintained by review) | engineering | engineering, diagrams | `engineering/diagrams.md` | holds anywhere | |
-| `## Diagrams`, the change workflow's graph, drawn by hand from its graph table and compared with it until a deterministic layout reads as well | repository | repository, diagrams | `AGENTS.md`, `## Exceptions to shared guidance` | **Exception (overrides):** the change workflow's graph is laid out by hand and compared with its graph table, overriding `diagrams.md`'s rule that a diagram held to its source is generated from it, because a generated layout came out far larger than the hand-laid SVG; temporary, until the gap `openspec/specs/change-workflow/README.md`'s "Current limits" records (the graph's diagram laid out by hand) closes (31 O1e). Table: `AGENTS.md`, since the capability's directory holds no guidance file to carry one; the engineering rule itself is unchanged | |
+| `## Diagrams`, the change workflow's graph, drawn by hand from its graph table and compared with it until a deterministic layout reads as well | repository | repository, diagrams | `openspec/specs/change-workflow/diagrams.md` (new, `tags: [repository, diagrams]`), `## Exceptions to shared guidance` (section 6, task 6.2) | **Exception (overrides):** the change workflow's graph is laid out by hand and compared with its graph table, overriding `diagrams.md`'s rule that a diagram held to its source is generated from it, because a generated layout came out far larger than the hand-laid SVG; temporary, until the gap `openspec/specs/change-workflow/README.md`'s "Current limits" records (the graph's diagram laid out by hand) closes (31 O1e). Table: beside the one capability it applies to (CW-x4ex), in a guidance file created for it, which every step reading `change-workflow` reads (CW-r8cg; 48 F2); the engineering rule itself is unchanged | |
 | `## Diagrams`, "Keep a diagram's `.drawio` source beside its `.svg` export, and embed the export in the document that explains it", the neutral rule (keep a diagram's editable source beside its export; embed the export in the document that explains it) | engineering | engineering, diagrams | `engineering/diagrams.md` | holds anywhere; draw.io is this repository's selection, not guidance on using draw.io (31 O1c) | |
 | `## Diagrams`, draw.io as the diagram tool | repository | repository, diagrams | `AGENTS.md`, this repository's own rules | "this repository uses draw.io" is a selection; no `drawio` tag exists until a file holds guidance on using it (31 O1c) | |
 | `## Package and dependency discipline`, first bullet (follow the layer, scope, and kind rules of `ARCHITECTURE.md#package-and-dependency-layers` and the subsystem's specification) | repository | repository, dependencies | stays as `AGENTS.md`'s pointer to `ARCHITECTURE.md`, "Package and dependency layers" | names this repository's architecture | Duplicate (31 O1b): its second sentence — edges pointing permitted ways answer direction and knowledge, not ownership, which review answers — restates `ARCHITECTURE.md`'s three questions, which move to `engineering/dependencies.md` (31 O1a); the two forms are reviewed in section 4's triage where they differ |
@@ -539,7 +543,7 @@ How to read it:
 
 | Source | Layer | Tags | Destination | Reason | Ambiguous |
 |---|---|---|---|---|---|
-| The document as a whole | repository | repository, testing, deployment | stays whole, with frontmatter (section 5) | a procedure (D10): the local pass, a clean host, the cloud proof, real hosts, relays, and qualification; the runbook is not guidance, and nothing moves out of it (31 O1e) | |
+| The document as a whole | repository | repository, testing, deployment | stays whole, outside the guidance set: no frontmatter, no layer-table row (48 F1) | a procedure (D10): the local pass, a clean host, the cloud proof, real hosts, relays, and qualification; the runbook is not guidance, and nothing moves out of it (31 O1e) | |
 | `# Full Validation Runbook` | repository | repository, testing, deployment | stays | procedure (D10) | |
 | `## Notes` | repository | repository, testing | stays | procedure (D10) | |
 | `## Local Mock Pass Criteria` | repository | repository, testing | stays | procedure (D10) | |

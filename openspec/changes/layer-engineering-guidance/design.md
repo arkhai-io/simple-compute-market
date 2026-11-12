@@ -143,7 +143,8 @@ Destinations are provisional file names; round 1 confirms them.
 | `DEPLOYMENT_AND_CONFIG.md` "Marketplace identity configuration" | repository, configuration | `openspec/specs/marketplace-identity/configuration.md` | Ambiguous: overlap with the operator handbook |
 | `DEPLOYMENT_AND_CONFIG.md` "Kubernetes: ConfigMap and Secret mounting" | repository, deployment | stays | cross-system |
 | `docs/agents/change-workflow.md` | workflow; its step table's validation parts and links to `market-change-workflow` split out | `docs/agents/change-workflow.md`; `openspec/specs/market-change-workflow/README.md` | the direction rule |
-| `VALIDATION_RUNBOOK.md`, `RELEASING.md` | repository, document-level tags | stay whole (D10), but for `RELEASING.md`'s versioning policy, which moves to engineering (D10 as amended) | procedures |
+| `RELEASING.md` | repository, document-level tags | stays whole (D10), but for its versioning policy, which moves to engineering (D10 as amended) | a procedure |
+| `VALIDATION_RUNBOOK.md` | outside the guidance set: no frontmatter, no layer-table row | stays whole (D10, 48 F1) | a procedure, not guidance |
 | `openspec/config.yaml` | outside the guidance set; its restatements as rows | stays (D23) | |
 | `docs/prompts/` | outside the guidance set | untouched (D12) | |
 
@@ -295,11 +296,12 @@ D1's test and adjacency apply to every section. `DEPLOYMENT_AND_CONFIG.md`'s
 general method moves to engineering with neutral examples, its capability sections
 beside their capabilities, and its cross-system deployment stays; overlap with the
 operator handbook is flagged in the inventory rather than settled by the agent.
-`VALIDATION_RUNBOOK.md` and `RELEASING.md` are procedures and stay whole, with
-document-level tags; a section of one that states policy rather than a step is
-classified by D1 like any other, so `RELEASING.md`'s versioning policy moves to
-engineering, its repository reasons staying and citing it (amended at round 1's
-triage, 31 O1e). The runbook is not guidance and moves nothing.
+`RELEASING.md` is a procedure and stays whole, with document-level tags; a section
+of a procedure that states policy rather than a step is classified by D1 like any
+other, so `RELEASING.md`'s versioning policy moves to engineering, its repository
+reasons staying and citing it (amended at round 1's triage, 31 O1e). The validation
+runbook is a procedure outside the guidance set: it carries no frontmatter and no
+row in `AGENTS.md`'s layer table, and moves nothing (48 F1).
 `BUILD_AND_PACKAGING.md` stays repository material, any uv convention that holds
 anywhere moving out tagged `tool`.
 
@@ -526,8 +528,10 @@ round 1's triage" applies them row by row.
   other repositories change it, "never" is too strong, while the rule's purpose —
   stopping an owner from declaring everything an exception — stays. Section 4 drafts
   the wording and its triage reviews it. The change workflow's hand-laid graph is a
-  temporary `overrides` row in `AGENTS.md`'s exceptions table against the diagrams
-  rule, until the "Current limits" bullet on generating it closes.
+  temporary `overrides` row against the diagrams rule, until the "Current limits"
+  bullet on generating it closes; the row sits beside the capability it applies to,
+  in a new guidance file `openspec/specs/change-workflow/diagrams.md`, as CW-x4ex
+  requires (48 F2).
   `docs/agents/domain.md` is removed once its rows move.
 - **31 O1f — The roadmap and the capability index.** Every adopting repository keeps
   the roadmap and the OpenSpec change organization this repository uses, so the

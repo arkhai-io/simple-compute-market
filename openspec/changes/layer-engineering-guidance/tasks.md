@@ -291,7 +291,8 @@ Round 1's triage (reviews 29–31, the orchestrator's record 27):
   inside a procedure moves), so tasks 3.2, 3.4, and 9.6, and closeout's order, no
   longer match the design; sections 3–6 owe the deduplication and its review
   (31 O1b), section 3 the removal of `docs/agents/domain.md`, section 4 the
-  exceptions framework, section 5 the diagram exception row (31 O1e); and the
+  exceptions framework, section 6 the diagram exception row (31 O1e, placed by
+  48 F2); and the
   engineering layer now names 40 files, against section 4's one session. The plan
   is amended after the next implementation review's triage, which the owner chose
   before any return to planning.
@@ -311,6 +312,26 @@ Round 1's triage (reviews 29–31, the orchestrator's record 27):
   `checks` recorded as open above. An inline `python3 -I -c` listing destination
   files' tags was denied (no rule allows it); the check was made with Grep and the
   fresh-context subagent.
+
+Round 1's second review (review 48 at `23b54361c`; the owner's notes, record 47,
+had none; validation of `23b54361c` waived by the owner, the commit changing only
+change documents):
+
+- Edit, 48 F1: the validation runbook stays outside the guidance set, as 31 O1e
+  settled — no frontmatter and no row in `AGENTS.md`'s layer table, since D21 would
+  otherwise discover it twice over. D10, its hard-case sample row, the inventory's
+  preamble and document row, and task 5.3 now say so.
+- Edit, 48 F2: the hand-laid graph's `overrides` row moves from `AGENTS.md` to a new
+  guidance file beside the capability it applies to,
+  `openspec/specs/change-workflow/diagrams.md` (`tags: [repository, diagrams]`), as
+  CW-x4ex requires; task 6.2 places it. The inventory's row 155 and O1e rule and
+  `design.md`'s O1e bullet name it.
+- The change returns to planning, as round 1's triage arranged: the plan owes the
+  amendments listed above — tasks 3.2, 3.4, 9.6 and closeout's order against D8 as
+  amended; the deduplication and its review in sections 3–6; `domain.md`'s removal
+  in section 3; the exceptions framework in section 4; and whether section 4's 40
+  engineering files take one session or more. Evidence: inspected; no test applies
+  to a change document.
 
 ## 3. The workflow layer
 
@@ -447,8 +468,9 @@ and the classification of the checks. Files: `AGENTS.md`; `openspec/README.md`;
   check-guidance` where the guidance placement part runs the repository's guidance
   check (D21). Verify it holds no row the inventory tags `workflow`.
 - [ ] 5.3 Give `ARCHITECTURE.md`, `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`,
-  `BUILD_AND_PACKAGING.md`, `VALIDATION_RUNBOOK.md`, and `RELEASING.md` frontmatter
-  with their tags (D10, D17), and move what the inventory finds misfiled across
+  `BUILD_AND_PACKAGING.md`, and `RELEASING.md` frontmatter with their tags (D10,
+  D17) — `VALIDATION_RUNBOOK.md` stays outside the guidance set, with no frontmatter
+  and no layer-table row (48 F1) — and move what the inventory finds misfiled across
   systems — on the sample's reading, "Public repository content checks" to
   `market-change-workflow`'s README. Verify each document opens with its frontmatter
   and appears in `AGENTS.md`'s layer table.
