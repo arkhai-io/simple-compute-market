@@ -1,0 +1,215 @@
+{
+  "evidence_class": "fixture",
+  "domain": "vms",
+  "profile": "lane-only",
+  "double_selector": "in-process",
+  "setup_amount": null,
+  "livemode": false,
+  "spot_default_buyer": "a default buyer refuses this option: payee stop does not return the final partial period; a default buyer refuses this option: term end does not return the final partial period",
+  "on-demand_default_buyer": "a default buyer refuses this option: term end does not return the final partial period",
+  "lost_response": {
+    "outcome": {
+      "status": "unknown",
+      "reason": "operation requires verified read recovery: fixture response lost after authority recorded stop"
+    }
+  },
+  "same_key_retry": {
+    "outcome": {
+      "status": "accepted",
+      "records": [
+        {
+          "negotiation_id": "spot",
+          "commitment_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e",
+          "part": "0",
+          "kind": "stop_request",
+          "actor": "22222222-2222-4222-8222-222222222222",
+          "at": 1794453354,
+          "amount": null,
+          "cause": "payee",
+          "case_ref": null,
+          "extension_ref": null,
+          "sequence": 1,
+          "authority_record_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e:events:1:part:0",
+          "settles_through": "started_period"
+        }
+      ],
+      "filing": null
+    }
+  },
+  "pending_read": {
+    "negotiation_id": "spot",
+    "commitment_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e",
+    "authority": {
+      "outcome": {
+        "status": "accepted",
+        "records": [],
+        "filing": null
+      },
+      "payouts": {
+        "0": null
+      },
+      "state": "ending",
+      "events": [
+        {
+          "negotiation_id": "spot",
+          "commitment_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e",
+          "part": "0",
+          "kind": "stop_request",
+          "actor": "22222222-2222-4222-8222-222222222222",
+          "at": 1794453324,
+          "amount": null,
+          "cause": "payee",
+          "case_ref": null,
+          "extension_ref": null,
+          "sequence": 1,
+          "authority_record_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e:events:1",
+          "settles_through": null
+        }
+      ],
+      "parts": [
+        {
+          "part": "0",
+          "started_at": null,
+          "end_at": 1794456924,
+          "funded_through": null,
+          "initial_reservation": true,
+          "pending_stop": {
+            "negotiation_id": "spot",
+            "commitment_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e",
+            "part": "0",
+            "kind": "stop_request",
+            "actor": "22222222-2222-4222-8222-222222222222",
+            "at": 1794453354,
+            "amount": null,
+            "cause": "payee",
+            "case_ref": null,
+            "extension_ref": null,
+            "sequence": 1,
+            "authority_record_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e:events:1:part:0",
+            "settles_through": "started_period"
+          },
+          "final_stop": null,
+          "release_at": null,
+          "evidence_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e:snapshot:1:1794453324"
+        }
+      ],
+      "disputes": [],
+      "cases": [],
+      "extensions": [],
+      "deadline": 1794453354
+    },
+    "delivery": {
+      "recorded_end": null,
+      "progress": "unstarted",
+      "site_reports": []
+    },
+    "filings": []
+  },
+  "list": {
+    "deals": [
+      {
+        "negotiation_id": "on-demand",
+        "commitment_ref": "45cd999ed8d507591a51b0392eef539ad070ae71235a125cf31c024a45afbc66",
+        "domain": "vms",
+        "mechanism": "arkhai.payments.v1",
+        "entitlements": {
+          "payer": {
+            "notice_seconds": 0,
+            "settles_through": "started_period"
+          }
+        },
+        "state": "unstarted",
+        "deadline": 1794456924,
+        "parts": [],
+        "has_open_extension": false,
+        "open_cases": [],
+        "filings": []
+      },
+      {
+        "negotiation_id": "spot",
+        "commitment_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e",
+        "domain": "vms",
+        "mechanism": "arkhai.payments.v1",
+        "entitlements": {
+          "payee": {
+            "notice_seconds": 30,
+            "settles_through": "started_period"
+          },
+          "payer": {
+            "notice_seconds": 0,
+            "settles_through": "started_period"
+          }
+        },
+        "state": "ending",
+        "deadline": 1794453354,
+        "parts": [
+          {
+            "part": "0",
+            "started_at": null,
+            "end_at": 1794456924,
+            "funded_through": null,
+            "initial_reservation": true,
+            "pending_stop": {
+              "negotiation_id": "spot",
+              "commitment_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e",
+              "part": "0",
+              "kind": "stop_request",
+              "actor": "22222222-2222-4222-8222-222222222222",
+              "at": 1794453354,
+              "amount": null,
+              "cause": "payee",
+              "case_ref": null,
+              "extension_ref": null,
+              "sequence": 1,
+              "authority_record_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e:events:1:part:0",
+              "settles_through": "started_period"
+            },
+            "final_stop": null,
+            "release_at": null,
+            "evidence_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e:snapshot:1:1794453324"
+          }
+        ],
+        "has_open_extension": false,
+        "open_cases": [],
+        "filings": []
+      }
+    ],
+    "continuation": null
+  },
+  "on_demand_refusal": {
+    "outcome": {
+      "status": "rejected",
+      "reason": "accepted option has no payee entitlement; actual seller non-delivery uses delivery_end"
+    }
+  },
+  "changed_retry": {
+    "outcome": {
+      "status": "rejected",
+      "reason": "operation key retry changes content"
+    }
+  },
+  "delivery_without_rate_hook": "refused",
+  "wrong_actor": "403",
+  "earlier_buyer_stop": {
+    "status": "accepted",
+    "records": [
+      {
+        "negotiation_id": "spot",
+        "commitment_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e",
+        "part": "0",
+        "kind": "stop",
+        "actor": "11111111-1111-4111-8111-111111111111",
+        "at": 1794453324,
+        "amount": null,
+        "cause": "payer",
+        "case_ref": null,
+        "extension_ref": null,
+        "sequence": 2,
+        "authority_record_ref": "16a11183c93c56e9c013d9c6e831449c5d25cccef04e1fddb55d0b8679f3776e:events:2:part:0",
+        "settles_through": "started_period"
+      }
+    ],
+    "filing": null
+  },
+  "one_seller_stop": true
+}

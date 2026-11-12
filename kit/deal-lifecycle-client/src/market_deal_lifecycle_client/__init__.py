@@ -2,4 +2,6 @@
 
 from .client import LifecycleClient, LifecycleClientError
 
-__all__ = ["LifecycleClient", "LifecycleClientError"]
+from .seller import SellerLifecycleClient, SyncSellerLifecycleClient
+
+__all__ = ["LifecycleClient", "LifecycleClientError", "SellerLifecycleClient", "SyncSellerLifecycleClient"]
