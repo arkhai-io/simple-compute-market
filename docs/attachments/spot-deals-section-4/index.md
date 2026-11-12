@@ -42,7 +42,7 @@ The VM admin interrupt body adds interruption_kind=preemption|failure beside its
 
 ## Permanent coverage and validation
 
-- Payments: 266 tests, typing, published vector and generated-model checks pass. New cases cover exact rate/setup derivation, buyer re-derivation, authorization phases, activation/digest admission, refusal classification, stable money-operation keys, lost responses, verified stop observations and fixed settlement figures after held reversal.
+- Payments: 277 tests, typing, published vector and generated-model checks pass. New cases cover exact rate/setup derivation, buyer re-derivation, authorization phases, activation/digest admission, refusal classification, stable money-operation keys, lost responses, verified stop observations and fixed settlement figures after held reversal.
 - Servicing: 70; lifecycle contracts: 37; lifecycle client: 2; buyer half: 22. Servicing and buyer-half typing pass.
 - VM storefront focused lifecycle, payment and operator suites: 157 pass. New signed-route cases cover both preempt CLIs, actor refusal, accepted permissions surviving listing edits, response loss/read/list and an earlier payer stop.
 - Bare-metal storefront focused lifecycle, payment and operator suites: 46 pass, including its composed rate seller and buyer paths.
@@ -62,6 +62,12 @@ PROVISIONING_MODE=mock mise exec -- make -C e2e-tests test-e2e-vm
 Make exited 2 after seven minutes: 290 passed, 2 skipped, 1235 deselected and one failure. The sole failure was test_listing_shapes.py::TestStage07_ShapePricing::test_07a2_market_buy_buys_a_smaller_shape_and_reaches_ready, reporting retained pricing differs from seller publication: rate_structure. This is the maintainer-owned excluded base defect and was left unchanged.
 
 The pipeline exercised the existing VM purchase, lifecycle and dispute scenarios against the local compose stack. It did not qualify rate delivery. The owned compose stack, volumes/network and leftover test Anvil were stopped with e2e-vm-down and the supervised process-group cleanup.
+
+## Follow-up corrections
+
+Horizon resolution and mandate derivation share minimum_rate_duration_seconds. Replaying the old mandate function reproduced admission of an 89-second duration starting one hour after acceptance; the shared calculation requires 90 seconds for a 30-second delivery deadline plus a 60-second period. Boundary regressions cover both early and late starts. Settlement-runtime's 182 tests pass.
+
+The vendored ApiErrorCode enum defines every code D4 names. Rate command HTTP 409 request_id_reused and hold_not_reversible now explicitly require repair. Approval HTTP 409 insufficient_funds becomes exported PaymentApprovalInsufficientFunds with funding guidance and no receipt polling. Tests retain unknown outcomes for server errors. These two corrections are separate commits after the section 4 implementation.
 
 ## Deferred work
 

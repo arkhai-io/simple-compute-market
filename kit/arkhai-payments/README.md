@@ -399,6 +399,15 @@ payload uses the same expansion and journal contract; each derived stop retains
 the accepted payer notice. Explicit part commands still require their exact
 caller-journaled descriptor digest.
 
+Command failures are classified from their structured API codes. HTTP 409
+request_id_reused and hold_not_reversible return a rejection requiring repair;
+insufficient_held_funds requires a verified read before another delta, and
+hold_matured exposes the shortfall for the case path. Server errors stay unknown.
+At approval, HTTP 409 insufficient_funds raises the exported
+PaymentApprovalInsufficientFunds exception, carrying status_code/code and an
+instruction to fund the payer account. The buyer does not poll for a receipt
+after this refusal.
+
 `authorize` is read-only for commit, dispatch, physical start and disclose.
 Disclosure additionally requires `billing_operation_key` and a matching verified
 start event containing the same activation envelope. A caller-supplied journaled

@@ -7,7 +7,11 @@ import json
 import pytest
 from market_core.schemas import derive_settlement_option_id
 
-from market_arkhai_payments import MandatePolicyError, PaymentApproval, PaymentSettlementData, transaction_id
+from market_arkhai_payments import (
+    MandatePolicyError, PaymentApproval, PaymentApprovalInsufficientFunds, PaymentsAPIError,
+    PaymentSettlementData, transaction_id,
+)
+from market_arkhai_payments.fixtures import FakePaymentsClient
 from market_arkhai_payments.canonical import wire_json
 from payment_terms import BUYER, PAYEE, DISPUTE, config
 from rate_terms import NOW, rate_agreement, rate_data
@@ -96,6 +100,26 @@ def test_runway_meets_both_approval_expiry_and_a_later_service_start(start_offse
             rate_data(raw)
     else:
         assert rate_data(raw).mandate.parts[1].root.end.at == NOW + start_offset + minimum + delta
+
+
+@pytest.mark.parametrize("status,code,typed", [(409, "insufficient_funds", True), (503, "insufficient_funds", False), (409, "card_debt", False)])
+def test_initial_reservation_funding_refusal_is_typed_and_never_polls(status, code, typed):
+    class RefusedApproval(FakePaymentsClient):
+        def approve(self, mandate, **kwargs):
+            self.calls.append(("approve", mandate))
+            raise PaymentsAPIError(status, code)
+
+    raw = rate_agreement(treatment="last_boundary")
+    data = rate_data(raw)
+    fake = RefusedApproval()
+    with pytest.raises(PaymentsAPIError) as refusal:
+        PaymentApproval(config(), BUYER, client_for_owner=fake).approve(json.dumps(raw), data.to_wire())
+    assert isinstance(refusal.value, PaymentApprovalInsufficientFunds) == typed
+    assert (refusal.value.status_code, refusal.value.code) == (status, code)
+    assert fake.count("approve") == 1 and fake.count("get_transaction") == 0
+    if typed:
+        assert "fund the payer account" in str(refusal.value)
+        assert isinstance(refusal.value.__cause__, PaymentsAPIError)
 
 
 def test_entitlement_object_order_does_not_change_derived_permission_order():
