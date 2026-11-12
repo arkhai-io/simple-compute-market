@@ -28,31 +28,88 @@ Delivers the first half of the inventory (D2): `AGENTS.md`, `openspec/README.md`
 D3 and D8–D10, tags by D7 and D17–D19, and exceptions by D9. No guidance text moves.
 Files: `openspec/changes/layer-engineering-guidance/inventory.md` (new).
 
-- [ ] 1.1 Create `inventory.md` with its sections table — columns `Source` (document
+- [x] 1.1 Create `inventory.md` with its sections table — columns `Source` (document
   and heading, or the part of a heading's text a split row covers), `Layer`, `Tags`,
   `Destination` (file, and heading where it joins one), `Reason`, `Ambiguous` (empty,
   or what the test did not decide) — and an opening paragraph saying the inventory
   is change history and that the corrected rows govern every later section (D2).
   Verify the file exists with that header.
-- [ ] 1.2 Classify every heading of `AGENTS.md` and `openspec/README.md` at every
+  Note: the table is split into one table per document under `## Sections`, each with
+  the same six columns, so the owner can correct a document's rows together. The
+  opening also gives the reading conventions: one layer per row, the
+  `engineering/`/`workflow/` destination shorthand, "stays", "neutralized", how
+  closeout rows name the layer of the rule they confirm, and how exceptions are marked
+  (**Exception (selects|overrides)** at the head of `Reason`, with the table named).
+  Evidence: inspected; no test applies to a change document.
+- [x] 1.2 Classify every heading of `AGENTS.md` and `openspec/README.md` at every
   level, splitting a section into one row per layer its text holds (D1), the
   closeout parts one row per part with the part's layer and the layer of the rule it
   confirms (D8), and each exception the text states — a case selected, a shared rule
   overridden — marked as one, with where its table goes (D9). Verify by listing the
   two documents' headings (`grep -n '^#' AGENTS.md openspec/README.md`) and finding a
   row for each.
-- [ ] 1.3 Classify every heading of `docs/agents/change-workflow.md`,
+  Note: every heading `grep -n '^#'` lists has a row (checked with Grep against the
+  inventory's Source cells). The grep's hits inside fenced blocks are covered as the
+  inventory's legend says: `AGENTS.md`'s comment examples by the comment rows, and
+  `openspec/README.md`'s three template headings by rows of their own. Closeout parts 5,
+  7, and 8 are repository rows (D8); the other eight are workflow rows naming the
+  layer of the rule each confirms, and part 2's import rule itself is split out as
+  engineering, Python. One exception is stated in the text: the public case, selected,
+  in `AGENTS.md`'s table.
+- [x] 1.3 Classify every heading of `docs/agents/change-workflow.md`,
   `docs/agents/domain.md`, and `docs/development/ARCHITECTURE.md` the same way,
   including the workflow guide's links to this repository's documents and its step
   table's validation parts (D1's direction), and `ARCHITECTURE.md`'s engineering
   rules and the subsections filed under "Deterministic database-concurrency tests"
   (D10). Verify every heading has a row.
-- [ ] 1.4 Verify: every row has a layer, tags from the tags the inventory proposes,
+  Note: every heading has a row (checked as in 1.2). Beyond the sample, the workflow
+  guide names this repository in more places than its links and step table: `dev`
+  as the integration branch and the protected branches, the hook commands, the CI
+  baseline, the clone's remote, bootstrap, and evidence paths, the waiver parts, and
+  `ROADMAP` examples; each has a repository row, neutralized in the guide. One
+  exception candidate is flagged rather than marked: `ARKHAI_IDENTITY_CREDENTIAL`
+  becomes an `overrides` row only if section 2 moves the secrets rule to engineering.
+- [x] 1.4 Verify: every row has a layer, tags from the tags the inventory proposes,
   a destination, and a reason; every row the test did not decide says why in
   `Ambiguous`; `git diff --stat` against the section's start shows only
   `inventory.md` changed; and `scripts/change-workflow run pre-commit
   layer-engineering-guidance` reports no failure but the two the preamble expects.
   End-to-end: none; the inventory changes no behaviour.
+  Note: 196 rows, each with six cells, one of the three layers, that layer as its
+  first tag, a destination, and a reason (Grep over the rows); every tag a row uses is
+  in the inventory's "Tags the rows use" list, and every listed tag is used. The diff
+  against `699ab24c1` holds `inventory.md` (new) and, besides this task list, one
+  edit the implementation skill makes on a change's first section: the change's index
+  row set to `in implementation`. No guidance text moved. `scripts/change-workflow run
+  pre-commit layer-engineering-guidance` fails only on the two the preamble expects —
+  the citations of files the change creates (from `design.md`, `proposal.md`, and
+  `tasks.md`; none from `inventory.md`) and the six `CW-*` entries `index.md` lacks;
+  the index, tasks, skills, and strict OpenSpec checks pass. End-to-end scenarios
+  covering the section: none confirmed, as planned. Owed by validation: nothing.
+
+Section 1 notes (handoff):
+
+- The rows hold more `Ambiguous` entries than the sample: each records the
+  recommendation the owner can accept or correct in round 1's triage. The ones most
+  likely to change later sections: whether "Amend a rule or comply" admits declared
+  exceptions (D9); whether `docs/agents/domain.md` is removed; whether `ARCHITECTURE.md`'s
+  one-capability summaries stay (recommended) or move beside their capabilities;
+  whether "Durable fulfillment acceptance" joins fulfillment's companion
+  (recommended) rather than becoming a guidance file; whether the draw.io and Python
+  forms of short rules get files of their own (D7).
+- Workflow tags use the step names (`plan`, `implement`, `validate`), not the sample's
+  `planning`, so a later loader selects by step; the inventory's legend says so.
+- "Tags the rows use" is a flat list with each tag's proposed layer; section 2 turns
+  it into the D18 tables (task 2.4). `configuration`, `packaging`, and `deployment`
+  are placed provisionally: section 2's rows on `DEPLOYMENT_AND_CONFIG.md` and
+  `BUILD_AND_PACKAGING.md` decide their layer.
+- Section 2 should look for `dev`, `.snapshot/`, and make targets inside workflow
+  text, as the fresh-context check found the guide's sample split too coarse; and
+  should settle `ARCHITECTURE.md`'s "Operator lifecycle controls" principle together
+  with `TESTING.md`'s "Pause the loop, then advance it explicitly".
+- This session read `TESTING.md` through its first 600 lines and
+  `DEPLOYMENT_AND_CONFIG.md` by its heading outline only; section 2 classifies both
+  and reads them in full.
 
 ## 2. Inventory of the repository documents, restatements, vocabulary, and checks
 
