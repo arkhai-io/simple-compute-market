@@ -15,7 +15,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from release_components import REPO_ROOT, load, project_version, wheel_file_name
+from release_components import (
+    REPO_ROOT,
+    DeclarationError,
+    load,
+    project_version,
+    wheel_file_name,
+)
 
 
 def main() -> int:
@@ -31,8 +37,13 @@ def main() -> int:
 
     planned: list[tuple[str, Path]] = []
     missing: list[str] = []
-    for entry in load().distributions:
-        version = project_version(REPO_ROOT, entry)
+    try:
+        distributions = [(entry, project_version(REPO_ROOT, entry))
+                         for entry in load().distributions]
+    except DeclarationError as error:
+        print(f"ERROR: {error}")
+        return 1
+    for entry, version in distributions:
         wheel = args.dist_dir / wheel_file_name(entry, version)
         if wheel.is_file():
             planned.append((entry.dist, wheel))

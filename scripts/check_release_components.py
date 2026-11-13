@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Refuse a second list of release components, and any workflow that could publish.
 
-Two rules, with no exception list.
+Two rules, with no exception list. Each runs on its own (`--rule enumeration`,
+`--rule credentials`); with no `--rule`, both run.
 
-**One enumeration.** `manifests/release-components.json` is the only list of what
-a marketplace release comprises and of the development images its validation
-runs. A workflow, a publish target or a lane target that names a declared
+**One enumeration.** This rule holds `manifests/release-components.json` to being
+the only list of what a marketplace release comprises and of the development
+images its validation runs. A workflow, a publish target or a lane target that names a declared
 distribution, image, development image, the chart or the binary is refused,
 naming the file, the target and what it named. A publish target is a Make target
 named `push-*`, `publish-*`, `clobber-*` or `load-candidate`, or one whose recipe
@@ -22,11 +23,13 @@ action. A workflow is refused when it declares no top-level `permissions:`
 (without one it gets the repository's default token, which may write), grants
 `id-token`, `packages`, `attestations` or `contents` write access anywhere, or
 references a secret other than `GITHUB_TOKEN`. Named publishing steps are
-refused as well, so that a refusal can name the step.
+refused as well, so that a refusal can name the step. This rule reads no
+declaration.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import sys
@@ -40,7 +43,9 @@ _SKIPPED_DIRS = {".git", ".venv", "venv", "node_modules", ".dist", "__pycache__"
 
 _GRANT = re.compile(r"(?<![\w-])(id-token|packages|attestations|contents)\s*:\s*['\"]?write\b")
 _WRITE_ALL = re.compile(r"\bpermissions\s*:\s*['\"]?write-all\b")
-_SECRET = re.compile(r"\bsecrets\.([A-Za-z_][A-Za-z0-9_]*)|\bsecrets\[\s*['\"]([^'\"]+)['\"]\s*\]")
+# Context and secret names are case-insensitive in an Actions expression.
+_SECRETS_CONTEXT = re.compile(r"(?<![\w.-])secrets\b", re.IGNORECASE)
+_NAMED_SECRET = re.compile(r"\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_-]*)|\[\s*['\"]([^'\"]+)['\"]\s*\])")
 _INHERITED_SECRETS = re.compile(r"\bsecrets\s*:\s*inherit\b")
 _PUBLISHING_STEPS = {
     "pypa/gh-action-pypi-publish": re.compile(r"pypa/gh-action-pypi-publish"),
@@ -50,7 +55,8 @@ _PUBLISHING_STEPS = {
     "gh release create": re.compile(r"\bgh\s+release\s+create\b"),
 }
 _BUILD_PUSH_ACTION = re.compile(r"docker/build-push-action")
-_PUSH_TRUE = re.compile(r"^\s*push\s*:\s*['\"]?true\b", re.MULTILINE)
+# Any `push:` but a literal false may push, such as an expression true on some events.
+_PUSH = re.compile(r"^\s*push\s*:\s*(?!['\"]?false['\"]?\s*$)(\S.*?)\s*$", re.MULTILINE)
 
 _UPLOADER = re.compile(
     r"publish_artifacts\.py|push-distributions\.py|\bdocker\s+push\b|\bhelm\s+push\b"
@@ -238,8 +244,46 @@ def _step_text(lines: list[str], index: int) -> str:
     return lines[index]
 
 
-def workflow_problems(label: str, text: str,
-                      patterns: list[tuple[str, re.Pattern[str]]]) -> list[str]:
+def _expressions(text: str) -> list[str]:
+    """The body of every `${{ … }}` in `text`, the only place a workflow reads the
+    secrets context. A `}}` inside one of the expression's single-quoted strings
+    does not end it."""
+    found: list[str] = []
+    start = text.find("${{")
+    while start != -1:
+        index, quoted = start + 3, False
+        while index < len(text):
+            if text[index] == "'":
+                quoted = not quoted
+            elif not quoted and text.startswith("}}", index):
+                break
+            index += 1
+        found.append(text[start + 3:index])
+        start = text.find("${{", index)
+    return found
+
+
+def _secret_references(text: str) -> tuple[set[str], bool]:
+    """The secrets a workflow's expressions name, upper-cased, and whether one
+    reads the secrets context without naming a secret, as `toJSON(secrets)` and
+    `secrets[matrix.name]` do: such a read can reach any secret.
+
+    It reads the workflow's raw text. A line beginning with `#` inside a block
+    scalar is not a comment, and Actions substitutes expressions in it."""
+    names: set[str] = set()
+    unnamed = False
+    for expression in _expressions(text):
+        for match in _SECRETS_CONTEXT.finditer(expression):
+            named = _NAMED_SECRET.match(expression, match.end())
+            if named:
+                names.add((named.group(1) or named.group(2)).upper())
+            else:
+                unnamed = True
+    return names, unnamed
+
+
+def workflow_credential_problems(label: str, text: str) -> list[str]:
+    """The workflow-credential rule's refusals of one workflow."""
     lines = _without_comments(text)
     body = "\n".join(lines)
     problems: list[str] = []
@@ -250,10 +294,12 @@ def workflow_problems(label: str, text: str,
         problems.append(f"{label}: grants {grant}: write")
     if _WRITE_ALL.search(body):
         problems.append(f"{label}: grants permissions: write-all")
-    secrets = sorted({first or second for first, second in _SECRET.findall(body)}
-                     - {"GITHUB_TOKEN"})
-    for secret in secrets:
+    named, unnamed = _secret_references(text)
+    for secret in sorted(named - {"GITHUB_TOKEN"}):
         problems.append(f"{label}: references secret {secret}; only GITHUB_TOKEN is allowed")
+    if unnamed:
+        problems.append(f"{label}: reads the secrets context without naming a secret; "
+                        "only GITHUB_TOKEN is allowed")
     if _INHERITED_SECRETS.search(body):
         problems.append(f"{label}: passes on every secret with secrets: inherit")
     for index, line in enumerate(lines):
@@ -261,12 +307,20 @@ def workflow_problems(label: str, text: str,
             if pattern.search(line):
                 problems.append(f"{label}: step {_step_name(lines, index)!r} publishes "
                                 f"with {step}")
-        if _BUILD_PUSH_ACTION.search(line) and _PUSH_TRUE.search(_step_text(lines, index)):
+        push = (_PUSH.search(_step_text(lines, index))
+                if _BUILD_PUSH_ACTION.search(line) else None)
+        if push:
             problems.append(f"{label}: step {_step_name(lines, index)!r} publishes with "
-                            "docker/build-push-action and push: true")
-    for component in named_components(body, patterns):
-        problems.append(f"{label}: names {component}; read it from the declaration instead")
+                            f"docker/build-push-action and push: {push.group(1)}")
     return problems
+
+
+def workflow_enumeration_problems(label: str, text: str,
+                                  patterns: list[tuple[str, re.Pattern[str]]]) -> list[str]:
+    """The single-enumeration rule's refusals of one workflow."""
+    body = "\n".join(_without_comments(text))
+    return [f"{label}: names {component}; read it from the declaration instead"
+            for component in named_components(body, patterns)]
 
 
 def _makefiles(root: Path) -> list[Path]:
@@ -280,25 +334,64 @@ def _makefiles(root: Path) -> list[Path]:
     return found
 
 
-def check(root: Path = REPO_ROOT, components: ReleaseComponents | None = None) -> list[str]:
-    """Every refusal for the tree at `root`."""
+def _workflows(root: Path) -> list[Path]:
+    workflows = root / ".github" / "workflows"
+    if not workflows.is_dir():
+        return []
+    return sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")])
+
+
+def check_credentials(root: Path = REPO_ROOT) -> list[str]:
+    """The workflow-credential rule's refusals for the tree at `root`. It reads
+    no declaration."""
+    problems: list[str] = []
+    for workflow in _workflows(root):
+        problems += workflow_credential_problems(str(workflow.relative_to(root)),
+                                                 workflow.read_text(encoding="utf-8"))
+    return problems
+
+
+def check_enumeration(root: Path = REPO_ROOT,
+                      components: ReleaseComponents | None = None) -> list[str]:
+    """The single-enumeration rule's refusals for the tree at `root`."""
     components = components or load(root / "manifests" / "release-components.json")
     patterns = component_patterns(components, _chart_name(root, components.chart.path))
     problems: list[str] = []
-    workflows = root / ".github" / "workflows"
-    if workflows.is_dir():
-        for workflow in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")]):
-            problems += workflow_problems(str(workflow.relative_to(root)),
-                                          workflow.read_text(encoding="utf-8"), patterns)
+    for workflow in _workflows(root):
+        problems += workflow_enumeration_problems(str(workflow.relative_to(root)),
+                                                  workflow.read_text(encoding="utf-8"),
+                                                  patterns)
     for makefile in _makefiles(root):
         problems += makefile_problems(str(makefile.relative_to(root)),
                                       makefile.read_text(encoding="utf-8"), patterns)
     return problems
 
 
-def main() -> int:
+# Each rule, by the name `--rule` takes, and what its passing establishes.
+RULES = {
+    "enumeration": "the declaration is the only list of release components",
+    "credentials": "no workflow can publish",
+}
+
+
+def check(root: Path = REPO_ROOT, components: ReleaseComponents | None = None,
+          rules: tuple[str, ...] = tuple(RULES)) -> list[str]:
+    """Every refusal the named rules make for the tree at `root`."""
+    problems: list[str] = []
+    if "enumeration" in rules:
+        problems += check_enumeration(root, components)
+    if "credentials" in rules:
+        problems += check_credentials(root)
+    return problems
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--rule", action="append", choices=sorted(RULES), dest="rules",
+                        help="run only this rule; repeat it for several (default: every rule)")
+    rules = tuple(parser.parse_args(argv).rules or RULES)
     try:
-        problems = check()
+        problems = check(rules=rules)
     except DeclarationError as error:
         print(f"check-release-components: {error}", file=sys.stderr)
         return 1
@@ -307,8 +400,7 @@ def main() -> int:
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         return 1
-    print("OK: the declaration is the only list of release components, "
-          "and no workflow can publish.")
+    print("OK: " + "; ".join(RULES[rule] for rule in RULES if rule in rules) + ".")
     return 0
 
 

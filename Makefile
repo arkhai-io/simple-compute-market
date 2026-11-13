@@ -12,7 +12,7 @@ FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-release-components check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
+.PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-release-components check-workflow-credentials check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
@@ -559,7 +559,7 @@ push-charts: _require-ar-project dist-helm
 	helm push $(DIST_DIR)/arkhai-node-operator-*.tgz $(HELM_REGISTRY)
 	rm $(DIST_DIR)/arkhai-node-operator-*.tgz
 
-push-wheels: _require-ar-project ## Publish every manifest distribution to the registry.
+push-wheels: _require-ar-project ## Publish every declared distribution to the registry.
 	uv run --no-project python scripts/push-distributions.py \
 	  --dist-dir $(DIST_DIR) --registry $(PYTHON_REGISTRY)
 
@@ -641,10 +641,13 @@ check-uv-version: ## Fail if the installed uv is older than the minimum that wri
 	@python3 scripts/check_uv_version.py
 
 check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
-	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture check-workflow-credentials
 
 check-release-components: ## Fail if a workflow, publish target, or lane target lists release components itself, or a workflow holds a publishing credential
 	@python3 scripts/check_release_components.py
+
+check-workflow-credentials: ## Fail if a workflow holds a credential that could publish, or names a publishing step
+	@python3 scripts/check_release_components.py --rule credentials
 
 check-uv-setup: ## Fail if a reinit target or image install names internal packages instead of deriving them
 	@python3 scripts/check_uv_setup.py

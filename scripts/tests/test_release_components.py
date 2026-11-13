@@ -102,8 +102,35 @@ def test_a_duplicated_distribution_is_refused_however_it_is_spelled() -> None:
     assert "distribution dist 'arkhai_kit_A' is declared twice" in _refusal(document)
 
 
+@pytest.mark.parametrize(("key", "entry", "message"), [
+    ("distributions", {"key": "kit-a", "path": "kit/a2", "dist": "arkhai-kit-a2"},
+     "distribution key 'kit-a' is declared twice"),
+    ("distributions", {"key": "kit-a2", "path": "kit/a", "dist": "arkhai-kit-a2"},
+     "distribution path 'kit/a' is declared twice"),
+    ("development_images", {"name": "dev-registry", "local": "compute-provisioning"},
+     "image local 'compute-provisioning' is declared twice"),
+    ("binaries", {"name": "market", "target": "build-other", "path": "out/other"},
+     "binary name 'market' is declared twice"),
+    ("binaries", {"name": "other", "target": "build-other", "path": "out/market"},
+     "binary path 'out/market' is declared twice"),
+])
+def test_every_other_duplicated_entry_is_refused(key: str, entry: dict, message: str) -> None:
+    document = _document()
+    document[key].append(entry)
+
+    assert message in _refusal(document)
+
+
+def test_a_duplicated_npm_package_is_refused() -> None:
+    document = _document(npm=[{"path": "middleware/typescript"},
+                              {"path": "middleware/typescript"}])
+
+    assert "npm package path 'middleware/typescript' is declared twice" in _refusal(document)
+
+
 @pytest.mark.parametrize(("document", "message"), [
     (_document(images={"name": "registry"}), "images is dict, not a list"),
+    (_document(images=["registry"]), "images[0] is str, not an object"),
     (_document(chart=["helm"]), "chart is list, not an object"),
     (_document(binaries=[{"name": "market", "target": "build-market", "path": 7}]),
      "binaries[0].path is not a non-empty string"),

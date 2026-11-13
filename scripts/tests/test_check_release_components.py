@@ -10,8 +10,10 @@ import pytest
 from check_release_components import (
     check,
     component_patterns,
+    main,
     makefile_problems,
-    workflow_problems,
+    workflow_credential_problems,
+    workflow_enumeration_problems,
 )
 from release_components import parse
 
@@ -53,7 +55,9 @@ jobs:
 
 
 def _workflow(text: str) -> list[str]:
-    return workflow_problems("wf.yml", text, PATTERNS)
+    """Both rules' refusals of one workflow, the credential rule's first."""
+    return (workflow_credential_problems("wf.yml", text)
+            + workflow_enumeration_problems("wf.yml", text, PATTERNS))
 
 
 def _makefile(text: str) -> list[str]:
@@ -88,11 +92,46 @@ def test_write_all_is_refused() -> None:
     assert _workflow(text) == ["wf.yml: grants permissions: write-all"]
 
 
-def test_a_secret_other_than_the_github_token_is_refused() -> None:
-    text = CLEAN_WORKFLOW.replace("make test", "make test TOKEN=${{ secrets.PYPI_TOKEN }}")
+@pytest.mark.parametrize("reference", ["secrets.PYPI_TOKEN", "secrets['PYPI_TOKEN']",
+                                       "Secrets.pypi_token",
+                                       "format('}}', secrets.PYPI_TOKEN)"])
+def test_a_secret_other_than_the_github_token_is_refused(reference: str) -> None:
+    text = CLEAN_WORKFLOW.replace("make test", f"make test TOKEN=${{{{ {reference} }}}}")
 
     assert _workflow(text) == [
         "wf.yml: references secret PYPI_TOKEN; only GITHUB_TOKEN is allowed"]
+
+
+@pytest.mark.parametrize("expression", ["${{ toJSON(secrets) }}",
+                                        "${{ secrets[matrix.name] }}"])
+def test_reading_the_secrets_context_without_naming_a_secret_is_refused(
+        expression: str) -> None:
+    text = CLEAN_WORKFLOW.replace("make test", f"make test ALL={expression}")
+
+    assert _workflow(text) == [
+        "wf.yml: reads the secrets context without naming a secret; "
+        "only GITHUB_TOKEN is allowed"]
+
+
+def test_a_secret_on_a_block_scalar_line_beginning_with_a_hash_is_refused() -> None:
+    """Inside a block scalar such a line is text, not a comment, and Actions
+    substitutes the expression in it."""
+    text = CLEAN_WORKFLOW.replace(
+        "        run: make test\n",
+        "        env:\n          T: |\n            #${{ secrets.PYPI_TOKEN }}\n"
+        "        run: make test\n")
+
+    assert _workflow(text) == [
+        "wf.yml: references secret PYPI_TOKEN; only GITHUB_TOKEN is allowed"]
+
+
+@pytest.mark.parametrize("reference", ["secrets['GITHUB_TOKEN']", "secrets.github_token"])
+def test_the_github_token_however_spelled_and_the_word_secrets_in_a_command_pass(
+        reference: str) -> None:
+    text = CLEAN_WORKFLOW.replace(
+        "make test", f"make check-secrets TOKEN=${{{{ {reference} }}}}")
+
+    assert _workflow(text) == []
 
 
 def test_inherited_secrets_are_refused() -> None:
@@ -114,15 +153,16 @@ def test_a_named_publishing_step_is_refused_naming_the_step(step: str, named: st
     assert _workflow(text) == [f"wf.yml: step 'Ship it' publishes with {named}"]
 
 
-def test_a_build_push_action_pushing_is_refused() -> None:
+@pytest.mark.parametrize("push", ["true", "${{ github.event_name != 'pull_request' }}"])
+def test_a_build_push_action_that_may_push_is_refused(push: str) -> None:
     text = CLEAN_WORKFLOW + (
         "      - name: Image\n"
         "        uses: docker/build-push-action@v6\n"
         "        with:\n"
-        "          push: true\n")
+        f"          push: {push}\n")
 
     assert _workflow(text) == [
-        "wf.yml: step 'Image' publishes with docker/build-push-action and push: true"]
+        f"wf.yml: step 'Image' publishes with docker/build-push-action and push: {push}"]
 
 
 def test_a_build_push_action_that_only_builds_passes() -> None:
@@ -140,6 +180,7 @@ def test_a_build_push_action_that_only_builds_passes() -> None:
     ("run: docker save arkhai:compute-provisioning", "image provisioning"),
     ("run: docker save arkhai:dev-env-abc", "development image dev-env"),
     ("run: helm lint helm/", "chart helm"),
+    ("run: helm pull arkhai-node-operator", "chart helm"),
     ("run: sha256sum .dist/bin/market", "binary market"),
 ])
 def test_a_workflow_naming_a_declared_component_is_refused(line: str, component: str) -> None:
@@ -147,6 +188,15 @@ def test_a_workflow_naming_a_declared_component_is_refused(line: str, component:
 
     assert _workflow(text) == [
         f"wf.yml: names {component}; read it from the declaration instead"]
+
+
+def test_a_workflow_naming_a_declared_npm_package_is_refused() -> None:
+    declaration = {**DECLARATION, "npm": [{"path": "middleware/typescript"}]}
+    patterns = component_patterns(parse(declaration), None)
+    text = CLEAN_WORKFLOW + "      - name: Pack\n        run: cd middleware/typescript\n"
+
+    assert workflow_enumeration_problems("wf.yml", text, patterns) == [
+        "wf.yml: names npm package middleware/typescript; read it from the declaration instead"]
 
 
 def test_a_longer_name_is_not_taken_for_a_declared_one() -> None:
@@ -218,6 +268,43 @@ def test_a_lane_target_naming_a_release_image_is_refused() -> None:
         "read it from the declaration instead"]
 
 
+@pytest.mark.parametrize("target", ["publish-images", "load-candidate"])
+def test_every_publish_target_name_is_a_publish_target(target: str) -> None:
+    text = f"{target}:\n\tsave arkhai:registry\n"
+
+    assert _makefile(text) == [
+        f"Makefile: publish target {target} names image registry; "
+        "read it from the declaration instead"]
+
+
+@pytest.mark.parametrize("target", ["build-e2e-vm", "pull-release-images"])
+def test_every_lane_target_name_is_a_lane_target(target: str) -> None:
+    text = f"{target}:\n\tdocker pull example.invalid/arkhai:provisioning-abc\n"
+
+    assert _makefile(text) == [
+        f"Makefile: lane target {target} names image provisioning; "
+        "read it from the declaration instead"]
+
+
+def test_an_image_named_by_its_published_name_is_found() -> None:
+    """`provisioning` is built as `compute-provisioning`; either name is found."""
+    text = "push-images:\n\tsave arkhai:provisioning\n"
+
+    assert _makefile(text) == [
+        "Makefile: publish target push-images names image provisioning; "
+        "read it from the declaration instead"]
+
+
+def test_a_declared_npm_package_named_by_a_publish_target_is_refused() -> None:
+    declaration = {**DECLARATION, "npm": [{"path": "middleware/typescript"}]}
+    patterns = component_patterns(parse(declaration), None)
+    text = "push-npm:\n\tcd middleware/typescript && pack\n"
+
+    assert makefile_problems("Makefile", text, patterns) == [
+        "Makefile: publish target push-npm names npm package middleware/typescript; "
+        "read it from the declaration instead"]
+
+
 def test_a_build_target_naming_its_own_image_passes() -> None:
     text = (
         "build-registry:\n"
@@ -272,3 +359,58 @@ def test_a_clean_tree_passes(tmp_path: Path) -> None:
         "build-registry:\n\tdocker build -t arkhai:registry .\n", encoding="utf-8")
 
     assert check(tmp_path) == []
+
+
+def _tree_breaking_both_rules(root: Path) -> None:
+    """A tree whose workflow holds a publishing credential and names a declared
+    distribution, and whose publish target names a declared image."""
+    (root / "manifests").mkdir()
+    (root / "manifests" / "release-components.json").write_text(
+        json.dumps(DECLARATION), encoding="utf-8")
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / ".github" / "workflows" / "tests.yml").write_text(
+        CLEAN_WORKFLOW.replace("contents: read", "contents: write")
+        + "      - name: List\n        run: pip install arkhai-core-buyer\n",
+        encoding="utf-8")
+    (root / "Makefile").write_text("push-images:\n\tdocker push arkhai:registry\n",
+                                   encoding="utf-8")
+
+
+def test_the_credential_rule_runs_alone(tmp_path: Path) -> None:
+    _tree_breaking_both_rules(tmp_path)
+
+    assert check(tmp_path, rules=("credentials",)) == [
+        ".github/workflows/tests.yml: grants contents: write"]
+
+
+def test_the_credential_rule_reads_no_declaration(tmp_path: Path) -> None:
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "tests.yml").write_text(CLEAN_WORKFLOW,
+                                                                  encoding="utf-8")
+
+    assert check(tmp_path, rules=("credentials",)) == []
+
+
+def test_the_enumeration_rule_runs_alone(tmp_path: Path) -> None:
+    _tree_breaking_both_rules(tmp_path)
+
+    assert check(tmp_path, rules=("enumeration",)) == [
+        ".github/workflows/tests.yml: names distribution arkhai-core-buyer; "
+        "read it from the declaration instead",
+        "Makefile: publish target push-images names image registry; "
+        "read it from the declaration instead",
+    ]
+
+
+def test_with_no_rule_named_both_run(tmp_path: Path) -> None:
+    _tree_breaking_both_rules(tmp_path)
+
+    assert check(tmp_path) == (check(tmp_path, rules=("enumeration",))
+                               + check(tmp_path, rules=("credentials",)))
+
+
+def test_the_command_runs_the_rules_it_names(capsys: pytest.CaptureFixture[str]) -> None:
+    """On this tree the workflow-credential rule passes alone; its message names
+    only what it establishes."""
+    assert main(["--rule", "credentials"]) == 0
+    assert capsys.readouterr().out == "OK: no workflow can publish.\n"

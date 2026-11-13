@@ -3,9 +3,10 @@
 `manifests/release-components.json` declares a release's components: its
 distributions in dependency order, its service images, its chart and its
 `market` binary. Apart from them, it lists the development images that a release
-candidate's validation runs, which are not release components. Every publish
-target, check and test that needs one of these lists reads it here, because two
-lists kept in agreement by hand drift apart silently.
+candidate's validation runs, which are not release components. A publish
+target, check or test that needs one of these lists reads it here rather than
+keeping its own, because two lists kept in agreement by hand drift apart
+silently; `scripts/check_release_components.py` refuses a second list.
 
 The reader accepts only the shape it knows. It refuses a declaration with any of
 these, naming each one:

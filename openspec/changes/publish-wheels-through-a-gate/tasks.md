@@ -133,7 +133,7 @@ option (b), which the owner confirmed:
   now comes from `make dist` rather than from ordering, and the test asserts
   the workflow still reaches it.
 
-- [ ] 2.7 **Finding (2026-09-21, from `capacity-resource-administration`'s
+- [x] 2.7 **Finding (2026-09-21, from `capacity-resource-administration`'s
   branch): this change's workflow edits are not in the tree, though its tasks
   say they are.** `.github/workflows/publish-pypi.yml` is still the publishing
   workflow: it keeps the `publish` job and its `pypa/gh-action-pypi-publish`
@@ -150,6 +150,9 @@ option (b), which the owner confirmed:
   - Planning note (2026-11-13): closed by 7.1, which deletes the workflow (D1), and by
     7.4, which removes the workflow assertions from `test_publish_matrix.py`. 7.1
     checks this task.
+  - Closed (2026-11-13) by 7.1 and 7.4: `publish-pypi.yml` is deleted, so no workflow
+    path reaches a PyPI upload, and `make test-release-tooling` passes with the
+    workflow assertions gone (7.8).
 
 ## 3. Publish to the development registry on merge
 
@@ -226,10 +229,13 @@ Touches:
 - `install.sh`, `scripts/install-remote.sh`, `scripts/build-installer.sh`;
 - `README.md`'s tree.
 
-- [ ] 7.1 Delete `.github/workflows/publish-pypi.yml`, `publish-npm.yml`, `release.yml`
+- [x] 7.1 Delete `.github/workflows/publish-pypi.yml`, `publish-npm.yml`, `release.yml`
   and `release-cli.yml` (D1). Check 2.7, which this closes.
   - Verify: no file under `.github/workflows/` names PyPI, npm, ghcr or a release upload.
-- [ ] 7.2 Delete `scripts/verify-marketplace-release.py` and
+  - Done (2026-11-13). A search of `.github/workflows/` for PyPI, npm, ghcr and upload
+    finds only `e2e.yml`'s `actions/upload-artifact` steps, which keep a run's
+    diagnostics as workflow artifacts and publish nothing. 2.7 is checked.
+- [x] 7.2 Delete `scripts/verify-marketplace-release.py` and
   `scripts/tests/test_verify_marketplace_release.py` (D1). Delete the curl installer:
   `install.sh`, `scripts/install-remote.sh`, `scripts/build-installer.sh`,
   `scripts/tests/test_install_remote_urls.py` and
@@ -237,11 +243,27 @@ Touches:
   `README.md`'s tree (D18).
   - Verify: a search of the tree outside `openspec/` finds no reference to the deleted
     files or to `arkhai.marketplace-release.v2`.
-- [ ] 7.3 Set `.github/workflows/validate-model-release.yml` to `permissions: contents:
+  - Done (2026-11-13), with one remainder this task's search does not exclude. Outside
+    `openspec/` and `docs/`, a search finds no deleted file and no release contract.
+    The search also matches uv's own installer URL (`astral.sh/uv/…/install.sh`) in
+    the root and registry Makefiles and the host bootstrap script, which is not the
+    deleted installer. It also matches synthetic workflow names that name no file:
+    `publish-pypi.yml` in `test_ci_evidence.py` and `test_validate_slice.py`, and
+    `.github/workflows/release.yml` in `test_check_python_version.py`. Two
+    documents under `docs/` still describe what was deleted:
+    - `docs/buyer-quickstart.md` gives the curl installer's URL;
+    - `docs/development/RELEASING.md` describes `publish-pypi.yml` and `release.yml`.
+
+    13.9 rewrites both documents, and 13.3 checks that no permanent document still
+    describes a publishing workflow or the curl installer. Until closeout they describe
+    deleted files.
+- [x] 7.3 Set `.github/workflows/validate-model-release.yml` to `permissions: contents:
   read`, and remove the step that appends a validation line to the release's notes
   (D7). Downloading the release's assets still works with the read token.
   - Verify: the workflow's remaining steps reference only `secrets.GITHUB_TOKEN`.
-- [ ] 7.4 Rename `manifests/published-distributions.json` to
+  - Done (2026-11-13). Its one secret reference is `secrets.GITHUB_TOKEN`, in the
+    download step, and `make check-workflow-credentials` passes on it.
+- [x] 7.4 Rename `manifests/published-distributions.json` to
   `manifests/release-components.json` in D6's shape:
   - `distributions`, without `arkhai-apicredits-sample-app` and without `wheel_only`;
   - `images` with `name` and `local` for the five release images;
@@ -264,7 +286,20 @@ Touches:
 
   - Verify: unit tests for the reader's refusals, one case per rule, in
     `scripts/tests/test_release_components.py`; `make test-release-tooling` passes.
-- [ ] 7.5 Add the single-enumeration and workflow-credential check,
+  - Done (2026-11-13). Unit: `test_release_components.py` has a case for each
+    refusal:
+    - a missing required key, one case per key;
+    - an unknown key, at the top and in an entry;
+    - an empty `npm` list;
+    - each duplicate rule: an image's name (across release and development images) and
+      local name, a distribution's key, path, and name however it is spelled, a
+      binary's name and path, and an npm package's path;
+    - values of the wrong kind, including a list item that is not an object.
+
+    It also reads every problem at once and the repository's own declaration.
+    `test_publish_matrix.py` reads through the reader and passes. `make
+    test-release-tooling` passed, 2817 tests.
+- [x] 7.5 Add the single-enumeration and workflow-credential check,
   `scripts/check_release_components.py`, as `make check-release-components` (D7). It
   refuses, naming the file and what it found:
   - **the single-enumeration rule:** a list of declared distributions, images,
@@ -293,18 +328,82 @@ Touches:
       passes with it;
     - the single-enumeration rule, run alone on the tree, refuses exactly those five
       targets and nothing else. Record its output in the task note.
-- [ ] 7.6 CI resolves every declared distribution against the wheelhouse it builds
+  - Done (2026-11-13). The script takes `--rule enumeration` and `--rule credentials`,
+    and runs both with neither: `check()`'s default is every rule, and so is the
+    command line's. `make check-release-components`, which names no rule, printed the
+    enumeration refusals below. The credential rule reads no declaration.
+    - `make check-release-components` runs both rules.
+    - `make check-workflow-credentials` runs the credential rule alone, and
+      `check-packaging` runs it after `check-architecture`. 10.9 replaces it there with
+      `check-release-components`.
+    - Unit: `test_check_release_components.py`, over synthetic workflow and Makefile
+      text, with clean cases. The credential rule has a case for:
+      - no top-level `permissions:`;
+      - each write grant, and `write-all`;
+      - a named secret, by `secrets.X`, by `secrets['X']`, in another case, and after a
+        `}}` inside a string literal;
+      - a secret on a line beginning with `#` inside a block scalar, which is not a
+        comment;
+      - the secrets context read without a name (`toJSON(secrets)`,
+        `secrets[matrix.name]`);
+      - `secrets: inherit`;
+      - `GITHUB_TOKEN` passing under either spelling and in lower case;
+      - each named publishing step, and `docker/build-push-action` with `push: true`,
+        with `push:` an expression, and with `push: false`, which passes.
+
+      The enumeration rule has a case for each component kind named by a workflow and
+      by a Makefile target: each distribution, image and development image, the chart
+      by its path and by its `Chart.yaml` name, the binary, and an npm package once
+      declared. It also has a case for an image named by its published name where that
+      differs from its local name, and for
+      each way a target is a publish target (`push-*`, `publish-*`, `clobber-*`,
+      `load-candidate`, an uploader in the recipe) or a lane target (`test-e2e*`,
+      `build-e2e*`, `pull-release-images`), a list held in a variable, and a longer
+      name that is not a declared one.
+
+      Further cases show each rule run alone on a tree breaking both, the credential
+      rule passing with no declaration, `check()` running both rules when none is
+      named, and the command passing on this tree with `--rule credentials`.
+    - On the tree, `make check-workflow-credentials` prints `OK: no workflow can
+      publish.` `make check-packaging` passes with it: it ran inside
+      `scripts/change-workflow run pre-commit` (7.8).
+    - On the tree, `make check-release-components` fails. The credential rule passes,
+      so its output is the enumeration rule's alone, and it names exactly the five
+      targets:
+      ```text
+      Makefile: publish target push-images names image registry
+      Makefile: publish target push-images names image storefront
+      Makefile: publish target push-images names image provisioning
+      Makefile: publish target push-images names image frp-grant-admission
+      Makefile: publish target push-dev-images names development image dev-env
+      Makefile: publish target push-dev-images names development image e2e-tests
+      Makefile: publish target push-charts names chart helm
+      Makefile: publish target push-cli names binary market
+      Makefile: publish target clobber-wheels names distribution arkhai-core-registry-client
+      Makefile: publish target clobber-wheels names distribution arkhai-core-storefront-client
+      Makefile: publish target clobber-wheels names distribution arkhai-vms-provisioning-operator-client
+      ```
+      (Each line ends "; read it from the declaration instead".)
+- [x] 7.6 CI resolves every declared distribution against the wheelhouse it builds
   (D1). A test in `scripts/tests/` asserts every declared wheel is in `.dist`, run by
   `make test-release-tooling` inside `test-deployment-packaging`, after `tests.yml`'s
   `make dist-ci`. If `dist-ci` does not build every declared wheel, `test-deployment-
   packaging`'s job builds what is missing through the existing dist targets, and that
   is recorded in the task note.
   - Verify: passes locally after `make dist`.
-- [ ] 7.7 Correct the comments that cite the deleted workflows: the root `Makefile`'s
+  - Done (2026-11-13). `scripts/tests/test_release_wheelhouse.py` passes locally
+    against this checkout's `.dist`, inside `make test-release-tooling`. In CI,
+    `tests.yml` runs `make dist-ci` before `make test-deployment-packaging`, whose
+    prerequisite is `test-release-tooling`. `dist-ci` builds a superset of
+    `dist-release-set`, so the job needs no extra build step. That CI run is owed by
+    validation (7.8).
+- [x] 7.7 Correct the comments that cite the deleted workflows: the root `Makefile`'s
   `dist-release` and Artifact Registry comments, and any comment
   `make check-comment-hygiene` or a search for the workflow names finds.
   - Verify: `make check-comment-hygiene` passes.
-- [ ] 7.8 Section verification.
+  - Done (2026-11-13). The comments the section's notes list are corrected, and
+    `make check-comment-hygiene` passes.
+- [x] 7.8 Section verification.
   - Unit and integration:
     - `make test-release-tooling` (unit: the reader and both rules of the check);
     - `make check-packaging`, running the workflow-credential rule;
@@ -316,6 +415,101 @@ Touches:
   - Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — after
     `make dist-ci`, the declared-wheel resolution test of 7.6 passes, and the new script
     tests run and pass.
+  - Done (2026-11-13, second session). Results:
+    - `make test-release-tooling` (unit) passed, 2817 tests.
+    - `make check-workflow-credentials` passed.
+    - `make check-comment-hygiene` passed.
+    - `scripts/change-workflow run pre-commit publish-wheels-through-a-gate`: its
+      functional hooks passed, among them the relock, `make check-packaging` (running
+      the credential rule) and every suite. Its closing `pre-commit` hook passed every
+      check but the documentation citations, which fail on this change's own
+      documents ("Section 7 notes: resumed", below).
+  - End-to-end: confirmed that no scenario exercises this section. No marker in
+    `e2e-tests/` covers a workflow, the declaration or the check, and none was added.
+  - Owed by validation: confirmed as written above. `tests.yml` is a workflow
+    `scripts/ci_evidence.py` lists, and its `test · test-deployment-packaging` job runs
+    `make test-release-tooling` after `make dist-ci`.
+
+### Section 7 notes: resumed (2026-11-13, second session)
+
+**What this session added to the work-in-progress commit.**
+- 7.5's split. `scripts/check_release_components.py` takes `--rule enumeration` and
+  `--rule credentials`. `make check-workflow-credentials` runs the credential rule, and
+  `check-packaging` runs that target. `make check-release-components` still runs both
+  rules, and fails on the tree until 10.3, 10.7 and 10.8.
+- Fixes from the two fresh-context checks:
+  - The credential rule now refuses any read of the secrets context, inside a
+    `${{ }}` expression, that does not name `GITHUB_TOKEN`. That includes a read that
+    names no secret, such as `toJSON(secrets)` or `secrets[matrix.name]`, which can
+    reach every secret. Before the fix it saw only `secrets.X` and `secrets['X']`, and
+    it missed three more cases:
+    - expressions on lines beginning with `#`, which inside a block scalar are text;
+    - other letter cases, since Actions compares context and secret names without
+      case;
+    - an expression continuing past a `}}` inside a string literal.
+  - A secret in a bare `if:` is not looked for. Actions does not allow the secrets
+    context there, so the refusal would guard a case Actions already rejects
+    (`ARCHITECTURE.md`, "No speculative guard code").
+  - `docker/build-push-action` is refused for any `push:` but a literal `false`, such as
+    an expression true on some events.
+  - Test cases were added for the rules that had none (7.4 and 7.5 list them).
+  - The docstrings of `release_components.py` and `check_release_components.py` now
+    state the rule rather than claiming the tree already meets it.
+  - `push-distributions.py` reports a `DeclarationError` instead of raising a
+    traceback.
+  - `push-wheels`' help says "declared".
+
+**Choices for review**, beyond those the first session listed:
+- The enumeration rule refuses a single mention of a declared component in a workflow,
+  publish target or lane target, not only a list of them. D7 says "a list". A target
+  naming one component by hand is the same drift D7 exists to stop, since the next
+  component added is missed. The spec delta's scenario ("names it") reads the same way.
+- `check-workflow-credentials` is a second target over one script. 10.9 should decide
+  whether it stays as the credential rule's focused runner once `check-packaging` runs
+  `check-release-components`. 13.9's `BUILD_AND_PACKAGING.md` row should name it if it
+  stays.
+
+**Declined from the fresh-context check.** The check asked that the declared-wheel
+test (7.6) not depend on a wheelhouse a workflow builds, by giving
+`test-release-tooling` a `dist-release-set` prerequisite or by moving the test into a
+check target. I declined, for two reasons:
+- 7.6 places the test in `test-release-tooling`, after `tests.yml`'s `make dist-ci`, by
+  design. Every `make test` job runs after `make dist-ci`, as TESTING.md's
+  "Boundary-Change Validation" describes, and `make validate-local` runs
+  `check-packaging`, which builds `dist`, before `make test`.
+- A `dist-release-set` prerequisite would rebuild every wheel inside the CI job that
+  has just built them.
+
+The test names the missing wheels and `make dist` when it fails.
+
+The second check also noted that the root `Makefile`'s `dist-release` and
+`dist-release-set` comments say nearly the same thing. That is cosmetic, and it is left
+as it is.
+
+**For closeout (13.3).** The citation check reads only `openspec/`, `docs/`, `tools/`,
+`scripts/`, `e2e-tests/` and `.agents/` paths. It will not report
+`docs/development/RELEASING.md`'s citations of the deleted
+`.github/workflows/publish-pypi.yml` and `release.yml`, so 13.3 has to find them by
+hand. 13.9's rewrite removes them.
+
+**A finding for the round: the change's citations cannot pass before closeout.**
+`check-repository`'s citation check, scoped to this change, reports 25 citations in
+the change's own documents that do not resolve. They are of two kinds:
+- files sections 8–12 create, named by their tasks: `scripts/release_bom.py`, its
+  tests and fixture, and others;
+- files this section deleted, named where the design (D1, D18), the proposal and 7.2's
+  completed text say they are deleted: `scripts/verify-marketplace-release.py`,
+  `scripts/install-remote.sh`, `scripts/build-installer.sh` and the deleted tests.
+
+The first kind resolves as sections 8–12 land. The second never resolves, and this
+step may not rewrite the design, the proposal or a completed task to remove it.
+13.10 runs the same check and must resolve every match. The question is for the round
+or closeout to settle: rewrite those citations at closeout, or have the scoped check
+accept a path the change itself deletes. It was already failing on the first kind
+before this section began: the plan's own `scripts/release_bom.py` did not exist when
+it was planned.
+
+**Outside the plan.** None beyond the fixes above, all within section 7's files.
 
 ### Section 7 notes: returned to planning (2026-11-13, first implementation session)
 
