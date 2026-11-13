@@ -16,11 +16,15 @@
 # (compose.vms-local.yml for development), and nothing here gives one a
 # fallback, so without an overlay the registries, storefronts and provisioning
 # authorities refuse to start for want of their identities.
+#
+# Each release image is named `arkhai:<local>${IMAGE_SUFFIX:-}`: with the suffix
+# unset, the bare tag a build writes; in a lane run with RELEASE_IMAGES=1, a
+# release candidate's pulled image (scripts/release_images.py).
 
 services:
   # 1. Registry/Indexer service (vms.compute filter-spec — the image default).
   registry:
-    image: arkhai:registry
+    image: arkhai:registry${IMAGE_SUFFIX:-}
     # The migration before the application, which refuses a database it has
     # not migrated.
     command: ["sh", "-c", "registry-migrate && exec uvicorn core_registry.main:app --host 0.0.0.0 --port 8080"]
@@ -47,7 +51,7 @@ services:
   # 1b. Second Registry/Indexer — a private registry alongside the public
   # one, exercising authenticated multi-registry publication and discovery.
   registry-b:
-    image: arkhai:registry
+    image: arkhai:registry${IMAGE_SUFFIX:-}
     command: ["sh", "-c", "registry-migrate && exec uvicorn core_registry.main:app --host 0.0.0.0 --port 8080"]
     ports:
       - "8082:8080"
@@ -76,7 +80,7 @@ services:
   # public config, and strict provider-secret mounts; this seller stack does
   # not own or inspect buyer profile state.
   bob-storefront:
-    image: arkhai:storefront
+    image: arkhai:storefront${IMAGE_SUFFIX:-}
     platform: linux/amd64
     # entrypoint.sh starts ZeroTier, then the migration command runs before
     # the storefront, which refuses a database it has not migrated.
@@ -137,7 +141,7 @@ services:
   # every listing has the same registry footprint and the test can't
   # distinguish per-provider config from per-listing config.
   alice-storefront:
-    image: arkhai:storefront
+    image: arkhai:storefront${IMAGE_SUFFIX:-}
     platform: linux/amd64
     # As Bob's: ZeroTier, then the migration command, then the storefront.
     command: ["./entrypoint.sh", "sh", "-c", "market-storefront-migrate && exec market-storefront serve"]
@@ -185,7 +189,7 @@ services:
   # CONFIG_DIRECTORY at its own profiles, its site's identities among them, and
   # extends ACTIVE_PROFILES with them.
   provisioning: &provisioning
-    image: arkhai:compute-provisioning
+    image: arkhai:compute-provisioning${IMAGE_SUFFIX:-}
     platform: linux/amd64
     command: ["sh", "-c", "compute-provisioning-migrate && exec compute-provisioning-api"]
     depends_on:

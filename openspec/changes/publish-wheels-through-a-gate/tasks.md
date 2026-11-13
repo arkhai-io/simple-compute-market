@@ -2103,13 +2103,34 @@ images". Touches:
   `domains/bare_metal/compose.yml`, `domains/apicredits/compose.yml` and
   `compose.apicredits-lane.yml`.
 
-- [ ] 12.1 Name each release image in the compose files as
+- [x] 12.1 Name each release image in the compose files as
   `arkhai:<local>${IMAGE_SUFFIX:-}`. The bare-metal storefront's
   `BARE_METAL_STOREFRONT_IMAGE` default follows the same form. Non-release images keep
   their names (D17).
   - Verify: `docker compose config` for each lane, with `IMAGE_SUFFIX` unset, names the
     bare tags as before.
-- [ ] 12.2 Add `scripts/release_images.py`, which reads the declaration and has three
+  - Done (2026-11-13). The registry, storefront and provisioning lines of the three
+    domain stacks, and `compose.apicredits-lane.yml`'s compute registry, read
+    `arkhai:<local>${IMAGE_SUFFIX:-}`. The bare-metal storefront's default is
+    `${BARE_METAL_STOREFRONT_IMAGE:-arkhai:bare-metal-storefront${IMAGE_SUFFIX:-}}`, and
+    Compose resolves the nested default. Each domain stack's header says why, and
+    `compose.apicredits-lane.yml` says it beside its line. The API-credit images,
+    dev-env, the test image and the lane doubles keep their names.
+    - Integration with a real external process, `test_release_images.py`: each lane's
+      Compose files, taken from the `--compose` argument its target passes to the check,
+      are rendered with `docker compose config --images`, unset and with
+      `IMAGE_SUFFIX=-0123456ab`. Unset, the lane runs at least one release image, by its
+      bare tag. Set, exactly the images that were release images' bare tags gain the
+      suffix, none stays bare, and every other image is unchanged. No render from before
+      the change is compared: "as before" rests on the bare tags being the ones the
+      lines held. The renders skip without Docker Compose, except under
+      `COMPOSE_REQUIRED=1`, which `tests.yml`'s packaging job now sets beside
+      `HELM_REQUIRED`, so a skip fails there. They ran here.
+    - `test_committed_stack_values.py`, which renders the four stacks and selects the
+      registries by `arkhai:registry`, passes. Its render now drops `IMAGE_SUFFIX` from
+      the environment, as it drops `PROVISIONING_MODE`, and fails rather than skips
+      under `COMPOSE_REQUIRED=1`.
+- [x] 12.2 Add `scripts/release_images.py`, which reads the declaration and has three
   commands:
   - `pull DOCKER_REGISTRY= IMAGE_SUFFIX=` pulls `<registry>/arkhai:<name><suffix>` for
     each declared release image and tags it `arkhai:<local><suffix>`;
@@ -2130,7 +2151,49 @@ images". Touches:
     - no repo digest and two repo digests each refused;
     - the registry stripped from the value;
     - `provisioning` pulled and tagged as `compute-provisioning`.
-- [ ] 12.3 Give `test-e2e-vm`, `test-e2e-bare-metal` and `test-e2e-apicredits` the
+  - Done (2026-11-13). `scripts/release_images.py` runs `docker` through one `run` seam
+    and reads the declared release images through `release_components`:
+    - `pull --registry= --suffix=` pulls `<registry>/arkhai:<name><suffix>` and tags it
+      `arkhai:<local><suffix>`, for each declared release image.
+    - `check --suffix= --compose=` renders the lane's Compose files with `docker compose
+      config --images`, from the repository root with `IMAGE_SUFFIX` set to the suffix.
+      It names every declared release image they run that `docker image inspect` does
+      not find, and reports any other inspection failure as itself, such as an
+      unreachable daemon. It also refuses one they run bare (`arkhai:<local>` with the suffix
+      set), which would run whatever holds the bare tag; that goes beyond the task's
+      wording ("Section 12 notes").
+    - `record --lane= --suffix= --compose=` reads the lane's running containers (`docker
+      compose ps --quiet`, `docker container inspect`), keeps those running
+      `arkhai:<local><suffix>`, and reads each image's repo digests (`docker image
+      inspect`). It counts only a repo digest from a registry: one in the local `arkhai`
+      repository names none (12.3's finding). It refuses an image with no such digest
+      or with two different ones, a release image the lane's Compose files run that no
+      running container runs, and a lane running no release image of the candidate. It
+      writes the record and prints it.
+    - Each refuses an empty suffix, and `pull` an empty registry, before running
+      anything.
+
+    `make -C e2e-tests pull-release-images` runs `pull` with `DOCKER_REGISTRY` and
+    `IMAGE_SUFFIX`. A suffix begins with `-`, so every call passes `--suffix=<value>`:
+    argparse reads `--suffix -0123456ab` as a missing value.
+    - Integration, `scripts/tests/test_release_images.py`, `docker` stubbed at the
+      script's `run`, over a synthetic declaration of three release images, as 11.2's
+      load tests are:
+      - `pull`'s commands, in order, `provisioning` tagged `compute-provisioning`, and
+        a failed pull stopping and named;
+      - an empty suffix refused by each command, and an empty registry by `pull`, with
+        nothing run;
+      - `check`: every release image present passes, rendered from the root with the
+        suffix; an image the lane does not run, and a non-release image, are not looked
+        for; each missing image named; another inspection failure named as itself; a
+        bare release image refused;
+      - `record`: the shape, written and printed; two containers of one image read
+        once; one manifest under two registries is one digest; the local repository's
+        digest beside a registry's ignored; no registry name in the record; no repo
+        digest, only the local repository's, and two different ones each refused, with
+        nothing written; a release image the Compose files run with no running
+        container refused; a lane running no candidate image refused.
+- [x] 12.3 Give `test-e2e-vm`, `test-e2e-bare-metal` and `test-e2e-apicredits` the
   `RELEASE_IMAGES=1` mode. In it, the root `build-e2e-*` targets build the wheels,
   dev-env, the test image and the non-release images the lane runs, and no declared
   release image. The lane runs 12.2's `check` before starting its stack and `record`
@@ -2144,7 +2207,79 @@ images". Touches:
     The lane passes, builds no release image, and its record's digests equal the
     pushed manifests'. A run with one image removed fails before the stack starts. If
     the session cannot run the lanes, it records that as unrun.
-- [ ] 12.4 Section verification.
+  - Done (2026-11-13), with the registry round trip unrun.
+    - **The lanes.** Each lane target checks `RELEASE_IMAGES` is `1` or unset. With it
+      set, the lane runs the check first, before it tears down or builds anything, then
+      `build-e2e-<lane>`, `up --wait`, then the record, before the payments check and
+      the scenarios. Without it, both expand to nothing. `e2e-tests/Makefile` exports
+      `IMAGE_SUFFIX`, which the Compose files read.
+    - **The builds.** With `RELEASE_IMAGES` set, the root `build-e2e-*` targets drop
+      their release-image builds (`e2e_release_builds`) and pass `IMAGE_SUFFIX=` empty
+      to every image build they run (`E2E_IMAGE_SUFFIX`). The suffix names the
+      candidate's images, and the Compose files run what the lane builds by its bare
+      tag. Like any unsuffixed build, dev-env's and the test image's also write their
+      revision tags. The build targets are still named in the lane targets, as `build`,
+      `build-dev` and `build-candidate` name theirs.
+    - Unit, through `make -n` as 10.2's cases, in `test_release_images.py`, for each
+      lane:
+      - with `RELEASE_IMAGES=1 IMAGE_SUFFIX=-0123456ab`, no `docker build` or `docker
+        tag` writes a release image's tag, bare, suffixed or revision-tagged; the test
+        image and dev-env are built bare, and no tag carries the suffix; the order is
+        check, down, the first build, up, record, the scenarios; the check and the
+        record pass the suffix and exactly the Compose files the lane brings up;
+      - without the switch, the lane builds release images and runs neither command;
+      - `RELEASE_IMAGES=yes` refused.
+
+      Also `pull-release-images`' command line.
+    - Integration with real Compose, in the same file, for each lane: in release-image
+      mode, every `arkhai:` image the lane's Compose files run that is not a declared
+      release image's suffixed tag is one the lane writes. A build target left in
+      `e2e_release_builds` after its image left the declaration would fail it, whether
+      or not its Compose line keeps the suffix.
+    - The `make -n` walk reads the root build as the lane's `$(MAKE)` line runs it in
+      place, with the suffix MAKEFLAGS passes, tracking directories through `-w`, and
+      follows each `cd <dir> && make` line from the directory make was in. It reads
+      every `-t` of a `docker build`, and every `docker tag`.
+    - **The local run.** A missing image:
+      `make -C e2e-tests test-e2e-bare-metal RELEASE_IMAGES=1 IMAGE_SUFFIX=-000000000`
+      failed at its first command, naming `arkhai:registry-000000000`,
+      `arkhai:compute-provisioning-000000000` and
+      `arkhai:bare-metal-storefront-000000000`, before `down` ran. An empty suffix:
+      `make -C e2e-tests test-e2e-vm RELEASE_IMAGES=1` failed at the check, naming
+      `IMAGE_SUFFIX`.
+    - **The lane on candidate-shaped images, first run.** `make -C e2e-tests
+      test-e2e-bare-metal RELEASE_IMAGES=1 IMAGE_SUFFIX=-92d47be09` passed, 98
+      scenarios, against the `-92d47be09` images that section 11's `make
+      build-candidate` wrote and no step pushed. Its check passed. Its build ran four
+      `docker build`s: dev-env, the test image and the two lane doubles, each to its
+      bare tag (dev-env and the test image also took their revision tags). Its record,
+      printed and written to `.snapshot/e2e-release-images-bare-metal.json`, named
+      `registry`, `provisioning` and `bare-metal-storefront`, each with one `sha256:`
+      digest. That record should not have been written: see the finding below.
+    - **A finding, fixed: on this Docker, a locally built image has a repo digest.**
+      This Docker keeps images in containerd: its builds export an image index
+      ("exporting manifest list" in the build log), and each built image carries a repo
+      digest in the local `arkhai` repository, though no registry served it. D17's "no
+      repo digest" refusal assumed the classic image store, where only a push or a pull
+      sets one. The first run showed it; the first fresh-context check proposed the
+      fix. `record` now counts only a repo digest from a registry, any repository but
+      the local `arkhai`, and the record still carries no registry name. That a pull
+      records `<registry>/arkhai@<digest>`, on either store, is expected and was not
+      observed: no pull ran.
+    - **Second run, after the fix.** With `release_images.py` as committed but for the
+      wording of an inspection failure (a later fix), the same command built the same
+      four images, then the record refused all three images, each "has no repo digest
+      from a registry, so it was not pulled", and the lane failed before its
+      scenarios. That shows each built image's only repo digests are in the local
+      repository. No run shows the final code recording images it accepts. Both runs'
+      stacks were taken down with `make -C e2e-tests e2e-bare-metal-down`.
+    - **Unrun: the registry round trip** (steps 1–3 against a registry on `localhost`).
+      This step's rules allow neither `docker push` nor `docker pull`, nor `make -C
+      e2e-tests pull-release-images`. So no run shows `pull` against a real registry,
+      a passing record of pulled images, or the record's digests equal to the pushed
+      manifests'. `pull`'s commands are shown only with `docker` stubbed (12.2).
+      Validation or the owner can make the round trip as 12.3's verification lists it.
+- [x] 12.4 Section verification.
   - Unit: `make test-release-tooling`.
   - Packaging: `make check-packaging`, where 7.5's check covers the lane targets.
   - Local lane run: 12.3's.
@@ -2154,6 +2289,167 @@ images". Touches:
     compose image lines with an empty suffix and must pass unchanged. The release-image
     mode is exercised only by 12.3's local run and by the deployment's release
     validation.
+  - Done (2026-11-13). Results:
+    - Unit and integration: `make test-release-tooling` passed, 3005 tests, among them
+      `test_release_images.py`'s 24, whose three Compose renders ran rather than
+      skipped. After both fresh-context checks' fixes, `test_release_images.py` passed
+      32 tests, its six Compose cases running, and `make test-release-tooling` passed
+      3013 tests inside the last pre-commit run below.
+    - `make check-release-components` passed, with the enumeration rule reading the
+      changed lane targets and `pull-release-images`.
+    - Local lane run: 12.3's, with its registry round trip unrun.
+    - `scripts/change-workflow run pre-commit publish-wheels-through-a-gate` ran three
+      times: before the fresh-context checks and after each one's fixes. Each time its
+      functional hooks passed.
+      They include the relock, which changed no lock, `make check-packaging` with
+      `check-release-components` (whose credential rule read the changed `tests.yml`),
+      and every suite. Each time its closing `pre-commit` hook passed every check but
+      the documentation citations. That check now reports 16 citations, all of the
+      second kind section 7's notes describe: files the change deleted or renamed.
+      Section 12's own two files resolve the last of the first kind.
+  - End-to-end: confirmed. No marker in `e2e-tests/` was added. The pipeline's three
+    lanes run in build mode, where the Compose files resolve to the bare tags, as the
+    renders above show, so they must pass unchanged. The release-image mode is
+    exercised only by 12.3's local run and the deployment's release validation.
+  - Owed by validation: `tests.yml`, job `test · test-deployment-packaging`. With
+    `COMPOSE_REQUIRED=1`, which this section adds to that job, the Compose render cases
+    of `test_release_images.py` and `test_committed_stack_values.py` run rather than
+    skip and pass. The job passing shows it, since a skip fails there.
+
+### Section 12 notes (2026-11-13)
+
+**Choices for review.**
+- **`check` refuses a release image run bare.** With the suffix set, a Compose line that
+  still reads `arkhai:<local>` would run whatever image holds the bare tag. The lane's
+  check would not have looked for it, and its record would have left it out. D17 asks
+  only that missing images be named. One rendering with the suffix set finds both.
+- **`record` counts only a repo digest from a registry** (12.3's finding). D17 says
+  "from their repo digests" and expects an image not pulled to have none, which holds
+  only on the classic image store. Excluding the local `arkhai` repository restores
+  that on the containerd store too, with no registry name in the record. A candidate
+  pulled from a registry named in Docker's familiar form, such as Docker Hub's
+  `<org>/arkhai`, still counts, since only the bare local repository is excluded.
+- **`record` refuses a release image the lane's Compose files run that no running
+  container runs**, and a lane running no release image of the candidate. D17 says
+  each lane records the release images it runs; either gap would leave the record
+  short without failing.
+- **The check runs before `down` and the build.** The release images are pulled, not
+  built, so they can be checked first, and a missing one fails the lane in seconds.
+- **The root `build-e2e-*` targets clear the suffix themselves** in release-image mode,
+  rather than relying on the lane target to pass `IMAGE_SUFFIX=`. `make
+  build-e2e-bare-metal RELEASE_IMAGES=1 IMAGE_SUFFIX=-…` run directly therefore builds
+  what the lane runs.
+- **Which builds a lane drops is named in the root Makefile** (`e2e_release_builds`),
+  not derived from the declaration, since only the Makefile knows which target builds
+  which image (section 11's notes). A newly declared image left in a lane's build
+  list fails the `make -n` test; a dropped build whose image has left the declaration
+  fails the Compose test.
+- **`BARE_METAL_STOREFRONT_IMAGE`**, set in the environment, replaces the bare-metal
+  storefront's image. Set to the bare `arkhai:bare-metal-storefront`, the check
+  refuses it as run bare; set to the candidate's tag, it is checked and recorded; set
+  to any other image, neither command sees a release image there. That last is an
+  operator's explicit choice of image, so neither refuses it.
+- **A lane run with `IMAGE_SUFFIX` and no `RELEASE_IMAGES`** builds every image
+  suffixed, and its Compose files now run the release images suffixed and the rest
+  bare. Before this section they ran everything bare, so the combination was
+  inconsistent before and after; no lane or workflow uses it, and nothing refuses it.
+
+**From the fresh-context check.** Fixed:
+- the Compose renders skipped with no gate; `tests.yml`'s packaging job now sets
+  `COMPOSE_REQUIRED=1`, and both render tests fail rather than skip under it;
+- the stubbed-`run` tests were labelled unit; they drive `main` against the process
+  boundary, as 11.2's integration tests do, and are now labelled integration;
+- the root Makefile's `IMAGE_SUFFIX` comment said Compose and the lanes always use the
+  bare tags;
+- the `build-e2e-*` comment, and 12.3's notes, said what the lane builds is tagged
+  bare; dev-env and the test image also take their revision tags, and the `make -n`
+  test now reads `docker tag` lines too;
+- the record counted a local repository's digest (above), and left out a release
+  image with no running container (above);
+- no test caught a dropped build whose image left the declaration (above);
+- the `RELEASE_IMAGES` refusal was tested on one lane; it is tested on each;
+- a vacuous assertion in the Compose test;
+- the API-credit compose comment, and an unmarked placeholder registry in the tests;
+- notes overstating their evidence: "the five release images", "all bare", "nothing
+  carries a suffix", and what the Compose test compares.
+
+Declined:
+- **Make variables for the build lists derived from the declaration.** An
+  image-to-target map would be a second copy of what the Makefiles say; the two tests
+  above hold the lists instead.
+- **Refusing a suffix not beginning with `-`.** Such a suffix names tags no build or
+  pull writes, so the check already fails, naming each missing image.
+- **The `make -n` tests labelled integration.** Sections 10 and 11 class the same
+  tests as unit, and this section follows them; TESTING.md does not name them.
+- **Recording the containerd finding in `design.md`.** This step does not amend the
+  design; the question is raised below for the round.
+
+**From the second fresh-context check.** Fixed:
+- the `build-e2e-*` comment said every unsuffixed build writes a revision tag; only
+  the dev chain's and the test image's do;
+- the root Makefile's `IMAGE_SUFFIX` comment now says the lanes' Compose files name
+  release images with `IMAGE_SUFFIX` whenever it is in their environment;
+- the `make -n` walk's docstring said `$(MAKE)` lines are printed, not run; the walk
+  now reads them as run in place, tracks directories through `-w`, and no longer walks
+  the root build a second time without the inherited suffix;
+- the walk read only the first `-t` of a `docker build`;
+- the Compose test of a lane's own images missed an image that left the declaration
+  with its Compose line still suffixed;
+- `check` reported any failed inspection as a missing image;
+- a test docstring called the two-registry shape the bare-metal lane's;
+- notes overstating their evidence: a pull's repo digest (unobserved), which run used
+  which code, the storefront override, and 12.1's headers.
+
+Declined:
+- **A refusal of `IMAGE_SUFFIX` without `RELEASE_IMAGES`** (above).
+- **Relabelling the `make -n` tests**, as after the first check.
+
+**Questions for the round.**
+- **D17 and the delta's wording on repo digests.** The delta's requirement says
+  "failing an image without exactly one repo digest", and D17 "no repo digest, or two
+  different ones". Read literally on the containerd store, they accept a locally built
+  image, which has one, and could refuse a pulled image whose local tag adds a second
+  reference in the local repository. `record` reads "repo digest" as one a registry
+  served. Triage can amend D17 and the delta to say so, or rule otherwise.
+- **The behaviours beyond D17's text**: `check` refusing a release image run bare, and
+  `record` refusing a release image with no running container. If accepted, D17 and the
+  delta's requirement could name them.
+- **A permanent scenario this section makes stale.** `openspec/specs/deployment-state/
+  spec.md`, "A stack's configuration lives in committed files", scenario "A lane stack
+  is brought up", says a lane target "names only the lane's Compose files and the run's
+  provisioning mode". A lane target now also takes the release-image mode and its
+  suffix. The delta does not modify that requirement, so the archive would leave it
+  stale; a MODIFIED requirement in the delta would correct it. `docs/development/
+  TESTING.md`'s matching sentence ("A lane target names only its Compose files, its
+  project, and the run's provisioning mode") is for 13.9.
+- **Test levels.** TESTING.md names no level for a dry run of committed Makefiles
+  through a real `make`. Sections 10–12 call those tests unit; the Compose renders,
+  which need a binary a runner may lack, are gated as the third flavour of
+  integration test. TESTING.md could say which.
+
+**Outside the plan.**
+- `test_committed_stack_values.py`'s render drops `IMAGE_SUFFIX` from the environment,
+  since its registry selection compares the bare tag, and fails under
+  `COMPOSE_REQUIRED=1` rather than skipping.
+- `tests.yml`'s packaging job sets `COMPOSE_REQUIRED`, as section 8 added
+  `HELM_REQUIRED`.
+
+**For closeout (13.9).**
+- `docs/development/DEPLOYMENT_AND_CONFIG.md` says "Compose, the pipeline lanes, and
+  your own deployments keep bare tags". A lane run with `RELEASE_IMAGES=1` does not.
+  13.9 does not name this document.
+- `docs/development/TESTING.md`: "A lane target names only its Compose files, its
+  project, and the run's provisioning mode" (above), and `COMPOSE_REQUIRED` beside the
+  other required-binary gates wherever they are described.
+- The record shows the manifest digest of each release image the lane ran, pulled from
+  a registry; the deployment's comparison with the pushed manifests is what shows they
+  are the candidate's. RELEASING.md should say so.
+- `docs/development/TESTING.md`, "Locally verifiable and external-topology scenarios":
+  the release-image mode, the order (check, build, up, record), and the record's shape.
+- `RELEASING.md`: `make -C e2e-tests pull-release-images DOCKER_REGISTRY=…
+  IMAGE_SUFFIX=-<rev9>`, then each lane with `RELEASE_IMAGES=1` and the same suffix. A
+  suffix is passed as `--suffix=<value>` inside the targets; an operator passes Make
+  variables and never meets that.
 
 ## 13. Closeout
 

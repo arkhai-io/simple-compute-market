@@ -25,13 +25,18 @@
 # overlay (compose.apicredits-local.yml for development), and nothing here gives
 # one a fallback, so without an overlay the registry, credits service, sample
 # app and storefront refuse to start for want of them.
+#
+# Each release image is named `arkhai:<local>${IMAGE_SUFFIX:-}`: with the suffix
+# unset, the bare tag a build writes; in a lane run with RELEASE_IMAGES=1, a
+# release candidate's pulled image (scripts/release_images.py). The API-credit
+# images are not release images, so their names carry no suffix.
 
 services:
   # 1. Registry for the api_credits schema — same image as the vms.compute
   # registry, different filter-spec, mounted below and selected by the
   # deployment's registry profile through REGISTRY_FILTER_SPEC_PATH.
   api-credits-registry:
-    image: arkhai:registry
+    image: arkhai:registry${IMAGE_SUFFIX:-}
     # The migration before the application, which refuses a database it has
     # not migrated.
     command: ["sh", "-c", "registry-migrate && exec uvicorn core_registry.main:app --host 0.0.0.0 --port 8080"]

@@ -12,10 +12,14 @@
 # and site profiles, and its host and pool definitions. Nothing here gives one a
 # fallback, so without an overlay the registry, the site and the storefront
 # refuse to start for want of them.
+#
+# Each release image is named `arkhai:<local>${IMAGE_SUFFIX:-}`: with the suffix
+# unset, the bare tag a build writes; in a lane run with RELEASE_IMAGES=1, a
+# release candidate's pulled image (scripts/release_images.py).
 
 services:
   bare-metal-registry:
-    image: arkhai:registry
+    image: arkhai:registry${IMAGE_SUFFIX:-}
     # The migration before the application, which refuses a database it has
     # not migrated.
     command: ["sh", "-c", "registry-migrate && exec uvicorn core_registry.main:app --host 0.0.0.0 --port 8080"]
@@ -46,7 +50,7 @@ services:
       retries: 3
 
   bare-metal-provisioning:
-    image: arkhai:compute-provisioning
+    image: arkhai:compute-provisioning${IMAGE_SUFFIX:-}
     platform: linux/amd64
     command: ["sh", "-c", "compute-provisioning-migrate && exec compute-provisioning-api"]
     depends_on:
@@ -83,7 +87,7 @@ services:
       start_period: 15s
 
   bare-metal-storefront:
-    image: ${BARE_METAL_STOREFRONT_IMAGE:-arkhai:bare-metal-storefront}
+    image: ${BARE_METAL_STOREFRONT_IMAGE:-arkhai:bare-metal-storefront${IMAGE_SUFFIX:-}}
     # The migration command runs before the storefront, which refuses a
     # database it has not migrated. Setting the entrypoint drops the image's
     # `serve` command, which this line restates.

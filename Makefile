@@ -260,7 +260,10 @@ test-kits:
 # passed it explicitly. A change's Helm validation builds with
 # `IMAGE_SUFFIX=-<change>` and deploys those tags, so two changes' builds never
 # write one tag (scripts/change_namespace.py). Compose, the pipeline lanes, and
-# an owner's own deployments use the bare tags.
+# an owner's own deployments use the bare tags, except that the lanes' Compose
+# files name each release image with IMAGE_SUFFIX when it is set in their
+# environment, as a lane running a release candidate's images sets it
+# (e2e-tests/Makefile).
 IMAGE_SUFFIX ?=
 
 build: ## Build the wheels, the release's market binary, and every runtime image
@@ -282,20 +285,32 @@ build-dev: ## Build everything `build` does, the dev chain image, the test image
 # builds only its own; build-dev keeps building everything for local use. The
 # pipeline runs a lane target on a fresh checkout, so this target, not its
 # caller, makes the wheels first, ordered as `build` orders its steps.
+#
+# With RELEASE_IMAGES=1 the lane runs a release candidate's pulled images, which
+# IMAGE_SUFFIX names (e2e-tests/Makefile), so a lane target builds no declared
+# release image, and builds the rest with no suffix: the lanes' Compose files run
+# those by their bare tags. Unsuffixed, the dev chain's and the test image's builds
+# also write their revision tags.
+E2E_IMAGE_SUFFIX = $(if $(RELEASE_IMAGES),,$(IMAGE_SUFFIX))
+e2e_release_builds = $(if $(RELEASE_IMAGES),,$(1))
+
 build-e2e-base:
 	$(MAKE) init-prerequisites
 	$(MAKE) dist
-	$(MAKE) build-dev-env
-	$(MAKE) build-test-image
+	$(MAKE) build-dev-env IMAGE_SUFFIX=$(E2E_IMAGE_SUFFIX)
+	$(MAKE) build-test-image IMAGE_SUFFIX=$(E2E_IMAGE_SUFFIX)
 
 build-e2e-vm: build-e2e-base ## Build the VM end-to-end lane's images
-	$(MAKE) -j4 build-registry build-storefront build-provisioning build-tools
+	$(MAKE) -j4 $(call e2e_release_builds,build-registry build-storefront build-provisioning) \
+		build-tools IMAGE_SUFFIX=$(E2E_IMAGE_SUFFIX)
 
 build-e2e-bare-metal: build-e2e-base ## Build the bare-metal end-to-end lane's images
-	$(MAKE) -j4 build-registry build-provisioning build-bare-metal-storefront build-tools
+	$(MAKE) -j4 $(call e2e_release_builds,build-registry build-provisioning build-bare-metal-storefront) \
+		build-tools IMAGE_SUFFIX=$(E2E_IMAGE_SUFFIX)
 
 build-e2e-apicredits: build-e2e-base ## Build the API-credit end-to-end lane's images
-	$(MAKE) -j5 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-tools
+	$(MAKE) -j5 $(call e2e_release_builds,build-registry) build-apicredits-service \
+		build-apicredits-storefront build-apicredits-sample-app build-tools IMAGE_SUFFIX=$(E2E_IMAGE_SUFFIX)
 
 # The native Ansible gate's image: only the provisioning image and the wheels it
 # installs, since the gate composes no stack, so no dev chain and no test image.

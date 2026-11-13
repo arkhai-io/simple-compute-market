@@ -21,7 +21,7 @@ MODULE ?= contracts
 DIST_DIR ?= ../.dist
 
 .PHONY: build venv test test-e2e test-e2e-vm test-e2e-bare-metal test-e2e-apicredits \
-	e2e-vm-down e2e-vm-logs e2e-bare-metal-down e2e-bare-metal-logs e2e-apicredits-down e2e-apicredits-logs
+	pull-release-images e2e-vm-down e2e-vm-logs e2e-bare-metal-down e2e-bare-metal-logs e2e-apicredits-down e2e-apicredits-logs
 
 # -----------------------------------------------------------------------
 # Setup
@@ -45,7 +45,10 @@ GIT_SUFFIX := $(shell git rev-parse --short=9 HEAD)
 # Appended to the image's tag; the root Makefile's IMAGE_SUFFIX. A suffixed build
 # is tagged per change alone: a commit tag would keep one image per validated commit.
 # The targets that run the image use the bare tag, as the pipeline lanes do.
+# Exported, since the lanes' Compose files name each release image
+# `arkhai:<local>${IMAGE_SUFFIX:-}`.
 IMAGE_SUFFIX ?=
+export IMAGE_SUFFIX
 
 build: build-images
 
@@ -171,7 +174,7 @@ test-ci:
 # through them.
 #
 # A lane target names only its Compose files and project, and the run's
-# provisioning mode. Every value the stack reads is in a committed file -- the
+# provisioning and release-image modes. Every value the stack reads is in a committed file -- the
 # overlays, the registry and site profiles, the secret overlays -- which is what
 # lets a lane run without repository secrets; see dev-env/identities/README.md.
 #
@@ -187,6 +190,31 @@ test-ci:
 PROVISIONING_MODE ?= mock
 export PROVISIONING_MODE
 E2E_REQUIRE_PROVISIONING_MODE = $(if $(filter mock real,$(PROVISIONING_MODE)),,$(error PROVISIONING_MODE must be mock or real, not '$(PROVISIONING_MODE)'))
+
+# RELEASE_IMAGES=1 runs a release candidate's images in place of the lane's own
+# builds, since images do not rebuild to the same digest. IMAGE_SUFFIX names the
+# candidate's images, as `-<rev9>`; pull them first with pull-release-images. A
+# lane then builds no release image (the root build-e2e-* targets skip them), and
+# scripts/release_images.py, reading the declaration, checks that each release
+# image the lane's Compose files run is present before anything is torn down or
+# built, and once the stack is up records the manifest digest each runs in
+# .snapshot/e2e-release-images-<lane>.json. Unset, a lane builds every image.
+RELEASE_IMAGES ?=
+E2E_REQUIRE_RELEASE_IMAGES = $(if $(filter-out 1,$(RELEASE_IMAGES)),$(error RELEASE_IMAGES must be 1 or unset, not '$(RELEASE_IMAGES)'))
+RELEASE_IMAGES_SCRIPT := python3 scripts/release_images.py
+# Each expands to nothing without RELEASE_IMAGES. A suffix and the compose
+# arguments begin with `-`, so each is passed as `--option=value`.
+# $(1): the compose arguments.
+e2e_check_release_images = $(if $(RELEASE_IMAGES),cd .. && $(RELEASE_IMAGES_SCRIPT) check --suffix="$(IMAGE_SUFFIX)" --compose="$(1)")
+# $(1): the lane; $(2): the compose arguments.
+e2e_record_release_images = $(if $(RELEASE_IMAGES),cd .. && $(RELEASE_IMAGES_SCRIPT) record --lane $(1) --suffix="$(IMAGE_SUFFIX)" --compose="$(2)")
+
+# A release candidate's images for RELEASE_IMAGES=1: each declared release image,
+# pulled from DOCKER_REGISTRY by its published name and IMAGE_SUFFIX, and tagged
+# with the local name the lanes' Compose files run.
+DOCKER_REGISTRY ?=
+pull-release-images:
+	cd .. && $(RELEASE_IMAGES_SCRIPT) pull --registry="$(DOCKER_REGISTRY)" --suffix="$(IMAGE_SUFFIX)"
 
 # Bring a lane's stack up. On failure, print the state and each container's
 # output *here*, in the failing step: `up --wait` reports only which container
@@ -246,9 +274,12 @@ E2E_VMS_COMPOSE := -p $(E2E_VMS_PROJECT) -f compose.vms.yml -f compose.vms-local
 
 test-e2e-vm:
 	@$(E2E_REQUIRE_PROVISIONING_MODE)
+	@$(E2E_REQUIRE_RELEASE_IMAGES)
+	$(call e2e_check_release_images,$(E2E_VMS_COMPOSE))
 	cd .. && docker compose $(E2E_VMS_COMPOSE) down -v --remove-orphans
-	cd .. && $(MAKE) build-e2e-vm
+	cd .. && $(MAKE) build-e2e-vm RELEASE_IMAGES=$(RELEASE_IMAGES)
 	cd .. && $(call e2e_up,$(E2E_VMS_COMPOSE))
+	$(call e2e_record_release_images,vm,$(E2E_VMS_COMPOSE))
 	cd .. && $(call e2e_check_payments,$(E2E_VMS_COMPOSE),bob-storefront,market-storefront)
 	$(MAKE) test-buyer-machine NETWORK=$(E2E_VMS_PROJECT)_default BUYER_MODULE="$(E2E_MODULE)" \
 		RUNNER_PROFILES=docker,payments-lane,vms-lane
@@ -270,9 +301,12 @@ E2E_BARE_METAL_COMPOSE := -p $(E2E_BARE_METAL_PROJECT) \
 
 test-e2e-bare-metal:
 	@$(E2E_REQUIRE_PROVISIONING_MODE)
+	@$(E2E_REQUIRE_RELEASE_IMAGES)
+	$(call e2e_check_release_images,$(E2E_BARE_METAL_COMPOSE))
 	cd .. && docker compose $(E2E_BARE_METAL_COMPOSE) down -v --remove-orphans
-	cd .. && $(MAKE) build-e2e-bare-metal
+	cd .. && $(MAKE) build-e2e-bare-metal RELEASE_IMAGES=$(RELEASE_IMAGES)
 	cd .. && $(call e2e_up,$(E2E_BARE_METAL_COMPOSE))
+	$(call e2e_record_release_images,bare-metal,$(E2E_BARE_METAL_COMPOSE))
 	cd .. && $(call e2e_check_payments,$(E2E_BARE_METAL_COMPOSE),bare-metal-storefront,bare-metal-storefront)
 	$(MAKE) test-buyer-machine NETWORK=$(E2E_BARE_METAL_PROJECT)_default BUYER_MODULE="$(E2E_BARE_METAL_MODULE)" \
 		RUNNER_PROFILES=docker,payments-lane,bare-metal-lane
@@ -292,9 +326,12 @@ E2E_APICREDITS_COMPOSE := -p $(E2E_APICREDITS_PROJECT) -f compose.apicredits.yml
 
 test-e2e-apicredits:
 	@$(E2E_REQUIRE_PROVISIONING_MODE)
+	@$(E2E_REQUIRE_RELEASE_IMAGES)
+	$(call e2e_check_release_images,$(E2E_APICREDITS_COMPOSE))
 	cd .. && docker compose $(E2E_APICREDITS_COMPOSE) down -v --remove-orphans
-	cd .. && $(MAKE) build-e2e-apicredits
+	cd .. && $(MAKE) build-e2e-apicredits RELEASE_IMAGES=$(RELEASE_IMAGES)
 	cd .. && $(call e2e_up,$(E2E_APICREDITS_COMPOSE))
+	$(call e2e_record_release_images,apicredits,$(E2E_APICREDITS_COMPOSE))
 	cd .. && $(call e2e_check_payments,$(E2E_APICREDITS_COMPOSE),credits-storefront,apicredits-storefront)
 	$(MAKE) test-buyer-machine NETWORK=$(E2E_APICREDITS_PROJECT)_default BUYER_MODULE="$(E2E_APICREDITS_MODULE)" \
 		RUNNER_PROFILES=docker,payments-lane,apicredits-lane
