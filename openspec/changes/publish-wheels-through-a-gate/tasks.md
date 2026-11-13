@@ -1579,18 +1579,43 @@ Touches:
 - `scripts/check_build_requirements.py`;
 - `helm/` and its nine subcharts.
 
-- [ ] 10.1 Compute `GIT_SUFFIX` with `git rev-parse --short=9` in the root, `e2e-tests`,
+- [x] 10.1 Compute `GIT_SUFFIX` with `git rev-parse --short=9` in the root, `e2e-tests`,
   `dev-env`, `core/registry`, `provisioning/compute/service` and `domains/vms/storefront`
   Makefiles (D4). Extend 7.5's check to refuse a `git rev-parse --short` without `=9` in
   any Makefile.
   - Verify: a unit case for the refusal; the check passes on the tree.
-- [ ] 10.2 Every declared image's and development image's build writes
+  - Done (2026-11-13). The six Makefiles use `--short=9`. The check is a fourth rule of
+    `scripts/check_release_components.py`, `revision` (`--rule revision`). It refuses
+    any `git rev-parse` in a Makefile that abbreviates with anything but `--short=9`,
+    across continuation lines too, and reads no declaration.
+    - Unit, `test_check_release_components.py`: a bare `--short`, `--short=7` and
+      `--short=12` each refused; one across a continuation refused; `--short=9`, a full
+      revision and a comment pass; the rule run alone; every rule run when none is
+      named; the command passing on this tree with `--rule revision`.
+    - `make check-release-components` passes on the tree with all four rules.
+- [x] 10.2 Every declared image's and development image's build writes
   `arkhai:<local>-<rev9>` when `IMAGE_SUFFIX` is empty. `build-bare-metal-storefront`
   gains its tag (D8).
   - Extend `scripts/tests/test_image_publication_contract.py` from provisioning to every
     declared image and development image, read from the declaration.
   - Verify: the extended test passes.
-- [ ] 10.3 `push-images` and `push-dev-images` push the declared images and development
+  - Done (2026-11-13). `build-bare-metal-storefront` tags its image with the revision
+    when `IMAGE_SUFFIX` is empty, as `build-frp-grant-admission` does.
+    `test_image_publication_contract.py` is rewritten. It follows `make build-dev`
+    through `make -n`, entering each subproject Makefile that a recipe enters with
+    `cd <dir> && make <target>`, which `make -n` prints rather than runs. It reads the
+    images from the declaration. Unit, a static check of the Makefiles' recipes
+    through `make -n`, as `test_change_build_and_helm_targets.py` is. It passes:
+    - each of the five release images and two development images has a `docker build`
+      writing `arkhai:<local>`, and a `docker tag arkhai:<local> arkhai:<local>-<rev9>`;
+    - every image `push-images` and `push-dev-images` push from, as the script runs
+      them with the arguments their recipes pass and `run` stubbed, is a tag a build
+      writes. Which images they push is `test_publish_artifacts.py`'s (10.3).
+
+    `test_change_build_and_helm_targets.py` (unit, through `make -n`): the bare-metal
+    storefront joins the frps image's case, tagged with its commit unless suffixed,
+    and its `_commit()` reads `--short=9`.
+- [x] 10.3 `push-images` and `push-dev-images` push the declared images and development
   images through `scripts/publish_artifacts.py`, from the declaration, each as
   `arkhai:<name>-<rev9>` beside its bare `arkhai:<name>` tag. This replaces their literal
   lines (D8).
@@ -1603,7 +1628,29 @@ Touches:
     `docker` subprocess stubbed at `publish_artifacts.py`'s own wrapper. They show the
     pushes are exactly the declared set, with each one's revision and bare tags, and
     `provisioning` pushed from local `compute-provisioning`.
-- [ ] 10.4 Pin the build requirements (D15).
+  - Done (2026-11-13). `scripts/publish_artifacts.py` reads the declaration and has
+    the commands `check`, `images [--development]`, `chart` and `binaries`. Each push
+    target is one line naming no component. Gone:
+    - `push-wheels`, and `scripts/push-distributions.py`, its only caller;
+    - `clobber-wheels`, and the script's `wheel` command and `publish_wheel`, whose
+      only caller it was;
+    - `PYTHON_REGISTRY` and the three client-version variables.
+
+    `push-runtime-artifacts` is `push-images push-charts push-cli`.
+  - Integration, `test_publish_artifacts.py`, with every subprocess stubbed at the
+    script's `run` seam. Read through `make -n`, each push target's command line, run
+    by the script, shows:
+    - `push-images` pushes exactly the declared images, each tagged from
+      `arkhai:<local>-<rev9>` as `arkhai:<name>-<rev9>` and `arkhai:<name>`, and
+      `provisioning` from `compute-provisioning`;
+    - `push-dev-images` does the same for the declared development images.
+
+    Called directly rather than through a target: a failed tag stops one image's
+    remaining tags and pushes (`push_image`); a declaration the reader refuses, and a
+    chart with no version, are reported with nothing run (`main` over a synthetic
+    tree); and an empty destination is refused (the script's `check` command, run as
+    a process).
+- [x] 10.4 Pin the build requirements (D15).
   - A root `build-constraints.txt`, beside `.python-version`, pins `hatchling` exactly at
     the version builds use today.
   - The root `Makefile` exports it as `UV_BUILD_CONSTRAINT`, beside `UV_PYTHON`. Every
@@ -1618,7 +1665,29 @@ Touches:
     - the check passes on the tree;
     - after `make dist-clean dist`, every wheel's `WHEEL` file names the pinned
       hatchling.
-- [ ] 10.5 Remove `appVersion` from `helm/Chart.yaml` and the nine subcharts' `Chart.yaml`
+  - Done (2026-11-13). `build-constraints.txt` pins `hatchling==1.33.0`, the version
+    every wheel in `.dist` named. The root Makefile exports it as
+    `UV_BUILD_CONSTRAINT` by its absolute path, since the dist recipes `cd` into a
+    project before `uv build`. Each of the 41 subproject Makefiles that runs `uv build`
+    exports it the same way, beside its `UV_PYTHON` line.
+    `scripts/check_build_requirements.py` is `make check-build-requirements`, run by
+    `check-packaging` after `check-python-version`. It refuses:
+    - a declaration line that is not `<name>==<version>`, and a name pinned twice;
+    - a `[build-system]` requirement the declaration does not pin, by normalised name;
+    - a Makefile running `uv build` without the export, by a path resolving to the
+      declaration.
+  - Unit, `test_check_build_requirements.py`: an unpinned backend, an unpinned plugin,
+    normalised names, an unconstrained `uv build`, a path that does not reach the
+    declaration, a Makefile running no `uv build`, three inexact pins, a name pinned
+    twice, a missing declaration, and the tree passing. `make check-build-requirements`
+    passes on the tree.
+  - After `make dist-clean dist`, a new case in `test_release_wheelhouse.py` read every
+    declared wheel's `WHEEL` and found `Generator: hatchling 1.33.0` in each.
+  - That uv applies the export was shown once. With the pin moved to 1.27.0, `make
+    dist-identity` rebuilt `arkhai_kit_identity` under hatchling 1.27.0: the case named
+    every other wheel and not that one. The pin was restored, the wheel rebuilt, and
+    the case passed.
+- [x] 10.5 Remove `appVersion` from `helm/Chart.yaml` and the nine subcharts' `Chart.yaml`
   (D9).
   - Remove the `app.kubernetes.io/version` block from the umbrella's helpers
     (`helm/templates/_helpers.tpl`, and its copy `helm/_helpers.tpl`) and from the seven
@@ -1626,31 +1695,75 @@ Touches:
   - Bump each changed chart's version per RELEASING.md's versioning policy, and update
     the umbrella's ten dependency entries to match.
   - Verify: a search finds no `appVersion` or `.Chart.AppVersion` under `helm/`.
-- [ ] 10.6 Chart tests (D9), run by `helm/scripts/test-render.sh`:
+  - Done (2026-11-13). `appVersion` is gone from all ten `Chart.yaml`, and the
+    `app.kubernetes.io/version` block from both copies of the umbrella's helpers and
+    the seven subcharts. Each chart takes a patch bump, the label being in no selector
+    and nothing consuming it: the umbrella, the storefront and the bare-metal
+    storefront 0.4.0 → 0.4.1, and the seven others 0.1.0 → 0.1.1. The umbrella's ten
+    entries follow them. A search under `helm/` finds no `appVersion` or
+    `.Chart.AppVersion`.
+- [x] 10.6 Chart tests (D9), run by `helm/scripts/test-render.sh`:
   - `helm/tests/test_subchart_pins.py` holds each umbrella dependency entry's `version`
     equal to its subchart's `Chart.yaml` version, naming a mismatch;
   - a render assertion that the chart's default values name no semver-shaped image tag,
     no revision-suffixed tag and no digest.
   - Verify: `make -C helm test-render` passes; a deliberately mismatched pin fails the
     pin test, checked once and reverted.
-- [ ] 10.7 `push-charts` packages the declared chart (`chart.path`) and pushes the package
+  - Done (2026-11-13). Both are standard-library tests that `test-render.sh` runs with
+    the other `helm/tests/test_*.py`.
+    - `helm/tests/test_subchart_pins.py` names any entry whose version differs from
+      its subchart's `Chart.yaml`, and has a synthetic mismatch case. Moving the
+      umbrella's `dev-env` entry to 0.1.0 failed it with `dependency dev-env pins
+      subchart dev-env at 0.1.0; charts/dev-env/Chart.yaml is version 0.1.1`.
+      Reverted, it passed.
+    - `helm/tests/test_default_images.py` renders the umbrella with its default values
+      and refuses an image with a digest, a semver-shaped tag or a revision-suffixed
+      tag. A subchart renders only inside the umbrella, since it reads the umbrella's
+      globals (rendered alone, `dev-env` fails on `.Values.global.rpc`). The lane
+      doubles are off by default, so a second case reads every chart's `values.yaml`
+      for the tags and digests it sets. A third case renders a revision tag, a semver
+      tag and a digest through `--set`, and each is found.
+  - `make -C helm test-render` passed under Helm v4.3.0, and again inside `make
+    test-deployment-packaging` (10.10).
+- [x] 10.7 `push-charts` packages the declared chart (`chart.path`) and pushes the package
   `make dist-helm` writes for it. The package is found from the declaration and the
   chart's `Chart.yaml`, never named in the recipe (D6, D7). It stays a developer push;
   no release step names it (D3).
   - Verify: an integration test with `helm` stubbed at the push's own wrapper shows the
     pushed file is the declared chart's `<name>-<version>.tgz`. The single-enumeration
     rule no longer refuses `push-charts`.
-- [ ] 10.8 `push-cli` uploads the declared binary (`binaries[]`'s `path`, `.dist/bin/market`
+  - Done (2026-11-13). `push-charts` keeps `dist-helm` as its prerequisite and runs
+    `publish_artifacts.py chart`, which names the package from the declared chart's
+    `Chart.yaml`. The recipe's `rm` of the package is gone: it removed whatever a glob
+    matched, and the push now names one file. Integration, `test_publish_artifacts.py`
+    (through `make -n`, `helm` stubbed at the script's `run`): the one command is
+    `helm push <repo>/.dist/arkhai-node-operator-<version>.tgz <HELM_REGISTRY>`. The
+    single-enumeration rule passes the target.
+- [x] 10.8 `push-cli` uploads the declared binary (`binaries[]`'s `path`, `.dist/bin/market`
   since 9.3) as package `market`, version `<rev9>`. The path is never named in the recipe
   (D6, D7). It stays a developer push; 11.2's load uploads the binary itself.
   - Verify: an integration test with `gcloud` stubbed at the upload's own wrapper shows
     the uploaded file is the declared binary's path, under the nine-character revision.
     The single-enumeration rule no longer refuses `push-cli`.
-- [ ] 10.9 Add the single-enumeration rule (7.5) to `make check-packaging` (D7). From
+  - Done (2026-11-13). `push-cli` runs `publish_artifacts.py binaries --suffix
+    $(GIT_SUFFIX)`. Each declared binary goes to `<prefix>-cli` as the generic package
+    of its name. Integration, `test_publish_artifacts.py` (through `make -n`, `gcloud`
+    stubbed at the script's `run`): the one upload is `.dist/bin/market` as package
+    `market`, version the revision the recipe passes, which is nine characters. The
+    single-enumeration rule passes the target.
+- [x] 10.9 Add the single-enumeration rule (7.5) to `make check-packaging` (D7). From
   here on, it also covers the targets sections 11 and 12 add.
   - Verify: `make check-release-components` runs both rules and passes on the tree;
     `make check-packaging` passes.
-- [ ] 10.10 Section verification.
+  - Done (2026-11-13). `check-packaging` runs `check-release-components` (every rule:
+    enumeration, credentials, market binary and revision) in place of
+    `check-workflow-credentials` and `check-market-binary`, and adds
+    `check-build-requirements` (10.4). Section 7's notes left open whether
+    `check-workflow-credentials` stays. Both focused targets stay, each running one
+    rule alone, and a Makefile comment says so; 13.9's "Checks" rows should name them.
+    `make check-release-components` passes on the tree, and `make check-packaging`
+    passed in the pre-commit run (10.10).
+- [x] 10.10 Section verification.
   - Unit and integration: `make test-release-tooling`; `make test-deployment-packaging`
     (render tests); `make check-packaging`, now running both rules of 7.5's check.
   - Local build: `make build` succeeds and writes every revision tag.
@@ -1664,6 +1777,96 @@ Touches:
   - Owed by validation: `tests.yml`, job `test · test-deployment-packaging` —
     `make -C helm test-render` passes, including the subchart-pin test and the
     default-values assertion.
+  - Done (2026-11-13). Results:
+    - `make test-deployment-packaging` passed: `make test-release-tooling`, 2967 tests,
+      none failing, then `make -C helm test-render` with both new chart tests. The
+      worktree then also held section 11's untracked scripts and tests, which account
+      for 17 of those tests (section 11's notes).
+    - Local build evidence, an image build rather than one of TESTING.md's levels:
+      `make build-dev`, which runs `make build`, succeeded. The step's rules allow
+      `make build-*` and not a bare `make build`. It tagged every declared image and
+      development image `-f05894761`, the nine-character revision: `registry`,
+      `storefront`, `compute-provisioning`, `bare-metal-storefront`,
+      `frp-grant-admission`, `dev-env` and `e2e-tests`. The binary's smoke test listed
+      `api_credits.v1`, `bare_metal.v1` and `compute.v1`. That build ran with section
+      11's Dockerfiles and Makefiles in the worktree too (section 11's notes).
+    - `scripts/change-workflow run pre-commit publish-wheels-through-a-gate`: its
+      functional hooks passed. They include the relock, which changed no lock, `make
+      check-packaging`, now running `check-build-requirements` and
+      `check-release-components`, and every suite. Like the two runs above, it ran
+      with section 11's unstaged Dockerfiles and untracked scripts in the worktree,
+      and with section 11's one test reading its Make target held back.
+    - After the fresh-context check's fixes, the touched script and chart tests were
+      rerun and passed (107 tests); the full runs above were not repeated.
+    - Its closing `pre-commit` hook passed every check but the documentation
+      citations. That check reports 18 citations in the change's own documents, of the
+      two kinds section 7's notes describe:
+      - files section 12 creates: `scripts/release_images.py` and its test;
+      - files the change deleted or renamed. This section adds
+        `scripts/push-distributions.py`, which the proposal and 3.2's completed text
+        name.
+    - `make check-comment-hygiene` passed inside that hook.
+  - End-to-end: no scenario exercises the release components, and none was added. The
+    pipeline's three lanes build every image through the changed targets, so a lane
+    passing shows the builds and the revision tags still work. The Helm validation's
+    render and upgrade of the chart without `appVersion` is validation's to record.
+  - Owed by validation: confirmed as written above. `tests.yml` is a workflow
+    `scripts/ci_evidence.py` lists, and its `test · test-deployment-packaging` job runs
+    `make test-deployment-packaging`, whose `make -C helm test-render` runs both new
+    chart tests.
+
+### Section 10 notes (2026-11-13)
+
+**How the image contract test reads the builds.** `make -n` runs a `$(MAKE)` line
+rather than printing it. The wheelhouse build's recursive makes therefore print their
+own `cd <dir> && make` lines, relative to directories the walk cannot see. The walk
+follows only a `cd` naming a Makefile's directory relative to the Makefile being
+read; the other lines build wheels, not images. `make -o dist` does not stop a
+`$(MAKE) dist` recipe line, so the wheelhouse build cannot be skipped that way.
+
+**Choices for review.**
+- `publish_artifacts.py` derives the generic repositories (`<prefix>-cli`, and
+  section 11's `<prefix>-candidates`) from the prefix. The Docker and Helm registries
+  stay derived in the Makefile and passed in whole, as before.
+- The chart test reads every chart's `values.yaml` as well as rendering the umbrella.
+  A subchart cannot render alone, and the lane doubles render nothing by default.
+- The chart bumps are patches: the removed label is in no selector, and nothing reads
+  it.
+- `build-constraints.txt` refuses an inexact pin, including `hatchling == 1.33.0`
+  written with spaces.
+
+**From the fresh-context check.** Fixed:
+- the revision rule's docstring justified itself by the lanes' release-image suffix,
+  which section 12 adds; it now gives the push targets and the bill of materials;
+- the image contract test took any `docker tag` target as the revision tag; it now
+  requires `docker tag arkhai:<local> arkhai:<local>-<rev9>`;
+- its push case repeated `test_publish_artifacts.py`; it now holds only what the
+  pushes read to what the builds write;
+- `test_default_images.py`'s docstring described one kind of test of its three;
+- refusal branches with no test now have one: a project that is not TOML, a build
+  requirement naming no package, a chart with no version;
+- the 10.2, 10.3 and 10.10 notes overstated or left out what their tests ran.
+
+Declined: sharing `_environment()` and `_revision()` between the two test modules that
+copy them. Each module states what it reads from Make and git, and a shared helper
+would hide that for two short functions.
+
+**Outside the plan.**
+- `scripts/push-distributions.py` is deleted, since `push-wheels` was its only caller.
+  The check's uploader pattern no longer names it.
+- `test_change_build_and_helm_targets.py` took the bare-metal storefront's new tag,
+  and reads the commit with `--short=9`.
+
+**For closeout (13.9).**
+- `BUILD_AND_PACKAGING.md`, "Checks": the `check-release-components` row names its
+  four rules and the two focused targets; the `check-build-requirements` row names
+  `build-constraints.txt` and the `UV_BUILD_CONSTRAINT` export in every Makefile that
+  runs `uv build`.
+- `TESTING.md`, "Chart Render Tests": nothing names the new chart tests
+  (`test_subchart_pins.py`, `test_default_images.py`). They run with the umbrella's
+  other tests, and the section may want a line for them.
+- `RELEASING.md` describes no push target. `docs/development/VALIDATION_RUNBOOK.md`
+  still runs `make push-runtime-artifacts`, which no longer pushes wheels.
 
 ## 11. The load operation
 

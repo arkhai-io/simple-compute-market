@@ -14,6 +14,7 @@ from check_release_components import (
     component_patterns,
     main,
     makefile_problems,
+    revision_problems,
     workflow_credential_problems,
     workflow_enumeration_problems,
 )
@@ -321,9 +322,9 @@ def test_a_build_target_naming_its_own_image_passes() -> None:
 def test_a_publish_target_reading_the_declaration_passes() -> None:
     text = (
         "push-images:\n"
-        "\tpython3 scripts/publish_artifacts.py images --set images\n"
-        "push-wheels:\n"
-        "\tpython3 scripts/push-distributions.py --dist-dir .dist\n")
+        "\tpython3 scripts/publish_artifacts.py images --registry $(DOCKER_REGISTRY)\n"
+        "push-cli:\n"
+        "\tpython3 scripts/publish_artifacts.py binaries --suffix abc\n")
 
     assert _makefile(text) == []
 
@@ -453,7 +454,8 @@ def _tree_breaking_every_rule(root: Path) -> None:
         CLEAN_WORKFLOW.replace("contents: read", "contents: write")
         + "      - name: List\n        run: pip install arkhai-core-buyer\n",
         encoding="utf-8")
-    (root / "Makefile").write_text("push-images:\n\tdocker push arkhai:registry\n",
+    (root / "Makefile").write_text("GIT_SUFFIX := $(shell git rev-parse --short HEAD)\n"
+                                   "push-images:\n\tdocker push arkhai:registry\n",
                                    encoding="utf-8")
 
 
@@ -496,7 +498,40 @@ def test_with_no_rule_named_every_rule_runs(tmp_path: Path) -> None:
 
     assert check(tmp_path) == (check(tmp_path, rules=("enumeration",))
                                + check(tmp_path, rules=("credentials",))
-                               + check(tmp_path, rules=("market-binary",)))
+                               + check(tmp_path, rules=("market-binary",))
+                               + check(tmp_path, rules=("revision",)))
+
+
+def test_the_revision_rule_runs_alone(tmp_path: Path) -> None:
+    _tree_breaking_every_rule(tmp_path)
+
+    assert check(tmp_path, rules=("revision",)) == [
+        "Makefile: abbreviates a revision with --short; use git rev-parse --short=9"]
+
+
+@pytest.mark.parametrize("abbreviation", ["--short", "--short=7", "--short=12"])
+def test_a_revision_abbreviated_otherwise_than_to_nine_characters_is_refused(
+        abbreviation: str) -> None:
+    text = f"GIT_SUFFIX := $(shell git rev-parse {abbreviation} HEAD)\n"
+
+    assert revision_problems("dev-env/Makefile", text) == [
+        f"dev-env/Makefile: abbreviates a revision with {abbreviation}; "
+        "use git rev-parse --short=9"]
+
+
+def test_a_revision_abbreviated_in_a_recipe_across_a_continuation_is_refused() -> None:
+    text = "tag:\n\tdocker tag arkhai:x arkhai:x-$$(git rev-parse \\\n\t\t--short HEAD)\n"
+
+    assert revision_problems("Makefile", text) == [
+        "Makefile: abbreviates a revision with --short; use git rev-parse --short=9"]
+
+
+def test_nine_characters_a_full_revision_and_a_comment_pass() -> None:
+    text = ("GIT_SUFFIX := $(shell git rev-parse --short=9 HEAD)\n"
+            "FULL := $(shell git rev-parse HEAD)\n"
+            "# git rev-parse --short HEAD in a comment is not a revision\n")
+
+    assert revision_problems("Makefile", text) == []
 
 
 def test_the_command_runs_the_rules_it_names(capsys: pytest.CaptureFixture[str]) -> None:
@@ -504,3 +539,10 @@ def test_the_command_runs_the_rules_it_names(capsys: pytest.CaptureFixture[str])
     only what it establishes."""
     assert main(["--rule", "credentials"]) == 0
     assert capsys.readouterr().out == "OK: no workflow can publish.\n"
+
+
+def test_every_makefile_in_this_tree_abbreviates_a_revision_to_nine_characters(
+        capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["--rule", "revision"]) == 0
+    assert capsys.readouterr().out == (
+        "OK: every Makefile abbreviates a revision to nine characters.\n")

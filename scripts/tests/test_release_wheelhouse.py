@@ -1,5 +1,6 @@
-"""The wheelhouse the build makes holds every declared distribution's wheel, and
-none of them requires the tool that freezes the release's binary.
+"""The wheelhouse the build makes holds every declared distribution's wheel, built
+by the pinned backend, and none of them requires the tool that freezes the
+release's binary.
 
 CI builds the wheelhouse (`make dist-ci`) before this suite runs, so a declared
 distribution that no build target makes, or that builds under another name or
@@ -13,6 +14,7 @@ import re
 import zipfile
 from pathlib import Path
 
+from check_build_requirements import pins
 from release_components import REPO_ROOT, declared_wheels, load
 
 DIST_DIR = REPO_ROOT / ".dist"
@@ -46,3 +48,19 @@ def test_no_declared_wheel_requires_the_tool_that_freezes_the_binary() -> None:
     ]
 
     assert not requiring, "these declared wheels require PyInstaller: " + ", ".join(requiring)
+
+
+def _generator(wheel: Path) -> str | None:
+    with zipfile.ZipFile(wheel) as archive:
+        name = next(name for name in archive.namelist() if name.endswith(".dist-info/WHEEL"))
+        return email.parser.BytesParser().parsebytes(archive.read(name)).get("Generator")
+
+
+def test_every_declared_wheel_was_built_by_the_pinned_backend() -> None:
+    pinned, _ = pins(REPO_ROOT)
+    expected = f"hatchling {pinned['hatchling']}"
+    others = sorted(f"{wheel.name} ({_generator(wheel)})"
+                    for wheel in declared_wheels(load(), REPO_ROOT, DIST_DIR)
+                    if _generator(wheel) != expected)
+
+    assert not others, f"wheels not built by {expected}: " + ", ".join(others)

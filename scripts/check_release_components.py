@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Refuse a second list of release components, and any workflow that could publish.
 
-Three rules, with no exception list. Each runs on its own (`--rule enumeration`,
-`--rule credentials`, `--rule market-binary`); with no `--rule`, every one runs.
+Four rules, with no exception list. Each runs on its own (`--rule enumeration`,
+`--rule credentials`, `--rule market-binary`, `--rule revision`); with no
+`--rule`, every one runs.
 
 **One enumeration.** This rule holds `manifests/release-components.json` to being
 the only list of what a marketplace release comprises and of the development
@@ -34,6 +35,12 @@ equal to the declaration by a check is not a second list. A missing
 distribution is named with the project that registers it, and an extra one as
 neither. Only `dependencies` is compared; the build's own tools sit in a
 dependency group.
+
+**Nine-character revisions.** Every revision tag a build writes and every
+version a push stores is `git rev-parse --short=9`, and a release's bill of
+materials names each image by its `<name>-<rev9>` tag. Git's default
+abbreviation grows with the repository, so a Makefile abbreviating a revision
+with a bare `--short`, or any other length, is refused.
 """
 
 from __future__ import annotations
@@ -78,7 +85,7 @@ _BUILD_PUSH_ACTION = re.compile(r"docker/build-push-action")
 _PUSH = re.compile(r"^\s*push\s*:\s*(?!['\"]?false['\"]?\s*$)(\S.*?)\s*$", re.MULTILINE)
 
 _UPLOADER = re.compile(
-    r"publish_artifacts\.py|push-distributions\.py|\bdocker\s+push\b|\bhelm\s+push\b"
+    r"publish_artifacts\.py|\bdocker\s+push\b|\bhelm\s+push\b"
     r"|\bgcloud\s+artifacts\b|\buv\s+publish\b|\btwine\s+upload\b|\bnpm\s+publish\b")
 _PUBLISH_TARGET = re.compile(r"^(push|publish|clobber)-|^load-candidate$")
 _LANE_TARGET = re.compile(r"^(test-e2e|build-e2e)|^pull-release-images$")
@@ -86,6 +93,9 @@ _RULE = re.compile(r"^([^\s#:=][^#:=]*?)\s*:(?![=:])(.*)$")
 _VARIABLE = re.compile(
     r"^(?:export\s+|override\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(\+=|\?=|:{1,3}=|=)\s*(.*)$")
 _REFERENCE = re.compile(r"\$[({]([A-Za-z_][A-Za-z0-9_]*)[)}]")
+_REV_PARSE = re.compile(r"\bgit\s+rev-parse\b[^\n;&|)]*")
+_SHORT = re.compile(r"--short(?:=\S*)?")
+REVISION_LENGTH = 9
 
 
 @dataclass(frozen=True)
@@ -416,6 +426,30 @@ def check_market_binary(root: Path = REPO_ROOT,
     return problems
 
 
+def revision_problems(label: str, text: str) -> list[str]:
+    """The revision rule's refusals of one Makefile: each `git rev-parse` that
+    abbreviates with anything but `--short=9`."""
+    wanted = f"--short={REVISION_LENGTH}"
+    problems: list[str] = []
+    for line in _without_comments(text.replace("\\\n", " ")):
+        for call in _REV_PARSE.finditer(line):
+            for short in _SHORT.finditer(call.group(0)):
+                if short.group(0) != wanted:
+                    problems.append(f"{label}: abbreviates a revision with {short.group(0)}; "
+                                    f"use git rev-parse {wanted}")
+    return problems
+
+
+def check_revision(root: Path = REPO_ROOT) -> list[str]:
+    """The revision rule's refusals for the tree at `root`. It reads no
+    declaration."""
+    problems: list[str] = []
+    for makefile in _makefiles(root):
+        problems += revision_problems(str(makefile.relative_to(root)),
+                                      makefile.read_text(encoding="utf-8"))
+    return problems
+
+
 def check_enumeration(root: Path = REPO_ROOT,
                       components: ReleaseComponents | None = None) -> list[str]:
     """The single-enumeration rule's refusals for the tree at `root`."""
@@ -438,6 +472,7 @@ RULES = {
     "credentials": "no workflow can publish",
     "market-binary": "the market binary's project bundles exactly the buyer CLI and the "
                      "declared buyer domains",
+    "revision": "every Makefile abbreviates a revision to nine characters",
 }
 
 
@@ -451,6 +486,8 @@ def check(root: Path = REPO_ROOT, components: ReleaseComponents | None = None,
         problems += check_credentials(root)
     if "market-binary" in rules:
         problems += check_market_binary(root, components)
+    if "revision" in rules:
+        problems += check_revision(root)
     return problems
 
 

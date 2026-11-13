@@ -41,7 +41,7 @@ reinit: init-venv
 
 IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= e2e-tests
-GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+GIT_SUFFIX := $(shell git rev-parse --short=9 HEAD)
 # Appended to the image's tag; the root Makefile's IMAGE_SUFFIX. A suffixed build
 # is tagged per change alone: a commit tag would keep one image per validated commit.
 # The targets that run the image use the bare tag, as the pipeline lanes do.
