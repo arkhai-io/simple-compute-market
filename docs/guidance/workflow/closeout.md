@@ -7,14 +7,14 @@ tags: [workflow, closeout]
 Every `tasks.md` for a change, or for a major section within one, ends with a
 closeout task before implementation is considered planned, not invented after a
 review round asks for it. The closeout task works through the parts below, in this
-order, and ends by archiving the change, so the closeout review reads the change and
-the specifications as archived. Closeout changes documentation only: the code was
-last reviewed at pre-closeout, and the closeout review reads documentation, so a
-part that would need a code edit returns the change to implementation instead.
+order, archival last. It changes documentation only: a part that would need a code
+edit returns the change to implementation instead. Why closeout is shaped so is the
+workflow companion's
+([Closeout and archival](../../../openspec/specs/change-workflow/README.md#closeout-and-archival)).
 
-The workflow's parts are these ten, each under its own heading below. A repository
-adds parts of its own, which its root guidance names; they run after campaign index
-currency and before promotion:
+The workflow's parts are these ten, each under its own heading below, with the
+repository's own parts at the seventh position
+([The repository's own closeout parts](#the-repositorys-own-closeout-parts)):
 
 1. Comment hygiene
 2. Import placement
@@ -22,7 +22,7 @@ currency and before promotion:
 4. Narrative compression
 5. Roadmap currency
 6. Campaign index currency
-7. *The repository's own closeout parts*
+7. The repository's own closeout parts
 8. Promotion
 9. Guidance placement
 10. Documentation citations
@@ -110,6 +110,25 @@ that is `blocked in` a phase keeps its status, because that blocker is independe
 of this change; archive cleanup records in its `Notes` that design reverification is
 owed once the blocker clears.
 
+## The repository's own closeout parts
+
+A repository adds a part for a check or evidence the workflow cannot name: one that
+depends on how the repository builds, packages, deploys, or runs its system end to
+end. Its root guidance names the section that defines them; there each part has a
+heading of its own saying what it confirms, the command it runs, and what a failure
+means for the change. They run once the change index is current and before
+promotion, so a failure that returns the change to implementation does so before any
+permanent document is written.
+
+For example, a repository whose services ship as container images might define:
+
+```markdown
+### Image build
+
+Run `make images` and confirm every image builds from the change's lock files.
+A failure returns the change to implementation.
+```
+
 ## Promotion
 
 Write the permanent documents the closeout task names — the capabilities'
@@ -169,8 +188,8 @@ Archive the change as the last step, once every other part is done:
 `scripts/change-workflow openspec archive <change> -y` merges its spec deltas into
 `openspec/specs/` and moves it to `openspec/changes/archive/<date>-<change>/`; the
 change's row in the change index then links to that directory. A change whose
-`spec.md` promotion was made by hand before archival became closeout's last part
-archives with `--skip-specs`, so the merge is not applied twice. The closeout review
+`spec.md` was already edited by hand archives with `--skip-specs`, so the merge is
+not applied twice. The closeout review
 and its triage then read the archived change and the permanent documents as
 archived, and find the change by name under the archive
 (`scripts/change-workflow find <change>`).

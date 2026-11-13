@@ -16,20 +16,7 @@ What it leaves to the repository is named here:
 | This repository's closeout parts, run after campaign index currency | [`openspec/README.md`, "This repository's closeout parts"](openspec/README.md#this-repositorys-closeout-parts) |
 | This repository's roadmap | [`docs/development/ROADMAP.md`](docs/development/ROADMAP.md) |
 
-## Working model
-
-The working model — discuss, plan, implement, close out — is the workflow's
-([`docs/guidance/workflow/working-model.md`](docs/guidance/workflow/working-model.md)).
-Here, implementation is complete only when, besides what it says:
-
-- the checks run include the packaging and typing checks, and `make check-comment-hygiene`
-  and `make check-packaging` pass;
-- permanent documentation describes the current system rather than announcing completion;
-- temporary migration and changelog commentary has been removed from production code.
-
-Accepted cross-system architecture is promoted to `docs/development/ARCHITECTURE.md`.
-
-### Amend a rule or comply
+## Amend a rule or comply
 
 When work conflicts with a written rule, amend the rule first or make the work
 comply; never record a private exception to it. The testing levels, for instance,
@@ -111,7 +98,7 @@ document that explains it.
 - When a failure cannot be reproduced locally, report useful diagnostic steps and identify any design decision needed before changing behavior.
 - A difficult-to-test failure is evidence to consider a testability refactor, not permission to bypass the boundary.
 - Run `make check-comment-hygiene` before implementation is considered complete; closeout confirms it (`docs/guidance/workflow/closeout.md`, "Comment hygiene").
-- Once the tests covering a change pass, run `make check-packaging` and resolve every failure it reports before the work is committed. Passing tests do not prove it: they may have run against an environment a missing or hand-maintained refresh left stale, and the next environment to rebuild will fail instead.
+- Once the tests covering a change pass, run `make check-packaging` and the typing checks, and resolve every failure they report before the work is committed. Passing tests do not prove it: they may have run against an environment a missing or hand-maintained refresh left stale, and the next environment to rebuild will fail instead.
 
 ## Public repository discipline
 

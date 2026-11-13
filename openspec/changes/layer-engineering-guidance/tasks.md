@@ -679,6 +679,40 @@ Section 3 notes (handoff):
   resolved by trimming `closeout.md`'s copy, not by moving the engineering rule,
   which is section 5's.
 
+Round 2's triage (reviews 56, 57, 58), fixes and the return:
+
+- Fixes, made in the triage session: `docs/guidance/workflow/README.md` gains "What
+  the workflow's guidance holds", the rule dividing the workflow's specification,
+  guidance, and operator handbook (58 O5), and drops its sentence calling the guide
+  workflow guidance (58 O7); `closeout.md`'s opening is trimmed to cite the
+  companion's "Closeout and archival" rather than restate it (58 O5), and gains "The
+  repository's own closeout parts" with a neutral example (58 O4);
+  `working-model.md` opens with its subject and links the phases (58 O2);
+  `AGENTS.md`'s "Working model" section is removed, the typing checks joining
+  "Tests and diagnostics" and "Amend a rule or comply" taking its own heading
+  (58 O9) — section 5 writes the two engineering criteria it held from the
+  inventory's rows rather than moving them; four phrases relative to the migration
+  are rewritten in the workflow's `README.md`, `closeout.md`'s Archival, and
+  `changes.md` (58 O3); the root `README.md`'s reading list becomes a pointer to
+  `AGENTS.md`, and its validation command `scripts/openspec validate --all
+  --strict`, which applies the validator's pin (58 O8). Committed as the
+  work-in-progress commit of the return, unchecked by the round's checks; the
+  replanned round's checks cover them.
+- Tasks added: 4.7 (58 O1), 5.9 (58 O3), 5.10 (58 O6), 6.5's amendment (58 O1),
+  9.4's amendment (56 F1).
+- Why the change returns to planning: the owner settled at this triage that the
+  workflow's guide is not guidance but the change workflow's operator handbook (D3
+  as amended; "Settled at round 2's triage", 58 O7) — no frontmatter, beside the
+  other handbooks in `docs/`, holding only what the owner needs, embedding the
+  workflow's diagrams, its agent-facing content moved to the specification, its
+  companion, or `docs/guidance/workflow/` by 58 O5's rule, and its 31 citations
+  outside the changes (skills, specifications, `AGENTS.md`, `next_step.py`, two test
+  files) and other changes' documents re-pointed. No section plans that work: the
+  inventory's rows for the guide (258–281) need reclassifying by audience, and
+  section 3's task 3.6 tagged the guide `workflow`, which the handbook undoes. The
+  owner reads the round again (`make round-view`) after planning, before round 3,
+  and may give further notes and run another review and triage then.
+
 ## 4. The engineering layer: testing
 
 Delivers the engineering layer's README and its testing files (D1, D3, D7, D17–D19;
@@ -722,6 +756,14 @@ where 31 O1b brings it in line; skills and documents citing moved text;
   `scripts/change-workflow config load common` prints them.
 - [ ] 4.6 Verify the section as task 3.10 does. End-to-end: none; no pipeline
   scenario reads guidance, and none is owed.
+- [ ] 4.7 Before 4.6's verification (58 O1): move the argument of
+  `openspec/README.md`'s "End-to-end pipeline" part — that a change is not complete
+  because its own suites pass, and what the end-to-end tier catches — to the
+  engineering testing file 31 O1g names; drop its blocker sentence, which restates
+  `working-model.md`'s "any unrun check is disclosed"; and leave the part as one
+  declarative statement of what this repository's closeout records (the run at the
+  closeout's code, its result, the scenarios exercising the change), citing both.
+  Verify the part holds no instruction or argument beyond that statement.
 
 ## 5. The engineering layer: everything else
 
@@ -776,6 +818,22 @@ in line; skills and documents citing moved text; `.agents/workflow.toml`.
   config load common` prints them.
 - [ ] 5.8 Verify the section as task 3.10 does. End-to-end: none; no pipeline
   scenario reads guidance, and none is owed.
+- [ ] 5.9 Before 5.8's verification (58 O3): `documentation.md` states that
+  permanent documentation and guidance describe the system they apply to
+  declaratively and read as timeless even while they change constantly, with no
+  wording relative to a migration or a planned change. Verify the rule is in
+  `documentation.md` and no file of sections 3 to 5 phrases guidance relative to
+  this change's move.
+- [ ] 5.10 Before 5.8's verification (58 O6): in `docs/guidance/workflow/closeout.md`,
+  each part names and links the rules it confirms, each to its own layer's file —
+  "Comment hygiene" the engineering comment rule (`comments.md`) and the workflow's
+  change-references rule separately, "Documentation citations" and "Campaign index
+  currency" the engineering citation rule (`documentation.md`), "Import placement"
+  the import rule (`dependencies-python.md`) — and "Documentation compliance" also
+  confirms the permanent documents the change wrote against `documentation.md`'s
+  current-state rule (5.9), besides placement; `change-closeout`'s restatement is
+  re-pointed to match (D11). Verify every rule a part names is linked to a file of
+  its layer, and `make check-agent-skills` passes.
 
 ## 6. The repository layer at the root and across systems
 
@@ -824,6 +882,9 @@ checks. Files: `AGENTS.md`; `openspec/README.md`; `docs/development/ARCHITECTURE
 - [ ] 6.5 Deduplicate the repository material as the preamble says (31 O1b),
   including the handbook and runbook duplicates the inventory recommends for one
   home. Verify every duplicate row this section moves is merged or listed.
+  Amended at round 2's triage (58 O1): `openspec/README.md`'s "Packaging" part is
+  reduced to the checks it runs, citing `BUILD_AND_PACKAGING.md` for what each
+  enforces rather than restating it.
 - [ ] 6.6 Re-point every citation of what this section moved, and verify the
   section as task 3.10 does. End-to-end: none; no pipeline scenario reads guidance,
   and none is owed.
@@ -936,6 +997,13 @@ files the check finds wanting.
 - [ ] 9.4 Run `make check-guidance` over the tree and fix in the guidance whatever it
   reports — a missing tag, an unused row, a stale anchor, an upward link — each fix
   following the corrected inventory. Verify `make check-guidance` passes.
+  Amended at round 2's triage (56 F1): before that gate, this change's own
+  documents (`design.md`, `tasks.md`, `inventory.md`) name each heading the change
+  removed in prose — `` `openspec/README.md`, "Plan closeout requirements" `` —
+  rather than as an anchored citation, and the `market-change-workflow` delta's
+  scenario "A guidance link's section moved" uses a neutral example rather than a
+  real removed anchor, which would otherwise fail the check from the permanent
+  `spec.md` once archived. Task 10.11 remains the final sweep.
 - [ ] 9.5 Verify the section: `pytest -q scripts/tests/test_check_guidance.py
   scripts/tests/test_check_change.py` (unit), then `make test-release-tooling`, and
   `scripts/change-workflow run pre-commit layer-engineering-guidance`, which now runs

@@ -41,8 +41,8 @@ workflow's engine it changes — a subcommand, a flag, an output field, a skill 
 argument form, a graph node or review kind, the record set's format, or a role an
 adopting repository provides — and whether each change is compatible, as
 `change-workflow`'s compatibility requirement (`CW-c2tw`) judges it; review checks
-it. The engine carries no version of its own until it is extracted, so the proposal
-is where an incompatible change is declared.
+it. Where the engine carries no version of its own, the proposal is where an
+incompatible change is declared.
 
 ## Open questions and prescribed tasks
 

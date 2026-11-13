@@ -2,7 +2,8 @@
 
 Status: design settled and reviewed; design review 19's findings are settled in D5,
 D21, and D22. Round 1's triage amended D8 and D10 and settled the decisions under
-"Settled at round 1's triage".
+"Settled at round 1's triage". Round 2's triage amended D3 and settled the decisions
+under "Settled at round 2's triage".
 
 ## Context
 
@@ -155,7 +156,11 @@ The initial migration organizes shared guidance as `docs/guidance/engineering/` 
 organization is for people navigating the tree, and may change: the tag defines a
 file's layer, the workflow attaches no meaning to directories, and a lift-out
 selects files by layer tag, which the direction rule keeps cheap.
-`docs/agents/change-workflow.md` stays where it is, tagged `workflow`.
+The workflow's guide, `docs/agents/change-workflow.md`, is not guidance: it becomes
+the change workflow's operator handbook, holding only what the owner needs to know,
+beside the other handbooks in `docs/`, with no frontmatter; what agents need of it
+moves out by the rule under "Settled at round 2's triage" (amended at round 2's
+triage, 58 O7).
 
 Repository guidance sits beside the system it pertains to: a section of
 `TESTING.md` or `DEPLOYMENT_AND_CONFIG.md` that pertains to one capability moves to
@@ -546,6 +551,51 @@ round 1's triage" applies them row by row.
 - **29 F1 — The project layout.** `BUILD_AND_PACKAGING.md`'s "Project layout" splits
   into its Python rules, its uv rules, its Hatchling form (each engineering, tagged
   with its tool), and this repository's selection of Hatchling, which stays.
+
+### Settled at round 2's triage
+
+The owner settled these at the triage of round 2, the workflow layer; the owner
+reviews the layering by hand before round 3.
+
+- **58 O5 — The workflow's specification, its guidance, and its handbook.** Within
+  the workflow layer, a statement is placed by what it constrains. The
+  specification states what the workflow does — its steps, exits, records, and the
+  engine's commands and interfaces — as requirements the engine and the skills are
+  held to, and its companion explains how and why. The guidance states what whoever
+  works a change must produce or satisfy — what a design, a plan, a task note, a
+  comment, or a closeout must contain — rules applied by judgement and read by every
+  step. The handbook tells the owner how to operate the workflow. The test: wrong if
+  the engine or a skill behaved otherwise, the specification's; wrong if a change's
+  work product were otherwise, guidance; telling the owner what to do or type, the
+  handbook's. `docs/guidance/workflow/README.md` states the rule. Rejected: the
+  workflow's guidance beside its capability, which CW-r8cg would have read only with
+  that capability while every step needs it; the guidance as normative
+  requirements, in a document no step loads.
+- **58 O7 — The operator handbook.** The workflow's guide is the change workflow's
+  operator handbook (D3 as amended): not guidance, so no frontmatter and no place in
+  the guidance set; it holds what the owner needs to know and nothing workflow agents
+  need; it sits beside the other handbooks in `docs/`. What agents need of it moves
+  by O5's rule — what the workflow does to the specification or its companion, what
+  a change's work must produce to `docs/guidance/workflow/` — and its citations are
+  re-pointed to where each statement lands. Diagrams serve a human reader more than
+  an agent, so the handbook embeds the workflow's diagrams; they may stay in
+  `openspec/specs/change-workflow/diagrams/`, linked from the handbook. Rejected:
+  keeping the guide whole and tagged `workflow` as a procedure (D10's reasoning),
+  which leaves agent-facing rules in an owner's document; splitting only its rule
+  sections into guidance.
+- **58 O6 — Closeout's parts name the rules they confirm by layer.** Every part stays
+  the workflow's (D8). Each part names and links the rules it confirms, each to its
+  own layer's file — engineering to `docs/guidance/engineering/`, the workflow's own
+  to `docs/guidance/workflow/`, the repository's by role — and "Documentation
+  compliance" confirms the permanent documents a change wrote against the
+  engineering rule that documentation describes the current system, besides
+  placement. Rejected: a separate "Documentation currency" part, which lengthens the
+  list every plan and the closeout skill carry; leaving the current-state rule
+  confirmed by no part.
+- **58 O3 — Guidance reads as timeless.** Permanent documentation and guidance
+  describe the system they apply to declaratively, with no wording relative to a
+  migration or a planned change, even while they change constantly;
+  `engineering/documentation.md` states it.
 
 ### Implementation cadence
 

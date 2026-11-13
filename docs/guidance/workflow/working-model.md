@@ -4,7 +4,10 @@ tags: [workflow]
 
 # The working model
 
-A non-trivial change is discussed, then planned, then implemented, and closed out.
+What a change's work must produce in each phase: what a discussion reads and
+records, what a plan holds, and when an implementation is complete. The phases
+themselves, and the steps and exits between them, are the workflow's
+([Phases, triage, and archival](../../../openspec/specs/change-workflow/README.md#phases-triage-and-archival)).
 
 ## Discuss
 
