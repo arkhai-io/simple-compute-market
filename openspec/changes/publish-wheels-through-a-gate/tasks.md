@@ -22,6 +22,13 @@ option (b), which the owner confirmed:
   moved into the closeout (13.6, 13.9), with their text kept where it was, so that the
   round holding sections 1, 2 and 7 can complete.
 
+Amended again on 2026-11-13, after section 9 returned to design ("Section 9 notes:
+returned to design"). Design amended D18: the binary builds from a locked virtual
+project, whose buyer domains a packaging check holds to the declaration, and
+`check-uv-setup` reads every Dockerfile and every wheelhouse `pip` install. The owner
+waived another design review. Section 9's 9.1, 9.2 and 9.5 are replanned, and 13.2,
+13.7, 13.9 and the promotion record follow.
+
 - **External prerequisites.** Nothing outside this repository gates implementation. Two
   things a real load needs are outside it, and no task depends on them:
   - the candidate store's repository (`<prefix>-candidates`), which only an operator's
@@ -954,21 +961,74 @@ test-deployment-packaging` installs Helm through `azure/setup-helm`, sets
 
 ## 9. The release binary is PyPI's CLI
 
-Delivers D18. Implements the requirement "The release binary is the buyer CLI with every
-declared buyer domain". Touches:
-- `core/buyer/market-binary.Dockerfile`;
-- `scripts/buyer_domain_wheels.py`;
-- the root `Makefile`'s `build`, `build-buyer` and `build-market-binary`;
+Delivers D18, as amended after the section's return to design. Implements the
+requirement "The release binary is the buyer CLI with every declared buyer domain",
+with its scenarios for a missing and an undeclared domain.
+
+Replanned on 2026-11-13 against the amended D18. 9.1, 9.2 and 9.5 are rewritten:
+- the binary builds from a locked virtual project through `scripts/uv_project.py image`;
+- a packaging check holds that project's dependencies to the declaration;
+- `check-uv-setup` reads every Dockerfile and every wheelhouse `pip` install.
+
+Their in-progress notes are kept as the history of the commit the section returned
+on. 9.3 and 9.4 stand as written; their work in that commit stands.
+
+Touches:
+- `scripts/buyer_domain_wheels.py`, renamed `scripts/market_binary.py`, and its test;
+- `scripts/check_release_components.py`, a `market-binary` rule, and its test;
+- `scripts/check_uv_setup.py` and its test;
+- the binary's virtual project, `core/buyer/market-binary/` (`pyproject.toml`,
+  `uv.lock`, `Dockerfile`), replacing `core/buyer/market-binary.Dockerfile`;
+- the root `Makefile`'s `build`, `build-buyer`, `build-market-binary`,
+  `check-market-binary` and `check-packaging`;
 - `domains/vms/buyer/` (its `pyproject.toml`, `Makefile`, lock and `main.py`);
 - `manifests/release-components.json`'s `binaries` entry.
 
-- [ ] 9.1 Add `scripts/buyer_domain_wheels.py`. It derives, from the declaration, the
-  declared distributions whose `pyproject.toml` registers a `market.buyer_domains` entry
-  point, and prints their wheel file names in `.dist` (D18). No Dockerfile or Makefile
-  lists them.
-  - Verify: a unit test over a synthetic declaration and projects. On the tree, it names
-    `arkhai-vms-buyer`, `arkhai-bare-metal-buyer` and `arkhai-apicredits-buyer`.
-  - In progress (2026-11-13), unchecked because the section returned to design
+- [ ] 9.1 Rename `scripts/buyer_domain_wheels.py` to `scripts/market_binary.py`, and add
+  the check holding the binary's project to the declaration (D18).
+  - What the script derives, from the declaration and each declared project's
+    `pyproject.toml`:
+    - the buyer CLI: the one declared distribution defining the binary's console
+      script;
+    - the buyer domains: every declared distribution registering a
+      `market.buyer_domains` entry point;
+    - the entry point the binary freezes;
+    - the PyInstaller options: `--copy-metadata` for the CLI and each domain, and
+      `--hidden-import` for each module a domain's entry point names.
+  - How it finds the binary: by its `binaries[]` entry, the one whose `target` the
+    caller names. `build-market-binary` passes `$@`.
+    - The console script is the entry's `name`.
+    - A command prints the directory of the entry's `path`, where the build exports
+      the binary.
+    - It refuses no entry, two entries, and a `path` whose file name is not `name`.
+    - `BINARY_NAME` goes.
+  - What it drops: the `domains`, `cli` and `constraints` commands, their refusal of a
+    wheel `.dist` lacks, and their test cases. The lock installs the wheels (9.2).
+  - The check: add the rule `market-binary` to `scripts/check_release_components.py`,
+    run as `make check-market-binary` in `make check-packaging`, as `check-workflow-
+    credentials` runs `--rule credentials`. `make check-release-components` runs it
+    with the other rules.
+    - It refuses the binary project unless its `[project].dependencies` names, by
+      normalised distribution name, exactly the buyer CLI and the buyer domains the
+      script derives.
+    - It names each missing distribution, with the project that registers it, and each
+      extra one.
+    - It reads only `dependencies`. The `freeze` group is not compared.
+  - Verify:
+    - Unit, `scripts/tests/test_market_binary.py`, renamed from
+      `test_buyer_domain_wheels.py`, over synthetic declarations and projects. It has a
+      case for each remaining command, the binary entry found by its target, and no
+      matching entry, two, and a `path` not ending in `name`. It keeps the existing
+      cases for two entry points in one domain, a missing `pyproject.toml`, the console
+      script defined by two distributions or none, no buyer domain, and a declaration
+      the reader refuses.
+    - Unit, `scripts/tests/test_check_release_components.py`: the rule passes an exact
+      project. It refuses a missing domain, naming it and its project; an extra
+      distribution; and a missing CLI. It ignores the `freeze` group.
+    - On the tree: the script names `arkhai-core-buyer` with `core_buyer.cli:main` and
+      the three domains, and `make check-market-binary` passes once 9.2's project
+      exists.
+  - In progress (2026-11-13, before the return to design), unchecked because the section returned to design
     ("Section 9 notes: returned to design"). The script's default command, `domains`, prints the buyer-domain
     wheels. Four more commands derive the rest of the binary's build from the same
     reading ("Section 9 notes"):
@@ -991,19 +1051,61 @@ declared buyer domain". Touches:
     One case reads the tree. It finds `arkhai-core-buyer` with `core_buyer.cli:main`,
     and the three domains the task names. `make build-market-binary` printed the same
     three wheels.
-- [ ] 9.2 Add `core/buyer/market-binary.Dockerfile` and `make build-market-binary`.
-  - The build image is pinned by digest: Debian bookworm, with the Python version
-    `.python-version` declares, as `check-python-version` requires.
-  - It installs `arkhai-core-buyer` and 9.1's wheels from `.dist`, and freezes
-    `core_buyer.cli:main` with PyInstaller, passing `--copy-metadata` for each bundled
-    distribution.
-  - It runs `market plugins` inside the image as the smoke test, and copies the binary to
-    `.dist/bin/market`.
-  - PyInstaller is installed in the build image only.
-  - Verify: `make build-market-binary` succeeds locally, and its smoke test lists the VM,
-    bare-metal and API-credit domains. If the session cannot run Docker, it records that
-    as unrun.
-  - In progress (2026-11-13), unchecked: its install from the wheelhouse is the design
+- [ ] 9.2 Build the binary from a locked virtual project, and make `check-uv-setup`
+  refuse what the earlier install did (D18).
+  - The project: add `core/buyer/market-binary/pyproject.toml`, shaped as D18 shows.
+    - It is virtual (`[tool.uv] package = false`).
+    - Its `dependencies` are the buyer CLI and the three buyer domains, by bare name.
+    - Its `freeze` dependency group holds `pyinstaller==6.22.3`.
+    - Its `environments` are linux x86_64 only.
+    - `requires-python` admits the version `.python-version` declares.
+    - Lock it with `make lock PROJECTS=core/buyer/market-binary`.
+  - The Dockerfile: move `core/buyer/market-binary.Dockerfile` to
+    `core/buyer/market-binary/Dockerfile`.
+    - Its build stage is `ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim`
+      for linux/amd64, pinned by digest. It keeps the step refusing an image whose
+      Python is not the `PYTHON_VERSION` default.
+    - It copies `.dist/`, `scripts/uv_project.py` and the project's `pyproject.toml` and
+      `uv.lock` at the depths BUILD_AND_PACKAGING.md's "Images" gives. It installs with
+      `uv_project.py image --project <project> -- --group freeze` into
+      `UV_PROJECT_ENVIRONMENT`, with no `install-wheel`, since the project builds no
+      wheel.
+    - It takes the binary's name as the build argument `BINARY_NAME`, for PyInstaller's
+      `--name` and the final stage's `COPY`. It keeps the frozen entry point, the
+      PyInstaller options, the smoke test and the `scratch` export stage as they are.
+    - The constraints argument and both `pip install` steps go.
+  - The Makefile: `build-market-binary` derives its arguments from `market_binary.py`
+    (9.1), passing `$@`, and exports to the directory the script prints. It names no
+    domain, binary or path.
+  - The digest: if the session cannot query a registry, it takes the digest from the
+    first build's BuildKit log, as section 9's notes describe, pins it, and builds again
+    from it.
+  - `check-uv-setup`: `scripts/check_uv_setup.py` reads `*.Dockerfile` as well as
+    `Dockerfile*`, as `check_python_version.py` does.
+    - In a stage that copies the wheelhouse, it refuses any `pip install`,
+      `python -m pip install` or `uv pip install` naming the wheelhouse not made through
+      the script. Naming the wheelhouse means `--find-links`/`-f`, or a `.dist` path.
+    - Its docstring and its row in BUILD_AND_PACKAGING.md's "Checks" are amended at
+      closeout (13.9).
+  - Verify:
+    - Unit, `scripts/tests/test_check_uv_setup.py`:
+      - a `*.Dockerfile` is read;
+      - plain `pip install --find-links`, `python -m pip install` and `uv pip install`
+        from the wheelhouse are each refused;
+      - the install the section returned on, `pip install --find-links /dist --constraint
+        …` followed by `pip install --no-index --no-deps --find-links /dist`, is
+        refused;
+      - a `uv pip install` that does not name the wheelhouse, as in
+        `provisioning/compute/service/Dockerfile`, passes;
+      - an install made through the script (`uv_project.py image` or `install-wheel`)
+        passes.
+    - On the tree: `make check-uv-setup`, `make check-python-version`, `make check-locks`
+      and `make check-market-binary` pass.
+    - Local build evidence, an image build rather than one of TESTING.md's levels: `make
+      build-market-binary` succeeds from the pinned digest, its smoke test lists the VM,
+      bare-metal and API-credit domains, and it exports `.dist/bin/market`. If the
+      session cannot run Docker, it records that as unrun.
+  - In progress (2026-11-13, before the return to design), unchecked: its install from the wheelhouse is the design
     question the section returned on. The build image is `python:3.13-slim-bookworm`, pinned by its
     index digest, for linux/amd64. Its first step refuses to build if the image's Python
     is not the `PYTHON_VERSION` default, since the digest, not the tag, selects the
@@ -1071,14 +1173,22 @@ declared buyer domain". Touches:
       on a missing one. It refuses any `Requires-Dist` naming PyInstaller, and it
       passes, `arkhai_vms_buyer-0.12.0` among the wheels it read.
 - [ ] 9.5 Section verification.
-  - Unit: 9.1's test.
-  - System-level build evidence: 9.2's smoke test.
-  - Packaging: `make check-packaging`.
+  - Unit: 9.1's tests (`test_market_binary.py`, the `market-binary` rule's cases in
+    `test_check_release_components.py`) and 9.2's (`test_check_uv_setup.py`), and
+    `test_check_python_version.py`. All of them run in `make test-release-tooling`.
+  - Local build evidence: 9.2's build and smoke test, from the locked project.
+  - Packaging: `make check-packaging`, now running `check-market-binary` and the widened
+    `check-uv-setup`, with the binary's lock current.
   - Functional checks: `scripts/change-workflow run pre-commit
-    publish-wheels-through-a-gate`.
+    publish-wheels-through-a-gate`, run after the build, together with a fresh-context
+    check of the section's diff.
+  - Search: no `buyer_domain_wheels`, `market-binary.Dockerfile` or `pip install` from
+    the wheelhouse remains outside `openspec/` and `docs/`.
   - End-to-end: no scenario runs the binary (D18), and none is owed. The pipeline's lanes
     install `market` from the wheels, so they exercise the buyer CLI 9.4 repackages.
-  - Evidence so far (2026-11-13), unchecked with the section:
+  - Owed by validation: `tests.yml`, job `test · test-deployment-packaging`. The new and
+    changed cases in `scripts/tests/` pass there, as section 7 already owes.
+  - Evidence so far (2026-11-13, before the return to design), unchecked with the section:
     - Unit: `test_buyer_domain_wheels.py` passed, 12 cases since the fresh-context fixes.
     - Build evidence: 9.2's smoke test passed, on the build before those fixes.
     - `scripts/change-workflow run pre-commit publish-wheels-through-a-gate`, run
@@ -1182,6 +1292,21 @@ written, and choosing between them is a design decision.
 **Not done.** `check-uv-setup` is not widened to `*.Dockerfile`, since the chosen option
 decides what it then refuses. The section's closing pre-commit run and a second
 fresh-context check belong to the session that finishes it.
+
+**How design settled it.** Design took option (a), and D18 was amended; the owner waived
+another design review. The section was replanned: 9.1, 9.2 and 9.5 above.
+
+Design corrected two of these notes:
+- **A lock with the CLI and all three domains does exist.** `e2e-tests/uv.lock` resolves
+  all four from `.dist`. D18 rejects building the binary from it, because a test project
+  would then own what customers download.
+- **Widening `check-uv-setup` to `*.Dockerfile` would not have refused this commit's
+  install.** Its Dockerfile rule recognised only `uv sync` and `uv pip install
+  --find-links`, and this commit's pins come through a build argument. 9.2 closes both
+  gaps.
+
+A virtual project is not a package to the architecture check, so the binary's project
+needs no row in `ARCHITECTURE.toml`.
 
 ### Section 9 notes (2026-11-13)
 
@@ -1494,7 +1619,8 @@ documentation only. A part that needs a code edit returns the change to implemen
   - `scripts/check_build_requirements.py`;
   - `scripts/load_candidate.py`;
   - `scripts/release_images.py`;
-  - `scripts/buyer_domain_wheels.py`;
+  - `scripts/market_binary.py`;
+  - `scripts/check_uv_setup.py`;
   - their tests.
 
   Look for any import still local without a recorded reason.
@@ -1526,7 +1652,8 @@ documentation only. A part that needs a code edit returns the change to implemen
     built by `make dist`) as unowned work in the campaign's section.
   - Run `make check-change-index`.
 - [ ] 13.7 **Packaging.** Run `make check-packaging`, now including
-  `check-release-components` and `check-build-requirements`, and resolve every failure.
+  `check-release-components`, `check-market-binary` and `check-build-requirements`, and
+  resolve every failure.
   Run `make check-architecture-change CHANGE=publish-wheels-through-a-gate`. No
   `.agents/`, `.claude/` or `.codex/` file changes, so `make check-agent-skills` is not
   owed.
@@ -1569,9 +1696,15 @@ documentation only. A part that needs a code edit returns the change to implemen
   - `AGENTS.md`, "Public repository discipline", "Never enters this repository": admit a
     marketplace release's bill of materials holding content identities only, enforced by
     `make check-release-record` (D10).
-  - `docs/development/BUILD_AND_PACKAGING.md`, "Checks": `check-release-components` (D7,
-    D4's `--short=9` rule) and `check-build-requirements` with `build-constraints.txt`
-    (D15).
+  - `docs/development/BUILD_AND_PACKAGING.md`:
+    - "Checks": `check-release-components` (D7, D4's `--short=9` rule),
+      `check-build-requirements` with `build-constraints.txt` (D15), and
+      `check-market-binary` (D18).
+    - "Checks" also gains two row amendments. `check-uv-setup` reads `*.Dockerfile` and
+      refuses any wheelhouse `pip` install not made through the script.
+      `check-python-version` reads `*.Dockerfile` (D18).
+    - "Images": the binary's locked virtual project and its digest-pinned build image.
+      A Python bump pins a new digest, and the build refuses a stale one (D18).
   - `docs/development/TESTING.md`, "Locally verifiable and external-topology scenarios":
     the lanes' release-image mode and record (D17).
   - `docs/buyer-quickstart.md`, "1. Install": PyPI, pinned to a release's versions; the
@@ -1612,7 +1745,7 @@ documentation only. A part that needs a code edit returns the change to implemen
 | D15 The build backend is pinned; a pin move is a release-wide bump | `openspec/specs/deployment-state/spec.md`; `docs/development/BUILD_AND_PACKAGING.md`, "Checks"; `docs/development/RELEASING.md`, "Versioning policy" | Pending |
 | D16 A product version is distinct from a distribution version | `openspec/specs/deployment-state/spec.md` (the bill-of-materials requirement) | Pending (13.11) |
 | D17 The local lanes can run a release candidate's images | `openspec/specs/deployment-state/spec.md`; `docs/development/RELEASING.md`; `docs/development/TESTING.md`, "Locally verifiable and external-topology scenarios" | Pending |
-| D18 The release's `market` binary is PyPI's CLI | `openspec/specs/deployment-state/spec.md`; `docs/development/ARCHITECTURE.md`, "Build, packaging, and initialization"; `docs/buyer-quickstart.md`, "1. Install" | Pending |
+| D18 The release's `market` binary is PyPI's CLI | `openspec/specs/deployment-state/spec.md`; `docs/development/ARCHITECTURE.md`, "Build, packaging, and initialization"; `docs/development/BUILD_AND_PACKAGING.md`, "Images" and "Checks"; `docs/buyer-quickstart.md`, "1. Install" | Pending |
 | D19 The npm package is not a release component until it can be loaded | `openspec/specs/deployment-state/spec.md` (the declaration requirement); `docs/development/RELEASING.md` | Pending |
 | D20 The orphaned release-verification requirement is removed | `openspec/specs/deployment-state/spec.md` (removed by the archive) | Pending (13.11) |
 | D21 RELEASING.md keeps the anchors other documents cite | `docs/development/RELEASING.md` | Pending |
