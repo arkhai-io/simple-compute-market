@@ -44,10 +44,10 @@ development registry and a promotion script here copied to PyPI. Sections 3–6 
 
 1. **Change.** Work lands on `dev` and then `main`. CI builds and tests, and publishes
    nothing.
-2. **Release candidate.** An operator loads `main`'s commit X with
-   `make check-release-versions` and then `make push-runtime-artifacts`. That stores
-   every release component, and the development images its validation runs, under X's
-   nine-character revision.
+2. **Release candidate.** An operator loads `main`'s commit X with `make load-candidate`
+   (D3). In one invocation it builds the wheelhouse, checks its versions, builds the
+   images and the binary from it, and stores every release component, and the
+   development images its validation runs, under X's nine-character revision.
 3. **Validation and promotion.** The deployment's release validation runs:
    - the live end-to-end tests against X's revision tags;
    - every one of this repository's local lanes against the same images, pulled by
@@ -55,12 +55,13 @@ development registry and a promotion script here copied to PyPI. Sections 3–6 
      (`RELEASE_IMAGES=1`).
 
    The deployment builds the release's bill of materials, refusing it unless the live
-   pods, the local run and X's revision tags name the same digests. It then promotes
+   pods, the local run and X's revision tags name the same digests, and unless PyPI
+   holds none of its wheel versions with other bytes (D14). It then promotes
    the candidate to pre-production and production, aliasing each image to
    `<service>-<semver>`.
-4. **Cut.** Once production runs the release, `releases/<semver>` is cut at X, one
-   commit adds the bill of materials, `make check-release-record` passes, and that
-   commit is tagged `marketplace-v<semver>`.
+4. **Cut.** Once production runs the release, and the deployment's PyPI read passes
+   again, `releases/<semver>` is cut at X, one commit adds the bill of materials,
+   `make check-release-record` passes, and that commit is tagged `marketplace-v<semver>`.
 5. **Publication.** The operator publishes the promoted bytes to PyPI, ghcr and the
    GitHub release, after the cut and all or nothing. npm is reached only once the npm
    package is a release component (D19).
@@ -122,15 +123,35 @@ Loading a candidate stores:
   declared wheel under its wheel file name;
 - the chart package `make dist-helm` builds as generic package `chart`, version
   `<rev9>`, one file `<chart>-<version>.tgz`;
-- the `market` binary as generic package `market`, version `<rev9>`, as `push-cli`
-  stores it today.
+- the `market` binary as generic package `market`, version `<rev9>`, in `<prefix>-cli`,
+  where `push-cli` stores it today.
 
 The wheels and the chart go to the repository `<prefix>-candidates`, beside
 `<prefix>-cli`, `<prefix>-docker`, `<prefix>-helm` and `<prefix>-python`, all derived from
 `AR_PREFIX`. That repository is provisioned outside this repository.
 
-The validated wheels are the candidate's wheelhouse, because images install their wheels
-from `.dist` when they are built. A candidate's versions are not unique: the version
+**One load operation binds the wheels to the images** (design review 26 F2).
+`make load-candidate`, in one invocation and in this order:
+1. builds `.dist` once and runs `make check-release-versions` on it (D14);
+2. builds every declared image and development image, and the binary (D18), from that
+   `.dist`. Each image whose build installs wheels from `.dist` — the four release
+   images other than `frp-grant-admission`, and the e2e-tests image — takes the
+   wheelhouse digest as a build argument and records it as the label
+   `org.arkhai.wheelhouse-digest`;
+3. refuses, naming what differs, unless `.dist`'s wheelhouse digest is still the one it
+   built with and every such image carries it;
+4. deletes the revision's stored versions and uploads (below).
+
+The wheelhouse digest is computed like the chart's content digest (D14), over the
+declared wheels in `.dist`. It replaces the `cksum` fingerprints that two image builds
+pass today as a cache key: Podman can reuse cross-stage layers after `.dist` changes, so
+an image built after `.dist` could otherwise hold layers from an older wheelhouse. The
+validated wheels are therefore the candidate's wheelhouse because one load builds them,
+the images and the binary, and uploads nothing unless every image was built from them.
+`push-runtime-artifacts` is no longer how a candidate is loaded, and no release step
+names it or the individual push targets.
+
+A candidate's versions are not unique: the version
 check compares only with the previous marketplace release, and the versioning policy
 forbids bumping an unreleased version again. So failed candidate A and the next
 candidate B routinely carry one wheel version with different bytes. Likewise, a later
@@ -138,12 +159,20 @@ candidate or a developer push overwrites a chart's OCI tag, which is its version
 Storing by revision is what makes "the revision names a release candidate" true of every
 component rather than of images and the CLI alone.
 
-Reloading a revision first deletes that revision's `wheelhouse` and `chart` versions,
-then uploads. The store then always holds exactly one load's declared set, which the
-deployment's bill-of-materials builder requires: exactly the declared wheels, each once,
-and exactly one chart package whose file name matches its `Chart.yaml`. Development
-registries are scratch, every identity in the bill of materials is a content identity,
-and validation runs against the last load, so replacing a revision breaks nothing.
+**Reloading** (design review 26 F5). Once every component is built and the check in
+step 3 passes, the load deletes the revision's `wheelhouse`, `chart` and `market`
+versions, all three, before uploading any. The generic-package upload cannot overwrite a
+file a version holds — it fails with ALREADY_EXISTS — so without the delete a reload
+would fail at the binary after replacing the rest. The load never uses
+`--skip-existing`, or any upload mode that keeps an earlier file. The store then always
+holds exactly one load's declared set, which the deployment's bill-of-materials builder
+requires: exactly the declared wheels, each once, exactly one chart package whose file
+name matches its `Chart.yaml`, and exactly one binary file. A load that fails after the
+deletes leaves the revision incomplete, never mixed, and the builder refuses it until
+the operator loads again. Development registries are scratch, every identity in the bill
+of materials is a content identity, and validation runs against the last load, so
+replacing a revision breaks nothing; the binary's identity is the SHA-256 of the file the
+last complete load stored.
 
 Nothing installs from the development Python index, so loading a candidate does not push
 to it.
@@ -168,6 +197,17 @@ Alternatives considered:
   and nothing records it.
 - **Leave the snapshot to the deployment.** Rejected: the deployment would have to
   reproduce part of this repository's build to know a candidate's bytes.
+- **Separate build and push targets, with the wheelhouse label checked at upload.**
+  Rejected (design review 26 F2): it binds across invocations, but leaves the version
+  check reading whatever `.dist` holds when it runs.
+- **The deployment installs and tests the stored wheelhouse itself.** Rejected: it
+  cannot tell which wheelhouse an image installed, and it adds validation work outside
+  this repository.
+- **Replace the binary in place on reload.** Not available: the generic-package upload
+  cannot overwrite a file.
+- **A load record written last, which the store must match.** Not adopted: the images'
+  labels bind them to the wheelhouse, and a revision tag rewritten after a load is
+  accepted in development registries and caught by the deployment's digest agreement.
 
 ### D4 — A candidate's revision is nine characters
 
@@ -242,6 +282,10 @@ apart:
   release components. They are declared here so that `push-dev-images` reads a list
   rather than naming its own, which the single-enumeration check (D7) would refuse.
   (Design review 14 F2.)
+- **Absence.** Every key is required except `npm`, which is absent until the package is
+  declared; an empty `npm` list is refused, so "no npm package" has one spelling. Every
+  reader refuses a missing required key, an unknown key, a duplicated name or
+  distribution, and a value of the wrong kind. (Design review 26 F4.)
 
 Who reads it:
 - the publish targets;
@@ -268,8 +312,7 @@ A check run by `make check-packaging` refuses:
     default token, which may write;
   - `id-token: write` (trusted publishing to PyPI and npm), `packages: write` (ghcr) or
     `attestations: write`, anywhere;
-  - `contents: write` in any workflow but `validate-model-release.yml`, which edits a
-    `model-v*` release's notes and uploads nothing;
+  - `contents: write`, anywhere;
   - a reference to any secret but `GITHUB_TOKEN`;
 - a named publishing step in a workflow, so a refusal names the step:
   `pypa/gh-action-pypi-publish`, `npm publish`, `docker push`,
@@ -282,6 +325,13 @@ uploads an artifact" a mechanical guarantee. A list of upload commands alone wou
 `uv publish`, `twine upload`, `helm push` or any marketplace action. The named steps stay
 for the message, not the guarantee.
 
+The rule has no exception (design review 26 F3). `validate-model-release.yml` held
+`contents: write` only to append a validation line to a `model-v*` release's notes, but
+that token could also upload release assets and push commits and tags, including a
+`marketplace-v*` tag. It drops to `contents: read`, which downloading the release's
+assets needs, and loses its note step; the workflow's pass or fail on the tag is the
+validation's record.
+
 No such check exists today, though the task that would have added it is checked off. Two
 lists kept in agreement by hand diverge silently, and review alone did not prevent it.
 
@@ -290,6 +340,11 @@ Alternatives rejected:
   guarantee rests on review.
 - **An allowlist of permitted actions and commands.** Strongest, but edited for every new
   CI step.
+- **Keep `validate-model-release.yml`'s write token, restricted to its note-edit
+  command.** A check parsing one workflow's shell, which a call to the API with the
+  same token defeats.
+- **Keep the exception and rest that one workflow on review.** Honest, but keeps a
+  write-capable token beside what this change protects.
 
 ### D8 — Every declared image's build writes its revision tag
 
@@ -300,7 +355,7 @@ declared image to a build target that writes it, extending
 pushes the declared images through `scripts/publish_artifacts.py`, in place of its four
 literal lines, and keeps pushing the bare `arkhai:<name>` tags that shared development
 releases follow. `push-dev-images` pushes the declared development images the same way,
-and `push-runtime-artifacts` includes it. No release step reads a bare tag.
+and the load (D3) pushes both. No release step reads a bare tag.
 
 ### D9 — The chart names no release
 
@@ -400,7 +455,10 @@ the tag. It refuses unless:
    the public vcs link;
 4. its `arkhai:source-revision` is the parent commit, and its subject's version is the
    tag's semver;
-5. it names every declared component;
+5. its components, by bom-ref `<kind>/<name>`, are unique and are exactly the release
+   components the declaration at the parent commit declares — every distribution,
+   image, the chart, every binary, and npm only once declared — naming each missing,
+   extra and duplicated component; no development image appears (design review 26 F4);
 6. `make check-release-versions` passes with the bill of materials itself as its
    subject, against every earlier marketplace release (D14).
 
@@ -427,13 +485,25 @@ The deployment-state delta specifies what this repository does and can prove:
 
 RELEASING.md describes the deployment's part as the procedure this repository relies on:
 - validation, and building the bill of materials;
+- refusing a release whose wheel versions PyPI holds with other bytes, by a public,
+  tokenless read of PyPI when building the bill of materials and again immediately
+  before the cut, which also surfaces a new distribution whose PyPI project does not yet
+  exist (design review 26 F1);
 - running every local lane with `RELEASE_IMAGES=1`, whose records together cover every
   release image but `frp-grant-admission`, which only the live tests run (design
   review 14 F6);
 - aliasing images to `<service>-<semver>` at promotion;
 - cutting only after production runs the release;
 - publishing only after the cut, with promoted bytes, all or nothing, never replacing or
-  deleting a version, and wheels only, since no sdist is built at the cut.
+  deleting a version, skipping a wheel PyPI already holds with the same SHA-256, and
+  wheels only, since no sdist is built at the cut.
+
+Until this change lands on `main`, `publish-pypi.yml` uploads every version bump merged
+there with CI-built bytes. The workflow runs on pushes to `main`, so deleting it on this
+change's branch stops it only when the change lands, whichever commit deletes it;
+disabling it in the repository's Actions settings closes the window sooner, and is the
+owner's call. This is a transition concern, so it is recorded here and in the proposal,
+not in RELEASING.md, which describes the release once the change has landed.
 
 A spec states the implemented normative contract. Requirements no part of this
 repository implements or can test would be permanent text describing someone else's
@@ -453,7 +523,8 @@ identity that record gives it. (Design review 11 F2 / 14 F1.)
   `arkhai:content-digest`.
 
 Its subject depends on when it runs:
-- **Before a load,** the built wheelhouse and the chart `make dist-helm` packages.
+- **In a load** (D3), the wheelhouse the load built and the chart `make dist-helm`
+  packages.
 - **At the cut** (D12), the release's own committed bill of materials: its wheel
   SHA-256s and chart content digest, with no build.
 
@@ -475,14 +546,34 @@ archives differ in tar metadata between runs while the files inside are identica
 rewrite may change between Helm versions, so the check pins Helm.
 
 When no other tag carries a bill of materials, the check says so and passes; v0.3.0
-carries none. Before a load it needs git, the wheelhouse and the pinned Helm; at the cut,
+carries none. In a load it needs git, the wheelhouse and the pinned Helm; at the cut,
 git alone. A refusal means "bump the version"; the check never chooses one.
+
+**Its scope** (design review 26 F1). The check guards the versions recorded releases
+name, offline. It is not a complete guard against PyPI, whose history includes versions
+no record names: those CI published before this change, and any it publishes before the
+change lands on `main`. PyPI holds v0.3.0's distributions with exactly the bytes the
+deployment's record of v0.3.0 gives them. The complete guard is the deployment's: a
+public, tokenless PyPI read refusing any wheel version PyPI holds with other bytes, when
+it builds the bill of materials and again before the cut (D13). This repository relies
+on it and does not read PyPI, so its checks stay offline and deterministic. A collision
+is therefore caught after validation rather than before the load, which can cost one
+validation run in the narrow cases left: a version lowered to one released before
+v0.3.0, or one CI uploaded in the meantime.
 
 Alternatives rejected:
 - **Only the newest earlier release, plus a rule that versions never decrease.** Two
   rules where one suffices.
 - **A rebuild at the cut.** The cut runs in a fresh worktree, and a rebuild would only
   reproduce what the record says.
+- **This repository's check reads PyPI.** Complete, and catches a collision before the
+  load, but puts a network read in an offline check for a guard that belongs with
+  publication, which is the deployment's.
+- **A one-time bump of every distribution before the first recorded release.**
+  Unnecessary, since PyPI's bytes match v0.3.0's record, and it leaves older versions
+  and CI's interim uploads unguarded.
+- **A baseline imported from PyPI or from v0.3.0's record.** A permanent migration
+  artifact in a second format, covering only what it captured.
 
 The chart package includes `helm/`'s tests and fixtures, since there is no
 `.helmignore`, so a test-only edit inside `helm/` forces a chart version bump. That is
@@ -601,7 +692,8 @@ programs sharing one name is the defect.
   domain. No validation suite runs the binary, so this is what exercises it.
 - **Repeatability.** Pinning the image fixes the Linux floor, not repeatability.
   PyInstaller output is never byte-for-byte repeatable. The binary is identified by the
-  SHA-256 of the stored file, and a reload replaces it.
+  SHA-256 of the stored file. The load builds it from the same `.dist` as the stored
+  wheelhouse and the images, and a reload replaces it by D3's delete-then-upload rule.
 - **The PyPI defect.** PyInstaller leaves `arkhai-vms-buyer`'s runtime dependencies,
   where it made every PyPI install of the VM plugin pull it in. That is a minor-version
   bump of `arkhai-vms-buyer`.
@@ -666,11 +758,14 @@ history. The proposal states what the change does.
 
 One round of five sessions before closeout:
 1. CI publishes nothing (the four workflows, the verifier and the curl installer
-   deleted); the declaration renamed and reshaped, with `development_images` and no npm
-   entry; the single-enumeration and workflow-credential checks.
-2. Candidate loading: the candidate store with delete-then-upload, `--short=9` in every
-   Makefile and its check, every declared image's revision tag, `push-images` and
-   `push-dev-images` from the declaration; the build-requirement pin and its check;
+   deleted; `validate-model-release.yml` read-only); the declaration renamed and
+   reshaped, with `development_images`, no npm entry and its absence rule; the
+   single-enumeration and workflow-credential checks.
+2. Candidate loading: `make load-candidate`, with the wheelhouse digest as every
+   `.dist`-built image's build argument and label and the check before upload; the
+   candidate store with delete-then-upload of all three generic versions; `--short=9`
+   in every Makefile and its check, every declared image's revision tag, `push-images`
+   and `push-dev-images` from the declaration; the build-requirement pin and its check;
    `appVersion` removed, the subchart pins and their test.
 3. The layout-1 reader, `make check-release-versions` over every earlier record with its
    two subjects, and `make check-release-record`.
@@ -695,6 +790,12 @@ Closeout writes RELEASING.md, the buyer quickstart, the `AGENTS.md` amendment an
   npm** (D19).
 - **A candidate expires with the store's retention** (D3). It is then loaded and
   validated again.
+- **A PyPI collision is caught after validation** (D14). The deployment's PyPI read runs
+  when it builds the bill of materials, so a wheel version PyPI holds with other bytes
+  costs one validation run. It arises only for a version CI published that no record
+  names.
+- **A load always rebuilds every image and the binary** (D3). Loads are rare, and the
+  rebuild is what binds the stored wheels to the validated images.
 - **The release is published after production runs it.** For a short while production
   serves a release whose wheels are not yet on PyPI. Nothing in production installs
   from PyPI.

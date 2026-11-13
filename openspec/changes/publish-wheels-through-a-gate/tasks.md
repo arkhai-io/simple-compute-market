@@ -8,8 +8,8 @@ release branch. Sections 1–2 are kept as implemented. Sections 3–6 belonged 
 interim design and are withdrawn, their completed tasks preserved.
 
 **Sections 7–12 and the design promotion record predate the settled design** (D1–D22 as
-amended by design review 11's triage) **and are rewritten at planning.** Do not
-implement from them. Planning addresses each discrepancy design review 11 F3 found:
+amended by the triages of design reviews 11 and 26) **and are rewritten at planning.**
+Do not implement from them. Planning addresses each discrepancy design review 11 F3 found:
 - 8.1 adds a `public` field, which D6 removed; 12.1 and the promotion record describe
   it.
 - Section 9 covers only the umbrella chart; D9 changes all nine subcharts and the
@@ -25,6 +25,18 @@ implement from them. Planning addresses each discrepancy design review 11 F3 fou
   development registry serves npm.
 - The citations of `design.md` decisions in 4.1 (D1, D8), 6.1 (D5) and 8.3 (D4) name
   decisions renumbered by the redesign.
+- Design review 26's triage adds work no task names: `make load-candidate` with the
+  wheelhouse digest as every `.dist`-built image's build argument and label, replacing
+  the two `cksum` fingerprints (D3, 26 F2); delete-then-upload of the `market` version
+  with the `wheelhouse` and `chart` versions, and no upload mode keeping an earlier file
+  (D3, 26 F5); `validate-model-release.yml` at `contents: read` without its note step,
+  and the credential rule with no exception (D7, 26 F3); the declaration's absence rule
+  and the record check's exact, unique component set (D6, D12, 26 F4); D14's offline
+  scope, and the deployment's PyPI read in RELEASING.md's list of the deployment's steps
+  (D13, D14, 26 F1).
+- The sentence below was written for the interim design. A commit on this branch stops
+  `publish-pypi.yml` only when the change lands on `main`, whichever section deletes it
+  (design, D13).
 
 Section 7 should land first: until it does, a merge still publishes to PyPI and npm.
 

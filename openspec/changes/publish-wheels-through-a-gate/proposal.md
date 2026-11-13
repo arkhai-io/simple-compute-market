@@ -33,7 +33,9 @@ comprises are not known when the merge happens.
   (`arkhai.marketplace-release.v2`) and its verifier. CI builds and tests, including
   building the wheelhouse and resolving every declared distribution against it. A check
   refuses a workflow holding a publishing credential (write permissions, `id-token`, or
-  a secret other than `GITHUB_TOKEN`) or containing a named upload step.
+  a secret other than `GITHUB_TOKEN`) or containing a named upload step, with no
+  exception: `validate-model-release.yml` drops to read access and stops editing a model
+  release's notes.
 - **A release candidate is a `main` commit stored under its revision.** Loading it stores
   every release component under the commit's nine-character revision:
   - images as `arkhai:<name>-<rev9>`;
@@ -43,8 +45,11 @@ comprises are not known when the merge happens.
   - the development images its validation runs (dev-env, e2e-tests), which are not
     release components.
 
-  A reload replaces the revision's stored files. Every Makefile computes the revision
-  with `--short=9`, and a check refuses the default abbreviation. A **marketplace release** is a promoted
+  One load operation, `make load-candidate`, builds the wheelhouse once, checks its
+  versions, builds the images and the binary from it, and uploads nothing unless every
+  image that installs wheels carries the wheelhouse's digest as a label. A reload removes
+  the revision's stored wheels, chart and binary before uploading any. Every Makefile
+  computes the revision with `--short=9`, and a check refuses the default abbreviation. A **marketplace release** is a promoted
   release candidate, named by its semver.
 - **One declaration of release components.** `manifests/published-distributions.json`
   becomes `manifests/release-components.json`, declaring the distributions, the five
@@ -63,8 +68,10 @@ comprises are not known when the merge happens.
 - **A version must change when its contents change.** `make check-release-versions`
   holds every (component, version) pair to the content identity any earlier marketplace
   release's bill of materials gives it: the built wheels (by SHA-256) and the packaged
-  chart (by a digest of its packaged files) before a load, and the release's own bill of
-  materials, with no build, at the cut.
+  chart (by a digest of its packaged files) in a load, and the release's own bill of
+  materials, with no build, at the cut. It reads no registry: a wheel version PyPI holds
+  with other bytes is refused by the deployment's PyPI read, which this repository
+  relies on.
 - **A marketplace release is recorded last, on a release branch.**
   - Once production runs it, `releases/<semver>` is cut at the candidate's commit, one
     commit adds the bill of materials the deployment built (CycloneDX 1.6, layout 1,
@@ -121,6 +128,8 @@ None.
 - `sign-multi-language-credits-middleware` names the npm workflow this change deletes;
   its npm publication becomes the deployment's.
 - External, outside this repository:
+  - the deployment's public PyPI read, refusing a release whose wheel versions PyPI holds
+    with other bytes, when it builds the bill of materials and before the cut;
   - the candidate store's repository;
   - a development registry serving npm, without which the npm package is not a release
     component and no marketplace release publishes it.
@@ -157,7 +166,11 @@ None.
 - `scripts/push-distributions.py` and `scripts/publish_artifacts.py`;
 - new scripts for the release-record reader and its two checks, the enumeration and
   upload-step check, and the lanes' image record;
-- the root `Makefile`'s publish and build targets and `GIT_SUFFIX`;
+- the root `Makefile`'s publish and build targets and `GIT_SUFFIX`, and a new
+  `load-candidate` target;
+- the image builds that install wheels from `.dist`, which take the wheelhouse digest as
+  build argument and label;
+- `.github/workflows/validate-model-release.yml` (read-only, its note step removed);
 - `e2e-tests/Makefile` and the compose files' release-image lines;
 - the hatchling pin beside `.python-version` and its packaging check;
 - a binary build image;
@@ -170,7 +183,14 @@ No runtime behaviour of any service changes.
 
 **Contributor-workflow break:** merging to `main` publishes nothing, and pushing a
 `marketplace-v*` or `market-cli-v*` tag runs nothing. A marketplace release is cut only
-through the release procedure, after production runs it.
+through the release procedure, after production runs it. A validated `model-v*` release
+no longer gains a validation line in its notes; the workflow's check on the tag records
+the result.
+
+**Transition:** until this change lands on `main`, `publish-pypi.yml` uploads every
+version bump merged there. Deleting it on this branch stops it only when the change
+lands; disabling it in the repository's Actions settings closes the window sooner, and
+is the owner's call.
 
 **Consumer-visible break:** the curl installer URL stops being served; it already
 returns 404. `arkhai-vms-buyer` no longer installs PyInstaller.

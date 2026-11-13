@@ -6,10 +6,9 @@ A workflow MUST NOT upload an artifact to a public channel, a package or image r
 or a release page, and MUST NOT hold a credential that could. Continuous integration
 builds and tests, including building the wheelhouse and resolving every declared
 distribution against it. The packaging check MUST refuse a workflow that declares no
-top-level `permissions:`; that grants `id-token: write`, `packages: write` or
-`attestations: write`; that grants `contents: write`, unless it is the one named
-workflow that edits a model release's notes and uploads nothing; that references a
-secret other than `GITHUB_TOKEN`; or that contains a named publishing step.
+top-level `permissions:`; that grants `id-token: write`, `packages: write`,
+`attestations: write` or `contents: write`; that references a secret other than
+`GITHUB_TOKEN`; or that contains a named publishing step. No workflow is excepted.
 
 #### Scenario: A change is merged
 
@@ -29,8 +28,8 @@ secret other than `GITHUB_TOKEN`; or that contains a named publishing step.
 
 #### Scenario: A workflow gains a publishing credential
 
-- **WHEN** a workflow grants `id-token: write`, or references a secret other than
-  `GITHUB_TOKEN`
+- **WHEN** a workflow grants `id-token: write` or `contents: write`, or references a
+  secret other than `GITHUB_TOKEN`
 - **THEN** the packaging check fails and names the workflow and the credential
 
 ### Requirement: A release candidate is stored under its revision
@@ -41,20 +40,39 @@ Loading MUST store every release component under the commit's nine-character rev
 each declared image as `arkhai:<name>-<rev9>`, and the declared wheels, the chart package
 and the `market` binary as revision-versioned packages in the candidate store. Loading
 MUST also push each declared development image as `arkhai:<name>-<rev9>`; a development
-image is not a release component. Reloading a revision MUST first remove its stored
-wheels and chart package.
+image is not a release component. One load operation MUST build the wheelhouse once,
+check its versions, build every declared image and development image and the binary
+from it, each image that installs wheels from it labelled with the wheelhouse's digest,
+and MUST upload nothing unless the wheelhouse still has that digest and every such image
+carries it. Once every component is built and checked, reloading a revision MUST remove
+its stored wheels, chart package and binary before uploading any, and MUST NOT keep a
+file an earlier load stored.
 
 #### Scenario: A candidate is loaded
 
 - **WHEN** a default-branch commit is loaded
 - **THEN** every declared image, development image, wheel, chart package and binary is
   stored under that commit's nine-character revision, and the store holds exactly the
-  declared wheels and one chart package for it
+  declared wheels, one chart package and one binary for it
+
+#### Scenario: An image was built from another wheelhouse
+
+- **WHEN** the wheelhouse changes after the load built its images, or an image's
+  wheelhouse label differs from the wheelhouse being loaded
+- **THEN** the load uploads nothing and names the image or the wheelhouse
 
 #### Scenario: A revision is reloaded after a version changed
 
 - **WHEN** a revision is loaded again with a wheel at a different version
-- **THEN** the store holds only the new load's wheels for that revision
+- **THEN** the store holds only the new load's wheels, chart package and binary for that
+  revision
+
+#### Scenario: A reload fails after removing the stored files
+
+- **WHEN** a reload fails after removing the revision's stored files and before
+  uploading all of them
+- **THEN** the revision holds no file from the earlier load beside the new load's, and
+  lacks the files not yet uploaded
 
 ### Requirement: One declaration of release components
 
@@ -63,8 +81,10 @@ the development images a release candidate's validation runs, MUST have exactly 
 declaration, `manifests/release-components.json`. Its release components MUST be only
 what a release ships; development images are listed apart and are not release
 components. A package whose candidate bytes cannot be stored under the revision MUST NOT
-be a release component. Each image MUST be declared by its published name and its local
-build name. The publish targets, the lanes' release-image check and image pull, and the
+be a release component. Every category MUST be present except the npm package's, which
+is absent until the package is declared and MUST NOT be present and empty; a reader MUST
+refuse a missing or unknown category and a duplicated entry. Each image MUST be declared
+by its published name and its local build name. The publish targets, the lanes' release-image check and image pull, and the
 binary build MUST read it, and the packaging check MUST refuse a second list of
 components or development images in a workflow, publish target or lane target.
 
@@ -144,10 +164,12 @@ project with any `[build-system]` requirement that declaration does not pin.
 tag carrying one, except the tag being checked, and refuse a layout it does not know. It
 MUST refuse a wheel whose distribution and version an earlier record names with a
 different SHA-256, or a chart whose version an earlier record names with a different
-content digest. Before a candidate is loaded, its subject is the built wheelhouse and
-the chart packaged with the pinned Helm, whose content digest is computed over the
+content digest. When a candidate is loaded, its subject is the wheelhouse the load built
+and the chart packaged with the pinned Helm, whose content digest is computed over the
 packaged files. At the cut, its subject is the release's own bill of materials, and it
-MUST NOT need a build. With no other bill of materials it MUST pass and say so.
+MUST NOT need a build. With no other bill of materials it MUST pass and say so. It
+guards the versions recorded releases name and reads no package registry; it is not a
+guard against versions a registry received by other means.
 
 #### Scenario: A wheel changed without a version bump
 
@@ -183,7 +205,8 @@ A marketplace release MUST be recorded as a `releases/<semver>` branch at a
 default-branch commit, one commit on it adding only `manifests/release-bom.cdx.json`, and
 a `marketplace-v<semver>` tag on that commit. `make check-release-record` MUST refuse a
 record of any other shape, one whose source revision is not the branch point or whose
-version is not the tag's, one omitting a declared component, or one the version check
+version is not the tag's, one whose components are not exactly the release components
+the declaration at the branch point declares, each once, or one the version check
 refuses with the record as its subject.
 
 #### Scenario: A well-formed record is checked
@@ -196,6 +219,12 @@ refuses with the record as its subject.
 
 - **WHEN** the tag's commit changes any path besides the bill of materials
 - **THEN** the record check fails and names the path
+
+#### Scenario: The record names an undeclared or duplicated component
+
+- **WHEN** the bill of materials names a component the declaration does not declare, a
+  development image, or one component twice
+- **THEN** the record check fails and names each such component
 
 ### Requirement: The release bill of materials holds content identities only
 
