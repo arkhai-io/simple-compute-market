@@ -12,7 +12,7 @@ FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
+.PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-release-components check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
@@ -30,18 +30,11 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 # Docker images via --find-links.  Only pure-Python packages (py3-none-any
 # wheels) should be built here; packages with native extensions must be built
 # inside the Docker build context.
-#
-# Upgrade path: replace --find-links with a PEP 503 index served from .dist/
-# by running gen_simple_index.py and passing --index file://${PWD}/.dist/index
-# to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
-# Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-# The wheel set a publishing path builds; publishing workflows call this name.
-# It is the release set alone: the release workflow tars .dist as the
-# marketplace wheelhouse, which carries no distribution only tests depend on —
-# neither the lane doubles' control contract nor the API-credit sample app —
-# since no operator installs one.
-dist-release: ## Build the wheel set for a publishing path.
+# The release set alone: every internal wheel but those only tests depend on —
+# the lane doubles' control contract and the API-credit sample app — since no
+# operator installs one.
+dist-release: ## Build the wheel set a release carries.
 	$(MAKE) dist-release-set
 
 # Every internal wheel but the lane doubles' control contract and the API-credit
@@ -169,7 +162,7 @@ dist-lane-double-controls: ## Build the lane doubles' control-contract wheel int
 dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 	helm package helm/ --destination $(DIST_DIR)
 
-test-release-tooling: dist-identity ## Run release verifier and portable wheelhouse contract tests.
+test-release-tooling: dist-identity ## Run the scripts' tests, among them the release declaration's, its checks', and the wheelhouse's.
 	uv run --no-project --with pytest --with 'eth-account>=0.13,<0.14' \
 		--with 'arkhai-kit-identity' --with pyyaml --find-links "$(DIST_DIR)" \
 		pytest -q scripts/tests
@@ -649,6 +642,9 @@ check-uv-version: ## Fail if the installed uv is older than the minimum that wri
 
 check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
 	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture
+
+check-release-components: ## Fail if a workflow, publish target, or lane target lists release components itself, or a workflow holds a publishing credential
+	@python3 scripts/check_release_components.py
 
 check-uv-setup: ## Fail if a reinit target or image install names internal packages instead of deriving them
 	@python3 scripts/check_uv_setup.py

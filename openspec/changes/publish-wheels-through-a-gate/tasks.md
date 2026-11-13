@@ -292,6 +292,120 @@ Touches:
     `make dist-ci`, the declared-wheel resolution test of 7.6 passes, and the new script
     tests run and pass.
 
+### Section 7 notes: returned to planning (2026-11-13, first implementation session)
+
+**Why the section stopped.** 7.5's verification ("the check passes on the tree;
+`make check-packaging` passes") cannot hold within section 7. Implemented as D7 states
+it, the single-enumeration rule refuses five root `Makefile` publish targets that no
+section 7 task touches. Run on this commit, `make check-release-components` reports:
+- `push-images`: names the release images `registry`, `storefront`, `provisioning` and
+  `frp-grant-admission` (and omits `bare-metal-storefront`, the drift D7 exists to
+  stop). 10.3 replaces it.
+- `push-dev-images`: names `dev-env` and `e2e-tests`. 10.3 replaces it.
+- `clobber-wheels`: names three distributions. 10.3 retires it, and says 7.5 refuses
+  it, so the plan saw the refusal but ordered its fix after the check.
+- `push-cli`: names the binary's path, `domains/vms/buyer/dist/market`. 9.3 and 11 touch
+  the binary and `push-cli`; no task says `push-cli` reads the declaration.
+- `push-charts`: names the chart by its package, `arkhai-node-operator-*.tgz`. No task
+  touches it, and 10.3 keeps it as a developer push.
+
+Every workflow already passes the credential rule, and no lane target names a component.
+If the enumeration rule joined `check-packaging` in section 7, the packaging check would
+fail for sections 8 and 9 and for every validation until section 11. Pulling the fixes
+forward is not small. `push-images` read from the declaration pushes
+`bare-metal-storefront`, whose build writes no revision tag until 10.2, and
+`test_image_publication_contract.py` reads `push-images`' literal arguments, which 10.2
+rewrites. That would move most of section 10's push half into section 7. Choosing
+between these is planning's decision, so the section returns.
+
+**Options for planning.**
+- **(a)** Move into section 7: 10.2's bare-metal revision tag and contract-test rewrite,
+  10.3's declaration-driven `push-images` and `push-dev-images` and its retirement of
+  `clobber-wheels`, and declaration-driven `push-cli` and `push-charts`.
+- **(b), recommended.** Split 7.5.
+  - The workflow-credential rule joins `check-packaging` in section 7; it passes on the
+    tree now.
+  - The single-enumeration rule is built and unit-tested in section 7, and joins
+    `check-packaging` in the section that makes the last publish target comply.
+  - Give `push-charts` and `push-cli` a task that makes them read the declaration;
+    none has one now.
+
+  This keeps each section's scope. From section 7 onward, it also holds the half of the
+  rule that stops a workflow publishing.
+- **(c)** Move all of 7.5 after section 11.
+
+**A second finding, for the round.** The round recorded as `[[1, 2, 7], …]` can never
+reach its join as planned. Two tasks of sections 1 and 2 are checked only at closeout:
+1.1e at 13.6 and 2.3 at 13.9. `scripts/change-workflow next` reads the session as
+incomplete until every task of 1, 2 and 7 is checked. Planning should decide where
+1.1e and 2.3 sit so that the round can join, for example as closeout tasks that keep
+their history.
+
+**What this commit holds (no task checked).**
+- 7.1: the four workflows are deleted, and `.github/workflows/` names no PyPI, npm, ghcr
+  or release upload.
+- 7.2: the verifier, the curl installer and their tests are deleted, and `install.sh` is
+  removed from `README.md`'s tree. Outside `openspec/`, a search finds the deleted files
+  and the release contract named only in `docs/buyer-quickstart.md` (the curl
+  installer's URL), which 13.9 rewrites. That task has the same `docs/` exclusion 9.3
+  states.
+- 7.3: `validate-model-release.yml` has `permissions: contents: read`, and its note
+  step is removed. Its remaining steps reference only `secrets.GITHUB_TOKEN`.
+- 7.4: `manifests/release-components.json` follows D6's shape:
+  - fifty-nine distributions, with `arkhai-apicredits-sample-app` and `wheel_only` gone;
+  - five images;
+  - the chart;
+  - `market`, which names `build-buyer` and `domains/vms/buyer/dist/market` until 9.3;
+  - two development images;
+  - no `npm` key, and no `_comment`, since the reader refuses unknown keys.
+
+  `scripts/release_components.py` is the reader. It collects every refusal before
+  raising one `DeclarationError`. A name or local name may appear once across images
+  and development images, since both are tagged and pushed side by side. It also gives
+  `project_version`, `wheel_file_name` and `declared_wheels`, which sections 8 and 11
+  can reuse for the wheelhouse digest. `scripts/push-distributions.py` reads through it,
+  and its migration-narrative docstring is rewritten. `test_publish_matrix.py`:
+  - reads through it;
+  - loses the workflow, path-filter and `wheel_only` assertions;
+  - keeps closure, dependency order, name-at-path, the find-links rule and the
+    RELEASING.md table checks.
+
+  The RELEASING.md table already equalled the fifty-nine declared distributions, so it
+  needed no edit.
+- 7.5: `scripts/check_release_components.py` and `make check-release-components` exist,
+  but are not in `check-packaging` (above). Some choices go beyond D7's wording, so
+  review should look at them:
+  - Make variables a rule references are read as part of the rule.
+  - A publish target is one named `push-*`, `publish-*`, `clobber-*` or
+    `load-candidate`, or one whose recipe runs an uploader.
+  - A lane target is one named `test-e2e*`, `build-e2e*` or `pull-release-images`.
+  - The chart is found by its declared path (`helm/`) or by its `Chart.yaml` name, and
+    the binary by its declared path.
+  - `permissions: write-all` and `secrets: inherit` are refused as credential grants.
+- 7.6: `scripts/tests/test_release_wheelhouse.py` fails, naming each missing wheel and
+  `make dist`, when `.dist` lacks a declared wheel. It passes locally against this
+  checkout's `.dist`. `dist-ci` builds a superset of `dist-release-set`, since `kit`'s
+  `dist` is its `dist-ci`, so `tests.yml` needs no extra build step.
+- 7.7: the comments citing the deleted workflows are corrected:
+  - the root `Makefile`'s `dist-release` comment and its stale Artifact Registry
+    "upgrade path";
+  - `test-release-tooling`'s description, which named the deleted verifier;
+  - `check_uv_version.py`'s docstring;
+  - `test_init_targets.py`'s docstring.
+
+  `test_ci_evidence.py` and `test_validate_slice.py` keep `publish-pypi.yml` as a
+  synthetic name of a workflow validation may not dispatch. It names no file.
+
+**Evidence so far.**
+- Unit: `make test-release-tooling` passed, 2788 tests. Among them are the reader's
+  cases (`test_release_components.py`) and the check's cases over synthetic workflow and
+  Makefile text, one per rule plus clean cases (`test_check_release_components.py`).
+- `make check-comment-hygiene` passed.
+- `make check-release-components` on the tree fails as listed above.
+- Not run, since a return commit owes no checks: `make check-packaging`, `scripts/change-workflow run
+  pre-commit`, and the fresh-context review. They belong to the session that finishes
+  this section.
+
 ## 8. The release record: the layout-1 reader, the version check and the record check
 
 Delivers D10's reader, D11, D12, D14 and D16. Implements the requirements "A version

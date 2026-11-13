@@ -1,5 +1,4 @@
 {
-  "_comment": "Every distribution this repository publishes, in dependency order. One declaration read by every publication path: the registry push and the public index workflow both derive their set from here, because two lists kept in agreement by hand diverge silently and the copy that diverges is discovered by consumers. Order matters -- a distribution must appear after everything it depends on.",
   "distributions": [
     {
       "key": "kit-schema-migrations",
@@ -244,8 +243,7 @@
     {
       "key": "vms-buyer",
       "path": "domains/vms/buyer",
-      "dist": "arkhai-vms-buyer",
-      "wheel_only": true
+      "dist": "arkhai-vms-buyer"
     },
     {
       "key": "vms-provisioning-operator-client",
@@ -265,8 +263,7 @@
     {
       "key": "vms-storefront",
       "path": "domains/vms/storefront",
-      "dist": "arkhai-vms-storefront",
-      "wheel_only": true
+      "dist": "arkhai-vms-storefront"
     },
     {
       "key": "apicredits-domain",
@@ -276,8 +273,7 @@
     {
       "key": "apicredits-buyer",
       "path": "domains/apicredits/buyer",
-      "dist": "arkhai-apicredits-buyer",
-      "wheel_only": true
+      "dist": "arkhai-apicredits-buyer"
     },
     {
       "key": "apicredits-middleware",
@@ -298,11 +294,48 @@
       "key": "bare-metal-buyer",
       "path": "domains/bare_metal/buyer",
       "dist": "arkhai-bare-metal-buyer"
+    }
+  ],
+  "images": [
+    {
+      "name": "registry",
+      "local": "registry"
     },
     {
-      "key": "apicredits-sample-app",
-      "path": "domains/apicredits/sample-app",
-      "dist": "arkhai-apicredits-sample-app"
+      "name": "storefront",
+      "local": "storefront"
+    },
+    {
+      "name": "provisioning",
+      "local": "compute-provisioning"
+    },
+    {
+      "name": "bare-metal-storefront",
+      "local": "bare-metal-storefront"
+    },
+    {
+      "name": "frp-grant-admission",
+      "local": "frp-grant-admission"
+    }
+  ],
+  "chart": {
+    "path": "helm"
+  },
+  "binaries": [
+    {
+      "name": "market",
+      "target": "build-buyer",
+      "path": "domains/vms/buyer/dist/market"
+    }
+  ],
+  "development_images": [
+    {
+      "name": "dev-env",
+      "local": "dev-env"
+    },
+    {
+      "name": "e2e-tests",
+      "local": "e2e-tests"
     }
   ]
 }
