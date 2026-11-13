@@ -984,7 +984,7 @@ Touches:
 - `domains/vms/buyer/` (its `pyproject.toml`, `Makefile`, lock and `main.py`);
 - `manifests/release-components.json`'s `binaries` entry.
 
-- [ ] 9.1 Rename `scripts/buyer_domain_wheels.py` to `scripts/market_binary.py`, and add
+- [x] 9.1 Rename `scripts/buyer_domain_wheels.py` to `scripts/market_binary.py`, and add
   the check holding the binary's project to the declaration (D18).
   - What the script derives, from the declaration and each declared project's
     `pyproject.toml`:
@@ -1051,7 +1051,32 @@ Touches:
     One case reads the tree. It finds `arkhai-core-buyer` with `core_buyer.cli:main`,
     and the three domains the task names. `make build-market-binary` printed the same
     three wheels.
-- [ ] 9.2 Build the binary from a locked virtual project, and make `check-uv-setup`
+  - Done (2026-11-13, after the replan). `scripts/market_binary.py` takes a required
+    `--target` and four commands: `name`, `output-dir`, `entry-point` and
+    `pyinstaller-options`. `binary()` refuses no entry with the target, two, and a
+    `path` not ending in `name`. `BINARY_NAME`, `domains`, `cli`, `constraints` and the
+    wheelhouse refusal are gone. The script also holds `TARGET` and `PROJECT`
+    (`core/buyer/market-binary`), which the check uses to find the binary and its
+    project.
+    - The rule is `check_release_components.check_market_binary`, run as `--rule
+      market-binary`. `make check-market-binary` runs it in `check-packaging`, and
+      `make check-release-components` runs it with the other two rules.
+    - Unit, `scripts/tests/test_market_binary.py`, 14 cases over synthetic declarations
+      and projects. They cover each command; the entry found by its target among two;
+      no entry, two, and a misnamed path; the CLI and domains in declaration order;
+      and every case the task says to keep.
+    - Unit, `scripts/tests/test_check_release_components.py`. The rule passes an exact
+      project, and one spelled with other normalisations, specifiers and markers. It
+      names a missing domain with its project, a missing CLI, and an extra
+      distribution. It ignores the `freeze` group and refuses a missing project. It
+      also runs alone, and with every rule when none is named. The tree tests now
+      build the binary's project, since `check()` runs every rule by default.
+    - On the tree: the repository case finds `arkhai-core-buyer`, `core_buyer.cli:main`,
+      `market` at `.dist/bin/market`, and the three domains. `make check-market-binary`
+      prints `OK: the market binary's project bundles exactly the buyer CLI and the
+      declared buyer domains.` `make check-release-components` prints the same eleven
+      enumeration refusals 7.5 records, and nothing from the new rule.
+- [x] 9.2 Build the binary from a locked virtual project, and make `check-uv-setup`
   refuse what the earlier install did (D18).
   - The project: add `core/buyer/market-binary/pyproject.toml`, shaped as D18 shows.
     - It is virtual (`[tool.uv] package = false`).
@@ -1123,7 +1148,74 @@ Touches:
     bundled domain wheel. Which domains it listed is read from that build's log. Since
     that build, the count is one line per registered entry point, and the Makefile's
     argument handling has changed; neither has been rebuilt.
-- [ ] 9.3 Point the declaration's `market` entry at `build-market-binary` and
+  - Done (2026-11-13, after the replan).
+    - **The project.** `core/buyer/market-binary/pyproject.toml` is as D18 shows, with a
+      header comment. `make lock PROJECTS=core/buyer/market-binary` could not lock it at
+      first: `uv_project.py lock` read the project's existing lock and refused a project
+      with none. It now locks a named project with no lock afresh ("Section 9 notes:
+      after the replan", outside the plan). The lock resolves 105 packages: every repository distribution from
+      `../../../.dist`, and PyInstaller 6.22.3 in the `freeze` group.
+    - **The Dockerfile.** `core/buyer/market-binary/Dockerfile` builds on
+      `ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim` for linux/amd64,
+      pinned at `sha256:531f855b…44ca`. It keeps the Python check, binutils, the entry
+      point, the options, the smoke test and the `scratch` export. It copies `.dist/`,
+      the script and the project's two files under `/repo`, and installs with
+      `uv_project.py image --project /repo/core/buyer/market-binary -- --group freeze`
+      into `UV_PROJECT_ENVIRONMENT=/opt/market`. `BINARY_NAME` names PyInstaller's
+      output, the smoke test's two commands and the final `COPY`. The constraints
+      argument and both `pip install` steps are gone.
+    - **The Makefile.** `build-market-binary` reads `name`, `output-dir`, `entry-point`
+      and `pyinstaller-options` from `market_binary.py --target $@`, and exports to the
+      directory `output-dir` prints. It names no domain, binary or binary path. It names
+      the Dockerfile's path, as every image target does.
+    - **The digest.** As before, it was taken from the first build's BuildKit log: that
+      build ran on the unpinned tag and resolved `sha256:531f855b…44ca`. The second build
+      ran from the pin.
+    - **`check-uv-setup`.** It reads `*.Dockerfile` as well as `Dockerfile*`, and skips
+      ignore files. In a Dockerfile that copies the wheelhouse, it refuses any `pip
+      install`, `pip3 install`, `python -m pip install` or `uv pip install` that may
+      read the wheelhouse. As the task defines it, that is one passing `--find-links`
+      or `-f` with any value, or naming a path in `.dist`. It also counts a path where
+      the file copied `.dist/`, such as the `/dist` of the install this section
+      returned on. That rule replaces its narrower `uv pip install --find-links`
+      pattern. Like the existing `uv sync` refusal, it applies to every stage of such a
+      file, not only the copying stage: a later stage can reach the copy through
+      `--from`. Its docstring states the rule and its known limits (the handoff
+      below). Closeout edits no code, so the docstring could not wait for 13.9; 13.9
+      still amends BUILD_AND_PACKAGING.md's row.
+    - Unit, `scripts/tests/test_check_uv_setup.py`, 12 new cases, passing:
+      - a `market.Dockerfile` is read;
+      - a `Dockerfile.dockerignore`, which `Dockerfile*` matches, is not read, though
+        it holds text the check would refuse in a Dockerfile;
+      - a wheelhouse install in a later stage, through a mount from the copying stage,
+        is refused;
+      - seven installs reading the wheelhouse are each refused, among them plain
+        `pip install --find-links`, `python3 -m pip install -f`, `pip3 install
+        --find-links=`, `uv pip install --find-links`, a wheel by its copied path, and
+        a wheel by its `.dist` path;
+      - the returned install, constrained and then reinstalled from `/dist`, is refused;
+      - a `uv pip install` naming no wheelhouse, as in
+        `provisioning/compute/service/Dockerfile`, passes;
+      - the installs made through the script (`image` and `install-wheel`) pass, by
+        the existing case.
+    - Unit, `scripts/tests/test_uv_project.py`: a named project with no lock is locked
+      with `uv lock --find-links` and no upgrade flags. A named directory that is
+      missing, or that declares no project inside another one, is refused before uv
+      runs.
+    - On the tree: `make check-uv-setup`, `make check-python-version` and `make
+      check-market-binary` passed. `make check-locks` passed inside `make
+      check-packaging`, in the pre-commit run (9.5).
+    - Local build evidence, an image build rather than one of TESTING.md's levels:
+      - The first build, on the unpinned tag, succeeded. Its install step ran `uv sync
+        --locked --find-links ../../../.dist --group freeze` with a `--reinstall-package`
+        for each internal package, and installed 104 packages.
+      - Its smoke test printed `api_credits.v1`, `bare_metal.v1` and `compute.v1`, and
+        reported no skipped domain.
+      - It exported a 48 MB `.dist/bin/market`.
+      - The second build, from the pinned digest, succeeded and exported the binary
+        again. BuildKit reused every layer of the first build, since the digest is the
+        one that build resolved. Its smoke test result is therefore the first build's.
+- [x] 9.3 Point the declaration's `market` entry at `build-market-binary` and
   `.dist/bin/market`. `build` builds it in place of `build-buyer`.
   - Retire `build-buyer`, the PyInstaller recipe in `domains/vms/buyer/Makefile`, and
     `domains/vms/buyer/src/arkhai_vms_buyer/main.py`, whose only user is that recipe.
@@ -1132,6 +1224,10 @@ Touches:
   - Verify: a search outside `openspec/` and `docs/` finds no `build-buyer` and no
     `arkhai_vms_buyer/main.py`. `make test-release-tooling` passes. `docs/` is rewritten
     at closeout (13.9).
+  - Done (2026-11-13, after the replan). The work recorded below stands. A search
+    outside `openspec/` and `docs/` again finds no `build-buyer`,
+    `arkhai_vms_buyer/main.py` or `vms/buyer/dist`, and `make test-release-tooling`
+    passed (9.5).
   - In progress (2026-11-13), unchecked with the section. The declaration names `build-market-binary` and `.dist/bin/market`,
     and `build` runs `build-market-binary`. `build-buyer` is retired. So are the VM
     buyer Makefile's `build` and `smoke-test` targets and `main.py`.
@@ -1148,7 +1244,7 @@ Touches:
     notes"). A search outside `openspec/` and `docs/` for `build-buyer`,
     `arkhai_vms_buyer/main.py` and `vms/buyer/dist` finds nothing. `make
     test-release-tooling` passed, 2895 tests, inside the pre-commit run (9.5).
-- [ ] 9.4 Remove `pyinstaller` from `arkhai-vms-buyer`'s runtime dependencies, and bump
+- [x] 9.4 Remove `pyinstaller` from `arkhai-vms-buyer`'s runtime dependencies, and bump
   it a minor version (0.11.0 → 0.12.0) per RELEASING.md's versioning policy. Move any
   exact pin on it with the bump, and refresh every lock that installs it with
   `make lock`.
@@ -1157,6 +1253,10 @@ Touches:
     - `make check-packaging` passes, with locks current;
     - `make test-domains` passes for the VM buyer;
     - the built wheel's metadata requires no PyInstaller.
+  - Done (2026-11-13, after the replan). The work and evidence recorded below stand.
+    No lock in the tree names `pyinstaller` but the binary's own, in its `freeze`
+    group, which is no published distribution's dependency. `make check-version-bumps`
+    and `make check-packaging` passed again in the pre-commit run (9.5).
   - In progress (2026-11-13), unchecked with the section; its own evidence passes, and
     the package's description now calls it the VM buyer domain of the `market` CLI. No exact pin on `arkhai-vms-buyer` exists. The VM storefront and
     `e2e-tests` declare a `>=0.9.0` floor, which is unchanged. `make lock` rewrote the
@@ -1172,7 +1272,7 @@ Touches:
       reads the built wheelhouse: every declared wheel's `METADATA` in `.dist`, failing
       on a missing one. It refuses any `Requires-Dist` naming PyInstaller, and it
       passes, `arkhai_vms_buyer-0.12.0` among the wheels it read.
-- [ ] 9.5 Section verification.
+- [x] 9.5 Section verification.
   - Unit: 9.1's tests (`test_market_binary.py`, the `market-binary` rule's cases in
     `test_check_release_components.py`) and 9.2's (`test_check_uv_setup.py`), and
     `test_check_python_version.py`. All of them run in `make test-release-tooling`.
@@ -1188,6 +1288,36 @@ Touches:
     install `market` from the wheels, so they exercise the buyer CLI 9.4 repackages.
   - Owed by validation: `tests.yml`, job `test · test-deployment-packaging`. The new and
     changed cases in `scripts/tests/` pass there, as section 7 already owes.
+  - Done (2026-11-13, after the replan). Results:
+    - Unit: `make test-release-tooling` passed, 2922 tests, after the fresh-context
+      fixes. It holds 9.1's and 9.2's cases, `test_check_python_version.py` and
+      `test_uv_project.py`.
+    - Local build evidence: 9.2's build and smoke test, from the locked project (9.2's
+      note says what the pinned build reused).
+    - `scripts/change-workflow run pre-commit publish-wheels-through-a-gate` ran twice,
+      after the build and again after the fresh-context fixes. Both times its
+      functional hooks passed:
+      - the relock, which changed no lock;
+      - `make check-packaging`, whose output includes `check-uv-setup`, `check-locks`,
+        `check-python-version`, `check-project-layout`, `check-architecture`,
+        `check-workflow-credentials` and `check-market-binary`, each printing `OK`;
+      - every suite.
+    - Both times the closing `pre-commit` hook passed every check but the documentation
+      citations. That check reports 19 citations in the change's own documents, of the
+      two kinds section 7's notes describe:
+      - files sections 10–12 create;
+      - files the change deleted or renamed: section 7's, and now
+        `scripts/buyer_domain_wheels.py` and its test, which this section renamed.
+        The plan's own text and the in-progress notes name them.
+    - Search: outside `openspec/` and `docs/`, no `buyer_domain_wheels`,
+      `market-binary.Dockerfile` or `pip install` from the wheelhouse remains. The one
+      Dockerfile `pip install`, in `provisioning/compute/service/Dockerfile`, names no
+      wheelhouse.
+  - End-to-end: confirmed. No marker in `e2e-tests/` runs the binary, and none was added.
+    The lanes install `market` from the wheels through `e2e-tests/uv.lock`.
+  - Owed by validation: confirmed as written above. `tests.yml` is a workflow
+    `scripts/ci_evidence.py` lists, and its `test · test-deployment-packaging` job runs
+    `make test-release-tooling`.
   - Evidence so far (2026-11-13, before the return to design), unchecked with the section:
     - Unit: `test_buyer_domain_wheels.py` passed, 12 cases since the fresh-context fixes.
     - Build evidence: 9.2's smoke test passed, on the build before those fixes.
@@ -1207,6 +1337,63 @@ Touches:
     the repackaged VM buyer.
   - Owed by validation: none. The new cases in `scripts/tests/` run in `tests.yml`'s
     `test · test-deployment-packaging` job, which section 7 already owes.
+
+### Section 9 notes: after the replan (2026-11-13)
+
+**Outside the plan.**
+- **`scripts/uv_project.py lock` locks a new project.** It read a named project's
+  existing lock to choose its upgrade flags, so it refused a project with none, and
+  `make lock PROJECTS=core/buyer/market-binary` failed. A project with no lock now gets
+  `uv lock --find-links <wheelhouse>` with no upgrade flags, since a first lock resolves
+  everything afresh. A named directory must declare a project, or the command refuses
+  before uv runs. Without that, uv would lock an enclosing project instead, such as
+  `core/buyer` for `PROJECTS=core/buyer/src`, now that a project sits inside
+  `core/buyer`. Neither file is in the section's Touches list.
+- **`check_uv_setup.py`'s docstring** is amended here, not at 13.9, since closeout edits
+  no code.
+
+**Choices for review.**
+- `market_binary.py` holds the binary's build target and project path as `TARGET` and
+  `PROJECT`, so that the check can find the binary and its project. The Dockerfile
+  spells its own project path in its `COPY`s, and the Makefile spells the Dockerfile's
+  path, as every image does. A second binary would need a mapping from target to
+  project, and none is speculated now.
+- The `market-binary` rule finds the binary as the build does, by `TARGET`. A
+  declaration whose binary names another target fails the rule with the script's
+  refusal, not a pass.
+- The pip refusal counts `--find-links`/`-f` with any value as reading the wheelhouse,
+  as 9.2's task defines it. A `pip install -f https://…` in a Dockerfile that copies
+  `.dist/` is therefore refused, even with nothing from the wheelhouse.
+
+**Known limits of the pip refusal**, stated in the docstring: an install finding the
+wheelhouse only through `PIP_FIND_LINKS`, `UV_FIND_LINKS` or a shell variable holding
+its paths, and a Dockerfile that bind-mounts `.dist` without copying it. The last
+predates this section: the whole check skips a file that does not copy the wheelhouse.
+
+**Declined from the fresh-context check.**
+- **`.dockerignore` hard-codes `.dist/bin`**, the binary's output directory, which the
+  Makefile now reads from the declaration. It is the ignore file's own exclusion, and a
+  moved `path` would make the old binary part of build contexts again, not part of an
+  image, since no image copies `.dist/bin`. It is left as a known second copy rather
+  than a test, because nothing else holds an ignore file to the declaration.
+- **Amending 13.9 and the Touches list.** A later task and a section's header are
+  planning's to edit. They are recorded here and under "For closeout" instead.
+
+**For closeout.**
+- **13.9, `docs/development/BUILD_AND_PACKAGING.md`:**
+  - "Locks": `make lock PROJECTS=<dir>` locks a project with no lock yet.
+  - "Images": the binary's project is the one image-like build that exports a file
+    rather than an image, and it installs no project wheel (`install-wheel` is
+    skipped, as for a virtual project).
+  - "Checks": `check-uv-setup`'s row gains the pip rule and `*.Dockerfile`, and a
+    `check-market-binary` row is added.
+- **13.9, the binary's digest.** A Python bump re-pins
+  `core/buyer/market-binary/Dockerfile`'s digest, and the build's own check refuses a
+  stale one. The earlier notes' "For closeout" line already asks BUILD_AND_PACKAGING.md
+  to say so; the image is now the uv one.
+- The earlier notes' closeout items still stand.
+
+**End-to-end.** None owed, confirmed in 9.5.
 
 ### Section 9 notes: returned to design (2026-11-13)
 

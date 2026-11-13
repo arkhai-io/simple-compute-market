@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 _SPEC = importlib.util.spec_from_file_location(
     "check_uv_setup", Path(__file__).resolve().parents[1] / "check_uv_setup.py"
 )
@@ -90,9 +92,9 @@ def test_a_project_with_tests_and_internal_wheels_needs_a_reinit(tmp_path):
     assert found == ["kit/consumer: installs arkhai-core from the wheelhouse but has no `reinit` target"]
 
 
-def _dockerfile(root: Path, text: str) -> None:
+def _dockerfile(root: Path, text: str, name: str = "Dockerfile") -> None:
     (root / "img").mkdir(exist_ok=True)
-    (root / "img" / "Dockerfile").write_text(text, "utf-8")
+    (root / "img" / name).write_text(text, "utf-8")
 
 
 GOOD_IMAGE = """\
@@ -142,6 +144,84 @@ def test_a_script_call_needs_the_script_copied_into_that_stage(tmp_path):
     _dockerfile(root, GOOD_IMAGE.replace("COPY scripts/uv_project.py /repo/scripts/uv_project.py\n", ""))
 
     assert any("did not copy there" in p for p in checker.problems(root))
+
+
+WHEELHOUSE_INSTALL = "installs from the wheelhouse without uv_project.py"
+
+
+def _builder(run: str) -> str:
+    return f"FROM base AS builder\nCOPY .dist/ /dist/\nRUN {run}\n"
+
+
+def test_a_dockerfile_named_for_its_image_is_read(tmp_path):
+    root = _repository(tmp_path)
+    _project(root, REINIT)
+    _dockerfile(root, _builder("uv sync --locked"), name="market.Dockerfile")
+
+    assert checker.problems(root) == [f"img/market.Dockerfile: {WHEELHOUSE_INSTALL}"]
+
+
+def test_an_ignore_file_beside_a_dockerfile_is_not_read(tmp_path):
+    """`Dockerfile*` matches `Dockerfile.dockerignore`; text the check would
+    refuse in a Dockerfile shows it is skipped."""
+    root = _repository(tmp_path)
+    _project(root, REINIT)
+    _dockerfile(root, _builder("uv sync --locked"), name="Dockerfile.dockerignore")
+
+    assert checker.problems(root) == []
+
+
+def test_a_wheelhouse_install_in_a_stage_that_does_not_copy_it_is_refused(tmp_path):
+    root = _repository(tmp_path)
+    _project(root, REINIT)
+    _dockerfile(root, GOOD_IMAGE + "RUN --mount=from=builder,source=/repo/.dist,target=/w "
+                                   "pip install --find-links /w arkhai-consumer\n")
+
+    assert checker.problems(root) == [f"img/Dockerfile: {WHEELHOUSE_INSTALL}"]
+
+
+@pytest.mark.parametrize("run", [
+    "pip install --find-links /dist arkhai-consumer",
+    "python3 -m pip install -f /dist arkhai-consumer",
+    "/opt/venv/bin/pip3 install --find-links=/dist arkhai-consumer",
+    "uv pip install --find-links /dist arkhai-consumer",
+    "pip install /dist/arkhai_consumer-0.1.0-py3-none-any.whl",
+    "pip install ./.dist/arkhai_consumer-0.1.0-py3-none-any.whl",
+    "python3 -m venv /opt/v && /opt/v/bin/pip install -f/dist arkhai-consumer",
+])
+def test_a_pip_install_reading_the_wheelhouse_is_refused(tmp_path, run):
+    root = _repository(tmp_path)
+    _project(root, REINIT)
+    _dockerfile(root, _builder(run))
+
+    assert checker.problems(root) == [f"img/Dockerfile: {WHEELHOUSE_INSTALL}"]
+
+
+def test_the_constrained_install_and_reinstall_from_the_wheelhouse_is_refused(tmp_path):
+    root = _repository(tmp_path)
+    _project(root, REINIT)
+    _dockerfile(root, """\
+FROM base AS build
+COPY .dist/ /dist/
+RUN set -eu; \\
+    printf '%s\\n' $CONSTRAINTS > /tmp/constraints.txt; \\
+    /opt/market/bin/pip install --find-links /dist --constraint /tmp/constraints.txt $wheels; \\
+    /opt/market/bin/pip install --no-index --no-deps --force-reinstall --find-links /dist $installed
+""")
+
+    assert checker.problems(root) == [f"img/Dockerfile: {WHEELHOUSE_INSTALL}"]
+
+
+def test_a_pip_install_that_does_not_read_the_wheelhouse_passes(tmp_path):
+    root = _repository(tmp_path)
+    _project(root, REINIT)
+    _dockerfile(root, GOOD_IMAGE.replace(
+        "FROM base AS runtime\n",
+        "RUN uv venv /opt/ansible && "
+        "uv pip install --python /opt/ansible/bin/python 'ansible-core>=2.17,<2.20'\n"
+        "FROM base AS runtime\n"))
+
+    assert checker.problems(root) == []
 
 
 def test_the_current_tree_passes():

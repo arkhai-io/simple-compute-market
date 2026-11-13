@@ -1,4 +1,4 @@
-"""What the release's `market` binary bundles is derived from the declaration."""
+"""The release's `market` binary is derived from the declaration."""
 
 from __future__ import annotations
 
@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 
-import buyer_domain_wheels
+import market_binary
 from release_components import REPO_ROOT, DeclarationError, load
+
+TARGET = "build-market-binary"
+BINARY = {"name": "market", "target": TARGET, "path": ".dist/bin/market"}
 
 
 def _project(root: Path, path: str, name: str, version: str, extra: str = "") -> None:
@@ -25,19 +28,23 @@ def _domain(entry: str) -> str:
     return f'[project.entry-points."market.buyer_domains"]\n{entry}\n'
 
 
-def _declare(root: Path, distributions: list[tuple[str, str]]) -> None:
+def _declare(root: Path, distributions: list[tuple[str, str]],
+             binaries: list[dict[str, str]] | None = None) -> None:
     document = {
         "distributions": [{"key": path.rsplit("/", 1)[-1], "path": path, "dist": dist}
                           for path, dist in distributions],
         "images": [{"name": "registry", "local": "registry"}],
         "chart": {"path": "helm"},
-        "binaries": [{"name": "market", "target": "build-market-binary",
-                      "path": ".dist/bin/market"}],
+        "binaries": [BINARY] if binaries is None else binaries,
         "development_images": [{"name": "dev-env", "local": "dev-env"}],
     }
-    (root / "manifests").mkdir()
-    (root / "manifests" / "release-components.json").write_text(json.dumps(document),
-                                                                encoding="utf-8")
+    manifests = root / "manifests"
+    manifests.mkdir(exist_ok=True)
+    (manifests / "release-components.json").write_text(json.dumps(document), encoding="utf-8")
+
+
+def _components(root: Path):
+    return load(root / "manifests" / "release-components.json")
 
 
 @pytest.fixture
@@ -51,37 +58,50 @@ def tree(tmp_path: Path) -> Path:
     _declare(tmp_path, [("kit/base", "shop-base"), ("core/cli", "shop-cli"),
                         ("domains/boats", "shop-boats-buyer"),
                         ("domains/cars", "shop-cars-buyer")])
-    dist = tmp_path / ".dist"
-    dist.mkdir()
-    for wheel in ("shop_cli-0.6.2-py3-none-any.whl", "shop_boats_buyer-0.3.0-py3-none-any.whl",
-                  "shop_cars_buyer-2.1.0-py3-none-any.whl"):
-        (dist / wheel).write_bytes(b"")
     return tmp_path
 
 
-def _run(root: Path, *argv: str, capsys: pytest.CaptureFixture[str]) -> tuple[int, list[str], str]:
-    status = buyer_domain_wheels.main(list(argv), root=root)
+def _run(root: Path, *argv: str, capsys: pytest.CaptureFixture[str],
+         target: str = TARGET) -> tuple[int, list[str], str]:
+    status = market_binary.main(["--target", target, *argv], root=root)
     captured = capsys.readouterr()
     return status, captured.out.splitlines(), captured.err
 
 
-def test_domains_are_the_declared_distributions_registering_a_buyer_domain(
+def test_the_name_and_output_directory_are_the_binary_entrys(
         tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert _run(tree, capsys=capsys) == (
-        0, ["shop_boats_buyer-0.3.0-py3-none-any.whl", "shop_cars_buyer-2.1.0-py3-none-any.whl"], "")
+    assert _run(tree, "name", capsys=capsys) == (0, ["market"], "")
+    assert _run(tree, "output-dir", capsys=capsys) == (0, [".dist/bin"], "")
 
 
-def test_the_cli_is_the_declared_distribution_defining_the_binary_as_a_console_script(
+def test_the_binary_is_the_entry_whose_target_the_caller_names(
         tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert _run(tree, "cli", capsys=capsys) == (0, ["shop_cli-0.6.2-py3-none-any.whl"], "")
+    _declare(tree, [("core/cli", "shop-cli"), ("domains/boats", "shop-boats-buyer")],
+             [{"name": "other", "target": "build-other", "path": "out/other"}, BINARY])
+
+    assert _run(tree, "output-dir", capsys=capsys) == (0, [".dist/bin"], "")
+    assert _run(tree, "name", capsys=capsys, target="build-other") == (0, ["other"], "")
+
+
+@pytest.mark.parametrize(("binaries", "message"), [
+    ([], "found 0"),
+    ([BINARY, {**BINARY, "name": "shop", "path": ".dist/bin/shop"}], "found 2"),
+    ([{**BINARY, "path": ".dist/bin/market-linux"}], "does not end in its name"),
+])
+def test_a_missing_doubled_or_misnamed_binary_entry_is_refused(
+        tree: Path, capsys: pytest.CaptureFixture[str], binaries: list[dict[str, str]],
+        message: str) -> None:
+    _declare(tree, [("core/cli", "shop-cli")], binaries)
+
+    status, lines, error = _run(tree, "name", capsys=capsys)
+
+    assert (status, lines) == (1, [])
+    assert message in error
+
+
+def test_the_entry_point_is_the_console_script_named_for_the_binary(
+        tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert _run(tree, "entry-point", capsys=capsys) == (0, ["shop_cli.cli:main"], "")
-
-
-def test_constraints_pin_every_declared_distribution_at_its_declared_version(
-        tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert _run(tree, "constraints", capsys=capsys) == (0, [
-        "shop-base==1.0.0", "shop-cli==0.6.2", "shop-boats-buyer==0.3.0", "shop-cars-buyer==2.1.0",
-    ], "")
 
 
 def test_pyinstaller_options_copy_each_bundled_distributions_metadata_and_import_each_domain(
@@ -96,31 +116,20 @@ def test_pyinstaller_options_copy_each_bundled_distributions_metadata_and_import
     ]
 
 
-def test_a_wheel_the_wheelhouse_lacks_is_refused_naming_make_dist(
-        tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    (tree / ".dist" / "shop_cars_buyer-2.1.0-py3-none-any.whl").unlink()
+def test_the_cli_and_the_domains_are_found_in_declaration_order(tree: Path) -> None:
+    found = market_binary.inputs(_components(tree), tree, "market")
 
-    status, lines, error = _run(tree, capsys=capsys)
-
-    assert (status, lines) == (1, [])
-    assert "shop_cars_buyer-2.1.0-py3-none-any.whl" in error and "make dist" in error
-
-
-def test_a_cli_wheel_the_wheelhouse_lacks_is_refused_naming_make_dist(
-        tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    (tree / ".dist" / "shop_cli-0.6.2-py3-none-any.whl").unlink()
-
-    status, lines, error = _run(tree, "cli", capsys=capsys)
-
-    assert (status, lines) == (1, [])
-    assert "shop_cli-0.6.2-py3-none-any.whl" in error and "make dist" in error
+    assert found.cli.distribution.dist == "shop-cli"
+    assert [domain.distribution.dist for domain in found.domains] == [
+        "shop-boats-buyer", "shop-cars-buyer"]
+    assert found.domains[1].modules == ("shop_cars.cli", "shop_cars.vans")
 
 
 def test_a_declared_project_with_no_pyproject_is_reported(
         tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
     (tree / "kit" / "base" / "pyproject.toml").unlink()
 
-    status, lines, error = _run(tree, "constraints", capsys=capsys)
+    status, lines, error = _run(tree, "entry-point", capsys=capsys)
 
     assert (status, lines) == (1, [])
     assert "kit/base/pyproject.toml does not exist" in error
@@ -132,8 +141,7 @@ def test_a_second_distribution_defining_the_console_script_is_refused(tmp_path: 
     _declare(tmp_path, [("a", "shop-a"), ("b", "shop-b")])
 
     with pytest.raises(DeclarationError, match="found shop-a, shop-b"):
-        buyer_domain_wheels.inputs(load(tmp_path / "manifests" / "release-components.json"),
-                                   tmp_path)
+        market_binary.inputs(_components(tmp_path), tmp_path, "market")
 
 
 def test_no_declared_cli_is_refused(tmp_path: Path) -> None:
@@ -141,8 +149,7 @@ def test_no_declared_cli_is_refused(tmp_path: Path) -> None:
     _declare(tmp_path, [("b", "shop-b")])
 
     with pytest.raises(DeclarationError, match="found none"):
-        buyer_domain_wheels.inputs(load(tmp_path / "manifests" / "release-components.json"),
-                                   tmp_path)
+        market_binary.inputs(_components(tmp_path), tmp_path, "market")
 
 
 def test_no_declared_buyer_domain_is_refused(tmp_path: Path) -> None:
@@ -150,13 +157,15 @@ def test_no_declared_buyer_domain_is_refused(tmp_path: Path) -> None:
     _declare(tmp_path, [("a", "shop-a")])
 
     with pytest.raises(DeclarationError, match="market.buyer_domains"):
-        buyer_domain_wheels.inputs(load(tmp_path / "manifests" / "release-components.json"),
-                                   tmp_path)
+        market_binary.inputs(_components(tmp_path), tmp_path, "market")
 
 
 def test_this_repository_bundles_its_three_buyer_domains_into_the_core_buyer_cli() -> None:
-    found = buyer_domain_wheels.inputs(load(), REPO_ROOT)
+    components = load()
+    entry = market_binary.binary(components, market_binary.TARGET)
+    found = market_binary.inputs(components, REPO_ROOT, entry.name)
 
+    assert (entry.name, entry.path) == ("market", ".dist/bin/market")
     assert found.cli.distribution.dist == "arkhai-core-buyer"
     assert found.entry_point == "core_buyer.cli:main"
     assert sorted(domain.distribution.dist for domain in found.domains) == [
@@ -169,7 +178,7 @@ def test_a_declaration_the_reader_refuses_is_reported_and_prints_nothing(
     (tree / "manifests" / "release-components.json").write_text('{"distributions": []}',
                                                                 encoding="utf-8")
 
-    status, lines, error = _run(tree, "constraints", capsys=capsys)
+    status, lines, error = _run(tree, "entry-point", capsys=capsys)
 
     assert (status, lines) == (1, [])
     assert "required key 'images' is missing" in error

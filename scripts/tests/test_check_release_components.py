@@ -1,4 +1,5 @@
-"""The single-enumeration and workflow-credential check, over synthetic files."""
+"""The single-enumeration, workflow-credential and market-binary check, over
+synthetic files."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import pytest
 
 from check_release_components import (
     check,
+    check_market_binary,
     component_patterns,
     main,
     makefile_problems,
@@ -21,13 +23,15 @@ DECLARATION = {
     "distributions": [
         {"key": "core", "path": "core", "dist": "arkhai-core"},
         {"key": "core-buyer", "path": "core/buyer", "dist": "arkhai-core-buyer"},
+        {"key": "boats-buyer", "path": "domains/boats/buyer", "dist": "arkhai-boats-buyer"},
     ],
     "images": [
         {"name": "registry", "local": "registry"},
         {"name": "provisioning", "local": "compute-provisioning"},
     ],
     "chart": {"path": "helm"},
-    "binaries": [{"name": "market", "target": "build-market", "path": ".dist/bin/market"}],
+    "binaries": [{"name": "market", "target": "build-market-binary",
+                  "path": ".dist/bin/market"}],
     "development_images": [{"name": "dev-env", "local": "dev-env"}],
 }
 PATTERNS = component_patterns(parse(DECLARATION), "arkhai-node-operator")
@@ -324,10 +328,90 @@ def test_a_publish_target_reading_the_declaration_passes() -> None:
     assert _makefile(text) == []
 
 
-def test_the_check_reads_workflows_and_makefiles_under_a_root(tmp_path: Path) -> None:
-    (tmp_path / "manifests").mkdir()
-    (tmp_path / "manifests" / "release-components.json").write_text(
+BINARY_PROJECT = "core/buyer/market-binary"
+EXACT = ("arkhai-core-buyer", "arkhai-boats-buyer")
+
+
+def _pyproject(root: Path, path: str, text: str) -> None:
+    (root / path).mkdir(parents=True, exist_ok=True)
+    (root / path / "pyproject.toml").write_text(text, encoding="utf-8")
+
+
+def _binary_tree(root: Path, dependencies: tuple[str, ...] = EXACT,
+                 freeze: tuple[str, ...] = ("pyinstaller==6.22.3",)) -> None:
+    """The declaration, its projects, and the binary's project depending on
+    `dependencies`: `core/buyer` defines the `market` console script and
+    `domains/boats/buyer` registers a buyer domain."""
+    (root / "manifests").mkdir(exist_ok=True)
+    (root / "manifests" / "release-components.json").write_text(
         json.dumps(DECLARATION), encoding="utf-8")
+    _pyproject(root, "core", '[project]\nname = "arkhai-core"\nversion = "1.0.0"\n')
+    _pyproject(root, "core/buyer",
+               '[project]\nname = "arkhai-core-buyer"\nversion = "1.0.0"\n'
+               '[project.scripts]\nmarket = "core_buyer.cli:main"\n')
+    _pyproject(root, "domains/boats/buyer",
+               '[project]\nname = "arkhai-boats-buyer"\nversion = "1.0.0"\n'
+               '[project.entry-points."market.buyer_domains"]\nboats = "boats.plugin:domain"\n')
+    _pyproject(root, BINARY_PROJECT,
+               '[project]\nname = "arkhai-market-binary"\nversion = "0.1.0"\n'
+               f"dependencies = {json.dumps(list(dependencies))}\n"
+               f"[dependency-groups]\nfreeze = {json.dumps(list(freeze))}\n"
+               "[tool.uv]\npackage = false\n")
+
+
+def test_the_market_binary_rule_passes_an_exact_project(tmp_path: Path) -> None:
+    _binary_tree(tmp_path)
+
+    assert check_market_binary(tmp_path) == []
+
+
+def test_the_market_binary_rule_compares_normalised_names_and_ignores_specifiers(
+        tmp_path: Path) -> None:
+    _binary_tree(tmp_path, ("Arkhai_Core_Buyer>=1.0", "arkhai.boats-buyer ; sys_platform == 'linux'"))
+
+    assert check_market_binary(tmp_path) == []
+
+
+def test_the_market_binary_rule_names_a_missing_domain_and_its_project(tmp_path: Path) -> None:
+    _binary_tree(tmp_path, ("arkhai-core-buyer",))
+
+    assert check_market_binary(tmp_path) == [
+        f"{BINARY_PROJECT}/pyproject.toml: does not depend on arkhai-boats-buyer, which "
+        "domains/boats/buyer registers a market.buyer_domains entry point"]
+
+
+def test_the_market_binary_rule_names_a_missing_cli(tmp_path: Path) -> None:
+    _binary_tree(tmp_path, ("arkhai-boats-buyer",))
+
+    assert check_market_binary(tmp_path) == [
+        f"{BINARY_PROJECT}/pyproject.toml: does not depend on arkhai-core-buyer, which "
+        "core/buyer defines the `market` console script"]
+
+
+def test_the_market_binary_rule_names_an_extra_distribution(tmp_path: Path) -> None:
+    _binary_tree(tmp_path, (*EXACT, "arkhai-core"))
+
+    assert check_market_binary(tmp_path) == [
+        f"{BINARY_PROJECT}/pyproject.toml: depends on arkhai-core, which is neither the "
+        "buyer CLI nor a declared buyer domain"]
+
+
+def test_the_market_binary_rule_ignores_the_freeze_group(tmp_path: Path) -> None:
+    _binary_tree(tmp_path, freeze=("pyinstaller==6.22.3", "arkhai-core"))
+
+    assert check_market_binary(tmp_path) == []
+
+
+def test_the_market_binary_rule_refuses_a_missing_project(tmp_path: Path) -> None:
+    _binary_tree(tmp_path)
+    (tmp_path / BINARY_PROJECT / "pyproject.toml").unlink()
+
+    assert check_market_binary(tmp_path) == [
+        f"{BINARY_PROJECT}/pyproject.toml does not exist; the market binary is built from it"]
+
+
+def test_the_check_reads_workflows_and_makefiles_under_a_root(tmp_path: Path) -> None:
+    _binary_tree(tmp_path)
     (tmp_path / "helm").mkdir()
     (tmp_path / "helm" / "Chart.yaml").write_text("name: arkhai-node-operator\n",
                                                   encoding="utf-8")
@@ -349,9 +433,7 @@ def test_the_check_reads_workflows_and_makefiles_under_a_root(tmp_path: Path) ->
 
 
 def test_a_clean_tree_passes(tmp_path: Path) -> None:
-    (tmp_path / "manifests").mkdir()
-    (tmp_path / "manifests" / "release-components.json").write_text(
-        json.dumps(DECLARATION), encoding="utf-8")
+    _binary_tree(tmp_path)
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "tests.yml").write_text(CLEAN_WORKFLOW,
                                                                   encoding="utf-8")
@@ -361,12 +443,11 @@ def test_a_clean_tree_passes(tmp_path: Path) -> None:
     assert check(tmp_path) == []
 
 
-def _tree_breaking_both_rules(root: Path) -> None:
+def _tree_breaking_every_rule(root: Path) -> None:
     """A tree whose workflow holds a publishing credential and names a declared
-    distribution, and whose publish target names a declared image."""
-    (root / "manifests").mkdir()
-    (root / "manifests" / "release-components.json").write_text(
-        json.dumps(DECLARATION), encoding="utf-8")
+    distribution, whose publish target names a declared image, and whose binary
+    project lacks the buyer domain."""
+    _binary_tree(root, ("arkhai-core-buyer",))
     (root / ".github" / "workflows").mkdir(parents=True)
     (root / ".github" / "workflows" / "tests.yml").write_text(
         CLEAN_WORKFLOW.replace("contents: read", "contents: write")
@@ -377,7 +458,7 @@ def _tree_breaking_both_rules(root: Path) -> None:
 
 
 def test_the_credential_rule_runs_alone(tmp_path: Path) -> None:
-    _tree_breaking_both_rules(tmp_path)
+    _tree_breaking_every_rule(tmp_path)
 
     assert check(tmp_path, rules=("credentials",)) == [
         ".github/workflows/tests.yml: grants contents: write"]
@@ -392,7 +473,7 @@ def test_the_credential_rule_reads_no_declaration(tmp_path: Path) -> None:
 
 
 def test_the_enumeration_rule_runs_alone(tmp_path: Path) -> None:
-    _tree_breaking_both_rules(tmp_path)
+    _tree_breaking_every_rule(tmp_path)
 
     assert check(tmp_path, rules=("enumeration",)) == [
         ".github/workflows/tests.yml: names distribution arkhai-core-buyer; "
@@ -402,11 +483,20 @@ def test_the_enumeration_rule_runs_alone(tmp_path: Path) -> None:
     ]
 
 
-def test_with_no_rule_named_both_run(tmp_path: Path) -> None:
-    _tree_breaking_both_rules(tmp_path)
+def test_the_market_binary_rule_runs_alone(tmp_path: Path) -> None:
+    _tree_breaking_every_rule(tmp_path)
+
+    assert check(tmp_path, rules=("market-binary",)) == [
+        f"{BINARY_PROJECT}/pyproject.toml: does not depend on arkhai-boats-buyer, which "
+        "domains/boats/buyer registers a market.buyer_domains entry point"]
+
+
+def test_with_no_rule_named_every_rule_runs(tmp_path: Path) -> None:
+    _tree_breaking_every_rule(tmp_path)
 
     assert check(tmp_path) == (check(tmp_path, rules=("enumeration",))
-                               + check(tmp_path, rules=("credentials",)))
+                               + check(tmp_path, rules=("credentials",))
+                               + check(tmp_path, rules=("market-binary",)))
 
 
 def test_the_command_runs_the_rules_it_names(capsys: pytest.CaptureFixture[str]) -> None:

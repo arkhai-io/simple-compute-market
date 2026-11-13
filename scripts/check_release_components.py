@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Refuse a second list of release components, and any workflow that could publish.
 
-Two rules, with no exception list. Each runs on its own (`--rule enumeration`,
-`--rule credentials`); with no `--rule`, both run.
+Three rules, with no exception list. Each runs on its own (`--rule enumeration`,
+`--rule credentials`, `--rule market-binary`); with no `--rule`, every one runs.
 
 **One enumeration.** This rule holds `manifests/release-components.json` to being
 the only list of what a marketplace release comprises and of the development
@@ -25,6 +25,15 @@ action. A workflow is refused when it declares no top-level `permissions:`
 references a secret other than `GITHUB_TOKEN`. Named publishing steps are
 refused as well, so that a refusal can name the step. This rule reads no
 declaration.
+
+**The market binary's project.** The release's `market` binary is built from a
+locked project whose `[project].dependencies` list what it bundles. That list
+is held equal, by normalised distribution name, to the buyer CLI and the buyer
+domains `scripts/market_binary.py` derives from the declaration: a list held
+equal to the declaration by a check is not a second list. A missing
+distribution is named with the project that registers it, and an extra one as
+neither. Only `dependencies` is compared; the build's own tools sit in a
+dependency group.
 """
 
 from __future__ import annotations
@@ -33,10 +42,20 @@ import argparse
 import os
 import re
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from release_components import REPO_ROOT, DeclarationError, ReleaseComponents, chart_field, load
+from market_binary import DOMAIN_GROUP, PROJECT, TARGET, binary, inputs
+from release_components import (
+    DECLARATION_PATH,
+    REPO_ROOT,
+    DeclarationError,
+    ReleaseComponents,
+    chart_field,
+    load,
+    normalise_distribution,
+)
 
 _SKIPPED_DIRS = {".git", ".venv", "venv", "node_modules", ".dist", "__pycache__",
                  "openspec", "target", ".snapshot"}
@@ -349,10 +368,58 @@ def check_credentials(root: Path = REPO_ROOT) -> list[str]:
     return problems
 
 
+_REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def check_market_binary(root: Path = REPO_ROOT,
+                        components: ReleaseComponents | None = None,
+                        target: str = TARGET, project: str = PROJECT) -> list[str]:
+    """The market-binary rule's refusals: the binary's project at `project`
+    must depend on exactly the buyer CLI and the buyer domains the declaration
+    gives the binary `target` builds."""
+    components = components or load(root / DECLARATION_PATH)
+    entry = binary(components, target)
+    found = inputs(components, root, entry.name)
+    expected = {normalise_distribution(found.cli.distribution.dist):
+                (found.cli.distribution, f"defines the `{entry.name}` console script")}
+    for domain in found.domains:
+        expected[normalise_distribution(domain.distribution.dist)] = (
+            domain.distribution, f"registers a {DOMAIN_GROUP} entry point")
+
+    label = f"{project}/pyproject.toml"
+    try:
+        document = tomllib.loads((root / project / "pyproject.toml").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return [f"{label} does not exist; the {entry.name} binary is built from it"]
+    except tomllib.TOMLDecodeError as error:
+        return [f"{label} is not valid TOML: {error}"]
+    dependencies = (document.get("project") or {}).get("dependencies") or []
+    if not isinstance(dependencies, list):
+        return [f"{label}: [project].dependencies is not a list"]
+
+    problems: list[str] = []
+    named: dict[str, str] = {}
+    for requirement in dependencies:
+        match = _REQUIREMENT_NAME.match(requirement) if isinstance(requirement, str) else None
+        if not match:
+            problems.append(f"{label}: {requirement!r} is not a requirement")
+            continue
+        named.setdefault(normalise_distribution(match.group(1)), match.group(1))
+    for name, (distribution, why) in expected.items():
+        if name not in named:
+            problems.append(f"{label}: does not depend on {distribution.dist}, which "
+                            f"{distribution.path} {why}")
+    for name, spelled in named.items():
+        if name not in expected:
+            problems.append(f"{label}: depends on {spelled}, which is neither the buyer "
+                            "CLI nor a declared buyer domain")
+    return problems
+
+
 def check_enumeration(root: Path = REPO_ROOT,
                       components: ReleaseComponents | None = None) -> list[str]:
     """The single-enumeration rule's refusals for the tree at `root`."""
-    components = components or load(root / "manifests" / "release-components.json")
+    components = components or load(root / DECLARATION_PATH)
     patterns = component_patterns(components, _chart_name(root, components.chart.path))
     problems: list[str] = []
     for workflow in _workflows(root):
@@ -369,6 +436,8 @@ def check_enumeration(root: Path = REPO_ROOT,
 RULES = {
     "enumeration": "the declaration is the only list of release components",
     "credentials": "no workflow can publish",
+    "market-binary": "the market binary's project bundles exactly the buyer CLI and the "
+                     "declared buyer domains",
 }
 
 
@@ -380,6 +449,8 @@ def check(root: Path = REPO_ROOT, components: ReleaseComponents | None = None,
         problems += check_enumeration(root, components)
     if "credentials" in rules:
         problems += check_credentials(root)
+    if "market-binary" in rules:
+        problems += check_market_binary(root, components)
     return problems
 
 

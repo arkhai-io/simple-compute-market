@@ -1,0 +1,27 @@
+# The release's `market` binary: the buyer CLI frozen with every declared buyer
+# domain. A virtual project, so it builds no wheel; its lock fixes every version
+# the binary bundles, with each repository distribution from the wheelhouse.
+# `make check-market-binary` holds `dependencies` equal to the buyer CLI and the
+# buyer domains scripts/market_binary.py derives from
+# manifests/release-components.json: a domain declared there must be added here,
+# or the check fails.
+[project]
+name = "arkhai-market-binary"
+version = "0.1.0"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "arkhai-core-buyer",
+  "arkhai-vms-buyer",
+  "arkhai-bare-metal-buyer",
+  "arkhai-apicredits-buyer",
+]
+
+# The freezing tool, installed in the build image only and never bundled as a
+# dependency of any published distribution.
+[dependency-groups]
+freeze = ["pyinstaller==6.22.3"]
+
+[tool.uv]
+package = false
+# The binary is built for linux/amd64 only.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]

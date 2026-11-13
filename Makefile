@@ -12,7 +12,7 @@ FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-release-components check-workflow-credentials check-release-versions check-release-record check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
+.PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-release-components check-workflow-credentials check-market-binary check-release-versions check-release-record check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
@@ -317,25 +317,25 @@ build-seller-for-host: ## build-seller with appuser UID/GID matching the current
 	$(MAKE) build-seller APPUSER_UID=$(shell id -u) APPUSER_GID=$(shell id -g)
 
 # The release's `market` binary: the buyer CLI frozen with every declared buyer
-# domain, from the wheelhouse, in the build image core/buyer/market-binary.Dockerfile
-# pins by digest. scripts/buyer_domain_wheels.py derives what it bundles from the
-# declaration; the image's smoke test runs `market plugins`. Like the image
-# targets, it builds no wheels: run `make dist` first.
-MARKET_BINARY_INPUTS = python3 scripts/buyer_domain_wheels.py
-build-market-binary: ## Build the release's linux/amd64 market binary from the wheelhouse into .dist/bin/market
-	cli=$$($(MARKET_BINARY_INPUTS) cli) && \
-	domains=$$($(MARKET_BINARY_INPUTS) domains) && \
-	constraints=$$($(MARKET_BINARY_INPUTS) constraints) && \
-	entry_point=$$($(MARKET_BINARY_INPUTS) entry-point) && \
-	options=$$($(MARKET_BINARY_INPUTS) pyinstaller-options) && \
-	echo "Bundling $$cli with:" $$domains && \
-	docker build -f core/buyer/market-binary.Dockerfile \
-		--build-arg "CLI_WHEEL=$$cli" \
-		--build-arg "DOMAIN_WHEELS=$$domains" \
-		--build-arg "CONSTRAINTS=$$constraints" \
+# domain, installed from its locked project, core/buyer/market-binary, in the
+# build image that project's Dockerfile pins by digest. scripts/market_binary.py
+# reads the binary's name and output from the declaration entry this target
+# builds, and derives what the freeze needs; check-market-binary holds the
+# project's dependencies to the declaration. The image's smoke test runs
+# `market plugins`. Like the image targets, it builds no wheels: run `make dist`
+# first.
+MARKET_BINARY = python3 scripts/market_binary.py --target $@
+build-market-binary: ## Build the release's linux/amd64 market binary from the wheelhouse into its declared path
+	name=$$($(MARKET_BINARY) name) && \
+	output=$$($(MARKET_BINARY) output-dir) && \
+	entry_point=$$($(MARKET_BINARY) entry-point) && \
+	options=$$($(MARKET_BINARY) pyinstaller-options) && \
+	echo "Freezing $$entry_point as $$output/$$name" && \
+	docker build -f core/buyer/market-binary/Dockerfile \
+		--build-arg "BINARY_NAME=$$name" \
 		--build-arg "ENTRY_POINT=$$entry_point" \
 		--build-arg "PYINSTALLER_OPTIONS=$$options" \
-		--output type=local,dest=$(DIST_DIR)/bin .
+		--output "type=local,dest=$$output" .
 
 # Regenerate the baked Anvil state + Alkahest address book by running
 # EnvTestManager once and snapshotting its chain (see dev-env/generate_state.py).
@@ -659,13 +659,16 @@ check-uv-version: ## Fail if the installed uv is older than the minimum that wri
 	@python3 scripts/check_uv_version.py
 
 check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
-	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture check-workflow-credentials
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture check-workflow-credentials check-market-binary
 
-check-release-components: ## Fail if a workflow, publish target, or lane target lists release components itself, or a workflow holds a publishing credential
+check-release-components: ## Fail if a workflow, publish target, or lane target lists release components itself, a workflow holds a publishing credential, or the market binary's project bundles other than the declared buyer CLI and domains
 	@python3 scripts/check_release_components.py
 
 check-workflow-credentials: ## Fail if a workflow holds a credential that could publish, or names a publishing step
 	@python3 scripts/check_release_components.py --rule credentials
+
+check-market-binary: ## Fail unless the market binary's project depends on exactly the declared buyer CLI and buyer domains
+	@python3 scripts/check_release_components.py --rule market-binary
 
 check-release-versions: ## Fail if a wheel or the chart keeps a version an earlier marketplace release recorded with other contents: the wheelhouse and the chart packaged with .helm-version's Helm, or with TAG=marketplace-v<semver> that tag's own record, with no build
 	@python3 scripts/check_release_versions.py $(if $(TAG),--tag $(TAG))
