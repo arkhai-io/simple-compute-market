@@ -37,7 +37,9 @@ CW-x4ex, CW-n6dm, and CW-r8cg, entries closeout's promotion writes (task 10.9). 
 other failure is the section's to fix. Correction, section 3: from section 3 on, the
 citations check also reports the change's own `design.md`, `inventory.md`, and
 `tasks.md` citing `docs/agents/domain.md`, which section 3 removes; they are change
-history, resolved with the rest at closeout (task 10.11).
+history, resolved with the rest at closeout (task 10.11). From task 3.13 on, the
+same holds for their citations of `docs/agents/change-workflow.md`, which moves to
+`docs/change-workflow-handbook.md`.
 
 ## 1. Inventory of the root and workflow documents
 
@@ -712,6 +714,65 @@ Round 2's triage (reviews 56, 57, 58), fixes and the return:
   section 3's task 3.6 tagged the guide `workflow`, which the handbook undoes. The
   owner reads the round again (`make round-view`) after planning, before round 3,
   and may give further notes and run another review and triage then.
+
+Appended at round 2's triage's return to planning: the workflow's operator handbook
+(D3 as amended; 58 O5, 58 O7). Section 3 is complete again only when these are. They
+undo task 3.6's tagging of the guide, which stands as done. Files:
+`docs/agents/change-workflow.md`, moved to `docs/change-workflow-handbook.md`;
+`docs/guidance/workflow/*.md`; `openspec/specs/change-workflow/README.md`, and its
+`spec.md`'s Evidence; `openspec/specs/market-change-workflow/README.md`; `AGENTS.md`;
+`.agents/skills/*/SKILL.md`; `scripts/change_workflow/next_step.py`,
+`scripts/tests/test_change_next_step.py`, `scripts/tests/test_change_workflow_records.py`;
+the active changes' documents under `openspec/changes/` that cite the guide;
+`openspec/changes/layer-engineering-guidance/inventory.md`.
+
+- [ ] 3.11 Reclassify the inventory's rows for the guide (its `docs/agents/change-workflow.md`
+  table) by 58 O5's test: each statement's home is the workflow's specification or
+  its companion (wrong if the engine or a skill behaved otherwise), the workflow's
+  guidance (wrong if a change's work product were otherwise), or the handbook
+  (telling the owner what to do or type), with the destination file and heading,
+  the reason naming the test, and `Ambiguous` saying where the test does not decide;
+  and drop the guide from "Files and their tags". Verify every row of the guide's
+  table names one of the three homes.
+- [ ] 3.12 Move the guide's agent-facing content by those rows (58 O7): a guidance
+  statement into the `docs/guidance/workflow/` file its row names — a new file there
+  carrying its frontmatter, joining the workflow table's tags (D18) and `load.common`
+  by path; a statement of what the workflow does that a `change-workflow`
+  requirement already states, deleted with the handbook citing the requirement where
+  the owner needs it (31 O1b); an explanation the requirements do not hold, into
+  `openspec/specs/change-workflow/README.md` under the heading its row names; and a
+  statement of what the workflow does that no requirement states and that is no
+  explanation, left in place and listed in the section's notes for the round's
+  triage, since a new requirement is a delta the design must settle. Verify each
+  moved row sits in its destination and no longer in the guide.
+- [ ] 3.13 Make the handbook (D3 as amended, 58 O7): move the guide with `git mv` to
+  `docs/change-workflow-handbook.md`, beside `docs/operator-handbook.md`; remove its
+  frontmatter, so it is outside the guidance set (D21); keep only what the owner
+  needs to know — starting each step, orchestrating a change, reading a round,
+  waivers and directions, the ledger as the record of the owner's corrections —
+  rewritten for the owner where a passage addressed agents; and embed the workflow's
+  diagrams from `openspec/specs/change-workflow/diagrams/` by link. Remove the empty
+  `docs/agents/` directory. Verify the handbook carries no frontmatter, names no
+  rule a step must follow without citing its home, and embeds the diagrams.
+- [ ] 3.14 Re-point every citation of the guide to where its statement now lands:
+  `AGENTS.md`'s "Where the guidance lives" table (the handbook is no workflow
+  guidance) and "Agent skills"; every skill citing it; `change-workflow`'s README
+  and `spec.md`'s Evidence; `market-change-workflow`'s README, its statement of how
+  this repository provides the workflow's roles included;
+  `scripts/change_workflow/next_step.py`'s message and the two tests naming the path;
+  and the active changes' documents under `openspec/changes/` outside the archive.
+  Verify `grep -rn 'docs/agents/'` over the tracked tree, outside
+  `openspec/changes/archive/` and this change's own documents, finds nothing.
+- [ ] 3.15 Verify the appended tasks, and round 2's triage fixes committed unchecked
+  with the return: `make check-agent-skills`; `pytest -q
+  scripts/tests/test_change_next_step.py scripts/tests/test_change_workflow_records.py
+  scripts/tests/test_change_workflow_assumptions.py scripts/tests/test_change_workflow_config.py`
+  (unit); `make check-doc-citations` run unscoped reports nothing it did not report
+  before section 3; `scripts/change-workflow config load common` prints every
+  workflow guidance file; and `scripts/change-workflow run pre-commit
+  layer-engineering-guidance`, whose functional hooks run every suite, reports no
+  failure but the two the preamble expects. End-to-end: none; no pipeline scenario
+  reads guidance or the handbook, and none is owed.
 
 ## 4. The engineering layer: testing
 

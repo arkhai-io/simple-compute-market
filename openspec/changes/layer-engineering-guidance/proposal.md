@@ -127,7 +127,11 @@ As `openspec/README.md`'s change documentation requirements ask:
 ## Impact
 
 - `AGENTS.md`, `openspec/README.md`, every document under `docs/development/`
-  named above, and `docs/agents/`.
+  named above, and `docs/agents/`, which goes: `domain.md` is removed once its rows
+  move, and the workflow's guide becomes the change workflow's operator handbook,
+  `docs/change-workflow-handbook.md`, outside the guidance set (D3 as amended).
+- `scripts/change_workflow/next_step.py`'s message naming the guide, and the two
+  tests naming its path; the active changes' documents citing it.
 - New guidance files under `docs/guidance/` and under `openspec/specs/<capability>/`.
 - Every permanent document and skill that cites a moved section, including about 74
   citations of the closeout parts.
@@ -175,7 +179,7 @@ changes.
 
 - D1, the layers, their test, and the link direction: `openspec/specs/change-workflow/spec.md` (CW-g7lt, CW-d2rw); `openspec/specs/change-workflow/README.md`, "The repository's guidance is layered" (a new section under "The public surface"); `docs/guidance/workflow/README.md`, the layer model
 - D2: no permanent destination — the inventory is change history, and the placement and tags it produces are their own record
-- D3, shared guidance under `docs/guidance/` and repository guidance beside its system: `openspec/specs/change-workflow/spec.md` (CW-p9sa); `openspec/specs/change-workflow/README.md`, "The repository's guidance is layered"; `openspec/README.md`, "Documentation placement"; `AGENTS.md`'s layer table
+- D3, shared guidance under `docs/guidance/` and repository guidance beside its system: `openspec/specs/change-workflow/spec.md` (CW-p9sa); `openspec/specs/change-workflow/README.md`, "The repository's guidance is layered"; `openspec/README.md`, "Documentation placement"; `AGENTS.md`'s layer table; `docs/guidance/workflow/README.md`, "What the workflow's guidance holds" (58 O5); `docs/change-workflow-handbook.md`, the change workflow's operator handbook (58 O7)
 - D4, frontmatter tags: `openspec/specs/change-workflow/spec.md` (CW-g7lt); `openspec/specs/change-workflow/README.md`, "The repository's guidance is layered"
 - D5, `[load]` directory entries: `openspec/specs/change-workflow/spec.md` (CW-l7hn); `openspec/specs/change-workflow/README.md`, "A repository's configuration" and its "Current limits" bullet on `[load]`; `.agents/workflow.toml`
 - D6, private and public repositories: `docs/guidance/engineering/repository-content.md`, or the file round 1's inventory names for it; `AGENTS.md`'s exceptions table; `openspec/specs/change-workflow/README.md`, "The repository's guidance is layered", that the workflow runs in private repositories too
