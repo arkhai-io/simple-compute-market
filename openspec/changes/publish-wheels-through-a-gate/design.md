@@ -683,17 +683,69 @@ which discovers every buyer domain through `market.buyer_domains` entry points. 
 programs sharing one name is the defect.
 
 - **What gets built.** A `build-market-binary` target freezes `core_buyer.cli:main`
-  inside a build image pinned by digest (Debian bookworm, Python 3.13).
-- **Which plugins it bundles.** The build installs from `.dist` the declared
-  distributions that register `market.buyer_domains` entry points, derived from the
-  declaration and never listed in a Dockerfile. It passes `--copy-metadata` for each,
-  since discovery reads installed metadata.
-- **The smoke test.** The build image checks that `market plugins` lists every bundled
-  domain. No validation suite runs the binary, so this is what exercises it.
-- **Repeatability.** Pinning the image fixes the Linux floor, not repeatability.
-  PyInstaller output is never byte-for-byte repeatable. The binary is identified by the
-  SHA-256 of the stored file. The load builds it from the same `.dist` as the stored
-  wheelhouse and the images, and a reload replaces it by D3's delete-then-upload rule.
+  inside a build image pinned by digest: `ghcr.io/astral-sh/uv:python3.13-bookworm-slim`,
+  Debian bookworm with the Python `.python-version` declares, the base every image that
+  installs through `scripts/uv_project.py` uses. A Python bump pins a new digest, and the
+  build refuses an image whose Python is not the declared one.
+- **How it installs.** The binary has a locked virtual project (`[tool.uv] package =
+  false`), for example `core/buyer/market-binary/`, whose Dockerfile sits beside it:
+
+  ```toml
+  [project]
+  name = "arkhai-market-binary"
+  version = "0.1.0"
+  requires-python = ">=3.13,<3.14"
+  dependencies = [
+    "arkhai-core-buyer",
+    "arkhai-vms-buyer",
+    "arkhai-bare-metal-buyer",
+    "arkhai-apicredits-buyer",
+  ]
+
+  [dependency-groups]
+  freeze = ["pyinstaller==6.22.3"]
+
+  [tool.uv]
+  package = false
+  environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+  ```
+
+  The build image installs its committed lock through `uv_project.py image`, as every
+  image installs one (`BUILD_AND_PACKAGING.md`, "Images"). The lock records every
+  repository distribution's source as the wheelhouse, so the binary bundles `.dist`'s
+  bytes with `.dist`'s dependency sets, and third-party versions, PyInstaller included,
+  are decided at lock time and reviewed. `make lock` relocks the project and
+  `check-locks` holds it current, like any other. A virtual project is not a package, so
+  the architecture and layout checks pass over it.
+- **Which plugins it bundles.** Exactly the buyer CLI — the one declared distribution
+  defining the `market` console script — and every declared distribution registering a
+  `market.buyer_domains` entry point. They are listed once, in the binary project's
+  dependencies, and a packaging check holds that list equal to the set derived from the
+  declaration, naming each missing and each extra distribution. That is D21's rule: a
+  list held equal to the declaration by a check is not a second list. A missing domain
+  would make the release's `market` a different program from PyPI's, and so would an
+  undeclared one, which PyPI does not serve. The check runs in `make check-packaging`.
+- **What is derived.** `scripts/market_binary.py` derives, from the declaration and each
+  declared project's `pyproject.toml`, the set the check compares, the entry point the
+  binary freezes, and the PyInstaller options: `--copy-metadata` for the CLI and each
+  domain, since discovery reads installed metadata, and `--hidden-import` for each module
+  a domain's entry point names, since discovery imports it by name. The binary's name
+  and output path are read from its `binaries[]` entry, found by its build target; the
+  script refuses an entry whose `path` does not end in its `name`. Neither the
+  Dockerfile nor the Makefile names a domain, the binary or its path.
+- **The smoke test.** The build image runs `market plugins` in the installed environment
+  and in the frozen binary, and requires the same stdout from both, one line per
+  registered `market.buyer_domains` entry point, and no skipped domain on either stderr.
+  No validation suite runs the binary, so this is what exercises it.
+- **Repeatability.** Pinning the image and locking the environment fix the binary's
+  inputs, not its bytes. PyInstaller output is never byte-for-byte repeatable. The
+  binary is identified by the SHA-256 of the stored file. The load builds it from the
+  same `.dist` as the stored wheelhouse and the images, and a reload replaces it by D3's
+  delete-then-upload rule.
+- **The image rule holds without exception.** `check-uv-setup` reads `*.Dockerfile` as
+  well as `Dockerfile*`, as `check-python-version` does, and refuses any `pip install`,
+  `python -m pip install` or `uv pip install` of the wheelhouse not made through the
+  script, which it had not recognised: an unlocked `pip` install from `.dist` passed it.
 - **The PyPI defect.** PyInstaller leaves `arkhai-vms-buyer`'s runtime dependencies,
   where it made every PyPI install of the VM plugin pull it in. That is a minor-version
   bump of `arkhai-vms-buyer`.
@@ -712,6 +764,25 @@ Alternatives rejected:
 - **The VM-only binary in a pinned image.** It fixes the build host but keeps the two
   programs.
 - **Drop the binary.** Layout 1 includes it.
+- **An unlocked install, derived from the declaration at build time.** Every declared
+  distribution held at its version by constraints, then reinstalled from `.dist` with
+  `--no-deps`. If PyPI serves an internal distribution at the version `.dist` holds but
+  with other requirements, the resolve can take PyPI's, and the reinstall keeps them;
+  third-party versions in a binary customers download are whatever PyPI serves that day.
+  It breaks the image rule, which would need an exception.
+- **The image rule amended for the binary's build,** installing the internal closure
+  from `.dist` with `--no-index --no-deps` first and resolving only third-party packages.
+  It closes the requirements hazard, but leaves third-party versions unlocked and makes
+  the rule's one exception a downloadable binary.
+- **The binary built from `e2e-tests`' lock,** which already covers the CLI and all three
+  domains. The binary would bundle the third-party versions the lanes test, but a test
+  project would own the release binary's dependency set: a test-only bump relocks what
+  customers download, and PyInstaller follows optional imports into packages only tests
+  need.
+- **The binary project's dependencies written by `make lock` from the declaration.**
+  Adding a domain would be one edit, but `make lock` would gain a writer of a
+  `pyproject.toml`, unlike any other project, for a list that changes rarely and that
+  the check already names when stale.
 
 ### D19 — The npm package is not a release component until it can be loaded
 
@@ -770,8 +841,11 @@ One round of five sessions before closeout:
 3. The layout-1 reader, `make check-release-versions` over every earlier record with its
    two subjects, and `make check-release-record`.
 4. The lanes' release-image mode, `pull-release-images`, and the lanes' record.
-5. The binary's build image, and PyInstaller out of `arkhai-vms-buyer`'s runtime
-   dependencies.
+5. The binary's locked project and build image, the check holding its domains to the
+   declaration, `check-uv-setup` reading every Dockerfile and every wheelhouse `pip`
+   install, and PyInstaller out of `arkhai-vms-buyer`'s runtime dependencies. This
+   session resumes the binary's work already committed, whose retirement of the old
+   binary and relock without PyInstaller stand.
 
 Closeout writes RELEASING.md, the buyer quickstart, the `AGENTS.md` amendment and the
 `ARCHITECTURE.md` principles, as promotion.
@@ -786,6 +860,11 @@ Closeout writes RELEASING.md, the buyer quickstart, the `AGENTS.md` amendment an
 - **A test-only edit inside `helm/` forces a chart bump** (D14). Accepted.
 - **A hatchling pin move bumps every distribution** (D15). It is rare and deliberate.
 - **The binary runs on linux/amd64 only.** PyPI covers every platform.
+- **The binary's third-party versions are its own lock's** (D18). They may differ from
+  those `e2e-tests`' lock gives the `market` the lanes run, as a customer's install from
+  PyPI may; the build's smoke test is what exercises the binary.
+- **Adding a buyer domain takes a second edit** (D18): the binary project's dependencies,
+  which the packaging check names.
 - **No marketplace release publishes the npm package until a development registry serves
   npm** (D19).
 - **A candidate expires with the store's retention** (D3). It is then loaded and

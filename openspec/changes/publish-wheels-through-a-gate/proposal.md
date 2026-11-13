@@ -84,9 +84,11 @@ comprises are not known when the merge happens.
   them, and records each one's manifest digest by published name.
   `pull-release-images` pulls a candidate's release images from a given registry and
   tags them with the local names the lanes run.
-- **The release's `market` binary is PyPI's CLI.** It is built in a pinned image with
-  every declared buyer domain's plugin. PyInstaller leaves `arkhai-vms-buyer`'s runtime
-  dependencies.
+- **The release's `market` binary is PyPI's CLI.** It is built in a pinned image from a
+  locked project bundling exactly the buyer CLI and every declared buyer domain, which a
+  packaging check holds to the declaration. `check-uv-setup` reads every Dockerfile and
+  refuses any wheelhouse `pip` install that bypasses `scripts/uv_project.py`. PyInstaller
+  leaves `arkhai-vms-buyer`'s runtime dependencies.
 - **The curl installer is retired.** `install.sh`, `scripts/install-remote.sh` and
   `scripts/build-installer.sh` are deleted, and `market-cli-v*` tags are no longer made.
 - **`docs/development/RELEASING.md` describes this repository's half of the release,**
@@ -173,7 +175,10 @@ None.
 - `.github/workflows/validate-model-release.yml` (read-only, its note step removed);
 - `e2e-tests/Makefile` and the compose files' release-image lines;
 - the hatchling pin beside `.python-version` and its packaging check;
-- a binary build image;
+- the binary's locked virtual project and its build image, and a packaging check holding
+  its dependencies to the declaration's buyer CLI and buyer domains;
+- `scripts/check_uv_setup.py` and `scripts/check_python_version.py`, which read
+  `*.Dockerfile` too, the former also refusing a wheelhouse `pip` install;
 - `domains/vms/buyer/pyproject.toml`;
 - every chart's `Chart.yaml` and `_helpers.tpl`;
 - `.github/workflows/tests.yml`;
@@ -221,7 +226,7 @@ returns 404. `arkhai-vms-buyer` no longer installs PyInstaller.
 - D15: `openspec/specs/deployment-state/spec.md`; `docs/development/BUILD_AND_PACKAGING.md`; `docs/development/RELEASING.md`, "Versioning policy" (a pin move is a release-wide bump)
 - D16: `openspec/specs/deployment-state/spec.md` (within the release-record requirement)
 - D17: `openspec/specs/deployment-state/spec.md`; `docs/development/RELEASING.md`; `docs/development/TESTING.md` (the lanes' release-image mode)
-- D18: `openspec/specs/deployment-state/spec.md`; `docs/development/ARCHITECTURE.md`, "Build, packaging, and initialization" (one program per name); `docs/buyer-quickstart.md`
+- D18: `openspec/specs/deployment-state/spec.md`; `docs/development/ARCHITECTURE.md`, "Build, packaging, and initialization" (one program per name); `docs/development/BUILD_AND_PACKAGING.md` (the binary's locked project and digest-pinned build image, the check on its domains, and `check-uv-setup` and `check-python-version` reading `*.Dockerfile`); `docs/buyer-quickstart.md`
 - D19: `openspec/specs/deployment-state/spec.md` (a package whose candidate bytes cannot be stored is not a release component); `docs/development/RELEASING.md`
 - D20: `openspec/specs/deployment-state/spec.md` (removed by the delta)
 - D21: `docs/development/RELEASING.md`

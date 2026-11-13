@@ -279,14 +279,29 @@ tag it `arkhai:<local><IMAGE_SUFFIX>`.
 ### Requirement: The release binary is the buyer CLI with every declared buyer domain
 
 The release's `market` binary MUST freeze the same entry point as the published buyer
-CLI, bundling every declared distribution that registers a `market.buyer_domains` entry
-point, derived from the declaration. It MUST be built in a build image pinned by digest.
-A published distribution MUST NOT depend on the freezing tool at run time.
+CLI, and MUST bundle exactly the buyer CLI and every declared distribution that
+registers a `market.buyer_domains` entry point. It MUST be built in a build image pinned
+by digest, from a committed lock installed as every image installs one, with every
+repository distribution from the wheelhouse. The packaging check MUST refuse a binary
+project whose dependencies differ from that set, naming each missing and each extra
+distribution. A published distribution MUST NOT depend on the freezing tool at run time.
 
 #### Scenario: The binary is built
 
 - **WHEN** the release binary is built
 - **THEN** `market plugins` in the build image lists every declared buyer domain
+
+#### Scenario: A declared buyer domain is missing from the binary
+
+- **WHEN** a declared distribution registers a `market.buyer_domains` entry point and
+  the binary's project does not depend on it
+- **THEN** the packaging check fails and names it
+
+#### Scenario: The binary bundles an undeclared distribution
+
+- **WHEN** the binary's project depends on a distribution that is neither the buyer CLI
+  nor a declared buyer domain
+- **THEN** the packaging check fails and names it
 
 ## REMOVED Requirements
 
