@@ -101,10 +101,12 @@ def test_image_versions_come_from_the_build_argument(tmp_path):
     _conforming(root)
     _write(root, "a/Dockerfile", "FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim\n")
     _write(root, "b/Dockerfile", "ARG PYTHON_VERSION=3.12\nFROM python:${PYTHON_VERSION}-slim\n")
+    _write(root, "c/tool.Dockerfile", "ARG PYTHON_VERSION=3.12\nFROM python:${PYTHON_VERSION}-slim\n")
 
     assert checker.problems(root) == [
         "a/Dockerfile: names a Python version in FROM; use ARG PYTHON_VERSION",
         "b/Dockerfile: PYTHON_VERSION defaults to 3.12; the repository declares 3.13",
+        "c/tool.Dockerfile: PYTHON_VERSION defaults to 3.12; the repository declares 3.13",
     ]
 
 

@@ -18,7 +18,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
 .PHONY: test-lane-double-controls dist-lane-double-controls test-payments-lane-double test-mediation-lane-double build-tools
 .PHONY: dist-arkhai-core-registry dist-release-set dist-apicredits-sample-app
-.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
+.PHONY: build-market-binary build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
 .PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
@@ -258,10 +258,10 @@ test-kits:
 # an owner's own deployments use the bare tags.
 IMAGE_SUFFIX ?=
 
-build: ## Build the wheels, the buyer CLI binary, and every runtime image
+build: ## Build the wheels, the release's market binary, and every runtime image
 	$(MAKE) init-prerequisites
 	$(MAKE) dist
-	$(MAKE) build-buyer
+	$(MAKE) build-market-binary
 	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
 	$(MAKE) -j4 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-frp-grant-admission
 
@@ -273,7 +273,7 @@ build-dev: ## Build everything `build` does, the dev chain image, the test image
 
 # One end-to-end lane's images: the wheels, the dev chain with its baked state,
 # the test image (which installs `market` from the wheels, so no lane needs
-# build-buyer), and the runtime images that lane's stack runs. Each lane job
+# the release's binary), and the runtime images that lane's stack runs. Each lane job
 # builds only its own; build-dev keeps building everything for local use. The
 # pipeline runs a lane target on a fresh checkout, so this target, not its
 # caller, makes the wheels first, ordered as `build` orders its steps.
@@ -316,8 +316,26 @@ build-seller: init-prerequisites dist-kits dist-storefront-client dist-identity 
 build-seller-for-host: ## build-seller with appuser UID/GID matching the current user
 	$(MAKE) build-seller APPUSER_UID=$(shell id -u) APPUSER_GID=$(shell id -g)
 
-build-buyer: init-prerequisites init-buyer
-	cd domains/vms/buyer && make build
+# The release's `market` binary: the buyer CLI frozen with every declared buyer
+# domain, from the wheelhouse, in the build image core/buyer/market-binary.Dockerfile
+# pins by digest. scripts/buyer_domain_wheels.py derives what it bundles from the
+# declaration; the image's smoke test runs `market plugins`. Like the image
+# targets, it builds no wheels: run `make dist` first.
+MARKET_BINARY_INPUTS = python3 scripts/buyer_domain_wheels.py
+build-market-binary: ## Build the release's linux/amd64 market binary from the wheelhouse into .dist/bin/market
+	cli=$$($(MARKET_BINARY_INPUTS) cli) && \
+	domains=$$($(MARKET_BINARY_INPUTS) domains) && \
+	constraints=$$($(MARKET_BINARY_INPUTS) constraints) && \
+	entry_point=$$($(MARKET_BINARY_INPUTS) entry-point) && \
+	options=$$($(MARKET_BINARY_INPUTS) pyinstaller-options) && \
+	echo "Bundling $$cli with:" $$domains && \
+	docker build -f core/buyer/market-binary.Dockerfile \
+		--build-arg "CLI_WHEEL=$$cli" \
+		--build-arg "DOMAIN_WHEELS=$$domains" \
+		--build-arg "CONSTRAINTS=$$constraints" \
+		--build-arg "ENTRY_POINT=$$entry_point" \
+		--build-arg "PYINSTALLER_OPTIONS=$$options" \
+		--output type=local,dest=$(DIST_DIR)/bin .
 
 # Regenerate the baked Anvil state + Alkahest address book by running
 # EnvTestManager once and snapshotting its chain (see dev-env/generate_state.py).
@@ -532,7 +550,7 @@ PROVISIONING_OPERATOR_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1
 #   make dist              — wheels must exist in .dist/
 #   make build             — Docker images must be built locally
 #   make build-dev         — additionally required before push-dev-images
-#   make build-buyer       — domains/vms/buyer/dist/market binary must exist
+#   make build-market-binary — .dist/bin/market must exist
 #
 # Targets can be run individually or all at once via push-runtime-artifacts.
 # ---------------------------------------------------------------------------
@@ -570,7 +588,7 @@ push-cli: _require-ar-project
 	  --repository=$(AR_PREFIX)-cli \
 	  --package=market \
 	  --version=$(GIT_SUFFIX) \
-	  --source=domains/vms/buyer/dist/market
+	  --source=.dist/bin/market
 
 clobber-wheels: _require-ar-project
 	$(ARTIFACT_COMMAND) wheel --registry "$(PYTHON_REGISTRY)" --package arkhai-core-storefront-client --version "$(STOREFRONT_CLIENT_VERSION)" --wheel "$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl" --clobber

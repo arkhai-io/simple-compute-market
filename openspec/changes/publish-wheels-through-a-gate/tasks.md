@@ -968,6 +968,29 @@ declared buyer domain". Touches:
   lists them.
   - Verify: a unit test over a synthetic declaration and projects. On the tree, it names
     `arkhai-vms-buyer`, `arkhai-bare-metal-buyer` and `arkhai-apicredits-buyer`.
+  - In progress (2026-11-13), unchecked because the section returned to design
+    ("Section 9 notes: returned to design"). The script's default command, `domains`, prints the buyer-domain
+    wheels. Four more commands derive the rest of the binary's build from the same
+    reading ("Section 9 notes"):
+    - `cli`: the buyer CLI's wheel;
+    - `entry-point`: the console script it freezes;
+    - `constraints`: every declared distribution at its declared version;
+    - `pyinstaller-options`.
+
+    `domains` and `cli` refuse a wheel `.dist` lacks, naming `make dist`.
+
+    Unit: `scripts/tests/test_buyer_domain_wheels.py`, over synthetic declarations and
+    projects, 12 cases, passing. It has a case for:
+    - each command's output;
+    - two entry points in one domain;
+    - a domain wheel and the CLI wheel each missing from `.dist`;
+    - a declared project with no `pyproject.toml`;
+    - two distributions defining the console script, none, and no buyer domain;
+    - a declaration the reader refuses.
+
+    One case reads the tree. It finds `arkhai-core-buyer` with `core_buyer.cli:main`,
+    and the three domains the task names. `make build-market-binary` printed the same
+    three wheels.
 - [ ] 9.2 Add `core/buyer/market-binary.Dockerfile` and `make build-market-binary`.
   - The build image is pinned by digest: Debian bookworm, with the Python version
     `.python-version` declares, as `check-python-version` requires.
@@ -980,6 +1003,24 @@ declared buyer domain". Touches:
   - Verify: `make build-market-binary` succeeds locally, and its smoke test lists the VM,
     bare-metal and API-credit domains. If the session cannot run Docker, it records that
     as unrun.
+  - In progress (2026-11-13), unchecked: its install from the wheelhouse is the design
+    question the section returned on. The build image is `python:3.13-slim-bookworm`, pinned by its
+    index digest, for linux/amd64. Its first step refuses to build if the image's Python
+    is not the `PYTHON_VERSION` default, since the digest, not the tag, selects the
+    image. `check-python-version` now also reads `*.Dockerfile`, so it holds that default
+    to `.python-version` ("Section 9 notes").
+
+    The install, the hidden imports and the smoke test go beyond the task's wording, as
+    the notes explain. PyInstaller 6.22.3 is installed in the build image only.
+
+    Build evidence, a local image build rather than one of TESTING.md's levels: `make
+    build-market-binary` succeeded locally on Docker with BuildKit, building from the
+    pinned digest, and exported a 48 MB `.dist/bin/market`. In the smoke test the frozen
+    binary printed `api_credits.v1`, `bare_metal.v1` and `compute.v1`, the same stdout
+    as the installed CLI. No skipped domain was reported, and the count was one line per
+    bundled domain wheel. Which domains it listed is read from that build's log. Since
+    that build, the count is one line per registered entry point, and the Makefile's
+    argument handling has changed; neither has been rebuilt.
 - [ ] 9.3 Point the declaration's `market` entry at `build-market-binary` and
   `.dist/bin/market`. `build` builds it in place of `build-buyer`.
   - Retire `build-buyer`, the PyInstaller recipe in `domains/vms/buyer/Makefile`, and
@@ -989,6 +1030,22 @@ declared buyer domain". Touches:
   - Verify: a search outside `openspec/` and `docs/` finds no `build-buyer` and no
     `arkhai_vms_buyer/main.py`. `make test-release-tooling` passes. `docs/` is rewritten
     at closeout (13.9).
+  - In progress (2026-11-13), unchecked with the section. The declaration names `build-market-binary` and `.dist/bin/market`,
+    and `build` runs `build-market-binary`. `build-buyer` is retired. So are the VM
+    buyer Makefile's `build` and `smoke-test` targets and `main.py`.
+
+    Comments updated:
+    - the root `Makefile`'s `build-e2e-base` comment and push prerequisites;
+    - `arkhai_vms_buyer.cli`'s comment on `app`, which tests and a docs attachment
+      still import;
+    - `domains/Makefile`'s `dist-buyer` help, which called the VM buyer the `market`
+      CLI.
+
+    `test_init_targets.py` names only `init-buyer`, which stays, and no e2e-tests
+    comment named `build-buyer`. `push-cli` now uploads `.dist/bin/market` ("Section 9
+    notes"). A search outside `openspec/` and `docs/` for `build-buyer`,
+    `arkhai_vms_buyer/main.py` and `vms/buyer/dist` finds nothing. `make
+    test-release-tooling` passed, 2895 tests, inside the pre-commit run (9.5).
 - [ ] 9.4 Remove `pyinstaller` from `arkhai-vms-buyer`'s runtime dependencies, and bump
   it a minor version (0.11.0 → 0.12.0) per RELEASING.md's versioning policy. Move any
   exact pin on it with the bump, and refresh every lock that installs it with
@@ -998,6 +1055,21 @@ declared buyer domain". Touches:
     - `make check-packaging` passes, with locks current;
     - `make test-domains` passes for the VM buyer;
     - the built wheel's metadata requires no PyInstaller.
+  - In progress (2026-11-13), unchecked with the section; its own evidence passes, and
+    the package's description now calls it the VM buyer domain of the `market` CLI. No exact pin on `arkhai-vms-buyer` exists. The VM storefront and
+    `e2e-tests` declare a `>=0.9.0` floor, which is unchanged. `make lock` rewrote the
+    three locks that install it: the VM buyer's, the VM storefront's and `e2e-tests`'.
+    No lock in the tree now names `pyinstaller`. Results:
+    - `make check-version-bumps` passed.
+    - `make check-packaging` passed with the locks current, inside the pre-commit run's
+      functional hooks (9.5).
+    - The VM buyer's part of `make test-domains` (unit, through `make -C domains/vms/buyer
+      test`) passed, 256 tests. Its reinit removed PyInstaller and setuptools from the
+      environment.
+    - A new case in `scripts/tests/test_release_wheelhouse.py`, in the scripts' suite,
+      reads the built wheelhouse: every declared wheel's `METADATA` in `.dist`, failing
+      on a missing one. It refuses any `Requires-Dist` naming PyInstaller, and it
+      passes, `arkhai_vms_buyer-0.12.0` among the wheels it read.
 - [ ] 9.5 Section verification.
   - Unit: 9.1's test.
   - System-level build evidence: 9.2's smoke test.
@@ -1006,6 +1078,177 @@ declared buyer domain". Touches:
     publish-wheels-through-a-gate`.
   - End-to-end: no scenario runs the binary (D18), and none is owed. The pipeline's lanes
     install `market` from the wheels, so they exercise the buyer CLI 9.4 repackages.
+  - Evidence so far (2026-11-13), unchecked with the section:
+    - Unit: `test_buyer_domain_wheels.py` passed, 12 cases since the fresh-context fixes.
+    - Build evidence: 9.2's smoke test passed, on the build before those fixes.
+    - `scripts/change-workflow run pre-commit publish-wheels-through-a-gate`, run
+      before the fresh-context fixes: its
+      functional hooks passed. They include the relock, which changed no further lock,
+      `make check-packaging` and every suite; `make test-release-tooling` passed 2895
+      tests. `check-packaging` passing says nothing about the binary's Dockerfile:
+      `check-uv-setup` reads only `Dockerfile*` (the return, below).
+    - Its closing `pre-commit` hook passed every check but the documentation citations.
+      That check reports 17 citations in the change's own documents, of the two kinds
+      section 7's notes describe: files sections 10–12 create, and files section 7
+      deleted. `scripts/buyer_domain_wheels.py` resolves one of the 18 section 8 found.
+  - End-to-end: confirmed. No marker in `e2e-tests/` runs the binary, and none was
+    added. The lanes' test image installs `market` from the wheels through
+    `e2e-tests/uv.lock`, which 9.4 relocked without PyInstaller, so the lanes exercise
+    the repackaged VM buyer.
+  - Owed by validation: none. The new cases in `scripts/tests/` run in `tests.yml`'s
+    `test · test-deployment-packaging` job, which section 7 already owes.
+
+### Section 9 notes: returned to design (2026-11-13)
+
+**Why the section stopped.** D18 and the repository's image rule cannot both hold as
+written, and choosing between them is a design decision.
+- **What D18 asks.** The binary's build image installs the buyer domains from `.dist`,
+  "derived from the declaration and never listed in a Dockerfile". No project's lock
+  covers `arkhai-core-buyer` with all three domains.
+- **What the rule says.** `docs/development/BUILD_AND_PACKAGING.md`, "Images", says "An
+  image installs the committed lock exactly as it is", through `scripts/uv_project.py`.
+  `check-uv-setup`'s row refuses a Dockerfile that installs from the wheelhouse without
+  the script, or that spells a repository distribution's version.
+- **What this commit does.** `core/buyer/market-binary.Dockerfile` installs with
+  `pip`, with no lock:
+  - it pins every declared distribution through a constraints build argument;
+  - it then reinstalls each one from `.dist` alone.
+
+  It passes `check-uv-setup` only because that check reads `Dockerfile*` and not
+  `*.Dockerfile`. This section widened `check-python-version` to `*.Dockerfile`
+  precisely so that the plan's file name would not escape it. Widening `check-uv-setup`
+  the same way would refuse this file, and leaving it narrow keeps a private exception,
+  which `AGENTS.md`'s "Amend a rule or comply" forbids.
+- **The hazard is real, not only formal.** Suppose PyPI serves an internal package at
+  the version `.dist` holds, but with other `Requires-Dist`. The first resolve can then
+  take PyPI's dependency set, and the reinstall from `.dist` with `--no-deps` keeps it.
+  That is the failure BUILD_AND_PACKAGING.md's "Wheels" section describes. Third-party
+  versions are also unlocked, which is how an unlocked image build once broke (the
+  comment in `e2e-tests/Dockerfile`).
+
+**Options for design.**
+- **(a), recommended. A locked project for the binary.** For example
+  `core/buyer/market-binary/`, with a `pyproject.toml` depending on `arkhai-core-buyer`
+  and the buyer domains, PyInstaller in a group, and a `uv.lock` that `make lock`
+  relocks.
+  - The image installs it through `uv_project.py image`, as every image does.
+  - A test (or `check-release-components`) holds the project's dependencies equal to
+    what `buyer_domain_wheels.py` derives from the declaration, naming a missing or
+    extra domain. RELEASING.md's table and D21 are the precedent: "a table … held equal
+    by a check, is not a second list".
+  - D18's "never listed in a Dockerfile" still holds. Its "derived from the
+    declaration" becomes "held equal to the declaration by a check".
+  - Third-party versions are locked, and `check-uv-setup` widens to `*.Dockerfile` with
+    no exception.
+  - Cost: a lock-only project to classify in `docs/development/ARCHITECTURE.toml`, and
+    the check.
+- **(b) Amend the image rule for the binary's build.** BUILD_AND_PACKAGING.md would admit
+  an unlocked install for a build image that ships no image, with the internal closure
+  installed from `.dist` first:
+  1. `buyer_domain_wheels.py` derives the closure under repository dependencies;
+  2. it is installed with `--no-index --no-deps`;
+  3. only third-party packages are then resolved from PyPI.
+
+  `check-uv-setup` widens to `*.Dockerfile` and states the amendment. This keeps D18 as
+  written, but leaves third-party versions unlocked in a binary customers download.
+- **(c) Keep this commit's install, and amend the rule to admit it as it is.** Not
+  recommended, because of the `Requires-Dist` hazard above.
+
+**A smaller question for the same design round.**
+- The binary's name and output are spelled outside the declaration:
+  - `BINARY_NAME = "market"` in `buyer_domain_wheels.py`;
+  - `--name market` and `/market` in the Dockerfile;
+  - `dest=$(DIST_DIR)/bin` in `build-market-binary`.
+- The single-enumeration rule does not cover a build target, so nothing catches these
+  drifting from `binaries[]`. Reading them from the declaration is cheap, if design
+  wants it.
+
+**What this commit holds (no task checked).**
+- 9.1–9.4 implemented as their notes above say, with the evidence recorded there.
+- Fixes from the fresh-context check, made after the pre-commit run:
+  - per-image ignore files exclude `.dist/bin`;
+  - the smoke test counts entry points, not wheels;
+  - `build-market-binary` stops on a failing derivation instead of passing an empty
+    argument;
+  - `constraints` reports a missing `pyproject.toml`;
+  - the CLI-wheel refusal and the missing-project case have tests;
+  - the wheel-metadata case fails on a missing wheel rather than skipping it;
+  - `arkhai-vms-buyer`'s description;
+  - overstated evidence labels in the notes.
+
+  After these fixes, the scripts' affected tests were rerun and pass. Neither the
+  binary build nor the pre-commit run was repeated.
+
+**Not done.** `check-uv-setup` is not widened to `*.Dockerfile`, since the chosen option
+decides what it then refuses. The section's closing pre-commit run and a second
+fresh-context check belong to the session that finishes it.
+
+### Section 9 notes (2026-11-13)
+
+**How the binary's build works, where the task is silent.**
+- **What is derived.** The domains are not the only thing derived. The buyer CLI is the
+  declared distribution whose project defines `market` as a console script, and its
+  entry point is that script's value. Neither is named in the Dockerfile or the
+  Makefile.
+- **Hidden imports.** PyInstaller passes `--hidden-import` for each module a domain's
+  entry point names, as well as `--copy-metadata` for the CLI and each domain.
+  Discovery imports each domain by the name in its entry point, which PyInstaller's
+  import analysis cannot see. That they are needed is reasoning from how discovery
+  works; no build without them was made.
+- **The two-phase install.** PyPI also serves the internal distributions, some at the
+  versions `.dist` holds, and the binary must bundle `.dist`'s bytes.
+  1. The first `pip install` resolves third-party packages from PyPI, holding every
+     declared distribution at its declared version (`constraints`).
+  2. The second reinstalls each declared distribution the first installed from `.dist`
+     alone, with `--no-index --no-deps --force-reinstall`, whichever source the
+     resolver chose.
+
+  Third-party versions are not locked. No project's lock covers the CLI with all three
+  domains, and D18 makes the binary's identity its SHA-256, not its repeatability.
+- **The smoke test.** It runs `market plugins` twice, in the venv and frozen, and
+  requires:
+  - the same stdout from both;
+  - one line per registered `market.buyer_domains` entry point, as the venv's metadata
+    counts them, since one wheel may register several;
+  - no "skipping buyer domain" on either stderr.
+
+  Discovery only warns and skips a domain that fails to load, and the API-credit domain
+  prints pydantic `UserWarning`s on stderr, so the outputs cannot be compared with
+  stderr included. The first build failed on exactly that.
+- **Output.** The binary is exported with `docker build --output type=local` from a
+  final `scratch` stage. That needs BuildKit, which Docker uses by default and Podman
+  supports. The root `.dockerignore` excludes `.dist/bin`, and so do the three
+  per-image ignore files that admit `.dist/` whole: the VM storefront's and the two lane
+  doubles'. No image build therefore receives the last binary, or has its cache
+  invalidated by it.
+- **No `dist` prerequisite.** Like the image targets, `build-market-binary` builds no
+  wheels. `build` runs `dist` first, and 11.2's load builds `.dist` once.
+
+**How the digest was obtained.** The session could not query a registry: `docker image
+inspect`, `docker pull` and web fetches are not in this step's rules. The first build
+ran on the unpinned tag, and BuildKit's log recorded the digest it resolved,
+`sha256:281d39ff…0b7f`. That digest was pinned, and the second build ran from it.
+Bumping Python means pinning a new digest; the build's own check refuses a stale one.
+
+**Outside the plan.**
+- `scripts/check_python_version.py` read only `Dockerfile*`, so the plan's file name,
+  `market-binary.Dockerfile`, would have escaped the check 9.2 says applies. It now
+  also reads `*.Dockerfile`, with a test case.
+- `push-cli` uploaded `domains/vms/buyer/dist/market`, which no build writes once
+  `build-buyer` is retired. It now uploads `.dist/bin/market`, spelled literally, so
+  the single-enumeration rule still refuses it until 10.8 makes it read the
+  declaration. Its refusal is unchanged: "publish target push-cli names binary market".
+- `domains/Makefile`'s `dist-buyer` help no longer calls the VM buyer the `market` CLI.
+
+**For closeout.**
+- **13.9.** `docs/buyer-quickstart.md` still gives `make build-buyer`.
+- **13.3 or 13.9.** `docs/development/BUILD_AND_PACKAGING.md` should say:
+  - `check-python-version` reads `*.Dockerfile`;
+  - the binary's build image is pinned by digest, and a Python bump re-pins it.
+- **Defect, not this change's.** The API-credit domain prints pydantic `UserWarning`s
+  ("Field name "schema" … shadows an attribute in parent") whenever `market` starts,
+  frozen or not. It is not this change's. It could be recorded as unowned in the
+  index at closeout (13.6).
 
 ## 10. Build pins, revision tags, and a chart that names no release
 

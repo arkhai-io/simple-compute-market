@@ -324,8 +324,8 @@
   "binaries": [
     {
       "name": "market",
-      "target": "build-buyer",
-      "path": "domains/vms/buyer/dist/market"
+      "target": "build-market-binary",
+      "path": ".dist/bin/market"
     }
   ],
   "development_images": [

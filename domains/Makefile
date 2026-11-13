@@ -146,7 +146,7 @@ dist-apicredits-buyer: dist-apicredits-domain ## Build arkhai-apicredits-buyer w
 	@ls $(DIST_DIR)/arkhai_apicredits_buyer-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-apicredits-buyer produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-buyer: dist-vms-listings dist-vms-negotiation dist-vms-settlement ## Build arkhai-vms-buyer (the `market` CLI) wheel into .dist/
+dist-buyer: dist-vms-listings dist-vms-negotiation dist-vms-settlement ## Build arkhai-vms-buyer (the VM buyer domain of the `market` CLI) wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd vms/buyer && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_vms_buyer-*-none-any.whl > /dev/null 2>&1 || \
