@@ -32,30 +32,39 @@ comprises are not known when the merge happens.
 - **CI publishes nothing.** The four workflows are deleted, with the release contract
   (`arkhai.marketplace-release.v2`) and its verifier. CI builds and tests, including
   building the wheelhouse and resolving every declared distribution against it. A check
-  refuses any upload step in a workflow.
+  refuses a workflow holding a publishing credential (write permissions, `id-token`, or
+  a secret other than `GITHUB_TOKEN`) or containing a named upload step.
 - **A release candidate is a `main` commit stored under its revision.** Loading it stores
   every release component under the commit's nine-character revision:
   - images as `arkhai:<name>-<rev9>`;
   - the declared wheels and the chart package as generic packages `wheelhouse` and
     `chart` in a candidate store;
-  - the `market` binary as today.
+  - the `market` binary as today;
+  - the development images its validation runs (dev-env, e2e-tests), which are not
+    release components.
 
-  A reload replaces the revision's stored files. A **marketplace release** is a promoted
+  A reload replaces the revision's stored files. Every Makefile computes the revision
+  with `--short=9`, and a check refuses the default abbreviation. A **marketplace release** is a promoted
   release candidate, named by its semver.
 - **One declaration of release components.** `manifests/published-distributions.json`
   becomes `manifests/release-components.json`, declaring the distributions, the five
-  service images (each by published and local name), the chart, the `market` binary and
-  the npm package. It lists only what a release ships: the API-credit sample app leaves
-  it, and there is no `public` flag. Every publish target, the lanes and the binary
-  build read it, and a check refuses a second list.
+  service images (each by published and local name), the chart and the `market` binary,
+  and, apart from them, the development images. Its release components are only what a
+  release ships: the API-credit sample app leaves it, there is no `public` flag, and the
+  npm package is not a release component until a development registry serving npm lets
+  it be loaded. Every publish target, the lanes and the binary build read it, and a
+  check refuses a second list.
 - **The chart names no release.** Its version follows its own semver, its defaults keep
-  the bare development tags, and `appVersion` is removed from every chart.
-- **Wheels build with a pinned backend.** Hatchling is pinned beside `.python-version`.
-  Moving the pin is a release-wide version bump.
+  the bare development tags, and `appVersion` is removed from every chart. The umbrella
+  chart's dependency entries follow each subchart's version, held by a test.
+- **Wheels build with pinned build requirements.** Hatchling is pinned beside
+  `.python-version`, and a check refuses any build requirement the pin does not cover.
+  Moving the hatchling pin is a release-wide version bump.
 - **A version must change when its contents change.** `make check-release-versions`
-  compares the built wheels (by SHA-256) and the packaged chart (by a digest of its
-  packaged files) with the newest marketplace release's bill of materials, and refuses
-  an unchanged version whose contents differ.
+  holds every (component, version) pair to the content identity any earlier marketplace
+  release's bill of materials gives it: the built wheels (by SHA-256) and the packaged
+  chart (by a digest of its packaged files) before a load, and the release's own bill of
+  materials, with no build, at the cut.
 - **A marketplace release is recorded last, on a release branch.**
   - Once production runs it, `releases/<semver>` is cut at the candidate's commit, one
     commit adds the bill of materials the deployment built (CycloneDX 1.6, layout 1,
@@ -66,6 +75,8 @@ comprises are not known when the merge happens.
 - **The local lanes can run a candidate's release images.** With `RELEASE_IMAGES=1` and
   `IMAGE_SUFFIX=-<rev9>`, a lane runs existing local release images instead of building
   them, and records each one's manifest digest by published name.
+  `pull-release-images` pulls a candidate's release images from a given registry and
+  tags them with the local names the lanes run.
 - **The release's `market` binary is PyPI's CLI.** It is built in a pinned image with
   every declared buyer domain's plugin. PyInstaller leaves `arkhai-vms-buyer`'s runtime
   dependencies.
@@ -111,8 +122,8 @@ None.
   its npm publication becomes the deployment's.
 - External, outside this repository:
   - the candidate store's repository;
-  - a development registry serving npm, without which the npm package is declared but
-    not loaded.
+  - a development registry serving npm, without which the npm package is not a release
+    component and no marketplace release publishes it.
 
 ## Non-Goals
 
@@ -191,7 +202,7 @@ returns 404. `arkhai-vms-buyer` no longer installs PyInstaller.
 - D16: `openspec/specs/deployment-state/spec.md` (within the release-record requirement)
 - D17: `openspec/specs/deployment-state/spec.md`; `docs/development/RELEASING.md`; `docs/development/TESTING.md` (the lanes' release-image mode)
 - D18: `openspec/specs/deployment-state/spec.md`; `docs/development/ARCHITECTURE.md`, "Build, packaging, and initialization" (one program per name); `docs/buyer-quickstart.md`
-- D19: `docs/development/RELEASING.md`
+- D19: `openspec/specs/deployment-state/spec.md` (a package whose candidate bytes cannot be stored is not a release component); `docs/development/RELEASING.md`
 - D20: `openspec/specs/deployment-state/spec.md` (removed by the delta)
 - D21: `docs/development/RELEASING.md`
 - D22: no permanent destination — it concerns the change's own directory name

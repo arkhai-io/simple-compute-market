@@ -46,10 +46,12 @@ development registry and a promotion script here copied to PyPI. Sections 3–6 
    nothing.
 2. **Release candidate.** An operator loads `main`'s commit X with
    `make check-release-versions` and then `make push-runtime-artifacts`. That stores
-   every release component under X's nine-character revision.
+   every release component, and the development images its validation runs, under X's
+   nine-character revision.
 3. **Validation and promotion.** The deployment's release validation runs:
    - the live end-to-end tests against X's revision tags;
-   - this repository's local lanes against the same images, pulled by digest
+   - every one of this repository's local lanes against the same images, pulled by
+     revision tag and aliased to their local names by `pull-release-images`
      (`RELEASE_IMAGES=1`).
 
    The deployment builds the release's bill of materials, refusing it unless the live
@@ -59,8 +61,9 @@ development registry and a promotion script here copied to PyPI. Sections 3–6 
 4. **Cut.** Once production runs the release, `releases/<semver>` is cut at X, one
    commit adds the bill of materials, `make check-release-record` passes, and that
    commit is tagged `marketplace-v<semver>`.
-5. **Publication.** The operator publishes the promoted bytes to PyPI, npm, ghcr and the
-   GitHub release, after the cut and all or nothing.
+5. **Publication.** The operator publishes the promoted bytes to PyPI, ghcr and the
+   GitHub release, after the cut and all or nothing. npm is reached only once the npm
+   package is a release component (D19).
 
 A fault found at step 3 is fixed on `main`, and a later commit becomes the next release
 candidate. A candidate that fails before production gets no branch, no tag and no
@@ -97,7 +100,8 @@ Alternatives considered:
 - A **release candidate** is a default-branch commit loaded under its revision.
 - A **marketplace release** is a release candidate the deployment promoted, named by
   its semver and recorded by its tag.
-- A **release component** is an entry of the declaration (D6).
+- A **release component** is an entry of the declaration (D6) other than a development
+  image.
 - The **candidate store** is the set of revision-keyed generic packages a candidate's
   files are stored in (D3).
 
@@ -144,6 +148,18 @@ and validation runs against the last load, so replacing a revision breaks nothin
 Nothing installs from the development Python index, so loading a candidate does not push
 to it.
 
+Loading also pushes each declared development image (D6) as `arkhai:<name>-<rev9>`. The
+live topology runs dev-env and the e2e-tests image beside the release images, so a
+candidate's validation needs them under its revision. They are not release components:
+no bill of materials names them, and the deployment checks them against their revision
+tags only. (Design review 14 F2.)
+
+The candidate store expires stored revisions after a retention period set where it is
+provisioned, so a candidate must be promoted before its revision expires. An expired
+candidate is loaded again; images and binaries do not rebuild to the same digests, so a
+reload is new bytes and is validated again from the start. RELEASING.md states this
+without the period, which this repository cannot keep true. (Design review 14 F7.)
+
 Alternatives considered:
 - **Load by version, as before.** Rejected: on a collision the index holds whichever
   upload came last.
@@ -155,10 +171,15 @@ Alternatives considered:
 
 ### D4 — A candidate's revision is nine characters
 
-Every revision tag and store version uses `git rev-parse --short=9`, in the root
-Makefile and in `e2e-tests`. The bill of materials tags images `<service>-<rev9>`, and
-the local lanes' suffix must equal the revision tags exactly. Git's default abbreviation
-grows with the repository: it is nine characters today only by accident.
+Every revision tag and store version uses `git rev-parse --short=9`, in every Makefile
+that computes `GIT_SUFFIX`: the root, `e2e-tests`, `dev-env`, `core/registry`,
+`provisioning/compute/service` and `domains/vms/storefront`. Each subproject Makefile
+also runs on its own, so each keeps its own definition. The bill of materials tags
+images `<service>-<rev9>`, and the local lanes' suffix must equal the revision tags
+exactly. Git's default abbreviation grows with the repository: it is nine characters
+today only by accident, so a Makefile left on the default would go wrong only on the
+day the abbreviation grows. The packaging check therefore refuses a
+`git rev-parse --short` without `=9` in any Makefile. (Design review 14 F3.)
 
 ### D5 — Loading a candidate does not refuse an edited tree
 
@@ -173,9 +194,10 @@ identity the record relies on.
 
 ### D6 — One declaration of release components
 
-`manifests/published-distributions.json` becomes `manifests/release-components.json`. It
-lists only what a release ships, so every entry is released and no `public` flag
-exists:
+`manifests/published-distributions.json` becomes `manifests/release-components.json`. Its
+release components are only what a release ships, so every one is released and no
+`public` flag exists; the development images a candidate's validation runs are listed
+apart:
 
 ```json
 {
@@ -191,7 +213,10 @@ exists:
   ],
   "chart": {"path": "helm"},
   "binaries": [{"name": "market", "target": "build-market-binary", "path": ".dist/bin/market"}],
-  "npm": [{"path": "domains/apicredits/middleware/typescript"}]
+  "development_images": [
+    {"name": "dev-env", "local": "dev-env"},
+    {"name": "e2e-tests", "local": "e2e-tests"}
+  ]
 }
 ```
 
@@ -206,34 +231,65 @@ exists:
   built as `compute-provisioning`. The five images are the release's. The API-credit
   service, storefront and sample-app images are not release components, and the
   API-credit lane builds them from the checkout.
-- **Chart, binaries, npm.** The chart's directory; the binary with its build target and
-  output path; the npm package's directory.
+- **Chart, binaries.** The chart's directory; the binary with its build target and
+  output path.
+- **No npm entry.** The npm package is not a release component until it can be loaded
+  and validated (D19). It joins as `"npm": [{"path": "domains/apicredits/middleware/typescript"}]`
+  when `push-npm` exists.
+- **Development images.** `development_images` lists the images a candidate's
+  validation runs that a release does not ship, with `name` and `local` as for
+  `images`. The load pushes them under the revision (D3); nothing else treats them as
+  release components. They are declared here so that `push-dev-images` reads a list
+  rather than naming its own, which the single-enumeration check (D7) would refuse.
+  (Design review 14 F2.)
 
 Who reads it:
 - the publish targets;
 - the single-enumeration check (D7);
-- the lanes' release-image check (D17);
+- the lanes' release-image check and `pull-release-images` (D17);
 - the binary build (D18);
 - `test_publish_matrix.py`;
 - `make check-release-record` (D12);
 - the deployment's bill-of-materials builder, which reads `distributions[].dist`,
-  `images[].name`, `binaries[].name` and `npm[].path`, and finds the chart from the one
-  package stored under the revision.
+  `images[].name` and `binaries[].name`, and finds the chart from the one package stored
+  under the revision.
 
 The Makefile still builds everything. The declaration says what a release comprises, not
 how to build it.
 
-### D7 — The single-enumeration and upload-step checks
+### D7 — The single-enumeration and workflow-credential checks
 
 A check run by `make check-packaging` refuses:
-- a list of distributions, images, the chart or the binary in any workflow, publish
-  target or lane target, other than the declaration;
-- any upload step in a workflow: `pypa/gh-action-pypi-publish`, `npm publish`,
-  `docker push`, `docker/build-push-action` with `push: true`,
-  `softprops/action-gh-release`, `gh release create`.
+- a list of distributions, images, development images, the chart or the binary in any
+  workflow, publish target or lane target, other than the declaration;
+- a workflow that could publish, judged by the credentials it holds (design review
+  11 F5):
+  - no top-level `permissions:`, since a workflow without one gets the repository's
+    default token, which may write;
+  - `id-token: write` (trusted publishing to PyPI and npm), `packages: write` (ghcr) or
+    `attestations: write`, anywhere;
+  - `contents: write` in any workflow but `validate-model-release.yml`, which edits a
+    `model-v*` release's notes and uploads nothing;
+  - a reference to any secret but `GITHUB_TOKEN`;
+- a named publishing step in a workflow, so a refusal names the step:
+  `pypa/gh-action-pypi-publish`, `npm publish`, `docker push`,
+  `docker/build-push-action` with `push: true`, `softprops/action-gh-release`,
+  `gh release create`.
+
+A workflow cannot publish without a credential, and the credentials a workflow can hold
+are few and visible in its file, so the credential rule is what makes "no workflow
+uploads an artifact" a mechanical guarantee. A list of upload commands alone would miss
+`uv publish`, `twine upload`, `helm push` or any marketplace action. The named steps stay
+for the message, not the guarantee.
 
 No such check exists today, though the task that would have added it is checked off. Two
 lists kept in agreement by hand diverge silently, and review alone did not prevent it.
+
+Alternatives rejected:
+- **The named upload steps alone, with the spec narrowed to them.** Cheaper, but the
+  guarantee rests on review.
+- **An allowlist of permitted actions and commands.** Strongest, but edited for every new
+  CI step.
 
 ### D8 — Every declared image's build writes its revision tag
 
@@ -243,7 +299,8 @@ declared image to a build target that writes it, extending
 `test_image_publication_contract.py`, which covers provisioning only. `push-images`
 pushes the declared images through `scripts/publish_artifacts.py`, in place of its four
 literal lines, and keeps pushing the bare `arkhai:<name>` tags that shared development
-releases follow. No release step reads a bare tag.
+releases follow. `push-dev-images` pushes the declared development images the same way,
+and `push-runtime-artifacts` includes it. No release step reads a bare tag.
 
 ### D9 — The chart names no release
 
@@ -256,9 +313,17 @@ and would force a new chart version for every release.
 - **Images.** The default values keep the bare development tags with empty digests. A
   deployment names its images in its own values.
 - **appVersion.** It means nothing here and is removed from `helm/Chart.yaml` and all
-  eight subcharts, with the `app.kubernetes.io/version` block in each `_helpers.tpl`.
-  That block is guarded by `if .Chart.AppVersion`, so leaving it would be dead template.
-  The removal changes each chart's packaged files, so each chart's version is bumped.
+  nine subcharts, with the `app.kubernetes.io/version` block in the umbrella's
+  `_helpers.tpl` and the seven subcharts that carry one (the two lane doubles carry
+  none). That block is guarded by `if .Chart.AppVersion`, so leaving it would be dead
+  template. The label is in no selector, so an upgrade only rolls pods. The removal
+  changes each chart's packaged files, so each chart's version is bumped.
+- **Subchart pins.** The umbrella pins each subchart by exact version over
+  `file://charts/…`, in ten dependency entries (`registry` appears twice, once aliased
+  `api-credits-registry`). Every subchart bump updates its entries. A test in `helm/`
+  holds each entry's `version` equal to its subchart's `Chart.yaml` version, since
+  `dist-helm` runs a bare `helm package` and nothing shows that it refuses a mismatch.
+  (Design review 14 F4.)
 
 The bill of materials records which chart version a release uses, so one chart version
 can appear in many releases.
@@ -288,7 +353,7 @@ Layout 1 is CycloneDX 1.6:
   | image | `container`, named by service | none | SHA-256 manifest digest; purl `pkg:oci/arkhai@sha256%3A<hex>?tag=<service>-<rev9>`, no `repository_url` |
   | chart | `application`, named by chart | the chart's | property `arkhai:content-digest` (D14); no hashes |
   | binary | `application` `market` | none | SHA-256 of the file; property `arkhai:platform` = `linux/amd64` |
-  | npm | `library`, group `@arkhai` | the package's | SHA-512 of the tarball; while no development registry holds it, property `arkhai:loaded` = `false` and no hashes |
+  | npm | `library`, group `@arkhai` | the package's | SHA-512 of the tarball, required; present only once the npm package is declared (D19) |
 
 - **Serialization.**
   - UTF-8 JSON, two-space indent, LF line endings, trailing newline.
@@ -336,9 +401,12 @@ the tag. It refuses unless:
 4. its `arkhai:source-revision` is the parent commit, and its subject's version is the
    tag's semver;
 5. it names every declared component;
-6. `make check-release-versions` passes against the marketplace release before it.
+6. `make check-release-versions` passes with the bill of materials itself as its
+   subject, against every earlier marketplace release (D14).
 
-It shares its reader with the version check.
+It shares its reader with the version check, and needs no wheelhouse or Helm: the cut
+runs in a fresh worktree, and the bytes about to be published are the ones the record
+names. (Design review 11 F2 / 14 F1.)
 
 Alternative rejected: **a non-publishing workflow on a `marketplace-v*` tag push.** It
 can only report a public tag that already exists, and the rule is about what is pushed.
@@ -359,6 +427,9 @@ The deployment-state delta specifies what this repository does and can prove:
 
 RELEASING.md describes the deployment's part as the procedure this repository relies on:
 - validation, and building the bill of materials;
+- running every local lane with `RELEASE_IMAGES=1`, whose records together cover every
+  release image but `frp-grant-admission`, which only the live tests run (design
+  review 14 F6);
 - aliasing images to `<service>-<semver>` at promotion;
 - cutting only after production runs the release;
 - publishing only after the cut, with promoted bytes, all or nothing, never replacing or
@@ -372,14 +443,26 @@ Alternative rejected: **keep the deployment's acts as normative requirements her
 
 ### D14 — A version changes when its contents change
 
-`make check-release-versions` reads the bill of materials of the newest
-`marketplace-v*` tag that carries one, ordered by semver, and refuses a layout it does
-not know. It compares:
-- **Wheels:** each `wheel/*` component's version and SHA-256 with the built wheel of the
-  same name. It refuses one whose version is unchanged and whose bytes differ.
-- **The chart:** the `chart/*` component's version and `arkhai:content-digest` with the
-  chart `make dist-helm` packages. It refuses one whose version is unchanged and whose
-  digest differs.
+`make check-release-versions` reads the bill of materials of every `marketplace-v*` tag
+that carries one, except the tag being checked, and refuses a layout it does not know.
+Its rule: a (component, version) pair that any earlier record names keeps the content
+identity that record gives it. (Design review 11 F2 / 14 F1.)
+- **Wheels:** a wheel whose distribution and version an earlier record names must have
+  that record's SHA-256.
+- **The chart:** a chart whose version an earlier record names must have that record's
+  `arkhai:content-digest`.
+
+Its subject depends on when it runs:
+- **Before a load,** the built wheelhouse and the chart `make dist-helm` packages.
+- **At the cut** (D12), the release's own committed bill of materials: its wheel
+  SHA-256s and chart content digest, with no build.
+
+Every earlier record, not only the newest, is read, because a version lowered back to
+one released two releases ago would otherwise pass and then fail at PyPI after the
+record is public. Reading them all costs one git blob per release and needs no rule
+about version order. It also catches a release cut between a candidate's load and its
+cut. Excluding the tag being checked matters at the cut, where that tag already exists
+locally and is the newest.
 
 The chart's content digest is computed like Go's module dirhash:
 1. list the package's regular files by archive path, sorted bytewise;
@@ -391,10 +474,15 @@ every `Chart.yaml` when packaging and leaves the other files unchanged. `helm pa
 archives differ in tar metadata between runs while the files inside are identical. The
 rewrite may change between Helm versions, so the check pins Helm.
 
-When no tag carries a bill of materials, the check says so and passes; v0.3.0 carries
-none. It runs before a candidate is loaded and again at the cut, and needs only git, the
-wheelhouse and the pinned Helm. A refusal means "bump the version"; the check never
-chooses one.
+When no other tag carries a bill of materials, the check says so and passes; v0.3.0
+carries none. Before a load it needs git, the wheelhouse and the pinned Helm; at the cut,
+git alone. A refusal means "bump the version"; the check never chooses one.
+
+Alternatives rejected:
+- **Only the newest earlier release, plus a rule that versions never decrease.** Two
+  rules where one suffices.
+- **A rebuild at the cut.** The cut runs in a fresh worktree, and a rebuild would only
+  reproduce what the record says.
 
 The chart package includes `helm/`'s tests and fixtures, since there is no
 `.helmignore`, so a test-only edit inside `helm/` forces a chart version bump. That is
@@ -413,8 +501,11 @@ the version check would refuse every unbumped distribution.
 - **Where the pin lives.** Hatchling is pinned exactly in one root declaration beside
   `.python-version`. The root Makefile exports it to every build as a uv build
   constraint, as it exports `UV_PYTHON`. A packaging check beside
-  `check-python-version` refuses a `[build-system]` backend the declaration does not
-  constrain, and a build path that bypasses the export.
+  `check-python-version` refuses any `[build-system]` requirement the declaration does
+  not pin, not only the backend, and a build path that bypasses the export. A build
+  plugin such as `hatch-vcs` can change a wheel's bytes as the backend's version does.
+  Today every project requires exactly `hatchling`. The declaration pins direct build
+  requirements only, not hatchling's own dependencies. (Design review 14 F5.)
 - **Moving the pin.** A pin move is a change like any other. It changes every wheel, so
   it bumps every declared distribution's patch version once, and the version check
   enforces that with no special handling. SHA-256 stays the only wheel identity, in
@@ -430,8 +521,8 @@ Alternatives rejected:
 ### D16 — A product version is distinct from a distribution version
 
 A wheel's version is inside the wheel and cannot be relabelled without a rebuild, which
-would change its digest. Wheels, the chart and the npm package keep the versions they
-were built with. Images and the binary have no version of their own: they are named by
+would change its digest. Wheels and the chart, and the npm package once declared, keep
+the versions they were built with. Images and the binary have no version of their own: they are named by
 revision as candidates, and the deployment aliases images to the semver at promotion.
 The release semver appears once in the record, on the subject.
 
@@ -443,9 +534,19 @@ do not rebuild to the same digest, so a lane that builds its own release images 
 different bytes.
 
 ```
+make -C e2e-tests pull-release-images DOCKER_REGISTRY=<registry> IMAGE_SUFFIX=-07af25d57
 make -C e2e-tests test-e2e-bare-metal RELEASE_IMAGES=1 IMAGE_SUFFIX=-07af25d57
 ```
 
+- **How the images arrive.** `pull-release-images`, given a registry and a suffix,
+  pulls each declared release image as `<registry>/arkhai:<name><IMAGE_SUFFIX>` and
+  tags it `arkhai:<local><IMAGE_SUFFIX>`, the name the lane's compose files run. The
+  name-to-local mapping is applied only here, from the declaration, so the deployment
+  never reads `images[].local`. The registry is passed in, as the push targets take it,
+  and is never committed. Docker keeps the pulled repo digest across the retag, which
+  is what the lane's record reads. The digest check stays with the record and the
+  deployment's builder, so the target pulls by revision tag and needs no digests.
+  (Design review 11 F4.)
 - **What it builds.** With `RELEASE_IMAGES=1`, a lane target builds the wheels, dev-env,
   the test image and the non-release images its stack runs (the lane doubles; the
   API-credit images). It builds no declared release image.
@@ -472,9 +573,16 @@ Each lane records only the release images it runs. No lane runs `frp-grant-admis
 `e2e.yml` is unchanged: it is a CI check that builds from source, not release
 validation.
 
+Release validation runs every lane. Together their records cover every release image
+but `frp-grant-admission`, which only the deployment's live tests run (D13).
+
 Alternatives rejected:
 - **One `CANDIDATE=<rev9>` variable.** A second way to say a suffix.
 - **Separate release-image lane targets.** Duplicated recipes drift.
+- **The deployment pulls and retags, reading `images[].local`.** The mapping would be
+  applied in a second codebase.
+- **Compose takes full registry references in release-image mode.** The lanes'
+  interface would carry a registry, which the build mode never needs.
 
 ### D18 — The release's `market` binary is PyPI's CLI, built in a pinned image
 
@@ -513,11 +621,23 @@ Alternatives rejected:
   programs.
 - **Drop the binary.** Layout 1 includes it.
 
-### D19 — The npm package is declared but not loaded until a development registry serves npm
+### D19 — The npm package is not a release component until it can be loaded
 
-The middleware package is declared, built and tested. `push-npm` is added once a
-development registry serves npm, which is provisioned outside this repository. Until
-then, layout 1 carries it with `arkhai:loaded` = `false`.
+The middleware package is built and tested, but it is not in the declaration, and a
+marketplace release neither records nor publishes it, until a development registry
+serves npm. That registry is provisioned outside this repository. Then `push-npm` is
+added, the package joins the declaration, and its layout-1 row, with its SHA-512
+required, applies. Layout 1 already defines that row, so its joining needs no new
+layout.
+
+An unloaded package has no validated bytes. Recording it by version with no hash would
+let a release name, and its publication push, a tarball nobody validated, and npm
+versions are permanent. With `publish-npm.yml` deleted (D1), nothing publishes the
+package in the meantime. (Design review 11 F1.)
+
+Alternative rejected: **a loaded, digested tarball as a prerequisite of every release.**
+It keeps the release complete, but holds every wheel and chart release on
+infrastructure this repository does not control.
 
 ### D20 — The orphaned release-verification requirement is removed
 
@@ -546,13 +666,15 @@ history. The proposal states what the change does.
 
 One round of five sessions before closeout:
 1. CI publishes nothing (the four workflows, the verifier and the curl installer
-   deleted); the declaration renamed and reshaped; the single-enumeration and
-   upload-step checks.
-2. Candidate loading: the candidate store with delete-then-upload, `--short=9`, every
-   declared image's revision tag, `push-images` from the declaration; the hatchling pin
-   and its check; `appVersion` removed.
-3. The layout-1 reader, `make check-release-versions` and `make check-release-record`.
-4. The lanes' release-image mode and its record.
+   deleted); the declaration renamed and reshaped, with `development_images` and no npm
+   entry; the single-enumeration and workflow-credential checks.
+2. Candidate loading: the candidate store with delete-then-upload, `--short=9` in every
+   Makefile and its check, every declared image's revision tag, `push-images` and
+   `push-dev-images` from the declaration; the build-requirement pin and its check;
+   `appVersion` removed, the subchart pins and their test.
+3. The layout-1 reader, `make check-release-versions` over every earlier record with its
+   two subjects, and `make check-release-record`.
+4. The lanes' release-image mode, `pull-release-images`, and the lanes' record.
 5. The binary's build image, and PyInstaller out of `arkhai-vms-buyer`'s runtime
    dependencies.
 
@@ -569,7 +691,10 @@ Closeout writes RELEASING.md, the buyer quickstart, the `AGENTS.md` amendment an
 - **A test-only edit inside `helm/` forces a chart bump** (D14). Accepted.
 - **A hatchling pin move bumps every distribution** (D15). It is rare and deliberate.
 - **The binary runs on linux/amd64 only.** PyPI covers every platform.
-- **The npm package cannot be loaded until a development registry serves npm** (D19).
+- **No marketplace release publishes the npm package until a development registry serves
+  npm** (D19).
+- **A candidate expires with the store's retention** (D3). It is then loaded and
+  validated again.
 - **The release is published after production runs it.** For a short while production
   serves a release whose wheels are not yet on PyPI. Nothing in production installs
   from PyPI.

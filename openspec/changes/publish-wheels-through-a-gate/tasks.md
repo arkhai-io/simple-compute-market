@@ -5,12 +5,28 @@ and a promotion script here) is replaced by the release described in `design.md`
 publishes nothing, a candidate is a `main` commit loaded by the publish targets, the
 deployment validates, promotes and publishes, and the release is recorded last on its
 release branch. Sections 1–2 are kept as implemented. Sections 3–6 belonged to the
-interim design and are withdrawn, their completed tasks preserved. Sections 7–12 are the
-redesign's work.
+interim design and are withdrawn, their completed tasks preserved.
 
-Sections 7–12 need nothing from outside this repository except 8.6 (a development
-registry that serves npm). Section 7 should land first: until it does, a merge still
-publishes to PyPI and npm.
+**Sections 7–12 and the design promotion record predate the settled design** (D1–D22 as
+amended by design review 11's triage) **and are rewritten at planning.** Do not
+implement from them. Planning addresses each discrepancy design review 11 F3 found:
+- 8.1 adds a `public` field, which D6 removed; 12.1 and the promotion record describe
+  it.
+- Section 9 covers only the umbrella chart; D9 changes all nine subcharts and the
+  umbrella's dependency pins.
+- 10.1 compares the chart's git tree id; D14 uses the packaged-content digest, over every
+  earlier record, with the bill of materials as the subject at the cut.
+- No task covers the candidate store, `development_images` and `push-dev-images` in the
+  load, `--short=9` in every Makefile and its check, the build-requirement pin and its
+  check, the release-record reader and check, `pull-release-images`, the lanes' mode and
+  record, the subchart-pin test, the workflow-credential check, or the binary build
+  image.
+- 8.2 and 8.6 declare and load npm; under D19 npm is not a release component until a
+  development registry serves npm.
+- The citations of `design.md` decisions in 4.1 (D1, D8), 6.1 (D5) and 8.3 (D4) name
+  decisions renumbered by the redesign.
+
+Section 7 should land first: until it does, a merge still publishes to PyPI and npm.
 
 ## 1. One enumeration
 
