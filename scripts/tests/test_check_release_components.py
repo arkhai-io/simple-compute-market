@@ -324,7 +324,9 @@ def test_a_publish_target_reading_the_declaration_passes() -> None:
         "push-images:\n"
         "\tpython3 scripts/publish_artifacts.py images --registry $(DOCKER_REGISTRY)\n"
         "push-cli:\n"
-        "\tpython3 scripts/publish_artifacts.py binaries --suffix abc\n")
+        "\tpython3 scripts/publish_artifacts.py binaries --suffix abc\n"
+        "load-candidate:\n"
+        "\tpython3 scripts/load_candidate.py --revision abc\n")
 
     assert _makefile(text) == []
 

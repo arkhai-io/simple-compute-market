@@ -9,10 +9,10 @@ help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 DIST_DIR ?= ../../../.dist
-# Podman does not reliably invalidate a runtime-stage COPY when only the
-# referenced builder stage changes. Include the wheel set in the runtime cache
-# key so a rebuilt adapter/service can never be hidden by a stale final stage.
-DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
+# The image records the wheelhouse's digest, which a missing declared wheel
+# refuses. It is also the runtime stage's cache key: Podman does not reliably
+# invalidate a runtime-stage COPY when only the builder stage changes.
+WHEELHOUSE_DIGEST_COMMAND = python3 ../../../scripts/wheelhouse_digest.py
 IAC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../domains/vms/provisioning/iac)
 BARE_METAL_IAC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../domains/bare_metal/provisioning/iac)
 
@@ -60,11 +60,12 @@ APPUSER_GID ?= 1000
 build: build-image ## Build the compute provisioning image
 
 build-image: ## Build the wheel-only destination image
+	digest=$$($(WHEELHOUSE_DIGEST_COMMAND)) && \
 	docker build \
 		--ulimit nofile=65536 \
 		--build-arg APPUSER_UID=$(APPUSER_UID) \
 		--build-arg APPUSER_GID=$(APPUSER_GID) \
-		--build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) \
+		--build-arg WHEELHOUSE_DIGEST=$$digest \
 		-t $(IMAGE_NAME):$(IMAGE_TAG)$(IMAGE_SUFFIX) \
 		-f Dockerfile ../../..
 	$(if $(IMAGE_SUFFIX),,docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX))

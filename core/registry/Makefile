@@ -27,8 +27,10 @@ init-uv:
 
 build: reinit build-images
 
+# The image records the wheelhouse's digest, which a missing declared wheel refuses.
 build-images:
-	docker build --ulimit nofile=65536:65536 -f Dockerfile -t arkhai:registry$(IMAGE_SUFFIX) ../..
+	digest=$$(python3 ../../scripts/wheelhouse_digest.py) && \
+	docker build --ulimit nofile=65536:65536 -f Dockerfile --build-arg WHEELHOUSE_DIGEST=$$digest -t arkhai:registry$(IMAGE_SUFFIX) ../..
 	$(if $(IMAGE_SUFFIX),,docker tag arkhai:registry arkhai:registry-$(GIT_SUFFIX))
 
 deploy:

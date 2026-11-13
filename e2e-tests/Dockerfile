@@ -24,6 +24,9 @@ WORKDIR /app
 # These are built on the host by `make dist` before `docker build`.
 # The Dockerfile is built from the monorepo root:
 #   cd .. && docker build -t arkhai:e2e-tests -f e2e-tests/Dockerfile .
+# The wheelhouse's digest (scripts/wheelhouse_digest.py) keys the install's
+# cache.
+ARG WHEELHOUSE_DIGEST
 COPY .dist/ /.dist/
 COPY scripts/uv_project.py /scripts/uv_project.py
 
@@ -55,6 +58,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-client 
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# The digest of the wheelhouse this image installed, which loading a release
+# candidate requires to be the digest of the wheelhouse it stores. Set before
+# the cross-stage copies, which Podman could otherwise reuse from a build of
+# another wheelhouse.
+ARG WHEELHOUSE_DIGEST
+LABEL org.arkhai.wheelhouse-digest="${WHEELHOUSE_DIGEST}"
 
 COPY --from=builder /app/.venv ./.venv
 COPY --from=builder /app/src ./src

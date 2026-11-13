@@ -15,9 +15,9 @@ IMAGE_SUFFIX ?=
 # Dockerfile passes --find-links /dist on the uv sync CLI instead;
 # this variable is for local development only.
 DIST_DIR ?= ../../../.dist
-# Podman may reuse cross-stage layers after an internal wheel changes. Make the
-# wheel set an explicit cache key for both image stages.
-DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
+# The image records the wheelhouse's digest, its build's cache key, which a
+# missing declared wheel refuses.
+WHEELHOUSE_DIGEST_COMMAND = python3 ../../../scripts/wheelhouse_digest.py
 
 .PHONY: build build-images build-no-cache deploy deploy-storefront init reinit migrate test test-unit test-integration
 
@@ -41,11 +41,13 @@ reinit: ## Force-reinstall verified internal wheels.
 build: build-images
 
 build-images:
-	docker build --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) -t ${IMAGE_NAME}:${IMAGE_TAG}$(IMAGE_SUFFIX) ../../..
+	digest=$$($(WHEELHOUSE_DIGEST_COMMAND)) && \
+	docker build --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg WHEELHOUSE_DIGEST=$$digest -t ${IMAGE_NAME}:${IMAGE_TAG}$(IMAGE_SUFFIX) ../../..
 	$(if $(IMAGE_SUFFIX),,docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX))
 
 build-no-cache: ## Full Docker cache bust — use when .dist/ changes are not picked up by build-images.
-	docker build --no-cache --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) -t ${IMAGE_NAME}:${IMAGE_TAG}$(IMAGE_SUFFIX) ../../..
+	digest=$$($(WHEELHOUSE_DIGEST_COMMAND)) && \
+	docker build --no-cache --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg WHEELHOUSE_DIGEST=$$digest -t ${IMAGE_NAME}:${IMAGE_TAG}$(IMAGE_SUFFIX) ../../..
 	$(if $(IMAGE_SUFFIX),,docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX))
 
 test: reinit test-unit test-integration ## Run all tests

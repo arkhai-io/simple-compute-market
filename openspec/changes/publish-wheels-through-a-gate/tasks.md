@@ -1882,7 +1882,7 @@ revision". Touches:
   - the bare-metal storefront's `Dockerfile`;
   - `e2e-tests/Dockerfile`.
 
-- [ ] 11.1 Every image whose build installs wheels from `.dist` takes the wheelhouse
+- [x] 11.1 Every image whose build installs wheels from `.dist` takes the wheelhouse
   digest as a build argument and records it as the label
   `org.arkhai.wheelhouse-digest` (D3). Those images are the registry, storefront,
   provisioning and bare-metal storefront images, and the e2e-tests image. This replaces
@@ -1890,7 +1890,31 @@ revision". Touches:
   `provisioning/compute/service`, their Makefiles and Dockerfiles.
   - Verify: after `make build`, `docker image inspect` shows each of the five images
     labelled with 11.2's digest of the `.dist` they were built from.
-- [ ] 11.2 Add `scripts/load_candidate.py` and `make load-candidate`. In one invocation
+  - Done (2026-11-13), with the inspection unrun. `scripts/wheelhouse_digest.py`
+    prints the digest: `release_bom.files_digest` over the declared wheels in `.dist`.
+    It refuses a missing declared wheel, naming `make dist`, rather than digest a
+    partial set. Each of the five images' builds runs it first and passes
+    `WHEELHOUSE_DIGEST`. Each Dockerfile declares the argument before copying `.dist/`
+    in its builder stage, so the install's cache keys on it, and records it as the
+    label in its final stage, before the cross-stage copies. The two `cksum`
+    fingerprints, their Makefile variables and their labels are gone.
+    - Unit, `test_wheelhouse_digest.py`: the digest is the dirhash of the declared
+      wheels alone, ignoring an undeclared wheel and another version; a changed wheel
+      changes it; a missing wheel is refused, naming it and `make dist`; the command
+      prints it.
+    - Unit, `test_image_publication_contract.py`, through `make -n` as 10.2's cases:
+      every declared image whose Dockerfile copies `.dist/` computes the digest
+      before its `docker build`, passes it, and labels its final stage with it, and
+      the other two (`frp-grant-admission`, `dev-env`) carry no such label. The images
+      built from the wheelhouse are exactly the five the design names.
+    - Local build evidence, an image build rather than one of TESTING.md's levels:
+      `make build-dev` (10.10) and `make build-candidate` (11.3) each ran every one of
+      the five builds' `digest=$(python3 …/wheelhouse_digest.py) &&` before its
+      `docker build`, and each build succeeded. A failing digest would have stopped
+      the build, so each got a digest; the logs do not show its value.
+    - Not run: `docker image inspect`, which no rule of this step allows. Validation
+      or the owner can confirm the label on the built images.
+- [x] 11.2 Add `scripts/load_candidate.py` and `make load-candidate`. In one invocation
   and in this order (D3), it:
   1. builds `.dist` once, and runs `make check-release-versions` on it (8.3);
   2. builds every declared image and development image, and the binary (9.2), from that
@@ -1917,7 +1941,59 @@ revision". Touches:
     - no skip-existing flag in any upload;
     - the store receiving exactly the declared wheels, one chart and one binary;
     - a version check failure stopping the load before any build.
-- [ ] 11.3 Section verification.
+  - Done (2026-11-13). `scripts/load_candidate.py` runs every process through one
+    `run` seam:
+    1. `make dist`, `make check-release-versions`, then the wheelhouse digest;
+    2. `docker image rm` of each declared image's local revision tag, refusing a
+       removal that fails for any reason but an absent tag, then `make
+       build-candidate`, a new root target building the binary, the chart's package
+       (`dist-helm`) and every release and development image from `.dist`, and no
+       wheels. Then each declared image's revision tag is inspected, and the chart's
+       package and each binary are looked for. With the earlier tags removed, a tag
+       found was written by this load;
+    3. a refusal, uploading nothing, when the wheelhouse's digest moved, an image's
+       label differs from it (an empty label included), a declared image was not
+       built, or the chart's package or a binary is missing;
+    4. deletes of the revision's `wheelhouse` and `chart` versions in
+       `<prefix>-candidates` and of each binary's in `<prefix>-cli`, a `NOT_FOUND`
+       being already deleted and any other failure a refusal;
+    5. uploads of the declared wheels, the chart's package and each binary, then the
+       pushes of the images and development images through 10.3's functions.
+
+    `make load-candidate` passes the destination, `$(DOCKER_REGISTRY)` and
+    `$(GIT_SUFFIX)`. An image without the label counts as built from no wheelhouse,
+    which 11.1's test backs: every declared image built from the wheelhouse carries
+    it. `make` is run with `IMAGE_SUFFIX=` empty, since a suffixed build writes no
+    revision tag.
+  - Integration, `test_load_candidate.py`: `make`, `docker` and `gcloud` stubbed at the
+    script's `run` (`helm` is reached only inside the stubbed `make`), over a synthetic
+    tree whose declaration, projects and wheelhouse are real files. It shows:
+    - the step order: `make dist` and the version check, every revision tag removed,
+      `make build-candidate`, every inspection before the first delete, every delete
+      before the first upload, and every upload before the first push;
+    - a revision tag removed before the build, so that an image the build did not
+      write is refused rather than passed as an earlier build's, and a removal
+      refused for another reason stopping the load before the build;
+    - the store receiving exactly the declared wheels, not an undeclared one in
+      `.dist`, one chart package and one binary, under the revision;
+    - every image and development image pushed under both tags;
+    - no command carrying `--skip-existing`;
+    - no delete, upload or push when a wheel changes during the build, when an image's
+      label differs or is empty, when a declared image was not built, and when the
+      chart's package and the binary are missing, each refusal named;
+    - a version check failure stopping the load before any build;
+    - a reload deleting versions that exist, and a delete refused for another reason
+      uploading nothing;
+    - an upload failing after the deletes stopping the load;
+    - `make -n load-candidate` passing the destination and the nine-character
+      revision.
+
+    The stub stands in for `gcloud`: its `NOT_FOUND` answer to a delete is the
+    test's own text, and it models no store. The spec delta's reload scenarios are
+    therefore shown as the commands the load runs, not as a store's contents. That
+    `gcloud artifacts versions delete` answers `NOT_FOUND` for a missing version is
+    not shown here; the first real load shows it.
+- [x] 11.3 Section verification.
   - Integration: `make test-release-tooling`; `make check-packaging`.
   - Local build: `make build` with 11.1's label check.
   - Functional checks: `scripts/change-workflow run pre-commit
@@ -1927,6 +2003,94 @@ revision". Touches:
     its revision.
   - End-to-end: the pipeline's three lanes build the labelled images through the changed
     Dockerfiles and must pass unchanged; no scenario runs the load.
+  - Done (2026-11-13). Results:
+    - Local build evidence: `make build-candidate` succeeded at section 10's commit
+      with this section's changes in the worktree. It froze `core_buyer.cli:main` as
+      `.dist/bin/market`, packaged `arkhai-node-operator-0.4.1.tgz`, and tagged the
+      seven declared images `-92d47be09`, the four image builds and the test image's
+      each computing the digest first. 11.1's label inspection is unrun (11.1).
+    - `scripts/change-workflow run pre-commit publish-wheels-through-a-gate`: its
+      functional hooks passed, among them the relock, which changed no lock, `make
+      check-packaging` with `check-release-components` passing over `load-candidate`,
+      and every suite. `make test-release-tooling` passed 2979 tests there.
+    - Its closing `pre-commit` hook failed only on the documentation citations: the
+      same 18 that section 10's run reports (10.10).
+    - After the fresh-context check's fixes, `make test-release-tooling` passed 2981
+      tests, among them `test_load_candidate.py` (16) and
+      `test_image_publication_contract.py` (17). `make check-comment-hygiene` and
+      `make check-release-components` passed. The pre-commit run and the build were
+      not repeated, and the fresh-context check was not run again: the fixes answer
+      its findings and touch only the load script, its tests, the contract test, the
+      seller quickstart and these notes.
+    - No real load was made: the candidate store is provisioned outside this
+      repository, and this step's rules allow no registry write.
+  - End-to-end: confirmed that no scenario runs the load, and none was added. The
+    pipeline's three lanes build the registry, storefront, provisioning, bare-metal
+    storefront and test images through the changed Makefiles and Dockerfiles, so a lane
+    passing shows the digest's build argument breaks no build.
+  - Owed by validation: none beyond section 7's. The new tests run in `tests.yml`'s
+    `test · test-deployment-packaging` job, which section 7 already owes.
+
+### Section 11 notes (2026-11-13)
+
+**How the two sections were committed.** Sections 10 and 11 were implemented in one
+working tree before section 10 was committed. Section 11's hunks were taken out of the
+files both sections change, section 10 was checked and committed, and the hunks were
+restored. Section 10's checks therefore ran with section 11's Dockerfiles and new files
+in the worktree (10.10). The guarded push refuses a worktree that is not clean, so
+section 10's commit was pushed with this one.
+
+**Choices for review.**
+- **An image without the label counts as built from no wheelhouse.** The load cannot
+  tell which images install from `.dist`: only the Makefiles know which Dockerfile
+  builds each image. 11.1's test holds every declared image whose Dockerfile copies
+  `.dist/` to the label, deriving that from the Makefiles through `make -n`. The
+  fresh-context check proposed that the load read the Dockerfiles itself. That needs an
+  image-to-Dockerfile map in the load, a second copy of what the Makefiles say, so it
+  was declined.
+- **`build-candidate` names its build targets**, as `build`, `build-dev` and the lane
+  targets do. The declaration says what a release comprises, and the Makefile how to
+  build it (D6), so a newly declared image needs its build target added here. The load
+  refuses until it is: the earlier revision tag is removed, so a declared image the
+  target does not build is missing.
+- **The load runs `make`**, so its own `check-release-versions` and builds are the same
+  targets an operator runs, and the tests stub them at one seam.
+- **The wheelhouse digest refuses a partial wheelhouse.** Every image built from
+  `.dist` runs it, so `build-seller` now builds the release's whole wheel set
+  (`dist-release-set`) rather than a hand-picked subset, which lacked
+  `arkhai-core-registry` and `arkhai-compute-provisioning-client`.
+
+**From the fresh-context check.** Fixed:
+- an earlier build's revision tag at the same revision passed as this load's; the load
+  now removes each declared image's revision tag before building;
+- the test of the images built from the wheelhouse was named for the design; it now
+  states its invariant;
+- the Dockerfile test now holds the order the cache key depends on: the builder
+  stage's argument before `COPY .dist/`, and the final stage's label before its
+  cross-stage copies;
+- `docs/seller-quickstart.md` described `build-seller`'s old wheel set;
+- the D3 promotion row now names `BUILD_AND_PACKAGING.md`, "Images";
+- the 11.1–11.3 notes overstated their evidence, and 11.3 recorded none.
+
+Declined:
+- the load reading Dockerfiles to refuse an unlabelled image (above);
+- re-digesting the wheels after uploading them: they are read from `.dist` seconds after
+  the check, and a guard for a wheel rebuilt in that window is speculative;
+- calling the `make -n` tests integration: section 10 classes the same tests as unit.
+
+**Outside the plan.**
+- `build-seller` builds `dist-release-set` (above), and `docs/seller-quickstart.md`
+  says so.
+
+**For closeout (13.9).**
+- `BUILD_AND_PACKAGING.md`, "Images": every image built from `.dist` takes
+  `WHEELHOUSE_DIGEST` from `scripts/wheelhouse_digest.py` before its `docker build`,
+  declares it before copying `.dist/`, and records `org.arkhai.wheelhouse-digest` in
+  its final stage before the cross-stage copies. The section's Dockerfile example
+  lacks the argument. 13.9 does not name this; the D3 row now does.
+- `RELEASING.md`: `make load-candidate` removes the declared images' local revision
+  tags before it builds, and refuses when one cannot be removed, for example while a
+  container runs it.
 
 ## 12. The local lanes run a release candidate's images
 
@@ -2120,7 +2284,7 @@ documentation only. A part that needs a code edit returns the change to implemen
 |---|---|---|
 | D1 Continuous integration publishes nothing | `openspec/specs/deployment-state/spec.md`; `docs/development/ARCHITECTURE.md`, "Build, packaging, and initialization"; `docs/development/RELEASING.md` | Pending (13.9, 13.11) |
 | D2 Release candidate, marketplace release, release component, candidate store | `openspec/specs/deployment-state/spec.md`; `docs/development/RELEASING.md` | Pending |
-| D3 Every component of a release candidate is stored under its revision by one load | `openspec/specs/deployment-state/spec.md`; `docs/development/ARCHITECTURE.md`, "Build, packaging, and initialization"; `docs/development/RELEASING.md` | Pending |
+| D3 Every component of a release candidate is stored under its revision by one load | `openspec/specs/deployment-state/spec.md`; `docs/development/ARCHITECTURE.md`, "Build, packaging, and initialization"; `docs/development/RELEASING.md`; `docs/development/BUILD_AND_PACKAGING.md`, "Images" (the `WHEELHOUSE_DIGEST` argument and `org.arkhai.wheelhouse-digest` label of every image built from `.dist`) | Pending |
 | D4 A candidate's revision is nine characters | `openspec/specs/deployment-state/spec.md`; `docs/development/BUILD_AND_PACKAGING.md`, "Checks" | Pending |
 | D5 Loading does not refuse an edited tree | `docs/development/RELEASING.md` | Pending |
 | D6 One declaration of release components | `openspec/specs/deployment-state/spec.md`; `docs/development/RELEASING.md` | Pending |

@@ -85,7 +85,7 @@ _BUILD_PUSH_ACTION = re.compile(r"docker/build-push-action")
 _PUSH = re.compile(r"^\s*push\s*:\s*(?!['\"]?false['\"]?\s*$)(\S.*?)\s*$", re.MULTILINE)
 
 _UPLOADER = re.compile(
-    r"publish_artifacts\.py|\bdocker\s+push\b|\bhelm\s+push\b"
+    r"publish_artifacts\.py|load_candidate\.py|\bdocker\s+push\b|\bhelm\s+push\b"
     r"|\bgcloud\s+artifacts\b|\buv\s+publish\b|\btwine\s+upload\b|\bnpm\s+publish\b")
 _PUBLISH_TARGET = re.compile(r"^(push|publish|clobber)-|^load-candidate$")
 _LANE_TARGET = re.compile(r"^(test-e2e|build-e2e)|^pull-release-images$")

@@ -49,8 +49,10 @@ IMAGE_SUFFIX ?=
 
 build: build-images
 
+# The image records the wheelhouse's digest, which a missing declared wheel refuses.
 build-images: reinit
-	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG)$(IMAGE_SUFFIX) -f e2e-tests/Dockerfile .
+	digest=$$(python3 ../scripts/wheelhouse_digest.py) && \
+	cd .. && docker build --build-arg WHEELHOUSE_DIGEST=$$digest -t $(IMAGE_NAME):$(IMAGE_TAG)$(IMAGE_SUFFIX) -f e2e-tests/Dockerfile .
 	$(if $(IMAGE_SUFFIX),,docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX))
 
 test:

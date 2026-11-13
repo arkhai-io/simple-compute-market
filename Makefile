@@ -306,11 +306,11 @@ build-e2e-native-gate: ## Build the provisioning image the native Ansible gate r
 	$(MAKE) dist
 	$(MAKE) build-provisioning
 
-# Seller-only build: the two runtime images a seller actually needs
-# (`arkhai:storefront`, `arkhai:compute-provisioning`) and just the wheels they
-# consume via --find-links. Skips `build-registry` (sellers point at
+# Seller-only build: the runtime images a seller actually needs (the two
+# storefronts and `arkhai:compute-provisioning`) and the release's wheel set,
+# whose digest each image records. Skips `build-registry` (sellers point at
 # someone else's registry).
-build-seller: init-prerequisites dist-kits dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client ## Build only what a seller needs: storefront + provisioning images.
+build-seller: init-prerequisites dist-release-set ## Build only what a seller needs: storefront + provisioning images.
 	$(MAKE) -j3 build-storefront build-bare-metal-storefront build-provisioning
 
 # Same as build-seller, but the provisioning image's in-container appuser
@@ -358,9 +358,12 @@ build-registry:
 build-storefront:
 	cd domains/vms/storefront && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
+# The image records the wheelhouse's digest, which a missing declared wheel refuses.
 build-bare-metal-storefront:
+	digest=$$(python3 scripts/wheelhouse_digest.py) && \
 	docker build --ulimit nofile=65536:65536 \
 		-f domains/bare_metal/storefront/Dockerfile \
+		--build-arg WHEELHOUSE_DIGEST=$$digest \
 		-t arkhai:bare-metal-storefront$(IMAGE_SUFFIX) .
 	$(if $(IMAGE_SUFFIX),,docker tag arkhai:bare-metal-storefront arkhai:bare-metal-storefront-$(GIT_SUFFIX))
 
@@ -546,9 +549,10 @@ DOCKER_REGISTRY := $(AR_LOCATION)-docker.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-dock
 HELM_REGISTRY   := oci://$(AR_LOCATION)-docker.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-helm
 
 # ---------------------------------------------------------------------------
-# Push — developer pushes of built artifacts to Artifact Registry. Each reads
-# what it pushes from manifests/release-components.json through
-# scripts/publish_artifacts.py, and pushes under the revision GIT_SUFFIX names.
+# Push — developer pushes of built artifacts to Artifact Registry, and the load
+# of a release candidate. Each reads what it pushes from
+# manifests/release-components.json, and pushes under the revision GIT_SUFFIX
+# names. A release candidate is loaded by load-candidate, never by the others.
 #
 # Prerequisites:
 #   make build             — Docker images, and the market binary, built locally
@@ -559,7 +563,7 @@ HELM_REGISTRY   := oci://$(AR_LOCATION)-docker.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX
 
 ARTIFACT_COMMAND = python3 scripts/publish_artifacts.py --project "$(AR_PROJECT)" --location "$(AR_LOCATION)" --prefix "$(AR_PREFIX)"
 
-.PHONY: _require-ar-project test-domains dist-domains push-dev-images push-charts push-cli
+.PHONY: _require-ar-project test-domains dist-domains push-dev-images push-charts push-cli build-candidate load-candidate
 _require-ar-project:
 	@$(ARTIFACT_COMMAND) check
 
@@ -576,6 +580,27 @@ push-charts: _require-ar-project dist-helm ## Push the declared chart's package
 
 push-cli: _require-ar-project ## Upload the declared binaries under the revision
 	$(ARTIFACT_COMMAND) binaries --suffix "$(GIT_SUFFIX)"
+
+# Everything a release candidate stores but its wheels, built from the wheelhouse
+# already in .dist: the market binary, the chart's package, and every release and
+# development image under its revision tag. It builds no wheels, so the load that
+# runs it stores the wheelhouse these were built from.
+build-candidate: ## Build the market binary, the chart's package, and the release and development images from .dist, building no wheels
+	$(MAKE) build-market-binary
+	$(MAKE) dist-helm
+	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning build-frp-grant-admission
+	$(MAKE) build-dev-env
+	$(MAKE) build-test-image
+
+# Load HEAD as a release candidate (scripts/load_candidate.py): build the
+# wheelhouse once and check its versions, build everything else from it, refuse
+# unless every image built from a wheelhouse was built from that one, then replace
+# the revision's stored wheels, chart package and binary and push every declared
+# image and development image under the revision. The candidate store is
+# $(AR_PREFIX)-candidates, provisioned outside this repository.
+load-candidate: _require-ar-project ## Load HEAD as a release candidate: store every declared component under its revision
+	python3 scripts/load_candidate.py --project "$(AR_PROJECT)" --location "$(AR_LOCATION)" \
+		--prefix "$(AR_PREFIX)" --docker-registry "$(DOCKER_REGISTRY)" --revision "$(GIT_SUFFIX)"
 
 # Reviw and agent targets
 
