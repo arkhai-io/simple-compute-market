@@ -12,14 +12,14 @@ reports what they say, and lists the edits the owner may pick. The owner decides
 edit; you propose, measure, and record.
 
 The **default rule** is the one triage accepts findings by (`change-workflow`'s
-CW-d5ac; `docs/agents/change-workflow.md`, "Default acceptance"). Where it was chosen
+CW-d5ac). Where it was chosen
 it was measured as **Rule E**, one of several candidate rules, and its baseline below
 carries that name.
 
 This is not a step of a change. It has no node in the workflow graph, no row in the
 step table, no outcome, and nothing records it in a change's workflow log. The owner
 runs it interactively, in their workspace, which alone holds every cleaned-up change's
-records (`docs/agents/change-workflow.md`, "History and removal"). Nothing runs it
+records (`change-workflow`'s CW-hak6). Nothing runs it
 unattended; if you are in an unattended run, stop and say so. A change's clone is not
 the workspace: if `git remote` lists `workspace`, you are in a clone, whose archive is
 lost with it; stop and ask the owner to run the review in their workspace.
@@ -116,7 +116,7 @@ the ledger for comparison:
   sample's size, each disagreement with its finding, and whether the disagreements
   share a cause.
 - **Waivers.** Each waiver a step recommended, by criterion
-  (`docs/agents/change-workflow.md`, "Waivers"), and the merge's, by its own judgement,
+  (`change-workflow`'s CW-q3dm), and the merge's, by its own judgement,
   with how many the owner took; a recommended waiver the owner declined is a ledger
   correction. Note waivers the owner gave that no step recommended, by reason.
 - **Terms the owner asked about.** Each word or mechanism the owner asked an agent to
@@ -134,8 +134,8 @@ Extract each correction's general principle — from the ledger's entries, and f
 accepted judgement findings — and cluster them. Where several changes carry copies of
 the same dispositions, such as changes planned together from one plan, count them
 once, and say so. Check each cluster against the guidance (the documents
-`scripts/change-workflow config load common` prints, `docs/agents/change-workflow.md`,
-the skills) and the
+`scripts/change-workflow config load common` prints, `change-workflow`'s
+specification and companion, the skills) and the
 repository's `check-*` targets, and place it in one of three kinds:
 
 - **guidance that is false:** the guidance says one thing and the owner repeatedly

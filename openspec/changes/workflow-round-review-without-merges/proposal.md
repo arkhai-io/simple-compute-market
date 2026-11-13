@@ -55,7 +55,7 @@ None.
 
 - `scripts/round_view.py` and its tests, and `make round-view` / `make round-done`.
 - The orchestrate skill's round-view reading, the `change-workflow` spec and
-  architecture, and `docs/agents/change-workflow.md`.
+  architecture, and `docs/change-workflow-handbook.md`.
 
 ## Dependencies and Related Changes
 

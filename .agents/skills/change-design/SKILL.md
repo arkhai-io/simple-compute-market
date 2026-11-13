@@ -378,7 +378,7 @@ once the design review's triage records that the change advances.
 The design phase ends with a design review, not with this skill. Tell the owner
 the design is ready for review and leave the status `in design`. Finishing after a
 return to design, recommend that the owner waive another design review when a
-criterion of `docs/agents/change-workflow.md`'s "Waivers" holds — what this session
+criterion of `change-workflow`'s CW-q3dm holds — what this session
 settled is confined to one requirement's wording, or to a choice the design review
 already weighed — naming the criterion and its evidence; with none holding,
 recommend none. Only the owner waives, and the orchestrating session writes the

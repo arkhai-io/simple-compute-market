@@ -31,6 +31,10 @@ Create or amend the implementation plan only once the design is ready.
 - Identify the permanent documentation destination for every accepted material
   design decision.
 - Include focused validation and relevant integration suites.
+- Name evidence only a push produces — a CI workflow's run, which a change branch's
+  push does not trigger — on its own line of the section's verification task, beside
+  its end-to-end scenarios: `Owed by validation:`, the workflow, the job, and what
+  the job must show. It gates no task (`change-workflow`'s CW-5h8e).
 - End the plan with the closeout task: the workflow's parts, in their order, with the
   repository's own parts at the position the list gives them
   ([Closeout](closeout.md)). Do not defer it to a later review round. Promotion

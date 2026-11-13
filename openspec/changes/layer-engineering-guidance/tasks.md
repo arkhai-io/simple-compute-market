@@ -39,7 +39,11 @@ citations check also reports the change's own `design.md`, `inventory.md`, and
 `tasks.md` citing `docs/agents/domain.md`, which section 3 removes; they are change
 history, resolved with the rest at closeout (task 10.11). From task 3.13 on, the
 same holds for their citations of `docs/agents/change-workflow.md`, which moves to
-`docs/change-workflow-handbook.md`.
+`docs/change-workflow-handbook.md`. Correction, task 3.16 and 3.12: the
+specification index check also wants CW-pkug's entry linked to its renamed heading,
+"Closeout changes only inert paths", and entries for the requirements section 3
+proposes — CW-s7rq, CW-b5cf, CW-e3gt, CW-o9hd, CW-t2lw, and CW-w6vy — each kept or
+dropped by round 3's triage; closeout's promotion writes those it keeps (task 10.9).
 
 ## 1. Inventory of the root and workflow documents
 
@@ -726,7 +730,7 @@ undo task 3.6's tagging of the guide, which stands as done. Files:
 the active changes' documents under `openspec/changes/` that cite the guide;
 `openspec/changes/layer-engineering-guidance/inventory.md`.
 
-- [ ] 3.11 Reclassify the inventory's rows for the guide (its `docs/agents/change-workflow.md`
+- [x] 3.11 Reclassify the inventory's rows for the guide (its `docs/agents/change-workflow.md`
   table) by 58 O5's test: each statement's home is the workflow's specification or
   its companion (wrong if the engine or a skill behaved otherwise), the workflow's
   guidance (wrong if a change's work product were otherwise), or the handbook
@@ -734,7 +738,17 @@ the active changes' documents under `openspec/changes/` that cite the guide;
   the reason naming the test, and `Ambiguous` saying where the test does not decide;
   and drop the guide from "Files and their tags". Verify every row of the guide's
   table names one of the three homes.
-- [ ] 3.12 Move the guide's agent-facing content by those rows (58 O7): a guidance
+  Note: 51 rows, by statement group, each naming its home — the specification (with
+  the requirements stating it, or "proposed"), the companion, the guidance, or the
+  handbook — and a reason naming the test; section 1's rows are kept beneath as
+  superseded history, and its repository rows, moved at task 3.6, are named in the
+  table's preamble. The audit of every guide statement against `spec.md` and the
+  companion was made by three read-only helper subagents, one per third of the guide,
+  each verifying the requirement text it cited; their findings are the rows. The
+  guide is dropped from "Files and their tags", and the restatements' and checks'
+  rows citing its headings name where each now lands. Evidence: inspected; no test
+  applies to a change document.
+- [x] 3.12 Move the guide's agent-facing content by those rows (58 O7): a guidance
   statement into the `docs/guidance/workflow/` file its row names — a new file there
   carrying its frontmatter, joining the workflow table's tags (D18) and `load.common`
   by path; a statement of what the workflow does that a `change-workflow`
@@ -748,7 +762,23 @@ the active changes' documents under `openspec/changes/` that cite the guide;
   the section's notes, for the round's triage to review with the owner, as 31 O1b's
   differing pairs are; the handbook cites the proposed home (72 F2). Verify each
   moved row sits in its destination and no longer in the guide.
-- [ ] 3.13 Make the handbook (D3 as amended, 58 O7): move the guide with `git mv` to
+  Note: no new guidance file was needed, so neither the workflow table nor
+  `load.common` changes. Into the guidance: the `Owed by validation:` line
+  (`working-model.md`, "Plan") and one change per branch (`changes.md`, a new heading).
+  Into the companion: the command's synopsis and `start`'s, `find --json`'s,
+  `clone-remove --base`'s, and `wait`'s details ("The command and its tiers"); the
+  review publishing check's reading, `sent_back`, `refused`, the external review, the
+  record set's tree, and the workflow log's lines ("Reviews are files"); the ledger's
+  line, `revises`, and the standing and cleanup waivers' lines ("The intervention
+  ledger"); one command per Bash call and the harness's refused shapes
+  ("Restrictions bind unattended runs only"); and the stale sentence pointing to the
+  guide for the waiver criteria, which CW-q3dm states, dropped. Six proposed
+  requirements in the `change-workflow` delta, listed under "Section 3's proposed
+  homes" below. Everything else the guide said is stated by a requirement or the
+  companion already, or is the owner's and stays in the handbook; the inventory's
+  rows name which. Evidence: inspected; the strict validation runs in `run
+  pre-commit` (task 3.15).
+- [x] 3.13 Make the handbook (D3 as amended, 58 O7): move the guide with `git mv` to
   `docs/change-workflow-handbook.md`, beside `docs/operator-handbook.md`; remove its
   frontmatter, so it is outside the guidance set (D21); keep only what the owner
   needs to know — starting each step, orchestrating a change, reading a round,
@@ -758,7 +788,29 @@ the active changes' documents under `openspec/changes/` that cite the guide;
   `docs/agents/` directory. Verify the handbook carries no frontmatter, names no
   rule a step must follow without citing its home or its proposed home (72 F2), and
   embeds the diagrams.
-- [ ] 3.14 Re-point every citation of the guide to where its statement now lands:
+  Note: moved with `git mv`, then rewritten for the owner: no frontmatter; sections
+  "Starting a step", "Orchestrating a change", "A change in its own clone",
+  "Reviews" (with "Default acceptance"), "Waivers", "The ledger", and "The engine's
+  command"; a statement of what the workflow does cites the requirement stating it,
+  the companion's heading, or its proposed requirement (CW-o9hd, CW-t2lw), cited by
+  id unmarked, since a "proposed" would go stale at the archive — a proposal round
+  3's triage drops takes its citation with it; the
+  agent-facing rules are gone to the specification, companion, guidance, or a
+  proposed requirement. Repository references the rewrite first brought back (a
+  link to `market-change-workflow`, MCW-3i99, the review models' vendors) were
+  neutralized after the fresh-context check, as task 3.6 had the guide. Kept as the
+  owner meets them, with no requirement to cite: the refusals of `round-view`,
+  `round-done`, and `change-clone-remove`, named in the paragraph after "Section 3's
+  proposed homes". It embeds the graph, step-run, state, and engine-parts
+  diagrams from `openspec/specs/change-workflow/diagrams/`. Corrected while rewriting,
+  as the audit found the guide wrong: `make change-cost` marks inseparable dollars
+  partial (the guide said "a range"); a workspace round view holds review,
+  validation, triage, and implementation (CW-78ul; the guide said "every step that
+  could commit"); the `start` refusals, now in the companion. The empty `docs/agents/`
+  directory could not be removed: `rmdir` was refused (no rule allows it), and Git
+  tracks no empty directory, so the repository holds nothing of it. Evidence:
+  inspected; no test applies.
+- [x] 3.14 Re-point every citation of the guide to where its statement now lands:
   `AGENTS.md`'s "Where the guidance lives" table (the handbook is no workflow
   guidance) and "Agent skills"; every skill citing it; `change-workflow`'s README
   and `spec.md`'s Evidence; `market-change-workflow`'s README, its statement of how
@@ -767,7 +819,25 @@ the active changes' documents under `openspec/changes/` that cite the guide;
   and the active changes' documents under `openspec/changes/` outside the archive.
   Verify `grep -rn 'docs/agents/'` over the tracked tree, outside
   `openspec/changes/archive/` and this change's own documents, finds nothing.
-- [ ] 3.15 Verify the appended tasks, and round 2's triage fixes committed unchecked
+  Note: `AGENTS.md`'s table drops the guide and "Change workflow" points to the
+  handbook; the skills' citations go to the requirement stating each rule (the
+  waiver criteria to CW-q3dm in seven skills; default acceptance to CW-d5ac,
+  CW-t9bx, and CW-9pbk; revisiting to CW-r8vz; interrupting to CW-k2rv; history to
+  CW-hak6; waiving parts to CW-e7lm), `change-orchestrate`'s move into a clone to the
+  handbook, and `change-review`'s guidance basis drops the guide; `change-workflow`'s
+  README and `spec.md`'s Evidence name the handbook; `market-change-workflow`'s
+  provisions drop the guide from the documents every step reads, saying the handbook
+  is read by none; `closeout.md`'s index-check citation goes to CW-jyff;
+  `next_step.py`'s message and the two tests name the handbook's path; eight other
+  changes' documents name it; and the change index's history notes say "the
+  workflow's guide (now `docs/change-workflow-handbook.md`)", as `domain.md`'s were
+  handled. Of the other changes, those whose touched material moved off the guide
+  were re-pointed to it: `test-affected-suite-selection` to the companion, which
+  describes the hooks, and `add-skill-extension-points` to the companion and
+  `closeout.md`; the rest name the handbook, for what changes for the owner. A Grep
+  for `docs/agents/` outside the archive and this change finds nothing. Evidence:
+  the scripts suites (unit), as task 3.15 records.
+- [x] 3.15 Verify the appended tasks, and round 2's triage fixes committed unchecked
   with the return: `make check-agent-skills`; `pytest -q
   scripts/tests/test_change_next_step.py scripts/tests/test_change_workflow_records.py
   scripts/tests/test_change_workflow_assumptions.py scripts/tests/test_change_workflow_config.py`
@@ -778,7 +848,29 @@ the active changes' documents under `openspec/changes/` that cite the guide;
   failure but the two the preamble expects. End-to-end: none; no pipeline scenario
   reads guidance or the handbook, and none is owed. Run after task 3.16, which it
   verifies too.
-- [ ] 3.16 State closeout's rule in inert paths, and give the workflow default inert
+  Note: `make check-agent-skills` OK. The four unit suites ran inside `make
+  test-release-tooling`, which runs every suite under `scripts/tests`: 2867 passed
+  (unit); a direct `pytest` run of the four was refused in the forms tried (no rule
+  allows `uv run --directory scripts pytest`, and `scripts/` has no pytest of its
+  own). `make check-doc-citations CHANGE=` (unscoped) reports, outside this change's
+  own documents, only failures older than section 3 (other changes citing scripts and
+  an `architecture.md` that no longer exist). `scripts/change-workflow config load
+  common` prints the seven workflow guidance files after the five root and
+  cross-system documents; it reads and checks the whole configuration, as every
+  reader does (CW-w8ne), standing in for `check config`, which was refused here.
+  `scripts/change-workflow run pre-commit layer-engineering-guidance`, last run after
+  the fresh-context checks' fixes: `after-functional-change` (relock) passed, changing
+  no lock; `pre-commit-functional` (`make dist-clean`, `make check-packaging`, `make
+  test`, every suite) passed; `pre-commit`'s default checks — change index, tasks,
+  skills, and `scripts/openspec validate layer-engineering-guidance --strict`, "is
+  valid" — passed, standing in for task 3.16's direct strict validation, which was
+  refused here; and `make check-repository` failed only on the two the preamble
+  expects, as corrected above: citations of files the change creates or removed
+  (from its own `design.md`, `proposal.md`, `inventory.md`, and `tasks.md`), and the
+  specification index wanting the six `CW-*` entries, the six proposed ones, and
+  CW-pkug's link moved to its renamed heading. End-to-end scenarios covering the
+  section: none confirmed, as planned. Owed by validation: nothing.
+- [x] 3.16 State closeout's rule in inert paths, and give the workflow default inert
   paths (71 O1; design, "Settled at round 2's repeat triage"). In this change's
   `change-workflow` delta, add CW-pkug as modified — closeout changes only the
   repository's inert paths and changes' records, and a closeout part that would
@@ -797,6 +889,21 @@ the active changes' documents under `openspec/changes/` that cite the guide;
   task 3.12's proposed homes. Verify `scripts/change-workflow openspec validate
   layer-engineering-guidance --strict` passes and `scripts/change-workflow check
   config` accepts the configuration.
+  Note: CW-pkug is renamed, "Closeout changes only inert paths", and modified, with a
+  scenario for a citation inside a skill; CW-n7ra is modified with the default and a
+  scenario for a repository declaring none; both texts are under "Section 3's
+  proposed homes" below. `closeout.md`'s opening cites CW-pkug, and
+  `change-closeout`'s opening restates it. The orchestrating session's edit of
+  `.agents/workflow.toml`, `AGENTS.md` appended to `inert-paths`, was in the worktree
+  as the routing note said, and is committed with the section; no further edit of
+  that file was needed. `scripts/change-workflow openspec validate … --strict` and
+  `check config` were each refused here (no rule allows those forms): the strict
+  validation ran as `run pre-commit`'s default check instead, and `config load
+  common`, which checks the whole configuration as every reader does (CW-w8ne),
+  accepted it (task 3.15). Two tests keep naming an undeclared configuration's
+  Markdown file as not inert (`test_change_workflow_records.py`'s `None` case and
+  `test_change_next_step.py`'s `inert_paths=lambda _: None` case): task 8.4's default
+  flips them, and they are section 8's to change.
 
 Round 2's repeat triage (reviews 71, 72, 73): the owner accepted section 3's
 differing pairs as written (72 F1); task 3.12 gives an agent rule no requirement
@@ -805,6 +912,110 @@ states a proposed home for the triage, and 3.13's check accepts it (72 F2); task
 and the workflow's default inert paths (71 O1); the handbook move is 3.11–3.15, the
 next round (71 O2). The orchestrator's routing observations (73 R1) are workflow
 maintenance after this change merges, outside it.
+
+Section 3's proposed homes (72 F2, 71 O1), for round 3's triage — each a statement
+of the guide no requirement stated, its source, and the home proposed; the full
+texts are in this change's `change-workflow` delta:
+
+- **CW-s7rq A skill restates guidance no stricter than its source.** Source, the
+  guide's "Skills": "A skill that restates a rule from the guidance restates it
+  briefly where its step applies it, and cites it; it is never stricter than its
+  source. A step that needs a stricter rule proposes amending the guidance."
+  Proposed as a requirement: how a skill is written is the skills' behaviour.
+- **CW-b5cf An unattended step's calls take the forms its rules match.** Source,
+  "Skills" (one command per Bash call, the Read tool, the refused shapes) and "The
+  engine's command" (`wait`, never `tail -f`). Proposed as a requirement, the
+  harness's shapes explained in the companion.
+- **CW-e3gt A step checks its entry before it works.** Source, "Skills": planning,
+  the merge, closeout, and archive cleanup ask the computation as they start;
+  "the steps that act on a task list run it first".
+- **CW-o9hd The orchestrating session tells the owner what it starts and leaves the
+  owner's actions to them.** Source, "Orchestrating a change": it says when it starts
+  a long turn, rereads the files after a takeover, and, told that the owner closed an
+  interactive step before it recorded, starts nothing for it and gives the owner the
+  command, never running it.
+- **CW-t2lw A triage's records take their written shapes.** Source, "Default
+  acceptance" (the `Classification:` line, the table's heading, default fixes made
+  with the round's others), "The ledger" (the JSON line's keys, `revises`, the
+  advancing exit's `next`), and "Reviews" (an external review saved verbatim,
+  triaged with its kind, its fields assigned by triage). Restated today only by
+  `change-triage`.
+- **CW-w6vy Waivers are recommended and recorded where they are given.** Source,
+  "Waivers": the recommendation in the step's existing message; planning's and the
+  merge after the archive's recommendations; validation taking a standing waiver
+  only from the log; a standing waiver's ledger line by where it was given; archive
+  cleanup's `validated` line.
+- **Guidance, `changes.md`'s "One change per branch".** Source, "Skills": a note in
+  another change's documents, or a follow-up's proposal, written on the current
+  branch lands with the current change. Proposed as guidance: what a change's work
+  lands as. Its prerequisite sentence cites CW-dtpz rather than naming a branch,
+  since CW-dtpz says "the development branch" and the guide "the branch the change
+  lands on".
+- **Guidance, `working-model.md`'s "Plan", the `Owed by validation:` line.** Source,
+  "Reviews": what a plan writes for evidence only a push produces. Stated before
+  only by `change-plan`; CW-5h8e states that it is owed, not where the plan says so.
+- **CW-pkug, renamed and modified (71 O1).** Was "Closeout changes documentation
+  only": "Closeout MUST change documentation only; a closeout part that would need a
+  code change MUST return the change to implementation." Now "Closeout changes only
+  inert paths": "Closeout MUST change only the repository's inert paths and changes'
+  records; a closeout part that would change any other path MUST return the change
+  to implementation", its scenario kept and one added for a citation inside a skill.
+- **CW-n7ra, modified (71 O1).** Its last sentence was "The engine MUST read no
+  inert path of its own; with none declared, no path is inert and only changes'
+  records are exempt where a requirement exempts them." Now: "Where a repository
+  declares none, the workflow's default MUST apply: `openspec/` and every Markdown
+  file, `**/*.md`. A declaration, an empty one included, MUST replace the default;
+  with an empty one, no path is inert and only changes' records are exempt where a
+  requirement exempts them", with a scenario for a repository declaring none and one
+  for an empty declaration.
+
+Read as the companion's rather than as requirements, by this section's judgement
+for the triage to revisit: the engine details the guide stated and no requirement
+does — the command's synopsis, `find --json`'s fields, `wait`'s bound, the publishing
+check's reading, the `sent_back` and `refused` fields, the record set's names, the
+workflow log's line kinds. Each describes how the engine works rather than a rule a
+step follows, so it went to the companion; promoting any to a requirement is the
+triage's call. Kept in the handbook, as what the owner meets running a command: the
+refusals of `round-view`, `round-done`, and `change-clone-remove` that no
+requirement states — by 58 O5's test the engine's behaviour, so the triage may move
+them to the companion, the handbook keeping their remedies.
+
+Open for round 3's triage, found by the second fresh-context check: under CW-n7ra as
+modified, a repository declaring `inert-paths = []` makes no path inert, and CW-pkug
+as modified would then send every promotion and the archive's own writes back to
+implementation. 71 O1 settled both texts; whether CW-pkug exempts the archive's
+writes and the permanent documents closeout promotes, or an empty declaration is
+accepted as making closeout impossible, is the owner's.
+
+Section 3's re-run notes (handoff):
+
+- Two fresh-context checks ran on the diff; their right findings are fixed (the
+  handbook's uncited statements, its repository references, closeout's examples
+  that leaned on this repository's inert paths, `market-change-workflow`'s list of
+  inert paths missing `AGENTS.md`, wording of CW-t2lw, CW-b5cf, CW-o9hd, CW-w6vy,
+  and CW-n7ra's scenarios, an inventory row's wrong citation, two other changes'
+  re-pointing, and overstated notes). Declined: adding closeout to the
+  `inert-paths` comment in `.agents/workflow.toml` — the comment names who reads the
+  field, which is the engine, and the file is the orchestrating session's to edit;
+  and dropping the handbook from `extract-change-workflow-repository`'s list of what
+  moves with the workflow — the handbook now names no repository document, and which
+  repository owns it is that change's design.
+- Stale until closeout's promotion (task 10.9), as planned: the companion's
+  "Closeout and archival" still says closeout changes documentation only, and
+  `index.md` links CW-pkug's old heading.
+- Section 8 (task 8.4) flips two test cases that name an undeclared configuration's
+  Markdown file as not inert (task 3.16's note).
+- The companion gained engine details from the guide, unpromoted by any
+  requirement; the triage may move any into a requirement (above).
+- `docs/agents/` stays on disk empty in this clone: `rmdir` was refused. Git holds
+  nothing of it.
+- The audit of the guide against `spec.md` and the companion, and both checks, ran
+  as read-only helper subagents; an outage earlier in the session failed the first
+  attempts, which were rerun.
+- Not read in full this session: `ARCHITECTURE.md`, `TESTING.md`, and
+  `DEPLOYMENT_AND_CONFIG.md`, which the section does not touch, and `spec.md` and the
+  companion beyond the requirements and headings the section cites, which the
+  helpers read.
 
 ## 4. The engineering layer: testing
 

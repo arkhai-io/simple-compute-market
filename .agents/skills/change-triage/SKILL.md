@@ -226,7 +226,7 @@ For an implementation round, also take:
   only if the owner waives the rule, judging the changes between the commits: name
   both, summarize what changed (`git log --oneline <reviewed>..<validated>` and the
   paths of `git diff --stat <reviewed> <validated>`), and ask. Recommend the waiver
-  when a criterion of `docs/agents/change-workflow.md`'s "Waivers" holds — here,
+  when a criterion of `change-workflow`'s CW-q3dm holds — here,
   typically, that the two commits differ only in records or documentation —
   naming the criterion and the paths; with none holding, recommend none. Record a
   waiver in the triage file of each record involved and as one ledger line
@@ -322,8 +322,7 @@ For each finding, open what it cites and decide:
 - **Section:** the `tasks.md` section the finding concerns, when it concerns one.
 - **Default acceptance:** whether the finding is accepted by default or discussed.
   It is accepted by default when every condition of the default rule holds
-  (`change-workflow`'s CW-d5ac; `docs/agents/change-workflow.md`, "Default
-  acceptance"), and discussed otherwise:
+  (`change-workflow`'s CW-d5ac), and discussed otherwise:
   - it comes from a review — not a validation record, the owner's notes, or the
     orchestrating session's observations;
   - its severity, as triaged, is not `blocking`;
@@ -408,7 +407,7 @@ still without a disposition and ask about it. The owner may answer several at on
 or say to batch the rest; never propose it.
 
 The default acceptances reach the owner in one table, the form
-`docs/agents/change-workflow.md`'s "Default acceptance" gives — each finding's
+`change-workflow`'s CW-t9bx gives — each finding's
 label, its severity, the finding in one line, and its outcome:
 
 ```markdown
@@ -626,8 +625,8 @@ interface's operations, or the change's scope — so the reviews just triaged no
 longer describe the change, naming the decisions that changed; advancing when the
 fixes are corrections the reviewer would only confirm.
 
-Advancing is the default exit (`docs/agents/change-workflow.md`, "Default
-acceptance"): when you recommend it, take it without asking, and report it in your
+Advancing is the default exit (`change-workflow`'s CW-9pbk): when you recommend
+it, take it without asking, and report it in your
 final report beside the table of default acceptances, with the reason, so the
 owner can revisit it (step 7). When you recommend another round, argue it and ask,
 the table riding on the question (step 3); the owner's answer chooses. The exit is
@@ -718,8 +717,8 @@ status, and say what that review reads.
 The owner may revisit a default acceptance, or the advancing exit you took, after
 this triage finished. The orchestrating session then stops any step started after
 it, records the owner's direction naming this run (`--resumes`), and resumes this
-session with the owner's words (`docs/agents/change-workflow.md`, "Revisiting a
-default acceptance"): a message resuming a finished triage is that revisit.
+session with the owner's words (`change-workflow`'s CW-r8vz): a message resuming
+a finished triage is that revisit.
 
 1. **Check again**: the branch carries the change and the worktree is clean, and,
    for an implementation round, `scripts/change-workflow check round-view` passes.

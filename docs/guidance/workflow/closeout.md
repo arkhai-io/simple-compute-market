@@ -7,9 +7,9 @@ tags: [workflow, closeout]
 Every `tasks.md` for a change, or for a major section within one, ends with a
 closeout task before implementation is considered planned, not invented after a
 review round asks for it. The closeout task works through the parts below, in this
-order, archival last. It changes documentation only: a part that would need a code
-edit returns the change to implementation instead. Why closeout is shaped so is the
-workflow companion's
+order, archival last. It changes only the repository's inert paths and changes'
+records: a part that would change any other path — a comment in code, say — returns
+the change to implementation instead (`change-workflow`'s CW-pkug). Why closeout is shaped so is the workflow companion's
 ([Closeout and archival](../../../openspec/specs/change-workflow/README.md#closeout-and-archival)).
 
 The workflow's parts are these ten, each under its own heading below, with the
@@ -93,10 +93,10 @@ change that creates, renames, supersedes, or removes a change directory reconcil
 the index's links in the same step: a link to a directory that does not exist is a
 blocking defect, as an unresolvable citation always is, not a stale link to fix
 later. The workflow's index check, `scripts/change-workflow check index`, holds each
-row as the workflow's guide lists
-([The review directory](../../agents/change-workflow.md#the-review-directory)); an
-archived change needs no row, since archived rows may be pruned from the index over
-time.
+row — its cells, its link, its status, and its dependencies, each listed and not
+archived — and that every active change has exactly one (`change-workflow`'s
+CW-jyff); an archived change needs no row, since archived rows may be pruned from
+the index over time.
 
 Closeout leaves other rows' `Depends on` as they are: a dependency lands when it is
 `archived`, which is written only once the closeout review's triage records that the
@@ -164,7 +164,8 @@ that pertains to one system sits beside that system's specification, and guidanc
 spanning several systems in the repository's cross-system documents; an exception to
 shared guidance sits beside the component it applies to, or in the repository's root
 guidance when it spans several systems. Move what is misplaced and re-point its
-citations, then run the repository's guidance check. A misplacement that needs a
+citations within the inert paths — a citation outside them returns the change to
+implementation — then run the repository's guidance check. A misplacement that needs a
 decision is reported for the closeout review rather than settled here. A change that
 touched no guidance records that.
 

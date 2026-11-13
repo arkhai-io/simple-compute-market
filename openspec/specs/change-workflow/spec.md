@@ -3624,8 +3624,8 @@ rewriting them.
 
 ## Evidence
 
-- Contributor guide to each step, the review directory, and the ledger:
-  `docs/agents/change-workflow.md`; rationale, diagrams, and current limits:
+- The owner's handbook to each step, directions, waivers, and the ledger:
+  `docs/change-workflow-handbook.md`; rationale, diagrams, and current limits:
   `README.md`; the requirements' organization: `index.md`.
 - Leaf skills: `.agents/skills/change-design/`, `change-plan/`, `change-review/`,
   `change-triage/`, `change-implement/`, `change-validate/`, `change-merge/`,

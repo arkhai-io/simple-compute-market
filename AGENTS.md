@@ -6,13 +6,12 @@ This file defines repository-wide rules for AI-assisted and human implementation
 
 The change workflow's guidance — the working model, closeout, a change's documents,
 OpenSpec's documentation model, change references in code, and where terms live — is
-under [`docs/guidance/workflow/`](docs/guidance/workflow/README.md), beside the
-workflow's guide, [`docs/agents/change-workflow.md`](docs/agents/change-workflow.md).
-What it leaves to the repository is named here:
+under [`docs/guidance/workflow/`](docs/guidance/workflow/README.md). What it leaves
+to the repository is named here:
 
 | Guidance | Where |
 |---|---|
-| The workflow's guidance | [`docs/guidance/workflow/`](docs/guidance/workflow/README.md) and [`docs/agents/change-workflow.md`](docs/agents/change-workflow.md) |
+| The workflow's guidance | [`docs/guidance/workflow/`](docs/guidance/workflow/README.md) |
 | This repository's closeout parts, run after campaign index currency | [`openspec/README.md`, "This repository's closeout parts"](openspec/README.md#this-repositorys-closeout-parts) |
 | This repository's roadmap | [`docs/development/ROADMAP.md`](docs/development/ROADMAP.md) |
 
@@ -175,10 +174,10 @@ citations").
 
 Each step of an OpenSpec change is a leaf skill under `.agents/skills/`, started
 through `make` or a slash command, or carried from step to step by one
-orchestrating session, `make orchestrate CHANGE=<change>`. See
-`docs/agents/change-workflow.md` for which skill each step uses, orchestrating a
-change, the review files and where a change's records are kept, and the
-intervention ledger.
+orchestrating session, `make orchestrate CHANGE=<change>`. How the owner starts
+each step, orchestrates a change, reads a round, directs, and waives is the
+[change workflow handbook](docs/change-workflow-handbook.md); what the workflow
+does is `change-workflow`'s specification and companion.
 
 ### Deferred work
 

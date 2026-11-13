@@ -153,7 +153,7 @@ above.
   waiver, its reason the owner's. Otherwise stop and ask the owner, naming the paths
   and the commits that changed them, whether the correction is validated first
   (`make validate CHANGE=<change>`) or they waive the check. Recommend the waiver
-  when a criterion of `docs/agents/change-workflow.md`'s "Waivers" holds, naming
+  when a criterion of `change-workflow`'s CW-q3dm holds, naming
   the criterion and its evidence; with none holding, recommend none. Interactively, the
   owner answers in the session: record a waiver as their direction, and compute
   again, which then names archive cleanup:

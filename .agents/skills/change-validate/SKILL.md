@@ -450,7 +450,7 @@ the change, and triage cannot fix it. Settle it now:
    its deletion (`volumes gone`) to delete, the daemon to restart. When it is a
    known environmental failure, already diagnosed in an earlier validation record
    of this change, recommend beside the remedy that the owner may waive the part
-   instead, naming that record, as `docs/agents/change-workflow.md`'s "Waivers" gives the criterion;
+   instead, naming that record, as `change-workflow`'s CW-q3dm gives the criterion;
    with no criterion holding, recommend none. Only the owner waives: a part they
    waive is `waived`, an omission of evidence counted in no result, while one they
    decline to remedy is `inconclusive`.

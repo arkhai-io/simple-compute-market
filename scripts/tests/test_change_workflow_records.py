@@ -50,14 +50,14 @@ def test_a_validation_of_an_ancestor_clears_head_when_only_records_changed(
 
 
 @pytest.mark.parametrize("inert_paths, path, exempt", [
-    (("openspec/", "docs/"), "docs/agents/change-workflow.md", True),
+    (("openspec/", "docs/"), "docs/change-workflow-handbook.md", True),
     (("openspec/", "docs/"), "openspec/specs/x/spec.md", True),
     (("openspec/", "docs/"), "docsite/index.md", False),
     (("openspec/", "docs/"), "scripts/x.py", False),
     (("docs/", "assets/"), "assets/logo.svg", True),
     (("docs/", "assets/"), "openspec/changes/README.md", False),
     # With no inert path declared, only changes' records are exempt.
-    (None, "docs/agents/change-workflow.md", False),
+    (None, "docs/change-workflow-handbook.md", False),
     (None, f"{RECORDS}/interventions.jsonl", True),
     ((), f"{RECORDS}/reviews/05-validation.md", True),
 ])

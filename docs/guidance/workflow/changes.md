@@ -44,6 +44,14 @@ adopting repository provides — and whether each change is compatible, as
 it. Where the engine carries no version of its own, the proposal is where an
 incompatible change is declared.
 
+## One change per branch
+
+One change is implemented per branch. Recording an open question or a note in
+another active change's documents, or writing the proposal of a follow-up change, on
+the current branch is not working that change: the edit lands with the current
+change. A prerequisite — a change this one must wait for — is proposed apart, since
+it must land first (`change-workflow`'s CW-dtpz).
+
 ## Open questions and prescribed tasks
 
 An item may not appear under a change's `## Open questions` while a non-decision

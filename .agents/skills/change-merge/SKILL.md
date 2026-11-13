@@ -371,8 +371,8 @@ their evidence.
 **Validation.** The merged `HEAD` is validated before the exit you named — with the
 inert paths exempt before archive cleanup, records only before the merge review —
 and a failed validation brings the change back here to repair it. Only the owner
-waives it. Recommend a waiver only when a criterion of `docs/agents/change-workflow.md`'s
-"Waivers" holds, naming it and its evidence, and never after a reconciliation of
+waives it. Recommend a waiver only when a criterion of `change-workflow`'s CW-q3dm
+holds, naming it and its evidence, and never after a reconciliation of
 the change's own code. The waiver is the owner's direction past the guard to the
 exit you named — the merge review when you named it, archive cleanup otherwise — so
 a review you chose is not skipped with the validation: skipping both is the owner's

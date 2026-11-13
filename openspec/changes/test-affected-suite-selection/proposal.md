@@ -82,7 +82,7 @@ None.
   the `scripts/tests` suite.
 - The new check, added to `make check-packaging`.
 - `.agents/skills/change-implement/SKILL.md`, `docs/development/TESTING.md`,
-  and `docs/agents/change-workflow.md`.
+  and `openspec/specs/change-workflow/README.md`, which describes the hooks.
 
 ### Workflow engine interfaces
 

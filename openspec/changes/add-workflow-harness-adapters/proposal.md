@@ -112,7 +112,7 @@ profile can run a step under it.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
-`docs/agents/change-workflow.md` changes with it.
+`docs/change-workflow-handbook.md` changes with it.
 
 The lesser goal's gap "Writing steps run only on Claude Code" in
 `openspec/changes/README.md` is owned by this change and closes with it.

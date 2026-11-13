@@ -845,7 +845,7 @@ class Computation:
                 f"{state.change}'s branch is not checked out here, but its records are in "
                 "this workspace's reviews/, which a clone would start without: check out "
                 f"its branch here and go on in the workspace, or move it into a clone by "
-                "hand as docs/agents/change-workflow.md describes",
+                "hand as docs/change-workflow-handbook.md describes",
                 routes=["work it in the workspace", "move it into a clone by hand"])
         return self.clone_step(
             f"{state.change}'s branch is checked out neither here nor in a clone of its own",

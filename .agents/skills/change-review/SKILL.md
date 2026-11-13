@@ -287,8 +287,7 @@ and why it holds. The reader must be able to tell "no issue" from "not examined"
 
 - `specification` — a requirement in `openspec/specs/` or the change's own delta; cite it.
 - `guidance` — a written rule in `AGENTS.md`, `docs/guidance/`, `docs/development/`,
-  `docs/agents/change-workflow.md`, or `openspec/README.md`; cite the document and
-  heading.
+  or `openspec/README.md`; cite the document and heading.
 - `evidence` — a claim in the change that the files contradict; cite the files.
 - `judgement` — your view, resting on no written rule. Say so plainly; these are
   often the most valuable findings.

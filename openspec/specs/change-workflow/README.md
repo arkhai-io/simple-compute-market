@@ -7,8 +7,8 @@ them, and the interfaces an adopting repository may rely on. Its
 [index](index.md) organizes the requirements by id into five parts, and this document
 follows the same parts: the process; implementation and validation; reviews and
 triage; the engine; the public surface. It explains why the workflow is shaped as it
-is. How to run each step is in
-[`docs/agents/change-workflow.md`](../../../docs/agents/change-workflow.md); how this
+is. How the owner operates it is the
+[change workflow handbook](../../../docs/change-workflow-handbook.md); how this
 repository fills the roles the workflow leaves to a repository is in
 [`market-change-workflow`](../market-change-workflow/README.md).
 
@@ -122,8 +122,7 @@ review weighed — naming the criterion and its evidence (CW-q3dm); the merge be
 closeout keeps its own judgement. Criteria with no recommendation would leave the
 owner to spot every waiver. Each recommendation is a ledger line, taken or declined,
 so a guidance review can count them by criterion, the evidence a later change would
-need to take a criterion's waivers by default. The criteria themselves are in the
-workflow's guide, under "Waivers".
+need to take a criterion's waivers by default.
 
 A step's judgement of the exit it takes is followed without the owner's
 confirmation unless the exit needs a waiver. A confirmation of a judgement the owner
@@ -600,6 +599,42 @@ owner's workspace ([History lives in the owner's
 workspace](#history-lives-in-the-owners-workspace)), where it stays until an export
 flow carries it elsewhere.
 
+The publishing check reads the draft as a review of the kind and the change asked
+for, its sections in order, and every finding carrying a lens, a basis, a severity,
+evidence, and its alternatives; the run's line lists each send-back's problems as
+`sent_back`, and a refusal that survives as `refused`. A review pasted from
+elsewhere is saved verbatim as the next record, `NN-<kind>-external.md`, and
+triaged with any other review of its kind, the triage assigning its findings' lens,
+basis, severity, and alternatives. The directory reads as the change's history:
+
+```text
+openspec/changes/<change>/reviews/
+  01-design.md                       a review: summary, assessment, questions, findings
+  01-design.triage.md                each finding's position and the owner's disposition
+  02-implementation.md               an implementation review, run beside 03
+  03-validation.md                   validation of the same commit
+  04-implementation-owner.md         the owner's notes on the round, verbatim
+  02-implementation.triage.md        one triage file beside each record triaged
+  03-validation.triage.md
+  04-implementation-owner.triage.md
+  05-design-external.md              a review pasted from elsewhere
+  06-orchestrator.md                 the orchestrating session's observations of the tooling
+  pull-request.md                    archive cleanup's merge drafts
+  workflow.jsonl                     one line per run, unattended or recorded, and per orchestrator decision
+  transcripts/
+    01-design.log                    the reviewer's whole session
+    07-implement.jsonl               an unattended step's event stream
+    07-implement.progress            one line per tool call, as `make change-watch` shows it
+```
+
+A run whose answer was still not a review after its send-back publishes nothing,
+its draft kept beside its transcript as `transcripts/NN-<kind>.rejected.md`.
+`workflow.jsonl` is written by the command alone, which `log <change>` prints: each
+run's outcome with its session, commit, model, cost, and denials, an interactive one
+marked `interactive`; each `round` line; each `orchestrator` line, a decision naming
+the run it resolves or whose denials it read, and, for the owner's direction, its
+target; and a conversion's `convert` line.
+
 ### A finding has a lens, a basis, and a severity
 
 A flat list of finding classes conflates two questions: what kind of attention a
@@ -731,6 +766,22 @@ not the owner takes it, its agent's position naming the recommendation and its
 criterion, a declined one being a correction like any other (CW-n6wy). A step that
 commits nothing leaves the line to the step that next commits: a validation's to the
 triage that reads its record, or archive cleanup for a record no triage reads.
+
+Each line is one JSON object:
+
+```json
+{"review": "03-design", "finding": "F2", "section": null, "lens": "consistency", "basis": "evidence", "severity": "blocking", "agent_position": "agree: <reason>", "owner_disposition": "<what the owner decided>", "summary": "<one line>"}
+```
+
+`review` names the record the finding came from, or `design` for a redirection no
+review raised; `section` is the `tasks.md` section, or `null`. An entry revising an
+earlier one starts its disposition `revises <review> <finding>:`, a revision of a
+revisit included. A standing waiver of validation's parts given as a triage's
+disposition is that triage's line; one given outside a triage, with no step's
+recommendation, is the workflow log's decision alone, where a guidance review finds
+the waivers no step recommended. The owner's waiver of archive cleanup's validation
+of a correction is a line under the closeout review's record, its finding
+`validated`.
 
 ## The engine
 
@@ -875,6 +926,31 @@ too, reading `find --json` or `clone where` rather than the package's functions.
 make fragment's targets, and the repository's own, are conveniences around the
 command and carry no promise. Which subcommands and outputs another party may rely
 on is set out under [The public surface](#the-public-surface).
+
+```text
+scripts/change-workflow start <step> <change> [--unattended] [--allow …] [--sections …] [--session …] [--arguments …] [--fresh]
+scripts/change-workflow next | record | note | review | find | clone | clone-remove [--base …] | clone where
+scripts/change-workflow resume | stop | log | watch | denials | round-view | round-done | cost | history | push [--remote …]
+scripts/change-workflow run <hook> <change> [--base …] | run validation <change> preflight | run validation <change> <part> run|start|collect [--owed …] | run cleanup <change>
+scripts/change-workflow config [--json] | config load <step>|common | config parts <change> [--json] | openspec <arguments>
+scripts/change-workflow check config | check change | check index | check tasks | check push | check skills | check review | check round-view | check graph
+scripts/change-workflow hook post-compaction | convert | wait
+```
+
+`start` checks the configuration whole and refuses, naming it, a field the step
+needs that is absent, before launching anything (CW-t5hz); it refuses an archived
+change for design, planning, and implementation — the merge takes one after the
+archive — and refuses implementation and the steps after it while a round view is
+open. `find --json` prints the change's `name`, `directory`, `archived`, `records`,
+the record set's `format`, and `base`, the landing branch its clone recorded or
+`null`; the merge, every review but the design's, and the closing checks read
+`base`, an argument overriding it for one run. `clone-remove --base` overrides the
+clone's record of the landing branch too, and is needed where it records none.
+`wait <file> <pattern> [--timeout <seconds>]` prints the file's first line matching
+the pattern as soon as it is there, one written before it began included, and exits
+1 after its bound, nine minutes by default, inside a call's ten-minute limit:
+following a command's output with `tail -f … | grep -m1` hangs when the matching
+line is the command's last, so the step table denies the follow forms.
 
 ### The orchestrator relays and routes
 
@@ -1251,6 +1327,13 @@ widens its own or a later step's permissions; a step's permissions change as a
 tracked edit the owner commits, or the orchestrating session commits on the owner's
 word, or by a grant for one run. An interactive run is unaffected: the owner's own
 settings apply, with prompts.
+
+The rules match a call's whole command, so an unattended step runs one command per
+Bash call: a chained command runs only when every command in it is allowed. Two
+shapes the harness refuses whatever the step's rules allow, each costing a denial on
+the run's line: a `find` over `/` or `/etc`, and a path that climbs with `..` after
+a `cd`. A step names such a path from the repository's root, or reads it with the
+Read tool.
 
 No step may edit the repository's configuration either, `.agents/workflow.toml`:
 `[common]` denies the Edit and Write tools on that one file, beside `.claude/**`, so

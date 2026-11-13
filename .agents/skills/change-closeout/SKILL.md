@@ -18,12 +18,13 @@ land. Archive cleanup (`change-archive-cleanup`) — releasing dependents and
 drafting the pull request — follows once that review's triage advances the change,
 and is not closeout's.
 
-Closeout is one session, and it changes documentation only: the change's own
-files, the permanent documents, and the index. The code was last reviewed at
-pre-closeout, and the closeout review reads documentation, so closeout never edits
-code — a part that would need a code edit stops closeout and returns the change to
-implementation. That also means closeout runs no test suites and owes no new
-validation.
+Closeout is one session, and it changes only the repository's inert paths and
+changes' records (`change-workflow`'s CW-pkug): the change's own files, the
+permanent documents, and the index. The code was last reviewed at pre-closeout, and
+the closeout review reads documentation, so closeout never edits code or any other
+path outside the inert paths — a part that would stops closeout and returns the
+change to implementation. That also
+means closeout runs no test suites and owes no new validation.
 
 ## Running unattended
 
@@ -244,7 +245,8 @@ is accepted before the archive puts it in `spec.md`.
 **Guidance placement.** Read each guidance section the change added, moved, or
 rewrote — promoted text included — against the layer test, adjacency, and exception
 placement (`docs/guidance/workflow/closeout.md#guidance-placement`); move what is
-misplaced and re-point its citations, then run the repository's guidance check where
+misplaced and re-point its citations within the inert paths — a citation outside them
+returns the change to implementation — then run the repository's guidance check where
 its closeout parts name one. Report a placement that needs a decision for the
 closeout review; never settle it yourself. A change that touched no guidance records
 that.

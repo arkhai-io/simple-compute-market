@@ -175,7 +175,7 @@ plan on an answer the design review did not cover.
    `design.md`.
 3. Ask the owner whether the change needs another design review for it, or whether
    they waive the review, recommending the waiver when a criterion of
-   `docs/agents/change-workflow.md`'s "Waivers" holds — the decision is confined to
+   `change-workflow`'s CW-q3dm holds — the decision is confined to
    one requirement's wording, or to a choice the design review already weighed —
    naming it, and none otherwise. A waiver is the owner's call. Record it as a
    ledger entry with `"review": "plan"`, the decision as `finding`, lens

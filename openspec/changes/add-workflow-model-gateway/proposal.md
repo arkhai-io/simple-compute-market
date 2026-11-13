@@ -83,7 +83,7 @@ of the runner ever holding them in a running container.
 - `scripts/change_workflow/cost.py` and `scripts/change_cost.py`, for cost metered
   at the gateway.
 - The workflow's specification and architecture companion, and
-  `docs/agents/change-workflow.md`.
+  `docs/change-workflow-handbook.md`.
 
 ## Dependencies and Related Changes
 

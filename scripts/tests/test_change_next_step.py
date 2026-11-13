@@ -941,7 +941,7 @@ def test_a_validation_naming_another_exit_than_its_target_goes_to_the_owner(
 # After a pre-closeout review, closeout's own checks read the documentation, so a
 # triage's commit of documents alone needs no validation; before it, only records.
 DOCUMENTS = ["openspec/changes/README.md", f"openspec/changes/{CHANGE}/specs/x/spec.md",
-             "docs/agents/change-workflow.md"]
+             "docs/change-workflow-handbook.md"]
 
 
 def test_a_merge_bringing_only_documents_goes_to_closeout_unvalidated(
@@ -997,7 +997,7 @@ def test_a_documentation_correction_at_closeout_needs_no_validation(tmp_path: Pa
     root = _repository(tmp_path, "in closeout", archived=True)
     _closeout_triaged(root)
 
-    result = _next(root, changed=["docs/agents/change-workflow.md",
+    result = _next(root, changed=["docs/change-workflow-handbook.md",
                                   "openspec/specs/change-workflow/spec.md"])
 
     assert result["step"] == "archive-cleanup"
@@ -1038,7 +1038,7 @@ def test_with_no_inert_path_declared_a_documentation_correction_is_validated(
     root = _repository(tmp_path, "in closeout", archived=True)
     _closeout_triaged(root)
 
-    result = _next(root, changed=["docs/agents/change-workflow.md"], inert_paths=lambda _: None)
+    result = _next(root, changed=["docs/change-workflow-handbook.md"], inert_paths=lambda _: None)
 
     assert (result["step"], result["target"]) == ("validate", {"step": "archive-cleanup"})
 

@@ -128,7 +128,7 @@ direction rather than mechanics.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
-`AGENTS.md`, `docs/agents/change-workflow.md`, `openspec/README.md`, and
+`AGENTS.md`, `docs/change-workflow-handbook.md`, `openspec/README.md`, and
 `openspec/changes/README.md`'s lesser goal change with it. After extraction, the
 lesser goal's remaining gaps belong to the workflow's repository, and this
 repository keeps only its adoption.
