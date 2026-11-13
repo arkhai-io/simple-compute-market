@@ -597,6 +597,46 @@ reviews the layering by hand before round 3.
   migration or a planned change, even while they change constantly;
   `engineering/documentation.md` states it.
 
+### Settled at round 2's repeat triage
+
+The owner settled these at the triage of review 72, their notes 71, and the
+orchestrating session's observations 73, on the workflow layer's fixes and re-plan.
+
+- **72 F1 — Section 3's differing pairs.** The owner reviewed the pairs section 3
+  listed under 31 O1b and accepted each as written: the permanent documents are
+  written at closeout, after the code's last review, and "implemented" no longer
+  includes them; Implement's and the checklist's completion lists are one list; the
+  citation check runs after promotion; and the move's smaller neutralizations stand.
+- **72 F2 — A proposed home for an agent rule with none.** A statement of the guide
+  that tells an agent what to do, that no requirement states and that is no
+  explanation, is given a proposed home — a requirement in this change's
+  `change-workflow` delta, or the workflow's guidance, by 58 O5's test — which the
+  round's triage reviews with the owner, as 31 O1b's differing pairs; the handbook
+  cites it. The skills' restatement rule (the guide's "Skills") is the known case.
+  Rejected: stopping section 3 until each such rule is settled, which an unattended
+  session cannot ask and which splits the handbook over another return; retiring
+  such rules, which shrinks the contract the skills rely on.
+- **71 O1 — Closeout changes only inert paths, and inert paths have a default.**
+  CW-pkug states closeout's rule in the repository's inert paths rather than
+  "documentation", which the workflow never defined: closeout changes only inert
+  paths and changes' records, and a part needing any other change returns the change
+  to implementation. The rule then matches what archive cleanup already exempts from
+  validation (CW-trdu), which reads only what changed after the closeout review's
+  commit, so closeout's own commit is never validated. CW-n7ra gains a default for a
+  repository that declares none, `openspec/` and every Markdown file (`**/*.md`); a
+  declaration, an empty one included, replaces it. This repository keeps its
+  declaration and adds `AGENTS.md`, root guidance that closeout's guidance
+  placement may edit and that no validation proves anything about. A consequence:
+  closeout no longer re-points a citation inside a skill or a docstring; that
+  returns the change to implementation. Rejected: keeping "documentation only",
+  which leaves the term undefined and a non-inert closeout edit unvalidated;
+  deferring it to a later workflow change while this one rewrites `closeout.md`.
+- **73 R1 — Routing observations.** That an owner's notes on a returned triage's
+  fixes and re-plan have no triage short of another review, and that an
+  owner-directed review's exit to triage is passed over while the agreed round's
+  sections are open, are workflow maintenance the owner revisits after this change
+  merges; neither is this change's.
+
 ### Implementation cadence
 
 A review round per layer, so each layer is reviewed by itself, and the code last,

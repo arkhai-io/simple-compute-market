@@ -742,8 +742,11 @@ the active changes' documents under `openspec/changes/` that cite the guide;
   the owner needs it (31 O1b); an explanation the requirements do not hold, into
   `openspec/specs/change-workflow/README.md` under the heading its row names; and a
   statement of what the workflow does that no requirement states and that is no
-  explanation, left in place and listed in the section's notes for the round's
-  triage, since a new requirement is a delta the design must settle. Verify each
+  explanation, given a proposed home — a requirement added to this change's
+  `change-workflow` delta where 58 O5's test reads it as the specification's, or the
+  guidance file where it reads it as guidance — and listed with its source form in
+  the section's notes, for the round's triage to review with the owner, as 31 O1b's
+  differing pairs are; the handbook cites the proposed home (72 F2). Verify each
   moved row sits in its destination and no longer in the guide.
 - [ ] 3.13 Make the handbook (D3 as amended, 58 O7): move the guide with `git mv` to
   `docs/change-workflow-handbook.md`, beside `docs/operator-handbook.md`; remove its
@@ -753,7 +756,8 @@ the active changes' documents under `openspec/changes/` that cite the guide;
   rewritten for the owner where a passage addressed agents; and embed the workflow's
   diagrams from `openspec/specs/change-workflow/diagrams/` by link. Remove the empty
   `docs/agents/` directory. Verify the handbook carries no frontmatter, names no
-  rule a step must follow without citing its home, and embeds the diagrams.
+  rule a step must follow without citing its home or its proposed home (72 F2), and
+  embeds the diagrams.
 - [ ] 3.14 Re-point every citation of the guide to where its statement now lands:
   `AGENTS.md`'s "Where the guidance lives" table (the handbook is no workflow
   guidance) and "Agent skills"; every skill citing it; `change-workflow`'s README
@@ -772,7 +776,35 @@ the active changes' documents under `openspec/changes/` that cite the guide;
   workflow guidance file; and `scripts/change-workflow run pre-commit
   layer-engineering-guidance`, whose functional hooks run every suite, reports no
   failure but the two the preamble expects. End-to-end: none; no pipeline scenario
-  reads guidance or the handbook, and none is owed.
+  reads guidance or the handbook, and none is owed. Run after task 3.16, which it
+  verifies too.
+- [ ] 3.16 State closeout's rule in inert paths, and give the workflow default inert
+  paths (71 O1; design, "Settled at round 2's repeat triage"). In this change's
+  `change-workflow` delta, add CW-pkug as modified — closeout changes only the
+  repository's inert paths and changes' records, and a closeout part that would
+  change any other path returns the change to implementation — keeping its scenario
+  and adding one where a part would re-point a citation inside a skill; and CW-n7ra
+  as modified — where a repository declares no inert paths, the workflow's default
+  applies, `openspec/` and every Markdown file (`**/*.md`), and a declaration, an
+  empty one included, replaces the default — with a scenario for a repository
+  declaring none. Rewrite `closeout.md`'s opening to say closeout changes only the
+  repository's inert paths, citing CW-pkug by id, and `change-closeout`'s
+  restatement ("changes documentation only") to match. Add `AGENTS.md` to
+  `inert-paths` in `.agents/workflow.toml`: the step table denies every step that
+  file, so the orchestrating session makes the edit on the owner's word, as task
+  3.9's, and the section checks it is in the worktree before committing. List both
+  modified requirements' text in the section's notes for the round's triage, as
+  task 3.12's proposed homes. Verify `scripts/change-workflow openspec validate
+  layer-engineering-guidance --strict` passes and `scripts/change-workflow check
+  config` accepts the configuration.
+
+Round 2's repeat triage (reviews 71, 72, 73): the owner accepted section 3's
+differing pairs as written (72 F1); task 3.12 gives an agent rule no requirement
+states a proposed home for the triage, and 3.13's check accepts it (72 F2); task
+3.16, task 8.4, and 10.9's amendment carry closeout's rule restated in inert paths
+and the workflow's default inert paths (71 O1); the handbook move is 3.11–3.15, the
+next round (71 O2). The orchestrator's routing observations (73 R1) are workflow
+maintenance after this change merges, outside it.
 
 ## 4. The engineering layer: testing
 
@@ -1015,7 +1047,17 @@ handling needs it; `scripts/tests/test_change_workflow_config.py`,
   scripts/tests/test_change_workflow_hooks.py` (unit), then `make test-release-tooling`,
   and `scripts/change-workflow run pre-commit layer-engineering-guidance`.
   End-to-end: none; the engine's loading runs in no pipeline scenario, and none is
-  owed.
+  owed. Run after task 8.4, which it verifies too, adding
+  `scripts/tests/test_change_workflow_records.py` to the unit run.
+- [ ] 8.4 Give the engine the default inert paths of CW-n7ra as task 3.16 modifies
+  it (71 O1): where `repository.inert-paths` is absent, the configuration's inert
+  paths are `openspec/` and `**/*.md`; a declared list, an empty one included,
+  replaces the default. Keep `records.inert`'s and `records.exempting`'s docstrings
+  current. Files: `scripts/change_workflow/config.py`,
+  `scripts/change_workflow/records.py`, and their tests. Verify with unit tests: an
+  absent key yields the default; a declared list yields itself; an empty list yields
+  no inert path; and `records.inert` treats a nested Markdown file as inert under
+  the default.
 
 ## 9. `make check-guidance`
 
@@ -1130,6 +1172,10 @@ nothing in it had started.
   enforces", `openspec/specs/change-workflow/diagrams.md`, and `planning-governance`'s
   Evidence. `change-workflow/spec.md` and `market-change-workflow/spec.md` are
   written by the archive in 10.12. No id is retired.
+  Amended at round 2's repeat triage (71 O1): the companion's "Closeout and
+  archival" states closeout's rule in inert paths, and its "A repository's
+  configuration" the default inert paths; `change-workflow/index.md`'s summary lines
+  for CW-pkug and CW-n7ra are revised to match.
 - [ ] 10.10 Guidance placement (D16). Read each guidance section the change added,
   moved, or rewrote — every row of the corrected inventory, and what 10.9 wrote —
   against the layer test, adjacency, and exception placement; move what is misplaced

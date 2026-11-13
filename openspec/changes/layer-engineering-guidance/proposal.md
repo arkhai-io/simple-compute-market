@@ -72,6 +72,10 @@ cites guidance held elsewhere.
   nothing.
 - **The checks are classified.** Every check enforcing guidance is recorded with
   the rule it enforces and that rule's layer.
+- **Closeout changes only inert paths, and inert paths have a default.** Closeout's
+  rule is stated in the repository's inert paths rather than "documentation"; a
+  repository that declares no inert paths gets the workflow's default, `openspec/`
+  and every Markdown file (71 O1).
 
 ## Capabilities
 
@@ -84,7 +88,8 @@ cites guidance held elsewhere.
 - `change-workflow`: the layer tag, the link direction, placement beside the
   system, exceptions, directories carrying no meaning, capability guidance read
   with its capability (added); a `[load]` entry naming a directory (CW-l7hn,
-  modified).
+  modified); closeout changes only inert paths (CW-pkug, modified); default inert
+  paths (CW-n7ra, modified).
 - `market-change-workflow`: the closing checks include the guidance check
   (MCW-c4ek, modified).
 
@@ -98,6 +103,11 @@ As `openspec/README.md`'s change documentation requirements ask:
   a directory entry that is missing, unreadable, or holds no Markdown file.
   Compatible: its output is still one path per line, and no existing configuration
   has a directory entry.
+- **`repository.inert-paths`** — absent, it defaults to `openspec/` and every
+  Markdown file, where no path was inert before. Compatible for a repository that
+  declares it; one that declares none now has its Markdown and OpenSpec documents
+  exempt from validation and the functional hooks, and declares an empty list to
+  keep none.
 - **The skills `change-design`, `change-plan`, `change-implement`,
   `change-review`, `change-triage`, `change-merge`, and `change-closeout`** — read the guidance files in a
   capability's directory beside its specification and companion, and closeout gains
@@ -135,8 +145,9 @@ As `openspec/README.md`'s change documentation requirements ask:
 - New guidance files under `docs/guidance/` and under `openspec/specs/<capability>/`.
 - Every permanent document and skill that cites a moved section, including about 74
   citations of the closeout parts.
-- `.agents/workflow.toml` (`load.common`), `scripts/change_workflow/config.py` and
-  its tests (directory entries).
+- `.agents/workflow.toml` (`load.common`, and `AGENTS.md` among the inert paths),
+  `scripts/change_workflow/config.py` and its tests (directory entries, the default
+  inert paths), `scripts/change_workflow/records.py`'s docstrings.
 - `scripts/check_guidance.py` and its tests, and the `Makefile`'s `check-guidance`
   and `check-repository`.
 - `.agents/skills/change-{design,plan,implement,review,triage,merge,closeout}/SKILL.md`.
@@ -199,4 +210,5 @@ changes.
 - D20: no permanent destination — superseded by D3
 - D21, `make check-guidance`: `openspec/specs/market-change-workflow/spec.md` (MCW-c4ek); `openspec/specs/market-change-workflow/README.md`, "The closing checks"; `openspec/README.md`, "This repository's closeout parts", which names the command
 - D22, capability guidance read with its capability: `openspec/specs/change-workflow/spec.md` (CW-r8cg); the seven skills that read a capability's specification
+- 71 O1, closeout's rule in inert paths and the default inert paths: `openspec/specs/change-workflow/spec.md` (CW-pkug, CW-n7ra) and their `index.md` summary lines; `openspec/specs/change-workflow/README.md`, "Closeout and archival" and "A repository's configuration"; `docs/guidance/workflow/closeout.md`; `.agents/workflow.toml`
 - D23: no permanent destination — `openspec/config.yaml` is unchanged in kind
