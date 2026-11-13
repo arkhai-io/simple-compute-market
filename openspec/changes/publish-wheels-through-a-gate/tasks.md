@@ -638,7 +638,7 @@ on its release branch" and "The release bill of materials holds content identiti
 Touches `scripts/`, `scripts/tests/`, the root `Makefile` and `.helm-version`; it reads
 `.github/workflows/tests.yml`'s Helm version without changing it.
 
-- [ ] 8.1 Add `scripts/release_bom.py`, the layout-1 reader (D10). It provides:
+- [x] 8.1 Add `scripts/release_bom.py`, the layout-1 reader (D10). It provides:
   - parsing of a committed bill of materials, digesting its bytes as committed and never
     re-serializing them;
   - refusal of any layout but `arkhai:bom-layout` = `1`;
@@ -658,13 +658,56 @@ Touches `scripts/`, `scripts/tests/`, the root `Makefile` and `.helm-version`; i
       refused and named;
     - the dirhash of a known file set equals a hand-computed value;
     - two archives of one file set with different tar metadata give one digest.
-- [ ] 8.2 Pin Helm for the chart digest. Add a root `.helm-version` holding the version
+  - Done (2026-11-13). Unit: `scripts/tests/test_release_bom.py`, passing inside `make
+    test-release-tooling`. Its unit cases cover:
+    - the fixture parsing into its subject and components by bom-ref;
+    - the digest taken of the bytes as committed;
+    - each refusal, named:
+      - an unknown or absent layout;
+      - an unknown field, at the top, in a component, and as an unknown property;
+      - a `repository_url`;
+      - a foreign URL: the vcs link changed, a second link, and a URL in a value, named
+        by its component's bom-ref;
+      - a key stated twice, which could otherwise hide a `repository_url` behind a
+        clean copy;
+    - each kind's identity, including:
+      - a wheel's purl naming another file;
+      - a bom-ref of an unknown kind or not matching its name;
+      - the npm row's group and SHA-512;
+    - the header, compared with its JSON type, and the subject, its lifecycles, and a
+      repeated property;
+    - the dirhash of a hand-written manifest built from SHA-256's own test vectors;
+    - two archives of one file set, with different tar metadata and order, giving one
+      digest;
+    - a path an archive stores twice: counted once with one content, refused with two.
+
+    Its real-Helm cases, under 8.2, are integration tests that start a real external
+    process.
+
+    The wheelhouse digest is `files_digest`, the same dirhash over file names. The
+    fixture, `scripts/tests/fixtures/release-bom-layout1.cdx.json`, was written here from
+    D10. No example document from the deployment is in this repository (see the notes).
+- [x] 8.2 Pin Helm for the chart digest. Add a root `.helm-version` holding the version
   `tests.yml`'s `azure/setup-helm` installs (v4.3.0). The digest refuses to run under
   any other `helm version --short`. A test holds `tests.yml`'s setup-helm version equal to
   `.helm-version` (D14).
   - Verify: the equality test passes; a unit test with a stubbed `helm version` refuses a
     mismatch.
-- [ ] 8.3 Add `scripts/check_release_versions.py` and `make check-release-versions`
+  - Done (2026-11-13). `.helm-version` holds `v4.3.0`. `release_bom.package_chart`
+    compares `helm version --short`, before its `+`, with it, then runs the same `helm
+    package` as `make dist-helm`, into a temporary directory. Unit, in
+    `test_release_bom.py`:
+    - `tests.yml`'s `azure/setup-helm` version equals `.helm-version`;
+    - a stubbed Helm reporting v4.2.1 is refused before anything is packaged;
+    - a stubbed Helm reporting the pin packages, and the archive is digested.
+
+    Integration, starting the real pinned Helm, in the same file:
+    - `helm/` packaged twice gives one digest;
+    - the archive stores every file under `charts/`, and only those, exactly twice.
+
+    Both skip without that Helm on `PATH`, except under `HELM_REQUIRED=1`, where a skip
+    fails. Both ran locally under v4.3.0.
+- [x] 8.3 Add `scripts/check_release_versions.py` and `make check-release-versions`
   (D14).
   - It reads the bill of materials at every `marketplace-v*` tag carrying
     `manifests/release-bom.cdx.json`, except the tag being checked.
@@ -689,7 +732,33 @@ Touches `scripts/`, `scripts/tests/`, the root `Makefile` and `.helm-version`; i
 
     `make check-release-versions` on this tree passes, saying no earlier record exists
     (v0.3.0 carries none).
-- [ ] 8.4 Add `scripts/check_release_record.py` and
+  - Done (2026-11-13). Library integration: `scripts/tests/test_check_release_versions.py`
+    runs the check against real git in a scratch repository whose releases are cut as
+    the procedure cuts them. The wheelhouse is a directory of wheel files whose bytes
+    each test chooses. The chart's packaging is stubbed at the check's `chart` seam,
+    since its digest is the reader's and is tested there. It covers each case the task
+    lists, and also:
+    - a tag carrying no record is not an earlier record, and cannot be checked with
+      `--tag`;
+    - a tag that a branch of its name shadows is still read;
+    - a distribution respelled (`arkhai_core` for `arkhai-core`) is still the project
+      an earlier record named;
+    - an earlier record in an unknown layout is refused, not skipped;
+    - a declared wheel missing from the wheelhouse is refused, naming `make dist`;
+    - the command's pass and refusal output.
+
+    Two cut cases, with the tag's own record as the subject:
+    - **no build:** one release, checked with the wheelhouse directory absent and a
+      chart seam that raises if called. It passes, saying no earlier record exists, so
+      the tag was not compared with itself.
+    - **a refusal:** a second release reusing the first one's version with other bytes
+      is refused. Its summary lists only the first release.
+
+    On this tree, `make check-release-versions` printed `OK: no earlier marketplace
+    release carries a bill of materials, so there is nothing to compare the wheelhouse
+    and the packaged chart with.` It still built its subject first: it read every
+    declared wheel in `.dist` and packaged `helm/` under the pinned Helm.
+- [x] 8.4 Add `scripts/check_release_record.py` and
   `make check-release-record TAG=marketplace-v<semver>` (D11, D12). It refuses unless:
   1. the tag's commit is on `releases/<semver>`, and its parent is reachable from the
      default branch;
@@ -707,7 +776,29 @@ Touches `scripts/`, `scripts/tests/`, the root `Makefile` and `.helm-version`; i
     git in a scratch repository: a well-formed record passes, and each of the six rules
     has a failing case, including a record naming a development image and one naming a
     component twice.
-- [ ] 8.5 Section verification.
+  - Done (2026-11-13). Library integration: `scripts/tests/test_check_release_record.py`,
+    with real git in a scratch repository. A well-formed record passes, with an earlier
+    release present. Each rule has a failing case:
+    - **rule 1:** the commit on another branch, no release branch, and a branch point
+      `main` cannot reach. A remote's `main` reaches the branch point too.
+    - **rule 2:** another path changed, and no record added.
+    - **rule 3:** a field layout 1 does not admit, and a `repository_url`.
+    - **rule 4:** another source revision and another version.
+    - **rule 5:** a missing component, an undeclared one, a development image, and a
+      component named twice. The declaration is read at the branch point, not from the
+      checkout, and a branch point with no declaration or a nameless chart is refused.
+    - **rule 6:** an earlier release's version with other bytes.
+
+    It also has cases for:
+    - a name that is not a marketplace tag, and a tag that does not exist;
+    - a tag on a merge commit;
+    - a declared npm package as a component, named without its scope;
+    - the command's output with `--default-branch`.
+
+    On this tree, `make check-release-record TAG=marketplace-v0.3.0` refuses with
+    `marketplace-v0.3.0's commit has 2 parents; a release commit has exactly one`. It
+    stops there, before reading any record. With no `TAG`, the target says to name one.
+- [x] 8.5 Section verification.
   - Unit and integration: `make test-release-tooling` (unit: the reader and the digest;
     integration: the two checks against real git); `make check-packaging`;
     `scripts/change-workflow run pre-commit publish-wheels-through-a-gate`.
@@ -716,6 +807,150 @@ Touches `scripts/`, `scripts/tests/`, the root `Makefile` and `.helm-version`; i
   - Owed by validation: `tests.yml`, job `test · test-deployment-packaging` —
     `azure/setup-helm` installs the version `.helm-version` names, and the chart-digest
     tests run rather than skip and pass.
+  - Done (2026-11-13). Results:
+    - `make test-release-tooling` passed, 2884 tests, none skipped. That includes the
+      reader's unit cases, both checks' integration cases against real git, and the
+      two cases that start the real pinned Helm.
+    - `scripts/change-workflow run pre-commit publish-wheels-through-a-gate`: its
+      functional hooks passed. They include the relock, which changed no lock, `make
+      check-packaging` and every suite.
+    - Its closing `pre-commit` hook passed every check but the documentation
+      citations. That check reports 18 citations in the change's own documents, of the
+      two kinds section 7's notes describe:
+      - files sections 9–12 create: `scripts/buyer_domain_wheels.py`,
+        `check_build_requirements.py`, `load_candidate.py`, `release_images.py` and
+        their tests;
+      - files section 7 deleted.
+
+      Section 8's own files resolve seven of the 25 that section 7 found.
+    - `make check-comment-hygiene` passed.
+    - `make check-release-versions` and `make check-release-record` on the tree behave
+      as 8.3 and 8.4 record.
+  - End-to-end: confirmed that none is owed. No marker in `e2e-tests/` exercises the
+    release record, and none was added.
+  - Owed by validation: confirmed as written, now with `HELM_REQUIRED=1` on that job,
+    so that a skip fails it ("Section 8 notes").
+
+### Section 8 notes (2026-11-13)
+
+**A finding the deployment must agree with: Helm stores each subchart twice.** Under
+Helm v4.3.0, `helm package helm/` writes every file under `charts/` into the archive
+twice, at the same path. Every other file is written once, and the copies are
+byte-identical. Two real-Helm tests hold this: one asserts the archive's repeated
+paths are exactly those under `charts/`, and the other packages `helm/` twice and gets
+one digest. The digest would refuse differing copies. D14 lists "the package's regular
+files by archive path" and does not say what a path stored twice counts as.
+`release_bom.archive_digest` reads a file as its path and contents, so:
+- a path stored twice with one content is one file and one line;
+- a path stored twice with different contents is refused, since the copy a reader takes
+  is then the reader's choice.
+
+The deployment computes the same `arkhai:content-digest` from the stored package. If
+its builder writes one line per archive member, the two digests differ for this chart.
+`make check-release-versions` would then refuse every load at an unchanged chart
+version once the first record exists. The owner should confirm that the deployment's
+builder counts a path once. The rule belongs in the digest's description at closeout:
+RELEASING.md (13.9), and the D14 requirement's wording if review wants it normative.
+
+**Choices for review, where D10–D14 are silent.** No example document from the
+deployment is in this repository. The fixture and the allowlist are therefore written
+from D10's text. If the deployment's example differs, both follow it.
+- The npm row has no purl, since D10's table gives none.
+- An image's purl tag must be `<name>-` followed by the first nine characters of the
+  subject's source revision. A wheel's purl must name its own distribution and version
+  in its file name.
+- The subject's version may carry a semver prerelease suffix.
+- The reader checks fields, kinds, digest formats and URLs. It does not check key
+  order or the serialization rules, which only fix the bytes the digest is taken of.
+- Bom-ref names:
+  - a wheel's is its declared `dist`, as spelled, which the record check holds it to;
+    the version check compares names as PyPI does;
+  - the chart's is its `Chart.yaml` name at the branch point;
+  - an npm package's is its `package.json` name without `@arkhai/`.
+- `PUBLIC_VCS_URL` is a constant in `release_bom.py`.
+- "Every earlier record" is every other tag carrying one. Checking an old tag compares
+  it with later releases too, as D14's rule reads.
+- The record check finds `releases/<semver>` and the default branch locally or as any
+  remote's branch of that name. The default branch is `main`, overridable with
+  `--default-branch`. A tag on a merge commit is refused before rule 1.
+- The version check always builds its subject, even with no earlier record, so every
+  run exercises the Helm pin and the wheelhouse. It packages the chart itself into a
+  temporary directory with `dist-helm`'s command, rather than reading `.dist/*.tgz`,
+  so a stale package cannot be its subject. `check-release-versions` has no `dist`
+  prerequisite: the load (11.2) builds `.dist` once and then runs the check on it.
+
+**Outside the plan.**
+- `release_components.chart_field` reads a `Chart.yaml` scalar without a YAML parser.
+  `check_release_components._chart_name` now uses it instead of its own pattern, and
+  the enumeration rule's refusals on the tree are unchanged.
+- `tests.yml` gains `HELM_REQUIRED` beside `GITLEAKS_REQUIRED` on the packaging job's
+  test step. The plan said section 8 reads `tests.yml` without changing it, meaning its
+  Helm version, which is unchanged. TESTING.md requires a test that starts a real
+  external process to run in a gate that fails on a skip. Without the variable, the
+  real-Helm tests could skip in CI unnoticed.
+
+**From the fresh-context check.** Fixed:
+- a key stated twice, which `json.loads` would have let hide a `repository_url`;
+- `%(refname:short)`, which turns a tag that a branch of its name shadows into
+  `tags/<name>` and dropped its record;
+- the record read as text rather than as committed bytes;
+- the header's `version` accepting `true`;
+- a URL refusal named by JSON path rather than by the component;
+- the Helm skip gate;
+- the tests patching the imported `REPO_ROOT`: each `main` now takes `root`;
+- tests for the branches it named as untested;
+- three task notes that overstated their tests.
+
+Declined from the first check: none.
+
+**From the second fresh-context check.** Fixed:
+- The version check matched a wheel by its distribution exactly as spelled. It now
+  compares names as PyPI does (PEP 503), so a respelled distribution is still the
+  project an earlier record named.
+- `root` now reaches the chart seam's pin.
+- A version must begin with a digit, so it cannot carry a registry host.
+- The declaration's path and the semver pattern are each written once
+  (`release_components.DECLARATION_PATH`, `release_bom.SEMVER`).
+- Tests were added for some refusal branches it listed: a `--tag` with no record, a
+  missing `.helm-version`, and a branch point with no declaration or a nameless chart.
+
+Some refusal branches still have no test. They are each a malformed shape, such as
+properties that are not a list, a purl that is not a string, `helm package` writing
+no archive, or an unreadable `package.json`. None is a guard nobody could trigger.
+
+Declined from the second check:
+- **Moving `git`, `committed_bom` and `recorded_releases` into `release_bom.py`.** Rule
+  6 of the record check is the version check run with the record as its subject. The
+  record check therefore imports the version check's own functions rather than a copy.
+  `release_bom.py` stays the document reader that D12 says the two checks share, and
+  it reads no git.
+- **Rule 1 accepting any remote's `main`.** This is already listed as a choice for
+  review. A fork's remote reaching the branch point would still have to be a commit
+  that the record's source revision names.
+- **The test-level label.** TESTING.md calls tests that start real external processes
+  a third kind of integration test, beside in-process and library tests, run in a gate
+  that fails on a skip. The real-Helm cases are that kind, and `HELM_REQUIRED` is their
+  gate. The notes above call them integration.
+
+**For closeout (13.9).** `docs/development/TESTING.md`, "Chart Render Tests", says the
+supported Helm is `tests.yml`'s and that nothing enforces it. That is still true of the
+render tests. The chart digest, however, now refuses any Helm but `.helm-version`'s,
+and a test holds `.helm-version` equal to `tests.yml`'s version. 13.9 names no home
+for this. Closeout should say in TESTING.md, or in BUILD_AND_PACKAGING.md beside
+`.python-version`, that a Helm bump edits both files.
+
+**For section 11.** `release_bom.files_digest(paths)` is the wheelhouse digest (D3).
+Pass it `release_components.declared_wheels(...)`. `check_release_versions.check(root,
+dist_dir=..., chart=...)` is the load's version check, and its `chart` seam takes the
+chart directory and returns a `ChartPackage`.
+
+**End-to-end.** Confirmed: no scenario exercises this section, and none was added.
+
+**Owed by validation.** Confirmed as written in 8.5. In `tests.yml`, the job `test ·
+test-deployment-packaging` installs Helm through `azure/setup-helm`, sets
+`HELM_REQUIRED=1`, and runs `make test-deployment-packaging`. Its prerequisite
+`test-release-tooling` holds the two real-Helm tests in `test_release_bom.py`. Under
+`HELM_REQUIRED=1` a skip fails, so the job passing shows they ran and passed.
 
 ## 9. The release binary is PyPI's CLI
 

@@ -36,7 +36,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from release_components import REPO_ROOT, DeclarationError, ReleaseComponents, load
+from release_components import REPO_ROOT, DeclarationError, ReleaseComponents, chart_field, load
 
 _SKIPPED_DIRS = {".git", ".venv", "venv", "node_modules", ".dist", "__pycache__",
                  "openspec", "target", ".snapshot"}
@@ -91,9 +91,7 @@ def _chart_name(root: Path, path: str) -> str | None:
     chart = root / path / "Chart.yaml"
     if not chart.is_file():
         return None
-    match = re.search(r"^name:\s*['\"]?([^'\"\s]+)", chart.read_text(encoding="utf-8"),
-                      re.MULTILINE)
-    return match.group(1) if match else None
+    return chart_field(chart.read_text(encoding="utf-8"), "name")
 
 
 def component_patterns(components: ReleaseComponents,

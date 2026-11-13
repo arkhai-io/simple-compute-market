@@ -31,7 +31,8 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DECLARATION = REPO_ROOT / "manifests" / "release-components.json"
+DECLARATION_PATH = "manifests/release-components.json"
+DECLARATION = REPO_ROOT / DECLARATION_PATH
 
 
 class DeclarationError(ValueError):
@@ -190,6 +191,16 @@ def load(path: Path = DECLARATION) -> ReleaseComponents:
     except json.JSONDecodeError as error:
         raise DeclarationError(f"{path}: not JSON: {error}") from error
     return parse(document, str(path))
+
+
+def chart_field(chart_yaml: str, field: str) -> str | None:
+    """A top-level scalar of a `Chart.yaml`, such as its `name` or `version`.
+
+    Read by pattern rather than by a YAML parser, so that every check reading
+    the chart runs under a plain `python3`.
+    """
+    match = re.search(rf"^{re.escape(field)}:\s*['\"]?([^'\"\s#]+)", chart_yaml, re.MULTILINE)
+    return match.group(1) if match else None
 
 
 def project_version(root: Path, distribution: Distribution) -> str:

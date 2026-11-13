@@ -88,10 +88,12 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Build the repository's wheels
         run: make dist-ci
-      # Where the script suites run, a real-gitleaks case that would skip fails instead.
+      # Where the script suites run, a real-gitleaks or real-Helm case that would skip
+      # fails instead.
       - name: make ${{ matrix.target }}
         env:
           GITLEAKS_REQUIRED: ${{ matrix.target == 'test-deployment-packaging' && '1' || '' }}
+          HELM_REQUIRED: ${{ matrix.target == 'test-deployment-packaging' && '1' || '' }}
         run: make ${{ matrix.target }}
 
   # The frps admission plugin's gate, which needs the network: real frps and frpc,
