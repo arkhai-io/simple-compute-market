@@ -11,6 +11,17 @@ Sections 7–12 were replanned on 2026-11-13 against the design as settled by th
 design reviews 11 and 26 (D1–D22), replacing the unchecked sections written before them.
 Section 13 is the closeout.
 
+Amended on 2026-11-13 after section 7 returned to planning ("Section 7 notes"), taking
+option (b), which the owner confirmed:
+- 7.5 is split. The workflow-credential rule joins `make check-packaging` in section 7.
+  The single-enumeration rule is built and unit-tested in section 7, and joins
+  `make check-packaging` in 10.9, once 10.3, 10.7 and 10.8 have made the last publish
+  target read the declaration.
+- `push-charts` (10.7) and `push-cli` (10.8) each gain a task.
+- 1.1e and 2.3 had been left unchecked until closeout, inside sections 1 and 2. They are
+  moved into the closeout (13.6, 13.9), with their text kept where it was, so that the
+  round holding sections 1, 2 and 7 can complete.
+
 - **External prerequisites.** Nothing outside this repository gates implementation. Two
   things a real load needs are outside it, and no task depends on them:
   - the candidate store's repository (`<prefix>-candidates`), which only an operator's
@@ -69,7 +80,8 @@ Section 13 is the closeout.
   grew from 188 to 206 as the new entries picked up the existing
   per-distribution assertions, and all pass.
 
-- [ ] 1.1e `arkhai-vms-provisioning-iac` is the tenth and is **not** built by
+- 1.1e (moved to 13.6 on 2026-11-13, so that the round holding sections 1, 2 and 7 can
+  complete; its text is kept here) `arkhai-vms-provisioning-iac` is the tenth and is **not** built by
   `make dist`, so it cannot be published and is not in the manifest. Whether
   that is deliberate — an Ansible-role package that nobody installs from an
   index — or an omission in the dist graph is a question for whoever owns it.
@@ -77,7 +89,7 @@ Section 13 is the closeout.
   from enumerating what the build already produces.
   - Planning note (2026-11-13): the declaration lists what a release ships (D6), which
     this question does not change. Closeout part 6 (13.6) records it as unowned work in
-    the campaign's index section, and then checks this task.
+    the campaign's index section.
 
 - [x] 1.1c `packages.json` carried a `wheel_only` flag on three distributions
   whose wheels force-include files from outside their own directory, which an
@@ -102,11 +114,12 @@ Section 13 is the closeout.
   than leaving a job whose only consumer is gone.
 - [x] 2.2 Rename the workflow if it no longer publishes to PyPI. A file
   named for what it used to do is the same defect as a stale comment.
-- [ ] 2.3 Record in `docs/development/RELEASING.md` that merging no longer
+- 2.3 (moved to 13.9 on 2026-11-13, so that the round holding sections 1, 2 and 7 can
+  complete; its text is kept here) Record in `docs/development/RELEASING.md` that merging no longer
   publishes, and what to do instead. This is a contributor-workflow break and
   the first person it surprises should find the answer where they look.
   - Planning note (2026-11-13): discharged by closeout's rewrite of RELEASING.md
-    (13.9), which checks this task.
+    (13.9).
 - [x] 2.4 Verified: `make test-release-tooling` passes, and no workflow path
   reaches a PyPI upload.
 
@@ -252,22 +265,34 @@ Touches:
   - Verify: unit tests for the reader's refusals, one case per rule, in
     `scripts/tests/test_release_components.py`; `make test-release-tooling` passes.
 - [ ] 7.5 Add the single-enumeration and workflow-credential check,
-  `scripts/check_release_components.py`, as `make check-release-components`, run by
-  `make check-packaging` (D7). It refuses, naming the file and what it found:
-  - a list of declared distributions, images, development images, the chart or the
-    binary in any workflow, publish target or lane target;
-  - a workflow with no top-level `permissions:`;
-  - a workflow granting `id-token: write`, `packages: write`, `attestations: write` or
-    `contents: write` anywhere;
-  - a reference to a secret other than `GITHUB_TOKEN`;
-  - a named publishing step (`pypa/gh-action-pypi-publish`, `npm publish`,
-    `docker push`, `docker/build-push-action` with `push: true`,
-    `softprops/action-gh-release`, `gh release create`).
+  `scripts/check_release_components.py`, as `make check-release-components` (D7). It
+  refuses, naming the file and what it found:
+  - **the single-enumeration rule:** a list of declared distributions, images,
+    development images, the chart or the binary in any workflow, publish target or lane
+    target;
+  - **the workflow-credential rule:**
+    - a workflow with no top-level `permissions:`;
+    - a workflow granting `id-token: write`, `packages: write`, `attestations: write` or
+      `contents: write` anywhere;
+    - a reference to a secret other than `GITHUB_TOKEN`;
+    - a named publishing step (`pypa/gh-action-pypi-publish`, `npm publish`,
+      `docker push`, `docker/build-push-action` with `push: true`,
+      `softprops/action-gh-release`, `gh release create`).
 
-  It has no exception list.
-  - Verify: unit tests in `scripts/tests/test_check_release_components.py` over
-    synthetic workflow and Makefile text, one case per rule plus a clean case; the
-    check passes on the tree; `make check-packaging` passes.
+  It has no exception list. Each rule can run on its own.
+
+  `make check-packaging` runs the workflow-credential rule from this section on. It does
+  not yet run the single-enumeration rule: five root `Makefile` publish targets still
+  name components, and 10.3, 10.7 and 10.8 make them read the declaration (`push-images`,
+  `push-dev-images`, `clobber-wheels`, `push-charts`, `push-cli`). 10.9 then adds the
+  single-enumeration rule to `make check-packaging`.
+  - Verify:
+    - unit tests in `scripts/tests/test_check_release_components.py` over synthetic
+      workflow and Makefile text, one case per rule plus a clean case;
+    - the workflow-credential rule passes on the tree, and `make check-packaging`
+      passes with it;
+    - the single-enumeration rule, run alone on the tree, refuses exactly those five
+      targets and nothing else. Record its output in the task note.
 - [ ] 7.6 CI resolves every declared distribution against the wheelhouse it builds
   (D1). A test in `scripts/tests/` asserts every declared wheel is in `.dist`, run by
   `make test-release-tooling` inside `test-deployment-packaging`, after `tests.yml`'s
@@ -281,8 +306,8 @@ Touches:
   - Verify: `make check-comment-hygiene` passes.
 - [ ] 7.8 Section verification.
   - Unit and integration:
-    - `make test-release-tooling` (unit: the reader and the check);
-    - `make check-packaging`;
+    - `make test-release-tooling` (unit: the reader and both rules of the check);
+    - `make check-packaging`, running the workflow-credential rule;
     - `make check-comment-hygiene`;
     - `scripts/change-workflow run pre-commit publish-wheels-through-a-gate`, whose
       functional checks pass.
@@ -395,6 +420,11 @@ their history.
 
   `test_ci_evidence.py` and `test_validate_slice.py` keep `publish-pypi.yml` as a
   synthetic name of a workflow validation may not dispatch. It names no file.
+
+**Planning's answer (2026-11-13).** Option (b), confirmed by the owner. 7.5 is amended
+to split the two rules. 10.7 and 10.8 make `push-charts` and `push-cli` read the
+declaration, and 10.9 adds the single-enumeration rule to `make check-packaging`. 1.1e
+and 2.3 move into the closeout (13.6, 13.9). This section resumes from this commit.
 
 **Evidence so far.**
 - Unit: `make test-release-tooling` passed, 2788 tests. Among them are the reader's
@@ -558,7 +588,8 @@ Implements the requirements:
 
 Touches:
 - every Makefile computing `GIT_SUFFIX`;
-- the root `Makefile`'s build and push targets;
+- the root `Makefile`'s build and push targets, including `push-charts`, `push-cli` and
+  `check-packaging`;
 - `scripts/publish_artifacts.py`;
 - `build-constraints.txt`;
 - `scripts/check_build_requirements.py`;
@@ -618,9 +649,26 @@ Touches:
     no revision-suffixed tag and no digest.
   - Verify: `make -C helm test-render` passes; a deliberately mismatched pin fails the
     pin test, checked once and reverted.
-- [ ] 10.7 Section verification.
+- [ ] 10.7 `push-charts` packages the declared chart (`chart.path`) and pushes the package
+  `make dist-helm` writes for it. The package is found from the declaration and the
+  chart's `Chart.yaml`, never named in the recipe (D6, D7). It stays a developer push;
+  no release step names it (D3).
+  - Verify: an integration test with `helm` stubbed at the push's own wrapper shows the
+    pushed file is the declared chart's `<name>-<version>.tgz`. The single-enumeration
+    rule no longer refuses `push-charts`.
+- [ ] 10.8 `push-cli` uploads the declared binary (`binaries[]`'s `path`, `.dist/bin/market`
+  since 9.3) as package `market`, version `<rev9>`. The path is never named in the recipe
+  (D6, D7). It stays a developer push; 11.2's load uploads the binary itself.
+  - Verify: an integration test with `gcloud` stubbed at the upload's own wrapper shows
+    the uploaded file is the declared binary's path, under the nine-character revision.
+    The single-enumeration rule no longer refuses `push-cli`.
+- [ ] 10.9 Add the single-enumeration rule (7.5) to `make check-packaging` (D7). From
+  here on, it also covers the targets sections 11 and 12 add.
+  - Verify: `make check-release-components` runs both rules and passes on the tree;
+    `make check-packaging` passes.
+- [ ] 10.10 Section verification.
   - Unit and integration: `make test-release-tooling`; `make test-deployment-packaging`
-    (render tests); `make check-packaging`.
+    (render tests); `make check-packaging`, now running both rules of 7.5's check.
   - Local build: `make build` succeeds and writes every revision tag.
   - Functional checks: `scripts/change-workflow run pre-commit
     publish-wheels-through-a-gate`.
@@ -637,7 +685,7 @@ Touches:
 
 Delivers D3 and D5. Implements the requirement "A release candidate is stored under its
 revision". Touches:
-- the root `Makefile`'s `load-candidate` and `push-cli`;
+- the root `Makefile`'s `load-candidate`;
 - `scripts/load_candidate.py`;
 - `scripts/publish_artifacts.py`;
 - the image builds that install wheels from `.dist`:
@@ -802,8 +850,8 @@ documentation only. A part that needs a code edit returns the change to implemen
   - Reconcile with `configure-pypi-trusted-publishing`: CI publishes nothing, so its
     trusted-publisher half has no consumer. Record in both rows which of the
     distribution-graph and PyPI-only installation acceptance it still owns.
-  - Record 1.1e's question (`arkhai-vms-provisioning-iac` is not built by `make dist`) as
-    unowned work in the campaign's section, then check 1.1e.
+  - Record the question 1.1e kept in section 1 (`arkhai-vms-provisioning-iac` is not
+    built by `make dist`) as unowned work in the campaign's section.
   - Run `make check-change-index`.
 - [ ] 13.7 **Packaging.** Run `make check-packaging`, now including
   `check-release-components` and `check-build-requirements`, and resolve every failure.
@@ -840,7 +888,8 @@ documentation only. A part that needs a code edit returns the change to implemen
     - how a new PyPI project comes to be owned by the organization;
     - the published-packages table.
 
-    Check 2.3.
+    The rewrite records that merging publishes nothing, and what a contributor does
+    instead, discharging the obligation 2.3 kept in section 2.
   - `docs/development/ARCHITECTURE.md`, "Build, packaging, and initialization": nothing
     reaches a public channel except bytes a deployment validated (D1); every identity in
     a release record is a content identity, and development tags, revisions and
