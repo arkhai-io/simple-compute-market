@@ -7,9 +7,12 @@ tags: [workflow, closeout]
 Every `tasks.md` for a change, or for a major section within one, ends with a
 closeout task before implementation is considered planned, not invented after a
 review round asks for it. The closeout task works through the parts below, in this
-order, archival last. It changes only the repository's inert paths and changes'
-records: a part that would change any other path — a comment in code, say — returns
-the change to implementation instead (`change-workflow`'s CW-pkug). Why closeout is shaped so is the workflow companion's
+order, archival last. It changes only the repository's inert paths, changes'
+records, and the archive's own writes — the change's own documents and their move
+into the archive, its index row, and its deltas merged into the specifications: a
+part that would change any other path — a comment in code, say — returns the change
+to implementation instead (`change-workflow`'s CW-pkug). Why closeout is shaped so is
+the workflow companion's
 ([Closeout and archival](../../../openspec/specs/change-workflow/README.md#closeout-and-archival)).
 
 The workflow's parts are these ten, each under its own heading below, with the

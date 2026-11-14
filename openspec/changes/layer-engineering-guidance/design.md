@@ -637,6 +637,51 @@ orchestrating session's observations 73, on the workflow layer's fixes and re-pl
   sections are open, are workflow maintenance the owner revisits after this change
   merges; neither is this change's.
 
+### Settled at round 3's triage
+
+The owner settled these at the triage of review 86, validation 87, and their notes
+88, on section 3's re-run, the operator handbook.
+
+- **72 F2 — The proposed homes kept.** Every home section 3 proposed stands: CW-s7rq,
+  CW-b5cf, CW-e3gt, CW-o9hd, CW-t2lw, and CW-w6vy in the `change-workflow` delta;
+  `changes.md`'s "One change per branch" and `working-model.md`'s `Owed by
+  validation:` line in the guidance. The guide's engine details stay the companion's,
+  not requirements, since they describe how the engine works rather than a rule a
+  step follows; the refusals of `round-view`, `round-done`, and `change-clone-remove`
+  stay in the handbook as what the owner meets running the commands.
+- **71 O1 — The archive's own writes are exempt.** Under an empty `inert-paths`
+  declaration no path is inert, so CW-pkug as first amended would have returned every
+  archive to implementation, which cannot archive: a loop with no exit. CW-pkug
+  exempts the archive's own writes — the change's own documents and their move into
+  the archive, its row of the change index, and its deltas merged into the
+  specifications — as it exempts changes' records, and CW-n7ra's empty declaration
+  names both exemptions; the merge transcribes delta text already validated and
+  reviewed with the change's commits. The change's documents and its index row are
+  included because closeout writes its task notes and the row as it archives, and
+  the engine's changes' records are only the ledger and `reviews/`.
+  Promotion elsewhere follows the declaration, and under an empty one returns to
+  implementation, where it is validated. Rejected: accepting that an empty
+  declaration makes closeout impossible; making `openspec/` inert whatever the
+  declaration, which contradicts "an empty one included" and changes every commit's
+  hook tier; validating closeout's commit at archive cleanup, which reverses 71 O1's
+  reasoning and changes the engine, a workflow change of its own.
+- **88 O2 — The handbook cites no requirement id** (revises 72 F2 for the handbook).
+  The handbook's reader is the owner, to whom a bare id says nothing; the handbook
+  describes the system well enough that the owner need not open the specification,
+  and its introduction links the specification, its index, and the companion once as
+  the authority. The traceability 72 F2 wanted is the inventory's, whose rows map
+  each statement of the guide to its home. Rejected: ids turned into links, which
+  still interrupt the prose.
+- **88 O1, O3, O4 — The handbook in the order the owner needs it.** An introduction
+  saying what the workflow is and why; a table of contents; orchestrating a change —
+  starting it, the normal course of a change and what it asks of the owner, reading a
+  round, triage, then the interventions, common before rare; parallel changes and
+  where they contend, with the state diagram; the steps — the graph, the step table
+  with how to run each alone, and a paragraph per step on its responsibility, entry,
+  and exits; the state written to disk, for intervening by hand; the engine, with
+  its parts diagram; and customization. Fixed in the triage session, on the owner's
+  word, rather than by re-running section 3.
+
 ### Implementation cadence
 
 A review round per layer, so each layer is reviewed by itself, and the code last,

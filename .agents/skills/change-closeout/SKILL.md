@@ -18,12 +18,13 @@ land. Archive cleanup (`change-archive-cleanup`) — releasing dependents and
 drafting the pull request — follows once that review's triage advances the change,
 and is not closeout's.
 
-Closeout is one session, and it changes only the repository's inert paths and
-changes' records (`change-workflow`'s CW-pkug): the change's own files, the
-permanent documents, and the index. The code was last reviewed at pre-closeout, and
-the closeout review reads documentation, so closeout never edits code or any other
-path outside the inert paths — a part that would stops closeout and returns the
-change to implementation. That also
+Closeout is one session, and it changes only the repository's inert paths, changes'
+records, and the archive's own writes — the change's own documents and their move
+into the archive, its index row, and its deltas merged into the specifications
+(`change-workflow`'s CW-pkug). The code was last reviewed at pre-closeout, and the
+closeout review reads documentation, so closeout never edits code or any other path
+outside those — a part that would stops closeout and returns the change to
+implementation. That also
 means closeout runs no test suites and owes no new validation.
 
 ## Running unattended

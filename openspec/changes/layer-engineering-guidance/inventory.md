@@ -267,6 +267,11 @@ deleted, the handbook citing the requirement where the owner needs it (31 O1b);
 "proposed" marks a home given to a statement no requirement states, for the round's
 triage (72 F2), listed in section 3's notes.
 
+Round 3's triage restructured the handbook (88 O1–O4) and removed its requirement
+ids (88 O2): the handbook headings the rows name are its earlier layout, and a row's
+"citing" names the requirement that is the statement's home, which the handbook no
+longer cites. Round 3's triage kept every proposed home (72 F2).
+
 | Source | Layer | Tags | Destination | Reason | Ambiguous |
 |---|---|---|---|---|---|
 | The opening: what the document covers, and where the contract, companion, guidance, and change index are | workflow | workflow | handbook, its opening | tells the owner where to look; the handbook's map | |

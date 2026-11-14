@@ -42,8 +42,8 @@ same holds for their citations of `docs/agents/change-workflow.md`, which moves 
 `docs/change-workflow-handbook.md`. Correction, task 3.16 and 3.12: the
 specification index check also wants CW-pkug's entry linked to its renamed heading,
 "Closeout changes only inert paths", and entries for the requirements section 3
-proposes — CW-s7rq, CW-b5cf, CW-e3gt, CW-o9hd, CW-t2lw, and CW-w6vy — each kept or
-dropped by round 3's triage; closeout's promotion writes those it keeps (task 10.9).
+proposes — CW-s7rq, CW-b5cf, CW-e3gt, CW-o9hd, CW-t2lw, and CW-w6vy — all kept by
+round 3's triage; closeout's promotion writes them (task 10.9, 86 F1).
 
 ## 1. Inventory of the root and workflow documents
 
@@ -1017,6 +1017,53 @@ Section 3's re-run notes (handoff):
   companion beyond the requirements and headings the section cites, which the
   helpers read.
 
+Round 3's triage (review 86, validation 87, the owner's notes 88), fixes made in the
+triage session (design, "Settled at round 3's triage"):
+
+- 72 F2: every proposed home above is kept, and both judgement calls stand; nothing
+  to edit.
+- 71 O1: CW-pkug exempts the archive's own writes — the change's own documents and
+  their move into the archive, its index row, and its deltas merged into the
+  specifications — with a scenario for `inert-paths = []`; CW-n7ra's empty
+  declaration names that exemption beside changes' records; `closeout.md`'s opening
+  and `change-closeout`'s restatement match. The fresh-context check found the first
+  form, exempting only the move and the merge, left closeout's task notes and index
+  row unexempt, which would have kept the loop; widened.
+- 86 F1: task 10.9 amended with the six proposed requirements' index entries and
+  the companion's restatements; the proposal's "Knowledge to promote" gains its 72 F2
+  line.
+- 88 O1–O4: `docs/change-workflow-handbook.md` restructured in the order the owner
+  needs it — an introduction, a table of contents, orchestrating a change (starting,
+  what a change asks of the owner, reading a round, triage, interventions common
+  before rare), parallel changes with the state diagram, the steps (the graph, the
+  step table, a paragraph per step on its responsibility, entry, and exits, review
+  options), the state on disk, the engine with its parts and step-run diagrams, and
+  customization. 88 O2: it cites no requirement id, its introduction linking the
+  specification, its index, and the companion once (revises 72 F2 for the handbook;
+  task 3.13's check of citing each rule's home no longer applies to it). The
+  inventory's guide table notes that its handbook headings name the earlier layout.
+- Evidence: inspected; no focused suite applies to a document. `scripts/change-workflow
+  run pre-commit layer-engineering-guidance`, run after the fresh-context check's
+  fixes, ran the functional tier, since `change-closeout`'s skill lies outside the
+  inert paths: `after-functional-change` passed; `pre-commit-functional` passed
+  (`make test`, every suite); `pre-commit`'s defaults passed (index, tasks, skills,
+  strict OpenSpec validation, "is valid"); `make check-repository` failed only on the
+  two the preamble expects — citations of files the change creates or removed, from
+  its own documents, and the specification index wanting the twelve `CW-*` entries
+  and CW-pkug's renamed link (task 10.9). Comment hygiene passed among its other six
+  checks. End-to-end: none; no scenario reads the handbook or guidance.
+- The fresh-context check of the diff against `d1df2948f` found, and the triage
+  fixed: the handbook's closeout paragraph and the restatements missing the archive's
+  exemption, a stale "outside the inert paths" in `change-closeout`, the
+  customization section saying no step edits the skills or guidance, inert paths
+  described as needing no validation at all, a deployed-validation bullet stating
+  one repository's cluster as fact, the merge's exits read as a fallback, and dropped
+  details (the pre-closeout review's inert-path ancestor, failed validations and
+  closeout's return among the owner's stops, the default rule's last condition, the
+  merge's choice of branch without `FROM`, an external review's file name, the
+  `after-functional-change` hook). It found nothing on unimplemented behaviour, links
+  and anchors, or wording relative to the change.
+
 ## 4. The engineering layer: testing
 
 Delivers the engineering layer's README and its testing files (D1, D3, D7, D17–D19;
@@ -1387,6 +1434,18 @@ nothing in it had started.
   archival" states closeout's rule in inert paths, and its "A repository's
   configuration" the default inert paths; `change-workflow/index.md`'s summary lines
   for CW-pkug and CW-n7ra are revised to match.
+  Amended at round 3's triage (86 F1, 72 F2, 71 O1): `change-workflow/index.md` also
+  gains an entry, with its summary line and link, for each requirement section 3
+  proposed and the triage kept — CW-s7rq under "4. The engine", "Skills from one
+  source"; CW-b5cf under "Permissions"; CW-e3gt under "The next-step computation";
+  CW-o9hd under "The orchestrating session"; CW-t2lw under "3. Reviews and triage",
+  "Triage"; and CW-w6vy under "1. The process", "The owner's directions" — and
+  CW-pkug's entry links its renamed heading, its summary line naming the archive's
+  own writes as exempt; the companion's "Closeout and archival" names that exemption
+  beside the inert paths, and its "A repository's configuration" (under "Inert paths
+  and the documents a step loads") says that with an empty declaration only changes'
+  records and the archive's own writes are exempt. Verify `make check-spec-index`
+  reports no `change-workflow` requirement unlisted.
 - [ ] 10.10 Guidance placement (D16). Read each guidance section the change added,
   moved, or rewrote — every row of the corrected inventory, and what 10.9 wrote —
   against the layer test, adjacency, and exception placement; move what is misplaced

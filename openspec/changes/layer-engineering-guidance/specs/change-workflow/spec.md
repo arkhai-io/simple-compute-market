@@ -219,7 +219,9 @@ line under the closeout review's record, its finding `validated`.
 
 ### Requirement: CW-pkug Closeout changes only inert paths
 
-Closeout MUST change only the repository's inert paths and changes' records; a
+Closeout MUST change only the repository's inert paths, changes' records, and the
+archive's own writes — the change's own documents and their move into the archive,
+its row of the change index, and its deltas merged into the specifications; a
 closeout part that would change any other path MUST return the change to
 implementation.
 
@@ -237,6 +239,14 @@ implementation.
 - **THEN** closeout does not re-point the skill's citation, and the change returns to
   implementation to re-point it
 
+#### Scenario: A repository declares no path inert
+
+- **WHEN** a repository declares `inert-paths = []` and closeout's promotion would
+  write a section of a guidance file
+- **THEN** the change returns to implementation to write it, and once nothing is left
+  to promote, closeout archives the change, its task notes, its index row, its move
+  into the archive, and the merge of its deltas into the specifications exempt
+
 ### Requirement: CW-n7ra The repository's inert paths
 
 The repository's inert paths, `repository.inert-paths`, MUST name the paths a change
@@ -246,8 +256,8 @@ again. An entry without a glob character MUST match a directory or a file whole;
 entry with one MUST match as a pattern over the whole path, `**` spanning any number
 of directories. Where a repository declares none, the workflow's default MUST apply:
 `openspec/` and every Markdown file, `**/*.md`. A declaration, an empty one included,
-MUST replace the default; with an empty one, no path is inert and only changes'
-records are exempt where a requirement exempts them.
+MUST replace the default; with an empty one, no path is inert, and only changes'
+records and the archive's own writes are exempt, where a requirement exempts them.
 
 #### Scenario: A repository marks images inert
 
