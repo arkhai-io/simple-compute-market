@@ -10,8 +10,10 @@ on:
         description: "Release tag to validate (e.g. model-v0.1.0)"
         required: true
 
+# Reading the release's assets needs no more. The workflow's own pass or fail on the
+# tag is the validation's record, so it writes nothing back to the release.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
@@ -104,18 +106,3 @@ jobs:
 
           print('All models validated successfully.')
           "
-
-      - name: Comment on release
-        if: steps.download.outcome == 'success'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release edit "${{ env.RELEASE_TAG }}" \
-            --notes-file <(cat <<EOF
-          $(gh release view "${{ env.RELEASE_TAG }}" --json body -q .body)
-
-          ---
-          **Validation:** All model artifacts passed smoke tests (checkpoint load + forward pass).
-          EOF
-          )

@@ -3,22 +3,27 @@
 # failing after uv's default 3 tries.
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat .python-version 2>/dev/null),$(error .python-version not found))
+# Every wheel builds with the build requirements build-constraints.txt pins; a
+# subproject's Makefile exports it too, since each also runs on its own.
+export UV_BUILD_CONSTRAINT := $(or $(wildcard $(abspath build-constraints.txt)),$(error build-constraints.txt not found))
 
 export UV_HTTP_RETRIES ?= 10
 
-GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+# A release candidate's revision, nine characters on every revision tag and store
+# version; Git's default abbreviation grows with the repository.
+GIT_SUFFIX := $(shell git rev-parse --short=9 HEAD)
 GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
+.PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-release-components check-workflow-credentials check-market-binary check-release-versions check-release-record check-uv-setup check-locks check-uv-version check-python-version check-build-requirements check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
 .PHONY: test-lane-double-controls dist-lane-double-controls test-payments-lane-double test-mediation-lane-double build-tools
 .PHONY: dist-arkhai-core-registry dist-release-set dist-apicredits-sample-app
-.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
+.PHONY: build-market-binary build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
 .PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
@@ -30,18 +35,11 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 # Docker images via --find-links.  Only pure-Python packages (py3-none-any
 # wheels) should be built here; packages with native extensions must be built
 # inside the Docker build context.
-#
-# Upgrade path: replace --find-links with a PEP 503 index served from .dist/
-# by running gen_simple_index.py and passing --index file://${PWD}/.dist/index
-# to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
-# Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-# The wheel set a publishing path builds; publishing workflows call this name.
-# It is the release set alone: the release workflow tars .dist as the
-# marketplace wheelhouse, which carries no distribution only tests depend on —
-# neither the lane doubles' control contract nor the API-credit sample app —
-# since no operator installs one.
-dist-release: ## Build the wheel set for a publishing path.
+# The release set alone: every internal wheel but those only tests depend on —
+# the lane doubles' control contract and the API-credit sample app — since no
+# operator installs one.
+dist-release: ## Build the wheel set a release carries.
 	$(MAKE) dist-release-set
 
 # Every internal wheel but the lane doubles' control contract and the API-credit
@@ -169,7 +167,7 @@ dist-lane-double-controls: ## Build the lane doubles' control-contract wheel int
 dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 	helm package helm/ --destination $(DIST_DIR)
 
-test-release-tooling: dist-identity ## Run release verifier and portable wheelhouse contract tests.
+test-release-tooling: dist-identity ## Run the scripts' tests, among them the release declaration's, its checks', and the wheelhouse's.
 	uv run --no-project --with pytest --with 'eth-account>=0.13,<0.14' \
 		--with 'arkhai-kit-identity' --with pyyaml --find-links "$(DIST_DIR)" \
 		pytest -q scripts/tests
@@ -262,13 +260,16 @@ test-kits:
 # passed it explicitly. A change's Helm validation builds with
 # `IMAGE_SUFFIX=-<change>` and deploys those tags, so two changes' builds never
 # write one tag (scripts/change_namespace.py). Compose, the pipeline lanes, and
-# an owner's own deployments use the bare tags.
+# an owner's own deployments use the bare tags, except that the lanes' Compose
+# files name each release image with IMAGE_SUFFIX when it is set in their
+# environment, as a lane running a release candidate's images sets it
+# (e2e-tests/Makefile).
 IMAGE_SUFFIX ?=
 
-build: ## Build the wheels, the buyer CLI binary, and every runtime image
+build: ## Build the wheels, the release's market binary, and every runtime image
 	$(MAKE) init-prerequisites
 	$(MAKE) dist
-	$(MAKE) build-buyer
+	$(MAKE) build-market-binary
 	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
 	$(MAKE) -j4 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-frp-grant-admission
 
@@ -280,24 +281,36 @@ build-dev: ## Build everything `build` does, the dev chain image, the test image
 
 # One end-to-end lane's images: the wheels, the dev chain with its baked state,
 # the test image (which installs `market` from the wheels, so no lane needs
-# build-buyer), and the runtime images that lane's stack runs. Each lane job
+# the release's binary), and the runtime images that lane's stack runs. Each lane job
 # builds only its own; build-dev keeps building everything for local use. The
 # pipeline runs a lane target on a fresh checkout, so this target, not its
 # caller, makes the wheels first, ordered as `build` orders its steps.
+#
+# With RELEASE_IMAGES=1 the lane runs a release candidate's pulled images, which
+# IMAGE_SUFFIX names (e2e-tests/Makefile), so a lane target builds no declared
+# release image, and builds the rest with no suffix: the lanes' Compose files run
+# those by their bare tags. Unsuffixed, the dev chain's and the test image's builds
+# also write their revision tags.
+E2E_IMAGE_SUFFIX = $(if $(RELEASE_IMAGES),,$(IMAGE_SUFFIX))
+e2e_release_builds = $(if $(RELEASE_IMAGES),,$(1))
+
 build-e2e-base:
 	$(MAKE) init-prerequisites
 	$(MAKE) dist
-	$(MAKE) build-dev-env
-	$(MAKE) build-test-image
+	$(MAKE) build-dev-env IMAGE_SUFFIX=$(E2E_IMAGE_SUFFIX)
+	$(MAKE) build-test-image IMAGE_SUFFIX=$(E2E_IMAGE_SUFFIX)
 
 build-e2e-vm: build-e2e-base ## Build the VM end-to-end lane's images
-	$(MAKE) -j4 build-registry build-storefront build-provisioning build-tools
+	$(MAKE) -j4 $(call e2e_release_builds,build-registry build-storefront build-provisioning) \
+		build-tools IMAGE_SUFFIX=$(E2E_IMAGE_SUFFIX)
 
 build-e2e-bare-metal: build-e2e-base ## Build the bare-metal end-to-end lane's images
-	$(MAKE) -j4 build-registry build-provisioning build-bare-metal-storefront build-tools
+	$(MAKE) -j4 $(call e2e_release_builds,build-registry build-provisioning build-bare-metal-storefront) \
+		build-tools IMAGE_SUFFIX=$(E2E_IMAGE_SUFFIX)
 
 build-e2e-apicredits: build-e2e-base ## Build the API-credit end-to-end lane's images
-	$(MAKE) -j5 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-tools
+	$(MAKE) -j5 $(call e2e_release_builds,build-registry) build-apicredits-service \
+		build-apicredits-storefront build-apicredits-sample-app build-tools IMAGE_SUFFIX=$(E2E_IMAGE_SUFFIX)
 
 # The native Ansible gate's image: only the provisioning image and the wheels it
 # installs, since the gate composes no stack, so no dev chain and no test image.
@@ -308,11 +321,11 @@ build-e2e-native-gate: ## Build the provisioning image the native Ansible gate r
 	$(MAKE) dist
 	$(MAKE) build-provisioning
 
-# Seller-only build: the two runtime images a seller actually needs
-# (`arkhai:storefront`, `arkhai:compute-provisioning`) and just the wheels they
-# consume via --find-links. Skips `build-registry` (sellers point at
+# Seller-only build: the runtime images a seller actually needs (the two
+# storefronts and `arkhai:compute-provisioning`) and the release's wheel set,
+# whose digest each image records. Skips `build-registry` (sellers point at
 # someone else's registry).
-build-seller: init-prerequisites dist-kits dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client ## Build only what a seller needs: storefront + provisioning images.
+build-seller: init-prerequisites dist-release-set ## Build only what a seller needs: storefront + provisioning images.
 	$(MAKE) -j3 build-storefront build-bare-metal-storefront build-provisioning
 
 # Same as build-seller, but the provisioning image's in-container appuser
@@ -323,8 +336,26 @@ build-seller: init-prerequisites dist-kits dist-storefront-client dist-identity 
 build-seller-for-host: ## build-seller with appuser UID/GID matching the current user
 	$(MAKE) build-seller APPUSER_UID=$(shell id -u) APPUSER_GID=$(shell id -g)
 
-build-buyer: init-prerequisites init-buyer
-	cd domains/vms/buyer && make build
+# The release's `market` binary: the buyer CLI frozen with every declared buyer
+# domain, installed from its locked project, core/buyer/market-binary, in the
+# build image that project's Dockerfile pins by digest. scripts/market_binary.py
+# reads the binary's name and output from the declaration entry this target
+# builds, and derives what the freeze needs; check-market-binary holds the
+# project's dependencies to the declaration. The image's smoke test runs
+# `market plugins`. Like the image targets, it builds no wheels: run `make dist`
+# first.
+MARKET_BINARY = python3 scripts/market_binary.py --target $@
+build-market-binary: ## Build the release's linux/amd64 market binary from the wheelhouse into its declared path
+	name=$$($(MARKET_BINARY) name) && \
+	output=$$($(MARKET_BINARY) output-dir) && \
+	entry_point=$$($(MARKET_BINARY) entry-point) && \
+	options=$$($(MARKET_BINARY) pyinstaller-options) && \
+	echo "Freezing $$entry_point as $$output/$$name" && \
+	docker build -f core/buyer/market-binary/Dockerfile \
+		--build-arg "BINARY_NAME=$$name" \
+		--build-arg "ENTRY_POINT=$$entry_point" \
+		--build-arg "PYINSTALLER_OPTIONS=$$options" \
+		--output "type=local,dest=$$output" .
 
 # Regenerate the baked Anvil state + Alkahest address book by running
 # EnvTestManager once and snapshotting its chain (see dev-env/generate_state.py).
@@ -342,10 +373,14 @@ build-registry:
 build-storefront:
 	cd domains/vms/storefront && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
+# The image records the wheelhouse's digest, which a missing declared wheel refuses.
 build-bare-metal-storefront:
+	digest=$$(python3 scripts/wheelhouse_digest.py) && \
 	docker build --ulimit nofile=65536:65536 \
 		-f domains/bare_metal/storefront/Dockerfile \
+		--build-arg WHEELHOUSE_DIGEST=$$digest \
 		-t arkhai:bare-metal-storefront$(IMAGE_SUFFIX) .
+	$(if $(IMAGE_SUFFIX),,docker tag arkhai:bare-metal-storefront arkhai:bare-metal-storefront-$(GIT_SUFFIX))
 
 build-provisioning:
 	cd provisioning/compute/service && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
@@ -527,62 +562,60 @@ AR_PREFIX   ?= $(AR_PROJECT)
 
 DOCKER_REGISTRY := $(AR_LOCATION)-docker.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-docker
 HELM_REGISTRY   := oci://$(AR_LOCATION)-docker.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-helm
-PYTHON_REGISTRY := https://$(AR_LOCATION)-python.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-python/
 
-STOREFRONT_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' core/storefront-client/pyproject.toml | head -1)
-REGISTRY_CLIENT_VERSION   := $(shell sed -n 's/^version = "\(.*\)"/\1/p' core/registry-client/pyproject.toml | head -1)
-PROVISIONING_OPERATOR_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' domains/vms/provisioning/client/pyproject.toml | head -1)
 # ---------------------------------------------------------------------------
-# Push — publish built artifacts to Artifact Registry.
+# Push — developer pushes of built artifacts to Artifact Registry, and the load
+# of a release candidate. Each reads what it pushes from
+# manifests/release-components.json, and pushes under the revision GIT_SUFFIX
+# names. A release candidate is loaded by load-candidate, never by the others.
 #
 # Prerequisites:
-#   make dist              — wheels must exist in .dist/
-#   make build             — Docker images must be built locally
+#   make build             — Docker images, and the market binary, built locally
 #   make build-dev         — additionally required before push-dev-images
-#   make build-buyer       — domains/vms/buyer/dist/market binary must exist
 #
 # Targets can be run individually or all at once via push-runtime-artifacts.
 # ---------------------------------------------------------------------------
 
 ARTIFACT_COMMAND = python3 scripts/publish_artifacts.py --project "$(AR_PROJECT)" --location "$(AR_LOCATION)" --prefix "$(AR_PREFIX)"
 
-.PHONY: _require-ar-project test-domains dist-domains push-dev-images push-charts push-wheels push-cli clobber-wheels
+.PHONY: _require-ar-project test-domains dist-domains push-dev-images push-charts push-cli build-candidate load-candidate
 _require-ar-project:
 	@$(ARTIFACT_COMMAND) check
 
-push-runtime-artifacts: push-images push-charts push-wheels push-cli
+push-runtime-artifacts: push-images push-charts push-cli
 
-push-images: _require-ar-project
-	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target registry --source registry
-	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target storefront --source storefront
-	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target provisioning --source compute-provisioning
-	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target frp-grant-admission --source frp-grant-admission
+push-images: _require-ar-project ## Push the declared images under their revision and bare tags
+	$(ARTIFACT_COMMAND) images --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)"
 
-push-dev-images: _require-ar-project
-	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target dev-env --source dev-env
-	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target e2e-tests --source e2e-tests
+push-dev-images: _require-ar-project ## Push the declared development images under their revision and bare tags
+	$(ARTIFACT_COMMAND) images --development --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)"
 
-push-charts: _require-ar-project dist-helm
-	helm push $(DIST_DIR)/arkhai-node-operator-*.tgz $(HELM_REGISTRY)
-	rm $(DIST_DIR)/arkhai-node-operator-*.tgz
+push-charts: _require-ar-project dist-helm ## Push the declared chart's package
+	$(ARTIFACT_COMMAND) chart --registry "$(HELM_REGISTRY)" --dist-dir "$(DIST_DIR)"
 
-push-wheels: _require-ar-project ## Publish every manifest distribution to the registry.
-	uv run --no-project python scripts/push-distributions.py \
-	  --dist-dir $(DIST_DIR) --registry $(PYTHON_REGISTRY)
+push-cli: _require-ar-project ## Upload the declared binaries under the revision
+	$(ARTIFACT_COMMAND) binaries --suffix "$(GIT_SUFFIX)"
 
-push-cli: _require-ar-project
-	gcloud artifacts generic upload \
-	  --project=$(AR_PROJECT) \
-	  --location=$(AR_LOCATION) \
-	  --repository=$(AR_PREFIX)-cli \
-	  --package=market \
-	  --version=$(GIT_SUFFIX) \
-	  --source=domains/vms/buyer/dist/market
+# Everything a release candidate stores but its wheels, built from the wheelhouse
+# already in .dist: the market binary, the chart's package, and every release and
+# development image under its revision tag. It builds no wheels, so the load that
+# runs it stores the wheelhouse these were built from.
+build-candidate: ## Build the market binary, the chart's package, and the release and development images from .dist, building no wheels
+	$(MAKE) build-market-binary
+	$(MAKE) dist-helm
+	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning build-frp-grant-admission
+	$(MAKE) build-dev-env
+	$(MAKE) build-test-image
 
-clobber-wheels: _require-ar-project
-	$(ARTIFACT_COMMAND) wheel --registry "$(PYTHON_REGISTRY)" --package arkhai-core-storefront-client --version "$(STOREFRONT_CLIENT_VERSION)" --wheel "$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl" --clobber
-	$(ARTIFACT_COMMAND) wheel --registry "$(PYTHON_REGISTRY)" --package arkhai-core-registry-client --version "$(REGISTRY_CLIENT_VERSION)" --wheel "$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl" --clobber
-	$(ARTIFACT_COMMAND) wheel --registry "$(PYTHON_REGISTRY)" --package arkhai-vms-provisioning-operator-client --version "$(PROVISIONING_OPERATOR_CLIENT_VERSION)" --wheel "$(DIST_DIR)/arkhai_vms_provisioning_operator_client-$(PROVISIONING_OPERATOR_CLIENT_VERSION)-py3-none-any.whl" --clobber
+# Load HEAD as a release candidate (scripts/load_candidate.py): build the
+# wheelhouse once and check its versions, build everything else from it, refuse
+# unless every image built from a wheelhouse was built from that one, then replace
+# the revision's stored wheels, chart package and binary and push every declared
+# image and development image under the revision. The candidate store is
+# $(AR_PREFIX)-candidates, provisioned outside this repository.
+load-candidate: _require-ar-project ## Load HEAD as a release candidate: store every declared component under its revision
+	python3 scripts/load_candidate.py --project "$(AR_PROJECT)" --location "$(AR_LOCATION)" \
+		--prefix "$(AR_PREFIX)" --docker-registry "$(DOCKER_REGISTRY)" --revision "$(GIT_SUFFIX)"
 
 # Reviw and agent targets
 
@@ -648,7 +681,25 @@ check-uv-version: ## Fail if the installed uv is older than the minimum that wri
 	@python3 scripts/check_uv_version.py
 
 check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
-	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-build-requirements check-project-layout check-architecture check-release-components
+
+# Every rule of scripts/check_release_components.py; check-workflow-credentials
+# and check-market-binary each run one of them alone.
+check-release-components: ## Fail if a workflow, publish target, or lane target lists release components itself, a workflow holds a publishing credential, the market binary's project bundles other than the declared buyer CLI and domains, or a Makefile abbreviates a revision other than to nine characters
+	@python3 scripts/check_release_components.py
+
+check-workflow-credentials: ## Fail if a workflow holds a credential that could publish, or names a publishing step
+	@python3 scripts/check_release_components.py --rule credentials
+
+check-market-binary: ## Fail unless the market binary's project depends on exactly the declared buyer CLI and buyer domains
+	@python3 scripts/check_release_components.py --rule market-binary
+
+check-release-versions: ## Fail if a wheel or the chart keeps a version an earlier marketplace release recorded with other contents: the wheelhouse and the chart packaged with .helm-version's Helm, or with TAG=marketplace-v<semver> that tag's own record, with no build
+	@python3 scripts/check_release_versions.py $(if $(TAG),--tag $(TAG))
+
+check-release-record: ## Fail unless TAG=marketplace-v<semver> records a marketplace release in the shape the cut makes
+	@test -n "$(TAG)" || { echo "check-release-record: name the tag, TAG=marketplace-v<semver>" >&2; exit 1; }
+	@python3 scripts/check_release_record.py $(TAG)
 
 check-uv-setup: ## Fail if a reinit target or image install names internal packages instead of deriving them
 	@python3 scripts/check_uv_setup.py
@@ -658,6 +709,9 @@ check-locks: ## Fail if a lock is not current with its project, the wheels in .d
 
 check-python-version: ## Fail if anything selects a Python version other than .python-version
 	@python3 scripts/check_python_version.py
+
+check-build-requirements: ## Fail if a project's build requirement is not pinned in build-constraints.txt, or a uv build does not apply it
+	@python3 scripts/check_build_requirements.py
 
 check-project-layout: ## Fail if a distribution is not one package under src/ or cannot install editable
 	@python3 scripts/check_project_layout.py

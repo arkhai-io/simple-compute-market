@@ -105,9 +105,9 @@ def test_each_init_target_builds_every_wheel_its_lock_installs(tmp_path: Path, t
 
 def test_the_release_set_builds_every_wheel_dist_does_but_those_only_tests_depend_on(
         tmp_path: Path) -> None:
-    """`dist-release`, which the release workflow tars as the marketplace
-    wheelhouse, builds every wheel `dist` builds but the two only tests depend
-    on: the lane doubles' control contract, which only the lane doubles and the
+    """`dist-release`, the wheel set a release carries, builds every wheel
+    `dist` builds but the two only tests depend on: the lane doubles' control
+    contract, which only the lane doubles and the
     end-to-end harness install, and the API-credit sample app, the demo API the
     harness drives. `dist`, whose wheels the lanes' images install, and
     `dist-ci`, which CI's suites build before they run, still build both."""

@@ -2,48 +2,47 @@ apiVersion: v2
 name: arkhai-node-operator
 description: Arkhai node operator cloud stack
 type: application
-version: 0.4.0
-appVersion: "0.1.0"
+version: 0.4.1
 
 dependencies:
   - name: dev-env
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "file://charts/dev-env"
     condition: dev-env.enabled
   - name: registry
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "file://charts/registry"
     condition: registry.enabled
   - name: registry
     alias: api-credits-registry
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "file://charts/registry"
     condition: api-credits-registry.enabled
   - name: storefront
-    version: "0.4.0"
+    version: "0.4.1"
     repository: "file://charts/storefront"
     condition: storefront.enabled
   - name: bare-metal-storefront
-    version: "0.4.0"
+    version: "0.4.1"
     repository: "file://charts/bare-metal-storefront"
     condition: bare-metal-storefront.enabled
   - name: provisioning
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "file://charts/provisioning"
     condition: provisioning.enabled
   - name: validate-contracts
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "file://charts/validate-contracts"
     condition: validate-contracts.enabled
   - name: e2e-tests
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "file://charts/e2e-tests"
     condition: e2e-tests.enabled
   - name: payments-lane-double
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "file://charts/payments-lane-double"
     condition: payments-lane-double.enabled
   - name: mediation-lane-double
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "file://charts/mediation-lane-double"
     condition: mediation-lane-double.enabled

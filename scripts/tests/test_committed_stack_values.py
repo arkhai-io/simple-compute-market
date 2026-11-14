@@ -63,10 +63,16 @@ def _render(stack: str) -> dict:
     binary = os.environ.get("E2E_COMPOSE_BINARY")
     command = [binary] if binary else ["docker", "compose"]
     if not shutil.which(command[0]):
+        # CI's packaging job sets COMPOSE_REQUIRED=1, where a skip is a failure.
+        if os.environ.get("COMPOSE_REQUIRED") == "1":
+            pytest.fail("Docker Compose is required for deployment rendering")
         pytest.skip("Docker Compose is required for deployment rendering")
     for name in STACKS[stack]:
         command += ["-f", name]
-    env = {key: value for key, value in os.environ.items() if key != "PROVISIONING_MODE"}
+    # Each stack is read as its committed files give it, not as a lane run's mode
+    # or a release candidate's image suffix would.
+    env = {key: value for key, value in os.environ.items()
+           if key not in ("PROVISIONING_MODE", "IMAGE_SUFFIX")}
     result = subprocess.run(
         [*command, "-p", f"values-{stack}", "--profile", "buyer", "config", "--format", "json"],
         cwd=REPO_ROOT, capture_output=True, text=True, env=env,

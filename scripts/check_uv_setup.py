@@ -9,11 +9,19 @@ internal packages from the project's lock when it runs. This check rejects:
   other than a single call to the script by a path that resolves; and a
   project with tests whose lock installs wheelhouse packages but that has no
   `reinit` target;
-- in Dockerfiles that copy the wheelhouse: those same flags; a `sed` rewrite
-  of a lock's registry; a repository distribution's `name==version`; a
-  `uv sync` or wheelhouse `uv pip install` not made through the script; a call
-  to the script at a path the stage did not copy it to; and a final (runtime)
-  stage that copies the wheelhouse.
+- in Dockerfiles (`Dockerfile*` and `*.Dockerfile`) that copy the wheelhouse:
+  those same flags; a `sed` rewrite of a lock's registry; a repository
+  distribution's `name==version`; a `uv sync` not made through the script; a
+  `pip install`, `python -m pip install` or `uv pip install` that passes
+  `--find-links`/`-f` at all, or names a path in `.dist` or where the file
+  copied it, since only the script installs a lock's wheelhouse packages as the
+  lock records them; a call to the script at a path the stage did not copy it
+  to; and a final (runtime) stage that copies the wheelhouse.
+
+These rules apply to every stage of such a file, since a later stage reaches the
+wheelhouse through `--from`. An install that finds the wheelhouse only through
+the environment (`PIP_FIND_LINKS`, `UV_FIND_LINKS`) or a shell variable, and a
+file that bind-mounts the wheelhouse without copying it, are not recognised.
 
 Makefiles are read with Make's rules: backslash-newline joins lines, and a
 comment on a rule line runs to the end of the joined line, so text continued
@@ -42,6 +50,9 @@ SKIPPED_DIRS = {".venv", "node_modules", "openspec", ".git"}
 PACKAGE_FLAG = re.compile(r"--(?:upgrade|reinstall|refresh)-package\b")
 RULE = re.compile(r"^([^\t#=:][^=:]*?)\s*:(?![=:])(.*)$")
 UV_SYNC = re.compile(r"\buv\s+sync\b")
+# `pip install`, `pip3 install`, `python -m pip install` and `uv pip install`.
+PIP_INSTALL = re.compile(r"(?<![\w.-])pip3?\s+install\b")
+SHELL_SEPARATOR = re.compile(r"&&|\|\||[;|]")
 SCRIPT_CALL = re.compile(r"(\S*uv_project\.py)\b")
 REINIT_RECIPE = re.compile(r"^python3\s+(\S+/uv_project\.py)\s+reinit\s*$")
 
@@ -160,11 +171,42 @@ def _copies_wheelhouse(instruction: str) -> bool:
     return bool(re.match(r"(?i)^COPY\s", instruction)) and bool(re.search(r"(^|\s)\.dist/?(\s|$)", instruction))
 
 
+def _wheelhouse_paths(stages: list[list[str]]) -> set[str]:
+    """Where the Dockerfile copies the wheelhouse to."""
+    paths = {instruction.split()[-1].rstrip("/")
+             for stage in stages for instruction in stage if _copies_wheelhouse(instruction)}
+    return {path for path in paths if path}
+
+
+def _names_wheelhouse(command: str, paths: set[str]) -> bool:
+    """Whether a pip install may read the wheelhouse: it passes `--find-links`
+    or `-f` with any value, or names a path in `.dist` or where the Dockerfile
+    copied it."""
+    for token in command.split():
+        token = token.strip("'\"")
+        if token == "--find-links" or token.startswith("--find-links="):
+            return True
+        if token.startswith("-f") and not token.startswith("--"):
+            return True
+        value = token.split("=", 1)[-1].strip("'\"") if token.startswith("-") else token
+        if re.search(r"(^|/)\.dist(/|$)", value):
+            return True
+        if any(value == path or value.startswith(path + "/") for path in paths):
+            return True
+    return False
+
+
+def _pip_installs_from_wheelhouse(instruction: str, paths: set[str]) -> bool:
+    return any(PIP_INSTALL.search(command) and _names_wheelhouse(command, paths)
+               for command in SHELL_SEPARATOR.split(instruction))
+
+
 def dockerfile_problems(dockerfile: Path, root: Path, distributions: set[str]) -> list[str]:
     where = dockerfile.relative_to(root)
     stages = dockerfile_stages(dockerfile.read_text("utf-8"))
     if not any(_copies_wheelhouse(i) for stage in stages for i in stage):
         return []
+    wheelhouse = _wheelhouse_paths(stages)
     problems = []
     pin = re.compile(r"\b([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==[0-9]")
     for number, stage in enumerate(stages):
@@ -182,7 +224,7 @@ def dockerfile_problems(dockerfile: Path, root: Path, distributions: set[str]) -
                 if uv_project.normalise(name) in distributions:
                     problems.append(f"{where}: spells the version of {name}; install-wheel reads it")
             if re.match(r"(?i)^RUN\s", instruction):
-                if UV_SYNC.search(instruction) or re.search(r"\buv\s+pip\s+install\b[^&;|]*--find-links", instruction):
+                if UV_SYNC.search(instruction) or _pip_installs_from_wheelhouse(instruction, wheelhouse):
                     problems.append(f"{where}: installs from the wheelhouse without uv_project.py")
                 for called in SCRIPT_CALL.findall(instruction):
                     if called not in copied:
@@ -198,7 +240,7 @@ def problems(root: Path = ROOT) -> list[str]:
         found += makefile_problems(makefile, root)
     found += missing_reinit(root)
     distributions = set(uv_project.repository_versions(root))
-    for dockerfile in _files(root, "Dockerfile*"):
+    for dockerfile in sorted({*_files(root, "Dockerfile*"), *_files(root, "*.Dockerfile")}):
         if not dockerfile.name.endswith(".dockerignore"):
             found += dockerfile_problems(dockerfile, root, distributions)
     return found

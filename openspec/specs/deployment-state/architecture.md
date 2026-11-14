@@ -198,7 +198,7 @@ not credential references or resolved secrets. See
 
 ## Current limits
 
-The repository does not yet have one universal configuration-delivery mechanism for every service. The in-house migration engine serves single-writer SQLite only; a service moved to PostgreSQL or to more than one writer adopts Alembic from a baseline, as the registry already uses it. Adoption trusts recorded IDs and does not inspect schema, so a supported database altered by hand outside its chain is not detected at startup. Publication authority between private artifact registries and public package releases, removal of all local source overrides, and a repository-wide typed-client versioning policy remain separate decisions.
+The repository does not yet have one universal configuration-delivery mechanism for every service. The in-house migration engine serves single-writer SQLite only; a service moved to PostgreSQL or to more than one writer adopts Alembic from a baseline, as the registry already uses it. Adoption trusts recorded IDs and does not inspect schema, so a supported database altered by hand outside its chain is not detected at startup. Removal of all local source overrides and a repository-wide typed-client versioning policy remain separate decisions.
 
 ## Related contracts
 

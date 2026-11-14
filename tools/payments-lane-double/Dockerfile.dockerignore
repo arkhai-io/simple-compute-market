@@ -8,6 +8,8 @@
 *
 
 !.dist/
+# The `market` binary's build output, which no image installs.
+.dist/bin
 
 !scripts/
 scripts/*

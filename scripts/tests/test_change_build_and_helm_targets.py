@@ -55,7 +55,6 @@ def _tags(commands: str) -> list[str]:
 # --- IMAGE_SUFFIX ---------------------------------------------------------------
 
 ROOT_IMAGE_TARGETS = {
-    "build-bare-metal-storefront": ["arkhai:bare-metal-storefront"],
     "build-apicredits-service": ["arkhai:apicredits-service"],
     "build-apicredits-storefront": ["arkhai:apicredits-storefront"],
     "build-apicredits-sample-app": ["arkhai:apicredits-sample-app"],
@@ -96,18 +95,20 @@ def test_a_subproject_image_target_appends_the_suffix_to_every_tag(project: str)
 
 def _commit() -> str:
     """The suffix of a bare build's commit tag, as the Makefiles derive it."""
-    return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT,
+    return subprocess.run(["git", "rev-parse", "--short=9", "HEAD"], cwd=REPO_ROOT,
                           capture_output=True, text=True, check=True).stdout.strip()
 
 
-def test_the_frps_plugins_image_is_tagged_with_its_commit_unless_suffixed() -> None:
-    # The root builds this image itself, from the plugin's own directory, and
-    # `make push-images` pushes it from its commit tag.
-    image = "arkhai:frp-grant-admission"
-
-    assert _tags(_make_n("build-frp-grant-admission")) == [image, f"{image}-{_commit()}"]
-    assert _tags(_make_n("build-frp-grant-admission", f"IMAGE_SUFFIX={SUFFIX}")) == [
-        image + SUFFIX]
+@pytest.mark.parametrize("target, image", [
+    ("build-frp-grant-admission", "arkhai:frp-grant-admission"),
+    ("build-bare-metal-storefront", "arkhai:bare-metal-storefront"),
+])
+def test_a_release_image_the_root_builds_is_tagged_with_its_commit_unless_suffixed(
+        target: str, image: str) -> None:
+    # The root builds these release images itself, and `make push-images` pushes
+    # each from its commit tag.
+    assert _tags(_make_n(target)) == [image, f"{image}-{_commit()}"]
+    assert _tags(_make_n(target, f"IMAGE_SUFFIX={SUFFIX}")) == [image + SUFFIX]
 
 
 @pytest.mark.parametrize("project", sorted(SUBPROJECT_IMAGE_TARGETS))

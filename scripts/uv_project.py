@@ -17,7 +17,8 @@ the project's `uv.lock` when it runs, so no caller lists them:
 - `lock [PROJECT ...]` relocks projects against the current wheelhouse and
   installs nothing. It upgrades every internal package and every other
   repository distribution the lock names, so one that has drifted to a
-  package index returns to the wheelhouse.
+  package index returns to the wheelhouse. A project named with no lock yet
+  is locked for the first time.
 
 An internal package is one the lock resolves from the repository wheelhouse.
 A lock that resolves anything from another local path is an error. Any
@@ -177,9 +178,14 @@ def install_wheel_command(project: Path, root: Path, environment: Path) -> list[
 
 def lock_command(project: Path, root: Path, repository: set[str]) -> list[str]:
     wheelhouse = root / WHEELHOUSE_NAME
+    # A project's first lock resolves everything afresh, so there is nothing
+    # an earlier lock holds to upgrade. The project must declare itself: uv
+    # would otherwise lock whichever enclosing project it finds instead.
+    own = normalise(declared_distribution(project)[0])
+    if not (project / "uv.lock").is_file():
+        return ["uv", "lock", "--find-links", relative_wheelhouse(project, wheelhouse)]
     internal = set(wheelhouse_packages(project, wheelhouse))
     named = {normalise(p["name"]) for p in _read_toml(project / "uv.lock").get("package", [])}
-    own = normalise(declared_distribution(project)[0])
     upgrade = sorted(internal | (named & repository) - {own})
     return [
         "uv", "lock",

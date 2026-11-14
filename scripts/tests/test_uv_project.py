@@ -221,6 +221,32 @@ def test_lock_also_upgrades_repository_distributions_resolved_elsewhere(tmp_path
     ]
 
 
+def test_lock_locks_a_named_project_with_no_lock_for_the_first_time(tmp_path):
+    root = _repository(tmp_path)
+    project = _project(root, "core/buyer/market-binary", sources={"arkhai-core": WHEELHOUSE})
+    (project / "uv.lock").unlink()
+    run = _Recorder()
+
+    assert uv_project.main(["lock", str(project)], root=root, run=run, uv_problem=_uv_ok) == 0
+    assert run.calls == [(["uv", "lock", "--find-links", "../../../.dist"], project.resolve())]
+
+
+@pytest.mark.parametrize("path", ["core/buyr", "kit/consumer/src"])
+def test_lock_refuses_a_named_directory_that_is_not_a_project(tmp_path, capsys, path):
+    """A missing directory, or one inside another project, which uv would
+    otherwise lock in its place."""
+    root = _repository(tmp_path)
+    _project(root, sources={"arkhai-core": WHEELHOUSE})
+    if path.endswith("src"):
+        (root / path).mkdir()
+    run = _Recorder()
+
+    assert uv_project.main(["lock", str(root / path)], root=root, run=run,
+                           uv_problem=_uv_ok) == 2
+    assert run.calls == []
+    assert "pyproject.toml does not exist" in capsys.readouterr().err
+
+
 def test_a_failed_command_fails_the_invocation(tmp_path, capsys):
     root = _repository(tmp_path)
     project = _project(root)

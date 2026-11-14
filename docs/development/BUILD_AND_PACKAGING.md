@@ -80,7 +80,20 @@ not read that file from a nested project, so each consumer reads it explicitly:
   uses it in each `FROM`.
 
 To change the version, edit `.python-version` and the Dockerfile defaults, then run
-`make check-python-version`.
+`make check-python-version`. The `market` binary's build image is pinned by digest, so a
+Python bump also pins a new digest for it ([Images](#images)).
+
+Two more root declarations sit beside it:
+
+- `build-constraints.txt` pins every wheel's build requirements exactly. The root
+  Makefile exports it as `UV_BUILD_CONSTRAINT`, as it exports `UV_PYTHON`, and so does
+  every subproject Makefile that runs `uv build`, since each also runs on its own. The
+  build backend stamps its version into every wheel, so moving a pin changes every
+  wheel's bytes and bumps every published distribution
+  ([`RELEASING.md`, "Versioning policy"](RELEASING.md#versioning-policy)).
+- `.helm-version` names the Helm the chart's content digest is computed with; the
+  digest refuses any other. A test holds it equal to the Helm `tests.yml` installs, so a
+  Helm bump edits both.
 
 ## Project environments
 
@@ -107,7 +120,8 @@ drifted to a package index returns to the wheelhouse. It relocks unconditionally
 `uv lock --check` alone cannot see a same-version wheel's changed requirements, and
 `check-locks` compares names and specifiers but not markers; relocking a current project
 changes nothing. Run it after editing a project's dependencies or bumping an
-internal version, instead of reaching for `make test` to do it.
+internal version, instead of reaching for `make test` to do it. A project named in
+`PROJECTS` with no lock yet is locked for the first time.
 
 Locks are written by uv 0.12.22 or newer, the first release that writes lock revision 5,
 the revision every committed lock carries. uv releases write `uv.lock` differently, and
@@ -151,6 +165,7 @@ wheelhouse at `<image root>/.dist`. uv will not resolve a path above `/`, so the
 must match:
 
 ```dockerfile
+ARG WHEELHOUSE_DIGEST
 COPY .dist/ /repo/.dist/
 COPY scripts/uv_project.py /repo/scripts/uv_project.py
 COPY domains/vms/storefront/pyproject.toml domains/vms/storefront/uv.lock /repo/domains/vms/storefront/
@@ -178,6 +193,30 @@ RUN --mount=type=cache,target=/root/.cache/uv \
   an operator's credentials, keys, inventories, and variable files and Terraform's state
   and variables. The provisioning service's `Dockerfile.dockerignore` does this for both
   IaC trees it copies.
+- An image built from the wheelhouse records which wheelhouse it was built from. Its
+  build target runs `scripts/wheelhouse_digest.py` before `docker build` and passes the
+  digest as `WHEELHOUSE_DIGEST`. The Dockerfile declares the argument before copying
+  `.dist/` in its builder stage, so the install's cache keys on it, and records it as
+  the label `org.arkhai.wheelhouse-digest` in its final stage, before the cross-stage
+  copies. The digest is a dirhash of the declared wheels in `.dist` and refuses a
+  missing one, naming `make dist`. A release candidate's load uploads nothing unless
+  every labelled image carries the digest of the wheelhouse it stores
+  ([`RELEASING.md`, "Loading a release candidate"](RELEASING.md#loading-a-release-candidate)).
+
+The release's `market` binary is built like an image and exported as a file.
+`core/buyer/market-binary/` is a locked virtual project (`[tool.uv] package = false`)
+depending on the buyer CLI and every declared buyer domain, with PyInstaller in its
+`freeze` group and linux/amd64 as its only environment. Its Dockerfile, beside it,
+builds on `ghcr.io/astral-sh/uv:python<version>-bookworm-slim` pinned by digest, refuses
+an image whose Python is not the declared one, installs the committed lock through
+`uv_project.py image` with no `install-wheel`, since a virtual project builds no wheel,
+freezes the CLI's entry point, runs `market plugins` installed and frozen and requires
+the same output from both, and exports the binary from a `scratch` stage.
+`make build-market-binary` derives its name, output path, entry point and PyInstaller
+options from the declaration (`scripts/market_binary.py`), so neither the Makefile nor
+the Dockerfile names a domain. A Python bump pins a new digest; the build refuses a
+stale one. Pinning the image and locking the environment fix the binary's inputs, not
+its bytes: it is identified by the SHA-256 of the stored file.
 
 A project one level deep can use `/app` itself with the wheelhouse at `/.dist`, which
 keeps an editable install of the project valid in the runtime stage; `e2e-tests` does.
@@ -196,7 +235,7 @@ closeout ([plan-closeout requirements](../../openspec/README.md#plan-closeout-re
 
 | Target | Fails on |
 |---|---|
-| `check-uv-setup` | a literal `--upgrade-package`, `--reinstall-package`, or `--refresh-package` in a Makefile or Dockerfile; a Makefile recipe running `uv sync` itself; a `reinit` recipe other than the script call by a path that resolves; a project with tests and wheelhouse packages but no `reinit`; a Dockerfile that rewrites a lock, spells a repository distribution's version, installs from the wheelhouse without the script, calls the script where its stage did not copy it, or copies the wheelhouse into the runtime stage |
+| `check-uv-setup` | a literal `--upgrade-package`, `--reinstall-package`, or `--refresh-package` in a Makefile or Dockerfile (every `Dockerfile*` and `*.Dockerfile`, ignore files aside); a Makefile recipe running `uv sync` itself; a `reinit` recipe other than the script call by a path that resolves; a project with tests and wheelhouse packages but no `reinit`; a Dockerfile that rewrites a lock, spells a repository distribution's version, installs from the wheelhouse without the script — a `uv sync`, or a `pip install`, `pip3 install`, `python -m pip install` or `uv pip install` passing `--find-links`/`-f` or naming a path in the copied wheelhouse — calls the script where its stage did not copy it, or copies the wheelhouse into the runtime stage |
 | `check-locks` | a lock `uv lock --check --offline` rejects; a lock pinning an internal version the tree does not build; a lock whose record of an internal package disagrees with that wheel's metadata (a requirement added or removed, unconditionally or under an extra in use, or a locked version its specifier no longer admits); a version check it cannot evaluate; a repository distribution resolved from an index or from a local registry other than `.dist`; a lock carrying a lock revision other than 5, the one the repository's minimum uv writes |
 | `check-uv-version` | an installed uv older than the minimum that writes the repository's locks, or one whose version cannot be read; `make lock` runs it, and `check-packaging` does not, since it reads the locks without writing them |
 | `check-project-layout` | a distribution whose wheel target is not exactly `packages = ["src/<package>"]` with that package present, or that builds with another backend or other build settings; a `[tool.uv]` `find-links` or `cache-keys`; a `[tool.uv.sources]` entry naming a path; `UV_NO_EDITABLE`, `--no-editable`, or `no_editable` in a Makefile, shell script, or workflow |
@@ -205,7 +244,10 @@ closeout ([plan-closeout requirements](../../openspec/README.md#plan-closeout-re
 | `check-architecture-scope` | a dependency whose scope is not a subset of the package's own; an identity literal outside a core or kit package's scope (a warning elsewhere) |
 | `check-architecture-dependencies` | an internal distribution imported and not declared; a runtime reason for a dependency no longer declared, or now imported (a declaration without an import or a reason is a warning) |
 | `check-architecture-kinds` | a contracts or client package depending on something its kind allowlist does not name; a declaration or import outside a package allowlist, the `allowed-dependencies` in a package's own `pyproject.toml`, or a third-party import such a package does not declare; any import of a plugin |
-| `check-python-version` | a `.python-version` other than the root one; a literal `--python` version in a Makefile, shell script, or tool phase configuration; a Makefile running uv without exporting `UV_PYTHON` from the root declaration; a CI job running uv without it, setting it before checkout or under a different `if:` than checkout, or a setup pin of another minor version; a Dockerfile `FROM` naming a Python version, using `${PYTHON_VERSION}` without an `ARG` default before the first `FROM`, or a default other than the declared one |
+| `check-python-version` | a `.python-version` other than the root one; a literal `--python` version in a Makefile, shell script, or tool phase configuration; a Makefile running uv without exporting `UV_PYTHON` from the root declaration; a CI job running uv without it, setting it before checkout or under a different `if:` than checkout, or a setup pin of another minor version; a Dockerfile (every `Dockerfile*` and `*.Dockerfile`) whose `FROM` names a Python version, uses `${PYTHON_VERSION}` without an `ARG` default before the first `FROM`, or has a default other than the declared one |
+| `check-build-requirements` | a `build-constraints.txt` line that is not `<name>==<version>`, or a name pinned twice; a project's `[build-system]` requirement, backend or plugin, that `build-constraints.txt` does not pin; a Makefile running `uv build` without exporting `UV_BUILD_CONSTRAINT` by a path resolving to `build-constraints.txt` |
+| `check-release-components` | every rule of `scripts/check_release_components.py`, each also runnable alone with `--rule`: **enumeration**, a declared distribution, image, development image, the chart or the binary named in a workflow, a publish target (`push-*`, `publish-*`, `clobber-*`, `load-candidate`, or a recipe running an uploader) or a lane target (`test-e2e*`, `build-e2e*`, `pull-release-images`) rather than read from `manifests/release-components.json`; **credentials**, a workflow with no top-level `permissions:`, granting `id-token`, `packages`, `attestations` or `contents` write (or `write-all`) anywhere, reading any secret but `GITHUB_TOKEN` (including `secrets: inherit` and a read naming no secret), or containing a named publishing step; **market-binary**, a `core/buyer/market-binary` project whose dependencies are not exactly the declared buyer CLI and the declared distributions registering a `market.buyer_domains` entry point, naming each missing and extra one; **revision**, a `git rev-parse --short` in a Makefile that abbreviates to anything but nine characters. It has no exception list |
+| `check-workflow-credentials`, `check-market-binary` | the credentials rule, and the market-binary rule, of `check-release-components` alone, for focused work; `check-packaging` runs them through `check-release-components` |
 
 uv records no section for an empty extra, and no extra on the consumer's dependency edge
 either, so `check-locks` derives the extras in use from every place that can request one:

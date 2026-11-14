@@ -636,8 +636,10 @@ names; see [Private Service Dependencies](#private-service-dependencies). The
 VM lane also runs six dispute controls scenarios, each on its own deal, that
 program both doubles through their controls
 ([`e2e-tests/README.md`, "VM dispute controls"](../../e2e-tests/README.md#vm-dispute-controls)).
-A lane target names only its Compose files, its project, and the run's
-provisioning mode: every value its stack reads is in a committed overlay,
+A lane target names only its Compose files, its project, the run's
+provisioning mode and, in release-image mode, a release candidate's image suffix
+([Locally verifiable and external-topology scenarios](#locally-verifiable-and-external-topology-scenarios)):
+every value its stack reads is in a committed overlay,
 registry or site profile, or secret overlay, and the runner takes the lane's
 committed profiles (`RUNNER_PROFILES`).
 
@@ -756,6 +758,38 @@ and proves that the services compose into a working deal. An
 deploy, such as a hosted payments target or a real host. It runs only where a
 deployment supplies them, and it is the only evidence for what they bring: real
 delivery, access, and revocation on a host, and a payments target's records.
+
+A locally verifiable scenario also runs on a release candidate's images, as part of
+the deployment's release validation, which runs every lane this way. Images do not
+rebuild to the same digest, so a lane that built its own release images would test
+other bytes. With `RELEASE_IMAGES=1` and `IMAGE_SUFFIX=-<rev9>`, a lane target runs the
+release images `make -C e2e-tests pull-release-images` pulled and tagged
+`arkhai:<local><IMAGE_SUFFIX>`, and builds only the wheels, dev-env, the test image and
+its non-release images. Each lane's Compose files name a release image
+`arkhai:<local>${IMAGE_SUFFIX:-}`, so one set of files serves both modes; in the
+pipeline's build mode the suffix is empty and they name the bare tags. In this mode a
+lane target, through `scripts/release_images.py`:
+
+1. **checks**, before it tears down or builds anything, that each declared release image
+   its Compose files run is present under the suffix, naming every missing one; it
+   refuses an empty suffix, and a release image its Compose files run bare, which would
+   run whatever holds the bare tag;
+2. builds, then brings the stack up;
+3. **records**, once the stack is up, each release image its running containers run in
+   `.snapshot/e2e-release-images-<lane>.json`, by published name and manifest digest,
+   read from the image's repo digest from a registry (one in the local `arkhai`
+   repository names no registry and is not counted). It writes no record, and fails
+   the lane, for an image with no such repo digest or two different ones, for a release
+   image its Compose files run that no running container runs, and for a lane running
+   none of the release candidate's images;
+4. runs its scenarios.
+
+Each lane records only the release images it runs; no lane runs
+`frp-grant-admission`, which only the deployment's live tests run. The recorded value is
+the image's own manifest digest under a registry's name, which shows neither a pull nor
+that the registry holds it: the deployment's comparison of the records with the
+manifests the release candidate's load pushed is what ties a lane to the release
+candidate ([`RELEASING.md`, "Running the lanes on a release candidate's images"](RELEASING.md#running-the-lanes-on-a-release-candidates-images)).
 
 An external-topology scenario that makes a deal minimally extends a locally
 verifiable one. It subclasses that scenario's shared stages wherever their bodies
@@ -1489,18 +1523,63 @@ is quarantine pending history verification or host decommission, not a passing
 rollback test. A rejected cleanup retains capacity; normal same-job retry is
 distinct from terminal failed-job recovery or force-release.
 
+## Static Configuration Tests
+
+A static configuration test runs a real tool over committed configuration and
+asserts on what that configuration would do, without doing it: no image is built,
+no container starts, and no cluster is reached. It is neither a unit test of a
+class nor an integration test of a running application: its subject is the
+committed files, read the way the tool that consumes them reads them. It is a
+kind of test beside the four levels, not a fifth level, and runs where unit
+tests run. Three
+tools do the reading here:
+
+- **Chart renders**, `helm template` over a chart with chosen values
+  ([Chart Render Tests](#chart-render-tests)).
+- **Compose renders**, `docker compose config` over a stack's Compose files, such
+  as the lanes' image lines in `scripts/tests/test_release_images.py` and the
+  stacks' registry settings in `scripts/tests/test_committed_stack_values.py`.
+- **Makefile dry runs**, `make -n` of a committed target, reading the recipes it
+  would run, following each subproject Makefile it enters. Examples:
+  `scripts/tests/test_image_publication_contract.py`, which holds every declared
+  image to a build writing its revision tag in `build-dev` and `build-candidate`;
+  `scripts/tests/test_change_build_and_helm_targets.py`; and the lane-target
+  cases in `test_release_images.py`.
+
+`e2e-tests/tests/unit/`'s image-pin and stack checks are of the same kind.
+
+**What they cover:** what committed configuration says — which images a target
+builds and tags, which image a Compose service runs, what a chart renders for
+given values — and two committed sources held to each other, such as the release
+declaration and the targets that build what it declares.
+
+**What they do not cover:** whether the commands succeed when they run, whether
+an image builds, or whether a stack starts. A build, a lane, or a deployment
+remains the evidence for those.
+
+**How they run:** in the suite of the scripts or charts they check, beside its
+unit tests. A test needing only a tool every runner has, such as `make` or
+`git`, runs it. A test needing a tool a runner may lack skips without it, except
+under that tool's gate variable, `HELM_REQUIRED=1` or `COMPOSE_REQUIRED=1`, which
+`tests.yml`'s `test-deployment-packaging` job sets, so a skip fails there. A test
+of this kind needing another such tool gets its own gate, set in that job.
+
 ## Chart Render Tests
 
 A chart render test runs `helm template` against a chart with chosen values and
 asserts on the manifests it produces, or on its refusal to produce them. It is a
-static configuration test, like `e2e-tests/tests/unit/`'s image-pin and stack
-checks: it needs Helm, not a cluster.
+[static configuration test](#static-configuration-tests): it needs Helm, not a
+cluster.
 
 The supported Helm is the release pinned in
 [`.github/workflows/tests.yml`](../../.github/workflows/tests.yml).
 `helm/scripts/test-render.sh` prints `helm version --short` before its first
 render, so each render log names the Helm it ran. The script does not enforce
-the pin; a render step's result is recorded for the version it reports.
+the pin; a render step's result is recorded for the version it reports. The
+chart's content digest does enforce it: it refuses any Helm but the one
+`.helm-version` names, and a test holds `.helm-version` equal to `tests.yml`'s
+pin, so a Helm bump edits both
+([`BUILD_AND_PACKAGING.md`, "One Python version"](BUILD_AND_PACKAGING.md#one-python-version)).
 
 **What they cover:** what a deployment's manifests contain for a given set of
 values — which documents render into a ConfigMap, which files mount, which
@@ -1520,7 +1599,11 @@ passing render is not deployment evidence, just as it is not deal evidence.
   `make -C helm test-render` and by the top-level `make test-deployment-packaging`.
   The umbrella's own Python render tests, such as the two-release topology's
   `helm/tests/test_release_topology.py`, live in `helm/tests/`, and
-  `test-render.sh` runs them beside each chart's.
+  `test-render.sh` runs them beside each chart's. Among them,
+  `helm/tests/test_default_images.py` holds that the chart's default values name no
+  release — no semver-shaped or revision-suffixed image tag and no digest — and
+  `helm/tests/test_subchart_pins.py` that each of the umbrella's dependency entries
+  names its subchart's own version.
 - A chart's own render tests are `helm/charts/<chart>/tests/test_render.py`. Call
   each from `test-render.sh` so that one target runs every render check; a test
   reachable only through its chart's own Makefile is easily never run.
