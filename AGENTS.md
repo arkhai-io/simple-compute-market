@@ -159,6 +159,14 @@ pairing never appears here.
 A change document, a `design.md` rationale, and a task note are as public as
 production code. "It is only in the change directory" is not an exception.
 
+One run artifact is admitted: a marketplace release's bill of materials, committed
+at the cut as `manifests/release-bom.cdx.json` on its release branch. It holds
+content identities only — versions, digests, the source revision and the public
+repository link — and names no registry host, project or path.
+`make check-release-record` refuses any field or URL its layout does not admit, so
+the admission is enforced rather than promised
+([`docs/development/RELEASING.md`, "The bill of materials"](docs/development/RELEASING.md#the-bill-of-materials)).
+
 ### Test fixtures and local development configuration
 
 Local development configuration in this repository is public by design and must
