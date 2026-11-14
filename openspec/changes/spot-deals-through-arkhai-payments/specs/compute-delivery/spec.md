@@ -72,3 +72,23 @@ Before commit, dispatch, billing start and disclosure the path MUST call end ser
 
 - **WHEN** end service refuses a deal's commit with the code `rate_servicing_unavailable`
 - **THEN** `drive` returns `repair_required(rate_servicing_unavailable)`, no capacity is reserved, and the next drive asks again
+
+### Requirement: An undelivered deal is handed to the end operation with classified evidence
+
+Before availability, a site refusal, provisioning failure, elapsed window or lapsed activation MUST enter end service's `record_end`; a refusal by end service's `authorize_delivery` is handled as "Protected steps are authorized and admitted" says. Delivery MUST supply the actor, cause and source, the Agreement start, the fixed failure-observation time, the resource identities and verified evidence, and MUST NOT classify by event kind, compute amounts or send a payment stop or reverse. Any site refusal of the commit after a reservation was made, other than the refused commit of a hold verified lapsed, MUST be recorded as seller failure before dispatch, with its filing at the Agreement start and the reservation released through end service's no-dispatch path under one key.
+
+#### Scenario: A lawful end wins before availability
+
+- **WHEN** the buyer's end request is recorded before the deal is available
+- **THEN** delivery supplies it beside the never-delivered basis and acts on the classification end service returns, filing no self-penalty for a lawful end
+
+#### Scenario: A commit is refused after reservation
+
+- **WHEN** the site refuses the commit of a reservation the deal already holds
+- **THEN** a seller-failure end with its filing is recorded, nothing is dispatched, and the reservation is released through the no-dispatch path
+- **AND** a restart before the release is acknowledged retries the same release and places no second reservation
+
+#### Scenario: Settlement arrives after the window
+
+- **WHEN** settlement completes after the Agreement's end
+- **THEN** nothing is dispatched and never-delivered evidence is supplied, with no buyer fault inferred from the lateness

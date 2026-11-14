@@ -499,9 +499,29 @@ configured number of consecutive probes, sends the buyer's ordinary entitled sto
 `hint` through the flow above, journals the probe evidence it acted on, and exits. It
 exits also when the deal ends by any other path, or when the buyer stops it. The
 opt-in, interval and threshold are persisted per deal in the buyer's profile, so
-`buy --resume` re-enters the loop after a restart where the deal is still running; the
+`buy --resume` re-enters the loop after a restart where the deal is still running. The
 deal read shows `monitored`, `stopped` or `unmonitored`, and a deal whose monitor is
-not running is shown as unmonitored, never as protected. The probe is injected per
+not running is shown as unmonitored, never as protected.
+
+The opt-in says only that the buyer asked for a monitor; a crashed or killed `buy`
+leaves it unchanged, so the status rests on the probes themselves (design review 18
+F1). Every probe, passed or failed, records its instant per deal in the buyer's
+profile beside the opt-in. The read shows `monitored` while `now − last probe ≤
+interval + probe timeout`, with a small fixed grace; `stopped` once the watchdog has
+journaled its stop; and `unmonitored` otherwise, a deal never opted in included. So
+`monitored` means what the bound rests on, a probe ran recently, and a hung loop
+reads as unmonitored as a dead process does. The status is the buyer's knowledge of
+its own process: the buyer half computes it when it composes the buyer's read, and
+the buyer CLI displays it; it is not a field of `LifecycleRead` or any lifecycle wire
+model, and the storefront neither sees nor reports it, so released clients are
+unaffected.
+
+Rejected: a lock the process holds, which the operating system releases on death but
+which a hung loop keeps, answering whether the process lives rather than whether it
+probes; and a status only the running command prints, which leaves a read from
+anywhere else knowing nothing.
+
+The probe is injected per
 domain — the VM's or bare-metal host's reachability on the disclosed address and
 credential kind — so the kit learns no credential format; what "stops answering"
 means is that access, not the buyer's workload.
@@ -755,6 +775,30 @@ then the buyer may release its reservation with its own stop. Planning confirms 
 each domain's worker drives a deferred deal again after the deadline, and adds the
 drive where one does not.
 
+**An earlier buyer stop wins over the deadline (design review 18 F2).** A rate buyer
+ends at the payment authority; its hint to the storefront is a courtesy, lost while
+the storefront is down, so end service learns of the stop only when the payment watch
+records the authority's final stop as a selected end. Admission already prefers a
+selected end effective by the deadline, but both domains' recovery admits the deadline
+before it reads the authority (VM's cycle admits before `seller.watch`, which
+dispatches filings before it polls; bare metal's drives delivery before
+`seller.read`), and a recorded classification never changes. So for a deal that is
+not once-only — `SellerDeal.once_only`, as D15 reads it — admission's missed-deadline
+branch acts only on a successful payment observation made at or after the deadline
+that shows no lawful end effective at or before it. Both domains' recovery reads the
+authority before admitting the deadline. While the authority cannot be read the deal
+stays where it is, in repair with no end recorded and nothing filed; a later drive
+after a successful read admits it. An authority outage delays the setup return, and
+the buyer's money stays held at the authority meanwhile. Once-only deals keep the
+released rule, since their buyer ends at the storefront and nothing earlier can be
+unobserved. compute-delivery's "An undelivered deal is handed to the end operation"
+names the site's refusal, so the commit-authorization refusal that waits in repair is
+not read as one that enters `record_end`.
+
+Rejected: recording a provisional deadline observation and holding its filing until
+the stop is resolved, which keeps local progress through an outage but adds a
+provisional state beside a classification that never changes once recorded.
+
 End service tells the path why it refused through an optional closed `code` on
 `DeliveryAuthorization` (`kit/deal-lifecycle`), absent on every other answer:
 
@@ -923,7 +967,9 @@ Destinations are planned, not claims of implemented behaviour.
 | D10 stop requests and final stops | `openspec/specs/deal-lifecycle/spec.md`; `openspec/specs/settlement-servicing/spec.md` |
 | D11 the composed transaction adapter | `openspec/specs/settlement-servicing/spec.md` and `architecture.md`; `openspec/specs/deal-lifecycle/spec.md` for the protocol |
 | D12–D15 end service's refusal of a rate deal it cannot service, its refusal code and the projection it reads | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md` (where fails closed is enforced) |
-| D14's repair reason | `openspec/specs/compute-delivery/spec.md` |
+| D14's repair reason and the site-refusal wording of the undelivered hand-off | `openspec/specs/compute-delivery/spec.md` |
+| D14's deadline barrier for a deal that is not once-only | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md` |
+| D6a's watchdog status: the last-probe freshness rule, buyer-local and off the wire | `openspec/specs/deal-lifecycle/spec.md` (with 4B.6's watchdog requirement); `openspec/specs/buyer-orchestration/architecture.md` |
 | D16 the recurring-purchase scenario's shape | `openspec/specs/test-compatibility/spec.md` |
 | Each change is mergeable to `dev` on its own merits | `openspec/README.md` or `docs/agents/change-workflow.md` |
 | Sibling-domain parity is checked before adding behaviour to one domain | `AGENTS.md`, "Package and dependency discipline" |

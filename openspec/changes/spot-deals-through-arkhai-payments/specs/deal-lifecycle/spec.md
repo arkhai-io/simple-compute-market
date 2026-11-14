@@ -48,6 +48,8 @@ kit/deal-servicing MUST own authorize_delivery for commit, dispatch, start and d
 
 While end service services no rate deals, authorize_delivery MUST refuse the commit phase of a deal whose committed seller projection is not once-only, before it asks the payment adapter and without I/O, with the refusal code `rate_servicing_unavailable`; a servicing declaration enables rate offers and MUST NOT by itself enable their delivery. A deal with no committed seller projection MUST be refused without that code. A delivery authorization MAY carry a closed refusal code; every answer other than this refusal MUST omit it, and a journaled authorization recorded without one MUST still read.
 
+For a deal whose committed seller projection is not once-only, end service's admission MUST NOT record the delivery-deadline end or journal its filing until a successful payment observation made at or after the deadline shows no lawful end effective at or before it; while the payment authority cannot be read the deal MUST stay unended with nothing filed. Each compute domain's recovery MUST read the payment authority before it admits a missed deadline. A once-only deal keeps admission's deadline rule unchanged.
+
 #### Scenario: A rate deal is committed before rate servicing exists
 - **GIVEN** a committed deal whose seller projection is not once-only, under a composition declaring the rate treatments its option uses
 - **WHEN** delivery asks authorize_delivery to commit it
@@ -59,9 +61,19 @@ While end service services no rate deals, authorize_delivery MUST refuse the com
 - **THEN** end service asks the payment adapter as before, and its answer carries no refusal code
 
 #### Scenario: A refused rate deal passes its delivery deadline
-- **GIVEN** a rate deal refused at commit and never available
-- **WHEN** it is driven after its delivery deadline
+- **GIVEN** a rate deal refused at commit and never available, whose buyer has not stopped
+- **WHEN** it is driven after its delivery deadline, following a payment observation made after the deadline
 - **THEN** admission records seller non-delivery at the deadline and journals the seller's `delivery_end(cause=payee, delivered=false)` filing
+
+#### Scenario: A buyer stops while the storefront is down
+- **GIVEN** a rate deal refused at commit whose buyer's stop took effect at the payment authority before the delivery deadline, while the storefront was down and the hint was lost
+- **WHEN** the storefront recovers after the deadline
+- **THEN** recovery reads the authority before admitting the deadline, records the buyer's lawful end, and journals no seller non-delivery filing
+
+#### Scenario: The payment authority is unreadable at the deadline
+- **GIVEN** a rate deal refused at commit and never available
+- **WHEN** it is driven after its delivery deadline and the payment authority cannot be read
+- **THEN** no end is recorded and no filing is journaled, and a later drive after a successful read admits the deadline
 
 #### Scenario: A financial decision is pending
 

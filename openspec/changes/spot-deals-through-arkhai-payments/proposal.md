@@ -87,12 +87,16 @@ continuation is a separate, dependent change.
   against the mandate's deal hash; its ruling preserves the payer's notice and
   `partialPeriod`. An opt-in foreground watchdog in the buyer's `buy` command sends
   the buyer's ordinary stop when the disclosed access fails its configured probes,
-  a bound stated as conditional on the command running.
+  a bound stated as conditional on the command running. The buyer's read shows it
+  monitored only while its last probe is fresh, a status the buyer half computes
+  and no lifecycle wire model carries.
 - A servicing declaration enables rate offers, not their execution: end service
   refuses to commit a rate deal while it services no rate deals, before any capacity
   is placed. The refused deal is repair-required with a named reason, carried as a
   closed refusal code on the delivery authorization, until the existing delivery
-  deadline rule classifies non-delivery and files. Convergence lifts the refusal
+  deadline rule classifies non-delivery and files — for a rate deal, only after a
+  payment read at or after the deadline shows no earlier buyer stop, so a stop made
+  while the storefront was down wins. Convergence lifts the refusal
   when it composes rate servicing.
 - A seller's `delivery_end(cause=payee)` is journaled and filed through the dispute
   adapter to the Agreement's dispute authority, never future-dated: a pre-start
@@ -238,9 +242,9 @@ domain or the persistence-owning servicing kit.
 - D6 seller notice and the administrator interrupt classification and routes:
   `openspec/specs/deal-lifecycle/spec.md` and its architecture companion;
   `openspec/specs/vm-storefront-fulfillment/spec.md`.
-- D6a the rate buyer end, the canonical `end` verb and the watchdog:
-  `openspec/specs/deal-lifecycle/spec.md`;
-  `openspec/specs/buyer-orchestration/spec.md`.
+- D6a the rate buyer end, the canonical `end` verb and the watchdog, its status
+  resting on a fresh last probe: `openspec/specs/deal-lifecycle/spec.md`;
+  `openspec/specs/buyer-orchestration/spec.md` and its architecture companion.
 - D7 servicing declarations, the materialization door, the `chosen` presupposition
   and identity rotation: `openspec/specs/settlement-configuration/spec.md`;
   `openspec/specs/settlement-servicing/spec.md`;
@@ -264,7 +268,9 @@ domain or the persistence-owning servicing kit.
   `openspec/specs/deal-lifecycle/spec.md`.
 - D14 the refused deal's repair state, its `rate_servicing_unavailable` reason and the
   delivery authorization's refusal code: `openspec/specs/compute-delivery/spec.md`
-  for the reason; `openspec/specs/deal-lifecycle/spec.md` for the code.
+  for the reason and the site-refusal wording of the undelivered hand-off;
+  `openspec/specs/deal-lifecycle/spec.md` for the code and the deadline barrier for
+  a deal that is not once-only.
 - D15 the door reading the committed seller projection:
   `openspec/specs/deal-lifecycle/spec.md`.
 - D16 the recurring-purchase scenario through commit, ended by the buyer:
