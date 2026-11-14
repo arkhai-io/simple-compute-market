@@ -285,7 +285,9 @@ corrections, or new decision numbers — for issues a review already named.
 
 Then read what you need to judge the findings: the documents
 `scripts/change-workflow config load triage` prints, every file in the change, earlier reviews and their triage, and the code,
-specifications, and guidance each finding cites.
+specifications, and guidance each finding cites — with each cited specification, its
+companion and every other Markdown file in its capability's directory but its
+`index.md`, the capability's own guidance — before deciding a fix.
 
 ## 2. Check every finding
 

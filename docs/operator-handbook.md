@@ -28,9 +28,9 @@ configuration file, named by its path setting, and under Helm supplied as the
 provisioning chart's `definitions.<kind>` value, which the chart renders,
 mounts, and names for the service. The method every kind follows is
 [`definition-documents.md`](guidance/engineering/definition-documents.md); the
-order startup imports them in, and how each kind here applies the method, are in
-`DEPLOYMENT_AND_CONFIG.md`,
-["Definition documents"](development/DEPLOYMENT_AND_CONFIG.md#definition-documents).
+order startup imports them in, and how each kind here applies the method, are
+`physical-provisioning`'s
+["Definition documents"](../openspec/specs/physical-provisioning/configuration.md#definition-documents).
 
 What that method means for running a site:
 
@@ -461,8 +461,8 @@ A storefront settling in `arkhai.payments.v1` needs three things from its
 deployment, beside `[Settlement.arkhai_payments]` in its public `config`: its
 payments key, the CA its payments service's certificate chains to when that is
 not a public one, and a way to prove the two work together. How the storefront
-resolves them is in `DEPLOYMENT_AND_CONFIG.md`,
-["Settlement consumer configuration and cutover"](development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover).
+resolves them is in `settlement-configuration`'s
+["Settlement consumer configuration and cutover"](../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover).
 
 **The key goes in the runtime Secret's overlay.** State it as
 `[Settlement.arkhai_payments] api_key` in the `storefront.secrets.toml` key of the
@@ -553,7 +553,7 @@ is empty, and the administrator key `REGISTRY_ADMIN_API_KEY` — from a Secret
 holding a profile env file, named by `secretProfile`. It mounts the file beside the
 profile it renders from its values and appends its profile to `ACTIVE_PROFILES`,
 so a setting the file states overrides the rendered one
-(["Registry descriptor configuration"](development/DEPLOYMENT_AND_CONFIG.md#registry-descriptor-configuration)).
+(["Registry descriptor configuration"](../openspec/specs/registry-discovery/configuration.md#registry-descriptor-configuration)).
 
 A values file naming `auth.bootstrapKeySecret` or `auth.adminKeySecret` is refused
 at render, naming `secretProfile`. To move off them:

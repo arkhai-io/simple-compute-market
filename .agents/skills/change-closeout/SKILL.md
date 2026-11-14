@@ -155,7 +155,9 @@ Read in full, even if you believe you know it:
   dispositions may have added to the closeout task.
 - For every capability the change touches: `openspec/specs/<capability>/spec.md`
   and its companion when one exists — `README.md` where the capability has an
-  `index.md`, which you read too, and `architecture.md` elsewhere.
+  `index.md`, which you read too, and `architecture.md` elsewhere — and every
+  other Markdown file in its directory but its `index.md`: the capability's own
+  guidance.
 - The change's row, campaign, and every row that lists it in `Depends on`, in
   `openspec/changes/README.md`.
 - Another change's records, where the closeout's evidence or promotion rests on

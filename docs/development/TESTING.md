@@ -10,6 +10,9 @@ levels, what each may prove, and the rules for writing tests are the engineering
 guidance: [`test-levels.md`](../guidance/engineering/test-levels.md),
 [`testing.md`](../guidance/engineering/testing.md), and the files beside them in
 [`docs/guidance/engineering/`](../guidance/engineering/README.md).
+How one capability's tests divide its behaviour between the levels is that
+capability's `testing.md`, beside its specification under `openspec/specs/`
+([`openspec/README.md`, "Documentation placement"](../../openspec/README.md#documentation-placement)).
 
 Read this alongside `docs/development/ARCHITECTURE.md` (system shape)
 and `openspec/README.md` (documentation placement).
@@ -36,18 +39,6 @@ its tests replace `fresh_identity`, `recovery_identity`, `registry_client`, and
 package, do not follow the rule: they replace library names and names the module
 imports, an unowned gap in
 [`ROADMAP.md`](ROADMAP.md), and are no model for a new test.
-
-**Negotiation-runtime convention:** a shared runtime is tested once
-([`test-seams.md`, "A shared runtime is tested once"](../guidance/engineering/test-seams.md#a-shared-runtime-is-tested-once)).
-Protocol invariants are tested once in
-`kit/negotiation-runtime/tests/unit` with an in-memory recording repository and
-injected opaque domain hooks. Those tests prove canonical-principal checks,
-round and terminal ordering, transcript recovery, acceptance persistence, and
-fail-before-effect behavior for recorded binding mismatches. Storefront tests
-then prove only their domain adapters: term decoding, seller policy input,
-accepted-artifact construction, and domain persistence/effect hooks. A domain
-test must invoke `NegotiationRuntime`; reintroducing a local lifecycle helper
-would test the duplication rather than the production composition.
 
 ### 2. Integration Tests
 
@@ -848,298 +839,11 @@ In a kit, a test that needs a migrated database migrates it through the kit's ow
 baseline. The end-to-end lanes start every service through its migration phase on
 a fresh database; no lane holds a release's database.
 
-## Pool Offering-Mode Enforcement
-
-Pool offering-mode coverage follows the lowest-meaningful-level rule while
-proving that no execution layer relies on another layer's earlier decision:
-
-- `kit/resource-pools-contracts` unit tests own declaration shape, typed reads,
-  membership, absent-as-empty behavior, the pool models' refusal of every
-  malformed domain-neutral hint, and asking-rate structure. `kit/resource-pools`
-  library integration tests own identical validation across individual and
-  bulk administration against real persistence.
-- `kit/site` unit tests own explicit claim identity and reservation admission.
-  They assert that neither a VM-shaped resource nor any resource attribute
-  supplies a missing mode, that an undeclared mode creates no hold, and that
-  pool authorization remains independent of exclusive/shareable physical
-  accounting.
-- `kit/fulfillment` scheduler tests withdraw a declaration after reservation;
-  orchestration tests withdraw it after provider input is prepared and assert
-  no provider dispatch occurs.
-- Advertisement and backing declarations follow the same split.
-  `kit/resource-pools-contracts` unit tests own declaration shape, both cross-tag
-  rules, the pool models' refusal to build an invalid write, and the resolver's
-  distinction between an absent and a malformed declaration. The
-  `kit/resource-pools` library integration suite owns identical validation
-  across individual and bulk administration, backing immutability, and the
-  stored-declaration check.
-  Provisioning integration tests own server-side refusal through the typed
-  client — status and stored state only, per the rejection-path rule
-  ([`integration-tests.md`](../guidance/engineering/integration-tests.md#no-raw-calls-the-typed-client-is-the-contract)) — plus the
-  startup refusal and every projected pool carrying both declarations. The
-  API-credits service's integration suite owns its own startup refusal.
-- Provider and backing immutability follow the same split. `kit/resource-pools`
-  unit tests own the pure stored-versus-proposed comparison; no database is
-  needed to prove it. Its library integration suite owns preserved state on
-  refused replace, patch and import, and the no-write equal-provider patch, using
-  real persistence and a recording handler. Provisioning integration tests own
-  the HTTP 400 and HTTP 422 statuses through the typed client — rejection-path
-  bodies for malformed hints — and, against file-backed SQLite with the real
-  importer, a refused startup document leaving its digest unchanged and the
-  document-created default. No deployed scenario is owed for these single-authority
-  transactions.
-- The deployed `e2e_pool_declared_modes` scenario sends an unsupported explicit
-  mode for a real matching capacity resource and observes HTTP 409 plus no
-  reservation row. It stops at the reservation boundary by design: provider
-  failure would be evidence that admission occurred too late.
-
-An executor-default inventory is part of closeout for changes to this boundary.
-Search production compute contracts, persistence, dispatch, result, release,
-site, storefront, and domain adapters for default arguments, `or` fallbacks,
-and attribute-based inference; a passing focused suite alone cannot prove their
-absence.
-
-## Host Requirement Enforcement
-
-The usable-host rule — where the pool is backed and its provider needs a host, a
-declaration is offered only when it names a registered, enabled host — is
-rechecked at each layer, and each layer proves its own check. Below the
-provisioning service a "disabled" or "unregistered" host is an id a fake
-`DeliverableHosts` report leaves out, one case to the layer; that the host
-authority leaves both out is proved where it lives.
-
-- `kit/resource-pools` unit tests own the predicates:
-  - `pool_needs_host`: no requirement supplied, a declared need, a provider the
-    requirement does not name, a value that is not a `bool`;
-  - `declaration_has_usable_host`: a host in the report, a host absent from it,
-    no host named, an empty report, an unbacked pool, a provider needing no
-    host, no requirement, and a requirement with no report.
-- `kit/fulfillment` unit tests own the provider declaration, including a
-  registry that refuses a provider declaring none.
-- `kit/site` library integration tests own admission and the offered read:
-  - probe, reserve, and resize refusing a declaration with no usable host, with
-    fall-through to one that has one, and matching it again once its host
-    returns to the report;
-  - the rebind recheck refusing such a destination with the debit and the
-    capacity version unchanged;
-  - no refusal without a requirement, and named hosts usable with no report;
-  - one report read per decision, in the decision's own session, and, on a
-    file-backed database, a write from another connection held off for the
-    whole decision;
-  - the offered read and the snapshot reporting a declaration with no usable
-    host not enabled, an unbacked pool's or a pool delivering no mode keeping
-    its own `enabled`, the operator's listing keeping the stored `enabled`, and
-    the capacity version unchanged.
-- `kit/site` unit tests own the projections' input: both are built from the
-  offered read, and the capacity-bucket projection's revision and digest
-  advance when only offered state changes.
-- `kit/fulfillment` library integration tests own placement:
-  - exclusion before policy, rebind, cursor, or assignment, on both the
-    automatic and the constrained path;
-  - a pool-scoped hold whose own backing lost its host re-placed elsewhere, or
-    refused with no other candidate;
-  - an existing assignment on a disabled host returned unchanged, and refusal
-    of an existing assignment that records no host;
-  - one report read per scheduling transaction, in its session, and none with
-    no requirement.
-- Provisioning library integration tests own the host authority's report: a
-  disabled host leaves it and returns on enable, an unregistered id is never in
-  it, and it reads the caller's own uncommitted disable.
-- Provisioning unit tests own composition: refusal of a requirement that
-  disagrees with the registered providers; the ledger and the scheduling unit
-  of work receiving the host authority as the same report; and a declaration
-  handed in not enabled projecting not enabled, with its bare-metal view
-  unavailable.
-- Provisioning integration tests prove the deployed surface through the typed
-  clients:
-  - admission and scheduling refusals with the executor boundary asserted
-    never reached;
-  - a host disabled through the family client making probe and reserve answer
-    no capacity and a constrained schedule answer `no_eligible_resource`,
-    projecting the declaration not enabled in the resource-pool projection, its
-    bare-metal view unavailable, leaving it out of the capacity buckets and the
-    snapshot, keeping the operator's listing, and leaving the capacity version
-    unchanged, each restored on enable; an unregistered host likewise until it
-    is registered; an unbacked pool's declaration unaffected; and an existing
-    assignment on a disabled host returned by a retry, its create waiting at
-    dispatch until the host is enabled;
-  - dispatch to an unregistered host failing before any playbook, even after a
-    host definitions document naming the host was submitted and refused.
-- End to end, `e2e_bare_metal_publication`'s host stages prove the storefront
-  half: disabling the advertised resource's host closes its listing as a
-  withdrawn source after one site-projection and one publication cycle, and
-  enabling it reopens the same listing id. Every lane registers each host a
-  backed declaration names before declaring it, through the shared
-  `register_e2e_host` helper.
-
-## Multi-Domain Storefront Composition
-
-The common shell owns a boundary matrix rather than duplicating complete domain
-scenarios at every level:
-
-- core storefront unit tests cover contribution discovery, duplicate/unknown
-  rejection, exact-object registry resolution, immutable listing/thread
-  bindings, lifecycle carriers, publication fan-out, and schema-opaque result
-  dispatch;
-- VM storefront tests cover installed contribution wiring, exact public
-  `offering_mode`, configured source selection, negotiation/settlement
-  adapters, selected-site capacity calls, and restart recovery;
-- bare-metal domain/storefront tests own only bare-metal codecs, publication
-  semantics, and the production lifecycle hook supplied by that package;
-- deployment tests render one combined image/command/database, both explicit
-  registrations, disabled-domain absence, and secret canary exclusion;
-- the system lanes observe a VM deal and a selected-site bare-metal deal, each
-  in its own lane through mock-provisioned delivery, including result,
-  teardown, and restored capacity; real bare-metal access and its revocation
-  are the protected lane's evidence, which no mock-provisioned deal stands in
-  for.
-
-Every cross-swap test asserts the unselected policy, repository mutation,
-capacity/provider call, result decoder, and teardown spy remain untouched.
-Restart fixtures route from recorded bindings even when current publication
-configuration changes.
-
-## Marketplace Identity Verification
-
-Identity tests follow the same lowest-meaningful-level rule while exercising
-the security boundary from canonical bytes through composed roles:
-
-Scheme-neutral behavior is exercised from one shared fixture matrix under both
-Ed25519 and EIP-191 rather than by maintaining parallel feature suites. Tests
-specific to normalization and cryptographic dispatch stay with the identity
-plugins; tests that require a wallet or chain stay with the explicitly selected
-EVM adapter. Arkhai payment composition coverage uses
-Ed25519 with every wallet and chain setting absent, while focused EIP-191
-integration coverage proves that selecting that scheme or an EVM effect does
-not change the common marketplace contract.
-
-Buyer profile tests treat metadata, provider access, and run ownership as
-separate boundaries. The deterministic matrix covers create/import/select,
-strict permissions and symlink rejection, exact-provider failures, generated
-secret cleanup, dual-proof rotation, retention blockers, restart, retirement,
-and deletion without inspecting a secret through a second path.
-
-Run-log migration is an atomic multi-artifact transformation: populated v1/v2
-runs become version 3 with stable profile UUID and canonical principal, every
-candidate validates before activation, and a failure after an earlier
-replacement restores the profile store and all run logs. An unresolved durable
-manifest must fail startup rather than admit mixed identity precedence.
-
-- Identity-kit unit and conformance fixtures cover strict Ed25519 and EIP-191
-  principal normalization, byte-identical version 2 request/response and
-  rotation vectors, field-by-field tamper rejection, timestamp skew, exact
-  replay, changed reuse, and dual-proof bounded rotation.
-- Authority integration tests use canonical typed clients against real
-  applications and databases. They prove replay reservation precedes handler
-  dispatch, exact principals and roles authorize, configured service-peer and
-  site pins are enforced, signed responses are verified, and no body address,
-  administrator key, private-key field, or missing-header fallback reaches a
-  state mutation.
-- Migration tests cover explicit buyer run-log migration and startup/readiness
-  rejection of drift or mixed signature versions.
-- Composition tests exercise an Ed25519 Arkhai payment path with wallet, chain,
-  RPC, balance, and gas configuration absent, and separately prove that a
-  selected EVM effect resolves and validates only its adapter-owned inputs.
-- Configuration and artifact tests use secret canaries
-  ([`repository-content.md`, "Published artifacts are checked with canaries"](../guidance/engineering/repository-content.md#published-artifacts-are-checked-with-canaries))
-  to reject private material in public models, persistence, logs, rendered
-  ConfigMaps, arguments, images, wheels, manifests, and fixtures. Payment tests use the
-  installed payments kit's generated wire models and never import the
-  payments service implementation. "Payment Receipts in Tests" below covers
-  how they obtain signed receipts.
-- VM and API-credit plugin conformance uses the same selected-primary and
-  retained-principal recovery fixtures. Discovery rejects any plugin missing
-  `core.resolved-buyer-identity.v1` before command registration.
-- Secret-canary scans
-  ([`repository-content.md`, "Published artifacts are checked with canaries"](../guidance/engineering/repository-content.md#published-artifacts-are-checked-with-canaries))
-  include profile JSON, run-log JSONL, human/JSON CLI output, exceptions/reprs,
-  generated buyer TOML, Compose/Helm renders, ConfigMaps, wheels, images, and
-  evidence; the component holding a credential is the selected provider.
-- A payment system scenario must cover publication, discovery, negotiation,
-  approval, receipt-gated delivery, status, and recovery with Ed25519 and no
-  wallet. Local controlled smoke evidence does not establish live ledger or
-  physical access. Check readiness before a live run and report unavailable
-  service or credential prerequisites rather than run against a down target.
-
 ## Accepted Arkhai purchase qualification
 
 For external physical qualification, use the shipped ordinary buyer CLI to exercise discovery, negotiation, signed TEST payment, delivery, and ordinary teardown. Collect independent lifecycle observations through the supported typed operator clients; do not import a payment-specific full-deal driver merely to obtain operator visibility. Keep buyer credentials separate from operator credentials. Bind source and selected artifacts/configuration to the run and correlate the accepted Agreement, funding evidence, receipt, rental debit, reservation, fulfillment, jobs, delivered access, and teardown observations in restricted evidence. Public summaries omit credentials, private service records, and raw deployment data.
 
 Require actual paid-buyer journeys for claims about tenant identity, negotiated privilege, grant admission, GPU work, delivery, ordinary teardown, fresh access denial, and capacity restoration. A supplemental network-policy probe is admissible only from an actual operator-only CPU guest on the same paid deployment, using the pinned guest base, its actual default bridge and virtio NIC, and the loaded policy structure. It may establish only the finite selectors observed on that path; it establishes none of the paid tenant identity, credential, privilege, grant, GPU, payment, delivery, or lifecycle facts and does not prove universal isolation. A namespace-only probe is not a substitute for this guest-path evidence. Published vectors, local component tests, and controlled smokes are narrower evidence. Record unrun markers as unrun: an equivalent ordinary-buyer method does not mean an older named test marker executed. The procedure is [`VALIDATION_RUNBOOK.md`, section 29](VALIDATION_RUNBOOK.md#29-qualify-an-ordinary-arkhai-purchase).
-
-## Payment Receipts in Tests
-
-A seller delivers only after verifying a receipt that the payments service
-signed for the exact mandate derived from the accepted Agreement. Proving that
-gate below the system level needs a receipt for each test's own Agreement. The
-published vectors cannot supply one: their receipt covers a fixed vector
-mandate that no accepted Agreement derives.
-
-Tests get receipts from the payments kit's fixture:
-
-```python
-receipt = build_signed_receipt(signer=SERVICE, mandate=accepted.mandate)
-```
-
-Tests and diagnostics never frame or sign a receipt themselves
-([`contract-fixtures.md`, "Signed protocol messages come from the producer's fixture"](../guidance/engineering/contract-fixtures.md#signed-protocol-messages-come-from-the-producers-fixture)).
-Code like this is a second framing implementation that nothing checks against the
-service:
-
-```python
-signature = service.sign(_frame(("arkhai.payments.receipt.v1", jcs_sha256(receipt))))
-```
-
-The fixture is trustworthy because it uses the same framing function as the
-kit's verifier, and that framing is pinned by the producer's own vectors. The
-kit vendors two vector publications. The current producer vectors' receipt passes the
-strict models and verifies. The historical vectors are a separate raw-framing
-regression whose receipt the current models refuse. The framing and the
-signature cover a receipt's JSON whatever its parts say, so the kit's unit
-suite reproduces each publication's message and signature from its raw
-published body, byte for byte, and then signs and verifies a receipt for a
-mandate the marketplace derives through the same framing:
-
-```python
-assert receipt_message(vector_body).hex() == vectors["receipt"]["message"]
-assert signer.sign(receipt_message(vector_body)) == vector_signature
-assert sign_receipt(SERVICE, derived_body) == build_signed_receipt(signer=SERVICE, mandate=mandate)
-```
-
-The fixture exists to supply receipts for mandates the marketplace derives.
-`kit/arkhai-payments/schema/SOURCE.md` records the schema's and both vector
-publications' content hashes and how to select newer ones.
-
-The fixture takes its signer as an argument and ships no key material.
-Integration tests replace `PaymentsClient`, the code that wraps the payments
-HTTP boundary, with a fake that serves fixture receipts. Each test varies one
-property:
-
-```python
-payments.serve(build_signed_receipt(signer=SERVICE, mandate=accepted.mandate))   # delivers
-payments.serve(build_signed_receipt(signer=IMPOSTOR, mandate=accepted.mandate))  # 409, no delivery
-payments.serve(None)                                                              # 202 pending
-```
-
-A receipt's signed mode is one of those properties. `build_signed_receipt` signs in
-the `livemode` it is given, default `False`, the mode of a test or development
-service. `FakePaymentsClient`'s own `livemode` applies only to the receipts it signs
-on approval; a receipt handed to `serve()` keeps the mode it was signed with. A stage
-configured for one mode is tested with a receipt signed in the other:
-
-```python
-payments.serve(build_signed_receipt(signer=SERVICE, mandate=accepted.mandate, livemode=True))  # refused unless the role sets livemode
-```
-
-A snapshot consumed as authority state needs its own verified proof, mode,
-deal/mandate/receipt binding and nonregressing event sequence. The payments kit
-owns snapshot vectors, `sign_snapshot` and the shared clock-injected
-`PaymentsAuthority` fixture engine. `FakePaymentsClient` uses that engine rather
-than reimplementing billing; a receipt-only fixture proves only the receipt gate,
-not part-state observation. The mediation kit independently owns claim framing,
-both signature-scheme vectors and ruling traces. Neither fixture qualifies a
-deployed authority or monetary ruling execution. See
-[lifecycle contract evidence](../../openspec/specs/test-compatibility/architecture.md#lifecycle-contract-evidence).
 
 ## Boundary-Change Validation
 
@@ -1452,7 +1156,7 @@ not domain configuration or payer selection.
 See [shared payment-scenario configuration](../../e2e-tests/README.md#shared-payment-scenario-configuration)
 for an external run's setup.
 
-**Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` generates its models from the service's published schema and checks the published vectors, all vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`: the current producer vectors through the strict models, signatures and transaction identities, and the historical vectors as raw transaction identities, receipt framing, signatures and attachment hashes only, which the current models refuse, as "Payment Receipts in Tests" describes. Neither proves live service responses, provider funding or physical delivery.
+**Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` generates its models from the service's published schema and checks the published vectors, all vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`: the current producer vectors through the strict models, signatures and transaction identities, and the historical vectors as raw transaction identities, receipt framing, signatures and attachment hashes only, which the current models refuse, as [`test-compatibility`'s "Payment Receipts in Tests"](../../openspec/specs/test-compatibility/testing.md#payment-receipts-in-tests) describes. Neither proves live service responses, provider funding or physical delivery.
 
 ## Offline Review Validation
 

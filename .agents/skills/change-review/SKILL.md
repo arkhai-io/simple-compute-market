@@ -71,7 +71,9 @@ Read all of this before forming a view:
   history of every cleaned-up change.
 - For every capability the change names or touches: `openspec/specs/<capability>/spec.md`
   and its companion when one exists — `README.md` where the capability has an
-  `index.md`, which you read too, and `architecture.md` elsewhere.
+  `index.md`, which you read too, and `architecture.md` elsewhere — and every
+  other Markdown file in its directory but its `index.md`: the capability's own
+  guidance.
 - The code the change cites, and the code it changes or would change. Read enough
   to verify every factual claim it makes.
 - For `implementation`, `pre-closeout`, `closeout`, and `merge`: the change's diff,

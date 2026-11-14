@@ -219,7 +219,8 @@ Read in full, even if you believe you know it:
 - the triage of the latest implementation review in `reviews/`, if any: accepted
   findings may have become tasks in this section;
 - the permanent spec and architecture companion of every capability the section
-  touches;
+  touches, and every other Markdown file in its directory but its `index.md`: the
+  capability's own guidance;
 - the code the section changes, and the tests it extends.
 
 If the session compacts while working, read these again before continuing.
@@ -347,7 +348,8 @@ command to see the diff (`git diff` against the section's starting commit, plus 
 untracked files), and this instruction — read the documents
 `scripts/change-workflow config load implement` prints and every document they
 require, plus the specs and architecture companions of the capabilities the diff
-touches; then report every place the diff breaks that guidance — layering,
+touches and every other Markdown file in their directories but their `index.md`;
+then report every place the diff breaks that guidance — layering,
 comments, test level, documentation placement, packaging — with file and line, and
 every evidence claim in the section's task notes that overstates what its tests
 exercise, and say plainly when it finds none. Fix what it finds that is right, and say what you

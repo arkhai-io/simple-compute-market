@@ -88,7 +88,11 @@ priority = []
 # never published. A [Delivery] section sends each revealed buyer contact to
 # the seller's own sinks, routed per site by [Delivery.origins] when the
 # storefront has more than one; sink credentials belong in
-# storefront.secrets.toml. See DEPLOYMENT_AND_CONFIG.md. Generated
+# storefront.secrets.toml. See "Settlement consumer configuration and
+# cutover", "Contact-exchange contacts", and "Introduction delivery" in the
+# configuration.md beside the settlement-configuration,
+# contact-exchange-settlement, and introduction-delivery specifications under
+# openspec/specs/. Generated
 # role configuration supplies every typed field and the exact capability pins.
 # Provider, webhook, database, migration, EAS, and RPC service configuration is
 

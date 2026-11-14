@@ -29,11 +29,16 @@ in `.agents/workflow.toml`.
 | Path | What it holds |
 |---|---|
 | `AGENTS.md` | This entry |
-| [`docs/guidance/`](docs/guidance/workflow/README.md#the-layers-of-guidance) | Every Markdown file beneath it: the engineering and the workflow layers |
+| [`docs/guidance/engineering/`](docs/guidance/engineering/README.md) | Every Markdown file beneath it: the engineering guidance |
+| [`docs/guidance/workflow/`](docs/guidance/workflow/README.md) | Every Markdown file beneath it: the change workflow's guidance |
 | [`openspec/README.md`](openspec/README.md) | This repository's OpenSpec guide: where each document goes, its closeout parts and their checks |
 | [`docs/development/ARCHITECTURE.md`](docs/development/ARCHITECTURE.md) | The system's shape, its package layers, authorities, vocabulary, and flows |
 | [`docs/development/TESTING.md`](docs/development/TESTING.md) | Where this repository's tests live, its lanes and doubles |
 | [`docs/development/DEPLOYMENT_AND_CONFIG.md`](docs/development/DEPLOYMENT_AND_CONFIG.md) | How its services resolve configuration and are deployed |
+
+A session working on a capability reads, beside its specification and companion,
+every other Markdown file in its directory under `openspec/specs/` but its
+`index.md`: the capability's own guidance.
 
 ## Where the guidance lives
 
@@ -129,9 +134,3 @@ says, and follow [`docs/guidance/engineering/terms.md`](docs/guidance/engineerin
 Here the market's cross-subsystem terms live in
 [`docs/development/ARCHITECTURE.md`, "Shared vocabulary and identities"](docs/development/ARCHITECTURE.md#shared-vocabulary-and-identities),
 whose "One name per concept" names the synonyms ruled out.
-
-### Diagrams
-
-A diagram drawing a structured source by hand, such as the change workflow's graph
-drawn from its graph table, may be compared with that source until a deterministic
-layout reads as well as the hand-laid one.

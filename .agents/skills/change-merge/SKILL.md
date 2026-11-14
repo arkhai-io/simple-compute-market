@@ -144,7 +144,10 @@ Read in full: the documents `scripts/change-workflow config load merge` prints; 
 `proposal.md`, `design.md`, and `tasks.md`, the section notes above all, which say
 which files each section owns and which suites and end-to-end scenarios prove it;
 the latest pre-closeout review and its triage, and after the archive the latest
-closeout review's and any merge review's too; and the latest validation record.
+closeout review's and any merge review's too; the latest validation record; and,
+for every capability the change touches, its `spec.md`, its companion, and every
+other Markdown file in its directory but its `index.md` — the capability's own
+guidance — which the merge reconciles, with the code, against both sides.
 
 ## 3. Merge
 

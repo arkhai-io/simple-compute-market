@@ -473,7 +473,7 @@ closes as leased, and it is never reserved, scheduled, or fulfilled. It publishe
 only settlement options bare metal does not fulfil through capacity, which today
 means contact exchange: enable `[Settlement.contact]` with a contact for the site
 and a profile, here `[Settlement.contact.profiles.default]` (see
-`docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Contact-exchange contacts"), and offer it to
+`openspec/specs/contact-exchange-settlement/configuration.md`'s "Contact-exchange contacts"), and offer it to
 the pool through a `contact-exchange.v1` clause, in `[pricing].settlements` or, to
 keep it to this pool, a pool override:
 

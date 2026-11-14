@@ -1901,6 +1901,12 @@ checks. Files: `AGENTS.md`; `openspec/README.md`; `docs/development/ARCHITECTURE
   draw.io paragraph, which 127 O1 placed below its placement table, is weighed with
   them. The loader is not designed yet; the tags need only stay flexible enough for
   several designs.
+  Amended at the owner's direction before section 7 (138 note 2, log seq 191): the
+  same revisit, beside 111 O2, weighs the owner's question "whether we should plan to
+  refactor the /docs/development/*.md repository guidance into the tagged and
+  smaller file format workflow and engineering guidance uses and place the knowledge
+  in /docs/guidance/repository instead of retaining the files as they are now." It is
+  recorded here only; nothing acts on it before the revisit.
   Note: the duplicate rows this section's material carries — 148 and 167 (merged),
   484, 497, and 575 (kept in place, compared, and listed) — and the `Makefile`'s
   `clobber-wheels` that round 4's triage left here are under "Section 6's differing
@@ -2148,14 +2154,74 @@ places a description of the system; `docs/development/TESTING.md`,
 `DEPLOYMENT_AND_CONFIG.md`, `ARCHITECTURE.md`;
 `.agents/skills/change-{design,plan,implement,review,triage,merge,closeout}/SKILL.md`.
 
-- [ ] 7.1 Move each section the corrected inventory places beside a capability — by
+- [x] 7.1 Move each section the corrected inventory places beside a capability — by
   the owner of what it governs (31 O1d) — into a guidance file in that capability's
   directory, each with frontmatter `tags: [repository, <topic>]` and no capability
   tag (D18), or into its companion where the inventory says the text describes the
   system, deleting it from its source. Verify each such row sits in its destination,
   and no file in a capability directory but `spec.md`, its companion, and `index.md`
   lacks frontmatter.
-- [ ] 7.2 Put each exception the inventory found that applies to one capability in
+  Note: six testing files, `tags: [repository, testing]`, each a heading of
+  `TESTING.md` moved whole under the same heading — `negotiation-protocol/testing.md`
+  (the negotiation-runtime instance, row 453; no heading of its own in the source),
+  `resource-pool-management/testing.md` ("Pool Offering-Mode Enforcement", row 492,
+  its closeout paragraph with it), `site-capacity/testing.md` ("Host Requirement
+  Enforcement", 493), `market-composition/testing.md` ("Multi-Domain Storefront
+  Composition", 494), `marketplace-identity/testing.md` ("Marketplace Identity
+  Verification", 496), and `test-compatibility/testing.md` ("Payment Receipts in
+  Tests", 498). Twelve configuration files, `tags: [repository, configuration]` but
+  `market-composition/configuration.md`'s `[repository, configuration, deployment]`
+  (row 559): `storefront-publication` (rows 545, 560, 576 — the startup refusal, the
+  unreachable start, durations, the servicing interval, system status, the listing
+  bindings and terms of sale, and the listing shapes and overrides),
+  `settlement-configuration` (546, 578, 579, 582 — the Alkahest startup refusal,
+  unreadiness, the chain probe, the settlement consumer section with the payments
+  check and the cutover sequence, release models, dispute preferences),
+  `resource-pool-management` (547, 565, 569), `site-capacity` (548),
+  `marketplace-identity` (549), `registry-discovery` (550), `market-composition`
+  (559), `physical-provisioning` (562, 564, 568, 570, 571, 573),
+  `compute-provisioning-contract` (577), `settlement-servicing` (581),
+  `contact-exchange-settlement` (584, 587), and `introduction-delivery` (586). Each
+  opens by saying what it holds, and links the engineering rules it instances where
+  it instances one (`settlement-servicing`'s library inputs instance none); the
+  bold-led paragraphs of "Storefront startup and site trust" became headings of
+  their files. Beyond the rows: `DEPLOYMENT_AND_CONFIG.md`'s "Definition documents"
+  opening, its "The method a document kind follows" instance paragraph, and the
+  pointer paragraphs of "What a document does…" and "Secrets are named…" moved to
+  `physical-provisioning` with their kinds, since nothing of the section was left
+  to span services, keeping the source's nesting under "Definition documents";
+  "Alkahest release models" moved with its section (row 578), but its last
+  paragraphs, filed under it in the source and none of them Alkahest's, are split
+  by 31 O1d: the publication migration, the VM storefront's retired inventory keys,
+  and the production cutover sequence under a heading of their own in the
+  settlement file, "Migrating a configuration and cutting over", which
+  `DEPLOYMENT_AND_CONFIG.md`'s retired-keys paragraph cites; and the API-credit
+  storefront's and credits service's own state back to `DEPLOYMENT_AND_CONFIG.md`'s
+  "Stateful service persistence", beside every service owning its database — a
+  placement beyond row 578, open for the triage; `ARCHITECTURE.md`'s "Durable fulfillment acceptance"
+  (row 435) merged into `fulfillment/architecture.md`'s existing "Fulfillment
+  acceptance and dispatch acknowledgement" (task 7.3). "Bare-metal role
+  configuration", left with no parent heading, is a `##` of its own. Every moved
+  heading's citation re-pointed (task 7.5). `TESTING.md`'s and
+  `DEPLOYMENT_AND_CONFIG.md`'s openings each gain a sentence saying one capability's
+  tests or configuration sit in its `testing.md` or `configuration.md`, and the
+  latter's list of rules drops `definition-documents.md`, no instance of which it
+  holds now. Wording changed in the move: "Identity tests follow the same
+  lowest-meaningful-level rule" loses "same", which named the sections beside it;
+  "Upgrading to listing shapes is fail-forward … the first publication cycle after
+  upgrade" reads "Listing shapes are fail-forward … a storefront's first publication
+  cycle on a release with shapes, from one without"; "not new `[Settlement]`
+  configuration keys" loses "new", "continues to configure" reads "configures", and
+  "The old … boolean settings" reads "The retired", each relative to a change; the
+  host-definition kinds' "a paragraph below" reads "a section", the pool's being in
+  another file; a citation "(see "X")" of a section now elsewhere is a link to it;
+  and the servicing budget's "+ teardown", which began a line and rendered as a
+  list item, is escaped.
+  Verified by `find openspec/specs -mindepth 2 -name '*.md'` without `spec.md`,
+  `architecture.md`, and `index.md`: every file it lists opens with `tags`
+  frontmatter but `change-workflow/README.md` and `market-change-workflow/README.md`,
+  companions of indexed capabilities. Evidence: inspected; no test applies.
+- [x] 7.2 Put each exception the inventory found that applies to one capability in
   that capability's guidance file, as an `## Exceptions to shared guidance` row
   (D9, CW-x4ex): at least the hand-laid change-workflow graph's `overrides` row
   against `docs/guidance/engineering/diagrams.md`, in a new
@@ -2165,17 +2231,144 @@ places a description of the system; `docs/development/TESTING.md`,
   Amended at round 5's triage (127 O1): the graph's sentence is all that is left
   under `AGENTS.md`'s "Diagrams"; moving it removes the heading, the draw.io rule
   being `openspec/README.md`'s.
-- [ ] 7.3 Deduplicate the capability material as the preamble says (31 O1b). Verify
+  Note: the inventory's only single-capability exception is row 159, the graph. It
+  is `openspec/specs/change-workflow/diagrams.md`'s one row: `overrides`
+  `diagrams.md`'s "A diagram is held to code only when generated", since the graph's
+  hand-laid diagram is held to the graph table by a test and `make change-graph`,
+  until a deterministic layout reads as well, citing the companion's "Routing is
+  code, with the model as backstop", which describes the comparison, and its
+  "Current limits" bullet. The file's opening says where the capability's diagrams
+  sit, citing `openspec/README.md`'s draw.io rule. `AGENTS.md`'s "Diagrams" heading
+  is gone with its sentence; nothing cited it. Evidence: inspected; no test applies.
+- [x] 7.3 Deduplicate the capability material as the preamble says (31 O1b). Verify
   every duplicate row this section moves is merged or listed.
-- [ ] 7.4 Extend the seven skills' reading lists — `change-design`, `change-plan`,
+  Note: merged — "Durable fulfillment acceptance" and the fulfillment companion's
+  "Fulfillment acceptance and dispatch acknowledgement" agreed on the two
+  transactions, the session-scoped claims, and acquisition disabled in validation;
+  the companion's section gains the sentences only the architecture document had
+  (the kit owns provider-neutral orchestration; preparation does no external I/O;
+  adapters, provisioning composition, and storefronts own what they own). The
+  handbook overlaps the inventory marks (rows 550, 565, 570, 571, 578, 582) are
+  listed under "Section 7's differing pairs" below; none contradicts. Evidence:
+  inspected; no test applies.
+- [x] 7.4 Extend the seven skills' reading lists — `change-design`, `change-plan`,
   `change-implement` (both of its lists), `change-review`, `change-triage`,
   `change-merge`, and `change-closeout` — so that wherever each reads a capability's
   specification and companion it also reads every other Markdown file in the
   capability's directory but its `index.md` (D22, CW-r8cg). Verify `make
   check-agent-skills` passes and each skill's list names the guidance files.
-- [ ] 7.5 Re-point every citation of what this section moved, and verify the
+  Note: design, review, and closeout extend their "For every capability…" bullet;
+  plan and implement their spec-and-companion bullet, implement's fresh-context
+  instruction too; triage reads each cited specification's companion and guidance
+  files before deciding a fix; merge, whose context listed no specification, reads
+  every touched capability's specification, companion, and guidance files, which it
+  reconciles with the code against both sides (design review 19 F2). Each names
+  "every other Markdown file in its directory but its `index.md`: the capability's
+  own guidance". `make check-agent-skills`: OK. Evidence: inspected; the skills
+  check verifies only their one source.
+- [x] 7.5 Re-point every citation of what this section moved, and verify the
   section as task 3.10 does. End-to-end: none; no pipeline scenario reads guidance,
   and none is owed.
+  Note: re-pointed, from Grep for each moved heading's anchor and quoted name
+  outside the archive: in `DEPLOYMENT_AND_CONFIG.md`, the registry, identity,
+  settlement, and Alkahest citations of "Profile-based configuration", the
+  ConfigMap bullets, "Storefront agents", and "Bare-metal role configuration"; in
+  `TESTING.md`, the receipt citation of "Private Service Dependencies"; the
+  operator handbook's three ("Definition documents", "Payments access", "Registry
+  secret profile"); `kit/arkhai-payments/README.md`; the buyer, seller, and
+  bare-metal seller quickstarts; `deployment-state/architecture.md`; the VM
+  storefront's `examples/README.md`; and the VM storefront's `settings.toml`
+  comment, which named `DEPLOYMENT_AND_CONFIG.md` for the contact and delivery
+  settings and now names their headings. Two active changes' design-promotion
+  records named destinations that moved, and are re-pointed, the edits landing with
+  this change (`changes.md`, "One change per branch"):
+  `multi-domain-storefront-composition`'s two anchored paths, which section 9's
+  guidance check would otherwise fail, and `add-persistent-buyer-profiles`' two
+  headings named in prose. Every anchor this section wrote was checked against its
+  heading by hand and again by the fresh-context check, the citation check reading
+  paths only.
+  Verification, as task 3.10: `make check-agent-skills` OK; `make
+  check-doc-citations CHANGE=layer-engineering-guidance` reports only this change's
+  own documents citing the files it removed or section 9 creates — ten, the
+  hard-case sample's capability files resolving now; unscoped, nothing from a file
+  this section wrote or edited. `scripts/change-workflow run pre-commit
+  layer-engineering-guidance`, run after the fresh-context check's fixes, eight
+  paths outside the inert paths (the seven skills and the VM storefront's
+  `settings.toml`): `after-functional-change` (relock) passed, changing no lock;
+  `pre-commit-functional` passed (`make check-packaging`, and `make test`'s every
+  suite, the VM storefront's, which packages `settings.toml`, among them); the
+  default checks passed, OpenSpec "is valid"; `make check-repository` failed only on
+  the two the preamble expects — the ten citations above, and the specification
+  index wanting the twelve `CW-*` entries and CW-pkug's renamed link (task 10.9) —
+  its other six checks, comment hygiene among them, passing. End-to-end scenarios
+  covering the section: none confirmed, as planned. Owed by validation: nothing.
+
+Owner's direction to section 7 (138 note 1, log seq 191): "The guidance table is
+missing a row for the engineering guidance." `AGENTS.md`'s layer table already has
+the engineering row, so the table read is "What every session reads", whose one
+`docs/guidance/` row linked only the workflow README: it is two rows now,
+`docs/guidance/engineering/` and `docs/guidance/workflow/`, each linking its
+layer's README. Open for the round's triage if another table was meant.
+
+Section 7's differing pairs (31 O1b), for the round's triage:
+
+- **The registry's configuration (row 550).** `registry-discovery/configuration.md`
+  against the operator handbook's "Registry secret profile" and
+  `core/registry/README.md`: they agree on the dotenv sources and their order, the
+  profile env files, `secretProfile` appended after `production` and never named
+  so, and the refused `auth.*` values; the handbook adds the move's procedure, the
+  README the full settings list. Proposed: all kept, unchanged.
+- **Pool, host, and capacity definitions (rows 565, 570, 571).** The moved
+  paragraphs name each document's setting, chart value, and contract and cite the
+  handbook for its format; they agree with the handbook's top-level lists,
+  `pool_seed_path` and `seed/pools.yaml`, and `PROVISIONING_HOST_DEFINITIONS_PATH`.
+  Proposed: kept, unchanged.
+- **The payments check and dispute credentials (rows 578, 582).** The settlement
+  file's failure steps are a superset of the handbook's "Payments access" table:
+  `configuration` adds "a configuration the storefront cannot read", `credential`
+  adds "not a single-line key"; the dispute credential's place in the overlay and
+  the values schema's refusal agree. The cutover sequence has no handbook copy.
+  Proposed: both kept, the handbook's table naming what an operator looks at;
+  neither contradicts.
+
+Section 7 notes (handoff):
+
+- Outside the plan: `AGENTS.md`'s "What every session reads" gains a sentence that a
+  session working on a capability reads its directory's other Markdown files but
+  `index.md`, D22 for sessions outside the workflow, which 127 O1's "what every
+  session reads" covers; open for the triage.
+- For the triage and task 9.3: "What every session reads" names
+  `docs/guidance/engineering/` and `docs/guidance/workflow/` as two rows (138 note
+  1), where 127 O1 settled `docs/guidance/` named as one directory and task 9.3's
+  amendment verifies that the table and `load.common` agree. The owner's later
+  direction is followed; 127 O1's wording and 9.3's check want amending at the
+  triage — the agreement read as of the files named, or `load.common` naming the
+  two directories.
+- For section 9's guidance check: the capability guidance set is the nineteen files
+  `find` lists above but the two indexed companions; each links `AGENTS.md`,
+  `DEPLOYMENT_AND_CONFIG.md`, or another capability's file only as repository
+  guidance may. `change-workflow/diagrams.md`'s exceptions row is the one the
+  check's `--list-exceptions` should print beside `AGENTS.md`'s two.
+- `DEPLOYMENT_AND_CONFIG.md` is down from 1,975 lines to about 840, holding the
+  profiles, the charts, the stacks, persistence, release topology, migrations, the
+  bare-metal role, and the current limits: the cross-service material the pre-closeout
+  revisit's split by tag weighs (task 6.5).
+- A pre-existing defect left: the VM storefront's `settings.toml` comment block
+  ends mid-sentence ("Provider, webhook, … service configuration is"); what it
+  meant to say is not recoverable from the file, so it is not fixed here.
+- The fresh-context check found no broken anchor and no moved text lost; it found,
+  and this section fixed, the definition-document headings flattened (two citations
+  of "Definition documents" covering less), undisclosed wording changes, an opening
+  claim false of two files, four phrases relative to a change, the `settings.toml`
+  comment naming files without headings, paragraphs filed under "Alkahest release
+  models" that are not Alkahest's, a pointer to the contract linking its
+  configuration rather than its specification, and the two active changes' stale
+  destinations. Declined, open for the triage: amending 127 O1 and task 9.3 for the
+  two guidance rows, which is the triage's (above); widening the tags of the
+  configuration files holding startup refusals with `deployment`, or the contract's
+  with `versioning`, which the inventory's tag column gives and the pre-closeout
+  revisit's tag-reach question weighs (task 6.5); and adding capability guidance to
+  `guidance-review`'s reading, a skill outside the seven D22 names and CW-r8cg binds.
 
 ## 8. `[load]` directory entries
 

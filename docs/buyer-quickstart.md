@@ -107,7 +107,7 @@ refuses to overwrite an existing file during generation.
 Settlement mechanisms are explicit and disabled by default.
 
 For Arkhai payments, configure `[Settlement.arkhai_payments]` and the separate
-`[vms].payer_account` as described in [settlement consumer configuration](development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover).
+`[vms].payer_account` as described in [settlement consumer configuration](../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover).
 The API key belongs in the environment variable named by `api_key_env`, not in
 TOML. Use `livemode = false` for TEST receipts. This mechanism needs no EVM wallet
 or RPC configuration.

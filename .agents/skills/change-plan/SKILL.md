@@ -148,7 +148,8 @@ the files are what the implementer will see:
   tasks template; every OpenSpec command runs so, through the command the
   repository's configuration names;
 - the permanent spec and architecture companion of every capability the change
-  touches, and `openspec/specs/README.md`;
+  touches, every other Markdown file in its directory but its `index.md` — the
+  capability's own guidance — and `openspec/specs/README.md`;
 - the code each decision changes: enough to name the files, the package
   boundaries, and the existing tests a section extends;
 - another change's records, where a section rests on them — a dependency's

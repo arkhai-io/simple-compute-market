@@ -194,7 +194,7 @@ Payment receipt pins support bounded current/retiring identity windows. Dispute
 origin/record-key pins do not: accepted deals remain bound to the old origin/key,
 including unbounded case life. Public renderings contain public trust projections,
 not credential references or resolved secrets. See
-[operator authority configuration](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences).
+[operator authority configuration](../settlement-configuration/configuration.md#dispute-authority-preferences).
 
 ## Current limits
 
