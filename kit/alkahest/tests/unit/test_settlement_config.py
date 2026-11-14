@@ -18,7 +18,7 @@ from market_alkahest import (
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.settlement_config import alkahest_preflight
-from market_core.schemas import SettlementOption
+from market_core.schemas import PriceBasis, SettlementOption, derive_settlement_option_id
 from market_settlement_runtime import (
     MechanismReadiness,
     SettlementConfigurationError,
@@ -988,3 +988,42 @@ def test_alkahest_rate_beyond_uint256_is_refused(monkeypatch) -> None:
 def test_registration_verifies_settlement_against_the_accepted_plan() -> None:
     registration = create_alkahest_registration()
     assert registration.settlement_verifier is verify_escrow_against_plan
+
+
+def _with(raw: dict, **changes) -> SettlementOption:
+    """``raw`` with ``changes`` applied, under its new canonical ID."""
+    fields = {key: value for key, value in {**raw, **changes}.items() if key != "option_id"}
+    return SettlementOption(option_id=derive_settlement_option_id(**fields), **fields)
+
+
+def test_an_alkahest_option_bills_one_whole_term_total(monkeypatch) -> None:
+    project = create_alkahest_registration().project_billing
+    published = SettlementOption.model_validate(
+        _build_alkahest_option(monkeypatch, "1.25", 6)["settlement_options"][0]
+    )
+    assert project(published) == PriceBasis(unit="total")
+    # A negotiated acceptance carries its escrow proposal directly rather than
+    # the published accepted escrow; it is the same whole-term escrow. Its
+    # addresses are the builder helper's deterministic development values,
+    # never contracts on a public network.
+    raw = published.model_dump(mode="json", exclude_none=True)
+    explicit = _with(raw, settlement={
+        "schema": ALKAHEST_MECHANISM_ID, "chain_name": "base_sepolia",
+        "escrow_address": "0x" + "34" * 20, "fields": {"token": "0x" + "12" * 20},
+        "expiration_unix": 1_900_000_000,
+    })
+    assert project(explicit) == PriceBasis(unit="total")
+
+
+def test_an_alkahest_option_that_is_not_a_plain_escrow_has_no_billing_projection(
+    monkeypatch,
+) -> None:
+    project = create_alkahest_registration().project_billing
+    raw = _build_alkahest_option(monkeypatch, "1.25", 6)["settlement_options"][0]
+    recurring = _with(raw, settlement={**raw["settlement"], "period": "PT15M"})
+    with pytest.raises(ValueError, match="requires an escrow option"):
+        project(recurring)
+    with pytest.raises(ValueError, match="without lifecycle terms"):
+        project(_with(raw, lifecycle={"delivery_deadline_seconds": 1200}))
+    with pytest.raises(ValueError, match="requires an Alkahest option"):
+        project(_with(raw, settlement={**raw["settlement"], "schema": "fixture.other.v1"}))

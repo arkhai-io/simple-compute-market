@@ -141,7 +141,7 @@ def test_bare_metal_listing_rejects_invalid_duration_bounds():
 def test_bare_metal_listing_publishes_exactly_the_compute_flat_names():
     published = set(BareMetalListing.model_fields) - {
         "kind", "offering_mode", "capacity_backing", "host_id", "physical_host_id",
-        "access_methods", "min_duration_seconds", "max_duration_seconds", "region",
+        "access_methods", "min_duration_seconds", "max_duration_seconds", "available_until_utc", "region",
         "asking_rate",
     }
 

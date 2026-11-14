@@ -77,7 +77,7 @@ the one its `pyproject.toml` declares.
 | `arkhai-bare-metal-storefront` | `domains/bare_metal/storefront/` | `arkhai-bare-metal`, `arkhai-compute`, `arkhai-compute-delivery`, `arkhai-compute-provisioning-client`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-mediation`, `arkhai-kit-arkhai-payments`, `arkhai-kit-capacity-publication`, `arkhai-kit-config`, `arkhai-kit-contact-exchange`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-deal-servicing`, `arkhai-kit-delivery`, `arkhai-kit-delivery-apprise`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-policy`, `arkhai-kit-pool-overrides`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-schema-migrations`, `arkhai-kit-settlement-runtime`, `arkhai-kit-site-client`, `arkhai-kit-storefront` |
 | `arkhai-bare-metal-buyer` | `domains/bare_metal/buyer/` | `arkhai-bare-metal`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-core-registry-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-mediation`, `arkhai-kit-arkhai-payments`, `arkhai-kit-contact-exchange`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-buyer`, `arkhai-kit-deal-lifecycle-client`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
 | `arkhai-bare-metal-provisioning-adapter` | `domains/bare_metal/provisioning/adapter/` | `arkhai-bare-metal`, `arkhai-compute-provisioning`, `arkhai-compute-provisioning-ansible`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-kit-fulfillment`, `arkhai-kit-resource-pools` |
-| `arkhai-vms` | `domains/vms/domain/` | `arkhai-compute`, `arkhai-core`, `arkhai-kit-capability-admissibility`, `arkhai-kit-capability-pricing`, `arkhai-kit-capability-shape` (`storefront` extra: `arkhai-core-storefront`) |
+| `arkhai-vms` | `domains/vms/domain/` | `arkhai-compute`, `arkhai-core`, `arkhai-kit-capability-admissibility`, `arkhai-kit-capability-pricing`, `arkhai-kit-capability-shape`, `arkhai-kit-resource-pools-contracts` (`storefront` extra: `arkhai-core-storefront`) |
 | `arkhai-vms-listings` | `domains/vms/listings/` | `arkhai-kit-alkahest`, `arkhai-kit-capability-admissibility`, `arkhai-kit-identity`, `arkhai-kit-resource-pools-contracts`, `arkhai-vms` (`pools` extra: `arkhai-kit-resource-pools`) (`overrides` extra: `arkhai-kit-pool-overrides`) |
 | `arkhai-vms-negotiation` | `domains/vms/negotiation/` | `arkhai-core`, `arkhai-kit-alkahest`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-vms`, `arkhai-vms-listings` |
 | `arkhai-vms-settlement` | `domains/vms/settlement/` | `arkhai-kit-alkahest`, `arkhai-vms-listings` |
@@ -220,6 +220,14 @@ it upgrade, and roll back, together. Persisted state keeps its own
 migration rules. Neither pre-1.0 allowance applies at or above 1.0.0.
 Incompatibility is signalled by the version numbers and the versioned
 contracts alone; no per-release list of incompatible changes is kept.
+
+Compatibility is owed to what a release has shipped. A decision made on the
+development branch and changed again before any release ships it affects no
+one, so revising it needs no compatibility path, migration or deprecation. A
+change to anything a release has shipped — its API, a wire format, a
+configuration key or a hint it reads — is judged under the rules above, so a key
+a release accepted keeps the meaning it had, or loses it only with the bump an
+incompatible change takes.
 
 A change bumps each package it changes at most once, measured against the
 package's version on the branch the change merges into: that is the version a

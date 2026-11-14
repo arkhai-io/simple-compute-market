@@ -86,8 +86,11 @@ def test_the_packaged_defaults_state_every_interval(monkeypatch, tmp_path):
     assert settings.capacity.publication_interval_seconds == 30
     assert settings.capacity.confirmation_window_seconds == 15
     assert settings.capacity.placement == "fill_first"
-    # No lease bound is shipped: a pool that resolves none is held, not refused.
+    # No lease bound is shipped: a pool that resolves none publishes with no
+    # relative limit, and startup is not refused.
     assert settings.pricing.default_max_duration_seconds is None
+    assert settings.pricing.default_premature_stop_penalty_periods == 24
+    assert settings.pricing.defaults.gpu == {}
     assert settings.registry.urls == []
     assert settings.settlement == {"schema_version": 1, "priority": []}
 
@@ -108,6 +111,35 @@ def test_each_file_layers_over_the_one_before(monkeypatch, tmp_path):
     assert settings.capacity.poll_interval == 2
     assert settings.capacity.publication_interval_seconds == 30
     assert settings.pricing.default_max_duration_seconds == 7200
+
+
+def test_a_configured_penalty_multiple_replaces_the_packaged_default(monkeypatch, tmp_path):
+    write_configuration(
+        monkeypatch, tmp_path, toml="[pricing]\ndefault_premature_stop_penalty_periods = 6\n",
+    )
+
+    assert load_storefront_settings().pricing.default_premature_stop_penalty_periods == 6
+
+
+def test_per_model_clauses_are_read_under_the_models_own_spelling(monkeypatch, tmp_path):
+    """``[pricing.defaults.gpu.<model>]`` keeps the model as a machine's shape
+    names it, its clauses read in any case like ``[pricing].settlements``; a
+    model stating no clauses defers to them."""
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        toml=(
+            "[pricing.defaults.gpu.H100]\n"
+            'settlements = [{ Mechanism = "alkahest.v1", asset = "USDC" }]\n'
+            "[pricing.defaults.gpu.A100]\n"
+        ),
+    )
+
+    gpu = load_storefront_settings().pricing.defaults.gpu
+
+    assert set(gpu) == {"H100", "A100"}
+    assert gpu["H100"].settlements == [{"mechanism": "alkahest.v1", "asset": "USDC"}]
+    assert gpu["A100"].settlements is None
 
 
 def test_the_secret_overlay_wins_on_a_conflicting_key(monkeypatch, tmp_path):
@@ -302,6 +334,12 @@ def test_section_and_key_names_are_read_in_any_case(monkeypatch, tmp_path):
                      "negotiation_watchdog_interval", id="a boolean interval"),
         pytest.param({"pricing": {"default_max_duration_seconds": "86400"}},
                      "pricing.default_max_duration_seconds", id="a bound as text"),
+        pytest.param({"pricing": {"default_premature_stop_penalty_periods": 0}},
+                     "pricing.default_premature_stop_penalty_periods", id="no penalty periods"),
+        pytest.param({"pricing": {"default_premature_stop_penalty_periods": -3}},
+                     "pricing.default_premature_stop_penalty_periods", id="negative penalty periods"),
+        pytest.param({"pricing": {"default_premature_stop_penalty_periods": 1.5}},
+                     "pricing.default_premature_stop_penalty_periods", id="fractional penalty periods"),
         pytest.param({"Identity": {"principal": {"scheme": "eip191", "identifier": "x"}}},
                      "identity.principal", id="a malformed principal"),
     ],

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from market_core.schemas import Agreement, derive_settlement_option_id
 
 from market_arkhai_payments import (
     MandatePolicyError,
@@ -89,6 +90,39 @@ def test_policy_requires_payments_selection_payer_and_trusted_policy():
         mandate_policy_for_agreement(agreement(), config(fee_bps=None))
     with pytest.raises(MandatePolicyError):
         mandate_policy_for_agreement(agreement(), config(), expected_payer=OTHER)
+
+
+@pytest.mark.parametrize("duration_seconds", [3600, 7200, 172_800])
+def test_the_mandate_charges_the_accepted_total_once_whatever_the_duration(duration_seconds):
+    accepted = agreement(duration_seconds=duration_seconds, amount="10000")
+    data = PaymentSettlementData.for_agreement(accepted, config())
+    (part,) = data.to_wire()["mandate"]["parts"]
+    assert int(part["amount"]) == 10000
+    data.require_bound_to(accepted)
+
+
+def _per_period(accepted: dict) -> dict:
+    """``accepted`` with its option billed per PT15M period, under the option's new ID."""
+    option = dict(accepted["settlement"])
+    option.pop("option_id")
+    option["settlement"] = {**option["settlement"], "period": "PT15M"}
+    option["option_id"] = derive_settlement_option_id(**option)
+    return {**accepted, "settlement": option}
+
+
+def test_a_payments_option_billed_per_period_gets_no_once_mandate():
+    # The installed adapter services once parts only. Its projection refuses an
+    # option carrying a period, so an Agreement whose amount is one period's
+    # price never becomes a once mandate charging that price for the horizon.
+    recurring = _per_period(agreement(duration_seconds=172_800, amount="625000"))
+    Agreement.model_validate(recurring)
+    with pytest.raises(MandatePolicyError, match="lacks the terms a payments mandate needs"):
+        mandate_policy_for_agreement(recurring, config())
+    with pytest.raises(MandatePolicyError, match="lacks the terms a payments mandate needs"):
+        PaymentSettlementData.for_agreement(recurring, config())
+    stored = PaymentSettlementData.for_agreement(agreement(duration_seconds=172_800, amount="625000"), config())
+    with pytest.raises(MandatePolicyError, match="stored payment mandate is malformed"):
+        stored.require_bound_to(recurring)
 
 
 def test_agreement_bytes_must_hold_a_json_object():

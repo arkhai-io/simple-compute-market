@@ -683,7 +683,8 @@ async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
             )
         )
         bought = buyer.run(
-            "buy", LISTING, "--option-id", option.option_id, "--ssh-public-key", SSH_KEY
+            "buy", LISTING, "--option-id", option.option_id, "--ssh-public-key", SSH_KEY,
+            "--duration-seconds", "3600",
         )
         teardown = buyer.run("teardown", "--run-id", bought["run_id"])
         retried = buyer.run("teardown", "--run-id", bought["run_id"])

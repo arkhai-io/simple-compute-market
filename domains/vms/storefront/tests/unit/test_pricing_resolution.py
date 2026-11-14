@@ -26,86 +26,104 @@ def _rates(rate: str, asset: str = _TOKEN) -> list[dict[str, str]]:
 
 
 class TestResolveGpuPricing:
-    def test_storefront_override_wins_for_every_field(self):
-        override = GpuPricingFields(
-            max_duration_seconds=7200, accepted_escrows="override",
-            settlements=["override"],
-        )
+    """VM's composition of the shared settlement-term order with its bounds.
+
+    The order of the settlement terms themselves is the shared resolver's,
+    tested in `kit/resource-pools-contracts/tests/unit/test_listing_terms.py`.
+    """
+
+    def test_a_released_configuration_and_hint_resolve_as_before(self):
+        """A per-model hint and per-model configuration, the forms a released VM
+        storefront reads, still resolve every field through their tiers."""
         result = resolve_gpu_pricing(
-            {"pricing": {"gpu": {"H100": {"max_duration_seconds": 1800}}}},
+            {"pricing": {"gpu": {"H100": {"settlements": ["hint"], "max_duration_seconds": 1800}}}},
             gpu_model="H100",
-            storefront_override=override,
-            config_defaults_by_model={"H100": GpuPricingFields(settlements=["cfg"])},
+            storefront_override=GpuPricingFields(available_until_utc="2030-01-01T00:00:00Z"),
+            config_defaults_by_model={
+                "H100": GpuPricingFields(accepted_escrows=["cfg"], settlements=["cfg"])
+            },
             flat_default=_FLAT_DEFAULT,
         )
-        assert result == override
-
-    def test_each_field_resolved_independently_across_tiers(self):
-        """A storefront override that only sets one field must not block
-        the others from falling through to lower tiers."""
-        result = resolve_gpu_pricing(
-            {"pricing": {"gpu": {"H100": {"settlements": ["hint"]}}}},
-            gpu_model="H100",
-            storefront_override=GpuPricingFields(max_duration_seconds=7200),
-            config_defaults_by_model={},
-            flat_default=_FLAT_DEFAULT,
+        assert result == GpuPricingFields(
+            max_duration_seconds=1800,
+            available_until_utc="2030-01-01T00:00:00Z",
+            accepted_escrows=["cfg"],
+            settlements=["hint"],
         )
-        assert result.max_duration_seconds == 7200  # storefront override
-        assert result.settlements == ["hint"]  # pool hint
-        assert result.accepted_escrows == "flat"  # flat fallback
 
-    def test_config_per_model_default_used_when_no_override_or_hint(self):
-        result = resolve_gpu_pricing(
-            {},
-            gpu_model="H100",
-            storefront_override=_NO_OVERRIDE,
-            config_defaults_by_model={"H100": GpuPricingFields(settlements=["cfg"])},
-            flat_default=_FLAT_DEFAULT,
-        )
-        assert result.settlements == ["cfg"]
-        assert result.max_duration_seconds == 60
+    def test_the_pool_level_clauses_sit_below_the_model_hint(self):
+        tags = {"pricing": {"settlements": ["pool"], "gpu": {"H100": {"settlements": ["h100"]}}}}
 
-    def test_flat_default_used_as_last_resort(self):
-        result = resolve_gpu_pricing(
-            {}, gpu_model="A100", storefront_override=_NO_OVERRIDE,
-            config_defaults_by_model={}, flat_default=_FLAT_DEFAULT,
-        )
-        assert result == _FLAT_DEFAULT
+        def clauses(model: str | None) -> object:
+            return resolve_gpu_pricing(
+                tags,
+                gpu_model=model,
+                storefront_override=_NO_OVERRIDE,
+                config_defaults_by_model={"A100": GpuPricingFields(settlements=["cfg"])},
+                flat_default=_FLAT_DEFAULT,
+            ).settlements
 
-    def test_hint_for_a_different_model_is_ignored(self):
+        assert clauses("H100") == ["h100"]
+        assert clauses("A100") == ["pool"]
+        assert clauses(None) == ["pool"]
+
+    def test_bounds_keep_the_mode_hint_above_the_per_model_tiers(self):
         result = resolve_gpu_pricing(
-            {"pricing": {"gpu": {"A100": {"settlements": ["a100"]}}}},
+            {
+                "capacity_bounds": {"vm": {"max_duration_seconds": 900}},
+                "pricing": {"gpu": {"H100": {"max_duration_seconds": 1800}}},
+            },
             gpu_model="H100",
             storefront_override=_NO_OVERRIDE,
-            config_defaults_by_model={},
+            config_defaults_by_model={"H100": GpuPricingFields(max_duration_seconds=2700)},
             flat_default=_FLAT_DEFAULT,
         )
-        assert result.settlements == ["flat"]
+        assert result.max_duration_seconds == 900
 
     @pytest.mark.parametrize(
-        "pricing",
-        ["not-a-mapping", {"gpu": "not-a-mapping"}],
+        ("tags", "override", "expected"),
+        [
+            pytest.param(
+                {"capacity_bounds": {"vm": {"max_duration_seconds": 900}}},
+                GpuPricingFields(max_duration_seconds=7200),
+                7200,
+                id="override-above-mode-hint",
+            ),
+            pytest.param(
+                {"pricing": {"gpu": {"H100": {"max_duration_seconds": 1800}}}},
+                _NO_OVERRIDE,
+                1800,
+                id="model-hint-above-model-config",
+            ),
+            pytest.param({}, _NO_OVERRIDE, 2700, id="model-config-above-flat"),
+        ],
     )
-    def test_malformed_pricing_hint_is_ignored_not_raised(self, pricing):
+    def test_each_bound_tier_wins_over_the_one_below(self, tags, override, expected):
         result = resolve_gpu_pricing(
-            {"pricing": pricing},
+            tags,
             gpu_model="H100",
-            storefront_override=_NO_OVERRIDE,
-            config_defaults_by_model={},
+            storefront_override=override,
+            config_defaults_by_model={"H100": GpuPricingFields(max_duration_seconds=2700)},
             flat_default=_FLAT_DEFAULT,
         )
-        assert result == _FLAT_DEFAULT
+        assert result.max_duration_seconds == expected
 
     @pytest.mark.parametrize("value", ["not-an-int", -1, True])
-    def test_malformed_max_duration_seconds_falls_through(self, value):
-        result = resolve_gpu_pricing(
-            {"pricing": {"gpu": {"H100": {"max_duration_seconds": value}}}},
-            gpu_model="H100",
-            storefront_override=_NO_OVERRIDE,
-            config_defaults_by_model={},
-            flat_default=_FLAT_DEFAULT,
-        )
-        assert result.max_duration_seconds == 60
+    def test_max_duration_seconds_is_strict_and_nonpositive_is_unlimited(self, value):
+        def resolve():
+            return resolve_gpu_pricing(
+                {"pricing": {"gpu": {"H100": {"max_duration_seconds": value}}}},
+                gpu_model="H100",
+                storefront_override=_NO_OVERRIDE,
+                config_defaults_by_model={},
+                flat_default=_FLAT_DEFAULT,
+            )
+
+        if value == -1 and not isinstance(value, bool):
+            assert resolve().max_duration_seconds == -1
+        else:
+            with pytest.raises(ValueError, match="max_duration_seconds"):
+                resolve()
 
     def test_retired_hint_keys_are_not_listing_terms(self):
         """A hint still stating min_price or token resolves exactly as one

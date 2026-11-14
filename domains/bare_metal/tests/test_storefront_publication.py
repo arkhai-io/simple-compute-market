@@ -449,7 +449,7 @@ def test_an_identical_listing_is_unchanged():
     ("resource_change", "term_change", "field"),
     [
         ({"access_methods": ["ssh", "serial-console"]}, {}, "access_methods"),
-        ({"max_duration_seconds": 7200}, {"max_duration_seconds": 7200}, "max_duration_seconds"),
+        ({}, {"max_duration_seconds": 7200}, "listing.max_duration_seconds"),
         ({}, {"settlement_options": [{"option_id": "o2"}]}, "listing.settlement_options"),
     ],
 )
@@ -532,6 +532,7 @@ def test_listing_terms_reads_only_term_fields():
         "settlement_options": None,
         "demands": None,
         "max_duration_seconds": 5,
+        "available_until_utc": None,
     }
 
 

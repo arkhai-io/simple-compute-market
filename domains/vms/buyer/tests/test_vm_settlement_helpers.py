@@ -11,8 +11,10 @@ from market_identity import (
 from arkhai_vms_buyer import (
     common,
     settle_cli,
+    settlement_composition,
     settlement_stages,
 )
+from market_settlement_runtime.buyer_terms import waiver_flags
 from arkhai_vms_buyer.escrow_selection import select_escrow_entry
 from arkhai_vms_settlement import escrow_proposal_from_accepted_entry
 
@@ -287,3 +289,25 @@ def test_recovery_never_falls_back_for_uninstalled_accepted_mechanism(
             poll_interval=0,
             settlement_timeout=1,
         )
+
+
+@pytest.mark.parametrize(
+    ("waivers", "allowed"),
+    [
+        (frozenset({"no_delivery_deadline"}), True),
+        (frozenset({"no_penalty", "charged_preemption", "charged_term_end"}), False),
+        (frozenset(), False),
+    ],
+    ids=["deadline-waiver", "every-other-waiver", "none"],
+)
+def test_the_resolved_policy_carries_the_run_s_waivers(waivers, allowed):
+    policy = settlement_composition.resolve_buyer_settlement_policy(
+        {"Settlement": {"schema_version": 1, "priority": ["alkahest.v1"], "alkahest": {"enabled": True}}},
+        waivers=waivers,
+    )
+
+    assert policy.option_preference.waivers == waivers
+    # Only the deadline's waiver lets the codec admit a compute option without one.
+    context = policy.option_preference.authority.contexts["arkhai.payments.v1"]
+    assert context.allow_missing_delivery_deadline is allowed
+    assert policy.public_context["compute_term_waivers"] == list(waiver_flags(waivers))

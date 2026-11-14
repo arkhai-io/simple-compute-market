@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -29,11 +30,32 @@ from jsonschema import Draft202012Validator
 from arkhai_vms_listings.listing_shapes import resolve_shape
 from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
+from market_arkhai_payments.fixtures import dispute_lifecycle
+from market_core.schemas import (
+    RateValue,
+    SettlementOption,
+    SettlementPrice,
+    derive_settlement_option_id,
+)
+from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
+from market_deal_lifecycle.terms import (
+    Adjudication, DisputeAuthority, EarlyTermination, Entitlement, LifecycleTerms, encode_terms,
+)
+from market_identity import Ed25519Signer
 from market_pool_overrides import PoolOverrideClient
 from market_settlement_runtime import ReadinessBlocker
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingDeclaration
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
+from storefront_client import StorefrontClientError
 
 import market_storefront.container as container
 from market_storefront import lifecycle
+from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.settlement_composition import (
+    VmSettlementComposition,
+    build_storefront_settlement_registry,
+)
 from market_storefront.startup import _start_lifecycle_loops
 from market_storefront.utils import config as storefront_config
 
@@ -47,6 +69,7 @@ from tests.introduction_deals import (
 from tests.publication_app import (
     BUYER_SIGNER,
     SELLER_WALLET,
+    SETTLEMENT,
     SITE,
     SITE_B,
     contact_clause,
@@ -1349,6 +1372,48 @@ async def test_a_pool_priced_only_per_gpu_model_refuses_its_shape_without_gpus(w
     assert refusal["shape_digest"] == resolve_shape(cpu_shape).digest
 
 
+async def test_a_reserved_option_publishes_with_no_relative_maximum(world):
+    """A pool resolving no maximum lease duration from any tier -- the packaged
+    default states none -- publishes its reserved escrow with no relative
+    maximum and is not held."""
+    world.pools.append(_shaped())
+
+    await _cycle(world)
+    listings = await _listings(world)
+    report = await _report(world)
+
+    ((_, listing),) = listings.items()
+    assert listing["max_duration_seconds"] is None
+    assert listing["accepted_escrows"]
+    assert report["holds"] == []
+
+
+async def test_pool_level_clauses_publish_below_a_model_hint(world):
+    """With no configured clause, a pool's ``pricing.settlements`` hint publishes
+    for the shape whose model has no hint of its own -- here one stating no
+    GPUs -- while the model hint, an empty list withholding every option, wins
+    for its model's shape. Spec scenario "A pool-level hint below a model hint"."""
+    cpu_shape = {"cpu": {"count": 8}, "memory": {"gib": 32}}
+    world.pools.append(
+        _shaped(
+            shapes=(_SHAPE, cpu_shape),
+            pricing={"settlements": [settlement_clause()], "gpu": {"H100": {"settlements": []}}},
+        )
+    )
+
+    with replaced_setting("pricing.settlements", []):
+        await _cycle(world)
+        listings = await _listings(world)
+        derivation = await _derivation(world)
+
+    ((_, listing),) = listings.items()
+    assert "gpu_model" not in listing["listing_resource"]
+    assert listing["accepted_escrows"]
+    (refusal,) = derivation["refusals"]
+    assert (refusal["reason"], refusal["pool_id"]) == ("no_settlement_option", "broker-a")
+    assert refusal["shape_digest"] == resolve_shape(_SHAPE).digest
+
+
 # ---------------------------------------------------------------------------
 # Shape admissibility
 # ---------------------------------------------------------------------------
@@ -2188,3 +2253,302 @@ async def test_only_the_admissible_mechanisms_of_a_mixed_list_are_classified(tmp
         "no_settlement_option",
         [CONTACT_MECHANISM],
     )
+
+
+# The listing's two capacity bounds, each resolved from its own tier.
+
+_HINT_END = "2035-01-02T00:00:00Z"
+_OVERRIDE_END = "2035-01-01T00:00:00Z"
+_DEFAULT_END = "2035-01-03T00:00:00Z"
+_BOUNDS_ADDRESS = {"site_id": "site-a", "pool_id": "bounded", "offering_mode": "vm"}
+
+
+def _hinted_pool() -> dict:
+    return pool("bounded", backing="backed", capacity_bounds={
+        "vm": {"max_duration_seconds": 7200, "available_until_utc": _HINT_END},
+    })
+
+
+@pytest.fixture
+async def bounded_world(tmp_path):
+    """One backed pool whose hint states both bounds, over configured defaults
+    of a day and a later availability end."""
+    with replaced_setting("pricing.defaults", {}), \
+            replaced_setting("pricing.default_max_duration_seconds", 86400), \
+            replaced_setting("pricing.default_available_until_utc", _DEFAULT_END):
+        async with publication_app(tmp_path) as app:
+            app.pools.append(_hinted_pool())
+            await app.client.get_system_status()
+            yield app
+
+
+async def test_each_capacity_bound_resolves_from_its_own_tier_onto_the_published_listing(
+    bounded_world,
+):
+    """An override stating only the availability end replaces the hint's end and
+    keeps its relative bound; both travel as top-level listing terms, never in the
+    listing resource. A nonpositive relative override states no limit and masks
+    the tiers below it. A malformed hint holds the listing as it stood, reporting
+    its bounds unreadable, rather than guessing a default."""
+    world = bounded_world
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+    hinted = await _listing(world, listing_id)
+    overrides = PoolOverrideClient(world.client)
+
+    await overrides.put_pool_override({**_BOUNDS_ADDRESS, "terms": {"available_until_utc": _OVERRIDE_END}})
+    await _cycle(world)
+    overridden = await _listing(world, listing_id)
+    sent = world.registries.to("publish", listing_id)[-1][1]
+
+    await overrides.put_pool_override({**_BOUNDS_ADDRESS, "terms": {"max_duration_seconds": 0}})
+    await _cycle(world)
+    unlimited = await _listing(world, listing_id)
+
+    world.pools[0]["pool_metadata"]["policy_tags"]["capacity_bounds"]["vm"][
+        "available_until_utc"
+    ] = "not-a-date"
+    held = await _cycle(world)
+
+    assert (hinted["max_duration_seconds"], hinted["available_until_utc"]) == (7200, _HINT_END)
+    assert (overridden["max_duration_seconds"], overridden["available_until_utc"]) == (
+        7200, _OVERRIDE_END,
+    )
+    assert sent["available_until_utc"] == _OVERRIDE_END
+    assert "available_until_utc" not in sent["listing_resource"]
+    assert "max_duration_seconds" not in sent["listing_resource"]
+    assert (unlimited["max_duration_seconds"], unlimited["available_until_utc"]) == (None, _HINT_END)
+    assert any(item.get("reason") == "capacity_bounds_unreadable" for item in held["actions"])
+    assert await _listing(world, listing_id) == unlimited
+    assert list(await _listings(world)) == [listing_id]
+
+
+async def test_withdrawn_capacity_bounds_are_cleared_from_the_listing_and_its_publication(
+    bounded_world,
+):
+    """With the hint and both defaults withdrawn, republication clears both stored
+    bounds, and the availability end leaves the publication, rather than keeping
+    the last ones published."""
+    world = bounded_world
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+    bounded = await _listing(world, listing_id)
+
+    del world.pools[0]["pool_metadata"]["policy_tags"]["capacity_bounds"]
+    with replaced_setting("pricing.default_max_duration_seconds", 0), \
+            replaced_setting("pricing.default_available_until_utc", None):
+        await _cycle(world)
+        withdrawn = await _listing(world, listing_id)
+    sent = world.registries.to("publish", listing_id)[-1][1]
+
+    assert (bounded["max_duration_seconds"], bounded["available_until_utc"]) == (7200, _HINT_END)
+    assert (withdrawn["max_duration_seconds"], withdrawn["available_until_utc"]) == (None, None)
+    assert "available_until_utc" not in sent
+
+
+# A once payment option's delivery deadline, through the real settlement
+# composition class: the real registry resolves the seller's Arkhai payments
+# configuration, its once builder builds the option, and a dispute authority is
+# configured. No rate servicing is declared, no recurring encoder is installed,
+# and the pool port supplies no deadline, as in every deployed composition, so the
+# deadline can come only from the clause. Its settlement persistence and workers
+# are absent and its chain client is a placeholder: publication runs without
+# them. Every account, key and address here
+# is a deterministic development value; none may be used on a public network.
+
+_PAYMENTS = "arkhai.payments.v1"
+_PAYEE = "22222222-2222-4222-8222-222222222222"
+_PAYMENTS_SERVICE = Ed25519Signer(bytes(range(1, 33)))
+_DISPUTE_ENTRY = DisputeEntry.model_validate({
+    **dispute_lifecycle("33333333-3333-4333-8333-333333333333")["adjudication"]["dispute"],
+    "interface": MEDIATION_INTERFACE,
+    "advertisement": {
+        "mechanisms": [_PAYMENTS],
+        "minimum_dispute_window_seconds": 60,
+        "minimum_case_hold_seconds": None,
+    },
+})
+_PAYMENTS_SETTLEMENT = {
+    "schema_version": 1,
+    "priority": ["alkahest.v1", _PAYMENTS],
+    "alkahest": {**SETTLEMENT["alkahest"], "release_models": ["recipient"]},
+    "arkhai_payments": {
+        "enabled": True,
+        "service_url": "http://127.0.0.1:9",
+        "service_identity": _PAYMENTS_SERVICE.identity.model_dump(mode="json"),
+        "fee_bps": 250,
+        "development_auth": True,
+    },
+}
+
+
+def _payments_composition(_fulfillment) -> VmSettlementComposition:
+    registry = build_storefront_settlement_registry()
+    return VmSettlementComposition(
+        domain=build_vm_storefront_domain(),
+        repository=None,
+        runtime=None,
+        coordinator=None,
+        worker=None,
+        local_principal=_PAYMENTS_SERVICE.identity,
+        mechanism_clients={},
+        evidence_clients={},
+        configuration_registry=registry,
+        settlement_config=registry.resolve(_PAYMENTS_SETTLEMENT, role="seller"),
+        mechanism_resources={
+            "wallet": SELLER_WALLET,
+            "chains": dict(storefront_config.CHAINS),
+            "clients": {"anvil": object()},
+        },
+        disputes=RegistryDisputePolicy(DisputeConfig(entries=[_DISPUTE_ENTRY])),
+    )
+
+
+def _payments_token_cache(path: Path) -> str:
+    """The token cache payments readiness reads the development chain's asset from."""
+    directory = path / "cache"
+    tokens = directory / "arkhai" / "tokens"
+    tokens.mkdir(parents=True, exist_ok=True)
+    token = "0x" + "22" * 20
+    (tokens / "31337.json").write_text(json.dumps({
+        token: {"symbol": "USDC", "contract_address": token, "decimals": 6, "chain_id": 31337},
+    }))
+    return str(directory)
+
+
+def _once_payment_clause(delivery_deadline_seconds: int | None) -> dict:
+    return {
+        "mechanism": _PAYMENTS,
+        "asset": "USD/6",
+        "rate": "2.5",
+        "per": "hour",
+        "mechanism_input": {
+            "asset": "USD/6",
+            "payee_account": _PAYEE,
+            "window": "PT5M",
+            "dispute_window_seconds": 604800,
+            **({"delivery_deadline_seconds": delivery_deadline_seconds}
+               if delivery_deadline_seconds is not None else {}),
+        },
+    }
+
+
+@pytest.mark.parametrize(("clause_deadline", "refused"), [(900, 0), (None, 1)],
+                         ids=["clause-configured", "neither"])
+async def test_a_once_payment_option_publishes_its_clause_s_deadline_where_the_pool_supplies_none(
+    tmp_path, clause_deadline, refused,
+):
+    """With no pool deadline, a once payment option publishes the deadline its
+    clause configures and no default buyer's refusal is reported; a clause
+    configuring none publishes no deadline, and the option is reported as refused
+    by a default buyer for lacking one."""
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": _payments_token_cache(tmp_path)}), \
+            replaced_setting("pricing.defaults", {}):
+        async with publication_app(
+            tmp_path,
+            settlement_configuration=_PAYMENTS_SETTLEMENT,
+            settlement_composition_factory=_payments_composition,
+        ) as world:
+            world.set_settlement_clauses([settlement_clause("1"), _once_payment_clause(clause_deadline)])
+            world.pools.append(pool("bounded", backing="backed"))
+            report = await _cycle(world)
+            ((_listing_id, listing),) = (await _listings(world)).items()
+
+    (payment,) = [option for option in listing["settlement_options"]
+                  if option["settlement"]["schema"] == _PAYMENTS]
+    assert "period" not in payment["settlement"]
+    assert payment["lifecycle"].get("delivery_deadline_seconds") == clause_deadline
+    refusals = [item for item in report["actions"] if item.get("reason") == "default_buyer_refusal"]
+    assert len(refusals) == refused
+    assert all(item["detail"].endswith("no delivery deadline") for item in refusals)
+
+
+# A cached rate option the servicing declaration in force does not qualify,
+# selected through the negotiation route of the same payments composition, which
+# declares only `charged`. No recurring encoder, term timing or billing projection
+# is composed: the door refuses the option before reading any of them.
+
+# A fictional authority: the origin is a reserved name that resolves nowhere.
+_AUTHORITY = DisputeAuthority(
+    interface="fixture.mediation.v1", origin="https://mediation.invalid",
+    account="fixture-account", record_key="fixture-record", params={},
+)
+
+
+def _narrowed_payments_composition(fulfillment) -> VmSettlementComposition:
+    return replace(_payments_composition(fulfillment), rate_servicing=RateServicing({
+        _PAYMENTS: RateServicingDeclaration(_PAYMENTS, frozenset({"charged"}), False),
+    }))
+
+
+def _on_demand_option() -> dict:
+    """A rate option whose payer's stop charges its started period and whose term
+    end returns the last one, as a storefront declaring ``returned`` published it."""
+    lifecycle = encode_terms(LifecycleTerms(
+        adjudication=Adjudication(version=1, dispute=_AUTHORITY, dispute_window_seconds=604800,
+                                  case_hold_max_seconds=None),
+        early_termination=EarlyTermination(version=1, settles_through="last_boundary", entitlements={
+            "payer": Entitlement(notice_seconds=0, settles_through="started_period"),
+        }),
+        delivery_deadline_seconds=1200,
+    ))
+    price = SettlementPrice(asset="USD/6", rates=[RateValue(field="amount", per="hour", value=2_500_000)])
+    settlement = {
+        "schema": _PAYMENTS, "payee_account": _PAYEE, "window": "PT5M",
+        "period": "PT15M", "reserve_ahead_seconds": 1800,
+    }
+    return SettlementOption(
+        option_id=derive_settlement_option_id(price=price, settlement=settlement, lifecycle=lifecycle),
+        price=price, settlement=settlement, lifecycle=lifecycle,
+    ).model_dump(mode="json")
+
+
+def _negotiation_threads(db) -> int:
+    """Read from persistence: the publication app mounts no negotiations route."""
+    with sqlite3.connect(db.db_path) as connection:
+        return connection.execute("SELECT COUNT(*) FROM negotiation_threads").fetchone()[0]
+
+
+async def test_a_cached_rate_option_whose_treatment_is_withdrawn_is_refused_through_the_app(
+    tmp_path,
+):
+    """The published listing's record gains a rate option published while
+    ``returned`` was declared, seeded as service-internal state since no installed
+    mechanism publishes one. A buyer selecting it is answered with the signed 409
+    asking for a refetch, and no negotiation is written."""
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": _payments_token_cache(tmp_path)}), \
+            replaced_setting("pricing.defaults", {}):
+        async with publication_app(
+            tmp_path,
+            negotiation=True,
+            settlement_configuration=_PAYMENTS_SETTLEMENT,
+            settlement_composition_factory=_narrowed_payments_composition,
+        ) as world:
+            world.set_settlement_clauses([settlement_clause("1")])
+            world.pools.append(pool("bounded", backing="backed"))
+            await _cycle(world)
+            ((listing_id, listing),) = (await _listings(world)).items()
+            option = _on_demand_option()
+            await world.db.update_listing(
+                listing_id=listing_id,
+                settlement_options=[*listing["settlement_options"], option],
+            )
+
+            with pytest.raises(StorefrontClientError) as refused:
+                await world.buyer.negotiate_new(
+                    listing_id=listing_id,
+                    initial_amount=625_000,
+                    provision_terms=_vm_provision(3600),
+                    settlement_selection={
+                        "option_id": option["option_id"],
+                        "settlement": {"schema": _PAYMENTS, "payer_account": _PAYEE},
+                        "expiration_unix": 1_900_000_000,
+                    },
+                    selection_only=True,
+                )
+            threads = _negotiation_threads(world.db)
+
+    assert refused.value.status_code == 409
+    assert "settlement_option_withdrawn_refetch" in str(refused.value)
+    assert "does not declare returned" in str(refused.value)
+    assert threads == 0

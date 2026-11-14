@@ -82,11 +82,12 @@ def _config() -> BuyConfig:
     )
 
 
-def _hook(selection: SettlementSelection, revalidated: list[SettlementOption]):
+def _hook(selection: SettlementSelection, revalidated: list[SettlementOption], **hooks: Any):
     async def revalidate(_match: dict[str, Any], option: SettlementOption) -> None:
         revalidated.append(option)
 
     return make_negotiate_hook(
+        **hooks,
         config=_config(),
         constraints=BuyConstraints(),
         provision={"kind": "example.v1", "version": 1, "payload": {}},
@@ -126,6 +127,38 @@ def test_a_payment_selection_negotiates_with_the_advertised_payment_option() -> 
     assert call["policy_params"]["_selected_settlement_option"] == PAYMENT.model_dump(
         mode="json"
     )
+
+
+@pytest.mark.parametrize("with_stage_check", [True, False], ids=["beside-the-stage-check", "alone"])
+def test_each_match_s_acceptance_validator_checks_the_accepted_outcome(
+    with_stage_check: bool,
+) -> None:
+    """The per-listing validator sees the listing it was bound to and runs after
+    the stage's own acceptance check, on the outcome the seller accepted."""
+    selection = SettlementSelection(
+        option_id=PAYMENT.option_id, settlement={"schema": PAYMENT.settlement_schema}
+    )
+    accepted = NegotiationOutcome(status="agreed", negotiation_id="N1")
+    checks: list[tuple[str, Any]] = []
+
+    def per_match(match: dict[str, Any]):
+        return lambda outcome: checks.append(("listing", (match["listing_id"], outcome)))
+
+    def negotiate(**kwargs: Any) -> NegotiationOutcome:
+        kwargs["validate_acceptance"](accepted)
+        return NegotiationOutcome(status="exited", negotiation_id=None, reason="seller_exit")
+
+    hooks: dict[str, Any] = {"acceptance_validator": per_match}
+    if with_stage_check:
+        hooks["validate_acceptance"] = lambda outcome: checks.append(("stage", outcome))
+    with (
+        patch("core_buyer.orchestration.fetch_listing_dict", return_value=_listing()),
+        patch("core_buyer.orchestration.negotiate_with_seller", negotiate),
+    ):
+        _hook(selection, [], **hooks)([_listing()], lambda *_args: None)
+
+    expected = [("listing", ("L1", accepted))]
+    assert checks == ([("stage", accepted)] + expected if with_stage_check else expected)
 
 
 def test_the_selected_option_lets_the_opening_carry_an_amount() -> None:
