@@ -178,11 +178,12 @@ checks your understanding here before reading anything that rests on it. Then:
    the level it claims — is a finding, not only a remark in this answer: a gap
    stated only in prose is never triaged.
 3. **`documentation`** — Does the code and documentation comply with `AGENTS.md`,
-   `ARCHITECTURE.md`, `openspec/README.md`, and the workflow's guidance under
-   `docs/guidance/workflow/`: comments describing the current system and naming no
-   change (`docs/guidance/workflow/change-references.md`),
-   permanent documents describing current state, promotion where the change says it
-   happened?
+   `ARCHITECTURE.md`, `openspec/README.md`, and the guidance under
+   `docs/guidance/`: comments describing the current system
+   (`docs/guidance/engineering/comments.md`) and naming no change
+   (`docs/guidance/workflow/change-references.md`), permanent documents describing
+   current state (`docs/guidance/engineering/documentation.md`), promotion where the
+   change says it happened?
 4. **`architecture`** — Is the code organized by `ARCHITECTURE.md`'s layers? Is
    universal market behavior in core, reusable inter-market functionality in kit, and
    does the domain compose that functionality rather than encode it?
@@ -207,11 +208,12 @@ checks your understanding here before reading anything that rests on it. Then:
    confirm them? Closeout edits no code, so this is the last review that can ask
    for a code change. Read the comments the change added for any naming the review,
    migration, or task that introduced them, or describing history rather than the
-   current system (`AGENTS.md`, "Python comments and docstrings";
+   current system (`docs/guidance/engineering/comments.md`;
    `docs/guidance/workflow/change-references.md`); and check each import the change
    added or touched that is local rather than at module level for a recorded reason
-   to stay local (`AGENTS.md`, "Package and dependency discipline";
-   `docs/guidance/workflow/closeout.md`, "Comment hygiene" and "Import placement").
+   to stay local (`docs/guidance/engineering/dependencies-python.md`, "Imports go at
+   module level"; `docs/guidance/workflow/closeout.md`, "Comment hygiene" and
+   "Import placement").
 4. **`readiness`** — Is the change ready for promotion and closeout?
 5. **`consistency`**, after the merge before closeout — when the workflow log's last
    run before this review is a `merge` run, the merge of the branch the change

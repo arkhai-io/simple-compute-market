@@ -237,7 +237,7 @@ is rewritten as part of this change rather than left to contradict the code.
 - [x] Existing subsystem specification: `openspec/specs/physical-provisioning/spec.md` — relay resource and its lifecycle, token confidentiality on read paths, `connectivity` field shape, allocation ownership
 - [x] Existing subsystem specification: `openspec/specs/vm-storefront-fulfillment/spec.md` — removal of storefront-configured connectivity keys
 - [x] Existing capability architecture: `openspec/specs/physical-provisioning/architecture.md` — why relay coordination is host-local rather than relay-side, and why a relay is a resource rather than pool configuration
-- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` — the definition documents' paths and contents, and that reconciliation follows a change to a document rather than a restart
+- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` — the definition documents' paths and contents; that reconciliation follows a change to a document rather than a restart is in `docs/guidance/engineering/definition-documents.md`
 - [ ] `docs/development/ARCHITECTURE.md` — no repository-wide shape change anticipated
 - [ ] `docs/development/ROADMAP.md` — no roadmap goal currently covers reaching hosts without an inbound route; whether one is warranted is a closeout decision, not an omission
 
@@ -268,7 +268,7 @@ is rewritten as part of this change rather than left to contradict the code.
   rather than erased →
   `openspec/specs/resource-pool-management/spec.md`
 - Reconciliation follows a change to a document rather than a restart →
-  `docs/development/DEPLOYMENT_AND_CONFIG.md`
+  `docs/guidance/engineering/definition-documents.md`
 - Relays are administered through their own controller, including rotation,
   without redeployment →
   `openspec/specs/physical-provisioning/spec.md`

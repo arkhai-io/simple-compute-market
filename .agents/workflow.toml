@@ -67,7 +67,26 @@ common = ["AGENTS.md", "docs/development/ARCHITECTURE.md", "docs/development/TES
           "docs/guidance/engineering/concurrency-tests.md",
           "docs/guidance/engineering/testing-python.md",
           "docs/guidance/engineering/helm-render-tests.md",
-          "docs/guidance/engineering/ansible-checks.md"]
+          "docs/guidance/engineering/ansible-checks.md",
+          "docs/guidance/engineering/documentation.md", "docs/guidance/engineering/rules.md",
+          "docs/guidance/engineering/comments.md", "docs/guidance/engineering/diagrams.md",
+          "docs/guidance/engineering/dependencies.md",
+          "docs/guidance/engineering/dependencies-python.md",
+          "docs/guidance/engineering/implementation.md",
+          "docs/guidance/engineering/repository-content.md",
+          "docs/guidance/engineering/terms.md", "docs/guidance/engineering/persistence.md",
+          "docs/guidance/engineering/migrations.md",
+          "docs/guidance/engineering/configuration.md",
+          "docs/guidance/engineering/configuration-python.md",
+          "docs/guidance/engineering/definition-documents.md",
+          "docs/guidance/engineering/deployment.md", "docs/guidance/engineering/kubernetes.md",
+          "docs/guidance/engineering/helm.md", "docs/guidance/engineering/packaging.md",
+          "docs/guidance/engineering/packaging-python.md",
+          "docs/guidance/engineering/packaging-uv.md",
+          "docs/guidance/engineering/packaging-hatchling.md",
+          "docs/guidance/engineering/packaging-docker.md",
+          "docs/guidance/engineering/versioning.md",
+          "docs/guidance/engineering/versioning-python.md"]
 # Engine, `config load design`: change-design's own addition.
 design = ["docs/development/ROADMAP.md"]
 

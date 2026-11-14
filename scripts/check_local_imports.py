@@ -3,7 +3,8 @@
 
 Imports go at module level unless one has a reason to stay local — a circular
 import the move was tried against, or a deliberate lazy load — recorded beside it
-(`AGENTS.md`, "Package and dependency discipline"; closeout confirms it,
+(`docs/guidance/engineering/dependencies-python.md`, "Imports go at module
+level"; closeout confirms it,
 `docs/guidance/workflow/closeout.md`, "Import placement"). This check reads
 the imports a change's diff adds or touches inside a function and fails on each
 with no comment: one ending a line of the statement, or one on its own on the

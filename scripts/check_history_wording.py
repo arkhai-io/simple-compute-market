@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fail if a comment or docstring line a change adds describes history.
 
-Comments describe the current system, not how it came to be (`AGENTS.md`,
-"Python comments and docstrings"). `check-comment-hygiene` catches change names
+Comments describe the current system, not how it came to be
+(`docs/guidance/engineering/comments.md`). `check-comment-hygiene` catches change names
 and task numbers over the whole tree; this check catches the wording of history,
 the phrases in `WORDS`, in the comment and docstring lines a change's diff adds
 to `.py`, `.toml`, `.yml` and `.yaml` files. "Now" and "legacy" are not on the
@@ -129,7 +129,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
         print("\n".join(found))
         print()
         print("FAIL: a comment or docstring the change adds describes history. Comments")
-        print("describe the current system (AGENTS.md, \"Python comments and docstrings\").")
+        print("describe the current system (docs/guidance/engineering/comments.md).")
         return 1
     print(f"OK: no comment or docstring the change adds since {args.base} describes history.")
     return 0

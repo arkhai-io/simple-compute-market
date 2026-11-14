@@ -6,39 +6,36 @@ It is distinct from `docs/configuration.md`, which documents the
 negotiation/fulfillment *policy plugin* system (how a seller or buyer
 writes a custom pricing or negotiation hook) — a different, unrelated
 meaning of "configuration." This document is about how a service reads
-its own settings at startup and how an operator supplies them.
+its own settings at startup and how an operator supplies them. The rules
+it applies are the engineering guidance:
+[`configuration.md`](../guidance/engineering/configuration.md),
+[`definition-documents.md`](../guidance/engineering/definition-documents.md),
+[`deployment.md`](../guidance/engineering/deployment.md),
+[`migrations.md`](../guidance/engineering/migrations.md), and their
+forms for Python, Kubernetes, and Helm beside them in
+[`docs/guidance/engineering/`](../guidance/engineering/README.md); this
+document holds this repository's instances of them.
 
 Read this alongside `docs/development/ARCHITECTURE.md` (system shape)
-and `openspec/README.md` (documentation placement). Like those
-documents, this one describes current practice and should be corrected
-in place when practice changes, not layered with historical commentary.
+and `openspec/README.md` (documentation placement).
 
 ## Profile-based configuration
 
-Every service in this repository but the registry uses the same
-configuration shape, built on [Dynaconf](https://www.dynaconf.com/): a
-committed `settings.toml` supplies base defaults, one or more
-profile-specific `config-<profile>.yml` files layer overrides on top, and
-environment variables under a service-specific prefix are the
-highest-priority override. The registry is a Pydantic-settings service
-that reads profile-shaped env files instead; see
+Every service in this repository but the registry resolves its
+configuration through
+[`configuration.md`'s profile layers](../guidance/engineering/configuration.md#profiles-layer-over-committed-defaults),
+in their Dynaconf form
+([`configuration-python.md`](../guidance/engineering/configuration-python.md)).
+The registry is a Pydantic-settings service that reads profile-shaped env
+files instead; see
 [Registry descriptor configuration](#registry-descriptor-configuration).
 The rest of this section describes the Dynaconf services.
 
-**Resolution order, highest priority first:**
-
-1. `<PREFIX>_*` environment variables — last-resort escape hatch only,
-   never the normal way to supply configuration.
-2. `config-<profile>.yml` files, one per entry in `ACTIVE_PROFILES`,
-   applied in order.
-3. `config.yml` files, default values.
-4. `settings.toml` — committed defaults.
-
-Each service picks its own `envvar_prefix` (for example, the compute
-provisioning service uses `PROVISIONING`; the API-credits storefront
-uses `APICREDITS_STOREFRONT`) and uses `environments=False` — this
-repository uses named profiles instead of Dynaconf's built-in environment
-concept, layered through `includes=[...]`, `merge_enabled=True`.
+The resolver variables are `ACTIVE_PROFILES`, the comma-separated list of
+profile names to layer, and `CONFIG_DIRECTORY`, where the profile files
+live. Each service picks its own `envvar_prefix`: for example, the compute
+provisioning service uses `PROVISIONING`, and the API-credits storefront
+uses `APICREDITS_STOREFRONT`.
 
 For compute provisioning and e2e, deterministic profile parsing, ordered
 base/profile include resolution, and Dynaconf construction live in
@@ -50,44 +47,31 @@ handling, wrappers, validators, and exported helpers. This boundary is scoped
 to those migrated consumers; other services may still have separate loaders
 until an explicit change migrates them.
 
-Dynaconf dotenv loading contributes prefixed variables to the environment
-layer rather than creating a file layer below profile includes. An already-set
-process variable wins over the same dotenv key; otherwise a dotenv-sourced
-prefixed variable overrides settings, secrets, base config, and profiles just
-like any other environment value. E2e points Dynaconf at its project `.env`.
-Compute provisioning uses Dynaconf's normal `.env` discovery and does not add
-`.env.local` loading.
+Dynaconf's dotenv files join the environment layer
+([`configuration-python.md`](../guidance/engineering/configuration-python.md#dotenv-values-join-the-environment-layer)).
+E2e points Dynaconf at its project `.env`. Compute provisioning uses
+Dynaconf's normal `.env` discovery and does not add `.env.local` loading.
 
-**Why environment variables are not used for application config, beyond
-the escape hatch:** environment variables are the highest-priority
-override layer. Baking application settings into a Dockerfile's `ENV`
-instructions, or setting them as individual Kubernetes pod env vars,
-silently overrides anything an operator configures through a profile
-file — the opposite of the profile system's purpose. A Dockerfile or
-pod spec should set only the profile resolver variables
-(`ACTIVE_PROFILES`, `CONFIG_DIRECTORY`) and any variable an external
-subprocess reads directly from `os.environ` rather than through this
-codebase's own settings object (for example, `ANSIBLE_CONFIG`, which
-the `ansible-playbook` subprocess reads itself and so cannot travel
-through Dynaconf — it is read from the resolved settings at startup and
-written into `os.environ` once, explicitly, rather than set as a pod env
-var).
+Application settings stay out of the environment
+([`configuration.md`](../guidance/engineering/configuration.md#application-settings-stay-out-of-the-environment)):
+a Dockerfile or pod spec sets only `ACTIVE_PROFILES` and
+`CONFIG_DIRECTORY`, and the provisioning service reads `ANSIBLE_CONFIG`
+from its resolved settings at startup and writes it into `os.environ`
+once.
 
 **Secrets travel in a secret profile or overlay file, never in a variable the
-configuration names.** A service takes each secret it needs — an API key, a
-bearer token, a wallet key — as a setting in a file its configuration system
-layers: a Secret-backed `config-<profile>.yml` (or the registry's
+configuration names**
+([`configuration.md`](../guidance/engineering/configuration.md#secrets-travel-in-a-secret-profile-or-overlay-file)).
+Here the file is a Secret-backed `config-<profile>.yml` (or the registry's
 `config-<profile>.env`) added to `ACTIVE_PROFILES`, or a storefront's
 `storefront.secrets.toml` overlay. On a cluster that file is a Kubernetes Secret
-key, which External Secrets writes; under Compose it is a bind-mounted file. A
-setting that names an environment variable holding the secret is a second, weaker
-channel beside the one a cluster already writes, so a service's configuration
-does not name one, and trust follows the same rule: a private CA is a configured
-bundle path the one client that needs it reads (such as
-`[Settlement.arkhai_payments].ca_bundle_path`, or a `[[DisputeCredential]]`'s
-`ca_bundle_path` for that authority's client), never `SSL_CERT_FILE`, which would
-replace the whole process's public trust; a client naming none uses the default
-trust store. The one secret outside the rule is the
+key, which External Secrets writes; under Compose it is a bind-mounted file.
+Trust follows the same rule
+([`configuration.md`](../guidance/engineering/configuration.md#trust-is-configured-where-its-client-reads-it)):
+a private CA is a configured bundle path the one client that needs it reads,
+such as `[Settlement.arkhai_payments].ca_bundle_path`, or a
+`[[DisputeCredential]]`'s `ca_bundle_path` for that authority's client. The one
+secret outside the rule is the
 signing credential `ARKHAI_IDENTITY_CREDENTIAL`, which the identity specification
 keeps from the loader, so it reaches a service as a variable sourced from a Secret.
 A buyer's `api_key_env`, in its payments section or a `[[DisputeCredential]]`, is
@@ -95,56 +79,43 @@ not a service's configuration but the buyer's own exact named-variable provider,
 beside its keyring and secret-file providers (see "Marketplace identity
 configuration").
 
-**A setting that belongs to one domain is named for it.** The compute
-provisioning service reads the VM playbook from `vm_playbook_path` and the
-bare-metal playbook from `bare_metal_playbook_path`; neither has an alias. A
-renamed setting is refused rather than ignored, because an ignored key would
-silently fall back to a default the operator meant to replace: the service's
-first startup step refuses a configuration stating the retired `playbook_path`
-in any layer, environment included, naming `vm_playbook_path`, and the
+**A setting that belongs to one domain is named for it**
+([`configuration.md`](../guidance/engineering/configuration.md#a-setting-that-belongs-to-one-domain-is-named-for-it)).
+The compute provisioning service reads the VM playbook from
+`vm_playbook_path` and the bare-metal playbook from
+`bare_metal_playbook_path`; neither has an alias. Its first startup step
+refuses a configuration stating the retired `playbook_path` in any layer,
+environment included, naming `vm_playbook_path`, and the
 provisioning chart's values schema refuses `config.playbook_path`. The same step
 refuses the retired `inventory_ini` and `inventory_path`, whatever value either
 states, naming `host_definitions_path` (the operator handbook's
 ["Upgrading from an INI inventory"](../operator-handbook.md#upgrading-from-an-ini-inventory)
 gives the upgrade). A setting
 retired because the service stopped needing it, such as
-`default_pool_inventory_group` and `default_host_id`, is not refused, since
-ignoring it changes nothing the service does.
+`default_pool_inventory_group` and `default_host_id`, is not refused.
 
 Before a package reaches 1.0.0, the meaning of a configuration key it reads may
 change incompatibly in a minor release (see
-[`RELEASING.md`, "Versioning policy"](RELEASING.md#versioning-policy)).
+[`versioning.md`](../guidance/engineering/versioning.md)).
 
 ## Kubernetes: ConfigMap and Secret mounting
 
-All application configuration travels through mounted files, never
-individual pod `env` entries — this rule applies equally to the
-application Deployment and to Helm test pods.
+This repository's charts deliver configuration through mounted files
+([`kubernetes.md`, "Configuration travels through mounted files"](../guidance/engineering/kubernetes.md#configuration-travels-through-mounted-files)),
+the application Deployment and the Helm test pods alike: a ConfigMap
+rendered from the chart's `values.yaml` mounts at `CONFIG_DIRECTORY` as a
+`config-<profile>.yml` file, a Secret holding its own `config-<profile>.yml`
+key mounts beside it, and a pod sets only `ACTIVE_PROFILES` and
+`CONFIG_DIRECTORY`. Where the charts differ:
 
-**Pattern:**
-
-- Non-secret configuration renders from the chart's `values.yaml` into
-  a ConfigMap, mounted at `CONFIG_DIRECTORY` as a `config-<profile>.yml`
-  file. Adding a new non-secret key requires only a `values.yaml`
-  change — no Deployment template change. The registry chart is the
-  exception: the registry is a Pydantic-settings service whose profile is a
-  dotenv file, `config-production.env`, and its chart maps each value to its
-  variable by name, so a new registry setting also needs a line in its
-  ConfigMap template (see "Registry descriptor configuration").
-  The provisioning chart and the umbrella's generated smoke-test profile
+- The registry chart: the registry is a Pydantic-settings service whose
+  profile is a dotenv file, `config-production.env`, and its chart maps
+  each value to its variable by name, so a new registry setting also needs
+  a line in its ConfigMap template (see "Registry descriptor configuration").
+- The provisioning chart and the umbrella's generated smoke-test profile
   write JSON syntax into that YAML profile so 0x-prefixed EIP-191
-  identifiers remain strings when Dynaconf reads it: Helm's YAML encoder
-  leaves a 160-bit address unquoted, and a YAML loader reads it as an
-  integer.
-- Secret material (key material, credentials) that cannot go in a
-  ConfigMap renders into a Kubernetes Secret whose data contains its own
-  `config-<profile>.yml` key, mounted at the same `CONFIG_DIRECTORY`.
-  The Dynaconf loader sees no difference between a file mounted from a
-  ConfigMap and one mounted from a Secret — the profile name is simply
-  added to `ACTIVE_PROFILES` alongside the non-secret profiles.
-- A pod sets only `ACTIVE_PROFILES` (the list of profile names to layer,
-  comma-separated) and `CONFIG_DIRECTORY` (where the mounted files live)
-  as environment variables.
+  identifiers remain strings when Dynaconf reads it
+  ([`helm.md`, "A hex value stays a string"](../guidance/engineering/helm.md#a-hex-value-stays-a-string)).
 - A file a setting names by path, rather than a value, reaches the
   provisioning service through the chart's `configFiles` map: each entry's
   content renders verbatim into the ConfigMap and mounts read-only at
@@ -159,71 +130,41 @@ application Deployment and to Helm test pods.
   quoted, so content and name reach the container exactly as given.
 
 **The rule behind the pod rule.** Every configuration value of a storefront
-reaches it through its configuration system: its configuration files and its
-loader's documented override layer. A value travels outside that system only
-when it controls which configuration is loaded — the configuration directory and
-the profiles to layer — or when it must be kept from the loader, as the signing
-credential `ARKHAI_IDENTITY_CREDENTIAL` is. A chart knows a configuration value
-only where the deployment itself needs it for a stated reason, such as the port
-its container, probes, and Service share, or the path of a file it mounts, such as
-the CA bundle whose `ca_bundle_path` the storefront charts derive, and supplies
-outside the configuration system only values of those two kinds. A storefront's
+reaches it through its configuration system
+([`configuration.md`, "The configuration system carries every value"](../guidance/engineering/configuration.md#the-configuration-system-carries-every-value)).
+Beside the values that select which configuration loads, a storefront takes
+outside that system only the signing credential `ARKHAI_IDENTITY_CREDENTIAL`,
+which must be kept from the loader. The storefront charts know the port their
+container, probes, and Service share, and the path of the CA bundle whose
+`ca_bundle_path` they derive. A storefront's
 secrets — its wallet key, a registry write token, its payments `api_key`, its
 `[[DisputeCredential]]` entries — are settings in its Secret overlay, never pod
 variables, so a storefront pod's environment holds only `XDG_CONFIG_HOME` and the
-signing credential. Conformance is a property of the source and
-charts, judged there, never a runtime refusal: a storefront does not refuse to
-start because a value reached it through its environment, and the override layer
-stays available to an operator correcting a development cluster. Both storefront
-charts set `enableServiceLinks: false`, because Kubernetes would otherwise inject
-variables for every Service in the namespace, and one named `storefront…` would
-land in the storefronts' `STOREFRONT_` override layer.
+signing credential. A storefront does not refuse to start because a value reached
+it through its environment. Both storefront charts set
+`enableServiceLinks: false`
+([`kubernetes.md`](../guidance/engineering/kubernetes.md#service-links-are-off-where-a-loader-reads-a-prefixed-override-layer)),
+since a Service named `storefront…` would land in the storefronts'
+`STOREFRONT_` override layer.
 
-**A deployment does not wait on a service's dependencies.** No chart holds a
-service back with an init container that waits for or validates an external
-dependency — a chain, a registry, a site, or another service — and no service
-waits for one in process either. The service starts with its dependencies
-unreachable, reports each one it cannot reach in its system status as degraded,
-and its own loops retry it; a misaddressed dependency is indistinguishable at
-start from one that is down, so it is reported the same way rather than refused.
+**A deployment does not wait on a service's dependencies**
+([`deployment.md`](../guidance/engineering/deployment.md#a-deployment-does-not-wait-on-a-services-dependencies)).
 The one init container a chart runs for a service is that service's own
 migration — the provisioning service's, each storefront agent's, the bare-metal
-storefront's, and each registry instance's — which acts on the service's own
-state (see "Migrations at startup"). What stops a
-service is its own configuration or stored state being incoherent (see
-"Storefront startup and site trust"), since waiting does not repair either. Both
-storefront charts give their container a `startupProbe` on `/health`, so a slow
-start holds the liveness and readiness probes off rather than being judged by
-them; `/health` is a process check that calls no dependency. Each storefront
+storefront's, and each registry instance's (see "Migrations at startup"). Both
+storefront charts give their container a `startupProbe` on `/health`, a process
+check that calls no dependency
+([`kubernetes.md`](../guidance/engineering/kubernetes.md#a-startup-probe-on-a-process-check)).
+Each storefront
 chart's render tests assert that no `wait-for-` container renders, that exactly
 one init container does — the storefront's migration command from the
 application's image over its data volume — and that the `startupProbe` does; the
 provisioning and registry charts' render tests assert their migration init
 container the same way.
 
-**A private CA is mounted once, and each client names it.** A chart mounts a
-deployment-supplied CA bundle from a ConfigMap or Secret key at one fixed path,
-and every client that trusts that CA names the file as its own `ca_bundle_path`;
-one CA that issues several services' certificates is one mount, however many
-clients name it. Where the chart renders the setting, it derives the path from the
-mount rather than taking it as a value beside the mount, so the two cannot
-disagree. Where the setting lives in a Secret overlay the chart never renders, the
-chart cannot derive it: whoever writes that Secret states the chart's mount path,
-and a Helm test running the client's access check from the Deployment's own mounts
-proves the two agree. A client loads its bundle when it is built, so a bundle that
-cannot be loaded fails the access check at its configuration step, before any
-request.
-
-**Toggling a mock/test profile:** A boolean chart value (for example
-`mockMode`) can conditionally append a profile name to
-`ACTIVE_PROFILES` in the Deployment template, causing the service's own
-composition root to select a mock implementation of an external
-dependency instead of the real one. The corresponding
-`config-<profile>.yml` supplies safe no-op values for that mode. This is
-the same mechanism Helm test pods use to layer in test-only
-configuration: the shared non-secret values merge through one profile,
-and a pod needing secret material mounts an additional Secret-backed
-profile on top.
+The provisioning chart's `mockMode` appends the `mock` profile to
+`ACTIVE_PROFILES`
+([`helm.md`, "A chart value toggles a mock profile"](../guidance/engineering/helm.md#a-chart-value-toggles-a-mock-profile)).
 
 **The umbrella's smoke-test profile.** The generated `<release>-test-config`
 profile carries what its smoke hooks read and the release's values state: the
@@ -247,8 +188,8 @@ into the registry smoke pod alone and appends the profile, once, to its
 `ACTIVE_PROFILES`. `helm/local-values.yaml` points it at `arkhai-e2e-credentials`'
 `e2e-secret` profile, which already carries the buyer's marketplace credential for
 the deal test, so one Secret holds one copy. A Secret's profile file quotes every
-hex value, because a YAML loader reads an unquoted `0x`-prefixed value as an
-integer.
+hex value
+([`helm.md`, "A hex value stays a string"](../guidance/engineering/helm.md#a-hex-value-stays-a-string)).
 
 ### Storefront agents: pass-through configuration
 
@@ -260,14 +201,14 @@ overlay). The chart mounts the last two at `/etc/arkhai/`.
 `market-storefront config show` reports the files merged as the server merges
 them; `--raw` prints each public file and never the overlay.
 
-`storefront.agents` is a map from each agent's name to its entry, not a list,
-because Helm merges maps key by key and replaces lists whole: an overlay states
-only what it changes in one agent, and `null` removes a key or an agent. A list
+`storefront.agents` is a map from each agent's name to its entry, not a list
+([`helm.md`, "Key a value that overlays change per entry; do not list it"](../guidance/engineering/helm.md#key-a-value-that-overlays-change-per-entry-do-not-list-it)):
+an overlay states only what it changes in one agent, and `null` removes a key
+or an agent. A list
 is refused by the values schema, naming the map, and so is a `name` inside an
 entry, whose key is its name. The storefront subchart ships no agent; the
 umbrella's `values.yaml` declares Bob, and a values file that replaces Bob with
-an agent of its own states `bob: null` beside it. The same holds for any chart
-value that overlays change per entry: key it, do not list it.
+an agent of its own states `bob: null` beside it.
 
 The supported Helm is the release pinned in
 [`.github/workflows/tests.yml`](../../.github/workflows/tests.yml). That release
@@ -334,8 +275,10 @@ which deploys the Anvil state the book describes, renders its copy of
 An agent's `caBundle` (`configMapName`, or alternatively `secretName`, never both;
 `key`, default `ca-bundle.pem`) mounts an existing ConfigMap's or Secret's key
 read-only at `/etc/arkhai/ca/ca-bundle.pem`, and the chart sets
-`[Settlement.arkhai_payments].ca_bundle_path` to that file: the path is derived
-from the mount rather than configured beside it, so the two cannot disagree. Only
+`[Settlement.arkhai_payments].ca_bundle_path` to that file, derived from the
+mount
+([`helm.md`, "A chart derives a mounted file's path from the mount"](../guidance/engineering/helm.md#a-chart-derives-a-mounted-files-path-from-the-mount)).
+Only
 the payments client reads the bundle, and the process's own trust store is left as
 it is. A `caBundle` is refused when the agent's `config` states no
 `[Settlement.arkhai_payments]` section, or an empty one, rather than given a
@@ -452,8 +395,8 @@ is a test overlay enabling contact exchange for Bob with SMTP delivery to the
 reads back; `docs/development/VALIDATION_RUNBOOK.md` gives the commands.
 
 `storefront.json` is JSON so every string, including a 160-bit address, is read
-back as a string. Every number in a values file passes through a float on its
-way into Helm, so write an integer above 2^53 as a string.
+back as a string. Write an integer above 2^53 in a values file as a string
+([`helm.md`](../guidance/engineering/helm.md#an-integer-above-253-is-a-string)).
 
 ## Storefront startup and site trust
 
@@ -480,11 +423,9 @@ impossible. A storefront that only services deals already accepted is not a supp
 deployment. A storefront chart cannot check any of this, which is why each chart's
 render tests run the storefront's own refusal over a rendered `storefront.json`.
 
-**A service refuses to start on its own incoherent state, never on a dependency.**
-A service refuses to start when its own configuration contradicts itself or its
-stored state cannot be served as it stands, since waiting repairs neither; a
-dependency it cannot reach is reported, not refused (see "Kubernetes: ConfigMap and
-Secret mounting"). Every storefront refuses an Alkahest section, enabled or not,
+**A service refuses to start on its own incoherent state, never on a dependency**
+([`deployment.md`](../guidance/engineering/deployment.md#a-service-refuses-to-start-on-its-own-incoherent-state-never-on-a-dependency)).
+Every storefront refuses an Alkahest section, enabled or not,
 listing a release model its domain cannot deliver (see "Alkahest release models"),
 and the bare-metal storefront
 refuses Alkahest inputs — `[Wallet].address`, `[Chains]`, `[Wallet].private_key` —
@@ -731,11 +672,10 @@ authorities:
 - `docker-compose.yml` is the full local stack: it includes `compose.vms.yml`
   and `domains/apicredits/compose.yml`, so the dev chain enters once.
 
-**A stack's configuration lives in committed files.** Every value a stack runs
-with is in a committed profile, overlay, values or secret-overlay file. A Makefile
-chooses which configuration loads — the Compose files, a profile, a mode — and
-never generates or carries configuration itself. A value the base topology fixes
-stays in the base file; a deployment's own values are in its overlay.
+**A stack's configuration lives in committed files**
+([`configuration.md`](../guidance/engineering/configuration.md#a-stacks-configuration-lives-in-committed-files)).
+Here the Makefiles choose the Compose files, a profile, and a mode, and the
+committed files are those below.
 
 Each base file — the domain files and `compose.bare-metal.yml` — composes topology
 only: images, ports, volumes, health checks, the database paths, `REDIS_URL`, a
@@ -843,11 +783,9 @@ access and revocation on a real host.
 
 Each service owns its own database; there is no shared database between
 services (see `openspec/specs/deployment-state/spec.md`'s "Explicit
-persistence ownership"). A SQLite-backed, single-writer service uses
-`Recreate` deployment strategy with a `ReadWriteOnce` volume — SQLite's
-single-writer model does not tolerate the overlapping old/new pod
-window a `RollingUpdate` strategy would otherwise produce against a
-shared volume.
+persistence ownership"). Each SQLite-backed service's chart deploys it with
+the `Recreate` strategy over a `ReadWriteOnce` volume
+([`kubernetes.md`, "A single-writer store deploys with `Recreate`"](../guidance/engineering/kubernetes.md#a-single-writer-store-deploys-with-recreate)).
 
 Registry and compute-provisioning runtime images create `/app/data` owned by
 their non-root `appuser`. Fresh Compose named volumes inherit that ownership,
@@ -904,10 +842,9 @@ release 1's `dev-env`. Every identity the overlay names is a well-known developm
 value (Anvil accounts 8 and 9) never for a public network. Release 2 reuses release
 1's provisioning SSH and runtime Secrets and reads three of its own.
 
-**A local release configures a service through the values a deployment uses.**
-The local release is where a deployment's shape is rehearsed, so it configures
-each service through the same values, files and Secrets a deployment supplies,
-never through a development-only mode. Payments are the example: both
+**A local release configures a service through the values a deployment uses**
+([`deployment.md`](../guidance/engineering/deployment.md#a-local-release-configures-a-service-through-the-values-a-deployment-uses)).
+Payments are the example: both
 storefronts settle in `arkhai.payments.v1` against the payments lane double
 through `[Settlement.arkhai_payments]` in their `config`, the `caBundle` option on
 the `payments-ca-bundle` ConfigMap, and the payments `api_key` in their runtime
@@ -942,9 +879,10 @@ double's respondent listing. The release serves no payment or dispute scenario.
   overlay, `dev-env/identities/bob.storefront.secrets.toml`, so both stacks hold one
   value, but for each copied entry's `ca_bundle_path`, which names the Compose
   mount and so is rewritten to the storefront chart's CA file
-  (`STOREFRONT_CA_BUNDLE_FILE`, `/etc/arkhai/ca/ca-bundle.pem`), as "A private
-  CA is mounted once, and each client names it" requires of a setting in a Secret
-  the chart never renders; an entry stating none keeps none.
+  (`STOREFRONT_CA_BUNDLE_FILE`, `/etc/arkhai/ca/ca-bundle.pem`), as
+  [`configuration.md`, "A private CA is mounted once, and each client names it"](../guidance/engineering/configuration.md#a-private-ca-is-mounted-once-and-each-client-names-it)
+  requires of a setting in a Secret the chart never renders; an entry stating
+  none keeps none.
   `helm/scripts/topology-secrets.sh` says what each Secret holds. It also
   creates, if absent, the deal test's buyer-profile volume, `arkhai-buyer-profiles`,
   which no chart creates, and leaves an existing claim as it is.
@@ -975,14 +913,14 @@ An end-to-end scenario that needs release 2 states `make helm-topology-up` on it
 Makefile target and in its suite module's docstring; the Helm validation scenarios
 need release 1 alone.
 
-**Helm test pods carry no workload selector label.** Each chart labels its Helm
+**Helm test pods carry no workload selector label**
+([`kubernetes.md`](../guidance/engineering/kubernetes.md#test-pods-carry-no-workload-selector-label)).
+Each chart labels its Helm
 test pod through its own `<chart>.testLabels` helper: chart, version, managed-by,
 instance, and `app.kubernetes.io/component: test`, but never
-`app.kubernetes.io/name`, which every Deployment selector requires. So
+`app.kubernetes.io/name`, which every Deployment selector requires, so
 `kubectl logs -l <selector>` or `kubectl logs deploy/<name>` finds only the
-service's pods, and no Service routes traffic to a test pod. Adding `component`
-to the Deployment selectors instead is not available: a selector is immutable, and
-changing one forces each release to recreate its Deployments.
+service's pods.
 `helm/tests/test_release_topology.py` renders both topology releases and asserts
 that no Pod annotated `helm.sh/hook: test` carries all of any Deployment's
 `matchLabels` or any Service's selector, and that each release renders its expected
@@ -1095,21 +1033,18 @@ of its own.
 
 ## Definition documents
 
-A service may be given the path to a YAML document describing resources it
-should hold — relays, pools, hosts, capacity declarations. The document is
-mounted like any other configuration file and is not a Secret: it carries
-endpoints, addresses, windows, quantities, and the *names* of profile keys and
-key files, never a credential.
+The provisioning service is given YAML definition documents describing the
+relays, pools, hosts, and capacity declarations it should hold
+([`definition-documents.md`](../guidance/engineering/definition-documents.md)).
 
 Four settings name such a document, all read by the provisioning service:
 `relay_definitions_path`, `pool_definitions_path`, `host_definitions_path`, and
 `capacity_definitions_path`. The provisioning chart derives each from the
 presence of its value under `definitions` (`relays`, `pools`, `hosts`,
-`capacity`) rather than configuring it beside the document, because two
-independent settings can disagree and the failure when they do is silent: the
-document renders, the volume mounts, and the service skips an unset path while
-everything looks configured. The chart's schema refuses every one of the four
-paths under `config` for that reason. Every value is empty by default, so a
+`capacity`) rather than configuring it beside the document
+([`definition-documents.md`, "Its path is derived from its presence"](../guidance/engineering/definition-documents.md#its-path-is-derived-from-its-presence)),
+and its schema refuses every one of the four paths under `config` for that
+reason. Every value is empty by default, so a
 deployment that supplies none is managed entirely through the API.
 
 Startup imports them in dependency order: relays, then pools (which may name a
@@ -1121,44 +1056,26 @@ or, on a fresh site with none, by the seed.
 
 ### The method a document kind follows
 
-This is the method a document kind is held to. The pool, host, and capacity
+The provisioning service's document kinds follow
+[`definition-documents.md`'s method](../guidance/engineering/definition-documents.md#the-method-a-document-kind-follows).
+Here a kind's path setting is `<kind>_definitions_path`, set by the
+provisioning chart from `definitions.<kind>`, rendered into its ConfigMap so
+that an edit rolls the pod through the ConfigMap checksum, refused under
+`config`, and mounted under a name `configFiles` refuses. A kind's validation
+route is its import route with `validate_only`, or for pools
+`POST /api/v1/pools/validate`, and the chart replaces the pod with `Recreate`,
+so a document is validated before the release that mounts it. A kind's slot in
+startup's dependency order is the one above.
+
+The pool, host, and capacity
 kinds each have a paragraph below naming the setting and where the kind's own
 rules are: its specification, and the
 [operator handbook](../operator-handbook.md#definition-documents) for its
 format and the procedures around it. The host document follows all of the
-method, and a new kind follows it. The others diverge in part: the capacity
+method. The others diverge in part: the capacity
 document has no export, the relay document has no import route or export, and
 the pool document validates at its own route and its import and export answer
 in their own shapes.
-
-- **One path setting, derived by the chart.** `<kind>_definitions_path` is set
-  by the provisioning chart from `definitions.<kind>`, rendered into its
-  ConfigMap so that an edit rolls the pod through the ConfigMap checksum,
-  refused under `config`, and mounted under a name `configFiles` refuses.
-- **A digest kind, recorded in the apply's transaction.** A startup applies a
-  document only when its digest differs from the one recorded under its kind
-  (see "Reconciliation follows the document, not the process").
-- **A session-scoped apply that fails whole.** Validation is strict and runs in
-  two stages, reporting every problem with its location; any problem leaves the
-  document unapplied, fails startup, and records no digest. An entry equal to
-  stored state writes nothing.
-- **An explicit import that always reconciles.** The kind's import route records
-  no digest and offers `validate_only`, answering one response: whether it
-  applied, the planned or applied changes, and every problem with a path and a
-  code. An applying request with any problem answers 422 and applies nothing;
-  `validate_only` answers 200.
-- **Validate before the release.** Submit a changed document to its validation
-  route — its import route with `validate_only`, or for pools
-  `POST /api/v1/pools/validate` — before the release that mounts it: the chart
-  replaces the pod with `Recreate`, so a document the service refuses at
-  startup leaves nothing serving, while the pre-flight reports the same
-  problems against live state without applying anything.
-- **A stated rule for entries it stops naming** (see "What a document does to
-  entries it stops naming").
-- **No credential.** A secret is named by its profile key or file path.
-- **A slot in startup's dependency order**, above.
-- **A canonical export where the kind round-trips**, so an existing site can
-  produce a first document that reproduces its state.
 
 ### Pool definitions
 
@@ -1172,33 +1089,13 @@ the format, the seed, and the steps for moving a pool's members to another
 provider are in the operator handbook's
 ["Pool definitions"](../operator-handbook.md#pool-definitions).
 
-### Reconciliation follows the document, not the process
-
-Import treats its document as authoritative. It overwrites entries that differ
-from what is stored and, for pools, disables entries the document does not
-name. That authority belongs to an operator submitting a document.
-
-**A process start is not a submission.** Import is idempotent with respect to
-the document, not the database: re-running it against state something else
-changed reverts that change, because a diff against the document is exactly what
-detects it. Applied on every startup it would silently undo administrative work
-on eviction, drain, and crash recovery.
-
-So a service records the digest of the document it last reconciled and applies a
-document only when the current one differs. The digest is written in the same
-transaction as the apply — recorded separately, a digest that committed after an
-already-committed apply is indistinguishable at the next startup from one
-recorded before a crash. An explicit import request reconciles regardless of the
-digest, because the operator has asked.
-
-The practical consequences for a deployment:
-
-- Editing a mounted document and rolling the deployment applies the edit.
-- Restarting against an unchanged document changes nothing, so anything set
-  through the API survives.
-- A failed apply records no digest, so the next start retries it.
-
 ### What a document does to entries it stops naming
+
+Each kind states its rule
+([`definition-documents.md`, "What a document does to entries it stops naming"](../guidance/engineering/definition-documents.md#what-a-document-does-to-entries-it-stops-naming)).
+Each kind's import reconciles as
+[`definition-documents.md`, "Reconciliation follows the document, not the process"](../guidance/engineering/definition-documents.md#reconciliation-follows-the-document-not-the-process)
+says.
 
 A pool absent from the document is **disabled**: the document declares what the
 deployment offers, and a pool it does not name should not be scheduled.
@@ -1252,15 +1149,8 @@ and the rules for VM and bare-metal declarations are in the operator handbook's
 ### Secrets are named, not carried
 
 A relay entry may name which key of the deployment's secrets profile holds its
-admission token. The service resolves that key **when the relay is created** and
-never re-reads it, so a token rotated through the API is not reverted by a later
-reconciliation of a document that still names the key holding the old value.
-
-An entry naming a key the profile does not carry fails the import, naming the
-key. Creating the resource with an empty credential instead would defer the
-failure to the point of use, where it appears as a remote service refusing a
-connection rather than as a configuration error where the configuration is
-wrong.
+admission token, resolved when the relay is created
+([`definition-documents.md`, "Secrets are named, not carried"](../guidance/engineering/definition-documents.md#secrets-are-named-not-carried)).
 
 A relay entry's `grant_key_secret_key` names the profile value containing the
 Ed25519 private key as one-line standard base64 PKCS#8 DER. The importer strips
@@ -1290,7 +1180,8 @@ are service settings, not pool fields or buyer inputs.
 
 Every stateful service applies its migrations in a deployment phase before its
 application starts, through its own packaged command, and its application only
-checks the database; the rules are `deployment-state`'s
+checks the database, as [`migrations.md`](../guidance/engineering/migrations.md)
+describes; for this repository the rules are `deployment-state`'s
 ["Service-owned migration history"](../../openspec/specs/deployment-state/spec.md#requirement-service-owned-migration-history)
 and the requirements beside it, and the design is its companion's
 ["Migration and initialization boundary"](../../openspec/specs/deployment-state/architecture.md#migration-and-initialization-boundary).
@@ -1317,20 +1208,19 @@ CLI, states it as its `entrypoint`. The registry chart's application container
 states its own `uvicorn` command, since the image's command migrates first for
 Compose.
 
-A migration command reads only its database location and log level — the
-bare-metal storefront's only its `db_path`, logging at INFO — from the
-service's layered settings, without resolving anything else, so it needs no
-secret mounted and one database migrates to the same schema and rows under any
-profile. What a deployment configures — a site's pools, their seed, its
-playbooks, the API-credit service's `default` pool — is applied by the
-service's startup after its check passes. Migration creates no pool.
+A migration command reads only its database location and log level
+([`migrations.md`](../guidance/engineering/migrations.md#the-command-reads-only-the-database-location-and-log-level));
+the bare-metal storefront's reads only its `db_path`, logging at INFO. What a
+deployment configures — a site's pools, their seed, its playbooks, the
+API-credit service's `default` pool — is applied by the service's startup
+after its check passes. Migration creates no pool.
 
-The application's startup opens its database read-only, issues no DDL, and
-refuses any database but a compatible one, naming the command and every
-migration ID that differs. `<service>-migrate --check` prints the same result
-and changes nothing: it exits 0 only for a compatible database, and otherwise
-lists the pending IDs, the unknown IDs, or the baseline to be adopted, so an
-operator can preview an upgrade or verify a restored backup.
+The application's startup opens its database read-only and refuses any
+database but a compatible one
+([`migrations.md`](../guidance/engineering/migrations.md#the-application-opens-its-database-read-only)).
+`<service>-migrate --check` is the check mode
+([`migrations.md`](../guidance/engineering/migrations.md#a-check-mode-previews)):
+it exits 0 only for a compatible database.
 
 | Result | Meaning | Remedy |
 |---|---|---|
@@ -1353,8 +1243,8 @@ refused the same way. Each in-house migration commits with its record, so a
 failure leaves the migrations before it applied and recorded; under Alembic,
 SQLite DDL is not transactional, so a fresh registry database whose migration
 fails partway is unsupported and is replaced by a fresh one. An image rolled back
-over a migrated database is refused as ahead: take a database backup before every
-upgrade, and roll back by restoring it. The operator handbook's
+over a migrated database is refused as ahead, so an upgrade is rolled back by
+restoring the backup taken before it. The operator handbook's
 ["Upgrading a deployment"](../operator-handbook.md#upgrading-a-deployment) is the
 procedure.
 
@@ -1401,10 +1291,12 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
   delivery records and escrows and deletes core `credentials` rows for listings
   no other offering mode binds (`20261106_002_vm_credentials_cleared`).
 
-These migrations are fail-forward: an older image cannot serve the migrated
-schema and refuses it as ahead, and rolling back means restoring the backup taken
-before the upgrade. No two versions of a service share a database: each chart
-deploys its service with `strategy: Recreate` over one ReadWriteOnce volume.
+These migrations are fail-forward
+([`migrations.md`](../guidance/engineering/migrations.md#migrations-fail-forward)).
+No two versions of a service share a database
+([`migrations.md`](../guidance/engineering/migrations.md#no-two-versions-share-a-database)):
+each chart deploys its service with `strategy: Recreate` over one ReadWriteOnce
+volume.
 
 Every supported database already holds canonical principals, since each
 service's v0.3.0 floor converted its identity-bearing rows; authorities still
@@ -1986,8 +1878,8 @@ token, one with surrounding whitespace, or one containing a line break, at
 construction. Duplicate bindings for an
 identity are refused at lookup.
 
-A credential may also name `ca_bundle_path`, under the private-CA rule in
-"Profile-based configuration"; the
+A credential may also name `ca_bundle_path`, under
+[`configuration.md`'s private-CA rule](../guidance/engineering/configuration.md#trust-is-configured-where-its-client-reads-it); the
 [settlement-configuration specification](../../openspec/specs/settlement-configuration/spec.md#requirement-dispute-credentials-are-bound-by-identity-and-no-template-ships-an-authority)
 states its rules, and its
 [architecture](../../openspec/specs/settlement-configuration/architecture.md#precedence-and-secret-boundaries)

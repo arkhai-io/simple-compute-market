@@ -18,6 +18,8 @@ explicitly, and this check rejects:
   `${PYTHON_VERSION}` with no `ARG PYTHON_VERSION` default before the first
   `FROM`, or a default other than the declared version.
 
+Rules: docs/guidance/engineering/packaging.md, with packaging-uv.md and
+packaging-docker.md beside it.
 Conventions: docs/development/BUILD_AND_PACKAGING.md.
 """
 

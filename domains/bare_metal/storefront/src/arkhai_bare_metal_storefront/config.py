@@ -13,7 +13,9 @@ Dynaconf would read as TOML, such as a hex identifier, a string). That layer is
 an operator's escape hatch and is never
 refused: whether a deployment supplies a value through its environment is a
 compliance check of its charts and Compose files, not a decision the storefront
-makes at startup. See docs/development/DEPLOYMENT_AND_CONFIG.md.
+makes at startup (docs/guidance/engineering/configuration.md, "The configuration
+system carries every value"). See docs/development/DEPLOYMENT_AND_CONFIG.md for
+how the storefronts' files are mounted.
 
 The signing credential never enters these settings. ``ARKHAI_IDENTITY_CREDENTIAL``
 is read by the composition root and handed to the signer factory alone, and the

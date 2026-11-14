@@ -1033,19 +1033,21 @@ manifest must fail startup rather than admit mixed identity precedence.
 - Composition tests exercise an Ed25519 Arkhai payment path with wallet, chain,
   RPC, balance, and gas configuration absent, and separately prove that a
   selected EVM effect resolves and validates only its adapter-owned inputs.
-- Configuration and artifact tests use secret canaries to reject private
-  material in public models, persistence, logs, rendered ConfigMaps,
-  arguments, images, wheels, manifests, and fixtures. Payment tests use the
+- Configuration and artifact tests use secret canaries
+  ([`repository-content.md`, "Published artifacts are checked with canaries"](../guidance/engineering/repository-content.md#published-artifacts-are-checked-with-canaries))
+  to reject private material in public models, persistence, logs, rendered
+  ConfigMaps, arguments, images, wheels, manifests, and fixtures. Payment tests use the
   installed payments kit's generated wire models and never import the
   payments service implementation. "Payment Receipts in Tests" below covers
   how they obtain signed receipts.
 - VM and API-credit plugin conformance uses the same selected-primary and
   retained-principal recovery fixtures. Discovery rejects any plugin missing
   `core.resolved-buyer-identity.v1` before command registration.
-- Secret-canary scans include profile JSON, run-log JSONL, human/JSON CLI
-  output, exceptions/reprs, generated buyer TOML, Compose/Helm renders,
-  ConfigMaps, wheels, images, and evidence. Credential values may appear only
-  inside the selected provider boundary.
+- Secret-canary scans
+  ([`repository-content.md`, "Published artifacts are checked with canaries"](../guidance/engineering/repository-content.md#published-artifacts-are-checked-with-canaries))
+  include profile JSON, run-log JSONL, human/JSON CLI output, exceptions/reprs,
+  generated buyer TOML, Compose/Helm renders, ConfigMaps, wheels, images, and
+  evidence; the component holding a credential is the selected provider.
 - A payment system scenario must cover publication, discovery, negotiation,
   approval, receipt-gated delivery, status, and recovery with Ed25519 and no
   wallet. Local controlled smoke evidence does not establish live ledger or
@@ -1356,7 +1358,7 @@ and `domains/apicredits/middleware/rust/tests/conformance.rs`.
 
 ## Private Service Dependencies
 
-This repository is public, and every test target it runs in public CI or a public build MUST pass without credentials for a private repository, image or package. A scenario that needs a private service's internals (its source, images, development-mode auth, operator test funds, or ledger reads) lives in that service's repository, which may depend on SCM's public artifacts. SCM's own e2e may run against a service's public test deployment, readiness-gated: it reports the unmet prerequisite when no target is configured or reachable. Otherwise SCM tests the client side against the service's published contract (schemas and test vectors) and a test double at the client kit's boundary.
+This repository is public, so its tests keep private dependencies out ([`repository-content.md`, "Private dependencies stay out of its tests"](../guidance/engineering/repository-content.md#private-dependencies-stay-out-of-its-tests)): a scenario needing a private service's internals, its ledger reads among them, lives in that service's repository, and SCM tests the client side against the service's published contract and a test double at the client kit's boundary.
 
 A double of a private service mirrors its producer and takes the producer's
 decisions as programmed answers

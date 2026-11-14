@@ -32,7 +32,8 @@ of their own. Apart from that, the one file it writes is the period ledger's lin
 ## What reaches the repository
 
 Everything you write that the repository keeps — a proposal, its design, a summary
-the owner commits — is public (`AGENTS.md`, "Public repository discipline"). Only
+the owner commits — is public (`AGENTS.md`, "Public repository discipline", which
+applies the public case of `docs/guidance/engineering/repository-content.md`). Only
 aggregates — counts, rates — and the principles drawn from them reach it: no
 correction's wording, and no private name, path, identifier, or log. The period ledger
 is untracked, and holds figures only.

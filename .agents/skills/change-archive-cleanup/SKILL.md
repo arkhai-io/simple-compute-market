@@ -280,8 +280,9 @@ Draft, for the owner to use when the branch is merged:
   exercised the change — from the closeout section and the validation record; and
   what it deliberately leaves to other changes, by their names.
 
-Both are as public as the code, so `AGENTS.md#public-repository-discipline`
-applies to every word. When the branch carries another change that is not archived,
+Both are as public as the code, so `AGENTS.md#public-repository-discipline`, the
+public case of `docs/guidance/engineering/repository-content.md`, applies to every
+word. When the branch carries another change that is not archived,
 say so: the pull request would merge that change too, so the owner decides when to
 open it, and the drafts cover this change only.
 

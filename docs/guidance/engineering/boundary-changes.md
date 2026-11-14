@@ -9,8 +9,9 @@ tests. Validate:
 
 - the package build and the contents of what it ships;
 - typing markers and static type checks where the contract moved;
-- the allowed dependency direction, every import counted, with the repository's
-  architecture check, writing a package's own boundary test only for what that
+- the allowed dependency direction, every import counted
+  ([Any import is a dependency](dependencies.md#any-import-is-a-dependency)), with
+  the repository's architecture check, writing a package's own boundary test only for what that
   check cannot express, such as which module of a package may import what;
 - old import removal, or an explicit, deliberate compatibility path;
 - every changed consumer's unit and integration suites, not just the producer's;

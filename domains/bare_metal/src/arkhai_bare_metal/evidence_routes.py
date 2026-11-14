@@ -9,7 +9,8 @@ and the evidence names the deal's parties, which is why the body is not public.
 The route contract here is what the storefront's binding authenticates with and
 what the typed client signs, so the two cannot disagree. The route service is
 framework-free; the storefront binds it and supplies its collaborators. See
-docs/development/ARCHITECTURE.md, "Route contracts and their HTTP binding".
+docs/guidance/engineering/implementation.md, "Route contracts and their HTTP
+binding".
 """
 
 from __future__ import annotations

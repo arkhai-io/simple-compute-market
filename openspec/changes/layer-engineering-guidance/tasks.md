@@ -1334,7 +1334,7 @@ citation re-pointed. Files: those files (new); `docs/guidance/engineering/README
 `docs/operator-handbook.md` and `VALIDATION_RUNBOOK.md` only where 31 O1b brings them
 in line; skills and documents citing moved text; `.agents/workflow.toml`.
 
-- [ ] 5.1 Move the remaining engineering material to its files, each with the
+- [x] 5.1 Move the remaining engineering material to its files, each with the
   frontmatter "Files and their tags" gives, each general rule given a neutral
   example (31 O1a), each tool or language form in the file its tags give (D7,
   31 O1c): the project layout's Python, uv, and Hatchling rows to their packaging
@@ -1344,38 +1344,194 @@ in line; skills and documents citing moved text; `.agents/workflow.toml`.
   production half to `implementation.md` (31 O1g). Verify each remaining engineering
   row of the inventory sits in its destination, and no file of this section names a
   package, service, document, or make target of this repository.
-- [ ] 5.2 Write `rules.md` from "Amend a rule or comply" as a framework for when an
+  Note: twenty-four files; `implementation-python.md` is not created, since the
+  route pattern's package split gives no reason of Python's own — the thin client
+  package exists so a caller need not install service code, which holds in any
+  language — open for the triage, as row 384 asks. Every engineering row of the
+  `AGENTS.md`, `openspec/README.md`, `domain.md`, `ARCHITECTURE.md`, `TESTING.md`
+  (the two left by section 4), `DEPLOYMENT_AND_CONFIG.md`, `BUILD_AND_PACKAGING.md`,
+  and `RELEASING.md` tables not moved by section 4 sits in the file its row names,
+  checked row by row: `AGENTS.md`'s and the checklist's to `documentation.md`,
+  `rules.md`, `comments.md`, `diagrams.md`, `dependencies.md`,
+  `dependencies-python.md` (part 2's import rule among them), `packaging.md`,
+  `repository-content.md`, and `terms.md`; `ARCHITECTURE.md`'s to
+  `implementation.md` (composition from one component, the standalone component,
+  thin controllers, the route pattern, the authority test, operator lifecycle
+  controls, no speculative guard code, an existing library), `persistence.md`
+  (accepted representations, schema changes, atomic cutovers), and, for "Local
+  development", `configuration.md`; `DEPLOYMENT_AND_CONFIG.md`'s to
+  `configuration.md`, `configuration-python.md`, `definition-documents.md`,
+  `deployment.md`, `kubernetes.md`, `helm.md`, and `migrations.md`;
+  `BUILD_AND_PACKAGING.md`'s to the five packaging files, the project layout split
+  into its Python, uv, and Hatchling rows with this repository's selection of
+  Hatchling staying (29 F1); and `RELEASING.md`'s versioning policy and lower-bounds
+  paragraph to `versioning.md` and `versioning-python.md` (D10 as amended). The
+  rules the check classification names for `check-uv-setup`, `check-locks`,
+  `check-python-version`, `check-project-layout`, and `check-uv-version` are each
+  stated in a packaging file. The route pattern's diagram moved with `git mv` beside
+  `implementation.md` (`route-contract-pattern.drawio` and `.svg`), its one
+  repository word, "pydantic", made "schema", so it is redrawn neutrally as row 384
+  asks; `ARCHITECTURE.md` keeps that its wire models are pydantic models. A Grep of
+  the twenty-four files for this repository's names (`arkhai`, `market_`,
+  `storefront`, `alkahest`, `kit/`, `make `, `.dist`, `uv_project`, `reinit`,
+  `ARKHAI`, `helm/`, `mockMode`, `EIP-191`, `registry`, `docs/`, `openspec`, the uv
+  minimum and lock revision) finds none; every link is to a file of the same
+  directory. Two helper subagents wrote the configuration and deployment files and
+  the packaging and versioning files, from the inventory's rows; this session wrote
+  the rest and read theirs. Evidence: inspected; no test applies.
+- [x] 5.2 Write `rules.md` from "Amend a rule or comply" as a framework for when an
   exception to shared guidance is expected — exceptions expected once other
   repositories change the shared guidance, the rule's purpose of stopping an owner
   from declaring everything an exception kept — proposing its wording in the
   section's notes for the round's triage to review (31 O1e, D9). Verify the notes
   hold the proposed wording beside the source's.
-- [ ] 5.3 Write what may enter a repository (D6) in `repository-content.md`: what
+  Note: `rules.md` has three headings — "Amend a rule or comply", for a rule the
+  repository owns; "When an exception is expected", for shared guidance the
+  repository does not own alone, a selected case or an overridden rule declared with
+  its reason beside what it applies to; and "What an exception is not", which keeps
+  the rule's purpose. The source and the proposed text are under "Section 5's
+  differing pairs" below. It names no table or workflow requirement, since D9's
+  table shape is CW-x4ex's and an engineering file may not cite the workflow; the
+  repository's tables are section 6's and 7's. `AGENTS.md`'s heading keeps the
+  testing-levels example and cites `rules.md`. The guide's two dropped citations of
+  the rule, which section 3 left for this section, landed in CW-s7rq's requirement
+  text ("proposes amending the guidance"), which carries no link, so none was added.
+  Evidence: inspected; no test applies.
+- [x] 5.3 Write what may enter a repository (D6) in `repository-content.md`: what
   holds in every repository, what a public repository additionally refuses, and
   what a private one may hold — the last limited to what a private repository may
   hold that a public one may not, the one piece of new guidance this change writes —
   from `AGENTS.md`'s "Public repository discipline", with "Cross-references must
   resolve"'s rule in `documentation.md`. Verify the private-repository part adds no
   obligation.
-- [ ] 5.4 Complete the engineering README's `## Tags` table with the tags this
+  Note: "In every repository" holds no credentials, fixtures that are obviously
+  fixtures, and referring to work that is not here (its Prefer and Avoid examples
+  kept); "In a public repository" holds the opening (world-readable, permanently),
+  the refused list with wallet addresses as the example of account identifiers (row
+  177), `TESTING.md`'s private-dependency rule (row 510), and its secret-canary
+  method (row 495), each with neutral wording; the opening states that a design note
+  is as public as code (row 178's neutral example). "In a private repository" names
+  what the public part refuses that a private repository may hold, keeps the
+  credentials and fixture rules, and ends "Nothing here obliges a private repository
+  to hold any of it": it adds no obligation. The citation rule is
+  `documentation.md`'s "Citations resolve". `AGENTS.md` keeps "This repository is
+  public" (section 6's exception row), the pairing rule, the local-configuration
+  statement, and the cited directories, each citing its file; "Never enters this
+  repository" and "Referring to work that is not here" are gone from it, and no
+  citation named either. `TESTING.md`'s "Private Service Dependencies" and both its
+  canary bullets cite the file. Evidence: inspected; no test applies.
+- [x] 5.4 Complete the engineering README's `## Tags` table with the tags this
   section's files carry (D18). Verify every tag an engineering file carries is in
   the table, and every table row is carried.
-- [ ] 5.5 Deduplicate as the preamble says (31 O1b). Verify every duplicate row this
+  Note: twenty-one rows, the inventory's engineering vocabulary in its order:
+  `engineering`, eleven topics, and the tools `python`, `uv`, `hatchling`, `docker`,
+  `kubernetes`, `helm`, `ansible`. A Grep over the forty engineering files'
+  frontmatter, the README's among them, finds every tag they carry in the table and every row carried;
+  `comments` and `terms` are carried too by `workflow/change-references.md` and
+  `workflow/terms.md`, as D18 lets a workflow file use a lower layer's tags.
+  Evidence: inspected; no test applies.
+- [x] 5.5 Deduplicate as the preamble says (31 O1b). Verify every duplicate row this
   section moves is merged or listed.
-- [ ] 5.6 Delete the moved text from its sources, leaving in each what the inventory
+  Note: the pairs, and the wording the move changed, are under "Section 5's
+  differing pairs" below: rows 162 and 370 (the dependency questions and the import
+  and declaration sentences, merged into `dependencies.md`, the two sources keeping
+  their instances and citing it), row 563 (the method's "Validate before the
+  release" beside the operator handbook, merged), the current-state rows 141, 236,
+  443, and 520 (merged into `documentation.md`), and the provenance rows 152 and
+  204 (merged, the placement table's row citing the file). Rows 148 and 167, and the
+  handbook overlaps of rows 550, 565, 570, 571, 575, 578, and 582, are repository
+  material: their cells' "section 5's triage" is the old numbering, section 6's now.
+  Non-guidance documents the moved guidance contradicts, for the round's fixes:
+  `e2e-tests/README.md`'s configuration table, which puts `.env` as a file layer
+  between `config.yml` and `settings.toml`, where `configuration-python.md` has
+  dotenv values join the environment layer above every profile; and the operator
+  handbook's opening, which says `DEPLOYMENT_AND_CONFIG.md` holds "the method every
+  definition document follows", now `definition-documents.md`, which that document
+  cites (stale rather than contrary). `tools/README.md`'s standalone components and
+  `docs/domain-authoring/README.md`'s versioning advice agree. Evidence: inspected;
+  no test applies.
+- [x] 5.6 Delete the moved text from its sources, leaving in each what the inventory
   keeps, and re-point every citation of what moved, skills included. Verify as task
   4.4 does.
-- [ ] 5.7 Add each new file to `load.common` by path. Verify `scripts/change-workflow
+  Note: each source keeps its repository instances under their headings, citing the
+  engineering file. Headings removed: `AGENTS.md`'s "Never enters this repository"
+  and "Referring to work that is not here", and "Python comments and docstrings"
+  renamed "Comments" since the rule is no longer Python's alone there;
+  `ARCHITECTURE.md`'s "No speculative guard code" and "Prefer an existing library",
+  "Implementation rules" keeping its examples and a citation; and
+  `DEPLOYMENT_AND_CONFIG.md`'s "Reconciliation follows the document, not the
+  process". `RELEASING.md`'s "Versioning policy" stays as a pointer naming this
+  repository's check and `VersionedEnvelope`, since many documents cite it.
+  `ARCHITECTURE.md`'s "Operators" and `DEPLOYMENT_AND_CONFIG.md`'s key-meaning
+  sentence cite `versioning.md`; its "Local development" rules cite
+  `configuration.md`. Re-pointed, from a Grep for each removed or reduced heading
+  and anchor and for each moved rule's source: `change-review` (the documentation
+  questions), `change-implement` (comments, imports, `TYPE_CHECKING`),
+  `change-closeout` (task 5.10), `change-archive-cleanup` and `guidance-review` (the
+  public case), and `change-design` (an owner's principle that holds anywhere may go
+  to `docs/guidance/engineering/`, inventory row 734); the docstrings and messages of
+  `check_comment_hygiene.py`, `check_history_wording.py`, `check_local_imports.py`,
+  `check_version_bumps.py`, and the five packaging check scripts, and a `Makefile`
+  comment; `evidence_routes.py`'s, the bare-metal storefront `config.py`'s, and
+  the API-credits service `database.py`'s docstrings (the last found by the
+  fresh-context check, the first Grep having missed it); `physical-provisioning`'s companion (the route pattern);
+  `market-change-workflow`'s provisions rows, naming each new file by path and
+  `docs/guidance/engineering/` among where documentation lives, as the assumptions
+  test requires once a skill names them; `openspec/README.md`'s provenance row; and
+  other changes' documents citing a moved rule (`redesign-authenticated-requests`,
+  `check-storefront-environment-reads`, `relay-vm-access-without-a-dashboard`'s
+  promotion rows, its completed task records left as history). Citations of what
+  stays were left. A Grep for each removed heading and its anchor outside the
+  archive, `docs/prompts/`, and this change finds nothing; each engineering file
+  links only to files of its directory. Evidence: inspected; `make
+  check-agent-skills` OK; `run pre-commit`'s functional suites, which import the
+  edited modules, passed (task 5.8), though no test reads a docstring or the check
+  scripts' re-pointed failure messages.
+- [x] 5.7 Add each new file to `load.common` by path. Verify `scripts/change-workflow
   config load common` prints them.
-- [ ] 5.8 Verify the section as task 3.10 does. End-to-end: none; no pipeline
+  Note: the step table denies `.agents/workflow.toml` to every step, so the section
+  stopped and named the edit, and the orchestrating session made it on the owner's
+  standing word (seq 74): the twenty-four paths appended after `ansible-checks.md`,
+  the comment unchanged, since it already says the engineering files follow the
+  workflow's, each by path. `scripts/change-workflow config load common` prints the
+  twelve documents before them and the forty engineering files. Evidence: inspected.
+- [x] 5.8 Verify the section as task 3.10 does. End-to-end: none; no pipeline
   scenario reads guidance, and none is owed.
-- [ ] 5.9 Before 5.8's verification (58 O3): `documentation.md` states that
+  Note: `make check-agent-skills` OK. `make check-doc-citations CHANGE=` (unscoped)
+  reports, outside this change's own documents, only failures older than section 3
+  (other changes citing scripts and an `architecture.md` that no longer exist).
+  `scripts/change-workflow run pre-commit layer-engineering-guidance`, nineteen
+  paths outside the inert paths: `after-functional-change` (relock) passed;
+  `pre-commit-functional` (`make check-packaging`, `make test`, every suite,
+  `make test-release-tooling` with `test_change_workflow_assumptions.py` and
+  `test_change_workflow_config.py` among its unit suites) passed; `pre-commit`'s
+  default checks passed; and `make check-repository` failed only on the two the
+  preamble expects — citations of files the change creates or removed, from its own
+  `design.md`, `inventory.md`, `proposal.md`, and `tasks.md`, and the specification
+  index wanting the twelve `CW-*` entries and CW-pkug's renamed link (task 10.9).
+  Comment hygiene and history wording passed among its other six checks. The
+  fresh-context check's fixes after that run touched documents, one docstring, and
+  the change's notes; the whole run, functional tier included, was made again on
+  them, with the same result: every hook and suite passed but those two expected
+  checks. End-to-end
+  scenarios covering the section: none confirmed, as planned. Owed by validation:
+  nothing.
+- [x] 5.9 Before 5.8's verification (58 O3): `documentation.md` states that
   permanent documentation and guidance describe the system they apply to
   declaratively and read as timeless even while they change constantly, with no
   wording relative to a migration or a planned change. Verify the rule is in
   `documentation.md` and no file of sections 3 to 5 phrases guidance relative to
   this change's move.
-- [ ] 5.10 Before 5.8's verification (58 O6): in `docs/guidance/workflow/closeout.md`,
+  Note: `documentation.md`'s "Permanent documents describe the current state" holds
+  it, merged with `AGENTS.md`'s and the checklist's current-state rows (141, 236) and
+  with the "corrected in place" clause `TESTING.md`'s and `DEPLOYMENT_AND_CONFIG.md`'s
+  openings dropped (rows 443, 520). A Grep of `docs/guidance/` for "now", "no
+  longer", "moved", "previously", "formerly", "used to", "will be", "this change",
+  and section numbers finds only text describing the system — a change being closed
+  out, a contract moved across a boundary, a shape a producer no longer emits, the
+  change-references Avoid example, and the rule's own list of such words — none
+  relative to this change's move. Evidence: inspected; no test applies.
+- [x] 5.10 Before 5.8's verification (58 O6): in `docs/guidance/workflow/closeout.md`,
   each part names and links the rules it confirms, each to its own layer's file —
   "Comment hygiene" the engineering comment rule (`comments.md`) and the workflow's
   change-references rule separately, "Documentation citations" and "Campaign index
@@ -1385,6 +1541,122 @@ in line; skills and documents citing moved text; `.agents/workflow.toml`.
   current-state rule (5.9), besides placement; `change-closeout`'s restatement is
   re-pointed to match (D11). Verify every rule a part names is linked to a file of
   its layer, and `make check-agent-skills` passes.
+  Note: "Comment hygiene" names the two rules separately, linking
+  `comments.md#comments-describe-the-current-system` and `change-references.md`;
+  "Import placement" links `dependencies-python.md#imports-go-at-module-level` in
+  place of "the repository's guidance on imports"; "Documentation compliance" adds
+  the current-state confirmation, linking `documentation.md`'s heading; "Campaign
+  index currency" and "Documentation citations" link `documentation.md#citations-resolve`.
+  "Promotion" names the citation check's purpose without a rule of its own, and the
+  repository's own parts are named by role, as 58 O6 says. `change-closeout`'s step
+  3 cites the same files for comment hygiene, import placement, and documentation
+  compliance, and step 4's citations check cites `documentation.md`. Outside the
+  plan: `workflow/changes.md`'s "Defects found during a change" links
+  `implementation.md#composition-from-one-component`, the unlinked rule section 3 left
+  for this section. `make check-agent-skills` OK. Evidence: inspected.
+
+Section 5's differing pairs (31 O1b, 31 O1e), for the round's triage — each the
+source forms, then the text the section wrote:
+
+- **The exceptions framework (row 146, 31 O1e).** Source, `AGENTS.md`: "When work
+  conflicts with a written rule, amend the rule first or make the work comply;
+  never record a private exception to it." Proposed, `rules.md`: "Amend a rule or
+  comply" keeps the source for a rule the repository owns, adding that a wrong rule
+  is changed where it is written; "When an exception is expected" says shared
+  guidance, changed by every repository sharing it, does not fit every one, so an
+  exception is expected where it conflicts with a need the repository can state — a
+  case it leaves open, selected, or a rule, overridden — declared with its reason
+  beside what it applies to, never kept privately or noted at one line of code;
+  "What an exception is not" says it never stands in for amending the repository's
+  own rule, that holding the repository to more than a shared rule asks is an
+  ordinary rule (D9's narrowing), and that declaring everything an exception is
+  what the rule prevents, a shared rule fitting no repository being proposed for
+  amendment where it is shared. `AGENTS.md` keeps "amend the rule first or make the
+  work comply", now "and declare an exception to shared guidance only as
+  `rules.md` says".
+- **The dependency questions (rows 162, 368, 370).** `ARCHITECTURE.md`'s three
+  questions and `AGENTS.md`'s "a change whose edges all point a permitted way has
+  answered the direction and knowledge questions, not the ownership one" agreed;
+  merged into `dependencies.md`'s "Three questions place a package", with neutral
+  examples. `ARCHITECTURE.md` keeps layer, scope, and its ownership examples, and
+  `AGENTS.md` that review answers ownership. `ARCHITECTURE.md`'s "Repository
+  layers" sentences on every import form and on declared distributions agreed with
+  `AGENTS.md`'s bullets; merged into `dependencies.md` and `dependencies-python.md`,
+  "Repository layers" citing both.
+- **Validate before the release (row 563).** The method's bullet and the operator
+  handbook's "Validate a changed document before the release that mounts it"
+  agreed; merged into `definition-documents.md`, taking the handbook's "A clean
+  validation is the release's go-ahead", and the source's reason, the chart's
+  `Recreate`, made conditional: "where a release stops the running service before
+  starting its replacement". The handbook is left as it is.
+- **Current state and provenance (rows 141, 152, 204, 236, 443, 520).** Agreeing
+  copies merged into `documentation.md`; the openings' "corrected in place" joined
+  the current-state rule.
+- **Wording the move changed beyond neutral examples.** `implementation.md`: the
+  authority test states as rules what the source gave through the storefront–site
+  instance — a rule one party declares but does not enforce where it decides is
+  advisory to the other, and a message missing what it must carry is refused where
+  it is acted on rather than read as asking for less (the escrow instance); "nothing
+  in their markets requires the difference" reads "nothing their own requirements
+  state calls for"; "customer-issue diagnosis" reads "diagnosing a reported
+  problem". `persistence.md`: "unsupported mandate forms" reads "a form the reader
+  never supported", and "zero nonterminal contracts" reads "no open record using a
+  form", their instances staying in `ARCHITECTURE.md`. `repository-content.md`:
+  "operator test funds, or ledger reads" reads "operator-held test funds", the
+  ledger reads staying in `TESTING.md`'s instance. `configuration.md`: the pod's
+  environment rule is narrower than the source, which let a pod set "any variable
+  an external subprocess reads" and then said its example is not set on the pod —
+  a container sets only the resolver variables, and the service exports such a
+  variable from its settings once; the source's carve-out for a value "kept from
+  the loader" stays out of the shared rule (row 531). `definition-documents.md`
+  adds one sentence summarising the per-kind reasons for entries a document stops
+  naming (disable what a declaring document stops naming; retain what others depend
+  on or the API registered). `documentation.md` defines "permanent document", which
+  no source did, since the file's rules turn on it. `migrations.md` states generally that the application
+  starts only once the migration succeeds, which the source said of Compose.
+  `kubernetes.md` states the `enableServiceLinks` instance as a rule for any pod
+  whose loader reads a prefixed override layer. `helm.md` leaves out "`null` removes
+  a key", since Helm removes a subchart's `null` only where its defaults define the
+  key. `packaging.md` says "runtime version" for "Python version" and "one store of
+  built packages" for "the wheelhouse", and states as a rule that whatever needs the
+  set of internal packages derives it from the lock; `packaging-uv.md` adds "No
+  source path to a sibling" as the uv form of the wheelhouse principle, from the
+  `[tool.uv.sources]` check, and "a lock is current only when it agrees with its
+  project, the wheels the tree builds, and that store", from the checks table;
+  row 600's history clause reads as the present reason. `versioning.md` reads "a
+  change" as "a unit of work merged as one" and drops the link to semver.org, since
+  engineering files link only to each other.
+
+Section 5 notes (handoff):
+
+- `.agents/workflow.toml` (task 5.7) was the orchestrating session's edit, as task
+  4.5's; section 9's collapse of `load.common` meets the same stop.
+- Section 6 inherits, in `AGENTS.md`: the kept repository instances under each
+  heading, each citing its engineering file; "Python comments and docstrings"
+  renamed "Comments"; the fourth dependency bullet still duplicating
+  `ARCHITECTURE.md` (row 167) and "review answers ownership" said twice; and the
+  public-case statement for its exception row. In `openspec/README.md`, the
+  Packaging part's "Passing test suites do not prove this" restates
+  `packaging.md`'s "Packaging checks run before a commit" (task 6.5's amendment).
+- Kept in `BUILD_AND_PACKAGING.md`, though general uv practice: bringing a lock to
+  the running uv's revision (`uv lock --upgrade-package`), which no row moves and
+  `market-change-workflow`'s README cites there; a candidate for `packaging-uv.md`.
+- The route-contract diagram sits flat beside `implementation.md`: `mkdir` of a
+  `diagrams/` directory was refused (no rule allows it), and `git mv` needs its
+  destination's directory to exist.
+- Two helper subagents wrote the configuration and deployment cluster and the
+  packaging and versioning cluster; their per-row reports are summarized in tasks
+  5.1, 5.5, and 5.6 and the differing pairs above. A fresh-context check of the diff
+  found a missed docstring citation, a canary bullet left restating the method,
+  four unlisted wording changes, and a rule given two homes in `helm.md` and
+  `configuration.md`; fixed — the helm duplicate trimmed to the chart's derivation,
+  `helm.md`'s hex forms restored as alternatives, the comment rule's added
+  condition and the dependency-order gloss reverted, the definition of "permanent
+  document" listed — and the notes' overstated counts and evidence corrected.
+- Not read in full this session: `DEPLOYMENT_AND_CONFIG.md`, `BUILD_AND_PACKAGING.md`,
+  and `RELEASING.md`, which the helpers read and edited; this session read their new
+  files' headings and `packaging.md`, `versioning.md`, `configuration.md`, and
+  `helm.md` whole.
 
 ## 6. The repository layer at the root and across systems
 

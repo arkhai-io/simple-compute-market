@@ -1,8 +1,10 @@
 ## Why
 
-`docs/development/DEPLOYMENT_AND_CONFIG.md` requires application configuration to travel
+`docs/guidance/engineering/configuration.md`, with its Kubernetes form in
+`docs/guidance/engineering/kubernetes.md`, requires application configuration to travel
 through mounted files, with environment variables only as the configuration loader's
-last-resort override layer. Nothing checks it. The bare-metal storefront drifted to reading
+last-resort override layer; `docs/development/DEPLOYMENT_AND_CONFIG.md` applies it to this
+repository's services. Nothing checks it. The bare-metal storefront drifted to reading
 about twenty-six application settings directly from its environment, and its chart to passing
 them as pod `env` entries, without any check noticing; `share-site-projection-state` corrects
 that drift and states the rule normatively in `deployment-state` ("A storefront reads no

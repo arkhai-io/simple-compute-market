@@ -19,6 +19,7 @@ Makefiles are read with Make's rules: backslash-newline joins lines, and a
 comment on a rule line runs to the end of the joined line, so text continued
 after a help comment is not recipe text.
 
+Rules: docs/guidance/engineering/packaging.md and packaging-uv.md beside it.
 Conventions: docs/development/BUILD_AND_PACKAGING.md.
 """
 

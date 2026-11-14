@@ -175,17 +175,23 @@ or rewrite a completed task; amend it with a correction note. An older plan may
 list its parts in another order; work in this order, and note it on the section.
 
 - **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read the
-  comments the change added for any that name the review or migration that
-  introduced them. Do not edit them: if anything needs rewriting, stop, tell the
-  owner what and where, and recommend a fix round in implementation.
+  comments the change added for any that describe history rather than the current
+  system (`docs/guidance/engineering/comments.md`) or name the change, the review,
+  or the migration that introduced them
+  (`docs/guidance/workflow/change-references.md`). Do not edit them: if anything
+  needs rewriting, stop, tell the owner what and where, and recommend a fix round
+  in implementation.
 - **Import placement — confirm.** Check the imports the change added for any still
-  local without a recorded reason. Do not move one: if one should move, stop as for
-  comment hygiene.
+  local without a recorded reason
+  (`docs/guidance/engineering/dependencies-python.md#imports-go-at-module-level`).
+  Do not move one: if one should move, stop as for comment hygiene.
 - **Documentation compliance.** Check every accepted decision in `design.md`
   against the placement rules —
   `docs/guidance/workflow/openspec-documentation.md#documentation-placement` and
   the repository's table, `openspec/README.md#documentation-placement` — and the permanent documents
-  against the code they describe.
+  against the code they describe, each describing the current state with no wording
+  relative to the change
+  (`docs/guidance/engineering/documentation.md#permanent-documents-describe-the-current-state`).
 - **Narrative compression.** Shorten completed-task notes to final behaviour,
   material evidence, deferrals, and destinations. Move what is worth keeping —
   alternatives, debugging narratives, review rationale — into `design.md` first;
@@ -256,7 +262,8 @@ that.
 exists:
 
 - `scripts/change-workflow run pre-commit <change>` must report nothing failing:
-  its citations check finds every document the change cites, so fix the
+  its citations check finds every document the change cites
+  (`docs/guidance/engineering/documentation.md#citations-resolve`), so fix the
   documents until it does, and its default OpenSpec check runs `validate <change>
   --strict` through the configured command. A change with no spec deltas cannot
   pass that validation — the validator rejects a change with none — so record on

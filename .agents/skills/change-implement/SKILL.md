@@ -244,17 +244,18 @@ Work through the section's tasks in order. For each:
 - Prove it at the lowest test level that can (`docs/guidance/engineering/testing.md`,
   `test-levels.md`), through the seams and injected dependencies the code already
   offers rather than brute-force patching (`test-seams.md`).
-- Respect the dependency layers in `ARCHITECTURE.md`; `TYPE_CHECKING` imports count.
+- Respect the dependency layers in `ARCHITECTURE.md`; `TYPE_CHECKING` imports count
+  (`docs/guidance/engineering/dependencies-python.md`).
   Internal dependencies come from wheels and locks through `scripts/uv_project.py`,
   never editable sibling paths.
 - Comments describe the current system: an invariant, a constraint, a reason a
   simpler implementation is wrong. Never a change name, a task number, a review, or
-  what the code used to be (`AGENTS.md`, "Python comments and docstrings";
+  what the code used to be (`docs/guidance/engineering/comments.md`;
   `docs/guidance/workflow/change-references.md`).
 - Imports the section adds go at module level, unless one has a reason to stay
   local that you verified by attempting the move — a circular import that fails, or
   a deliberate lazy load — and recorded beside it
-  (`AGENTS.md`, "Package and dependency discipline";
+  (`docs/guidance/engineering/dependencies-python.md`, "Imports go at module level";
   `docs/guidance/workflow/closeout.md#import-placement`). Closeout only confirms
   comments and imports; it never edits code, so this is where they are done.
 - Mark the task `[x]` when its evidence passes, with a short note: each suite, its

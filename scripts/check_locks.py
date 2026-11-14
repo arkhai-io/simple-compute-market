@@ -38,6 +38,7 @@ without the lock being stale; such requirements are checked in the "removed"
 direction only. A same-version wheel that changes only a marker is not seen
 here; `make lock` followed by an unchanged tree covers it.
 
+Rules: docs/guidance/engineering/packaging-uv.md and packaging.md beside it.
 Conventions: docs/development/BUILD_AND_PACKAGING.md.
 """
 

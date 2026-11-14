@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Fail if code outside openspec/ names a change, a task, or a change document.
 
-A mechanical sweep for the "Python comments and docstrings" rule in `AGENTS.md`:
+A mechanical sweep for the rule that code names no change, task, or change
+document (`docs/guidance/workflow/change-references.md`), beside the rule that
 comments describe the current system, not the history of the change that
-produced it. Two scans, each a line search over the tree from the repository
+produced it (`docs/guidance/engineering/comments.md`). Two scans, each a line search over the tree from the repository
 root, skipping the directories that hold no code of ours:
 
 - change-history references — a `POOLS-<n>` change ID, a section or task
@@ -128,8 +129,9 @@ def main(root: Path = ROOT) -> int:
     if matches := change_history_matches(root):
         print("\n".join(matches))
         print()
-        print("FAIL: found change-history references outside openspec/. See AGENTS.md's")
-        print("'Python comments and docstrings' section -- comments must describe the")
+        print("FAIL: found change-history references outside openspec/. See")
+        print("docs/guidance/workflow/change-references.md and")
+        print("docs/guidance/engineering/comments.md -- comments must describe the")
         print("current system, not the history of the change that produced it.")
         return 1
     print("OK: no change-ID/task-number references found outside openspec/.")

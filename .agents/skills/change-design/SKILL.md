@@ -201,7 +201,8 @@ of the owner's attention:
 - **Judgement** — the options trade real values against each other and no
   written principle or precedent picks one. Present these one at a time, in full.
 - **Consequence** — the answer follows from a decision already settled, or from
-  a principle in `ARCHITECTURE.md`. Name what it follows from.
+  a principle in `ARCHITECTURE.md` or `docs/guidance/engineering/`. Name what it
+  follows from.
 - **Convention** — the answer follows from how the nearest existing precedent
   does the same thing (a sibling hint, kit, or configuration key). Cite the
   precedent.
@@ -264,7 +265,8 @@ rationale.
 When the owner states a principle that settles a decision, apply it to the
 remaining open decisions before presenting them, and say where it applied.
 Principles the owner states that no document records are candidates for
-`ARCHITECTURE.md`; list them for the owner when the design is settled.
+`ARCHITECTURE.md`, or for `docs/guidance/engineering/` where one holds in any
+repository; list them for the owner when the design is settled.
 
 When the owner's input changes or reverses your recommendation, append one line
 to the change's `interventions.jsonl` with the decision as the finding:
@@ -326,7 +328,8 @@ When every decision is settled, and before writing anything:
   design of its own, is split. A change that can close out on its own is
   preferred to one waiting on another.
 - **List the principles the owner stated** that no permanent document records,
-  for promotion to `ARCHITECTURE.md`.
+  for promotion to `ARCHITECTURE.md`, or to `docs/guidance/engineering/` where one
+  holds in any repository.
 - **Settle the implementation cadence** with the owner, as a decision like any
   other: how many rounds implement the work, what each round covers before its
   review, and how many sessions implement each — in terms of the work, since the

@@ -42,8 +42,8 @@ The discipline of [Deterministic tests](test-determinism.md) applies to a servic
 own background loops, where the seam is a control rather than a callback. Each loop
 offers a pause, and an explicit single step that works while the loop is paused, so a
 test drives each transition instead of waiting for a timer. The production half of
-that rule — that a manual cycle invokes the same handler as the timer — is the
-implementation guidance's operator-control rule.
+that rule — that a manual cycle invokes the same handler as the timer — is
+[Operator lifecycle controls](implementation.md#operator-lifecycle-controls).
 
 Traps a new loop is worth checking for:
 

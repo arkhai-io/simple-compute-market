@@ -16,6 +16,8 @@ A virtual project (`[tool.uv] package = false`) builds no wheel, so the wheel
 rule does not reach it. Dockerfiles are not scanned for editability: an image
 installs its project's own wheel, which is not an editable install.
 
+Rules: docs/guidance/engineering/packaging-python.md, with packaging-uv.md and
+packaging-hatchling.md beside it.
 Conventions: docs/development/BUILD_AND_PACKAGING.md.
 """
 

@@ -15,6 +15,8 @@ pipeline workflows install the minimum; the release workflows build and publish
 without relocking. It stays a minimum, not an exact pin: a newer release writing
 another revision is caught by the revision check too.
 
+Rules: docs/guidance/engineering/packaging-uv.md, "Locks are written by a stated
+minimum uv".
 Conventions: docs/development/BUILD_AND_PACKAGING.md.
 """
 

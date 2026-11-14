@@ -1003,12 +1003,12 @@ Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/
 | Relays are administered through their own controller, including token rotation, without redeployment | `openspec/specs/physical-provisioning/spec.md` |
 | Import authority is scoped to submitting a document; a process restart is not a submission, so reconciliation is digest-gated | `openspec/specs/resource-pool-management/spec.md` |
 | Why import authority exists at all — a declaration an import could silently ignore is not a description of the system | `openspec/specs/resource-pool-management/spec.md` |
-| Reconciliation follows a change to the document rather than a restart | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| Reconciliation follows a change to the document rather than a restart | `docs/guidance/engineering/definition-documents.md` |
 | The resolved `connectivity` field shape and its forwarding contract | `openspec/specs/physical-provisioning/spec.md` |
 | Provider configuration reads split into a redacted default and a named execution read | `openspec/specs/resource-pool-management/spec.md` |
 | Full replacement does not reset a field a read never returned | `openspec/specs/resource-pool-management/spec.md` |
 | The storefront selects no buyer access infrastructure and holds no relay credential | `openspec/specs/vm-storefront-fulfillment/spec.md` |
-| The definition document's configuration contract and mount | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| The definition document's configuration contract and mount | `docs/guidance/engineering/definition-documents.md` (the contract); `docs/development/DEPLOYMENT_AND_CONFIG.md` (the mount) |
 | A relay binding is fixed for a VM's life; rebinding requires draining | `openspec/specs/physical-provisioning/spec.md` |
 | Relay tokens are resolved at execution, never carried in a persisted snapshot or returned by a job read | `openspec/specs/physical-provisioning/spec.md` |
 | Lease release attaches to the settlement record's terminal transition, in the same transaction | `openspec/specs/physical-provisioning/spec.md` |

@@ -33,9 +33,23 @@ the code imports carries its language's tag.
 | Tag | Kind | Description |
 |---|---|---|
 | `engineering` | layer | Holds in a repository that uses neither the change workflow nor OpenSpec |
-| `testing` | topic | Test levels, the coverage between them, seams, doubles, and determinism |
+| `documentation` | topic | Permanent documents: current state, provenance, citations, maintaining written rules |
+| `comments` | topic | Comments and docstrings: what they say and what they never say |
+| `diagrams` | topic | Diagrams, their sources, and what holds them to what they draw |
 | `dependencies` | topic | Imports and declared dependencies, and where a package belongs |
+| `testing` | topic | Test levels, the coverage between them, seams, doubles, and determinism |
+| `implementation` | topic | How production code is written: guards, libraries, service layering, operator controls |
+| `repository-content` | topic | What may enter a repository, private or public |
+| `terms` | topic | Vocabulary: one name per concept, one home per term |
 | `persistence` | topic | Stored representations, schema changes, migrations, and cutovers |
+| `configuration` | topic | How a service resolves its configuration and secrets, and the documents it is given |
+| `packaging` | topic | Builds, artifacts, locks, environments, and images |
+| `deployment` | topic | How a service is deployed and started: dependencies, startup refusals, rehearsal |
+| `versioning` | topic | Version numbers, compatibility commitments, and versioned contracts |
 | `python` | tool | The Python language and the libraries Python code imports |
+| `uv` | tool | The uv package and project manager |
+| `hatchling` | tool | The Hatchling build backend |
+| `docker` | tool | Dockerfiles and image builds |
+| `kubernetes` | tool | Kubernetes workloads, ConfigMaps, Secrets, and probes |
 | `helm` | tool | Helm charts, values, and render tests |
 | `ansible` | tool | Ansible playbooks and roles |

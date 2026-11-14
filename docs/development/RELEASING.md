@@ -124,10 +124,12 @@ in the table (the two buyer plugins and the VM storefront) are built with
 `uv build --wheel` and publish a wheel only.
 
 No package vendors another's modules. Each package builds exactly one import
-package from `src/<package>` (see
-[`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md#project-layout)), so a module
-added there ships without a packaging edit. Code another package needs is its
-own wheel and a declared dependency: the VM storefront and buyer depend on
+package from `src/<package>`, so a module added there ships without a
+packaging edit
+([`packaging-python.md`](../guidance/engineering/packaging-python.md); this
+repository's layout in
+[`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md#project-layout)). Code
+another package needs is its own wheel and a declared dependency: the VM storefront and buyer depend on
 `arkhai-vms-listings`, `arkhai-vms-negotiation`, and `arkhai-vms-settlement`
 rather than carrying their sources.
 
@@ -193,41 +195,15 @@ at once.
 
 ## Versioning policy
 
-Each package follows [SemVer](https://semver.org):
-
-- **Major** — incompatible API change (e.g. removing a public function,
-  changing a returned shape that consumers index into).
-- **Minor** — new public API, backwards compatible.
-- **Patch** — bug fix or internal change.
-
-Before a package reaches 1.0.0 its major version stays at zero: an
-incompatible change to anything the package publishes — its API, a wire
-format it sends or accepts, or the meaning of a configuration key it
-reads — takes a **minor** bump in place of a major one, and the other
-rules apply unchanged. Its users are expected to update; a consumer that
-depends on the incompatible behaviour raises its lower bound to the new
-minor version. Moving a package to 1.0.0 is a deliberate decision that
-sets its compatibility commitment, not a consequence of shipping an
-incompatible change.
-
-A contract that carries its own version — a `VersionedEnvelope`'s
-`(kind, schema_version)`, a contract version, a protocol identifier — is
-never changed in place, before 1.0.0 or after. An incompatible change
-defines a new version, and each party states the versions it accepts and
-refuses the others, naming what it supports. Before 1.0.0 the release that
-introduces a version may stop accepting the one before, so the parties to
-it upgrade, and roll back, together. Persisted state keeps its own
-migration rules. Neither pre-1.0 allowance applies at or above 1.0.0.
-Incompatibility is signalled by the version numbers and the versioned
-contracts alone; no per-release list of incompatible changes is kept.
-
-A change bumps each package it changes at most once, measured against the
-package's version on the branch the change merges into: that is the version a
-release sees. A package already bumped on the change's branch is bumped again
-only when a later edit needs a larger bump than the one it has, such as an
-incompatible edit to a package bumped only for a fix, and exact pins on it move
-only with that bump. Bumping an unreleased version again changes nothing a
-release sees and moves every exact pin on it for nothing.
+This repository's packages follow
+[`versioning.md`](../guidance/engineering/versioning.md): SemVer, the pre-1.0
+rules, versioned contracts never changed in place, and one bump per change
+measured against the branch it merges into, which `make check-version-bumps`
+holds. A `VersionedEnvelope`'s `(kind, schema_version)` is such a versioned
+contract. Why the pre-1.0 rules suit this repository is
+[`ARCHITECTURE.md`, "Operators"](ARCHITECTURE.md#operators). Dependencies
+between its packages declare lower bounds in `pyproject.toml`
+([`versioning-python.md`](../guidance/engineering/versioning-python.md)).
 
 ### Import package renames
 
@@ -250,10 +226,6 @@ raise their lower bound to the version shown.
 renamed packages and require the releases above. The entry-point group
 `domains.vms.buyer.aggregation_policies` keeps its name, so installed plugin
 packages continue to register without change.
-
-Cross-package compatibility is enforced via dependency constraints in
-`pyproject.toml`. Use `>=X.Y` (lower bound) for forward compatibility,
-or `>=X.Y,<X+1` when a breaking major release is anticipated.
 
 ## Local development
 

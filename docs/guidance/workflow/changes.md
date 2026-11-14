@@ -93,7 +93,9 @@ an unowned gap where no change owns its area
 ([Deferred work](working-model.md#deferred-work)). This is a judgement of
 proportion, not a rule that changes stay narrow, and growth that unifies behaviour
 the architecture wants shared, composed from one component rather than handled
-differently in two places, is not scope creep. A defect fixed outside the stated
+differently in two places
+([Composition from one component](../engineering/implementation.md#composition-from-one-component)),
+is not scope creep. A defect fixed outside the stated
 scope is recorded where the change's reviewers will see it: in the task notes, or in
 the triage record.
 

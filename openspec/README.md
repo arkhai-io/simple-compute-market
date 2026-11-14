@@ -26,7 +26,7 @@ change's documents. This repository's documents beside them:
 | Operating a deployment: document formats, procedures, upgrade and recovery steps | `docs/operator-handbook.md` |
 | Build, packaging, environment, lock, and image conventions, and the checks enforcing them | `docs/development/BUILD_AND_PACKAGING.md` |
 | The roadmap: directional goals, the value each delivers, current state per goal, and which change owns each open gap | `docs/development/ROADMAP.md` |
-| Change provenance and review discussion | Git history and pull requests |
+| Change provenance and review discussion | Git history and pull requests ([`documentation.md`, "Provenance lives in version control"](../docs/guidance/engineering/documentation.md#provenance-lives-in-version-control)) |
 
 `ARCHITECTURE.md` is a current-state cross-system map. It should link to detailed subsystem specifications rather than duplicate every endpoint and state transition. It is the cross-system document the workflow's guidance means where it says a change promotes cross-system knowledge.
 

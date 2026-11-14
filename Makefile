@@ -587,8 +587,9 @@ clobber-wheels: _require-ar-project
 # Reviw and agent targets
 
 # ---------------------------------------------------------------------------
-# check-comment-hygiene — mechanical sweep for AGENTS.md's "Python comments and
-# docstrings" rule: change IDs, section/task numbers, change-document filenames,
+# check-comment-hygiene — mechanical sweep for the change-references rule
+# (docs/guidance/workflow/change-references.md, with AGENTS.md's "Comments"
+# naming the file types): change IDs, section/task numbers, change-document filenames,
 # and OpenSpec change names must never appear in code outside openspec/. The
 # scans, their file types, exclusions, and the one exemption are
 # scripts/check_comment_hygiene.py's, with their reasons.
