@@ -252,8 +252,8 @@ workflow's or the engineering guidance's.
 | Task list (`scripts/change-workflow check tasks`; `make check-tasks`) | every numbered task sits under its own section's heading ([`change-workflow`'s companion, "The command and its tiers"](../change-workflow/README.md#the-command-and-its-tiers)) | workflow | the default checks; implementation's entry check |
 | Agent skills (`scripts/change-workflow check skills`; `make check-agent-skills`) | each skill has one source for every harness ([`change-workflow`'s CW-d8de](../change-workflow/spec.md#requirement-cw-d8de-each-skill-has-one-source-for-every-harness)) | workflow | the default checks; the packaging closeout part ([`openspec/README.md`, "Packaging"](../../README.md#packaging)) |
 | Strict OpenSpec validation (`scripts/change-workflow openspec validate <change> --strict`) | a change's delta requirements are well formed and carry scenarios ([`openspec-documentation.md`, "Capability documentation pattern"](../../../docs/guidance/workflow/openspec-documentation.md#capability-documentation-pattern)) | workflow | the default checks; closeout's "Documentation citations", last before the archive |
-| Comment hygiene (`make check-comment-hygiene`) | no change id, section or task number, change document's name, or change directory's name in code ([`change-references.md`](../../../docs/guidance/workflow/change-references.md)), over the file types and exemptions [`AGENTS.md`, "Comments"](../../../AGENTS.md#comments) names | workflow; its file types and exemptions the repository's | `make check-repository`; closeout's "Comment hygiene" |
-| Documentation citations (`make check-doc-citations`) | a cited path resolves and is no tombstone ([`documentation.md`, "Citations resolve"](../../../docs/guidance/engineering/documentation.md#citations-resolve)), over the directories [`AGENTS.md`, "Cross-references must resolve"](../../../AGENTS.md#cross-references-must-resolve) names | engineering; its directories the repository's | `make check-repository`, scoped to the change; closeout's "Documentation citations" |
+| Comment hygiene (`make check-comment-hygiene`) | no change id, section or task number, change document's name, or change directory's name in code ([`change-references.md`](../../../docs/guidance/workflow/change-references.md)), over the file types, exclusions, and exemption [The closing checks](#the-closing-checks) names | workflow; its file types and exemptions the repository's | `make check-repository`; closeout's "Comment hygiene" |
+| Documentation citations (`make check-doc-citations`) | a cited path resolves and is no tombstone ([`documentation.md`, "Citations resolve"](../../../docs/guidance/engineering/documentation.md#citations-resolve)), over the directories and documents [The closing checks](#the-closing-checks) names | engineering; its directories the repository's | `make check-repository`, scoped to the change; closeout's "Documentation citations" |
 | Specification index (`make check-spec-index`) | an indexed capability's `spec.md` and `index.md` agree on its ids, the change's deltas counted ([`openspec-documentation.md`, "A capability organized by an index"](../../../docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index); [`openspec/README.md`, "The index check"](../../README.md#the-index-check)) | workflow | `make check-repository`; closeout's "Promotion" |
 | Decision destinations (`make check-decision-destinations`) | each decision has a "Knowledge to promote" bullet ([`changes.md`, "Knowledge to promote"](../../../docs/guidance/workflow/changes.md#knowledge-to-promote)) | workflow | `make check-repository` |
 | History wording (`make check-history-wording`) | a comment or docstring the change adds describes no history ([`comments.md`, "Comments describe the current system"](../../../docs/guidance/engineering/comments.md#comments-describe-the-current-system)) | engineering | `make check-repository`, against the merge-base with the landing branch |
@@ -317,7 +317,26 @@ is reworded, or the rule amended. Whether an import's reason is sound, and wheth
 test sits at the level that can prove its behaviour, stay with review, which a
 pattern cannot judge.
 
-The citation check, `make check-doc-citations`, treats a citation whose target does
+Comment hygiene, `make check-comment-hygiene`, holds
+[`change-references.md`](../../../docs/guidance/workflow/change-references.md)
+outside `openspec/`: it fails on a change id, a section or task number, or a change
+document's name in a `.py`, `.yml`, or `.yaml` file, and on a change directory's name
+in those and `.toml` files outside `docs/`, which holds the roadmap, and `.claude/`.
+Its one exemption is each file name's definition in the script that reads it
+(`next_step.py`'s `TASKS_FILE`, `check_decision_destinations.py`'s `DESIGN_FILE` and
+`PROPOSAL_FILE`). A comment's stable heading is in `openspec/specs` or
+`ARCHITECTURE.md`, as in:
+
+```python
+# Fulfillment may depend on site and resource-pool authorities; those lower
+# layers must not import fulfillment, including under TYPE_CHECKING.
+# See openspec/specs/fulfillment/spec.md#dependency-boundary.
+```
+
+The citation check, `make check-doc-citations`, checks every `openspec/`, `docs/`,
+`tools/`, `scripts/`, `e2e-tests/`, and `.agents/` path cited in the Markdown under
+`openspec/specs/` and `docs/`, the change index, and every unarchived change's
+documents but its `reviews/`. It treats a citation whose target does
 not resolve as a blocking defect, and additionally rejects a citation pointing at a
 *tombstone*: a tombstoned file still exists on disk while its content is gone, so a
 plain existence test could never fail on a rename-to-tombstone — the likeliest

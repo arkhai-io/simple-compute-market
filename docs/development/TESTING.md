@@ -32,8 +32,10 @@ are command modules, whose factories are their one seam
 The bare-metal buyer CLI
 (`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`) has this shape:
 its tests replace `fresh_identity`, `recovery_identity`, `registry_client`, and
-`payment_approval`. The other CLIs' tests are an exception to the rule, declared in
-[`AGENTS.md`, "Exceptions to shared guidance"](../../AGENTS.md#exceptions-to-shared-guidance).
+`payment_approval`. The other CLIs' tests, and one unit test in the bare-metal buyer
+package, do not follow the rule: they replace library names and names the module
+imports, an unowned gap in
+[`ROADMAP.md`](ROADMAP.md), and are no model for a new test.
 
 **Negotiation-runtime convention:** a shared runtime is tested once
 ([`test-seams.md`, "A shared runtime is tested once"](../guidance/engineering/test-seams.md#a-shared-runtime-is-tested-once)).

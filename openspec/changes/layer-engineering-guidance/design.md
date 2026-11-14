@@ -4,7 +4,7 @@ Status: design settled and reviewed; design review 19's findings are settled in 
 D21, and D22. Round 1's triage amended D8 and D10 and settled the decisions under
 "Settled at round 1's triage". Round 2's triage amended D3 and settled the decisions
 under "Settled at round 2's triage"; later triages settled theirs under their own
-"Settled at" headings, round 4's sharpening D3 for `AGENTS.md`.
+"Settled at" headings, rounds 4 and 5 sharpening D3 for `AGENTS.md`.
 
 ## Context
 
@@ -282,9 +282,10 @@ which this change's emptying of `openspec/README.md` rules out.
 A repository's exception to shared guidance — selecting a case it leaves open, or
 overriding one of its rules — is a row in a table headed "Exceptions to shared
 guidance", with the columns `Shared rule | Kind | Here | Reason`, where `Kind` is
-`selects` or `overrides`. The table sits beside the component it applies to; an
+`selects` or `overrides`. Work not yet meeting a shared rule is deferred work, not
+an exception (amended at round 5's triage, S6 CLI exception). The table sits beside the component it applies to; an
 exception spanning several systems, such as this repository's choice of the public
-case or the buyer CLIs' test seams, sits in `AGENTS.md`, which both harnesses keep
+case or the signing credential's environment variable, sits in `AGENTS.md`, which both harnesses keep
 in context. Narrowing a shared rule is an ordinary repository rule. The guidance
 check validates every table and lists them all (D21). Once engineering guidance
 lives outside this repository, an exception has nothing of its own to sit beside,
@@ -724,6 +725,47 @@ The owner settled these at the triage of review 109, validation 110, and their n
 - **Inventory row 384 — No `implementation-python.md`.** The route pattern's package
   split has no reason particular to Python, so the pattern is `implementation.md`'s
   alone (D7).
+
+### Settled at round 5's triage
+
+The owner settled these at the triage of review 126, validation 126, and their notes
+127, on section 6, the repository layer at the root and across systems.
+
+- **127 O1 — `AGENTS.md` holds what can be nowhere else** (sharpens D3 and 111 O4).
+  That the repository works its changes through the change workflow, and where its
+  specification, handbook, skills, and configuration are; what every session reads,
+  workflow session or not, `docs/guidance/` named as one directory; where each
+  layer's guidance lives, each shared layer's README saying how its files are
+  organized and which tags it defines; the repository's tags and its exceptions
+  spanning systems; and its rules for any agent's actions here whatever the task —
+  what enters the repository and how it is pushed, where deferred work and terms go.
+  A topic's repository instance is in the repository document for its topic, and a
+  check's scope beside the check: the `deploy-local` rule in
+  `DEPLOYMENT_AND_CONFIG.md`, the packaging checks in `BUILD_AND_PACKAGING.md`, the
+  comment and citation checks' scopes in `market-change-workflow`'s README, draw.io in
+  `openspec/README.md`. The draw.io rule will be declared again by the extracted
+  engine's own repository guidance; it is read once in each repository. Rejected:
+  removing only the pure pointers, which leaves the line to judgement.
+- **126 F1 — A chosen list is not a copy.** `packaging.md` forbids what builds,
+  locks, or installs from copying the manifests and locks; a list choosing packages
+  for a purpose of its own, such as the published set, is kept where the choice is
+  made, and a document repeating the manifests for its reader is checked against
+  them. Rejected: generating the release guide's dependency column and the
+  publication set, which changes the release process.
+- **S6 CLI exception — Tech debt is no exception.** Work not yet meeting a shared
+  rule is deferred work, an OpenSpec change or a roadmap gap, never an exceptions
+  row: the CLIs' test seams leave `AGENTS.md`'s table, `TESTING.md` naming the gap.
+  A reviewer's list of known divergences would come better from metadata on the
+  change or gap than from a second hand-kept list. Rejected: a temporary-exception
+  sentence in `rules.md`, which would record tech debt in two places.
+- **Section 6's differing pairs (31 O1b).** Accepted as section 6's notes write them
+  (rows 148, 167, 497, 575, `clobber-wheels`, and the paraphrase sweep); the runbook's
+  section 25 brought in line with `TESTING.md` on adoption (row 484), which the
+  adoption helper confirms; the roles table kept apart from the layer table, since
+  the roadmap is no guidance; no `checks` tag, which no file carries.
+- **S6 tag reach.** `RELEASING.md`'s artifact destination is packaging, so its tags
+  stand; whether `DEPLOYMENT_AND_CONFIG.md` splits by tag joins the owner's
+  pre-closeout revisit of the split by reader (111 O2).
 
 ### Implementation cadence
 

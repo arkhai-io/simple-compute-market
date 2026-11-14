@@ -588,8 +588,8 @@ clobber-wheels: _require-ar-project
 
 # ---------------------------------------------------------------------------
 # check-comment-hygiene — mechanical sweep for the change-references rule
-# (docs/guidance/workflow/change-references.md, with AGENTS.md's "Comments"
-# naming the file types): change IDs, section/task numbers, change-document filenames,
+# (docs/guidance/workflow/change-references.md, with market-change-workflow's
+# README, "The closing checks", naming the file types): change IDs, section/task numbers, change-document filenames,
 # and OpenSpec change names must never appear in code outside openspec/. The
 # scans, their file types, exclusions, and the one exemption are
 # scripts/check_comment_hygiene.py's, with their reasons.
@@ -598,9 +598,10 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 	@python3 scripts/check_comment_hygiene.py
 
 # ---------------------------------------------------------------------------
-# check-doc-citations — AGENTS.md's cross-reference rule: every openspec/,
-# docs/, tools/, scripts/, e2e-tests/, and .agents/ path cited by a document
-# must resolve on this branch, and an unresolvable one is a blocking defect
+# check-doc-citations — citations resolve (docs/guidance/engineering/documentation.md),
+# here every openspec/, docs/, tools/, scripts/, e2e-tests/, and .agents/ path
+# cited by a document (market-change-workflow's README, "The closing checks"):
+# each must resolve on this branch, and an unresolvable one is a blocking defect
 # rather than a stale link.
 #
 # Rejects a tombstoned target as well as an absent one. The existence test

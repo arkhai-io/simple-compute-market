@@ -185,6 +185,10 @@ path.
 target. None resolves dependencies, relocks, or contacts a package index; building the
 wheelhouse fetches only the build backends each project declares. Every change runs it at
 closeout ([this repository's closeout parts, "Packaging"](../../openspec/README.md#packaging)).
+Here the packaging checks
+([`packaging.md`, "Packaging checks run before a commit"](../guidance/engineering/packaging.md#packaging-checks-run-before-a-commit))
+are `make check-packaging`, run with the typing checks, `make -C <project> typecheck`
+in each project whose Makefile has that target.
 
 | Target | Fails on |
 |---|---|

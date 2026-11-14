@@ -24,7 +24,7 @@ change's documents. This repository's documents beside them:
 
 | Knowledge | Permanent home |
 |---|---|
-| Where each layer of the guidance lives, this repository's tags, its exceptions to shared guidance across several systems, and its own rules | `AGENTS.md` |
+| That this repository works its changes through the change workflow, what every session reads, where each layer of the guidance lives, this repository's tags, its exceptions to shared guidance across several systems, and its rules for any agent's actions here | `AGENTS.md` |
 | Guidance that holds in any repository, and the change workflow's guidance | `docs/guidance/engineering/` and `docs/guidance/workflow/` |
 | Guidance pertaining to one capability, and an exception to shared guidance that applies to it alone | a guidance file in `openspec/specs/<capability>/`, beside its `spec.md`, carrying `tags` frontmatter |
 | The system's shape, repository-wide dependency layers, authority boundaries, common vocabulary, major flows, and deployment topology, and this repository's own rules spanning its systems | `docs/development/ARCHITECTURE.md` |
@@ -37,6 +37,9 @@ change's documents. This repository's documents beside them:
 | Change provenance and review discussion | Git history and pull requests ([`documentation.md`, "Provenance lives in version control"](../docs/guidance/engineering/documentation.md#provenance-lives-in-version-control)) |
 
 `ARCHITECTURE.md` is a current-state cross-system map. It should link to detailed subsystem specifications rather than duplicate every endpoint and state transition. It is the cross-system document the workflow's guidance means where it says a change promotes cross-system knowledge. Neither it, `DEPLOYMENT_AND_CONFIG.md`, nor the operator handbook replaces a specification's normative requirements.
+
+Diagrams follow [`diagrams.md`](../docs/guidance/engineering/diagrams.md). Here they
+are drawn in draw.io: a diagram's `.drawio` source sits beside its `.svg` export.
 
 ## The index check
 

@@ -1062,9 +1062,9 @@ and the log records:
 
 A second run against the same stack passes too: it reconciles the host's
 registration and adopts, paused, the listing the first run left, rather than
-creating another. A listing on the scenario's resource that it cannot adopt —
-several, a closed one, or one of another shape, as after the target's capacity
-changes — fails the run naming them; rerun with the target they were made for,
+creating another. Listings on the scenario's resource that it cannot adopt —
+several open ones, only closed ones, one of unknown status, or an open one of
+another shape, as after the target's capacity changes — fail the run naming them; rerun with the target they were made for,
 or against a fresh stack.
 
 The lane keeps the first guest's SSH heartbeat process open while a second guest

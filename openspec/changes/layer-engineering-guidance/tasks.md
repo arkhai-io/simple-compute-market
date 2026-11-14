@@ -1893,6 +1893,14 @@ checks. Files: `AGENTS.md`; `openspec/README.md`; `docs/development/ARCHITECTURE
   Before the pre-closeout review (111 O2): the owner revisits whether
   `docs/development/`'s documents split into owner-facing and agent-facing ones, by
   reader; any refactor the owner decides on is added to this change then.
+  Amended at round 5's triage (S6 tag reach): the same revisit weighs splitting
+  `DEPLOYMENT_AND_CONFIG.md` by tag once section 7 has shrunk it, since under 31
+  O1c's conjunctive reading its sections needing `deployment` alone sit in a file
+  tagged `[repository, configuration, deployment]`; a split by reader and one by tag
+  restructure the same files, so one decision settles both, and `openspec/README.md`'s
+  draw.io paragraph, which 127 O1 placed below its placement table, is weighed with
+  them. The loader is not designed yet; the tags need only stay flexible enough for
+  several designs.
   Note: the duplicate rows this section's material carries — 148 and 167 (merged),
   484, 497, and 575 (kept in place, compared, and listed) — and the `Makefile`'s
   `clobber-wheels` that round 4's triage left here are under "Section 6's differing
@@ -2065,6 +2073,67 @@ Section 6 notes (handoff):
   every passage citing `docs/guidance/`, their openings, and the sections moved or
   compared; the runbook beyond sections 25 and 29.
 
+Round 5's triage fixes (review 126, the owner's notes 127; `design.md`, "Settled at
+round 5's triage"):
+
+- **127 O1.** `AGENTS.md` holds what can be nowhere else: "The change workflow"
+  first (the specification, the handbook, `.agents/skills/`, `.agents/workflow.toml`),
+  then "What every session reads" (`AGENTS.md`, `docs/guidance/`,
+  `openspec/README.md`, and the three cross-system documents `load.common` names),
+  "Where the guidance lives", "Tags", "Exceptions to shared guidance" (absorbing
+  "Amend a rule or comply"'s one repository sentence), and "Rules for every agent
+  here" ("Public repository discipline", "Deferred work", "Domain docs", and
+  "Diagrams" holding only the graph's sentence until task 7.2). Moved out: the
+  `deploy-local` rule into `DEPLOYMENT_AND_CONFIG.md`'s "Stateful service
+  persistence", which cited it; the packaging checks with `typecheck` into
+  `BUILD_AND_PACKAGING.md`'s "Checks"; comment hygiene's file types and the citation
+  check's directories into `market-change-workflow`'s README, "The closing checks",
+  which its classification rows now cite; draw.io into `openspec/README.md` below
+  the placement table, whose `AGENTS.md` row now says what the entry holds. Removed
+  as pointers with a home elsewhere: "Documentation ownership", "Package and
+  dependency discipline", "Tests and diagnostics" (comment hygiene runs in `make
+  check-repository` and closeout's part), "Agent skills"' description of how steps
+  run (the handbook's). The fulfillment comment example moved with comment hygiene's
+  scope (inventory row 157); the testing-levels example was dropped (row 147).
+  Re-pointed: the `Makefile`'s `check-comment-hygiene` and `check-doc-citations`
+  comments, and `scripts/check_doc_citations.py`'s docstring, constant comment, and
+  failure message, which named `AGENTS.md` for the citation rule. The inventory's
+  rows 144, 147, 156, 157, 161, 169, 170, 183, 190, 192, 450, and 554 carry the
+  corrected destinations, and the change index's row the entry's new line. Left:
+  `render-diagrams-from-source`'s proposal, which names `AGENTS.md`'s "Diagrams" rule
+  in prose and meets the move at its own merge (D15).
+- **126 F1.** `packaging.md`'s "Nothing is maintained by hand": what builds, locks, or
+  installs copies nothing the manifests and locks say; a chosen list, such as the
+  published set, is kept where the choice is made; a document repeating the
+  manifests is checked against them. `RELEASING.md` and `publish-pypi.yml` unchanged.
+- **S6 CLI exception.** The CLIs' test-seam row leaves `AGENTS.md`'s table, whose
+  lead-in says work not yet meeting a shared rule is deferred work; `TESTING.md`'s
+  "Command modules" names the roadmap's gap instead; D9 and inventory row 450
+  corrected.
+- **S6 row 484.** The runbook's section 25 fails a rerun on several open listings,
+  only closed ones, one of unknown status, or an open one of another shape, as
+  `composed_listing.py`'s adoption does.
+- **Evidence.** `scripts/change-workflow run pre-commit layer-engineering-guidance`,
+  two paths outside the inert paths (`Makefile`, `scripts/check_doc_citations.py`):
+  `after-functional-change` passed, the relock changing no lock;
+  `pre-commit-functional` passed (`make check-packaging`, and `make test`'s every
+  suite, `scripts/tests/test_check_doc_citations.py` (unit) among them, which covers
+  the citation script whose comments and message changed); the default checks passed,
+  OpenSpec "is valid"; `make check-repository` failed only on the two the preamble
+  expects — the same sixteen citations from this change's own documents, and the
+  specification index wanting the twelve `CW-*` entries and CW-pkug's link (task
+  10.9) — comment hygiene and the other five checks passing. The fresh-context check
+  confirmed the inventory of what every session reads against `load.common`, both
+  checks' scopes against their scripts, the runbook against the adoption helper, and
+  every new anchor; it found, and this triage fixed, the citation check's documents
+  misstated, comment hygiene's exemption unnamed, the fulfillment example lost,
+  three places in the `Makefile` and the citation script still naming `AGENTS.md` for
+  the citation rule, the change index's row, eleven inventory rows, and wording
+  relative to a change in `TESTING.md` and `AGENTS.md`. Declined: moving the
+  deferred-work sentence of `AGENTS.md`'s exceptions lead-in into `rules.md`, beyond
+  the disposition, and re-pointing another change's proposal (D15). Owed by
+  validation: the fix commit, as any.
+
 ## 7. The repository layer beside each capability
 
 Delivers capability guidance beside its capability and the steps that read it (D3,
@@ -2093,6 +2162,9 @@ places a description of the system; `docs/development/TESTING.md`,
   `openspec/specs/change-workflow/diagrams.md` (`tags: [repository, diagrams]`)
   citing the "Current limits" bullet on generating the graph (31 O1e, 48 F2). Verify
   each row cites a guidance file and sits beside the one capability it applies to.
+  Amended at round 5's triage (127 O1): the graph's sentence is all that is left
+  under `AGENTS.md`'s "Diagrams"; moving it removes the heading, the draw.io rule
+  being `openspec/README.md`'s.
 - [ ] 7.3 Deduplicate the capability material as the preamble says (31 O1b). Verify
   every duplicate row this section moves is merged or listed.
 - [ ] 7.4 Extend the seven skills' reading lists — `change-design`, `change-plan`,
@@ -2180,6 +2252,8 @@ files the check finds wanting.
   documents, and `openspec/README.md` (D5), with its comment current. Verify
   `scripts/change-workflow config load common` prints every guidance file sections 3
   to 5 listed by path, and nothing more under `docs/guidance/`.
+  Amended at round 5's triage (127 O1): `AGENTS.md`'s "What every session reads"
+  names the same entries for sessions outside the workflow. Verify the two agree.
 - [ ] 9.4 Run `make check-guidance` over the tree and fix in the guidance whatever it
   reports — a missing tag, an unused row, a stale anchor, an upward link — each fix
   following the corrected inventory. Verify `make check-guidance` passes.

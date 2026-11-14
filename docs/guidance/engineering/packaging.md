@@ -14,11 +14,14 @@ anyone maintains by hand. Each tool's form of these rules is a file of its own:
 
 Every packaging rule replaces a list someone would otherwise maintain by hand. A
 project's manifest declares its own dependencies ([Dependencies](dependencies.md),
-"Declare what you import"), and nothing else maintained by hand lists internal
-packages: no build script, image definition, or CI workflow names the set of them or
-repeats a version a project already declares. Whatever needs that
-set derives it from the project's lock when it runs, so no caller lists it
-([Packaging with uv](packaging-uv.md), "Refreshing a same-version wheel").
+"Declare what you import"), and nothing that builds, locks, or installs copies what
+the manifests and locks already say: no build script, image definition, or CI
+workflow names the set of internal packages or repeats a version a project declares.
+Whatever needs that set derives it from the project's lock when it runs, so no caller
+lists it ([Packaging with uv](packaging-uv.md), "Refreshing a same-version wheel"). A
+list that chooses some packages for a purpose of its own, such as those a release
+publishes, is a choice rather than a copy, and is kept where the choice is made; a
+document that repeats the manifests for its reader is checked against them.
 
 ## One declaration of the runtime version
 

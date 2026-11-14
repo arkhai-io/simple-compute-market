@@ -808,9 +808,9 @@ deployment of other code migrated. A PVC whose release was last installed or
 upgraded without the overlay still carries the annotation, and survives an
 uninstall until it is deleted by hand.
 
-A local development cluster is deployed only with `make -C helm deploy-local`
-([`AGENTS.md`, "Local deployment"](../../AGENTS.md#local-deployment)) because a
-local cluster is redeployed with whatever code is checked out, and a
+A local development cluster is deployed with `make -C helm deploy-local`, never
+`make -C helm deploy` or the root `make deploy`, whether a person or an agent is
+deploying, because a local cluster is redeployed with whatever code is checked out, and a
 retained volume keeps the state that code wrote — a database another branch
 migrated — for the next deployment to start from. Pre-review validation run in
 `default` refuses to deploy over a release volume that carries the annotation and
