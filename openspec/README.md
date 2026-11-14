@@ -21,7 +21,7 @@ change's documents. This repository's documents beside them:
 | Knowledge | Permanent home |
 |---|---|
 | Repository-wide dependency layers, authority boundaries, common vocabulary, and major flows | `docs/development/ARCHITECTURE.md` |
-| Testing methodology, test-level jurisdiction, and validation conventions | `docs/development/TESTING.md` |
+| This repository's tests at each level, its end-to-end lanes and doubles, and its validation conventions | `docs/development/TESTING.md` |
 | Configuration resolution and Kubernetes deployment conventions | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Operating a deployment: document formats, procedures, upgrade and recovery steps | `docs/operator-handbook.md` |
 | Build, packaging, environment, lock, and image conventions, and the checks enforcing them | `docs/development/BUILD_AND_PACKAGING.md` |
@@ -60,7 +60,7 @@ Run `make check-packaging` and resolve every failure it reports, then run `make 
 
 ### End-to-end pipeline
 
-Confirm the end-to-end pipeline passes, and record the evidence — the run, its result, and the scenarios that exercise this change's behaviour. A change is not complete because its own suites are green: this is the tier that catches a wire contract whose two sides disagree, a service that starts cleanly and cannot settle, and a configuration gap no unit test can see, none of which any in-process test will report. If the pipeline cannot run for a reason unrelated to the change, record that as an explicit blocker naming the cause and the change that owns it, and treat the validations it gates as unrun rather than as passed.
+This repository's closeout records the end-to-end pipeline's run at the closeout's code — dispatched by `make run-e2e` and collected by `make fetch-e2e-logs` — its result, and the scenarios that exercise the change's behaviour; a failed run returns the change to implementation, and a run that could not be made is recorded as unrun, naming its cause and the change that owns it ([`docs/guidance/engineering/testing.md`, "Work is not complete because its own tests pass"](../docs/guidance/engineering/testing.md#work-is-not-complete-because-its-own-tests-pass); [`docs/guidance/workflow/working-model.md`, "Implement"](../docs/guidance/workflow/working-model.md#implement)).
 
 ## Current capability documentation
 

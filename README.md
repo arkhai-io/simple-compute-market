@@ -366,7 +366,7 @@ SCM handles signing credentials, payment state, provisioned infrastructure, and 
 - Never place signing secrets, wallet keys, payment credentials, action URLs, provider payloads, or issued API credentials in public configuration.
 - Pin the exact registries, authorities, environments, settlement mechanisms, and releases you trust.
 - Treat local fixtures and development payment runs as development evidence.
-- Review the [deployment model](./docs/development/DEPLOYMENT_AND_CONFIG.md) and [testing boundaries](./docs/development/TESTING.md) before production use.
+- Review the [deployment model](./docs/development/DEPLOYMENT_AND_CONFIG.md) and [testing boundaries](./docs/guidance/engineering/test-levels.md) before production use.
 
 ## License
 

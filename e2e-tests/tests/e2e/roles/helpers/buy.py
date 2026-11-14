@@ -6,7 +6,8 @@ stage advances convergence. A buy run in the foreground would block on its
 settlement poll until a convergence cycle no one steps, so the buy runs in the
 background and the helper steps the deal from the buyer's own run-log events and
 the storefront's stage events, each wait bounded and each on an effect of the
-buy's own requests (`docs/development/TESTING.md#the-discipline-every-scenario-follows`).
+buy's own requests
+(`docs/guidance/engineering/system-tests.md#a-scenario-is-a-sequence-of-state-changes`).
 """
 
 from __future__ import annotations

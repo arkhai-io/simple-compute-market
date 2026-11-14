@@ -1103,12 +1103,18 @@ repository documents and deduplicated, every citation re-pointed. Files:
 where 31 O1b brings it in line; skills and documents citing moved text;
 `.agents/workflow.toml`.
 
-- [ ] 4.1 Write `docs/guidance/engineering/README.md`: frontmatter `tags:
+- [x] 4.1 Write `docs/guidance/engineering/README.md`: frontmatter `tags:
   [engineering]`; what the layer holds; its organization (D19); and its `## Tags`
   table, `engineering` its first row, holding the tags this section's files carry
   (D7, D18); section 5 completes it. Verify every tag a file of this section
   carries is in the table.
-- [ ] 4.2 Move the engineering testing material to the fifteen files, each with the
+  Note: the table holds `engineering`, `testing`, `dependencies`, `persistence`,
+  `python`, `helm`, and `ansible`, each carried by a file of this section (Grep over
+  the frontmatter). The organization paragraph states D7's split (a principle's file
+  and its tool form's file) beside D19. `comments` and `terms`, which two workflow
+  files carry, join the table with section 5's files. Evidence: inspected; no test
+  applies.
+- [x] 4.2 Move the engineering testing material to the fifteen files, each with the
   frontmatter "Files and their tags" gives, each general rule given a neutral
   example in place of this repository's (31 O1a), each language or tool form in the
   file its tags give (D7, 31 O1c), and the operator-control rule's test half in
@@ -1116,22 +1122,112 @@ where 31 O1b brings it in line; skills and documents citing moved text;
   instance and cites the engineering file. Verify each engineering testing row of
   the inventory sits in its destination, and no file of this section names a
   package, service, document, or make target of this repository.
-- [ ] 4.3 Deduplicate the testing material as the preamble says (31 O1b), listing
+  Note: every engineering row of the `TESTING.md` table, and `ARCHITECTURE.md`'s
+  testing rows (aggregate targets, the levels, the deterministic-sequence rule, the
+  test double, the concurrency tests), `AGENTS.md`'s "Tests and diagnostics" rule
+  row, and `openspec/README.md`'s part 8 reason (task 4.7) sit in the file their row
+  names, checked row by row against the inventory. Two rows of the `TESTING.md`
+  table bound for other topics wait for section 5: the secret-canary method and the
+  private-dependency rule (`repository-content.md`). A Grep of the sixteen files for
+  this repository's names (`make `, `kit/`, `arkhai`, `storefront`, `alkahest`,
+  `lane`, `payments`, `buyer`, the guidance documents, relative links out of the
+  directory) finds none; every link is to a file of this section. `test-seams.md`
+  names the operator-control rule's production half without a link, since
+  `implementation.md` is section 5's; section 5 adds the link. Evidence: inspected;
+  no test applies.
+- [x] 4.3 Deduplicate the testing material as the preamble says (31 O1b), listing
   among the differing pairs the test levels the skills name (unit, library
   integration, application integration, system) against `TESTING.md`'s (unit,
   integration, smoke, system), which the restatements table records. Verify every
   duplicate row this section moves is merged or listed.
-- [ ] 4.4 Delete the moved text from its sources, leaving in each what the inventory
+  Note: the pairs, and the wording the move changed, are under "Section 4's
+  differing pairs" below: the test-level names, the two test-double statements
+  (row 511), and the runbook's observation method beside `system-tests.md`
+  (row 666). Rows 162 and 370 (the dependency questions) and 563 (a document kind's
+  method beside the handbook) were written for the old section 4, which held the
+  whole engineering layer; their material is section 5's, whose deduplication
+  (task 5.5) lists them; the inventory's cells still say "section 4's triage" in
+  the old numbering the preamble explains.
+  Non-guidance documents: the validation runbook's observation method adds to
+  `system-tests.md`'s and is left as it is; a Grep of `e2e-tests/README.md`, the
+  tools' READMEs, `helm/README.md`, and the operator handbook for the moved rules'
+  terms (outcomes, sleeps, raw calls, deterministic controls) found only statements
+  that agree. Evidence: inspected; no test applies.
+- [x] 4.4 Delete the moved text from its sources, leaving in each what the inventory
   keeps, and re-point every citation of what moved, skills included. Verify `grep
   -rn` over the tracked tree outside `openspec/changes/archive/` and
   `docs/prompts/` finds no citation of a heading this section removed, and no
   engineering file links to a file the inventory tags `workflow` or `repository`
   (D1's direction).
-- [ ] 4.5 Add the README and each new testing file to `load.common` by path. Verify
+  Note: `TESTING.md` keeps every heading but "Coverage Contract Between Levels",
+  each reduced to this repository's instances with a citation of its engineering
+  file; its opening drops the current-practice clause (row 443). `ARCHITECTURE.md`'s
+  "Testing strategy" keeps its pointers, the lanes, and the doubles' examples, citing
+  the files; its aggregate-targets sentence and "Deterministic database-concurrency
+  tests" body become citations, the latter heading kept for the subsections sections
+  5–7 move. `AGENTS.md`'s "Tests and diagnostics" keeps its two repository bullets
+  under a pointer to the engineering files, and "Amend a rule or comply"'s example
+  names `test-levels.md`, since the levels now change there. Re-pointed, from a Grep
+  for `TESTING.md` over every tracked permanent document and code file: the
+  test-level citations in `change-review`, `change-plan`, `change-design`,
+  `change-implement` (both), and `change-triage` (their restatements kept, D11); the
+  change index's citation of "Tests wait on events, never on durations";
+  `site-capacity`'s companion (seeding state no API expresses); `ROADMAP.md`'s
+  command-module and stage-wait rows; `openspec/README.md`'s placement row for
+  `TESTING.md`, which named it the home of test-level jurisdiction; `TESTING.md`'s
+  own "rejection-path rule"; the root `README.md`'s "testing boundaries" link;
+  `market-change-workflow`'s provisions row "The guidance documents every step
+  reads", which names each engineering file by path, as the assumptions test
+  requires once a skill names one; and, outside the plan, the docstrings and comments of
+  seventeen test modules and e2e helpers that cited `TESTING.md` for a level
+  definition, the rejection-path or parity rule, the no-sleeps rule, or the
+  command-module convention, now naming the engineering file. Citations of
+  `TESTING.md` for what it still holds (the migration-test instances, the lanes, the
+  frps tests, the chart render tests' home) were left. `openspec/config.yaml` cites
+  no heading and is left (D23). A Grep for the removed heading and its anchor
+  (`coverage-contract-between-levels`) outside the archive, `docs/prompts/`, and
+  this change finds nothing; the other changes citing `TESTING.md` anchors cite
+  headings that stay, and their plans to promote into `TESTING.md` meet the move at
+  their own merge (D15). Each engineering file links only to files of the same
+  directory. Evidence: inspected; `make check-agent-skills` OK; the edited test
+  modules run in `run pre-commit`'s suites (task 4.6).
+- [x] 4.5 Add the README and each new testing file to `load.common` by path. Verify
   `scripts/change-workflow config load common` prints them.
-- [ ] 4.6 Verify the section as task 3.10 does. End-to-end: none; no pipeline
+  Note: the step table denies `.agents/workflow.toml` to every step, so the
+  orchestrating session made the edit on the owner's standing word (seq 74), as the
+  section named it: the sixteen paths appended after `closeout.md`, and the comment
+  saying the engineering files follow the workflow's. `scripts/change-workflow
+  config load common` prints the twelve documents before them and the sixteen
+  engineering files after. Evidence: inspected.
+- [x] 4.6 Verify the section as task 3.10 does. End-to-end: none; no pipeline
   scenario reads guidance, and none is owed.
-- [ ] 4.7 Before 4.6's verification (58 O1): move the argument of
+  Note: `make check-agent-skills` OK. `make check-doc-citations CHANGE=` (unscoped)
+  reports, outside this change's own documents, only failures older than section 3
+  (other changes citing scripts and an `architecture.md` that no longer exist).
+  `scripts/change-workflow run pre-commit layer-engineering-guidance`, last run after
+  both fresh-context checks' fixes: `after-functional-change` (relock) passed,
+  changing no lock; `pre-commit-functional` (`make check-packaging`, `make test`,
+  every suite, the edited test modules among them) passed, `make
+  test-release-tooling` with 2867 passed (unit), among them
+  `test_change_workflow_assumptions.py` and `test_change_workflow_config.py`, the
+  first run having failed on the provisions row until it named the engineering files
+  by path; `pre-commit`'s default checks — change index, tasks, skills, and strict
+  OpenSpec validation, "is valid" — passed; and `make check-repository` failed only
+  on the two the preamble expects: citations of files the change creates or removed,
+  from its own documents, and the specification index wanting the twelve `CW-*`
+  entries and CW-pkug's renamed link (task 10.9). Comment hygiene and history wording
+  passed among its other six checks. The first fresh-context check found the End-to-end
+  part short of the workflow's rule for a repository part, citations of `TESTING.md`
+  left on moved rules (code, `site-capacity`, `ROADMAP.md`, the placement row), and
+  unlisted generalizations; the second, a widened library-integration sentence that
+  contradicted two docstrings, a dropped form of the wait rule, a narrowed
+  signed-message rule, the real-server exception missing from
+  `test-determinism.md`, the README restating the workflow's tag rule, docstrings
+  citing a file without the heading, and the provisions row; all fixed. Declined:
+  adding heading anchors to the docstrings that cite `test-levels.md` for a level's
+  definition, since the file as a whole is that definition. End-to-end scenarios
+  covering the section: none confirmed, as planned. Owed by validation: nothing.
+- [x] 4.7 Before 4.6's verification (58 O1): move the argument of
   `openspec/README.md`'s "End-to-end pipeline" part — that a change is not complete
   because its own suites pass, and what the end-to-end tier catches — to the
   engineering testing file 31 O1g names; drop its blocker sentence, which restates
@@ -1139,6 +1235,86 @@ where 31 O1b brings it in line; skills and documents citing moved text;
   declarative statement of what this repository's closeout records (the run at the
   closeout's code, its result, the scenarios exercising the change), citing both.
   Verify the part holds no instruction or argument beyond that statement.
+  Note: the argument is `testing.md`'s "Work is not complete because its own tests
+  pass" (row 226), "a change" read as any unit of work and "cannot settle" as
+  "cannot do its work". The part is one sentence of what the closeout records,
+  citing that heading and `working-model.md`'s "Implement" for the disclosure of an
+  unrun check. Evidence: inspected; no test applies.
+
+Section 4's differing pairs (31 O1b), for the round's triage — each the source
+forms, then the text the section wrote:
+
+- **The test levels' names (the restatements table's `change-plan`,
+  `change-implement`, and `change-triage` rows).** The skills name four levels:
+  unit, library integration, application integration through the typed client,
+  and system. `TESTING.md` named unit, integration, smoke, and system, with
+  "library packages" and a "third flavour" of real external processes described
+  inside integration. Proposed: `test-levels.md` keeps `TESTING.md`'s four levels
+  and names integration's three forms — application integration, library
+  integration, and external-process integration — so the skills' names are
+  integration's forms; the skills keep their restatement (D11), now citing
+  `test-levels.md`. The skills leave out smoke, since a section's suites never run
+  against a deployed stack; that stands.
+- **A test double mirrors its producer (row 511).** `ARCHITECTURE.md`'s "Testing
+  strategy" paragraph and `TESTING.md`'s "Private Service Dependencies" second
+  paragraph agreed; merged into `test-doubles.md` as their union, keeping
+  `TESTING.md`'s reason (a test against a double proves the client's handling of a
+  decision, not the decision's arithmetic) and `ARCHITECTURE.md`'s "a double of a
+  service" for "a double of a private service".
+- **An observation's outcome (row 666).** `system-tests.md` takes `TESTING.md`'s
+  per-observation outcome (made, failed, unproven; a stage not collected is not
+  run). The validation runbook's "Observations the qualification owes" states the
+  same outcome and adds three rules: an observation is never inferred from another,
+  a failed or unproven outcome is sorted by its cause, and the candidate is frozen
+  with every observation made again on a new one. The forms do not contradict, so
+  the runbook is left as it is. Open for the triage: whether `system-tests.md` also
+  states that an observation is never inferred from another, which holds anywhere.
+- **Wording the move changed beyond neutralizing examples.** `test-levels.md` names
+  integration's forms (above). `testing.md`'s "Work is not complete because its own
+  tests pass" reads part 8's "a change" as any unit of work. `helm-render-tests.md`
+  states as a rule that every chart's render tests run from one entry point, from
+  the source's reason for calling each from `test-render.sh`. `test-seams.md`'s third
+  trap says a timer loop waits through something that returns on a pause request,
+  from the controller's `idle`, the source's instance. `system-tests.md` says a
+  deadline is reached by moving the record's time into the past and stepping the loop
+  that acts on it, from `TESTING.md`'s VM lease-end paragraph, and reads "a scenario
+  that makes a deal" as one "that performs the work a locally verifiable scenario
+  performs — a purchase, say". `testing-python.md` gives the command-module rule and
+  the no-sleeps form each a neutral code example.
+- **The End-to-end pipeline part against the workflow's rule for a repository's
+  part (task 4.7).** Task 4.7 asked for one declarative statement of what the
+  closeout records, its blocker sentence dropped; `closeout.md`'s "The repository's
+  own closeout parts" asks each such part to say what it confirms, the command it
+  runs, and what a failure means. Proposed, both held in one sentence: the part
+  records the run at the closeout's code, dispatched by `make run-e2e` and collected
+  by `make fetch-e2e-logs`, its result, and the scenarios; a failed run returns the
+  change to implementation; a run that could not be made is recorded as unrun,
+  naming its cause and the change that owns it — the blocker sentence's content
+  that `working-model.md`'s disclosure of an unrun check does not state.
+
+Section 4 notes (handoff):
+
+- `.agents/workflow.toml` (task 4.5) is the orchestrating session's to edit, on the
+  owner's word (seq 74): the section stopped before 4.5, named the edit, and was
+  resumed once it was made; section 5's task 5.7 meets the same stop.
+- A skill naming a new guidance path must find it in `market-change-workflow`'s
+  provisions row, path by path, or `test_change_workflow_assumptions.py` fails.
+- Inventory row 734 recommends `change-design` name `docs/guidance/engineering/`
+  beside `ARCHITECTURE.md` for an owner's principle that holds anywhere; it fits
+  section 5, whose implementation rules are such principles.
+- `test-seams.md`'s "Pause the loop, then advance it explicitly" names the
+  production half — the implementation guidance's operator-control rule — without a
+  link, since `implementation.md` is section 5's; section 5 adds the link when it
+  writes that rule.
+- Left in `TESTING.md` for section 5: the secret-canary method under "Marketplace
+  Identity Verification" and the private-dependency rule opening "Private Service
+  Dependencies", both `repository-content.md` rows. Left for section 7: every
+  capability section, the negotiation-runtime instance among them; for section 5 or
+  6, `ARCHITECTURE.md`'s subsections under "Deterministic database-concurrency
+  tests", whose body is now a citation.
+- The engineering README's table holds only this section's tags; `comments` and
+  `terms`, which `change-references.md` and `workflow/terms.md` carry, join with
+  section 5's files (task 5.4).
 
 ## 5. The engineering layer: everything else
 

@@ -17,7 +17,7 @@
 | [Build, packaging, and initialization](#build-packaging-and-initialization) | Internal wheels, images, migrations, and reinit rules |
 | [Recovery workers](#recovery-workers) | Timer-driven durable recovery: capacity, fulfillment convergence, lease expiry |
 | [Implementation rules](#implementation-rules) | No speculative guard code; prefer an existing library |
-| [Testing strategy](#testing-strategy) | Test levels; see `TESTING.md` for methodology |
+| [Testing strategy](#testing-strategy) | How this repository's tests apply the engineering testing guidance; see `TESTING.md` |
 | [Capability documentation index](#capability-documentation-index) | Permanent detailed contracts and rationale |
 
 Directional context — which goals are being pursued, the value each delivers, and which change owns each open gap — lives in [`ROADMAP.md`](ROADMAP.md). This document states what is true now; the roadmap states where it is going.
@@ -1180,7 +1180,7 @@ image build                    install the committed lock unchanged, same intern
 
 One root `.python-version` fixes the interpreter for every environment and image. Docker builds copy `.dist` from the build context into builder stages; runtime stages receive only the finished environment. [`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md) owns the mechanics — `scripts/uv_project.py`, `make lock`, the image layout — and the `make check-packaging` checks that enforce them.
 
-Aggregate Make targets must run every included subproject's default tests. A standalone subproject target remains useful for focused work, but the aggregate contract is complete coverage, not a curated subset.
+Aggregate Make targets run every included subproject's default tests ([`test-levels.md`, "Aggregate test targets"](../guidance/engineering/test-levels.md#aggregate-test-targets)).
 
 ### Accepted representations and application views
 
@@ -1233,13 +1233,13 @@ Use an existing open-source library wherever one meets the requirements, and bui
 
 ## Testing strategy
 
-Tests belong at the lowest level that can prove the behavior: unit, integration, smoke, and end-to-end, each defending the narrowest observable contract appropriate to its level — no level should rely on end-to-end tests alone for behavior it could prove itself. See [`docs/development/TESTING.md`](TESTING.md) for the level definitions, coverage jurisdiction between them, the client-contract "no raw calls" rule, contract fixtures, boundary-change validation, cross-language conformance, and offline review validation, and [the testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md) for the normative requirements.
+Tests belong at the lowest level that can prove the behavior ([`test-levels.md`](../guidance/engineering/test-levels.md), [`testing.md`](../guidance/engineering/testing.md)). See [`docs/development/TESTING.md`](TESTING.md) for where this repository's tests at each level live, its end-to-end lanes and their doubles, its chart render tests, and offline review validation, and [the testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md) for the normative requirements.
 
-An end-to-end scenario is locally verifiable, running against this repository's own stack with provisioning mocked and the payments service and the dispute authority replaced by the in-lane doubles, or external-topology, needing services or hosts deployed elsewhere. An external-topology scenario that makes a deal minimally extends a locally verifiable one: it shares that scenario's stages wherever their bodies agree and adds only what its external parts bring, so the path both run is proven on every pipeline run. One that makes no deal extends nothing and follows, by name, the deal scenarios whose state it reads on the same stack. Setup or teardown needing knowledge this repository lacks, such as funding a payer, is the deployment's, and evidence from an external run is supplied free-form by whoever deploys it ([`TESTING.md`, "Locally verifiable and external-topology scenarios"](TESTING.md#locally-verifiable-and-external-topology-scenarios)).
+An end-to-end scenario is locally verifiable, running against this repository's own stack with provisioning mocked and the payments service and the dispute authority replaced by the in-lane doubles, or external-topology, needing services or hosts deployed elsewhere, such as a hosted payments target or a real host; an external-topology scenario that makes a deal extends a locally verifiable one ([`system-tests.md`](../guidance/engineering/system-tests.md#locally-verifiable-and-external-topology-scenarios); here, [`TESTING.md`, "Locally verifiable and external-topology scenarios"](TESTING.md#locally-verifiable-and-external-topology-scenarios)).
 
-An end-to-end test proves a deterministic sequence of state changes, never wall-clock time: a compute-lane pipeline scenario holds the timers its stages can meet, steps each transition itself, and waits only for an effect of its own request ([`TESTING.md`, "The discipline every scenario follows"](TESTING.md#the-discipline-every-scenario-follows)). A decision a service derives from a record and a timestamp is driven by moving that service's perceived clock through a control, never by waiting; today only the lane doubles have one, reset to wall time when the module that moved it ends.
+An end-to-end test proves a deterministic sequence of state changes, never wall-clock time ([`system-tests.md`](../guidance/engineering/system-tests.md#a-scenario-is-a-sequence-of-state-changes)): a compute-lane pipeline scenario holds the timers its stages can meet, steps each transition itself, and waits only for an effect of its own request ([`TESTING.md`, "The discipline every scenario follows"](TESTING.md#the-discipline-every-scenario-follows)). Today only the lane doubles have a perceived clock a control moves, reset to wall time when the module that moved it ends.
 
-A test double of a service mirrors its producer's API — routes, authentication, admission, read authorization, idempotency, and error codes — unless there is a compelling reason to deviate, and states any deviation. A double that answers differently from its producer proves only that a client agrees with the double. Where a double wraps a kit's engine, it serves what that engine serves, and its claims, not its behaviour, are what is narrowed. A double takes its producer's decisions as scenario-programmed answers, as mock provisioning takes a job's outcome, and never duplicates the producer's decision logic, which would drift whenever the producer revises it. The end-to-end lanes' payments double, `tools/payments-lane-double`, and mediation double, `tools/mediation-lane-double`, are the current examples ([`TESTING.md`, "Private Service Dependencies"](TESTING.md#private-service-dependencies)).
+A test double mirrors its producer's API and takes its producer's decisions as programmed answers ([`test-doubles.md`](../guidance/engineering/test-doubles.md#a-double-mirrors-its-producer)). The end-to-end lanes' payments double, `tools/payments-lane-double`, and mediation double, `tools/mediation-lane-double`, are the current examples ([`TESTING.md`, "Private Service Dependencies"](TESTING.md#private-service-dependencies)).
 
 ## Capability documentation index
 
@@ -1247,7 +1247,7 @@ The canonical [capability documentation index](../../openspec/specs/README.md) l
 
 ## Deterministic database-concurrency tests
 
-Database-concurrency tests use independent sessions and connections against the same database, establish transaction ownership through explicit synchronization at a semantic persistence boundary, and assert final durable state. Tests must not depend on uncontrolled thread races, scheduler timing, or elapsed-time ordering. Synchronization waits are bounded so lock regressions fail rather than hang. Test-only subclasses or adapters may pause a narrow persistence interface after a meaningful write; production code must not expose test-only hooks.
+Database-concurrency tests follow [`concurrency-tests.md`](../guidance/engineering/concurrency-tests.md).
 
 
 

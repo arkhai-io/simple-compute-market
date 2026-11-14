@@ -1,9 +1,9 @@
 """Relay administration over the real API, through the canonical client.
 
-Level 2, per `docs/development/TESTING.md`: the real in-process application, a
-real database, and the client production code actually uses. Not a helper built
-inside the test — a private wrapper and the shipped client drift independently,
-and the test stays green while they do.
+Integration level, per `docs/guidance/engineering/test-levels.md`: the real
+in-process application, a real database, and the client production code
+actually uses. Not a helper built inside the test — a private wrapper and the
+shipped client drift independently, and the test stays green while they do.
 
 What this covers that the library tests cannot: that the binding, its routes,
 its status codes, and the client's serialization agree. The relay service

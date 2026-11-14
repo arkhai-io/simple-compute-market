@@ -1,9 +1,10 @@
 """A relay grant: its header, its claims and their types, and its signature.
 
-Level 1, per `docs/development/TESTING.md`: the builder and signer over a lease
-value, with no database. The admission plugin refuses a grant whose header or
-claims differ from its specification, so each is pinned here, and a verifier
-written to that specification in this file checks what the signer produces:
+Unit level, per `docs/guidance/engineering/test-levels.md`: the builder and
+signer over a lease value, with no database. The admission plugin refuses a
+grant whose header or claims differ from its specification, so each is pinned
+here, and a verifier written to that specification in this file checks what the
+signer produces:
 the signature, the type, the key id, an integer expiry, string subject and
 identifier, and no issue time or critical header.
 """

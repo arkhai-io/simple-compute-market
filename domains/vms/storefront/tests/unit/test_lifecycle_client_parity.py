@@ -1,10 +1,10 @@
 """Sync and async storefront clients expose the same lifecycle-advance contract.
 
-`docs/development/TESTING.md` requires this check to live with the owning
-*service*, not the client package, because the service owns the
-contract-validation boundary. The advance controls are how a scenario drives a
-paused storefront, and a scenario using the sync client would not notice an
-async-only method until it called it.
+`docs/guidance/engineering/integration-tests.md#sync-and-async-client-parity`
+requires this check to live with the owning *service*, not the client package,
+because the service owns the contract-validation boundary. The advance controls
+are how a scenario drives a paused storefront, and a scenario using the sync
+client would not notice an async-only method until it called it.
 """
 
 from __future__ import annotations

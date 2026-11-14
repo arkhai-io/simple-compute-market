@@ -169,10 +169,11 @@ checks your understanding here before reading anything that rests on it. Then:
 2. **`testing`** — Is the validation strategy sound? For each significant claim of
    test coverage, state the level it actually operates at — unit against a mocked
    boundary, integration against a real in-process application, or something that
-   needs a live multi-service environment — using `TESTING.md`'s level definitions
-   and coverage jurisdiction. Does each integration test exercise the real typed
-   client, or build requests by hand in a way that could silently diverge from what
-   the client sends? What does the validation report show? A coverage gap you
+   needs a live multi-service environment — using the level definitions and
+   coverage jurisdiction of `docs/guidance/engineering/test-levels.md`, and the
+   typed-client rule of `integration-tests.md` beside it. Does each integration
+   test exercise the real typed client, or build requests by hand in a way that
+   could silently diverge from what the client sends? What does the validation report show? A coverage gap you
    notice while answering — a behaviour the change claims that no test proves at
    the level it claims — is a finding, not only a remark in this answer: a gap
    stated only in prose is never triaged.

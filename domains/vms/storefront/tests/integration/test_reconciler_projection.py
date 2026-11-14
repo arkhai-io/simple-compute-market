@@ -4,11 +4,12 @@ These cases call production derivation directly against a real SQLite
 database: an empty projection derives nothing, an unknown configured site is
 held rather than read as empty, another market's stored overrides do not
 reach VM derivation, and asking rates resolve, hold, and refresh as the
-precedence rules say. No application runs, so under docs/development/TESTING.md
-they are focused evidence for derivation's own rules rather than integration
-evidence. The storefront's integration evidence for the same paths drives the
-real app through its typed clients, in test_pool_overrides_api.py. The migrated
-database fixture and seeding helpers are tests/_reconciler_cases.py's.
+precedence rules say. No application runs, so under
+docs/guidance/engineering/test-levels.md they are focused evidence for
+derivation's own rules rather than integration evidence. The storefront's
+integration evidence for the same paths drives the real app through its typed
+clients, in test_pool_overrides_api.py. The migrated database fixture and
+seeding helpers are tests/_reconciler_cases.py's.
 """
 
 from __future__ import annotations

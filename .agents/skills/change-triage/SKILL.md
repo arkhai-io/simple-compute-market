@@ -595,7 +595,8 @@ acceptances' outcomes are carried out with the rest.
   fresh-context compliance check of the diff against the `HEAD` recorded at the
   start. In the fix's task
   note, record each check as `change-implement` records a section's evidence: each
-  suite with its level as `TESTING.md` defines them and its result, each hook's
+  suite with its level as `docs/guidance/engineering/test-levels.md` defines them
+  and its result, each hook's
   closing line, and what the fresh-context check found and what was fixed or declined —
   so the next review and validation can see what the fix was proven by.
   Commit, as one commit

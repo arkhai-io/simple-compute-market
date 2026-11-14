@@ -213,7 +213,8 @@ so the owner can confirm the batch or pull one out for discussion.
 Never ask the owner where documentation should live, at which test level a
 behaviour is proven, or which evidence a section records: state each as a
 provisional answer — the documentation destination in `proposal.md`, the test
-level from `TESTING.md` — for planning and review to confirm or move.
+level from `docs/guidance/engineering/test-levels.md` — for planning and review to
+confirm or move.
 
 ### Do not argue from absence of a caller alone
 

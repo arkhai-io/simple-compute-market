@@ -219,9 +219,9 @@ design.
   planning reports its mapping onto the sections in its outcome (section 7),
   never in the plan, which is agnostic of whether a coding harness implements it;
 - ends at a verification point — the focused suites that prove it, each named with
-  its level as `docs/development/TESTING.md` defines them (unit, library
-  integration, application integration through the typed client, system), at the
-  lowest level that can prove the behavior; and the repository's functional
+  its level as `docs/guidance/engineering/test-levels.md` defines them (unit,
+  library integration, application integration through the typed client, system),
+  at the lowest level that can prove the behavior; and the repository's functional
   checks, which `scripts/change-workflow run pre-commit` runs before a commit
   changing a path outside the inert paths. A section whose title promises a behavior
   of the running application — publication, a write refused — includes at least one

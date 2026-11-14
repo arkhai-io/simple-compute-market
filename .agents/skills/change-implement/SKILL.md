@@ -241,8 +241,9 @@ Work through the section's tasks in order. For each:
 - A task the plan gives the orchestrator — an edit under `.claude/`, which every
   step is denied — is never attempted: check that its edit is in the worktree and
   commit it with the section. When it is missing, stop and name the edit.
-- Prove it at the lowest test level that can (`TESTING.md`), through the seams and
-  injected dependencies the code already offers rather than brute-force patching.
+- Prove it at the lowest test level that can (`docs/guidance/engineering/testing.md`,
+  `test-levels.md`), through the seams and injected dependencies the code already
+  offers rather than brute-force patching (`test-seams.md`).
 - Respect the dependency layers in `ARCHITECTURE.md`; `TYPE_CHECKING` imports count.
   Internal dependencies come from wheels and locks through `scripts/uv_project.py`,
   never editable sibling paths.
@@ -257,8 +258,9 @@ Work through the section's tasks in order. For each:
   `docs/guidance/workflow/closeout.md#import-placement`). Closeout only confirms
   comments and imports; it never edits code, so this is where they are done.
 - Mark the task `[x]` when its evidence passes, with a short note: each suite, its
-  level as `TESTING.md` defines them — unit, library integration (a real component
-  against real storage, no application), application integration (the running
+  level as `docs/guidance/engineering/test-levels.md` defines them — unit, library
+  integration (a real component against real storage, no application),
+  application integration (the running
   application through its typed client), or system — and its result, and anything
   that differed from the plan. Name a suite by what it actually exercises: a test
   that calls the reconciler directly is not application integration, and a test that

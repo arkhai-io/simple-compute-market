@@ -1127,9 +1127,10 @@ async def test_a_registration_restating_a_field_as_an_attribute_is_refused(
     assert await capacity.snapshot() == []
 
 async def test_a_registration_without_a_pool_is_rejected(capacity: CapacityApi):
-    """Rejection-path test (docs/development/TESTING.md): the typed admin
-    client requires ``pool_id`` and cannot construct this registration, so
-    the body is posted by hand to prove the server's own validation boundary
+    """Rejection-path test (docs/guidance/engineering/integration-tests.md,
+    "No raw calls: the typed client is the contract"): the typed admin client
+    requires ``pool_id`` and cannot construct this registration, so the body is
+    posted by hand to prove the server's own validation boundary
     refuses it. Status code only."""
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"

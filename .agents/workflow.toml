@@ -47,13 +47,27 @@ command = "scripts/openspec"
 # Engine, `config load <step>`: the documents every step's skill reads as it
 # starts; the engine's post-compaction hook re-reads them. The root guidance and
 # the repository's cross-system documents, then the workflow's guidance files,
-# each named by path, since a literal entry names one file.
+# then the engineering guidance files, each named by path, since a literal entry
+# names one file.
 common = ["AGENTS.md", "docs/development/ARCHITECTURE.md", "docs/development/TESTING.md",
           "docs/development/DEPLOYMENT_AND_CONFIG.md", "openspec/README.md",
           "docs/guidance/workflow/README.md", "docs/guidance/workflow/working-model.md",
           "docs/guidance/workflow/openspec-documentation.md",
           "docs/guidance/workflow/changes.md", "docs/guidance/workflow/change-references.md",
-          "docs/guidance/workflow/terms.md", "docs/guidance/workflow/closeout.md"]
+          "docs/guidance/workflow/terms.md", "docs/guidance/workflow/closeout.md",
+          "docs/guidance/engineering/README.md", "docs/guidance/engineering/testing.md",
+          "docs/guidance/engineering/test-levels.md", "docs/guidance/engineering/test-seams.md",
+          "docs/guidance/engineering/test-determinism.md",
+          "docs/guidance/engineering/integration-tests.md",
+          "docs/guidance/engineering/system-tests.md", "docs/guidance/engineering/test-doubles.md",
+          "docs/guidance/engineering/contract-fixtures.md",
+          "docs/guidance/engineering/conformance-tests.md",
+          "docs/guidance/engineering/boundary-changes.md",
+          "docs/guidance/engineering/migration-tests.md",
+          "docs/guidance/engineering/concurrency-tests.md",
+          "docs/guidance/engineering/testing-python.md",
+          "docs/guidance/engineering/helm-render-tests.md",
+          "docs/guidance/engineering/ansible-checks.md"]
 # Engine, `config load design`: change-design's own addition.
 design = ["docs/development/ROADMAP.md"]
 

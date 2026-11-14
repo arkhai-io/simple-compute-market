@@ -1,9 +1,10 @@
 """Interservice coverage for the settled listing vocabulary.
 
 Real registry app, real database, and the canonical `RegistryClient` over
-`ASGITransport` — the integration level `docs/development/TESTING.md` defines.
-Raw HTTP appears only where a rejection cannot be expressed through the typed
-client, and those assertions are on status alone.
+`ASGITransport` — the integration level `docs/guidance/engineering/test-levels.md`
+defines. Raw HTTP appears only where a rejection cannot be expressed through the
+typed client, and those assertions are on status alone
+(`docs/guidance/engineering/integration-tests.md`).
 """
 
 from __future__ import annotations

@@ -1,63 +1,39 @@
 # Testing Strategy
 
-This document defines the testing conventions for this repository. It
-exists to give every contributor — human or AI — a consistent mental
-model of what each test level is responsible for, what it is explicitly
-not responsible for, and how the levels relate to each other. Put a new
-test at the lowest level that can meaningfully prove the behavior in
-question; see `AGENTS.md`'s "Tests and diagnostics" for the underlying
-rule this document elaborates.
+This document holds this repository's testing conventions: where each level's tests
+live here, the end-to-end lanes and their doubles, and this repository's instances
+of the engineering testing rules. The levels, what each may prove, and the rules for
+writing tests are the engineering guidance: [`test-levels.md`](../guidance/engineering/test-levels.md),
+[`testing.md`](../guidance/engineering/testing.md), and the files beside them in
+[`docs/guidance/engineering/`](../guidance/engineering/README.md).
 
 Read this alongside `docs/development/ARCHITECTURE.md` (system shape)
-and `openspec/README.md` (documentation placement). This document
-describes current testing practice, the same way `ARCHITECTURE.md`
-describes current system architecture — it is not a changelog of how
-testing conventions were introduced, and it should be corrected in place
-when practice changes rather than accumulate historical commentary.
+and `openspec/README.md` (documentation placement).
 
 ## Four-Level Hierarchy
 
+The four levels and their jurisdiction are
+[`test-levels.md`](../guidance/engineering/test-levels.md). Below, each level's
+tests as this repository places and writes them.
+
 ### 1. Unit Tests
 
-**What they cover:** A class or function in isolation. A unit test
-instantiates one class, passes mocked collaborators for its injected
-dependencies, and asserts on the return value or side effects of a
-specific method.
+Unit tests take their doubles through the constructor
+([`test-seams.md`](../guidance/engineering/test-seams.md); its Python form in
+[`testing-python.md`](../guidance/engineering/testing-python.md)).
 
-**What they do not cover:** Orchestration. If a function's sole purpose
-is to call other functions in sequence, that function does not have
-meaningful unit tests — the correctness of the sequence is an
-integration-test concern. The final abstraction before an external
-boundary (a database write, a subprocess invocation, an HTTP call) is
-similarly not meaningful to unit test in isolation; its behavior is
-validated by integration tests against the real boundary or a
-well-defined mock of it.
-
-**Mocking convention:** Use `unittest.mock.MagicMock`/`AsyncMock` for
-injected collaborators, passed in via the constructor. Do not patch
-module-level imports — the dependency-injection composition pattern
-used throughout this repository makes constructor injection the natural
-seam; patching around it defeats the purpose of the seam and produces
-tests that break when internal call structure changes even though
-behavior didn't.
-
-**Command-module convention:** a command module — a storefront's operator
-commands or a domain's buyer commands — has no constructor: the framework calls
-its module-level functions. It is its own composition root instead, and builds
-its collaborators through module-level factory functions it defines, named for
-what they provide; those factories are its one seam. A test replaces a factory
-on the module that defines it and nothing else — no library name, no name the
-module imports from another, no name inside core — because an import-style
-change can silently undo such a patch, and the test then runs the real
-collaborator. The bare-metal buyer CLI
+**Command modules.** A storefront's operator commands and a domain's buyer commands
+are command modules, whose factories are their one seam
+([`testing-python.md`, "A command module's factories are its seam"](../guidance/engineering/testing-python.md#a-command-modules-factories-are-its-seam)).
+The bare-metal buyer CLI
 (`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`) has this shape:
 its tests replace `fresh_identity`, `recovery_identity`, `registry_client`, and
 `payment_approval`. The other CLIs' tests still replace library and imported
 names; [`ROADMAP.md`](ROADMAP.md) records that gap.
 
-**Composition-boundary convention:** When a role receives a versioned domain contract, unit tests should inject a distinct compatible object and assert object identity at each constructor boundary rather than patching the default resolver. Fail-closed cases belong at the composition root and must assert that persistence, network, and worker collaborators were not constructed. Existing integration tests remain responsible for public behavior and persisted-state parity.
-
-**Negotiation-runtime convention:** Protocol invariants are tested once in
+**Negotiation-runtime convention:** a shared runtime is tested once
+([`test-seams.md`, "A shared runtime is tested once"](../guidance/engineering/test-seams.md#a-shared-runtime-is-tested-once)).
+Protocol invariants are tested once in
 `kit/negotiation-runtime/tests/unit` with an in-memory recording repository and
 injected opaque domain hooks. Those tests prove canonical-principal checks,
 round and terminal ordering, transcript recovery, acceptance persistence, and
@@ -69,142 +45,43 @@ would test the duplication rather than the production composition.
 
 ### 2. Integration Tests
 
-**What they cover:** End-to-end request → response paths with the full
-application stack running (the real app, a real database, the DI
-container wired) and a controlled mock only at the external I/O
-boundary. Orchestration logic, background job processing, retry
-behavior, and error propagation are validated here, not in unit tests.
+A service's integration tests drive its in-process application through its typed
+client ([`integration-tests.md`](../guidance/engineering/integration-tests.md);
+the setup in [`testing-python.md`, "Integration test setup"](../guidance/engineering/testing-python.md#integration-test-setup)).
+A kit library's are library integration, in its `tests/integration`
+([`test-levels.md`, "Integration tests"](../guidance/engineering/test-levels.md#integration-tests)).
 
-**What they do not cover:** Every edge case of data transformation
-logic — that belongs in unit tests. An integration test needs one
-representative case per external-mock behavior, not exhaustive
-parametrization.
-
-**External boundary definition:** Any I/O that crosses a process
-boundary — a subprocess invocation, a call to a service this codebase
-doesn't own, a blockchain RPC call. Mock at the point this codebase's
-own code wraps that boundary, not deeper.
-
-**Library packages:** A kit library has no app. For a library, integration
-means its public service API against a real embedded database, the
-persistence boundary the library owns, with collaborators it does not own
-injected. Such tests live in the library's `tests/integration`. They prove
-durable behavior a unit test with mocked collaborators cannot: transaction
-boundaries, locking, and independent-session concurrency. They do not
-replace the in-process-app integration tests of a service that composes the
-library, which remain the tests of that service's wire contract. A library
-test that exercises a real database but still sits in `unit/` moves to
-`integration/` when it is next touched.
-
-**Registration and traffic are different proofs:** a test that a
-connection, proxy, or route was admitted also carries traffic through
-it. A peer can report a registration it cannot serve — a tunnel listed
-as running whose remote port reaches nothing, an address delivered that
-routes elsewhere — and only bytes sent end to end show the admission
-did what it claims. The frps admission plugin's real-frp tests
+**Registration and traffic are different proofs**
+([`testing.md`](../guidance/engineering/testing.md#registration-and-traffic-are-different-proofs)).
+The frps admission plugin's real-frp tests
 (`tools/frp-grant-admission/tests/frp/`) hold to this: an admitted proxy
 carries bytes from frps's remote port to a listener behind frpc, and a
 proxy that outlives a reload carries traffic on a held connection and a
-new one. Those tests are a third flavour of integration test, beside the
-in-process and library ones: real external processes started by the
-test, skipped in the default suite without their binaries and run in a
-gate that fails on a skip, as the native Ansible checks are
+new one. Those tests are external-process integration tests, run in a gate
+that fails on a skip, as the native Ansible checks are
 ([Ansible Syntax and Native Checks](#ansible-syntax-and-native-checks)).
 
-**Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport`
-against the real application instance, injected via the service's
-canonical typed-client constructor (`FooClient(transport=...)`).
-Override DI container providers for the specific collaborator being
-mocked before the test and restore them after.
-
-**Typed client contract verification — the "no raw calls" rule:**
-Integration tests call a service's canonical typed client methods
-directly against the in-process app, not raw HTTP. Route strings,
-request body shapes, and response parsing are owned by the client;
-happy-path tests should not construct requests by hand. If an API
-renames a field or changes a route, the typed client should raise its
-own client error and the test should fail immediately — a test that
-builds its own request dict will not catch that, which is exactly the
-kind of interservice mismatch that mocked-boundary unit tests cannot
-catch either. This is the single most important rule for the layer
-where real bugs are most often found in review: an integration test
-that bypasses the typed client to make assertions easier has quietly
-stopped testing the client contract at all.
-
-Two narrow exceptions are permitted:
-
-1. **Rejection-path tests** — testing server-side validation of inputs
-   the typed client deliberately refuses to construct (asserting a 422
-   on a malformed body the client's own request model would reject
-   before it ever reached the HTTP layer). These verify the *server's*
-   validation boundary, not the client's, and must only assert on
-   status codes, never on response body field names, and must be
-   clearly commented as rejection-path tests.
-2. **Service-internal state setup** — inserting DB rows directly to
-   establish precondition state that cannot be expressed through any
-   HTTP API endpoint. This is not an HTTP call at all; it is standard
-   test-setup, and should be preferred only when the state genuinely
-   isn't reachable through an API — prefer creating precondition state
-   through the HTTP API where feasible, so integration tests stay
-   honest about what the API contract actually supports.
-
-Any other use of a raw HTTP call in an integration test is a gap: either
-add a method to the canonical client, or restructure the test. A comment
-like "not yet a client method" is a deferred-debt marker, not a
-permanent exemption.
-
-**Sync/async client parity:** When a client package exposes both async
-and sync variants, the owning service's unit suite should include a
-small contract test comparing public method names and signatures across
-both. A new client method must be added to both in the same change. This
-guardrail belongs with the service's tests, not the client package,
-because the service owns the contract-validation boundary — it does not
-substitute for integration tests that exercise the methods through real
-controller routes.
-
-**Async test discipline — no sleeps:** Tests exercising a background
-job-processing loop must never use `asyncio.sleep` or a bare timeout
-race to wait for a side effect — this produces intermittent failures.
-Use an explicit test seam instead: an injectable callback invoked at the
-point the test needs to synchronize on (for example,
+**Async test discipline — no sleeps**
+([`test-determinism.md`](../guidance/engineering/test-determinism.md#no-sleeps)):
 `AsyncJobQueue.__init__`'s `on_job_started: Optional[Callable[[str], None]]`,
-`None` in production and zero-cost there), set an `asyncio.Event` from
-the callback, and `await asyncio.wait_for(event.wait(), timeout=...)`
-before proceeding. If no such seam exists yet where a test needs one,
-adding it is the correct fix, not a sleep.
+`None` in production and zero-cost there, is the seam a test of the job queue
+synchronizes on.
 
-**Tests wait on events, never on durations:** a test does not spend the
-time a scenario passes through. An interval, timeout, or deadline the code
-under test waits out is driven in fake time, through the injected clock and
-sleep or wait the code already takes or a seam added for it. A state the
-test needs is signalled by the code reaching it, such as a thread arriving
-at a lock, not assumed after a pause. A deadline the scenario is defined
-by is asked as a deadline of now, and a lock the code must find held is
-met with no busy timeout. Real time is spent only to prove a real
-operating-system timeout, such as a subprocess killed at its limit, by one
-test per boundary. The one standing exception is a real server a test
-cannot replace with an in-process transport, whose library stops only at
-its next poll: `socketserver`'s `serve_forever` is run with
-`poll_interval=0.01`, and the storefronts' loopback uvicorn servers stop on
-an event rather than at uvicorn's poll.
+**Tests wait on events, never on durations**
+([`test-determinism.md`](../guidance/engineering/test-determinism.md#tests-wait-on-events-never-on-durations)).
+The storefronts' loopback uvicorn servers, which a test cannot replace with an
+in-process transport, stop on an event rather than at uvicorn's poll.
 
-**Leave nothing held:** a test that holds a job at a mock rule's gate
-(`pause_before_result`) ends that hold itself, by resuming the rule or by
-cancelling the job, so the test is idempotent: it leaves no execution
-parked for the next test, the next module, or a rerun, and holds no queue
-slot. A job's status is not the evidence: a cancelled job is terminal the
-moment the cancellation commits, while its execution may still be waiting.
-Wait on the execution instead — `MockRuleSet.wait_until_released` for the
-gate and `AsyncJobQueue.wait_until_idle` for the processing — and assert
-the rule's `waiting` count is zero. Cancelling a held job must end its
-execution without a resume; a mock whose cancellation leaves the run
-waiting is a defect in the mock, not something to resume around.
+**Leave nothing held**
+([`test-determinism.md`](../guidance/engineering/test-determinism.md#leave-nothing-held)):
+a test that holds a job at a mock rule's gate (`pause_before_result`) ends that
+hold by resuming the rule or by cancelling the job, then waits on the execution —
+`MockRuleSet.wait_until_released` for the gate and `AsyncJobQueue.wait_until_idle`
+for the processing — and asserts the rule's `waiting` count is zero.
 
-**Pause the loop, then advance it explicitly:** the same discipline
-applies to a service's own background lifecycle loops, where the seam is
-an HTTP control rather than a callback. Each loop should offer a pause,
-and an explicit single-step that works *while* paused, so a scenario
-drives transitions instead of waiting for a timer. The stage discipline
+**Pause the loop, then advance it explicitly**
+([`test-seams.md`](../guidance/engineering/test-seams.md#pause-the-loop-then-advance-it-explicitly)).
+Here the seam is an HTTP control. The stage discipline
 diagram under [system integration tests](#4-system-integration-tests-end-to-end)
 draws a scenario following this:
 
@@ -285,51 +162,32 @@ update. A module killed by `helm
 test`'s timeout runs no finaliser, and only a restart clears its pause; modules in a
 lane run serially.
 
-Traps this has already sprung, worth checking for a new loop:
+The traps [`test-seams.md`](../guidance/engineering/test-seams.md#pause-the-loop-then-advance-it-explicitly)
+lists have each sprung here:
 
-- **A loop with no pause is not paused.** Convergence ran a 30s timer
-  with no gate while the scenario around it believed everything was
-  stopped, so it claimed the same rows the test was explicitly
-  advancing. "Everything is mocked, so nothing can take wall time" is
-  true of the work and false of the coordination.
-- **A "run one cycle" endpoint is not necessarily a step.** Convergence
-  claims a row before polling its provider and, on a pending answer,
-  deliberately keeps that claim so the lease spaces the next poll. A
-  further cycle inside that lease reaches nothing, so any number of them
-  is still zero advances. `advance-cycle` releases the caller's own
-  claims first; `run-cycle` is the production cycle and does not. If a
-  test needs several steps to make one transition, suspect the step
-  rather than adding a sleep.
-- **A loop that sleeps its interval is held late.** A loop gated at the
-  top of each cycle but waiting with a plain sleep reaches its gate only
-  when the sleep ends, so a pause landing in a 30-second interval outlasts
-  the pause's 5-second bounded wait and reports the loop `pausing`. Every
-  timer loop waits through the controller's `idle`, which returns on a pause
-  request, and the kit runners refuse a gate without such a wait. The one
-  kind of loop whose task gates itself is a fan-out — the per-site
-  capacity-event pollers — whose children read their gates under each site's
-  cursor lock. Test it with the real loop body and an interval far longer
-  than the test waits. A test that needs a self-gating body runs it as a
-  fan-out with no children.
+- **A loop with no pause.** Convergence ran a 30s timer with no gate while the
+  scenario around it believed everything was stopped, so it claimed the same rows
+  the test was explicitly advancing.
+- **A "run one cycle" endpoint that is not a step.** Convergence claims a row
+  before polling its provider and, on a pending answer, keeps that claim so the
+  lease spaces the next poll. `advance-cycle` releases the caller's own claims
+  first; `run-cycle` is the production cycle and does not.
+- **A loop that sleeps its interval.** A pause landing in a 30-second interval
+  outlasted the pause's 5-second bounded wait and reported the loop `pausing`.
+  Every timer loop waits through the controller's `idle`, which returns on a pause
+  request, and the kit runners refuse a gate without such a wait. The one kind of
+  loop whose task gates itself is a fan-out — the per-site capacity-event pollers —
+  whose children read their gates under each site's cursor lock. Test it with the
+  real loop body and an interval far longer than the test waits. A test that needs
+  a self-gating body runs it as a fan-out with no children.
 
 ### 3. Smoke Tests (Deployment Validation)
-
-**What they cover:** Stateless, idempotent verification that a deployed
-stack is wired correctly — services can reach each other, authentication
-is enforced, health endpoints respond, expected routes exist.
-
-**What they do not cover:** Service semantics. By the time a smoke test
-runs, semantics have already been validated by integration tests. A
-smoke test verifies that a health endpoint returns 200 and that a
-protected endpoint returns 401 without valid credentials — it does not
-submit a real job and poll for completion.
 
 **Current location:** `e2e-tests/tests/smoke/`, run as Helm test hooks
 in Kubernetes (`helm/templates/tests/`, per-chart `templates/tests/`
 directories).
 
-A smoke check that writes state belongs in an integration test instead. The
-provisioning smoke checks carry two markers: `provisioning_readonly` for
+The provisioning smoke checks carry two markers: `provisioning_readonly` for
 reads of health, system status, hosts, and host connectivity, and
 `provisioning_security` for authentication enforcement, which sends an
 unsigned read to a protected route and expects 401 or 403, so it needs no
@@ -339,16 +197,8 @@ the hook to that expression.
 
 ### 4. System Integration Tests (End-to-End)
 
-**What they cover:** Cross-service contracts — scenarios that require
-two or more services to interact over the network to produce a
-meaningful result.
-
-**What they do not cover:** Anything already covered by the three levels
-above. These tests are expensive to run and brittle to maintain; they
-should be minimal in count and cover only the cross-service contract,
-not any one service's internal logic.
-
-**Current location:** `e2e-tests/tests/e2e/`.
+**Current location:** `e2e-tests/tests/e2e/`. How a scenario is written is
+[`system-tests.md`](../guidance/engineering/system-tests.md).
 
 Every deployable domain owns one release-qualified complete-deal scenario:
 discovery, negotiation, settlement, delivery, and domain-defined teardown.
@@ -368,43 +218,28 @@ in draw.io.
 
 #### The discipline every scenario follows
 
-An end-to-end test proves a deterministic sequence of state changes — a sequence
-diagram run repeatably — never wall-clock time. A timer left running is an
-unscripted participant in that diagram, and a scenario whose duration a timer sets
-measures the timer rather than the work.
-
-A scenario asserts only on side effects it asked for. While a service's timer
-loops run, an observation races them: a listing reconciled a second later reads
-differently from one reconciled a second earlier, and waiting for the system to
-settle cannot establish ordering even when it passes. So a scenario holds every
-loop it depends on once, at the start, through the pause and step controls
-under ["Pause the loop, then advance it explicitly"](#2-integration-tests), and
-initializes what the deal needs. Then, for each transition, it previews the
-move through the route's evaluate twin or the loop's dry run, advances exactly
-one side effect, and measures that effect against expectations through typed
-clients, with no sleeps: the only wait is on a request the stage made, or for
-an instant the deal's Agreement fixes, such as its start, since no control
-moves the storefronts', sites' or buyer's clock (`wait_until` in
-`e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`); a stage waiting
-for an instant then advances what acts on it explicitly. A decision a service
-derives from a record and a timestamp is driven by moving that service's
-perceived clock through a control instead. Today only the lane doubles have
-one: each reads wall time plus an offset that a control moves forward, a
-scenario advances both doubles together through the `lane_double_clock` fixture
+Every scenario follows the discipline of
+[`system-tests.md`, "A scenario is a sequence of state changes"](../guidance/engineering/system-tests.md#a-scenario-is-a-sequence-of-state-changes).
+Here a scenario holds its loops through the pause and step controls under
+["Pause the loop, then advance it explicitly"](#2-integration-tests), and
+initializes what the deal needs. It previews each move through the route's
+evaluate twin or the loop's dry run. The instants a stage may wait for are those
+the deal's Agreement fixes, such as its start, since no control moves the
+storefronts', sites' or buyer's clock (`wait_until` in
+`e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`). Today only the lane
+doubles have a perceived clock a control moves: each reads wall time plus an
+offset that a control moves forward, a scenario advances both doubles together
+through the `lane_double_clock` fixture
 (`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`), whose finaliser resets
 both to wall time whatever the module's outcome, and no storefront step follows
 an advance within its module, since the storefront still reads wall time. What a
 stage produced goes into the shared deal state for the stages that depend on
 it, and whatever happened, the fixture's finaliser resumes the loops.
 
-A wait is legitimate only on an effect the stage's own request caused, bounded:
-a stage event its request emits, or a message it sends off the request path,
-such as the seller-side introduction mail the introduction stages read back from
-the lane's Mailpit. Where one service reads another's state live, the stage
-reads the effect once after its step rather than polling for it. A behaviour
-defined by a window or interval elapsing, such as the introduction retention
-sweep, is proven at a level that can drive the clock; no pipeline stage waits
-for it.
+A message a stage sends off the request path, such as the seller-side
+introduction mail, is read back from the lane's Mailpit. The introduction
+retention sweep, a behaviour defined by a window elapsing, is proven at a level
+that can drive the clock; no pipeline stage waits for it.
 
 ![How an end-to-end scenario holds the loops once, then previews, advances, and measures each transition](diagrams/e2e-stage-discipline.svg)
 
@@ -465,9 +300,9 @@ both advance the deal and touch a gate is split at the gate, so its gate-free
 part stays shared: the escrow apart from arming the create gate, the advance to
 `active` apart from releasing and draining the create job, the lease expiry
 apart from arming the teardown gate, and teardown's completion apart from
-releasing and draining the teardown job. A gate answered by a real driver with a
-no-op would report a hold that never happened, and a shared assertion would hold
-under one driver and be vacuous under another. Settlement submits only once the
+releasing and draining the teardown job, as
+[`test-doubles.md`, "Shared stages never depend on a double"](../guidance/engineering/test-doubles.md#shared-stages-never-depend-on-a-double)
+requires. Settlement submits only once the
 lane's last check before it has passed: the mock rule's evaluation in a mock
 lane, the check of the previewed host in the real lane.
 
@@ -553,10 +388,9 @@ diagram opens the same way, with its own previews, advance, and measurement.
 
 Source: [`diagrams/e2e-settle-zoom.drawio`](diagrams/e2e-settle-zoom.drawio).
 
-The e2e test pod cannot import service internals — it uses typed
-clients, explicit test controllers, and stage/event APIs over HTTP, the
-same "no raw calls" discipline integration tests follow. Design new
-observability seams for e2e-visible behavior accordingly.
+The e2e test pod reaches services only through their interfaces
+([`system-tests.md`](../guidance/engineering/system-tests.md#a-system-test-reaches-services-only-through-their-interfaces)):
+typed clients, explicit test controllers, and stage/event APIs over HTTP.
 
 The pipeline runs one lane per market domain, each as its own job, so each
 failure's logs stand alone and one domain's failure never hides another's
@@ -656,16 +490,15 @@ adapter mounts its rules and job dry run under its own prefix, VM's at
 `/test/bare-metal/mock-rules` and `/test/bare-metal/evaluate-job`, beside the
 shared `/test/jobs/*` routes. None of them is mounted outside the mock profile.
 
-A mock's default output is what the shipped configuration prints for the job:
+A mock's default output is what the shipped configuration prints for the job
+([`test-doubles.md`, "A double answers as its producer would"](../guidance/engineering/test-doubles.md#a-double-answers-as-its-producer-would)):
 the role's `debug: var:` fact in the YAML result format, then the `debug: msg:`
 JSON copy the shared fact reader reads, rendered from the job's own parameters
 — its guest or host, its tenant account, its action, and booleans where the
-role prints booleans. So a mock lane exercises the same reader and the same
-linkage between a fact and its job as a real run, and a fact naming another
-guest or tenant yields no delivery evidence there too. The VM scenarios arm no
+role prints booleans. A fact naming another guest or tenant therefore yields no
+delivery evidence in a mock lane either. The VM scenarios arm no
 create output of their own; every create reads that default. A test that needs
-an output the role would not print for its job states it in a rule and keeps
-to the codec's or provider's level.
+an output the role would not print for its job states it in a rule.
 
 `make -C e2e-tests test-e2e` runs the three in turn, taking each stack down
 before the next, because every stack names its chain container `anvil` and
@@ -747,55 +580,35 @@ fetch means diagnostics were retrieved; it does not mean the tests passed.
 
 #### Locally verifiable and external-topology scenarios
 
-End-to-end scenarios come in two kinds, each with its own coverage. A *locally
-verifiable* scenario runs against this repository's own stack — a lane's Compose
-project or a Helm release — with provisioning in its mock profile and the
-payments service replaced by the in-lane double. It runs on every pipeline run
-and proves that the services compose into a working deal. An
-*external-topology* scenario needs services or hosts this repository does not
-deploy, such as a hosted payments target or a real host. It runs only where a
-deployment supplies them, and it is the only evidence for what they bring: real
-delivery, access, and revocation on a host, and a payments target's records.
+End-to-end scenarios come in the two kinds of
+[`system-tests.md`, "Locally verifiable and external-topology scenarios"](../guidance/engineering/system-tests.md#locally-verifiable-and-external-topology-scenarios).
+Here a *locally verifiable* scenario runs against this repository's own stack — a
+lane's Compose project or a Helm release — with provisioning in its mock profile
+and the payments service replaced by the in-lane double. An *external-topology*
+scenario needs a hosted payments target or a real host, and is the only evidence
+for real delivery, access, and revocation on a host, and a payments target's
+records.
 
-An external-topology scenario that makes a deal minimally extends a locally
-verifiable one. It subclasses that scenario's shared stages wherever their bodies
-agree and adds only the stages its external parts require, so the path both kinds
-run is proven on every pipeline run and the external run adds only what no lane
-can observe. The real-provisioning qualification modules for observations 2, 4
-and 5 extend the lanes' buyer purchases this way
-([the real-provisioning lane](#the-real-provisioning-lane)). An external-topology
-scenario that makes no deal extends nothing: it follows the deal scenarios on the
-same stack and names them, as observation 6's module follows the other two.
-Setup or teardown that needs knowledge this repository lacks — funding a payer
-account at a payment provider's sandbox, providing the hosts — is the
-deployment's topology.
-No scenario performs it. An absent target is a blocked skip, and a stage whose
-input the target does not name skips naming that field.
+The real-provisioning qualification modules for observations 2, 4 and 5 extend the
+lanes' buyer purchases, subclassing their shared stages
+([the real-provisioning lane](#the-real-provisioning-lane)); observation 6's
+module makes no deal, and follows the other two by name on the same stack.
+Funding a payer account at a payment provider's sandbox, and providing the hosts,
+are the deployment's topology. An absent target is a blocked skip. The scenarios
+log the identifiers each stage reads — the buyer run, Agreement, transaction,
+reservation, jobs, relay port, and grant — and no record format is defined for
+the operator's summary.
 
-Evidence from an external-topology run is supplied by whoever deploys the
-topology. The scenarios assert, and log the identifiers each stage reads — the
-buyer run, Agreement, transaction, reservation, jobs, relay port, and grant. The
-deployment's operator presents the outcome as a free-form summary it has
-sanitized. Raw logs and records stay in the operator's restricted storage and
-never enter this repository, and no record format is defined.
-
-A qualification module's outcome is per observation, not per module, because a
-pytest run that passes with a skipped stage has not run every check an
-observation requires. An observation is *made* when every stage requiring it
-passed, *failed* when one failed, and *unproven* when none failed and one skipped
-naming a prerequisite, which the outcome names. A stage the run did not collect
-counts as not run, so deselecting a stage cannot make an observation. Every stage
-of a qualification module requires the module's observations, or its cycle's in
-a module run once per cycle, unless the stage narrows that to fewer; the module
-logs each observation's outcome after its last stage
+A qualification module's outcome is per observation
+([`system-tests.md`, "An observation is made, failed, or unproven"](../guidance/engineering/system-tests.md#an-observation-is-made-failed-or-unproven)).
+Every stage of a qualification module requires the module's observations, or its
+cycle's in a module run once per cycle, unless the stage narrows that to fewer; the
+module logs each observation's outcome after its last stage
 (`e2e-tests/tests/e2e/roles/helpers/qualification.py`).
 
-Neither kind waits out the wall clock for a state it can step to. A VM lease's
-end is reached by moving its agreed end into the past and stepping one
-lease-watchdog cycle with the watchdog held, which runs exactly the service code
-a wall-clock expiry runs. That is how "Tests wait on events, never on durations"
-([Integration Tests](#2-integration-tests)) applies to a lease's end; lease
-durations stay fixed.
+A VM lease's end is reached by moving its agreed end into the past and stepping
+one lease-watchdog cycle with the watchdog held, which runs exactly the service
+code a wall-clock expiry runs; lease durations stay fixed.
 
 #### The real-provisioning lane
 
@@ -976,81 +789,20 @@ naming the field, and each observation requiring that stage is unproven: the
 management reads by observation 2, the admission check by observations 2, 4,
 and 5.
 
-## Coverage Contract Between Levels
-
-Each level has a defined jurisdiction. Duplicating coverage across
-levels creates maintenance burden without a corresponding safety
-benefit — a change should only need its assertions updated in one
-place.
-
-| Concern | Unit | Integration | Smoke | System |
-|---|---|---|---|---|
-| Data transformation / parsing logic | ✅ exhaustive | one happy path | ❌ | ❌ |
-| Request/response model validation rules | ✅ exhaustive | ❌ | ❌ | ❌ |
-| Orchestration / job lifecycle | ❌ | ✅ exhaustive | ❌ | ❌ |
-| Retry / backoff arithmetic | ✅ | one case | ❌ | ❌ |
-| Auth middleware enforcement | ❌ | ✅ | one case | ❌ |
-| Client ↔ API contract | ❌ | ✅ | ❌ | ❌ |
-| Service-to-service wiring | ❌ | ❌ | ✅ | ❌ |
-| Cross-service business flow | ❌ | ❌ | ❌ | ✅ |
-
 ## Contract Fixtures
 
-A **contract fixture** is a pair of functions — `build_*()` and
-`validate_*()` — that define the canonical shape of a message at a
-package boundary. They are shared between the producer's tests (which
-call `validate_*` to assert real code emits the agreed shape) and the
-consumer's tests (which call `build_*` to produce mock inputs of exactly
-that shape). When the boundary changes, both sides break at once,
-instead of the consumer silently mocking a shape the producer no longer
-emits.
-
-**When to add one:** A boundary earns a contract fixture when *both*
-its producer and consumer have unit or integration tests. A
-consumer-only mock with no corresponding producer test should stay as a
-local inline value — a contract fixture without producer-side
-enforcement just documents an agreement nothing actually checks.
-
-**`build_*()`** constructs a minimal but complete canonical instance,
-using keyword arguments with sensible defaults so a test can override
-only the fields it cares about. Non-deterministic fields (timestamps,
-generated IDs) get fixed sentinel values in `build_*` and range/type
-assertions in `validate_*` — never equality checks, which produce
-brittle failures when an incidental field shifts.
-
-**`validate_*()`** asserts structural and semantic constraints on a
-value produced by real code: field presence, type, and any invariant
-the consumer depends on. It does not check incidental fields the
-consumer ignores.
-
-**Where they live — import direction always flows producer → consumer:**
-
-- **Same-package boundary** (producer and consumer share a package):
-  `tests/fixtures/<module>.py` within that package, importable as
-  `tests.fixtures.<module>` by any test in the package. Example:
-  `domains/vms/storefront/tests/fixtures/publication_cycle.py`.
-- **Cross-package boundary** (the consumer is a separate, higher-level
-  package): `src/<package_name>/fixtures/<module>.py` inside the
-  producer's own source package. Because the producer is already
-  installed as a wheel in consumer packages, this needs no path
-  configuration — the import mirrors the client import it sits next to.
-  Example: `core/storefront-client/src/storefront_client/fixtures/escrow.py`,
-  imported as `from storefront_client.fixtures.escrow import build_claim_response`
-  alongside `from storefront_client import SyncStorefrontClient`.
-
-If the producer has no unit tests yet, create the `fixtures/` subpackage
-anyway with dormant `validate_*` functions — they document the contract
-and give a future producer test an immediate hook. Mark a dormant
-validator's module docstring with which test file is expected to call
-it once the producer gains coverage.
+Contract fixtures follow [`contract-fixtures.md`](../guidance/engineering/contract-fixtures.md),
+placed as [`testing-python.md`, "Contract fixtures"](../guidance/engineering/testing-python.md#contract-fixtures)
+says. A same-package fixture here is
+`domains/vms/storefront/tests/fixtures/publication_cycle.py`; a cross-package one
+is `core/storefront-client/src/storefront_client/fixtures/escrow.py`, imported as
+`from storefront_client.fixtures.escrow import build_claim_response` alongside
+`from storefront_client import SyncStorefrontClient`.
 
 ## Test File Layout
 
-A service's tests split into `unit/` and `integration/` subdirectories
-under its own `tests/` root, matching the four-level hierarchy above. A kit
-library splits the same way, and its test target runs both directories.
-Its `integration/` directory is a package, so a module there may share a
-basename with one in `unit/`.
+A service's and a kit library's tests split into `unit/` and `integration/`
+([`testing-python.md`, "Test layout"](../guidance/engineering/testing-python.md#test-layout)).
 System-level tests live in the separate `e2e-tests` package, itself
 split into `unit/` (its own helper logic), `smoke/`, and `e2e/`. A Helm
 chart's render tests live in its own `tests/` directory (see "Chart Render
@@ -1058,59 +810,36 @@ Tests").
 
 ## Migration Tests
 
-Each stateful service's migration chain is proven at the lowest level that can
-show it, against real SQLite files and never a mocked connection
+Each stateful service's migration chain is proven as
+[`migration-tests.md`](../guidance/engineering/migration-tests.md) requires, against
+real SQLite files
 ([`deployment-state`, "Migration and initialization boundary"](../../openspec/specs/deployment-state/architecture.md#migration-and-initialization-boundary)):
 
-- **The engine.** `kit/schema-migrations`' unit tests classify every result from
-  tables and recorded IDs and render each refusal; its library integration tests
-  run the engine over real files through both adapters — a fresh chain, a rerun,
-  adoption without running the baselines, ahead and unsupported databases refused
-  unchanged, a migration failing after DDL leaving no trace under every
-  transaction control, the read-only check creating no file — and prove that
-  `schema_snapshot` sees what a schema comparison must and ignores how a column
-  was added.
+- **The engine.** `kit/schema-migrations`' unit tests and its library integration
+  tests, which run the engine through both adapters, under every transaction
+  control, and prove that `schema_snapshot` sees what a schema comparison must and
+  ignores how a column was added.
 - **The floor fixture.** Each service whose chain adopts a release's databases
   commits that release's schema under its `tests/fixtures/v0_3_0_floor/`:
   `schema.json` (the snapshot), the release's recorded IDs or revision, and
-  `ddl.sql`, generated by running the release's published packages on a fresh
-  database, as each fixture's README states. A fixture is regenerated only to
-  correct it against its release, or for a new floor
+  `ddl.sql`, as each fixture's README states. A new floor is a release's decision
   ([`RELEASING.md`](RELEASING.md#cutting-a-release)).
 - **The chain.** Each service's `tests/integration/test_migration_chain.py` (the
-  registry's `test_migrations.py`) shows that the baselines alone reproduce the
-  fixture's snapshot exactly; that a database built from `ddl.sql` with the floor
-  IDs is adopted, applying exactly the later migrations and keeping its rows, and
-  ends with the same snapshot and ledger as a fresh database; that a rerun changes
-  no byte; that a database missing a floor ID, or holding tables with no ledger,
-  is refused unchanged; and each later migration's rewrite. A test of a single
-  later migration starts from a `ddl.sql` database, the real upgrade path.
+  registry's `test_migrations.py`), its later-migration tests starting from a
+  `ddl.sql` database.
 - **The command and the startup check.** Each service's command is driven
-  through its entry point with its settings in the loader's environment layer:
-  `--check` exits unsuccessfully on a behind or missing database, listing what
-  differs and changing nothing; the command refuses an ahead database; two
-  configurations differing in anything but the database location and log level
-  give one schema and one set of rows; and the command imports none of the
-  application's configuration. The startup check is proven at the function the
-  application's startup calls, refusing each state with the command's name, and
-  through the application's own startup for an absent database.
+  through its entry point with its settings in the loader's environment layer,
+  and is shown to import none of the application's configuration. The startup
+  check is proven at the function the application's startup calls, and through the
+  application's own startup for an absent database.
 - **The store-open test.** Each storefront's `tests/integration/test_store_open.py`
-  starts the real application over a database its chain migrated, opens every
-  store it composes, and asserts the `schema_snapshot` before and after are
-  equal, so a table created when a store opens fails it.
+  compares the `schema_snapshot` before and after opening every store it composes.
 - **The init containers.** Each chart's render test asserts its one migration
   init container ("Chart Render Tests").
 
-A service's migration test with no application — a real component against real
-storage — is library integration in the sense of the Integration Tests section,
-though the component is a service's chain rather than a kit library. A test that
-needs a migrated database for another subject migrates it through the service's
-chain, or, in a kit, through the kit's own baseline; a test that builds its
-tables with `create_all` instead proves nothing about the chain's schema.
-The end-to-end lanes start every service through its migration phase on a fresh
-database, so a passing pipeline shows each chain builds a schema its service runs
-on; adoption of a release's databases is proven only by the chain tests, since no
-lane holds one.
+In a kit, a test that needs a migrated database migrates it through the kit's own
+baseline. The end-to-end lanes start every service through its migration phase on
+a fresh database; no lane holds a release's database.
 
 ## Pool Offering-Mode Enforcement
 
@@ -1138,7 +867,8 @@ proving that no execution layer relies on another layer's earlier decision:
   across individual and bulk administration, backing immutability, and the
   stored-declaration check.
   Provisioning integration tests own server-side refusal through the typed
-  client — status and stored state only, per the rejection-path rule — plus the
+  client — status and stored state only, per the rejection-path rule
+  ([`integration-tests.md`](../guidance/engineering/integration-tests.md#no-raw-calls-the-typed-client-is-the-contract)) — plus the
   startup refusal and every projected pool carrying both declarations. The
   API-credits service's integration suite owns its own startup refusal.
 - Provider and backing immutability follow the same split. `kit/resource-pools`
@@ -1342,8 +1072,10 @@ Tests get receipts from the payments kit's fixture:
 receipt = build_signed_receipt(signer=SERVICE, mandate=accepted.mandate)
 ```
 
-Tests and diagnostics never frame or sign a receipt themselves. Code like this
-is a second framing implementation that nothing checks against the service:
+Tests and diagnostics never frame or sign a receipt themselves
+([`contract-fixtures.md`, "Signed protocol messages come from the producer's fixture"](../guidance/engineering/contract-fixtures.md#signed-protocol-messages-come-from-the-producers-fixture)).
+Code like this is a second framing implementation that nothing checks against the
+service:
 
 ```python
 signature = service.sign(_frame(("arkhai.payments.receipt.v1", jcs_sha256(receipt))))
@@ -1402,22 +1134,11 @@ deployed authority or monetary ruling execution. See
 
 ## Boundary-Change Validation
 
-Moving or renaming a contract at a package boundary needs more than
-relocated unit tests. Validate:
-
-- package build and wheel contents;
-- typing markers and static type checks where the contract moved;
-- allowed dependency direction, including `TYPE_CHECKING` imports, with
-  `make check-architecture` (see `AGENTS.md`'s "Package and dependency
-  discipline"); write a package's own boundary test only for what that check
-  cannot express, such as which module of a package may import what;
-- old import removal, or an explicit, deliberate compatibility path;
-- every changed consumer's unit and integration suites, not just the
-  producer's;
-- composition startup and duplicate-registration checks;
-- deterministic, idempotent retry behavior;
-- observable lifecycle events verified without arbitrary sleeps (see
-  "Async test discipline" above).
+A contract moved or renamed at a package boundary is validated as
+[`boundary-changes.md`](../guidance/engineering/boundary-changes.md) lists. Here the
+dependency direction, `TYPE_CHECKING` imports included, is held by
+`make check-architecture` (see `AGENTS.md`'s "Package and dependency
+discipline").
 
 CI's test matrix runs `make test` as a change's validation runs it locally: one
 job per target `make test` is made of, each running that target after `make
@@ -1430,21 +1151,10 @@ whenever `GITHUB_ACTIONS` is set, which a local run never sees.
 
 ## Ansible Syntax and Native Checks
 
-The roles reach most of their task files through `include_tasks`, which
-`ansible-playbook --syntax-check` does not follow, so checking a role's own
-playbook leaves those files unparsed. Each such role has a parse-only playbook
-that imports its task files through `import_role` instead, in the role's
-context: `vm-management-task-files.yaml` and `vm-setup-task-files.yaml` in the
-VM IaC tree. Parsing is where some errors only show: Ansible splits a free-form
-`shell: |` string as module arguments, so an unbalanced quote, an apostrophe in a
-bash comment included, fails the whole task file as it loads, though bash would
-run the script. A syntax check templates nothing and executes nothing.
-
-A parse-only playbook's first task refuses to run and is tagged `always`, since
-the tasks it imports keep their own tags and some carry `always`: under any
-`--tags` selection the refusal still runs first. An operator's explicit
-`--skip-tags always` or `--start-at-task` passes over it, which nothing in a play
-can refuse.
+The roles reach most of their task files through `include_tasks`, so each such
+role has a parse-only playbook, as
+[`ansible-checks.md`](../guidance/engineering/ansible-checks.md) describes:
+`vm-management-task-files.yaml` and `vm-setup-task-files.yaml` in the VM IaC tree.
 
 `domains/vms/provisioning/iac/scripts/validate_playbooks.sh` syntax-checks every playbook the VM IaC tree
 ships from one list, which a structure test holds equal to the playbooks
@@ -1491,28 +1201,16 @@ distinct from terminal failed-job recovery or force-release.
 
 ## Chart Render Tests
 
-A chart render test runs `helm template` against a chart with chosen values and
-asserts on the manifests it produces, or on its refusal to produce them. It is a
+What a chart render test is, what it covers, and how to write one are
+[`helm-render-tests.md`](../guidance/engineering/helm-render-tests.md). It is a
 static configuration test, like `e2e-tests/tests/unit/`'s image-pin and stack
-checks: it needs Helm, not a cluster.
+checks.
 
 The supported Helm is the release pinned in
 [`.github/workflows/tests.yml`](../../.github/workflows/tests.yml).
 `helm/scripts/test-render.sh` prints `helm version --short` before its first
 render, so each render log names the Helm it ran. The script does not enforce
 the pin; a render step's result is recorded for the version it reports.
-
-**What they cover:** what a deployment's manifests contain for a given set of
-values — which documents render into a ConfigMap, which files mount, which
-settings the chart derives — and which values the chart's schema refuses. This
-is where a derived setting is checked against the thing it is derived from, so a
-document that renders and mounts while its path is unset is caught before any
-pod runs.
-
-**What they do not cover:** whether a cluster accepts the manifests, whether the
-service starts with them, or whether it then behaves. Deploying to the dev
-cluster and the smoke and end-to-end tiers remain the evidence for those; a
-passing render is not deployment evidence, just as it is not deal evidence.
 
 **Where they live and how they run:**
 
@@ -1604,26 +1302,14 @@ passing render is not deployment evidence, just as it is not deal evidence.
   chart's CA file (`storefront.caBundleFile`) rather than the Compose mount
   (`scripts/tests/test_change_build_and_helm_targets.py`).
 
-**How to write one:**
+**Writing one here:** use the standard library only. `test-render.sh` runs a plain
+`python3`, which has no YAML parser, so a render test passes values as a JSON file
+and asserts on the rendered text; the storefront's `storefront.json` is read back
+with `json`.
 
-- Use the standard library only. `test-render.sh` runs a plain `python3`, so pass
-  values as a JSON file (JSON is YAML) and assert on the rendered text, rather
-  than depending on a YAML parser. A document the chart renders as JSON, such as
-  the storefront's `storefront.json`, can be read back with `json` and asserted
-  on structurally.
-- Assert related artifacts together. When the chart derives a setting from a
-  value, assert the rendered artifact, its mount, and the derived setting in one
-  helper, both present and all absent, so a test cannot pass with one of the
-  three missing.
-- For a schema refusal, assert a non-zero exit and that the error names the
-  offending key; a render that fails for an unrelated reason must not count.
-- Break the template once while writing the test (remove the mount, say) and
-  confirm the test fails, then restore it.
-- When the rendered artifact is a document a service parses, parse one rendered
-  instance with the service's own parser as well. The render test proves the
-  chart emits what it was given; only the parser proves the service accepts it.
-
-**A values schema generated from typed models.** Each storefront chart's values
+**A values schema generated from typed models**
+([`helm-render-tests.md`](../guidance/engineering/helm-render-tests.md#a-values-schema-generated-from-typed-models)).
+Each storefront chart's values
 schema carries a definition generated from that storefront's typed configuration
 models (`make helm-values-schema`, which runs each storefront's generator in its own
 environment). The generator is `kit/config`'s, with its own unit tests over small
@@ -1651,12 +1337,8 @@ records whichever version actually ran.
 
 ## Cross-Language Contract Conformance
 
-Where the same protocol has independent implementations in more than one
-language, each implementation MUST reproduce one shared, data-driven
-conformance trace rather than each maintaining its own hand-written
-assertions of the same behavior. Keeping the trace in data, not in each
-language's test code, is what makes "identical behavior across
-languages" a checkable claim rather than an assumption.
+Independent implementations of one protocol reproduce one shared conformance trace
+([`conformance-tests.md`](../guidance/engineering/conformance-tests.md)).
 
 **Current example:** the API-credits gating middleware's Python
 (reference implementation), TypeScript, and Rust ports all replay
@@ -1676,26 +1358,17 @@ and `domains/apicredits/middleware/rust/tests/conformance.rs`.
 
 This repository is public, and every test target it runs in public CI or a public build MUST pass without credentials for a private repository, image or package. A scenario that needs a private service's internals (its source, images, development-mode auth, operator test funds, or ledger reads) lives in that service's repository, which may depend on SCM's public artifacts. SCM's own e2e may run against a service's public test deployment, readiness-gated: it reports the unmet prerequisite when no target is configured or reachable. Otherwise SCM tests the client side against the service's published contract (schemas and test vectors) and a test double at the client kit's boundary.
 
-A double of a private service mirrors its producer's API — routes,
-authentication, admission, read authorization, idempotency and error codes —
-unless there is a compelling reason to deviate, and states the deviation; a
-double that answers differently proves only that the client agrees with the
-double. Where it wraps a kit's engine it serves what that engine serves, and it
-narrows its claims rather than its behaviour. A double takes its producer's
-decisions — a dispute authority's rulings, say — as scenario-programmed answers,
-as mock provisioning takes a job's outcome, and never re-implements the
-producer's decision logic: a rules engine held to the producer's traces would
-drift whenever the producer revises its rules, and a lane result proves the
-client's handling of a decision, not the decision's arithmetic, which stays the
-producer's to qualify.
+A double of a private service mirrors its producer and takes the producer's
+decisions as programmed answers
+([`test-doubles.md`, "A double mirrors its producer"](../guidance/engineering/test-doubles.md#a-double-mirrors-its-producer)),
+as mock provisioning takes a job's outcome.
 
 **The lane doubles' controls.** Both lane doubles serve one typed control
 contract, `tools/lane-double-controls`, which the doubles and the end-to-end
 harness import; its [README](../../tools/lane-double-controls/README.md) lists
-the rules, routes and refusals. Every control is a deterministic step: nothing
-delays, races or runs in the background. A transport fault never applies to a
-control route or `/health`, so a finaliser can always remove the rule that
-caused it, and it abandons a started response, so SCM's clients see a transport
+the rules, routes and refusals. Its controls are deterministic steps
+([`test-doubles.md`, "Controls are deterministic steps"](../guidance/engineering/test-doubles.md#controls-are-deterministic-steps)).
+A transport fault abandons a started response, so SCM's clients see a transport
 error, as they would a lost response, never an HTTP error status. A scenario
 installs its rules through the `lane_double_rules` fixture
 (`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`), whose finaliser deletes

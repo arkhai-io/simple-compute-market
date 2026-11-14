@@ -19,7 +19,7 @@ to the repository is named here:
 
 When work conflicts with a written rule, amend the rule first or make the work
 comply; never record a private exception to it. The testing levels, for instance,
-change only by changing `docs/development/TESTING.md`.
+change only by changing `docs/guidance/engineering/test-levels.md`.
 
 ## Documentation ownership
 
@@ -92,10 +92,8 @@ document that explains it.
 
 ## Tests and diagnostics
 
-- Put a test at the lowest level that can meaningfully prove the behavior. See `docs/development/TESTING.md` for the level definitions, per-level jurisdiction, and coverage boundaries between them.
-- Prefer observable seams, injected dependencies, and deterministic test controls over sleeps or brute-force monkeypatching.
-- When a failure cannot be reproduced locally, report useful diagnostic steps and identify any design decision needed before changing behavior.
-- A difficult-to-test failure is evidence to consider a testability refactor, not permission to bypass the boundary.
+How tests are placed and written is the engineering guidance: [`docs/guidance/engineering/testing.md`](docs/guidance/engineering/testing.md), the levels in [`test-levels.md`](docs/guidance/engineering/test-levels.md), and the files beside them. This repository's tests apply it as `docs/development/TESTING.md` describes. Here:
+
 - Run `make check-comment-hygiene` before implementation is considered complete; closeout confirms it (`docs/guidance/workflow/closeout.md`, "Comment hygiene").
 - Once the tests covering a change pass, run `make check-packaging` and the typing checks, and resolve every failure they report before the work is committed. Passing tests do not prove it: they may have run against an environment a missing or hand-maintained refresh left stale, and the next environment to rebuild will fail instead.
 
