@@ -1,13 +1,14 @@
 """A VM storefront that publishes recurring payment options, for integration tests.
 
-No deployed composition declares rate servicing or installs a recurring preset
-helper, so recurring options are dark in production. This world composes the real
-``VmSettlementComposition`` over the publication harness with the pieces a
-deployment would supply injected in their place: a servicing declaration, a
-fixture preset helper standing where the payment mechanism's encoder would, the
-mechanism's term timing and billing projection, and the pool's delivery deadline.
-Publication and negotiation then run through the served storefront and its typed
-client exactly as they would with those pieces installed.
+This world composes the real ``VmSettlementComposition`` over the publication
+harness. The composition installs the payments kit's recurring preset helper and
+term timing itself, and the negotiation runtime projects billing through the
+settlement registry by default. The composition builds no payments seller stage of
+its own, so the world builds one with ``servicing_stage`` over the composition's
+servicing declaration, as ``build_vm_settlement_composition`` does. Beyond that,
+the world supplies only what a deployment configures: the servicing declaration,
+the penalty multiple, and the pool's delivery deadline. Publication and
+negotiation then run through the served storefront and its typed client.
 
 Every account, key and address here is a deterministic development value; none
 may be used on a public network.
@@ -17,34 +18,18 @@ from __future__ import annotations
 
 import contextlib
 import json
-import math
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass, field, replace
-from decimal import Decimal
-from fractions import Fraction
+from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_arkhai_payments.fixtures import dispute_lifecycle
-from market_core.schemas import (
-    AgreedPrice,
-    PriceBasis,
-    RateValue,
-    SettlementOption,
-    SettlementPrice,
-    derive_settlement_option_id,
-)
+from market_arkhai_payments.seller import servicing_stage
 from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
-from market_deal_lifecycle.terms import Adjudication, TermContext, encode_terms
 from market_identity import Ed25519Signer
-from market_settlement_runtime.horizon import RateTermTiming
-from market_settlement_runtime.rate_publication import (
-    DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
-    RatePresetPricing,
-)
+from market_settlement_runtime.rate_publication import DEFAULT_PREMATURE_STOP_PENALTY_PERIODS
 from market_settlement_runtime.rate_servicing import (
     RateServicing,
     RateServicingDeclaration,
@@ -81,6 +66,7 @@ MAX_DURATION_SECONDS = 7200
 DELIVERY_DEADLINE_SECONDS = 1200
 PERIOD = "PT15M"
 PERIOD_SECONDS = 900
+#: The approval window each payment clause configures, ``PT5M``.
 APPROVAL_WINDOW_SECONDS = 300
 #: Both treatments the recurring presets name: the payer's stop charges its
 #: started period, and the payee's stop and the term end return the last one.
@@ -100,94 +86,6 @@ DISPUTE_ENTRY = DisputeEntry.model_validate({
         "minimum_case_hold_seconds": None,
     },
 })
-
-
-def _context() -> TermContext:
-    return TermContext(
-        mechanism=MECHANISM,
-        has_adapter=True,
-        dispute_interfaces=frozenset({DISPUTE_ENTRY.interface}),
-        authority=DISPUTE_ENTRY.requirements,
-        supported_partial_periods=QUALIFIED,
-    )
-
-
-class FixtureRateHelper:
-    """Stands where the payment mechanism's recurring encoder would.
-
-    It prices a clause's hourly rate per period, rounding up, reads the delivery
-    deadline the clause configures, and encodes the option the way the
-    mechanism's builder would. A shape-priced listing's clause
-    states no rate, its rate coming from the pool's family rates; it is quoted at
-    ``SHAPE_RATE``, the one family rate the shape-priced tests set.
-    """
-
-    def pricing(self, clause: Any, authorities: Any) -> RatePresetPricing:
-        hourly = Fraction(Decimal(clause.rate or SHAPE_RATE)) * 10**6
-        return RatePresetPricing(
-            quote=AgreedPrice(
-                unit="per_period",
-                period=clause.recurring.period,
-                period_seconds=PERIOD_SECONDS,
-                amount=math.ceil(hourly * PERIOD_SECONDS / 3600),
-                asset=clause.asset,
-            ),
-            approval_window_seconds=APPROVAL_WINDOW_SECONDS,
-            adjudication=Adjudication(
-                version=1,
-                dispute=DISPUTE_ENTRY.authority,
-                dispute_window_seconds=604800,
-                case_hold_max_seconds=None,
-            ),
-            context=_context(),
-            delivery_deadline_seconds=clause.mechanism_input.get("delivery_deadline_seconds"),
-        )
-
-    def build(self, request: Any) -> SettlementOption:
-        rate = request.clause.rate
-        price = SettlementPrice(asset=request.quote.asset, rates=[
-            RateValue(field="amount", per="hour", value=int(Decimal(rate) * 10**6)),
-        ] if rate is not None else [])
-        settlement = {
-            "schema": request.clause.mechanism,
-            "payee_account": PAYEE,
-            "window": "PT5M",
-            "deposit_agreement": False,
-            "period": request.preset.period,
-            "reserve_ahead_seconds": request.preset.reserve_ahead_seconds,
-        }
-        lifecycle = encode_terms(request.lifecycle)
-        return SettlementOption(
-            option_id=derive_settlement_option_id(
-                price=price, settlement=settlement, lifecycle=lifecycle
-            ),
-            price=price,
-            settlement=settlement,
-            lifecycle=lifecycle,
-        )
-
-
-def term_timing(_option: Any) -> RateTermTiming:
-    """The mechanism's period and approval window for a recurring option."""
-    return RateTermTiming(
-        PERIOD_SECONDS, APPROVAL_WINDOW_SECONDS, replace(_context(), has_stoppable_part=True),
-    )
-
-
-def billing(_option: Any) -> PriceBasis:
-    """The mechanism's billing projection: one period of a recurring option."""
-    return PriceBasis(unit="per_period", period=PERIOD, period_seconds=PERIOD_SECONDS)
-
-
-class AcceptedDataPlaceholder:
-    """Accepted payment data with nothing in it.
-
-    It stands for the mechanism's seller stage at acceptance, so an Agreement can
-    be signed; it is deliberately no authority or mandate adapter.
-    """
-
-    def settlement_data(self, _agreement: Any) -> Any:
-        return SimpleNamespace(to_wire=lambda: {})
 
 
 def payment_clause(
@@ -260,10 +158,10 @@ def _token_cache(path: Path) -> str:
 @dataclass
 class RecurringWorld:
     app: PublicationApp
-    helper: FixtureRateHelper
-    #: The composition's declarations, by mechanism. The composition reads them at
-    #: each door, so a test that changes them between publication and acceptance
-    #: stands for a storefront restarted under a different declaration.
+    #: The composition's declarations, by mechanism. Publication, acceptance and
+    #: the payments stage read them at each door, so a test that changes them
+    #: between publication and acceptance stands for a storefront restarted under
+    #: a different declaration.
     declarations: dict[str, RateServicingDeclaration] = field(default_factory=dict)
 
     def declare(self, treatments: frozenset[str] | None, *, setup: bool = False) -> None:
@@ -297,18 +195,22 @@ async def recurring_world(
     default the four clauses of ``clauses``.
 
     ``treatments`` is the payments declaration the composition starts with;
-    ``None`` declares none, as a deployed composition does. ``pricing`` is the
-    pool's family rates, which make its listing shape-priced.
-    ``default_penalty_periods`` is the composition's configured penalty multiple.
-    ``pool_deadline`` is the pool's effective delivery deadline, ``None`` where
-    the pool supplies none, as in a deployed composition, which wires no pool port.
+    ``None`` declares none, as a composition configuring no
+    ``[Settlement].rate_servicing`` does. ``pricing`` is the pool's family rates,
+    which make its listing shape-priced. ``default_penalty_periods`` is the
+    composition's configured penalty multiple. ``pool_deadline`` is the pool's
+    effective delivery deadline, ``None`` where the pool supplies none, as in a
+    deployed composition, which wires no pool port.
     """
-    helper = FixtureRateHelper()
     declarations: dict[str, RateServicingDeclaration] = {}
+    # One declaration object for every door: the composition's publication and
+    # acceptance and the stage's materialization read the same mapping.
+    servicing = RateServicing(declarations)
     root = _settlement_root()
 
     def composition(_fulfillment: Mapping[str, bool]) -> VmSettlementComposition:
         registry = build_storefront_settlement_registry()
+        config = registry.resolve(root, role="seller")
         return VmSettlementComposition(
             domain=build_vm_storefront_domain(),
             repository=None,
@@ -319,16 +221,17 @@ async def recurring_world(
             mechanism_clients={},
             evidence_clients={},
             configuration_registry=registry,
-            settlement_config=registry.resolve(root, role="seller"),
+            settlement_config=config,
             mechanism_resources={
                 "wallet": SELLER_WALLET,
                 "chains": dict(storefront_config.CHAINS),
                 "clients": {"anvil": object()},
             },
             disputes=RegistryDisputePolicy(DisputeConfig(entries=[DISPUTE_ENTRY])),
-            rate_servicing=RateServicing(declarations),
-            rate_preset_helpers={MECHANISM: helper},
-            rate_term_projections={MECHANISM: term_timing},
+            rate_servicing=servicing,
+            arkhai_payments_stage=servicing_stage(
+                config.mechanism_config("arkhai_payments"), rate_servicing=servicing,
+            ),
             delivery_deadline_for_pool=lambda _site, _pool: pool_deadline,
             default_penalty_periods=default_penalty_periods,
         )
@@ -340,11 +243,9 @@ async def recurring_world(
             negotiation=True,
             settlement_configuration=root,
             settlement_composition_factory=composition,
-            negotiation_options={
-                "project_billing": billing,
-                "arkhai_payments_stage": AcceptedDataPlaceholder(),
-                "accepted_obligation_dispatch": {MECHANISM: None},
-            },
+            # Payments builds no accepted obligation: this is the entry the
+            # composition's own dispatch gives it.
+            negotiation_options={"accepted_obligation_dispatch": {MECHANISM: None}},
         ) as app:
             app.set_settlement_clauses(published if published is not None else clauses())
             app.pools.append(pool(
@@ -355,7 +256,7 @@ async def recurring_world(
                     "available_until_utc": AVAILABLE_UNTIL,
                 }},
             ))
-            world = RecurringWorld(app, helper, declarations)
+            world = RecurringWorld(app, declarations)
             world.declare(treatments)
             await app.client.get_system_status()
             yield world

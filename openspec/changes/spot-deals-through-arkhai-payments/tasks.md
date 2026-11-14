@@ -674,7 +674,7 @@ record points R6, R11, R18, R20, R21 #48 and task 4.5a.
       `kit/deal-servicing/tests/integration/test_preempt_first_use.py` (library
       integration: runs the entry point's `main` on its profile, real SQLite and the
       in-process routes) — this step's tooling refuses running examples directly.
-- [ ] 4B.4 Restore the carried tests: every case in `carried-tests/` returns to the
+- [x] 4B.4 Restore the carried tests: every case in `carried-tests/` returns to the
       module its file names, each `recurring_world` reduced to the injected servicing
       declaration and the pool's delivery deadline (the helper, timing projection,
       billing projection and payments stage are the installed ones). Where a world's
@@ -682,6 +682,73 @@ record points R6, R11, R18, R20, R21 #48 and task 4.5a.
       assertion only to settled behaviour and raise anything else. Delete
       `carried-tests/` and the index row's sentence about the storefront tests it
       holds once empty.
+      As built: `tests/recurring_world.py` returns to each storefront (VM
+      `domains/vms/storefront/tests/`, bare metal `domains/bare_metal/storefront/tests/`)
+      without its fixture helper, term timing, billing projection or accepted-data
+      placeholder. Each world now supplies only what a deployment configures: the
+      declaration, the pool's deadline and the penalty multiple, which a carried
+      case sets. The declaration is one mutable mapping behind one `RateServicing`,
+      which publication, acceptance and the stage all read. The VM world leaves
+      `rate_preset_helpers` and `rate_term_projections` unset, so
+      `VmSettlementComposition` installs `payments_rate_wiring`, and it leaves
+      `project_billing` to the negotiation runtime's default, the registry's.
+      `VmSettlementComposition` builds no stage of its own; bare metal's builds one in
+      `__post_init__`. So the VM world builds the stage itself with
+      `servicing_stage(..., rate_servicing=)` over the declaration, the call
+      `build_vm_settlement_composition` makes. If the root stopped making that call,
+      no VM test would notice. Building the stage in VM's composition, as bare metal
+      does, is a production change outside this task, left for the round's review. `tests/publication_app.py` now
+      hands the composition's `arkhai_payments_stage` to the negotiation runtime, as
+      `server.py` does (the composition double has none, so other tests see `None` as
+      before). The VM world keeps `accepted_obligation_dispatch={payments: None}`,
+      which is the entry the composition's own dispatch gives payments, since only
+      contact exchange registers an accepted-obligation builder. The bare-metal world
+      replaces the configured composition with `rate_preset_helpers=None` and
+      `rate_term_projections=None`, so `__post_init__` reinstalls the kit's wiring
+      over the world's dispute policy: copied, the configured composition's wiring
+      would read the authorities of the dispute policy it was built with.
+      No restored assertion needed correcting. The installed helper writes
+      `approval_window` where the fixture wrote `window`, which changes option IDs
+      and settlement bytes, but no case asserts either. One restored call changed
+      its input. The VM shape-priced case's `verify_pricing_acceptance` takes the
+      installed buyer projection, `buyer_settlement_registry().project_billing`, in
+      place of the fixture `billing`. The carried comment saying the production
+      buyer client cannot open these negotiations, because the installed payments
+      projection refuses rate parameters, was dropped: that projection now projects
+      a complete pair `per_period`. The cases still open through the storefront's
+      typed client. The
+      shape-priced case passes the installed helper's explicit-price check because
+      publication composes the clause's rate from the family rates before the helper
+      reads it. The fixture's `SHAPE_RATE` fallback was therefore never needed.
+      Placement: VM `test_publication_loop.py` takes five cases and
+      `test_buyer_selection_negotiation.py` takes three; bare-metal
+      `test_http_publication_rates.py` takes four and `test_http_negotiation.py` takes
+      two. Each restored deadline case replaces its module's once-only
+      `test_a_once_payment_option_publishes_its_clause_s_deadline_where_the_pool_supplies_none`,
+      as `carried-tests/README.md` directed: the restored case covers the once
+      option too. The bare-metal module's payments fixtures that served only that test
+      went with it. The lowest-level tests the README listed stay. The docstrings of the two
+      `test_a_cached_rate_option_whose_treatment_is_withdrawn_is_refused_through_the_app`
+      tests and their composition helpers no longer claim that no mechanism publishes
+      a rate option or that no encoder is composed. `carried-tests/` is removed
+      (`git rm`), and so is the index row's "Holds the storefront tests …" sentence.
+      Raised, not changed: those two seeded tests keep their database-seeded option,
+      as R6 directs. `TESTING.md` prefers service-internal setup only where the state
+      is unreachable through an API, and publication now reaches it: each
+      restored cached-recurring case publishes the option and then narrows the
+      declaration. Each seeded test now duplicates a restored case at the same level,
+      on the same door with the same assertions. Removing both is the triage's call.
+      Tests, application integration (each served storefront app through its typed
+      clients, real SQLite, the installed recurring encoder and term timing): bare
+      metal's restored cases reach publication and the selection door only, since both
+      of its negotiation cases are refusals. The VM world also reaches acceptance
+      through the stage it builds, in two buyer-selection cases and the accepted half
+      of the third. VM storefront
+      `make -C domains/vms/storefront test-integration` 598 passed (was 591: nine
+      restored items added and the two parametrized once-deadline items removed);
+      bare-metal storefront `uv run pytest` after `make -C domains/bare_metal/storefront reinit`
+      641 passed (was 636: seven restored items added, two removed). Every restored
+      item is named PASSED in the verbose output.
 - [ ] 4B.5 The recurring-purchase E2E (D8): one scenario per compute lane, from a
       lane-only servicing declaration listing `charged` and `returned`, through
       approval against the payments double, asserting the published per-period price,
@@ -715,6 +782,46 @@ application suites; the compose lanes with Docker and the local Helm part for 4B
   unstarted, and each is a session's work on its own. The owner accepted the split:
   4B.1–4B.3 are committed on their own, and 4B.4, 4B.5 and 4B.6 each take a fresh
   session, from section 4B's first unchecked task, before sections 5 and 6.
+- 4B.4 has a commit of its own; 4B.5 and 4B.6 remain, each for its own session.
+  For 4B.5, the VM world's acceptance cases show what a recurring option needs from
+  a served storefront with the installed wiring:
+  - a servicing declaration listing `charged` and `returned`;
+  - a dispute entry advertising payments;
+  - a payments section with a service URL and receipt identity, so the stage exists
+    to derive acceptance data;
+  - the token cache payments readiness reads.
+
+  Bare metal's restored cases stop before acceptance, so they show none of this for
+  its stage.
+- End-to-end scenarios exercising 4B.4: none. It restores storefront tests and
+  changes no deployed behaviour. Owed by validation: none.
+- Evidence for 4B.4: the suites in its task note, then `scripts/change-workflow run
+  pre-commit`. after-functional-change (`make lock`) passed with no lock change;
+  pre-commit-functional (`make dist-clean`, `make check-packaging`, `make test`,
+  every suite) passed; pre-commit (index, tasks, skills, OpenSpec strict, `make
+  check-repository`) passed. A second full run after the fresh-context check's
+  fixes passed all three hooks too, with VM storefront integration 598 passed and
+  the bare-metal storefront 641 passed. Only `tasks.md` notes changed after that
+  run.
+- The 4B.4 fresh-context check found no blocking breach. It found:
+  - the VM world's docstring claiming the composition installs the stage and the
+    billing projection (reworded);
+  - a restored cached case comparing a row count where the carried case compared
+    rows (restored to rows, with the carried `_negotiation_rows` helper);
+  - the shape-priced case's changed billing input and the dropped carried comment,
+    both undisclosed (now in the task note);
+  - note claims broader than the tests: the declaration reaching acceptance and
+    the stage, and "installed wiring" for bare metal, which reaches no acceptance
+    (narrowed);
+  - the two seeded cached-rate tests no longer meeting `TESTING.md`'s exception
+    for service-internal setup (raised in the task note for the triage, kept per
+    R6; their docstrings now state the setup without claiming the exception);
+  - the VM stage being built by the world rather than by the composition
+    (recorded in the task note as a production follow-up).
+
+  Declined: removing the duplicate payments constants and composition helpers that
+  the seeded tests' modules keep beside the world's. They serve those kept tests,
+  and folding them into the world would rewrite tests R6 keeps unchanged.
 - Never run a kit's or the VM storefront's tests with a plain `uv run pytest`: without
   `--find-links` uv relocks the project against PyPI's released internal packages (it
   rewrote the buyer half's lock to contracts 0.1.0 until `make lock` restored it), and

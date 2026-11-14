@@ -1,13 +1,11 @@
 """A bare-metal storefront that publishes recurring payment options, for tests.
 
-No deployed composition declares rate servicing or installs a recurring preset
-helper, so recurring options are dark in production. This world composes the
-real settlement composition over the running app with the pieces a deployment
-would supply injected in their place: a servicing declaration, a fixture preset
-helper standing where the payment mechanism's encoder would, the mechanism's term
-timing, and the pool's delivery deadline. Publication and negotiation then run
-through the app and its typed clients exactly as they would with those pieces
-installed.
+This world composes the real settlement composition over the running app with
+what the composition installs itself: the payments kit's recurring preset helper
+and term timing, and the payments seller stage built over the composition's own
+servicing declaration. Only what a deployment configures is supplied here: the
+servicing declaration, the penalty multiple, and the pool's delivery deadline.
+Publication and negotiation then run through the app and its typed clients.
 
 Every account, key and address here is a deterministic development value; none
 may be used on a public network.
@@ -17,33 +15,18 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import math
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
-from decimal import Decimal
-from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
 import httpx
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_arkhai_payments.fixtures import dispute_lifecycle
-from market_core.schemas import (
-    AgreedPrice,
-    RateValue,
-    SettlementOption,
-    SettlementPrice,
-    derive_settlement_option_id,
-)
 from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
-from market_deal_lifecycle.terms import Adjudication, TermContext, encode_terms
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime import SettlementPublicationClause
-from market_settlement_runtime.horizon import RateTermTiming
-from market_settlement_runtime.rate_publication import (
-    DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
-    RatePresetPricing,
-)
+from market_settlement_runtime.rate_publication import DEFAULT_PREMATURE_STOP_PENALTY_PERIODS
 from market_settlement_runtime.rate_servicing import (
     RateServicing,
     RateServicingDeclaration,
@@ -74,6 +57,7 @@ MAX_DURATION_SECONDS = 7200
 DELIVERY_DEADLINE_SECONDS = 1200
 PERIOD = "PT15M"
 PERIOD_SECONDS = 900
+#: The approval window each payment clause configures, ``PT5M``.
 APPROVAL_WINDOW_SECONDS = 300
 #: Both treatments the recurring presets name: the payer's stop charges its
 #: started period, and the payee's stop and the term end return the last one.
@@ -88,77 +72,6 @@ DISPUTE_ENTRY = DisputeEntry.model_validate({
         "minimum_case_hold_seconds": None,
     },
 })
-
-
-def _context() -> TermContext:
-    return TermContext(
-        mechanism=MECHANISM,
-        has_adapter=True,
-        dispute_interfaces=frozenset({DISPUTE_ENTRY.interface}),
-        authority=DISPUTE_ENTRY.requirements,
-        supported_partial_periods=QUALIFIED,
-    )
-
-
-class FixtureRateHelper:
-    """Stands where the payment mechanism's recurring encoder would.
-
-    It prices a clause's hourly rate per period, rounding up, reads the delivery
-    deadline the clause configures, and encodes the option the way the
-    mechanism's builder would.
-    """
-
-    def pricing(self, clause: Any, authorities: Any) -> RatePresetPricing:
-        hourly = Fraction(Decimal(clause.rate)) * 10**6
-        return RatePresetPricing(
-            quote=AgreedPrice(
-                unit="per_period",
-                period=clause.recurring.period,
-                period_seconds=PERIOD_SECONDS,
-                amount=math.ceil(hourly * PERIOD_SECONDS / 3600),
-                asset=clause.asset,
-            ),
-            approval_window_seconds=APPROVAL_WINDOW_SECONDS,
-            adjudication=Adjudication(
-                version=1,
-                dispute=DISPUTE_ENTRY.authority,
-                dispute_window_seconds=604800,
-                case_hold_max_seconds=None,
-            ),
-            context=_context(),
-            delivery_deadline_seconds=clause.mechanism_input.get("delivery_deadline_seconds"),
-        )
-
-    def build(self, request: Any) -> SettlementOption:
-        price = SettlementPrice(asset=request.quote.asset, rates=[
-            RateValue(field="amount", per="hour",
-                      value=int(Decimal(request.clause.rate) * 10**6)),
-        ])
-        settlement = {
-            "schema": request.clause.mechanism,
-            "payee_account": PAYEE,
-            "window": "PT5M",
-            "deposit_agreement": False,
-            "period": request.preset.period,
-            "reserve_ahead_seconds": request.preset.reserve_ahead_seconds,
-        }
-        lifecycle = encode_terms(request.lifecycle)
-        return SettlementOption(
-            option_id=derive_settlement_option_id(
-                price=price, settlement=settlement, lifecycle=lifecycle
-            ),
-            price=price,
-            settlement=settlement,
-            lifecycle=lifecycle,
-        )
-
-
-def term_timing(_option: Any) -> RateTermTiming:
-    """The mechanism's period and approval window for a recurring option."""
-    return RateTermTiming(
-        PERIOD_SECONDS, APPROVAL_WINDOW_SECONDS,
-        dataclasses.replace(_context(), has_stoppable_part=True),
-    )
 
 
 def payment_clause(
@@ -231,9 +144,10 @@ class RecurringWorld:
     admin: StorefrontClient
     buyer: StorefrontClient
     db: Any
-    #: The composition's declarations, by mechanism. The composition reads them at
-    #: each door, so a test that changes them between publication and acceptance
-    #: stands for a storefront restarted under a different declaration.
+    #: The composition's declarations, by mechanism. Publication, acceptance and
+    #: the payments stage read them at each door, so a test that changes them
+    #: between publication and acceptance stands for a storefront restarted under
+    #: a different declaration.
     declarations: dict[str, RateServicingDeclaration]
 
     def declare(self, treatments: frozenset[str] | None, *, setup: bool = False) -> None:
@@ -265,11 +179,12 @@ async def recurring_world(
     Alkahest clause beside the three payment clauses of ``payment_clauses``.
 
     ``treatments`` is the payments declaration the composition starts with;
-    ``None`` declares none, as a deployed composition does.
-    ``default_penalty_periods`` is the composition's configured penalty multiple.
-    ``pool_deadline`` is the pool's effective delivery deadline, ``None`` where
-    the pool supplies none, as in a deployed composition, which wires no pool port;
-    ``clause_deadline`` is the one each payment clause configures.
+    ``None`` declares none, as a composition configuring no
+    ``[Settlement].rate_servicing`` does. ``default_penalty_periods`` is the
+    composition's configured penalty multiple. ``pool_deadline`` is the pool's
+    effective delivery deadline, ``None`` where the pool supplies none, as in a
+    deployed composition, which wires no pool port; ``clause_deadline`` is the one
+    each payment clause configures.
     """
     declarations: dict[str, RateServicingDeclaration] = {}
     site = Site(pool(POOL_ID, member("r1", POOL_ID), policy_tags={"capacity_bounds": {
@@ -288,9 +203,13 @@ async def recurring_world(
             registry=registry,
             config=registry.resolve(root, role="seller"),
             disputes=RegistryDisputePolicy(DisputeConfig(entries=[DISPUTE_ENTRY])),
+            # One declaration object for every door: publication, acceptance and
+            # the payments stage the composition builds over it.
             rate_servicing=RateServicing(declarations),
-            rate_preset_helpers={MECHANISM: FixtureRateHelper()},
-            rate_term_projections={MECHANISM: term_timing},
+            # Reinstalled over this composition's dispute policy: the configured
+            # composition's wiring reads the authorities it was built with.
+            rate_preset_helpers=None,
+            rate_term_projections=None,
             delivery_deadline_for_pool=lambda _site, _pool: pool_deadline,
             default_penalty_periods=default_penalty_periods,
         )
