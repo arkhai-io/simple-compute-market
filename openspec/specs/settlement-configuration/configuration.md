@@ -6,8 +6,11 @@ tags: [repository, configuration]
 
 How marketplace roles configure their settlement mechanisms — the `[Settlement]`
 root, Arkhai payments, Alkahest and its release models, and dispute authority
-preferences — what a storefront refuses or reports of them, and how a deployment
-cuts over between configurations. The rules these apply are
+preferences — what a storefront refuses or reports of them, and how a retired
+configuration migrates. The procedure that cuts a deployment over to a migrated
+configuration is the operator handbook's
+["Migrating settlement and publication configuration"](../../../docs/operator-handbook.md#migrating-settlement-and-publication-configuration).
+The rules these apply are
 [`configuration.md`](../../../docs/guidance/engineering/configuration.md) and
 [`deployment.md`](../../../docs/guidance/engineering/deployment.md); the
 [specification](spec.md) states the contract, and its
@@ -219,71 +222,10 @@ the file or backup. Dry-run lists redacted key changes; write validates the whol
 candidate and preserves the existing atomic replacement and restrictive backup
 contract. Repeating it is a no-op. Legacy boolean environment overrides must be
 replaced with the corresponding `SETTLEMENT__ALKAHEST__RELEASE_MODELS` list override,
-not copied as boolean values.
-
-### Migrating a configuration and cutting over
-
-Publication config migrates separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses per-model legacy pricing, which needs manual clauses.
-
-The VM storefront's retired inventory settings — `resources_csv_path`, `resources_csv_inline`, `[escrow_templates]`, and `capacity.use_site_projection_for_listings`, with the chart's `secret.resourcesCsvInline` value — are refused the same way as retired settlement settings: the chart's values schemas refuse them in any spelling, and `market-storefront config set` refuses to write them, naming the seller quickstart's "Upgrading from CSV inventory". No command migrates them, because inventory moves to provisioning by operator action, and startup does not refuse them.
-
-For each buyer and storefront configuration overlay, use this production
-sequence:
-
-1. Stage the release containing the migration commands without activating the
-   new workload.
-2. Preview every mounted or generated file. Select a storefront file with the
-   root `--config` option; select a buyer overlay through its normal
-   `XDG_CONFIG_HOME` mount.
-
-   ```console
-   market-storefront --config /path/storefront.toml config migrate \
-     --scope settlement --check
-   XDG_CONFIG_HOME=/path/to/buyer-overlay market config migrate \
-     --scope settlement --check
-   ```
-
-3. Resolve every reported conflict and legacy environment-name rename. Then
-   create backups and migrate every overlay atomically.
-
-   ```console
-   market-storefront --config /path/storefront.toml config migrate \
-     --scope settlement --write --backup
-   XDG_CONFIG_HOME=/path/to/buyer-overlay market config migrate \
-     --scope settlement --write --backup
-   ```
-
-   Preview and migrate storefront publication defaults:
-
-   ```console
-   market-storefront --config /path/storefront.toml config migrate \
-     --scope publication --check
-   market-storefront --config /path/storefront.toml config migrate \
-     --scope publication --write --backup
-   ```
-
-4. Repeat `--check` for every file and render the Helm or Compose deployment.
-   Do not proceed if a migration, typed configuration validation, generated
-   schema check or image/config schema check fails.
-   `config migrate` reads: rendering applies the values schema, and at startup
-   the storefront applies its typed validation — refusing, for example, a
-   settlement schema version other than its own. Untyped settings are not
-   checked key by key.
-5. Quiesce publication, negotiation, settlement, and recovery automation.
-   Deploy the coordinated marketplace configuration, wheels, image, Secret,
-   and ConfigMap set. Keep automation quiesced while every storefront reports
-   at least one ready mechanism:
-
-   ```console
-   market-storefront --config /path/storefront.toml settlement status --json
-   ```
-
-6. Resume automation only after the configured ready mechanisms and blocker
-   set match the intended overlay. Before activation or new settlement effects,
-   rollback restores each same-directory `.bak` and the previous pinned
-   artifacts together. After effects resume, recover forward from accepted
-   settlement plans and operation identities; never change mechanism priority
-   to redirect an accepted deal.
+not copied as boolean values. A deployment runs the migration as the operator
+handbook's
+["Migrating settlement and publication configuration"](../../../docs/operator-handbook.md#migrating-settlement-and-publication-configuration)
+sequences it.
 
 ### Dispute authority preferences
 

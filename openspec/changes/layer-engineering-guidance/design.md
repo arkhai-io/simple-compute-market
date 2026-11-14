@@ -767,6 +767,35 @@ The owner settled these at the triage of review 126, validation 126, and their n
   stand; whether `DEPLOYMENT_AND_CONFIG.md` splits by tag joins the owner's
   pre-closeout revisit of the split by reader (111 O2).
 
+### Settled at round 6's triage
+
+The owner settled these at the triage of review 141, validation 142, and their notes
+138 and 143, on section 7, the repository layer beside each capability.
+
+- **141 F1 — An operator's procedure goes to the handbook, and another capability's
+  rule beside that capability** (applies CW-p9sa and `openspec/README.md`'s
+  placement table; corrects inventory row 578). The settlement configuration's
+  production cutover sequence is the operator handbook's, under "Upgrading a
+  deployment", linked from the two capability guides whose migrations it runs; the
+  publication migration is `storefront-publication`'s; the VM storefront's retired
+  inventory keys sit with its retired-settings list in `DEPLOYMENT_AND_CONFIG.md`.
+  Rejected: the whole migration narrative in the handbook, which would put the
+  capabilities' refusal rules in an operator document; and leaving row 578's
+  placement, which hides the sequence from the operators who run it.
+- **138 O1 — "What every session reads" names each shared layer** (amends 127 O1's
+  "`docs/guidance/` named as one directory"). The table has an engineering row and a
+  workflow row, each linking its layer's README; `load.common` keeps D5's one
+  `docs/guidance/` entry, and task 9.3 checks that the two name the same files.
+  Rejected: `load.common` naming the two directories, which would make a new
+  directory under `docs/guidance/` need a configuration edit, against D5's reason.
+- **Section 7's differing pairs (31 O1b).** Rows 550 and 565, 570, 571 kept; the
+  handbook's payments step table gains the two conditions it lacked. The API-credit
+  services' own state stays in `DEPLOYMENT_AND_CONFIG.md`'s "Stateful service
+  persistence". `AGENTS.md`'s sentence on capability guidance, for sessions outside
+  the workflow, stays (127 O1). Wider tags on the configuration files wait for the
+  pre-closeout revisit (task 6.5); `guidance-review` reads no capability guidance,
+  being outside D22's seven skills.
+
 ### Implementation cadence
 
 A review round per layer, so each layer is reviewed by itself, and the code last,

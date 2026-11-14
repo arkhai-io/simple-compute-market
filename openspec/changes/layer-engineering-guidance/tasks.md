@@ -2370,6 +2370,57 @@ Section 7 notes (handoff):
   revisit's tag-reach question weighs (task 6.5); and adding capability guidance to
   `guidance-review`'s reading, a skill outside the seven D22 names and CW-r8cg binds.
 
+Round 6's triage fixes (review 141, validation 142, the owner's notes 138 and 143;
+`design.md`, "Settled at round 6's triage"):
+
+- **141 F1.** "Migrating a configuration and cutting over" leaves the settlement
+  file: its publication migration is `storefront-publication/configuration.md`'s
+  "Migrating publication configuration", after the terms of sale it migrates; the VM
+  storefront's retired inventory keys join `DEPLOYMENT_AND_CONFIG.md`'s
+  retired-settings list in "Storefront agents", in place of its citation of the
+  heading; and the production cutover sequence is `docs/operator-handbook.md`'s
+  "Migrating settlement and publication configuration" under "Upgrading a
+  deployment", opened by a sentence linking the two migrations' rules, the six
+  steps unchanged. The settlement file's release-models migration paragraph and
+  the publication section link the handbook's sequence, and both files' openings
+  say what they hold now. Inventory row 578 carries every destination of the
+  paragraphs filed under "Alkahest release models", the API-credit state's among
+  them (S7 API-credit paragraph, kept in "Stateful service persistence").
+- **S7 differing pairs.** Rows 550 and 565, 570, 571 kept as they are; for 578 and
+  582 the handbook's "Payments access" step table gains the two conditions the
+  settlement file names: `configuration` a configuration the storefront cannot read,
+  `credential` a value that is not a single-line key.
+- **S7 two guidance rows (138 O1).** The table read is "What every session reads";
+  task 9.3's check compares the files the two name, D5's one entry kept.
+- **S7 settings.toml.** Outside the plan, a defect `c22086fa3` left when it removed
+  hosted Stripe: the VM storefront's `settings.toml` loses the fragment it left of
+  the sentence on hosted-Stripe authority settings, whose continuation it deleted,
+  and regains "overlays." at the start of the `[Wallet]` comment's second line.
+- Kept as they stand, by the owner's dispositions: `AGENTS.md`'s capability-guidance
+  sentence (127 O1's inventory for every session), the tag widening (task 6.5's
+  pre-closeout revisit), and `guidance-review`'s reading (outside D22's seven).
+- **Evidence.** `scripts/change-workflow run pre-commit layer-engineering-guidance`,
+  run after the fresh-context check's fixes, one path outside the inert paths
+  (`settings.toml`): `after-functional-change` passed, the relock changing no lock;
+  `pre-commit-functional` passed (`make check-packaging`, and `make test`'s every
+  suite, unit and integration, the VM storefront's, which packages `settings.toml`,
+  among them); the default checks passed, OpenSpec "is valid"; `make
+  check-repository` failed only on the two the preamble expects — the same ten
+  citations from this change's own documents, and the specification index wanting
+  the twelve `CW-*` entries and CW-pkug's link (task 10.9) — its other six checks
+  passing. No test reads the comments changed; the moves are inspected. The
+  fresh-context check confirmed every added link and anchor, the moves verbatim, and
+  no remaining citation of the removed heading outside this file's history notes; it
+  found, and this triage fixed, the handbook's opening claiming `config migrate` for
+  every role (the API-credit storefront has none) and linking only one of the
+  settlement migration's sections, "Upgrading a deployment"'s opening not naming the
+  new subsection, the retired-settings list naming the inventory keys' startup
+  behaviour twice, inventory row 579 contradicting row 578, and this note misplacing
+  the restored word. Declined: rewording the moved step 4's "`config migrate`
+  reads:", whose intended sense the source does not settle, the moves being
+  verbatim. End-to-end: none applies. Owed by validation: the fix commit, its
+  `settings.toml` change taking Helm and the pipeline out of seq 113's waiver.
+
 ## 8. `[load]` directory entries
 
 Delivers directory entries in `[load]` (D5; CW-l7hn, modified). Files:
@@ -2447,6 +2498,11 @@ files the check finds wanting.
   to 5 listed by path, and nothing more under `docs/guidance/`.
   Amended at round 5's triage (127 O1): `AGENTS.md`'s "What every session reads"
   names the same entries for sessions outside the workflow. Verify the two agree.
+  Amended at round 6's triage (138 O1): the table names `docs/guidance/engineering/`
+  and `docs/guidance/workflow/` as two rows, and `load.common` keeps D5's one
+  `docs/guidance/` entry, so they agree by the files they name: verify that the
+  table's two directories hold every Markdown file `docs/guidance/` expands to, and
+  that its other rows are `load.common`'s other entries.
 - [ ] 9.4 Run `make check-guidance` over the tree and fix in the guidance whatever it
   reports — a missing tag, an unused row, a stale anchor, an upward link — each fix
   following the corrected inventory. Verify `make check-guidance` passes.

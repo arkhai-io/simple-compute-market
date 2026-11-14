@@ -6,7 +6,8 @@ tags: [repository, configuration]
 
 What a storefront's configuration does to its publication: what it refuses at
 startup, how it starts while its dependencies are unreachable, what its system
-status reports, and the terms, shapes, and per-pool overrides its listings publish.
+status reports, the terms, shapes, and per-pool overrides its listings publish, and
+how its retired publication configuration migrates.
 The rules these apply are
 [`configuration.md`](../../../docs/guidance/engineering/configuration.md) and
 [`deployment.md`](../../../docs/guidance/engineering/deployment.md); a storefront's
@@ -140,6 +141,12 @@ The storefront refuses to start with a configured family rate it cannot read.
 storefront names any it finds at startup. A change to any of them reaches open listings on the next publication
 cycle; `market-storefront publish` runs or previews that cycle and takes no terms
 of its own.
+
+## Migrating publication configuration
+
+Publication config migrates separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses per-model legacy pricing, which needs manual clauses. A deployment runs it as the operator handbook's
+["Migrating settlement and publication configuration"](../../../docs/operator-handbook.md#migrating-settlement-and-publication-configuration)
+sequences it.
 
 ## Storefront listing shapes and pool overrides
 

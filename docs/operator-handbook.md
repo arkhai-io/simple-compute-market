@@ -511,8 +511,8 @@ It prints one JSON line and exits 0 when the read succeeded:
 
 | `step` | What failed | Look at |
 |---|---|---|
-| `configuration` | the section is absent, invalid or disabled, names no `service_url` or no key, or its CA bundle cannot be loaded | `config`, the overlay, the `caBundle` source |
-| `credential` | the variable a buyer-style `api_key_env` names is unset or empty | the overlay: a storefront states `api_key` |
+| `configuration` | the storefront cannot read its configuration, or the section is absent, invalid or disabled, names no `service_url` or no key, or its CA bundle cannot be loaded | `config`, the overlay, the `caBundle` source |
+| `credential` | the variable a buyer-style `api_key_env` names is unset, empty, or not a single-line key | the overlay: a storefront states `api_key` |
 | `transport` | the service could not be reached over a trusted connection, or answered outside its contract | `service_url`, the network path, the CA bundle |
 | `refused` | the service refused the read; `code` is its error code | the key, and that `--account` is the key's own account |
 
@@ -598,7 +598,9 @@ through its own command before its application starts, and its application
 refuses a database its command has not migrated
 (["Migrations at startup"](development/DEPLOYMENT_AND_CONFIG.md#migrations-at-startup)
 names each command and where it runs). A release can therefore fail to start a
-service; it never starts one on a database it does not understand.
+service; it never starts one on a database it does not understand. A release that
+retires configuration settings is also cut over to a migrated configuration
+(["Migrating settlement and publication configuration"](#migrating-settlement-and-publication-configuration)).
 
 ### Supported databases
 
@@ -633,6 +635,76 @@ For each service, in its own deployment:
 
 To roll back, deploy the earlier image over the backup taken in step 1, never
 over the migrated database.
+
+### Migrating settlement and publication configuration
+
+The VM and bare-metal storefronts' and the buyer's `config migrate` rewrite
+retired settlement and publication settings; the API-credit storefront has no
+migration command, and its operators edit its configuration by hand. What the
+settlement migration maps and refuses is `settlement-configuration`'s
+["Settlement consumer configuration and cutover"](../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover)
+and
+["Alkahest release models"](../openspec/specs/settlement-configuration/configuration.md#alkahest-release-models),
+and what the publication migration converts and refuses is
+`storefront-publication`'s
+["Migrating publication configuration"](../openspec/specs/storefront-publication/configuration.md#migrating-publication-configuration).
+For each buyer and storefront configuration overlay, use this production
+sequence:
+
+1. Stage the release containing the migration commands without activating the
+   new workload.
+2. Preview every mounted or generated file. Select a storefront file with the
+   root `--config` option; select a buyer overlay through its normal
+   `XDG_CONFIG_HOME` mount.
+
+   ```console
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope settlement --check
+   XDG_CONFIG_HOME=/path/to/buyer-overlay market config migrate \
+     --scope settlement --check
+   ```
+
+3. Resolve every reported conflict and legacy environment-name rename. Then
+   create backups and migrate every overlay atomically.
+
+   ```console
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope settlement --write --backup
+   XDG_CONFIG_HOME=/path/to/buyer-overlay market config migrate \
+     --scope settlement --write --backup
+   ```
+
+   Preview and migrate storefront publication defaults:
+
+   ```console
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope publication --check
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope publication --write --backup
+   ```
+
+4. Repeat `--check` for every file and render the Helm or Compose deployment.
+   Do not proceed if a migration, typed configuration validation, generated
+   schema check or image/config schema check fails.
+   `config migrate` reads: rendering applies the values schema, and at startup
+   the storefront applies its typed validation — refusing, for example, a
+   settlement schema version other than its own. Untyped settings are not
+   checked key by key.
+5. Quiesce publication, negotiation, settlement, and recovery automation.
+   Deploy the coordinated marketplace configuration, wheels, image, Secret,
+   and ConfigMap set. Keep automation quiesced while every storefront reports
+   at least one ready mechanism:
+
+   ```console
+   market-storefront --config /path/storefront.toml settlement status --json
+   ```
+
+6. Resume automation only after the configured ready mechanisms and blocker
+   set match the intended overlay. Before activation or new settlement effects,
+   rollback restores each same-directory `.bak` and the previous pinned
+   artifacts together. After effects resume, recover forward from accepted
+   settlement plans and operation identities; never change mechanism priority
+   to redirect an accepted deal.
 
 ### What the upgrade from v0.3.0 changes
 

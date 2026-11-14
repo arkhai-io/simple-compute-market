@@ -372,9 +372,7 @@ turned publication off is not silently switched on, since VM always publishes to
 every `[registry].urls` entry; the removed `[provisioning.identity]`, since every
 site client verifies against its site's service peer; the removed
 `provisioning.fail_on_unreachable` and `provisioning.preflight_timeout`, since the
-storefront starts without waiting for its provisioning service; and the local-inventory keys,
-which startup does not refuse (see
-[`settlement-configuration`'s "Migrating a configuration and cutting over"](../../openspec/specs/settlement-configuration/configuration.md#migrating-a-configuration-and-cutting-over)). The chart's hand-written block holds only the chart's own retired values
+storefront starts without waiting for its provisioning service; and the local-inventory keys. The VM storefront's retired inventory settings — `resources_csv_path`, `resources_csv_inline`, `[escrow_templates]`, and `capacity.use_site_projection_for_listings`, with the chart's `secret.resourcesCsvInline` value — are refused the same way as retired settlement settings: the chart's values schemas refuse them in any spelling, and `market-storefront config set` refuses to write them, naming the seller quickstart's "Upgrading from CSV inventory". No command migrates them, because inventory moves to provisioning by operator action, and startup does not refuse them. The chart's hand-written block holds only the chart's own retired values
 shape, that of storefront chart releases before 0.2.0 — `seller`,
 `storefrontDomains`, `registryAuthority`, `registryUrl`, and `configMapName`
 under `config`; `agentId`, `autoRegister`, and `rootPath` on an agent; and
