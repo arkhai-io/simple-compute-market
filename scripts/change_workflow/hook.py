@@ -51,13 +51,14 @@ def _branch(root: Path) -> str:
 
 
 def _documents(root: Path) -> list[str]:
-    """What to re-read: the configuration's `load.common`, or, when the configuration
-    cannot be read, what to do about that, so the session is still told."""
+    """What to re-read: the configuration's `load.common`, each directory entry as the
+    files it stands for, or, when the configuration cannot be read or an entry names
+    nothing to read, what to do about that, so the session is still told."""
     try:
-        documents = config.load(root).documents(config.COMMON_DOCUMENTS)
+        documents = config.load(root).documents(config.COMMON_DOCUMENTS, root)
     except StepError as exc:
-        return [f"The workflow configuration cannot be read, so the documents to re-read "
-                f"are unknown: {exc}",
+        return [f"The documents to re-read are unknown, as the workflow configuration "
+                f"cannot be read or its load.common resolved: {exc}",
                 "Re-read the repository's guidance your skill names before continuing."]
     if not documents:
         return ["The workflow configuration lists no documents every step reads "

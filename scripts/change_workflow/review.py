@@ -489,7 +489,7 @@ def run_review(change: str, kind: str, *, base: str | None = None, model: str | 
         # it, closeout is next and its own checks read the documentation again.
         earlier = any(entry.name.endswith(".triage.md")
                       for entry in reviews.glob("[0-9]*-pre-closeout*.md"))
-        exempt = exempting(configuration.inert_paths) if earlier else is_record
+        exempt = exempting(configuration.repository_inert_paths()) if earlier else is_record
         if problem := validation_problem(reviews, reviewed, root, changed_since, exempt=exempt):
             raise ReviewError(f"a pre-closeout review needs a passing validation of HEAD: "
                               f"{problem}; validate first, or override it: UNVALIDATED=1, or "

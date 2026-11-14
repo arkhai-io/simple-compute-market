@@ -338,7 +338,7 @@ class Hooks:
         """The hooks a commit of `changed` runs: the functional tier when any path
         lies outside the inert paths, `pre-commit` alone otherwise."""
         functional = [path for path in changed
-                      if not inert(path, self.configuration.inert_paths)]
+                      if not inert(path, self.configuration.repository_inert_paths())]
         tier = (["after-functional-change", "pre-commit-functional", "pre-commit"]
                 if functional else ["pre-commit"])
         if functional:

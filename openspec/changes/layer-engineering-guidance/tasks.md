@@ -2428,7 +2428,7 @@ Delivers directory entries in `[load]` (D5; CW-l7hn, modified). Files:
 handling needs it; `scripts/tests/test_change_workflow_config.py`,
 `scripts/tests/test_change_workflow_hooks.py`.
 
-- [ ] 8.1 Make `config.documents()` expand an entry ending in `/` into the Markdown
+- [x] 8.1 Make `config.documents()` expand an entry ending in `/` into the Markdown
   files beneath it, recursively, in sorted path order, each document once across
   `load.common` and `load.<step>`, and refuse with a `StepError` naming the entry a
   directory entry that is missing, unreadable, or holds no Markdown file; literal
@@ -2438,17 +2438,50 @@ handling needs it; `scripts/tests/test_change_workflow_config.py`,
   directory, a file, an unreadable directory, and a directory with no Markdown each
   refuse naming the entry; a literal missing file is still printed; and the
   existing "Design loads the roadmap" test passes.
-- [ ] 8.2 Verify the post-compaction hook names the expanded files for a directory
+  Note: `Configuration.documents(step, root)` now takes the repository's root, since
+  a directory entry is resolved on disk; `directory_documents(root, entry)` walks it
+  (`Path.walk`, whose `on_error` turns an unreadable subdirectory into the refusal
+  too) and sorts by path component. The refusal is a `ConfigError`, which `config
+  load` resolves before printing anything, so a refused entry prints no partial list.
+  `test_change_workflow_config.py` (unit, `config load` through the CLI over
+  temporary trees): expansion in place, recursively and sorted, a document named in
+  both lists printed once, files of another kind skipped; the four refusals and an
+  empty subdirectory, each naming the entry, the unreadable case by `chmod 0`
+  (skipped where the user reads any directory, as root does); a literal missing file
+  printed; an absent or empty list loading nothing; "Design loads the roadmap"
+  unchanged — passed.
+- [x] 8.2 Verify the post-compaction hook names the expanded files for a directory
   entry, and, for a refused entry, tells the session the documents to re-read are
   unknown (CW-l7hn's scenario "A directory entry names nothing"), with unit tests in
   `test_change_workflow_hooks.py`.
-- [ ] 8.3 Verify the section: `pytest -q scripts/tests/test_change_workflow_config.py
+  Note: the tests are in `test_post_compaction_context.py`, where the hook
+  (`hook.py`) is tested; `test_change_workflow_hooks.py` tests `hooks.py`, the
+  pre-commit runner, so the plan's file was a slip. Unit, `hook.context` over
+  temporary trees: a directory entry named as its files, not itself; a missing one
+  telling the session the documents are unknown, naming the entry, with no list —
+  passed. The hook's message now reads "the workflow configuration cannot be read or
+  its load.common resolved", covering both causes.
+- [x] 8.3 Verify the section: `pytest -q scripts/tests/test_change_workflow_config.py
   scripts/tests/test_change_workflow_hooks.py` (unit), then `make test-release-tooling`,
   and `scripts/change-workflow run pre-commit layer-engineering-guidance`.
   End-to-end: none; the engine's loading runs in no pipeline scenario, and none is
   owed. Run after task 8.4, which it verifies too, adding
   `scripts/tests/test_change_workflow_records.py` to the unit run.
-- [ ] 8.4 Give the engine the default inert paths of CW-n7ra as task 3.16 modifies
+  Note: unit, `uv run --no-project --with pytest pytest -q` over
+  `test_change_workflow_config.py`, `test_post_compaction_context.py`,
+  `test_change_workflow_records.py`, `test_change_workflow_hooks.py`,
+  `test_change_workflow_review.py`, and `test_change_next_step.py` (the last two
+  because 8.4 changes what review and the next-step computation read): 579 passed.
+  `make test-release-tooling` (every `scripts/tests` suite, unit): 2893 passed.
+  `scripts/change-workflow run pre-commit layer-engineering-guidance`:
+  `after-functional-change` passed, no lock changed; `pre-commit-functional` passed
+  (`make check-packaging`, `make test`'s every suite); the default checks passed;
+  `make check-repository` failed only on the two the preamble expects — the
+  citations of files the change creates (now including `scripts/check_guidance.py`
+  and its test, which section 9 writes) and the `CW-*` index entries. End-to-end
+  scenarios covering the section: none confirmed, as planned. Owed by validation:
+  nothing.
+- [x] 8.4 Give the engine the default inert paths of CW-n7ra as task 3.16 modifies
   it (71 O1): where `repository.inert-paths` is absent, the configuration's inert
   paths are `openspec/` and `**/*.md`; a declared list, an empty one included,
   replaces the default. Keep `records.inert`'s and `records.exempting`'s docstrings
@@ -2457,6 +2490,34 @@ handling needs it; `scripts/tests/test_change_workflow_config.py`,
   absent key yields the default; a declared list yields itself; an empty list yields
   no inert path; and `records.inert` treats a nested Markdown file as inert under
   the default.
+  Note: `config.DEFAULT_INERT_PATHS` and `Configuration.repository_inert_paths()`,
+  following `openspec_command()`'s pattern: `inert_paths` keeps the declaration or
+  None, and the method resolves it. Every reader calls the method — `hooks.py`'s
+  tier, `review.py`'s pre-closeout guard, and `next_step.py`'s `_inert_paths`, files
+  the task did not name — and `records.inert` and `exempting` now take a sequence,
+  never None, so a caller cannot pass the raw field and read "nothing inert". `config`
+  shows the field `default` with its value. Unit: `test_change_workflow_config.py`
+  (absent key, no file, declared list, empty list), `test_change_workflow_records.py`
+  (the default's cases, a nested Markdown file), and through the engine
+  `test_change_workflow_hooks.py` (CW-n7ra's scenarios "A repository declares no
+  inert paths" and "… an empty list", through `run pre-commit` over a real Git
+  repository), `test_change_workflow_review.py` and `test_change_next_step.py` (the
+  default read from the repository's file, an empty declaration validating
+  documents) — passed. This repository declares its own list, so nothing here
+  changes.
+
+Section 8 notes (handoff):
+
+- `documents()` takes the root as an argument rather than deriving it from the
+  configuration's path, since `config.check` is called with a bare file name in
+  tests. Section 9's guidance check does not use it; task 9.3's verification runs
+  `config load common` once the orchestrator collapses `load.common`.
+- Declined from the fresh-context check: guarding a directory entry that resolves
+  outside the repository (absolute or `../`), which `relative_to` would raise on as
+  a traceback. No configuration names one and the requirement asks nothing of it,
+  so the guard would be speculative; it is the owner's to want.
+- The companion's "With none declared, no path is inert" and the index's CW-l7hn and
+  CW-n7ra summary lines are now stale; task 10.9 rewrites them.
 
 ## 9. `make check-guidance`
 
