@@ -52,6 +52,7 @@ from the lease ``09c`` compares it with.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import subprocess
 from dataclasses import dataclass
@@ -455,7 +456,8 @@ class Purchase10_BuyerTeardown:
         run = purchase_cli.run(deal_driver.teardown_arguments(deal_state.purchase_run.run_id))
         assert_market_run_succeeded(run, command=deal_driver.teardown_command)
         if mediation_if_configured() is not None:
-            progress = EndDeliveryProgress.model_validate_json(run.stdout().strip().splitlines()[-1])
+            ended = json.loads(run.stdout().strip().splitlines()[-1])
+            progress = EndDeliveryProgress.model_validate(ended["progress"])
             case = progress.case
             assert isinstance(case, Accepted) and case.filing is not None, progress
             assert case.filing.parts and all(

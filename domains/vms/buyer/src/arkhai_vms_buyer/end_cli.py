@@ -1,13 +1,8 @@
-"""Notice-preserving VM stop or receipt-time surrender through the buyer half."""
+"""The VM buyer's canonical ``end`` verb, registered from the buyer half."""
 
 from __future__ import annotations
 
-import asyncio
-import json
-import time
-
-import typer
-from market_deal_lifecycle_contracts.models import Accepted
+from market_deal_lifecycle_buyer import EndTarget, register_end_command
 from rich.console import Console
 
 from . import common
@@ -15,7 +10,6 @@ from .deal_helpers import (
     accepted_settlement_mechanism, load_deal_context,
     make_deal_publisher_trust_resolver, open_run_log,
 )
-from .lifecycle import run_sync
 from .settlement_composition import buyer_stage, resolve_buyer_settlement_policy
 from .settlement_stages import BuyerResumeContext
 
@@ -35,67 +29,18 @@ def end_context(run_id, *, poll_interval, identity):
     return deal, log, stage.lifecycle(context)
 
 
-def run_end_from_log(*, run_id, wait_timeout=0, poll_interval=1, identity=None, surrender=False):
-    deal, log, lifecycle_context = end_context(run_id, poll_interval=poll_interval, identity=identity)
+def end_target(run_id: str, _config: str | None = None) -> EndTarget:
+    """The run's deal, its lifecycle, and its run log for the ``end`` verb.
 
-    async def end():
-        async with lifecycle_context as lifecycle:
-            progress = await lifecycle.end(deal.negotiation_id, surrender=surrender)
-            log.event("delivery_end", **progress.model_dump(mode="json"))
-            delivery = progress.acknowledgement.delivery if progress.acknowledgement else None
-            deadline = time.monotonic() + wait_timeout
-            delivery_read_error = None
-            while wait_timeout > 0:
-                # Direct signed delivery reads are independent of payment or
-                # mediation availability; an unreachable authority cannot hide
-                # site evidence or block proof of capacity return.
-                try:
-                    observed = await lifecycle.peer.read(deal.negotiation_id)
-                except Exception:
-                    delivery_read_error = "storefront delivery read unavailable; authority outcome is retained"
-                    break
-                delivery = observed.delivery
-                if delivery.progress == "released" or time.monotonic() >= deadline:
-                    break
-                await asyncio.sleep(min(poll_interval, max(0, deadline - time.monotonic())))
-            return {
-                "progress": progress.model_dump(mode="json"),
-                "delivery_view": delivery.model_dump(mode="json") if delivery else None,
-                "capacity_released": delivery is not None and delivery.progress == "released",
-                "delivery_read_error": delivery_read_error,
-            }
-
-    result = run_sync(end)
-    log.event("delivery_end_observed", **result)
-    return result
+    The VM buyer reads no ``--config``. The resume context's poll interval paces
+    settlement polling, which an end does not do.
+    """
+    deal, log, lifecycle = end_context(run_id, poll_interval=1, identity=None)
+    return EndTarget(
+        negotiation_id=deal.negotiation_id, lifecycle=lifecycle,
+        record=lambda name, fields: log.event(name, **fields),
+    )
 
 
 def register(app):
-    @app.command("end")
-    def end(
-        run_id: str = typer.Option(..., "--from", "--run", "-r"),
-        wait_timeout: float = typer.Option(0, "--wait-timeout", min=0),
-        poll_interval: float = typer.Option(1, "--poll-interval", min=0.01),
-        surrender: bool = typer.Option(False, "--end-now-regardless", help="Surrender service now, even while paid notice remains."),
-    ):
-        """Stop rate billing and retain service through notice; otherwise surrender.
-
-        --end-now-regardless surrenders before any paid notice expires.
-        Report payment, receipt, case and capacity separately.
-
-        There is no historical end-time flag. Once-only and Alkahest surrender
-        invent no refund; a queued teardown is never reported as released.
-        Retry the same command to recover an unavailable stop or filing.
-        """
-        try:
-            result = run_end_from_log(
-                run_id=run_id, wait_timeout=wait_timeout, poll_interval=poll_interval, surrender=surrender,
-            )
-        except ValueError as exc:
-            raise typer.BadParameter(str(exc)) from exc
-        typer.echo(json.dumps(result, sort_keys=True))
-        outcome = "payment" if result["progress"]["mode"] == "normal_stop" else "delivery"
-        if result["progress"][outcome]["status"] != Accepted().status:
-            raise typer.Exit(1)
-        if wait_timeout > 0 and not result["capacity_released"]:
-            raise typer.Exit(1)
+    register_end_command(app, end_target)

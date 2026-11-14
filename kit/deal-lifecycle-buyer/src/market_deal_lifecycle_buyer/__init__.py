@@ -6,6 +6,12 @@ from market_deal_lifecycle_buyer.store import FileEvidenceStore
 from market_deal_lifecycle_buyer.export import export_case
 
 from market_deal_lifecycle_buyer.retention import PruneReport, RetentionObservation, prune_command
-from market_deal_lifecycle_buyer.commands import create_evidence_command_group
+from market_deal_lifecycle_buyer.commands import (
+    EndTarget, create_evidence_command_group, end_deal, end_exit_code, register_end_command,
+)
 
-__all__ = ["BuyerEndJournal", "EndDeliveryProgress", "BuyerDeal", "BuyerLifecycle", "export_case", "FileEvidenceStore", "PruneReport", "RetentionObservation", "prune_command", "create_evidence_command_group"]
+__all__ = [
+    "BuyerEndJournal", "EndDeliveryProgress", "BuyerDeal", "BuyerLifecycle", "export_case", "FileEvidenceStore",
+    "PruneReport", "RetentionObservation", "prune_command", "create_evidence_command_group",
+    "EndTarget", "end_deal", "end_exit_code", "register_end_command",
+]

@@ -22,9 +22,11 @@ from integration.test_payment_settlement_client import (
 )
 
 
-@pytest.mark.asyncio
-async def test_bare_metal_seller_notice_and_normal_buyer_end_use_the_rate_authority(harness, tmp_path):
-    h = harness
+def approve_rate(h, *, payee=True):
+    """Replace the harness's accepted deal with an approved, committed rate deal.
+
+    Returns its Agreement, settlement data and the instant it starts.
+    """
     lifecycle = h.runtime.lifecycle
     accepted, _ = lifecycle.agreement(h.negotiation_id)
     raw = accepted.model_dump(mode="json", exclude_none=True)
@@ -37,11 +39,11 @@ async def test_bare_metal_seller_notice_and_normal_buyer_end_use_the_rate_author
     option["settlement"].update(period="PT60S", reserve_ahead_seconds=120, approval_window="PT60S")
     option["price"]["rates"] = [{"field": "amount", "per": "hour", "value": 6000}]
     option["lifecycle"]["delivery_deadline_seconds"] = 30
+    entitlements = {"payer": {"notice_seconds": 300, "settles_through": "started_period"}}
+    if payee:
+        entitlements["payee"] = {"notice_seconds": 600, "settles_through": "started_period"}
     option["lifecycle"]["early_termination"] = {
-        "version": 1, "entitlements": {
-            "payer": {"notice_seconds": 300, "settles_through": "started_period"},
-            "payee": {"notice_seconds": 600, "settles_through": "started_period"},
-        }, "settles_through": "started_period",
+        "version": 1, "entitlements": entitlements, "settles_through": "started_period",
     }
     option["option_id"] = derive_settlement_option_id(**{k: v for k, v in option.items() if k != "option_id"})
     config = h.runtime.settlement_composition.arkhai_payments_stage().config
@@ -59,6 +61,15 @@ async def test_bare_metal_seller_notice_and_normal_buyer_end_use_the_rate_author
                      (json.dumps(raw).encode(), json.dumps(data.to_wire()), h.negotiation_id))
         register_agreement(conn, json.dumps(raw).encode(), data.to_wire())
         EndSession(conn).confirm_commitment(h.negotiation_id, committed_at=now)
+    return raw, data, now
+
+
+@pytest.mark.asyncio
+async def test_bare_metal_seller_notice_and_normal_buyer_end_use_the_rate_authority(harness, tmp_path):
+    h = harness
+    lifecycle = h.runtime.lifecycle
+    raw, data, now = approve_rate(h)
+    config = h.runtime.settlement_composition.arkhai_payments_stage().config
     transport = httpx.ASGITransport(app=h.app)
     trust = TrustedIdentitySet(identities=(SELLER.identity,))
     async with StorefrontClient("http://test", signer=ADMIN, caller_role="admin",

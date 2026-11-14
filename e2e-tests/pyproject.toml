@@ -66,10 +66,10 @@ dependencies = [
     # and the VM listing helper read from a listing.
     "arkhai-core>=0.5.0",
     # The dispute credential model a buyer's configuration is read with, the
-    # buyer's end-delivery progress its teardown prints, and the lifecycle
+    # buyer's end-delivery progress its end prints, and the lifecycle
     # outcomes both carry.
     "arkhai-kit-deal-lifecycle>=0.3.0",
-    "arkhai-kit-deal-lifecycle-buyer>=0.1.0",
+    "arkhai-kit-deal-lifecycle-buyer>=0.2.0",
     "arkhai-kit-deal-lifecycle-contracts>=0.1.0",
     # The mediation kit's client and dispute adapter, through which the VM
     # dispute scenarios file as the buyer.

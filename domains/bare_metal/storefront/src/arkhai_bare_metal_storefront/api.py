@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
@@ -67,6 +68,7 @@ from market_contact_exchange import (
     IntroductionRouteError,
     IntroductionStart,
 )
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_identity import EMPTY_BODY, Identity, RotationRequest
 from market_negotiation_runtime import (
     NegotiationStateError,
@@ -115,6 +117,8 @@ from .models import (
     BareMetalCapacityReleasedEvent,
     BareMetalEvaluateSettleRequest,
     BareMetalEvaluateSettleResponse,
+    BareMetalInterruptDealRequest,
+    BareMetalInterruptDealResponse,
     BareMetalReserveCapacityRequest,
     BareMetalSettleWaitResponse,
     BareMetalVerifyEscrowRequest,
@@ -1367,6 +1371,54 @@ async def admin_reserve_capacity(
         )
     except CapacityAdminRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post(
+    "/api/v1/admin/deals/{negotiation_id}/interrupt",
+    response_model=BareMetalInterruptDealResponse,
+)
+async def admin_interrupt_deal(
+    negotiation_id: str, body: BareMetalInterruptDealRequest, request: Request
+) -> BareMetalInterruptDealResponse:
+    """Interrupt a committed payments deal as its administrator classifies it.
+
+    Preemption sends the seller's notice under the accepted payee entitlement;
+    failure ends delivery and files ``delivery_end``. The seller half's
+    classification decides both, and refuses before any effect.
+    """
+    runtime = _runtime(request)
+    actor = await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_interrupt_deal",
+        resource=negotiation_id,
+        body=await _request_body(request),
+    )
+    try:
+        agreement, _ = await asyncio.to_thread(runtime.lifecycle.agreement, negotiation_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown accepted deal {negotiation_id!r}") from exc
+    if agreement.settlement is None or agreement.settlement.settlement_schema != ARKHAI_PAYMENTS_MECHANISM:
+        raise HTTPException(status_code=409, detail="only a payments deal has an administrator interruption")
+    if body.interrupted_at_utc is not None:
+        raise HTTPException(status_code=400, detail="an interruption takes effect at receipt and accepts no time")
+    try:
+        result = await runtime.lifecycle.seller.interrupt(
+            negotiation_id, actor=actor, reason=body.reason or "",
+            operation_key=body.operation_key, interruption_kind=body.interruption_kind,
+            dry_run=body.dry_run, physical=runtime.lifecycle.end.drive_physical,
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return BareMetalInterruptDealResponse(
+        escrow_uid=negotiation_id,
+        listing_id=agreement.listing_id,
+        status="dry_run" if body.dry_run else result.outcome.status,
+        interrupted_at_utc=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        settlement_action=result.settlement_action,
+        lifecycle_outcome=result.outcome.model_dump(mode="json"),
+        delivery=result.delivery.model_dump(mode="json"),
+    )
 
 
 @router.post(

@@ -8,6 +8,30 @@
 
 ## MODIFIED Requirements
 
+### Requirement: Lifecycle routes are authenticated per role
+
+VM and bare-metal storefronts MUST expose seller `submit/read/list` under the administrator-principal contract and buyer `commit/hint/end_delivery` under the negotiation's buyer principal, keyed by negotiation ID with signed responses. Buyer authority commands MUST NOT be relayed. For a committed `arkhai.payments.v1` deal, each compute storefront's admin interrupt MUST carry out the command the seller half's classification gives its kind ("Administrator interruption explicitly classifies its cause"): the notice stop for a preemption under the accepted payee entitlement, the journaled delivery_end filing for a failure.
+
+#### Scenario: Another principal sends commit
+
+- **WHEN** a principal other than the negotiation's buyer sends `commit` for it
+- **THEN** the storefront rejects it without reading the authority
+
+#### Scenario: The admin interrupt route uses an entitlement
+
+- **WHEN** an administrator interrupts with kind preemption a spot deal whose accepted option grants the payee a stop entitlement
+- **THEN** the route submits the notice stop through the seller half and delivery follows the authority's effective stop, without a self-penalty filing
+
+#### Scenario: The admin interrupt route ends a hosted deal
+
+- **WHEN** an administrator interrupts a hosted deal with only `once` parts through either compute storefront's admin route, naming no kind or kind failure
+- **THEN** the route journals an attributed delivery end and delivery_end(cause=payee) filing through the seller half; end service drives the lease without awaiting a ruling
+
+#### Scenario: Another principal ends delivery
+
+- **WHEN** a principal other than the accepted negotiation's buyer sends `end_delivery`
+- **THEN** the storefront rejects it without making a final request or contacting the site
+
 ### Requirement: Term ends carry their own partial-period treatment
 
 The sole term-end carrier MUST be early_termination.settles_through, distinct from entitlements. The adapter MUST map it to rate end.partialPeriod through the stop-authority mapping. Compute presets MUST use last_boundary/returned, and a term end MAY be offered only under a treatment the composition's servicing declaration lists. No mechanism-specific field MAY duplicate it.
@@ -108,7 +132,7 @@ Both compute storefront operator CLIs MUST provide deals preempt by negotiation 
 - **AND** displays pending, unknown or accepted authority state without bypassing notice
 
 ### Requirement: Administrator interruption explicitly classifies its cause
-The VM administrator interrupt verb MUST distinguish `interruption_kind=preemption` from `interruption_kind=failure`. Preemption MUST delegate the existing notice admission and journaled stop, requiring the accepted payee entitlement. Failure MUST end delivery and file delivery_end for both spot and on-demand, without a local rate-part payout remedy. An omitted kind MUST refuse for rate deals; once-only deals retain failure as their compatibility default. The free-text administrator reason remains required for hosted interruptions.
+An administrator interruption MUST distinguish `interruption_kind=preemption` from `interruption_kind=failure`, and the classification from kind to command MUST live in `kit/deal-servicing`'s seller half, which every compute storefront's interrupt route calls rather than classifying in a domain. Preemption MUST delegate the existing notice admission and journaled stop, requiring the accepted payee entitlement. Failure MUST end delivery and file delivery_end for both spot and on-demand, without a local rate-part payout remedy. An omitted kind MUST refuse for rate deals; once-only deals retain failure as their compatibility default. The free-text administrator reason remains required for hosted interruptions, and the seller half MUST record the administrator and reason under the operation's key, refusing a same-key retry that changes either.
 
 #### Scenario: A lawful administrator preemption
 - **GIVEN** the accepted option grants a payee entitlement
@@ -126,8 +150,13 @@ The VM administrator interrupt verb MUST distinguish `interruption_kind=preempti
 - **WHEN** a rate interruption omits its kind or an unentitled deal requests preemption
 - **THEN** the request refuses before any notice, physical end or filing
 
+#### Scenario: A retry changes the administrator's reason
+- **GIVEN** an interruption accepted under an operation key
+- **WHEN** the same key is sent again with a different reason
+- **THEN** the seller half refuses it, keeping the first attribution
+
 ### Requirement: Canonical rate buyer end preserves service during notice
-The buyer half MUST normally submit rate stop at the payment authority and send hint, allowing delivery until effective stop reaches end service through watch. It MUST reserve end_delivery for explicit immediate surrender or the unreachable-payment-authority delivery_end(cause=payer) case path. Immediate surrender MUST disclose that paid notice may outlast service.
+The buyer half MUST normally submit rate stop at the payment authority and send hint, allowing delivery until effective stop reaches end service through watch. It MUST reserve end_delivery for explicit immediate surrender or the unreachable-payment-authority delivery_end(cause=payer) case path. Immediate surrender MUST disclose that paid notice may outlast service. Both compute domains MUST expose this end as their canonical `end` verb, registered from the buyer half's shared command, with `--end-now-regardless` selecting immediate surrender.
 
 #### Scenario: A payer has nonzero notice
 - **GIVEN** an accepted rate option with payer notice 300 seconds

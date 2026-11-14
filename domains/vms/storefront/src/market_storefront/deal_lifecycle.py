@@ -29,7 +29,7 @@ from market_deal_lifecycle.delivery import DeliveryEvidence
 from market_deal_lifecycle.evidence import CommitmentAttempt
 from market_deal_lifecycle.terms import decode_terms
 from market_deal_lifecycle_contracts.models import (
-    Accepted, CommitMessage, EvidenceItem, LifecycleCommand, ListDealsRequest,
+    Accepted, CommitMessage, EvidenceItem, ListDealsRequest,
     Pending, Rejected, SubmitResponse, Unknown,
 )
 from market_deal_servicing import (
@@ -236,59 +236,11 @@ class VmDealLifecycle:
         )
 
     async def interrupt(self, negotiation_id, *, actor, operation_key, reason, interruption_kind=None, dry_run=False):
-        agreement, _ = await asyncio.to_thread(self.accepted, negotiation_id)
-        terms = decode_terms(agreement["settlement"].get("lifecycle"))
-        entitled = bool(terms and terms.early_termination and "payee" in terms.early_termination.entitlements)
-        if interruption_kind is None:
-            if agreement["settlement"]["settlement"].get("period") is not None:
-                raise ValueError("rate interruption requires interruption_kind: preemption or failure")
-            interruption_kind = "failure"
-        if interruption_kind not in {"preemption", "failure"}:
-            raise ValueError("unknown interruption kind")
-        if interruption_kind == "preemption" and not entitled:
-            raise ValueError("accepted option has no payee entitlement; preemption refused")
-        command = LifecycleCommand(
-            negotiation_id=negotiation_id, operation_key=operation_key,
-            kind="notice" if interruption_kind == "preemption" else "delivery_end",
+        """An administrator interruption, classified and carried out by the seller half."""
+        return await self.seller.interrupt(
+            negotiation_id, actor=actor, operation_key=operation_key, reason=reason or "",
+            interruption_kind=interruption_kind, dry_run=dry_run, physical=self.end.drive_physical,
         )
-        if not reason or not reason.strip():
-            raise ValueError("administrator interruption requires a reason")
-        if dry_run:
-            return command.kind, Pending(reason="dry run; no interruption submitted"), (await asyncio.to_thread(self.seller.delivery_read, negotiation_id)).delivery
-        # Keep operator attribution for notice stops as well as exceptional ends.
-        # The immutable evidence ID rejects a same-key retry changing its author.
-        await in_transaction(self.path, lambda conn: EvidenceSession(conn).put(negotiation_id, EvidenceItem(
-                evidence_id="administrator-interrupt:" + operation_key,
-                kind="administrator_interrupt", classification="seller_assertion",
-                recorded_at=self.clock(), body=base64.b64encode(canonical_json({
-                    "command": command.model_dump(mode="json"),
-                    "administrator": actor.model_dump(mode="json"), "reason": reason,
-                })),
-            )))
-        if command.kind == "notice":
-            outcome = await self.seller.submit(command, actor=actor, reason=reason)
-            # Only a verified authority stop may set an entitled delivery end.
-            return command.kind, outcome, (await asyncio.to_thread(self.seller.delivery_read, negotiation_id)).delivery
-
-        # Journal before either task: off-loop preparation can yield before it
-        # writes, so racing submit with teardown alone can miss the new end.
-        refusal = await self.seller.record_operator_end(command, actor=actor, reason=reason)
-        if refusal is not None:
-            return command.kind, refusal, (await asyncio.to_thread(self.seller.delivery_read, negotiation_id)).delivery
-
-        async def physical():
-            await self.end.drive_physical(negotiation_id)
-
-        outcome, progress = await asyncio.gather(
-            self.seller.submit(command, actor=actor, reason=reason), physical(),
-            return_exceptions=True,
-        )
-        if isinstance(progress, BaseException):
-            logger.error("VM administrator end awaits physical recovery: %s", progress)
-        if isinstance(outcome, BaseException):
-            logger.error("VM administrator filing awaits authority recovery: %s", outcome)
-            outcome = Unknown(reason="delivery-end filing awaits authority recovery")
-        return command.kind, outcome, (await asyncio.to_thread(self.seller.delivery_read, negotiation_id)).delivery
 
     async def peer(self, message):
         if isinstance(message, CommitMessage):

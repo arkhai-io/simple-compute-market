@@ -58,6 +58,7 @@ from .fulfillment import BareMetalFulfillmentTransport
 from .evidence import evidence_store
 from .lifecycle import buyer_lifecycle, run_sync
 from market_arkhai_payments import PaymentApproval
+from market_deal_lifecycle_buyer import EndTarget, register_end_command
 
 from .settlement_composition import (
     BUYER_STAGES, buyer_compute_disclosure, buyer_lifecycle_disclosure,
@@ -320,6 +321,11 @@ def fulfillment_access(
 
 
 def _lifecycle_for_run(run_id: str, config_path: str | None):
+    deal, context, _ = _run_lifecycle(run_id, config_path)
+    return deal, context
+
+
+def _run_lifecycle(run_id: str, config_path: str | None):
     deal, identity, trust = _recovered_deal(run_id, config_path)
     config = load_bare_metal_buyer_config(config_path)
     if not deal.agreement_bytes:
@@ -329,7 +335,7 @@ def _lifecycle_for_run(run_id: str, config_path: str | None):
         settlement_data=deal.settlement_data, seller_url=deal.seller_url,
         signer=identity.signer, publishers=trust(), config=config,
         approval=payment_approval(config) if config.arkhai_payments else None,
-    )
+    ), identity
 
 
 @bare_metal_app.command("delivery")
@@ -347,29 +353,22 @@ def delivery_status(
     _json(run_sync(read))
 
 
-@bare_metal_app.command("teardown")
-def teardown_fulfillment(
-    run_id: str = typer.Option(...),
-    config: str | None = typer.Option(None, "--config"),
-    surrender: bool = typer.Option(False, "--end-now-regardless", help="Surrender service before paid notice expires."),
-) -> None:
-    """Stop rate billing through notice; --end-now-regardless gives up service now."""
+def end_target(run_id: str, config: str | None) -> EndTarget:
+    """The run's deal, its lifecycle, and its run log for the ``end`` verb."""
+    deal, context, identity = _run_lifecycle(run_id, config)
+    log = open_run_log(run_id, signer=identity.signer, profile_id=identity.profile_id)
+    return EndTarget(
+        negotiation_id=deal.negotiation_id, lifecycle=context,
+        record=lambda name, fields: log.event(name, **fields),
+    )
 
-    deal, context = _lifecycle_for_run(run_id, config)
 
-    async def end():
-        async with context as lifecycle:
-            progress = await lifecycle.end(deal.negotiation_id, surrender=surrender)
-            # Retain the signed delivery read and its embedded site reports even
-            # without an independently configured site trust root on the buyer.
-            try:
-                await lifecycle.peer.read(deal.negotiation_id)
-            except Exception:
-                logging.getLogger(__name__).warning("delivery read unavailable; end progress is retained")
-            return progress
-
-    _json(run_sync(end))
-
+# ``end`` is the buyer's canonical verb in every compute domain. ``teardown`` is
+# its deprecated alias and keeps the output scripts written against it parse.
+register_end_command(
+    bare_metal_app, lambda run_id, config: end_target(run_id, config),
+    configurable=True, deprecated_alias="teardown",
+)
 
 
 

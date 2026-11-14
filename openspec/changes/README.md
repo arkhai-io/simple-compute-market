@@ -351,7 +351,7 @@ Deliberately outside the goal: postpaid monthly invoicing and on-chain open-ende
 
 | Item | Origin |
 |---|---|
-| The staged rename of `arkhai.payments.v1`'s approval expiry from `window` to `approval_window` (`RELEASING.md`'s staged field rename) has two stages left. In the release after the one first shipping readers of both names, once-option writers switch to `approval_window` and the `arkhai_payments.window` discovery field stops answering; in the release after that, readers stop accepting `window`. Each stage is triggered by its release | `spot-deals-through-arkhai-payments` round 1 owner record, R9 |
+| The staged rename of `arkhai.payments.v1`'s approval expiry from `window` to `approval_window` (`RELEASING.md`'s staged field rename) has two stages left. In the release after the one first shipping readers of both names, once-option writers switch to `approval_window` and the `arkhai_payments.window` discovery field stops answering; in the release after that, readers stop accepting `window`. In that same release after the first, the deprecated `market bare-metal teardown` alias of the buyer's canonical `end` verb is removed. Each stage is triggered by its release | `spot-deals-through-arkhai-payments` round 1 owner record, R9 and R20 |
 | `kit/arkhai-payments` keeps every test in one flat `tests/` root, where `docs/development/TESTING.md`, "Test File Layout", splits a kit library's tests into `unit/` and `integration/`. Moving them means moving the shared term builders (`payment_terms.py`, `rate_terms.py`) the modules import by name | `spot-deals-through-arkhai-payments` section 4A, its compliance check |
 
 ## Unblocking work — the local end-to-end stack

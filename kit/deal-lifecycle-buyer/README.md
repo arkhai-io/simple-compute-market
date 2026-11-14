@@ -118,10 +118,16 @@ retried under the same key; hint acknowledgement is independent. Progress expose
 `mode=normal_stop`, the authority's payment records and the separate `hint`.
 `end(id, surrender=True)` and `end_delivery(id)` use the receipt-time surrender
 and case path. Escalating a normal stop to surrender reuses its original stop.
-Once-only deals retain that immediate-surrender behavior. The VM `market end`
-and bare-metal `market bare-metal teardown` commands select ordinary end by
-default; `--end-now-regardless` explicitly gives up service before paid notice
-expires. No foreground probe or buyer watchdog is installed.
+Once-only deals retain that immediate-surrender behavior.
+
+`register_end_command` registers the canonical `end` verb on a domain's command
+group — VM `market end` and `market bare-metal end` — from an `EndTarget` the
+domain opens for a run. It selects ordinary end by default;
+`--end-now-regardless` explicitly gives up service before paid notice expires.
+It prints the end's progress, the storefront's delivery read and whether
+capacity is released, and exits 1 when the governing outcome is not accepted or
+a `--wait-timeout` ends unreleased. `market bare-metal teardown` is its
+deprecated alias, which prints a notice naming `end` before running it.
 
 Reproduce the injected first-use journey after rebuilding wheels:
 

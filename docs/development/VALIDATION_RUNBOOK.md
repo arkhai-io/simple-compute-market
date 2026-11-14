@@ -1534,7 +1534,7 @@ market --config <buyer.toml> bare-metal access --run-id <run-id> --config <buyer
 Check the delivered host key, tenant identity and privilege, wrong-key refusal, and the workload on the paid guest. After the ordinary lease expires, independently observe successful teardown, absence of the guest/access, and restored capacity. A bare-metal buyer can request the ordinary teardown/recovery path with:
 
 ```bash
-market --config <buyer.toml> bare-metal teardown --run-id <run-id> --config <buyer.toml>
+market --config <buyer.toml> bare-metal end --run-id <run-id> --config <buyer.toml>
 ```
 
 Do not equate an accepted receipt with successful delivery or a payment hold with a refund. Keep raw authority responses and deployment data restricted; publish sanitized findings and explicit unrun items. A supplemental network-policy result is admissible only from an actual operator-only CPU guest on the same paid deployment, with the pinned guest base, actual default bridge and virtio NIC, and loaded policy structure bound to that deployment. A namespace-only probe is not a substitute. That guest proves only finite policy selectors it exercises and none of the paid tenant's identity, payment, grant, GPU, delivery, or lifecycle facts. Reusing this method does not claim that an older named marker ran.

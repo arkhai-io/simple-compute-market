@@ -415,7 +415,7 @@ make test-module MODULE=e2e_real_provisioning_reapply ACTIVE_PROFILES=local,real
   both leases ended by back-dating and a stepped watchdog cycle.
 - `e2e_bare_metal_qualification` (observations 4 and 5): the normal cycle,
   then a successor whose reclaim refuses a planted foreign descendant until
-  fixture-only repair, each ended by `market bare-metal teardown`. Without the
+  fixture-only repair, each ended by `market bare-metal end`. Without the
   bare-metal host's `cleanup_qualification` its working-data stages and the
   refusal cycle skip, and both observations are unproven.
 - `e2e_real_provisioning_reapply` (observation 6): both hosts' registrations
@@ -571,7 +571,7 @@ storefront's settle wait on the negotiation. Delivery reads use that purchase's
 signer and fulfillment transport. Re-drive recovers the original run's retained
 profile and repeats canonical lifecycle `commit`, keeping both transaction and
 fulfillment unchanged; there is no bare-metal settle command. The buyer's
-`market bare-metal teardown` then ends delivery and starts mock reclaim, after
+`market bare-metal end` then ends delivery and starts mock reclaim, after
 which the seller's refund reverses the still-held once payment, and the site's
 capacity release is proven separately. Unless the last stage recorded the deal
 ended, the module's cleanup first opens any mock gate still closed, then finds

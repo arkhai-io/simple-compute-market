@@ -569,23 +569,111 @@ kit/arkhai-payments fixtures and a shared kit location for the preempt example,
 `carried-tests/` and the modules it names, both compute lanes' E2E scenarios. Owner
 record points R6, R11, R18, R20, R21 #48 and task 4.5a.
 
-- [ ] 4B.1 Administrator interrupt classification in kit (D6): move the kind-to-command
+- [x] 4B.1 Administrator interrupt classification in kit (D6): move the kind-to-command
       classification (preemption → `notice`, refused without a payee entitlement;
       failure → end delivery and file `delivery_end`; the reason requirement) into
       `kit/deal-servicing`'s seller half; VM's route calls it; bare metal gains the
       route and its typed admin client. Tests at unit (kit classification) and
       application (bare metal's route). Name the capability owning bare metal's route
       and add the requirement to its delta and to deal-lifecycle's.
-- [ ] 4B.2 The canonical `end` verb (D6a): `bare-metal end` joins `market end`,
+      As built: `market_deal_servicing.seller` gains `interrupt_command` (the pure
+      classification, raising `InterruptRefused`, a `ValueError`, before any effect),
+      `interrupt_operation_key` (the key derived from the request when the caller
+      sends none, the same digest VM's route derived) and `SellerServicing.interrupt`
+      (the administrator evidence item under the operation's key, then notice, or the
+      journaled operator end with filing and the injected `physical` drive run side by
+      side), returning `InterruptResult(kind, outcome, delivery)` with its
+      `settlement_action`. A rate deal is recognised by `SellerDeal.once_only`, the
+      committed projection, rather than the Agreement's `period`. VM's
+      `VmDealLifecycle.interrupt` and its route delegate to it. Bare metal gains
+      `POST /api/v1/admin/deals/{negotiation_id}/interrupt` (payments deals only, 409
+      for any other mechanism, 400 for a caller-supplied time) with
+      `BareMetalInterruptDealRequest`/`Response`; the canonical
+      `StorefrontClient.admin_interrupt_deal`, sync and async, already signs this route
+      and exposes the kind and key, so it is bare metal's typed admin client unchanged.
+      The capability owning both routes is `compute-delivery` (new delta "Both compute
+      storefronts mount the administrator interrupt route"); the deal-lifecycle delta's
+      "Administrator interruption explicitly classifies its cause" now names the kit
+      classification and the attribution refusal. Tests: deal-servicing
+      `tests/unit/test_interrupt.py` (unit: each kind, the once-only default, every
+      refusal, the derived key); bare-metal storefront
+      `tests/integration/test_admin_interrupt.py` (application integration, the
+      composed app through the canonical storefront client: a preemption's dry run
+      records nothing and its send leaves a pending stop, no end or filing; a failure
+      records the operator end with its reason and journals a `delivery_end` filing
+      with cause payee; a same-key retry changing the reason is 409; a caller-supplied
+      time is 400; an unclassifiable request is 409 with nothing recorded). The 409 for
+      a non-payments deal is untested: the harness composes no Alkahest deal. VM's
+      `test_lifecycle_admin.py` passes unchanged against the delegated path. The
+      deal-lifecycle MODIFIED "Lifecycle routes are authenticated per role" now defers
+      to the classification for both storefronts' route.
+- [x] 4B.2 The canonical `end` verb (D6a): `bare-metal end` joins `market end`,
       registered from shared buyer code; `bare-metal teardown` is a deprecated alias
       printing a notice naming `end` for one release (its removal joins task 4A.4's
       gap row); once-only end behaviour as `teardown` had it in v0.3.0 is preserved.
-- [ ] 4B.3 Fixtures on the shipped presets (D8): 4.4's fixtures use the shipped presets
+      As built: `market_deal_lifecycle_buyer.commands.register_end_command` registers
+      `end` (and an optional deprecated alias) from an `EndTarget` the domain opens for
+      a run; `end_deal` ends, then always reads the delivery back once and polls to
+      `--wait-timeout`; `end_exit_code` keeps VM's exit rule. Run options accept
+      `--from`, `--run`, `--run-id` and `-r`, so both domains' existing spellings work;
+      `--config` exists where the domain reads one (bare metal). The output is VM's
+      shape (`progress`, `delivery_view`, `capacity_released`, `delivery_read_error`),
+      and both domains record `delivery_end` and `delivery_end_observed` in the run
+      log. `bare-metal teardown` prints its notice on stderr and keeps the output its
+      callers parse: the end's progress alone on stdout, exit 0 whatever the outcome.
+      Beside v0.3.0 the progress carries the `mode` and `hint` later rounds added, a
+      `ValueError` exits 2 through `BadParameter`, and the alias writes the run-log
+      events; all are additive for a caller parsing stdout.
+      A once-only end still goes through `BuyerLifecycle.end`, which for a non-rate
+      deal is the `end_delivery` v0.3.0's `teardown` called. `arkhai-kit-deal-lifecycle-buyer` 0.1.0 → 0.2.0
+      (earlier sections changed it without a bump); both buyers and `e2e-tests` raised
+      their bound. The e2e bare-metal purchase and real-host scenario now run `end` and
+      read `result["progress"]`; `RECOVERY_COMMANDS` names `end`. Deltas:
+      buyer-orchestration MODIFIED "Compute buyers end delivery through the canonical
+      lifecycle client"; test-compatibility MODIFIED for the two bare-metal purchase
+      requirements naming the verb; deal-lifecycle's rate buyer end names the shared
+      verb. The gap row now carries the alias's removal. `TESTING.md`,
+      `e2e-tests/README.md`, `VALIDATION_RUNBOOK.md` and the kit README name `end`;
+      the deal-lifecycle and buyer-orchestration companions are closeout's (design.md's
+      record). Tests: buyer half `tests/unit/test_end_command.py` (unit: one read
+      without a wait, a fake-time wait to release, an unavailable read, the exit rule,
+      the alias's preserved output and exit code); bare-metal buyer
+      `test_rate_end_cli.py` (unit, `end` and `teardown` through the command module's
+      `end_target` factory with a mocked lifecycle: surrender forwarded, the record
+      hook called, each verb's output, the notice only on the alias); VM
+      `test_rate_end_cli.py` unchanged. The bare-metal storefront's
+      `test_the_buy_command_settles_over_a_run_log_a_later_command_reloads`
+      (application integration, the real buyer CLI against the composed storefront)
+      runs `teardown` twice over a once-only deal through the real `end_target` and run
+      log, and checks the two progress outputs' `observed_at` and receipt agree: the
+      once-only end, the progress-only shape and exit 0. VM's test patches
+      `end_context`, beneath its real `end_target`. No test reads the recorded run-log
+      events back.
+- [x] 4B.3 Fixtures on the shipped presets (D8): 4.4's fixtures use the shipped presets
       with default buyers under a lane declaration listing `returned`; the charged
       variant is a separate observation using the per-term waiver, not
       `allow_unprotected_terms`; move `preempt.py` and `preempt.lane.toml` from
       `domains/vms/storefront/examples` to a shared kit location, and update
       `docs/attachments/spot-deals-section-4/index.md`.
+      As built: `kit/deal-servicing/examples/preempt_first_use.py` and its
+      `preempt.lane.toml`, beside the kit's other seller first uses, in its `first-use`
+      target. The declaration lists `charged` and `returned`: the shipped presets
+      return on the payee's stop and at the term end, and the payer's stop always
+      charges its started period, which the declaration check reads too. A default
+      buyer approves both shipped options; the charged spot variant is refused by a
+      default buyer and approved by one waiving `charged_term_end` and
+      `charged_preemption`. A kit cannot import a domain, so the first use drives
+      `SyncSellerLifecycleClient.notice`, the client both `deals preempt` verbs
+      delegate to, instead of each domain's CLI; both CLIs' delegation stays proven by
+      the VM storefront's `tests/integration/test_spot_notice.py`, which installs the
+      bare-metal storefront and drives each domain's `deals preempt`. The examples
+      keep `USD/2` until task 6.1 moves fixtures to `USD/6`. The dropped
+      `one_seller_stop` count no longer held since
+      4A's identical retry resends. `arkhai-core-storefront-client` joins the kit's dev
+      group (the seller client signs through it). Test:
+      `kit/deal-servicing/tests/integration/test_preempt_first_use.py` (library
+      integration: runs the entry point's `main` on its profile, real SQLite and the
+      in-process routes) — this step's tooling refuses running examples directly.
 - [ ] 4B.4 Restore the carried tests: every case in `carried-tests/` returns to the
       module its file names, each `recurring_world` reduced to the injected servicing
       declaration and the pool's delivery deadline (the helper, timing projection,
@@ -617,6 +705,57 @@ record points R6, R11, R18, R20, R21 #48 and task 4.5a.
 
 Validation: deal-servicing, buyer-half and both buyers' unit suites; both storefronts'
 application suites; the compose lanes with Docker and the local Helm part for 4B.5.
+
+## Section 4B notes and handoff
+
+- Stopped after 4B.3 on the session's size: 4B.4 (eight carried cases and two
+  `recurring_world` modules, about 680 lines of fixtures to reduce), 4B.5 (a scenario
+  per compute lane) and 4B.6 (the watchdog across the buyer half, both `buy`
+  commands, the profile and the deal read, with an application test per domain) are
+  unstarted, and each is a session's work on its own. The owner accepted the split:
+  4B.1–4B.3 are committed on their own, and 4B.4, 4B.5 and 4B.6 each take a fresh
+  session, from section 4B's first unchecked task, before sections 5 and 6.
+- Never run a kit's or the VM storefront's tests with a plain `uv run pytest`: without
+  `--find-links` uv relocks the project against PyPI's released internal packages (it
+  rewrote the buyer half's lock to contracts 0.1.0 until `make lock` restored it), and
+  the VM storefront's resolution fails outright. Run `make -C <package> test` (or its
+  `test-unit`/`test-integration`), after `make dist` when a kit changed. `uv run
+  --no-sync`, `uv run --find-links …`, `git restore` and `git checkout --` are refused
+  by this step's tooling; `cd domains/bare_metal/storefront && uv run pytest <files>`
+  after `make -C domains/bare_metal/storefront reinit` works.
+- End-to-end scenarios exercising 4B.1–4B.3 once deployed: `e2e_vm_payment_deal` and
+  `e2e_vm_dispute_lost_filing` call the VM interrupt route, now over the kit
+  classification; `e2e_bare_metal_payment_deal` and `e2e_bare_metal_qualification`
+  end their purchases with `market bare-metal end` and read its `progress`;
+  `e2e_bare_metal_deal`, which no lane selects (it needs a real host), recovers with
+  `end` too. No lane scenario calls bare metal's new interrupt route or a rate deal.
+  Owed by validation: none.
+- Evidence for 4B.1–4B.3, after `make dist` and relocking: deal-servicing 86;
+  buyer half 27; VM buyer 323; bare-metal buyer 71; VM storefront 1194 unit (1
+  skipped) and 591 integration; bare-metal storefront 636. Then
+  `scripts/change-workflow run pre-commit`: after-functional-change (`make lock`)
+  passed; pre-commit-functional (`make dist-clean`, `make check-packaging`, `make
+  test`, every suite) passed; pre-commit (index, tasks, skills, OpenSpec strict,
+  `make check-repository`: comment hygiene, citations, specification index, decision
+  destinations, history wording, version bumps, local imports, capability index)
+  passed. The first pre-commit run failed on the bare-metal storefront's buy-and-
+  teardown test, which parses `teardown`'s progress-only output, and on MODIFIED
+  deltas missing permanent scenarios; the alias now keeps that output and the deltas
+  carry every scenario. Docstring, help-text and wording edits after that run
+  (the alias's help, `SellerServicing.interrupt`'s raises, a test comment) were
+  followed by the buyer half's suite only; the commit's own pre-commit run covers
+  them.
+- `bare-metal-and-credits-domain-stacks` has a buyer-orchestration delta requiring
+  `market bare-metal teardown --from <run_id>`; whichever of the two changes lands
+  second reconciles it with `end` and the alias.
+- The fresh-context check's findings declined: a third copy of the run-on-a-thread
+  helper (`_run` in the buyer half beside each domain's `run_sync`), since moving the
+  domains' other commands onto it is outside these tasks; bare metal's route answers
+  422 for VM's Alkahest payout fields, which it does not model, where VM answers 400;
+  the canonical `admin_interrupt_deal` returns a dict rather than a validated model,
+  as every admin method of that client does; the first use's `market_core` and
+  `market_settlement_runtime` arrive through the payments kit rather than the dev
+  group.
 
 ## 5. Identity re-anchoring
 

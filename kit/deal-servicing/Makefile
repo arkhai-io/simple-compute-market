@@ -26,3 +26,4 @@ first-use: reinit
 	uv run --find-links $(DIST_DIR) python examples/budget_first_use.py
 	uv run --find-links $(DIST_DIR) python examples/respondent_first_use.py
 	uv run --find-links $(DIST_DIR) python examples/receipt_first_use.py
+	uv run --find-links $(DIST_DIR) python examples/preempt_first_use.py

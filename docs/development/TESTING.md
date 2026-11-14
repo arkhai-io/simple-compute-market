@@ -51,8 +51,8 @@ module imports from another, no name inside core — because an import-style
 change can silently undo such a patch, and the test then runs the real
 collaborator. The bare-metal buyer CLI
 (`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`) has this shape:
-its tests replace `fresh_identity`, `recovery_identity`, `registry_client`, and
-`payment_approval`. The other CLIs' tests still replace library and imported
+its tests replace `fresh_identity`, `recovery_identity`, `registry_client`,
+`payment_approval`, and `end_target`. The other CLIs' tests still replace library and imported
 names; [`ROADMAP.md`](ROADMAP.md) records that gap.
 
 **Composition-boundary convention:** When a role receives a versioned domain contract, unit tests should inject a distinct compatible object and assert object identity at each constructor boundary rather than patching the default resolver. Fail-closed cases belong at the composition root and must assert that persistence, network, and worker collaborators were not constructed. Existing integration tests remain responsible for public behavior and persisted-state parity.
@@ -494,7 +494,7 @@ whichever ending ran. How a lease ends is shared only among scenarios that end
 the same way. The expiry stages back-date the lease, step one lease-watchdog
 cycle, and advance convergence to tearing down; the Alkahest set and the VM
 purchase run them. The bare-metal purchases end by the buyer's
-`market bare-metal teardown` in a stage of their own, which ends in the state
+`market bare-metal end` in a stage of their own, which ends in the state
 teardown completion starts from.
 
 The purchase's own stages are defined once, in
@@ -590,7 +590,7 @@ project of its own:
   shared purchase stages, then receipt-gated mock access, readiness read through
   the storefront's settle wait on the negotiation, same-transaction and
   same-fulfillment re-drive through the canonical lifecycle `commit`, the
-  buyer's `market bare-metal teardown`, then the seller's separate refund of the
+  buyer's `market bare-metal end`, then the seller's separate refund of the
   still-held payment and restored whole-host capacity. Unless the last stage
   recorded the deal ended, the module's cleanup opens any mock gate still
   closed, finds the purchase in the buyer's run log, refunds it if the log
@@ -936,7 +936,7 @@ extend an accepted Agreement, move a clock, or accept late delivery.
   ends both leases by back-dating and stepped watchdog cycles.
 - `e2e_bare_metal_qualification` (observations 4 and 5) runs the normal cycle,
   then the successor and refusal cycle, which needs the first cycle's consumed
-  UID, each lease ended by the buyer's `market bare-metal teardown`. It checks no
+  UID, each lease ended by the buyer's `market bare-metal end`. It checks no
   GPU.
 - `e2e_real_provisioning_reapply` (observation 6) reapplies both hosts'
   canonical registrations, steps a publication cycle, and reads the consumed-UID

@@ -4,7 +4,7 @@ The stages in ``helpers/buyer_purchase_stages.py`` hold the purchase's control
 flow and every assertion that is not bare metal's. ``BareMetalPurchaseParts``
 is what every bare-metal purchase adds to its canonical deal's driver, mock or
 real: the listing as the buyer's purchase profile reads it and the payments
-option it states; ``market bare-metal buy`` and ``market bare-metal teardown``
+option it states; ``market bare-metal buy`` and ``market bare-metal end``
 with the buyer's configuration; the deal's fulfillment as the seller reports it
 to the buyer; and the lease view, which finds the purchase's hold by its
 negotiation. ``BareMetalPurchaseDriver`` is the lane's, over
@@ -156,7 +156,7 @@ class BareMetalPurchaseParts:
     """
 
     buy_command = "market bare-metal buy (arkhai.payments.v1)"
-    teardown_command = "market bare-metal teardown"
+    teardown_command = "market bare-metal end"
     buy_timeout_seconds = PAYMENT_TIMEOUT_SECONDS + 30.0
     # After its approval, ``market bare-metal buy`` records its end only once
     # the seller has accepted its commit; a failed commit ends it unrecorded.
@@ -185,7 +185,7 @@ class BareMetalPurchaseParts:
         ]
 
     def teardown_arguments(self, run_id: str) -> list[str]:
-        return ["bare-metal", "teardown", "--run-id", run_id, "--config", self.config_path]
+        return ["bare-metal", "end", "--run-id", run_id, "--config", self.config_path]
 
     def purchase_fulfillment(self, negotiation_id: str) -> dict[str, Any]:
         # The command ended after the seller accepted its commit, which

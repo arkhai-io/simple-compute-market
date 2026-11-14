@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import builtins
 import hashlib
-from collections.abc import Callable
+import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any, Literal, NamedTuple
 
 from market_deal_lifecycle.adapters import (
     DisputeAdapter, DisputeAdapterTable, DisputeBinding,
@@ -15,8 +18,9 @@ from market_deal_lifecycle.adapters import (
 )
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
-    Accepted, AuthorityView, DealPage, DealSummary, LifecycleCommand, LifecycleOutcome,
-    FilingProgress, LifecycleRead, LifecycleState, ListDealsRequest, Pending, Reference, Rejected, SubmitResponse, WireModel,
+    Accepted, AuthorityView, DealPage, DealSummary, DeliveryView, EvidenceItem, LifecycleCommand, LifecycleOutcome,
+    FilingProgress, LifecycleRead, LifecycleState, ListDealsRequest, Pending, Reference, Rejected, SubmitResponse,
+    Unknown, WireModel,
 )
 from market_identity import Identity, canonical_json
 from pydantic import Field, JsonValue
@@ -25,6 +29,26 @@ from .end import SQLiteOperationStore
 from .evidence import EvidenceSession, in_transaction, transaction
 from .journal import Classification, EndSession, FinalRequest, JournalIntent, atomic, stable_ref
 from .watch import DealWatch, WatchSession
+
+logger = logging.getLogger(__name__)
+
+InterruptionKind = Literal["preemption", "failure"]
+
+
+class InterruptRefused(ValueError):
+    """An administrator interruption refused before any notice, end or filing."""
+
+
+class InterruptResult(NamedTuple):
+    """The command an interruption sent, its outcome, and the deal's delivery."""
+
+    kind: Literal["notice", "delivery_end"]
+    outcome: LifecycleOutcome
+    delivery: DeliveryView
+
+    @property
+    def settlement_action(self) -> Literal["notice_stop", "delivery_end_filing"]:
+        return "notice_stop" if self.kind == "notice" else "delivery_end_filing"
 
 
 class SellerDeal(WireModel):
@@ -42,6 +66,50 @@ class SellerDeal(WireModel):
     @property
     def dispute_binding(self) -> DisputeBinding | None:
         return DisputeBinding(self.negotiation_id, self.commitment_ref, self.dispute) if self.dispute else None
+
+
+def interrupt_command(
+    deal: SellerDeal, *, operation_key: str, reason: str | None,
+    interruption_kind: InterruptionKind | None,
+) -> LifecycleCommand:
+    """The lifecycle command an administrator interruption of ``deal`` sends.
+
+    Preemption is the seller's notice, admitted only under the accepted payee
+    entitlement; failure ends delivery and files ``delivery_end``. A rate deal
+    must name its kind, since its cause decides who pays for the remaining
+    period; a once-only deal defaults to failure, so a released caller, which
+    sends no kind, gets the operator end it asks for. Both kinds need the
+    administrator's reason. Every refusal is raised before anything is recorded
+    or sent.
+    """
+    if interruption_kind is None:
+        if not deal.once_only:
+            raise InterruptRefused("rate interruption requires interruption_kind: preemption or failure")
+        interruption_kind = "failure"
+    if interruption_kind not in ("preemption", "failure"):
+        raise InterruptRefused("unknown interruption kind")
+    if interruption_kind == "preemption" and "payee" not in deal.entitlements:
+        raise InterruptRefused("accepted option has no payee entitlement; preemption refused")
+    if not reason or not reason.strip():
+        raise InterruptRefused("administrator interruption requires a reason")
+    return LifecycleCommand(
+        negotiation_id=deal.negotiation_id, operation_key=operation_key,
+        kind="notice" if interruption_kind == "preemption" else "delivery_end",
+    )
+
+
+def interrupt_operation_key(
+    negotiation_id: str, *, actor: Identity, reason: str | None, interruption_kind: InterruptionKind | None,
+) -> str:
+    """The operation key of an interruption whose caller supplied none.
+
+    It is derived from everything the request asserts, so a resent request is a
+    retry of the same operation and a changed one is a new operation.
+    """
+    return hashlib.sha256(canonical_json({
+        "negotiation_id": negotiation_id, "administrator": actor.model_dump(mode="json"),
+        "reason": reason, "interruption_kind": interruption_kind,
+    })).hexdigest()
 
 
 class SellerSession:
@@ -256,6 +324,64 @@ class SellerServicing:
         return await submit_payment(
             command, PaymentBinding(deal.negotiation_id, deal.payment), self.payments, self.operations,
         )
+
+    async def interrupt(
+        self, negotiation_id: str, *, actor: Identity, reason: str,
+        physical: Callable[[str], Awaitable[Any]],
+        operation_key: str | None = None, interruption_kind: InterruptionKind | None = None,
+        dry_run: bool = False,
+    ) -> InterruptResult:
+        """Carry out an administrator interruption as ``interrupt_command`` classifies it.
+
+        ``physical`` drives the deal's physical end, normally end service's
+        ``drive_physical``. A dry run classifies and records nothing. A
+        classification refusal raises ``InterruptRefused`` before any effect; a
+        same-key retry changing the administrator or reason raises the evidence
+        store's ``ValueError``, and an unknown deal ``KeyError``.
+        """
+        deal = await asyncio.to_thread(self._deal, negotiation_id)
+        key = operation_key or interrupt_operation_key(
+            negotiation_id, actor=actor, reason=reason, interruption_kind=interruption_kind,
+        )
+        command = interrupt_command(deal, operation_key=key, reason=reason, interruption_kind=interruption_kind)
+        if dry_run:
+            return await self._interrupted(command, Pending(reason="dry run; no interruption submitted"))
+        # The administrator's attribution is kept for a notice as for a failure.
+        # Its evidence ID is the operation's, so a same-key retry changing the
+        # author or reason is refused here.
+        evidence = EvidenceItem(
+            evidence_id="administrator-interrupt:" + key,
+            kind="administrator_interrupt", classification="seller_assertion",
+            recorded_at=self.clock(), body=base64.b64encode(canonical_json({
+                "command": command.model_dump(mode="json"),
+                "administrator": actor.model_dump(mode="json"), "reason": reason,
+            })),
+        )
+        await in_transaction(self.path, lambda conn: EvidenceSession(conn).put(negotiation_id, evidence))
+        if command.kind == "notice":
+            # Only the authority's verified stop, read by the watch, ends delivery.
+            return await self._interrupted(command, await self.submit(command, actor=actor, reason=reason))
+
+        # The end is journaled before filing and physical work start, since
+        # either may yield before it writes and must not miss the new end.
+        refusal = await self.record_operator_end(command, actor=actor, reason=reason)
+        if refusal is not None:
+            return await self._interrupted(command, refusal)
+        outcome, progress = await asyncio.gather(
+            self.submit(command, actor=actor, reason=reason), physical(negotiation_id),
+            return_exceptions=True,
+        )
+        if isinstance(progress, BaseException):
+            logger.error("Administrator end of %s awaits physical recovery: %s", negotiation_id, progress)
+        if isinstance(outcome, BaseException):
+            logger.error("Administrator filing for %s awaits authority recovery: %s", negotiation_id, outcome)
+            outcome = Unknown(reason="delivery-end filing awaits authority recovery")
+        return await self._interrupted(command, outcome)
+
+    async def _interrupted(self, command: LifecycleCommand, outcome: LifecycleOutcome) -> InterruptResult:
+        read = await asyncio.to_thread(self.delivery_read, command.negotiation_id)
+        kind: Literal["notice", "delivery_end"] = "notice" if command.kind == "notice" else "delivery_end"
+        return InterruptResult(kind=kind, outcome=outcome, delivery=read.delivery)
 
     async def _operator_end(
         self, command: LifecycleCommand, *, actor: Identity, reason: str,

@@ -792,8 +792,8 @@ Destinations are planned, not claims of implemented behaviour.
 | D6–D6a seller notice, the rate buyer end and the CLI | `deal-lifecycle` `spec.md` (foundation-created; [delta](specs/deal-lifecycle/spec.md)) and `architecture.md`; `docs/development/ARCHITECTURE.md`, "Release" |
 | D4's freshness window | `openspec/specs/settlement-servicing/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` for `snapshot_freshness_seconds` |
 | D5's approval policy | `openspec/specs/buyer-orchestration/spec.md` |
-| D6's administrator interrupt classification and routes | `deal-lifecycle` `spec.md` and `architecture.md`; `openspec/specs/vm-storefront-fulfillment/spec.md` for the VM route; no bare-metal storefront specification exists, so section 4B names the capability that owns bare metal's route |
-| D6a's end verb | `deal-lifecycle` `spec.md`; `openspec/specs/buyer-orchestration/spec.md` |
+| D6's administrator interrupt classification and routes | `deal-lifecycle` `spec.md` and `architecture.md` for the kit classification; `openspec/specs/compute-delivery/spec.md` for both compute storefronts' route, since no bare-metal storefront specification exists and compute-delivery is the capability whose requirements bind both ([delta](specs/compute-delivery/spec.md)) |
+| D6a's end verb | `deal-lifecycle` `spec.md`; `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/test-compatibility/spec.md` for the bare-metal purchase's `end`; `deal-lifecycle` and `buyer-orchestration` `architecture.md`, which still name `market bare-metal teardown` |
 | D7 declarations, the materialization door, the `chosen` presupposition and rotation | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/deal-lifecycle/architecture.md`, "External authorities"; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | D8 vectors, evidence labels and the recurring-purchase E2E | `openspec/specs/test-compatibility/spec.md` and `architecture.md`; `kit/arkhai-payments/README.md` |
 | D9 the staged `approval_window` rename | `openspec/specs/settlement-configuration/spec.md` (wire field and alias); `docs/development/RELEASING.md` |
