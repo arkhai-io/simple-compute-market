@@ -492,9 +492,12 @@ def arkhai_payments_option_builder(
             value=clause_rate_minor_units(clause.rate, clause.per, params.asset),
         ))
 
-    option_params = params.model_dump(mode="json", exclude_none=True, exclude={
+    # A once option names approval expiry `window`, which every released buyer
+    # reads, whichever name the seller's clause used.
+    option_params = {**params.model_dump(mode="json", exclude_none=True, exclude={
         "asset", "dispute_window_seconds", "case_hold_max_seconds", "delivery_deadline_seconds",
-    })
+        "window", "approval_window",
+    }), "window": params.approval_term}
     price = SettlementPrice(asset=params.asset, rates=rates)
     settlement = {"schema": ARKHAI_PAYMENTS_MECHANISM, **option_params}
     option = SettlementOption(
@@ -552,9 +555,16 @@ def _payee_projection(option: Any) -> str | None:
     return params.payee_account if params is not None else None
 
 
-def _window_projection(option: Any) -> str | None:
+def _approval_window_projection(option: Any) -> str | None:
     params = _option_params(option)
-    return (params.approval_window or params.window) if params is not None else None
+    return params.approval_term if params is not None else None
+
+
+def _window_projection(option: Any) -> str | None:
+    # The released field answers for once options, whose writers name the term
+    # `window`; a rate option is discovered by `approval_window`.
+    params = _option_params(option)
+    return params.approval_term if params is not None and params.period is None else None
 
 
 def _period_projection(option: Any) -> str | None:
@@ -628,7 +638,7 @@ def create_arkhai_payments_registration() -> MechanismRegistration:
             descriptor=FieldDescriptor(
                 name="arkhai_payments.approval_window", value_type=QueryValueType.STRING,
                 operators=_CLAUSE_OPERATORS, description="approval expiry, independent of adjudication holds",
-            ), roles=frozenset({"buyer", "seller"}), projector=_window_projection,
+            ), roles=frozenset({"buyer", "seller"}), projector=_approval_window_projection,
         ),
         SettlementClauseField(
             descriptor=FieldDescriptor(
@@ -645,7 +655,7 @@ def create_arkhai_payments_registration() -> MechanismRegistration:
                 name="arkhai_payments.window",
                 value_type=QueryValueType.STRING,
                 operators=_CLAUSE_OPERATORS,
-                description="the payment mandate's authorization window",
+                description="approval expiry of a once-only option; absent for rate options",
             ),
             roles=frozenset({"buyer", "seller"}),
             projector=_window_projection,

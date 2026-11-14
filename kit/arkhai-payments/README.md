@@ -225,15 +225,23 @@ candidate, including a buyer that approved and never sent commit. The domain's
 idempotent settle callback decides whether to serve or refund; a crash or one
 candidate failure does not discard the remaining candidates.
 
-## Once payment lifecycle
+## The payment lifecycle adapter
 
-`market_arkhai_payments.adapter.PaymentAdapter` binds one exact accepted
-Agreement and its stored `PaymentSettlementData`. It supports voluntary
-`reverse` commands with exactly `payload={"part": "0", "amount": "100"}`:
-part references and positive minor-unit amounts are canonical decimal strings.
-Only the part's reverse authorities may send them. Rate commands, supplied
-`at`, and exceptional-end fields refuse before I/O. Exceptional seller ends
-belong to the dispute adapter, not to this payment adapter.
+`market_arkhai_payments.adapter.PaymentAdapter` is the one payments transaction
+adapter, for once-only and rate mandates alike. It binds one exact accepted
+Agreement and its stored `PaymentSettlementData`, and is composed of parts every
+part kind shares — verified reads, event projection, reverse, refusal
+classification and descriptor recording — with rate behaviour
+(`market_arkhai_payments.rate_parts`) composed in only when the mandate has a
+rate part. Once and rate behaviour do not inherit from one another. Every
+mandate supports voluntary `reverse` commands with exactly
+`payload={"part": "0", "amount": "100"}`: part references and positive
+minor-unit amounts are canonical decimal strings. Only the part's reverse
+authorities may send them. A once-only mandate refuses rate commands, and its
+billing start is a no-op once its commitment and the activation evidence are
+verified. A supplied `at` on a reverse, and exceptional-end fields, refuse
+before I/O. Exceptional seller ends belong to the dispute adapter, not to this
+payment adapter.
 
 Construction takes the acting account, `client_for_owner`, a required
 `verify_snapshot(signed, minimum_sequence) -> bool`, and an optional durable
@@ -246,13 +254,19 @@ by ref and case. Partial refunds never imply a delivery end. Once-only delivery
 authorization verifies commitment evidence; billing start makes no financial
 operation.
 
-Every part request uses `OperationKeys.part_event`. Submit reads before sending
-to recover an earlier lost answer and reject changed content; after sending it
-reads again, because an unsigned POST response does not prove the outcome.
-An unreachable or unverifiable post-write read is `unknown`, resolved by read
-and an identical-key retry, never by assuming the money moved or did not move.
-Callers use the foundation's durable operation store before submit; the adapter
-keeps no ledger, cursor store or daemon.
+Every part request uses `OperationKeys.part_event`. Before any I/O, submit
+records each operation's descriptor digest through the caller's operation store,
+`OperationKeys.store`, under a key derived from the operation key, the part and
+the kind: a retry with changed content is refused there, before any authority
+call, and an identical retry resends the same request identity, which the
+authority answers with the event it recorded. A rate deal's every monetary
+operation requires the store; a once-only reverse sent without one, as the
+seller's refund path does, relies on the authority's `request_id_reused`
+refusal of changed bytes. After sending, submit reads again, because an unsigned
+POST response does not prove the outcome. An unreachable or unverifiable
+post-write read is `unknown`, resolved by read and an identical-key retry, never
+by assuming the money moved or did not move. The adapter keeps no ledger, cursor
+store or daemon.
 
 From the repository root, `make dist && make -C kit/arkhai-payments first-use`
 starts an invocation-owned fixture and demonstrates a lost reverse response,
@@ -356,14 +370,17 @@ for both compute storefronts. Terms resolves notices, setup opt-out, bounds,
 delivery deadlines and penalty recommendations; the helper only encodes the
 resolved terms. `period` and `reserve_ahead_seconds` are paired positive fixed-unit
 parameters. Optional `setup_amount` is additional positive minor-unit money in the
-price's asset. Rate presets use `approval_window`; existing once options retain
-`window`. A rate's maximum end is the accepted whole-second start plus its finite
+price's asset. `window` and `approval_window` name one term, approval expiry:
+readers accept either and refuse a document naming both. Rate presets write
+`approval_window`; once options keep writing `window`, whichever name the
+seller's clause used, so released buyers keep reading them. A rate's maximum end is the accepted whole-second start plus its finite
 Agreement duration, never shifted after late activation.
 
 The public registration projects `arkhai_payments.period` as text or missing
 (`None`), and `arkhai_payments.billing_kind` as `total` or `per_period`. Setup
 beside rate remains `per_period`; there is no fabricated zero-length period.
-`arkhai_payments.approval_window` projects approval timing, not adjudication.
+`arkhai_payments.approval_window` projects approval timing, not adjudication, for
+every option; `arkhai_payments.window` projects it only for once options.
 Missing values use the existing clause descriptor's missing-value rule; no
 presence operator is added.
 
@@ -389,29 +406,28 @@ snapshot_freshness_seconds` (default 5); every stop, end and funding bound is
 still checked at the storefront's clock. `PaymentApproval(terms_policy=...)`
 refuses at approval the default-buyer refusals the run's policy did not waive.
 
-`RatePaymentAdapter` accepts an exact stored commitment, account credential
-factory, snapshot verifier, durable sequence floor and injectable clock. It
-exports immutable `PaymentOperation` descriptors through `describe` and
-`billing_operations`. The caller persists the exact descriptor/digest before
-calling `submit(..., journaled_digest=descriptor.digest)` or
-`start_billing(key, evidence, journaled_digest=operations_digest(descriptors))`.
-The latter uses only the end service's supplied billing key and the shared
-versioned `DeliveryEvidence`; activation, ready, reservation and fulfillment
-references are required. Site verification and journal persistence belong to
-the caller. No rate call allocates another billing-start key or stores a ledger.
-The continuation composition must pass these descriptors from its journal; the
-once-only end-service caller alone is not recurring enablement.
+For a rate mandate the adapter also takes an injectable clock and the freshness
+window. It exports immutable `PaymentOperation` descriptors through `describe`
+and `billing_operations` for audit. `start_billing(keys, evidence)` starts every
+rate part under end service's one billing-start key, `keys.operation_key`, and
+records each per-part descriptor through `keys.store` before the first call; it
+takes the shared versioned `DeliveryEvidence`, and activation, ready,
+reservation and fulfillment references are required. `authorize(phase,
+evidence, billing)` reads end service's `JournaledBillingStart` at disclosure:
+a start not bound to that intent is pending, and a refused journaled result
+refuses. Site verification and journal persistence belong to the caller. No
+rate call allocates another billing-start key or stores a ledger.
 
 Seller `notice` is admitted by seller servicing against its immutable accepted
-payee entitlement. The rate adapter expands it into explicit per-rate-part
-stops using that same command key, persists all descriptor digests through the
-caller's operation store before the first authority call, and returns verified
+payee entitlement. The adapter expands it into explicit per-rate-part stops
+using that same command key, records all descriptor digests through the caller's
+operation store before the first authority call, and returns verified
 controlling pending/final stops. A same-key retry recovers a lost response and
-never postpones an earlier payer stop. Notice carries no treatment override or
-local scheduling promise. An ordinary deal-level payer `stop` with an empty
-payload uses the same expansion and journal contract; each derived stop retains
-the accepted payer notice. Explicit part commands still require their exact
-caller-journaled descriptor digest.
+never postpones an earlier payer stop: a stop the authority answers with an
+already winning stop is satisfied only when that stop is effective no later.
+Notice carries no treatment override or local scheduling promise. An ordinary
+deal-level payer `stop` with an empty payload uses the same expansion and
+recording; each derived stop retains the accepted payer notice.
 
 Command failures are classified from their structured API codes. HTTP 409
 request_id_reused and hold_not_reversible return a rejection requiring repair;

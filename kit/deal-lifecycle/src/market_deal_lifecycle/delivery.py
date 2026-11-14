@@ -11,6 +11,7 @@ from market_deal_lifecycle_contracts.models import (
 )
 from pydantic import Field
 
+from .operations import OperationKeys
 from .terms import Version
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -60,6 +61,18 @@ class BillingStartResult(WireModel):
     no_op: bool = False
 
 
+class JournaledBillingStart(WireModel):
+    """End service's one billing-start intent, as its journal holds it.
+
+    The operation key names the intent whose per-part starts the payment
+    authority must carry; the result, once the journal has one, can refuse
+    disclosure definitively. It is the caller's record, never authority state.
+    """
+
+    operation_key: Reference
+    result: BillingStartResult | None = None
+
+
 class OnceDeliveryPolicy:
     """Once-only delivery makes no new financial action after verifying commitment.
 
@@ -79,7 +92,7 @@ class OnceDeliveryPolicy:
             evidence_refs=[evidence.commitment_ref],
         )
 
-    async def start_billing(self, operation_key: str, evidence: DeliveryEvidence) -> BillingStartResult:
+    async def start_billing(self, keys: OperationKeys, evidence: DeliveryEvidence) -> BillingStartResult:
         if evidence.activated_delivery is None:
             return BillingStartResult(outcome=Rejected(reason="activation evidence is required"))
         if not await self._validate_commitment(evidence):

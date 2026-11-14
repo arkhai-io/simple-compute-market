@@ -660,7 +660,15 @@ and null `settles_through`, so a once-deal read stays valid for
 `kit/deal-lifecycle-contracts` 0.1.0 clients; the contracts take a minor version, and
 a test validates a once-deal read against the 0.1.0 model. A `VersionedEnvelope`
 covers an incompatible lifecycle-read change if one is ever needed; nothing else is
-added for versioning.
+added for versioning. The omission lives in the contracts' models, which drop those
+fields at their defaults whenever they are dumped, so no producer of the wire shape
+can forget it.
+
+Which raw stop is a request follows the parts that bound delivery. In a once-only
+mandate a part's stop, its terms end included, stays the deal's payment end, as
+released. Beside a rate part every raw stop is a request — the setup part's terms
+end at the Agreement start among them, which would otherwise read as the deal's end
+— and the deal's end is a rate part's final stop.
 
 ### D11. One payments transaction adapter, by composition
 
@@ -676,6 +684,17 @@ stage or either buyer. The stop path does not pre-read, since D4's recording ref
 a changed retry. The protocol's `authorize` gains an optional journaled billing-start
 argument, and `start_billing` takes `OperationKeys` instead of a bare key, so it can
 carry the caller's operation store.
+
+The journaled billing start is end service's record, its operation key and, once
+recorded, its result; end service passes it at disclosure alone and builds the
+billing keys over its own operation store. With every pre-read gone, D4's repeated
+stop is judged after the send: the authority answers a stop of a stopped part with
+the winning stop, which satisfies the new one only when it is effective no later. A
+once-only reverse records its descriptor when the caller supplies a store; the
+seller's refund path holds none, and relies on the authority's `request_id_reused`
+refusal of changed bytes. Whole-part reverse amounts are inferred for every once
+part, a setup part beside a rate included, since no once part earns again. A refusal
+reason begins with the authority's code, which callers classify by.
 
 The adapter's earlier shape, a rate class subclassing the once-only one and
 switching its rate guard off, is the inverted hierarchy this replaces: two classes

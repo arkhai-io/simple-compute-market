@@ -1,0 +1,6 @@
+# The exact version of every build requirement a project's [build-system] names.
+# Every Makefile that runs `uv build` exports this file as UV_BUILD_CONSTRAINT;
+# `make check-build-requirements` refuses a requirement it does not pin. Moving a
+# pin changes every wheel's bytes, so it bumps every declared distribution's
+# version (docs/development/RELEASING.md, "Versioning policy").
+hatchling==1.33.0

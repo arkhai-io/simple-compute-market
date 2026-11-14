@@ -6,9 +6,8 @@ from market_core.schemas import derive_settlement_option_id
 from market_deal_lifecycle.delivery import DeliveryEvidence
 
 from market_arkhai_payments import PaymentSettlementData, derive_mandate, mandate_policy_for_agreement, transaction_id
-from market_arkhai_payments.adapter import pinned_snapshot_verifier
+from market_arkhai_payments.adapter import PaymentAdapter, pinned_snapshot_verifier
 from market_arkhai_payments.fixtures import FakePaymentsClient
-from market_arkhai_payments.rate_adapter import RatePaymentAdapter
 
 from payment_terms import BUYER, PAYEE, SERVICE, agreement, config
 
@@ -20,6 +19,8 @@ def rate_agreement(*, setup="25", payee_notice=30, payer_notice=300, treatment="
     raw = agreement(accepted_at=stamp, start_utc=stamp, amount="100")
     option = raw["settlement"]
     option["price"]["rates"] = [{"field": "amount", "per": "hour", "value": 6000}]
+    # A rate option names approval expiry `approval_window`, never also `window`.
+    del option["settlement"]["window"]
     option["settlement"].update(approval_window="PT60S", period="PT60S", reserve_ahead_seconds=120)
     if setup is not None:
         option["settlement"]["setup_amount"] = setup
@@ -56,8 +57,18 @@ def approved(*, client_type=FakePaymentsClient, account=PAYEE, **terms):
     fake = client_type(signer=SERVICE, observed_at=NOW)
     fake.engine.fund(BUYER, "USD/2", 1_000_000)
     fake.receipt = fake.engine.approve(data.mandate, account=BUYER)
-    adapter = RatePaymentAdapter(
+    adapter = PaymentAdapter(
         raw, data, account=account, client_for_owner=fake,
         verify_snapshot=pinned_snapshot_verifier(raw, data, config()), clock=lambda: fake.observed_at,
     )
     return raw, data, fake, adapter, evidence(raw, data)
+
+
+class MemoryOperations:
+    """The caller's operation store: new or identical digests pass, changed ones refuse."""
+
+    def __init__(self):
+        self.digests = {}
+
+    async def check_and_record(self, negotiation_id, operation_key, digest):
+        return self.digests.setdefault((negotiation_id, operation_key), digest) == digest

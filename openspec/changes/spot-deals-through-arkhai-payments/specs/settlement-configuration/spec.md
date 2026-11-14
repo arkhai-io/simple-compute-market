@@ -53,6 +53,27 @@ SCM MUST refuse to materialize a rate mandate whose treatments or setup charge t
 - **WHEN** a previously materialized rate deal is recovered with new publication disabled
 - **THEN** its existing servicing continues under accepted terms
 
+### Requirement: Approval expiry is one term under two names
+Approval expiry in `arkhai.payments.v1` option parameters MUST be read under either name, `window` or `approval_window`, as one term, and a document giving both a value MUST be refused rather than reconciled; a null names neither. Rate options MUST be written with `approval_window`; once options MUST be written with `window`, whichever name the seller's clause used, so buyers reading only `window` read them. The `arkhai_payments.approval_window` discovery field MUST project approval expiry for every option; `arkhai_payments.window` MUST project it only for once options.
+
+#### Scenario: A buyer reads either name
+- **WHEN** a buyer reads an option naming approval expiry `window` or `approval_window`
+- **THEN** both give the same expiry
+- **AND** an option naming both is refused, even when they agree
+
+#### Scenario: A seller's clause names approval_window for a once option
+- **WHEN** a once option is published from a clause that names `approval_window`
+- **THEN** the option carries the expiry as `window` and not `approval_window`
+
+#### Scenario: A rate option is discovered
+- **WHEN** a buyer filters on approval expiry
+- **THEN** `arkhai_payments.approval_window` matches rate and once options alike
+- **AND** `arkhai_payments.window` is absent for a rate option
+
+#### Scenario: The registry holds a rate option
+- **WHEN** a storefront publishes a rate option naming `approval_window`
+- **THEN** the registry accepts and returns it unchanged, holding mechanism parameters opaquely
+
 ### Requirement: Compute buyers select what the payments buyer helper can approve
 Both compute buyers MUST take the lifecycle capabilities of their payments term context — a stoppable rate part and the partial-period treatments the vendored contract encodes — from the payments kit's buyer helper, the same set mandate derivation and seller presets use, rather than declare their own. Other mechanisms keep their own contexts. A buyer whose term validation or dispute-authority acceptance refused every advertised option MUST be told each distinct reason at normal verbosity, and a `buy` that finds nothing for that reason MUST NOT exit as a successful empty search.
 

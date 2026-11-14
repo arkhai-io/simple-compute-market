@@ -164,6 +164,16 @@ The hosted adapter MUST translate lifecycle commands into explicit per-part even
 - **THEN** the adapter confirms satisfaction only from a verified same-or-earlier effective stop
 - **AND** it never reports a later local timestamp as the authority's end
 
+#### Scenario: A retry changes its content
+- **GIVEN** a rate stop, start or reverse whose descriptor the caller's operation store recorded under its operation key
+- **WHEN** a retry under the same key carries different content
+- **THEN** the adapter refuses it before any authority call
+- **AND** an identical retry is sent again under the same request identity, which the authority answers with the event it recorded
+
+#### Scenario: A rate operation has no operation store
+- **WHEN** a rate deal's monetary command or billing start arrives without the caller's operation store
+- **THEN** the adapter refuses it before any authority call
+
 ### Requirement: Rate stops consume authority-priced period treatment
 The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping and capability refusal rules. It MUST observe the winning authority entry rather than compute cooperative end-price corrections. Seller delivery_end MUST instead be filed through the dispute adapter, with no seller-side stop or reverse for that filing.
 
@@ -313,6 +323,30 @@ The hosted adapter MUST consume the verified snapshot interface before interpret
 #### Scenario: The snapshot cannot be verified
 - **WHEN** snapshot verification fails or its known sequence regresses
 - **THEN** no rate state from it is used for billing, start admission or funding renewal
+
+### Requirement: Rate stop requests are projected apart from final stops
+The hosted adapter MUST project a raw stop event on a rate-bearing mandate as a stop request, which never ends delivery, and MUST expose each rate part's verified pending and final stop, with the treatment its winning entry applied, as that part's observation. The winning final stop, an equal-time winner included, MUST come from the part's verified record, never from local arrival order. A once-only mandate's part stop MUST keep its projection as the deal's payment end.
+
+#### Scenario: A payee notice is pending
+- **WHEN** the authority records a payee stop effective after its notice
+- **THEN** the adapter's read carries a stop request event and the part's pending stop, and no final stop
+
+#### Scenario: The notice matures
+- **WHEN** the pending stop takes effect
+- **THEN** the part's final stop carries the authority's effective time and the treatment its entry applied
+
+### Requirement: One payments transaction adapter serves every part kind by composition
+One payments transaction adapter MUST implement the lifecycle payment-adapter protocol for every `arkhai.payments.v1` mandate, composed of parts every part kind shares — mandate binding, verified snapshot reads, reverse, event projection, refusal classification and descriptor recording — and of rate behaviour — start, stop, notice, rate observations and the rate delivery phases — composed in only when the mandate has a rate part. Once and rate behaviour MUST NOT inherit from one another: no private flag switches a once-only guard off, and neither the seller stage nor a buyer chooses an adapter class by part kind. A once-only mandate MUST refuse rate commands, and its billing start MUST be a no-op once its commitment and the activation evidence are verified. A stop MUST NOT pre-read the authority to detect a changed retry, since descriptor recording refuses one before any call.
+
+#### Scenario: A mixed mandate in one adapter
+- **GIVEN** an accepted mandate with a setup `once` part and a rate part
+- **WHEN** the payee reverses part of the setup and stops the rate through one adapter
+- **THEN** the setup reverse is projected as an ordinary once movement with its amount
+- **AND** only the rate part carries a rate observation, whose pending stop the read exposes
+
+#### Scenario: A once-only mandate starts billing
+- **WHEN** end service starts billing for a once-only mandate with verified activation evidence
+- **THEN** the adapter sends nothing to the authority and reports a no-op start
 
 ### Requirement: Running hosted rate deals can re-anchor during identity overlap
 SCM MUST provide current-key verified snapshots for rate re-anchoring during bounded identity overlap, preserving original bytes. Verification MUST accept identity validity windows, embedded old-receipt attestation and a caller-supplied minimum sequence. Retirement MUST inventory all hosted deals: rate deals MUST re-anchor or drain; once-only deals MUST drain. Mode changes MUST require draining.

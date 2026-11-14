@@ -10,7 +10,7 @@ import json
 
 from market_core.schemas import Agreement
 from market_deal_lifecycle.configuration import DisputeEntry
-from market_deal_lifecycle.delivery import DeliveryEvidence, DeliveryPhase
+from market_deal_lifecycle.delivery import DeliveryEvidence, DeliveryPhase, JournaledBillingStart
 from market_deal_lifecycle.operations import OperationKeys
 from market_deal_lifecycle_contracts.models import LifecycleCommand
 from market_identity import Ed25519Signer
@@ -18,14 +18,12 @@ from market_settlement_runtime import SettlementPublicationClause
 from market_settlement_runtime.rate_publication import derive_rate_preset, RatePresetRefusal
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingDeclaration
 
-from market_arkhai_payments.adapter import pinned_snapshot_verifier
+from market_arkhai_payments.adapter import PaymentAdapter, pinned_snapshot_verifier
 from market_arkhai_payments.agreement import PaymentSettlementData
 from market_arkhai_payments.buyer import PaymentApproval
 from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
 from market_arkhai_payments.errors import PaymentsTransportError
-from market_arkhai_payments.operations import operations_digest
 from market_arkhai_payments.presets import PaymentsRatePresetHelper
-from market_arkhai_payments.rate_adapter import RatePaymentAdapter
 from market_arkhai_payments.settlement_config import ArkhaiPaymentsConfig
 
 MECHANISM = "arkhai.payments.v1"
@@ -88,10 +86,20 @@ async def main() -> None:
                 raise PaymentsTransportError("response lost after authority recorded start")
             return result
 
+    class MemoryOperations:
+        """Stands in for the caller's durable operation store in this fixture."""
+
+        def __init__(self) -> None:
+            self.digests: dict[tuple[str, str], str] = {}
+
+        async def check_and_record(self, negotiation_id: str, operation_key: str, digest: str) -> bool:
+            return self.digests.setdefault((negotiation_id, operation_key), digest) == digest
+
+    store = MemoryOperations()
     fake = LostResponse(signer=signer, observed_at=now)
     fake.approve(data.mandate)
-    seller = RatePaymentAdapter(agreement, data, account=PAYEE, client_for_owner=fake,
-                               verify_snapshot=pinned_snapshot_verifier(agreement, data, config), clock=lambda: fake.observed_at)
+    seller = PaymentAdapter(agreement, data, account=PAYEE, client_for_owner=fake,
+                            verify_snapshot=pinned_snapshot_verifier(agreement, data, config), clock=lambda: fake.observed_at)
     evidence = DeliveryEvidence.model_validate({
         "negotiation_id": agreement["negotiation_id"], "commitment_ref": data.transaction_id,
         "reservation_ref": "fixture-reservation", "fulfillment_ref": "fixture-fulfillment",
@@ -99,25 +107,25 @@ async def main() -> None:
         "ready": {"schema_id": "example.ready.v1", "resource_ref": "fixture-resource", "digest": "b" * 64},
     })
     before = await seller.authorize(DeliveryPhase.START, evidence)
-    operations = seller.billing_operations("sole-end-service-start", evidence)
-    # A real caller persists these exact descriptors with its activation envelope
-    # under the sole end-service key, before issuing either call.
-    digest = operations_digest(operations)
-    first = await seller.start_billing("sole-end-service-start", evidence, journaled_digest=digest)
-    retry = await seller.start_billing("sole-end-service-start", evidence, journaled_digest=digest)
-    disclosed = await seller.authorize(DeliveryPhase.DISCLOSE, evidence, billing_operation_key="sole-end-service-start")
+    # End service journals its one billing-start key with the activation
+    # envelope; the adapter records each per-part descriptor through the same
+    # store before it calls the authority, so the retry reuses its identity.
+    billing = OperationKeys(agreement["negotiation_id"], "sole-end-service-start", store)
+    first = await seller.start_billing(billing, evidence)
+    retry = await seller.start_billing(billing, evidence)
+    disclosed = await seller.authorize(
+        DeliveryPhase.DISCLOSE, evidence, JournaledBillingStart(operation_key=billing.operation_key, result=retry),
+    )
     stop = LifecycleCommand(negotiation_id=agreement["negotiation_id"], kind="stop", operation_key="spot-notice", payload={"part": "1"})
-    keys = OperationKeys(stop.negotiation_id, stop.operation_key)
-    stopped = await seller.submit(stop, keys, journaled_digest=seller.describe(stop, keys).digest)
+    stopped = await seller.submit(stop, OperationKeys(stop.negotiation_id, stop.operation_key, store))
     pending = await seller.read()
-    payer = RatePaymentAdapter(agreement, data, account=PAYER, client_for_owner=fake,
-                              verify_snapshot=pinned_snapshot_verifier(agreement, data, config), clock=lambda: fake.observed_at)
+    payer = PaymentAdapter(agreement, data, account=PAYER, client_for_owner=fake,
+                           verify_snapshot=pinned_snapshot_verifier(agreement, data, config), clock=lambda: fake.observed_at)
     fake.observed_at += 1
     payer_stop = LifecycleCommand(negotiation_id=agreement["negotiation_id"], kind="stop",
                                   operation_key="payer-protection-stop", payload={"part": "1"})
-    payer_keys = OperationKeys(payer_stop.negotiation_id, payer_stop.operation_key)
-    payer_stopped = await payer.submit(payer_stop, payer_keys,
-                                       journaled_digest=payer.describe(payer_stop, payer_keys).digest)
+    payer_stopped = await payer.submit(payer_stop, OperationKeys(payer_stop.negotiation_id, payer_stop.operation_key,
+                                                                 MemoryOperations()))
     fake.observed_at += 29
     ended = await seller.read()
     print(json.dumps({

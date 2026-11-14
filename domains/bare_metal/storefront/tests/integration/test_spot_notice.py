@@ -32,6 +32,8 @@ async def test_bare_metal_seller_notice_and_normal_buyer_end_use_the_rate_author
     stamp = datetime.fromtimestamp(now, timezone.utc).isoformat().replace("+00:00", "Z")
     raw.update(start_utc=stamp, accepted_at=stamp, duration_seconds=3600)
     option = raw["settlement"]
+    # A rate option names approval expiry `approval_window`, never also `window`.
+    option["settlement"].pop("window", None)
     option["settlement"].update(period="PT60S", reserve_ahead_seconds=120, approval_window="PT60S")
     option["price"]["rates"] = [{"field": "amount", "per": "hour", "value": 6000}]
     option["lifecycle"]["delivery_deadline_seconds"] = 30

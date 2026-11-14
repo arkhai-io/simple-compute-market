@@ -8,8 +8,9 @@ from typing import Callable, Protocol
 
 from market_deal_lifecycle.adapters import PaymentAdapter
 from market_deal_lifecycle.delivery import (
-    BillingStartResult, DeliveryAuthorization, DeliveryEvidence, DeliveryPhase,
+    BillingStartResult, DeliveryAuthorization, DeliveryEvidence, DeliveryPhase, JournaledBillingStart,
 )
+from market_deal_lifecycle.operations import OperationKeys
 from market_deal_lifecycle_contracts.models import (
     Accepted, Reference, Rejected, WireModel,
 )
@@ -106,7 +107,12 @@ class EndService:
                 operation_id=f"{evidence.negotiation_id}:{phase.value}",
                 evidence_refs=[evidence.commitment_ref],
             )
-        financial = await adapter.authorize(phase, evidence)
+        billing = None
+        if phase == DeliveryPhase.DISCLOSE:
+            billing = await in_transaction(self.path, lambda conn: self._journaled_billing(
+                EndSession(conn), evidence.negotiation_id,
+            ))
+        financial = await adapter.authorize(phase, evidence, billing)
 
         def authorize(conn):
             session = EndSession(conn)
@@ -116,6 +122,16 @@ class EndService:
             return result
 
         return await in_transaction(self.path, authorize)
+
+    @staticmethod
+    def _journaled_billing(session: EndSession, negotiation_id: str) -> JournaledBillingStart | None:
+        """The deal's one billing-start intent, with its result once one is recorded."""
+
+        intent = next((item for item in session.intents(negotiation_id) if item.kind == "billing"), None)
+        if intent is None:
+            return None
+        result = BillingStartResult.model_validate(intent.result) if intent.result is not None else None
+        return JournaledBillingStart(operation_key=intent.operation_key, result=result)
 
     def _authorize_delivery(
         self, phase: DeliveryPhase, evidence: DeliveryEvidence, financial: DeliveryAuthorization,
@@ -205,8 +221,11 @@ class EndService:
         if isinstance(intent, BillingIntentResult):
             return intent
         # A retry of an unknown result uses the adapter's same-key resolution;
-        # no generic servicing code guesses from a mechanism snapshot.
-        result = await adapter.start_billing(operation_key, evidence)
+        # no generic servicing code guesses from a mechanism snapshot. The
+        # adapter records each operation it derives through this journal's own
+        # replay guard before it calls the authority.
+        keys = OperationKeys(evidence.negotiation_id, operation_key, SQLiteOperationStore(self.path))
+        result = await adapter.start_billing(keys, evidence)
         await in_transaction(self.path, lambda conn: EndSession(conn).acknowledge(
             intent.intent_ref, result.model_dump(mode="json"),
             state="done" if isinstance(result.outcome, (Accepted, Rejected)) else "pending",

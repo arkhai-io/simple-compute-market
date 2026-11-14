@@ -30,7 +30,7 @@ from market_storefront.groups import deals as vm_deals
 from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.contract import INTERFACE
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
-from market_arkhai_payments import PaymentApproval, PaymentSettlementData, RatePaymentAdapter
+from market_arkhai_payments import PaymentAdapter, PaymentApproval, PaymentSettlementData
 from market_arkhai_payments.adapter import pinned_snapshot_verifier
 from market_arkhai_payments.errors import MandatePolicyError, PaymentsTransportError
 from market_arkhai_payments.fixtures import FakePaymentsClient
@@ -47,7 +47,7 @@ from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand, S
 from market_deal_lifecycle_client import SyncSellerLifecycleClient
 from market_deal_servicing import (
     DealWatch, DeliveryRecord, EndSession, LifecycleRouteBinding, LifecycleRouteServices,
-    SellerDeal, SellerServicing, SellerSession, create_lifecycle_router, create_schema,
+    SellerDeal, SellerServicing, SellerSession, SQLiteOperationStore, create_lifecycle_router, create_schema,
 )
 from market_deal_servicing.evidence import transaction
 from market_identity import Ed25519Signer, TrustedIdentitySet
@@ -156,7 +156,7 @@ def main(domain: str, output: Path | None, profile_path: Path):
             fake = LossyPayments(signer=receipt_signer, observed_at=now)
             fake.engine.fund(PAYER, "USD/2", 1_000_000)
             fake.receipt = fake.engine.approve(data.mandate, account=PAYER)
-            adapter = RatePaymentAdapter(
+            adapter = PaymentAdapter(
                 agreement, data, account=PAYEE, client_for_owner=fake,
                 verify_snapshot=pinned_snapshot_verifier(agreement, data, config), clock=lambda: now,
             )
@@ -267,14 +267,17 @@ def main(domain: str, output: Path | None, profile_path: Path):
 
         # A payer's earlier effective stop remains controlling when the seller
         # repeats its original notice, even without a running storefront.
-        payer = RatePaymentAdapter(
+        payer = PaymentAdapter(
             agreements["spot"], adapters["spot"].data, account=PAYER, client_for_owner=doubles["spot"],
             verify_snapshot=pinned_snapshot_verifier(agreements["spot"], adapters["spot"].data, config),
             clock=lambda: now,
         )
         stop = LifecycleCommand(negotiation_id="spot", kind="stop", operation_key="buyer-stop", payload={"part": "0"})
-        keys = OperationKeys("spot", "buyer-stop")
-        assert asyncio.run(payer.submit(stop, keys, journaled_digest=payer.describe(stop, keys).digest)).status == "accepted"
+        buyer_operations = Path(root) / "buyer.sqlite"
+        with sqlite3.connect(buyer_operations) as conn:
+            create_schema(conn)
+        keys = OperationKeys("spot", "buyer-stop", SQLiteOperationStore(buyer_operations))
+        assert asyncio.run(payer.submit(stop, keys)).status == "accepted"
         replay = asyncio.run(service.submit(LifecycleCommand(
             negotiation_id="spot", kind="notice", operation_key="fixture-notice", at=now + 1,
         ), actor=administrator.identity))

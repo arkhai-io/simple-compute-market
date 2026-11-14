@@ -18,7 +18,44 @@ The sole term-end carrier MUST be early_termination.settles_through, distinct fr
 - **THEN** the compute preset's `end.partialPeriod` is returned, so billing ends at the last boundary without running past the agreed maximum
 - **AND** publication and acceptance refuse that preset where the servicing declaration does not list `returned`
 
+### Requirement: Neutral delivery decisions delegate payment interpretation
+
+kit/deal-servicing MUST own authorize_delivery for commit, dispatch, start and disclose with durable allow/refuse/pending, reason, operation ID and evidence references. The foundation payment-adapter protocol MUST expose authorize(phase, evidence, billing) and start_billing(keys, activated_delivery_evidence). `billing` is optional: end service's journaled billing-start intent, its operation key and, once recorded, its result, which end service MUST pass at disclosure. `keys` are the operation keys of end service's one billing-start intent and MUST carry its operation store, so a mechanism records each operation it derives before any I/O. Generic servicing MUST NOT interpret hosted part fields; once-only adapters MUST validate commitment evidence and use no-op billing start.
+
+#### Scenario: A financial decision is pending
+
+- **WHEN** the injected adapter cannot resolve authority evidence for dispatch
+- **THEN** delivery stays pending and a later allow still cannot override end-service admission
+
+#### Scenario: Disclosure reads the journaled billing start
+
+- **GIVEN** end service has journaled its billing-start intent and recorded its result
+- **WHEN** delivery asks authorize_delivery to disclose
+- **THEN** the adapter receives that intent's operation key and recorded result
+- **AND** no other phase receives a billing start
+
 ## ADDED Requirements
+
+### Requirement: Stop requests are distinct from final stops, readable by released clients
+
+A raw stop request MUST NOT end delivery. The lifecycle contracts MUST carry each part's verified rate bounds and its pending and final stops (`PaymentPartObservation`, `AuthorityView.parts`) and a payment event's treatment (`PaymentEvent.settles_through`). Because notice maturity can carry no new event sequence, the watch MUST read each part's final stop outside its event cursor and record it once by authority record, refusing a replay that changes the recorded end. The lifecycle read and list MUST omit an empty `parts` and a null `settles_through`, so a once-only deal's read and list stay valid for clients of `kit/deal-lifecycle-contracts` 0.1.0, whose models forbid unknown fields.
+
+#### Scenario: A stop request is pending
+
+- **WHEN** the authority records a stop request effective in the future
+- **THEN** the watch records no end, and read exposes the pending stop
+
+#### Scenario: Notice matures without a new event
+
+- **GIVEN** the watch consumed a stop request's event in an earlier poll
+- **WHEN** the authority's final stop appears with no new event sequence
+- **THEN** the watch records the end once, by the stop's authority record
+- **AND** a later read changing that stop's end is refused
+
+#### Scenario: A released client reads a once-only deal
+
+- **WHEN** a client of contracts 0.1.0 validates a once-only deal's lifecycle read or list
+- **THEN** it validates, since the read omits the empty `parts` and every null `settles_through`
 
 ### Requirement: Started-period treatment is a committed and declared payment term
 

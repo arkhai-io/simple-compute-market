@@ -1,4 +1,4 @@
-"""Immutable payment operations for caller-owned write-before-call journals."""
+"""Immutable payment operations, recorded through the caller's store before any call."""
 
 from __future__ import annotations
 
@@ -37,7 +37,3 @@ class PaymentOperation:
             "version": 1, "transaction": self.transaction, "account": self.account,
             "part": self.part, "request_id": self.request_id, "event": self.event,
         })).hexdigest()
-
-
-def operations_digest(operations: tuple[PaymentOperation, ...]) -> str:
-    return hashlib.sha256(jcs_bytes([operation.digest for operation in operations])).hexdigest()

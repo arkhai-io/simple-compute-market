@@ -221,6 +221,13 @@ migration rules. Neither pre-1.0 allowance applies at or above 1.0.0.
 Incompatibility is signalled by the version numbers and the versioned
 contracts alone; no per-release list of incompatible changes is kept.
 
+A field of a versioned contract may be renamed or retired without a new
+contract version, in stages: one release's readers accept both forms, a later
+release's writers switch, and a release after that removes the old form. This
+is a path for deprecating a field, not a limit on how a contract may change: a
+field that changes meaning, or a structure replaced by a richer one, is judged
+under the rules above on its own merits.
+
 Compatibility is owed to what a release has shipped. A decision made on the
 development branch and changed again before any release ships it affects no
 one, so revising it needs no compatibility path, migration or deprecation. A

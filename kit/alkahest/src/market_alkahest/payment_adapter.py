@@ -24,6 +24,7 @@ from market_deal_lifecycle.delivery import (
     DeliveryAuthorization,
     DeliveryEvidence,
     DeliveryPhase,
+    JournaledBillingStart,
     OnceDeliveryPolicy,
 )
 from market_deal_lifecycle.operations import OperationKeys
@@ -79,13 +80,15 @@ class AlkahestOnceAdapter:
 
     async def authorize(
         self, phase: DeliveryPhase, evidence: DeliveryEvidence,
+        billing: JournaledBillingStart | None = None,
     ) -> DeliveryAuthorization:
+        # An escrow starts nothing at billing, so a journaled start decides nothing.
         return await self._delivery.authorize(phase, evidence)
 
     async def start_billing(
-        self, operation_key: str, evidence: DeliveryEvidence,
+        self, keys: OperationKeys, evidence: DeliveryEvidence,
     ) -> BillingStartResult:
-        return await self._delivery.start_billing(operation_key, evidence)
+        return await self._delivery.start_billing(keys, evidence)
 
     async def _commitment_matches(self, evidence: DeliveryEvidence) -> bool:
         if (evidence.negotiation_id, evidence.commitment_ref) != (

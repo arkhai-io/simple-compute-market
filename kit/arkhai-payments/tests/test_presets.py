@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from market_core.schemas import SettlementOption
+from market_core.schemas import SettlementOption, derive_settlement_option_id
 from market_deal_lifecycle.configuration import DisputeEntry
 from market_settlement_runtime import SettlementPublicationClause
-from market_settlement_runtime.rate_publication import RatePresetRefusal
-from market_settlement_runtime.rate_servicing import RateServicingDeclaration
+from market_settlement_runtime.rate_publication import RatePresetRefusal, derive_rate_preset
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingDeclaration
 
 from market_arkhai_payments.fixtures import dispute_lifecycle, recurring_options
-from market_arkhai_payments.presets import PaymentsRatePresetHelper, payments_rate_wiring
+from market_arkhai_payments.presets import PaymentsRatePresetHelper, payments_rate_wiring, rate_term_timing
 from market_arkhai_payments.settlement_config import ARKHAI_PAYMENTS_MECHANISM, clause_rate_minor_units
 
 from payment_terms import OTHER, PAYEE
@@ -28,10 +29,12 @@ def _authority() -> DisputeEntry:
 
 
 def _clause(*, rate: str = "60", asset: str = "USD/2", **mechanism_input: Any) -> SettlementPublicationClause:
+    # An input given as None is left out of the clause.
+    inputs = {"asset": asset, "payee_account": PAYEE, "approval_window": "PT10M",
+              "dispute_window_seconds": 604800, **mechanism_input}
     return SettlementPublicationClause.model_validate({
         "mechanism": ARKHAI_PAYMENTS_MECHANISM, "asset": asset, "rate": rate, "per": "hour",
-        "mechanism_input": {"asset": asset, "payee_account": PAYEE, "approval_window": "PT10M",
-                            "dispute_window_seconds": 604800, **mechanism_input},
+        "mechanism_input": {key: value for key, value in inputs.items() if value is not None},
         "recurring": {"period": "PT15M", "reserve_ahead_seconds": 1800},
     })
 
@@ -72,6 +75,69 @@ def test_build_refuses_another_mechanisms_declaration():
     request = SimpleNamespace(servicing=RateServicingDeclaration("other.v1", frozenset({"charged"})))
     refusal = PaymentsRatePresetHelper().build(request)  # type: ignore[arg-type]
     assert isinstance(refusal, RatePresetRefusal) and refusal.code == "rate_servicing_undeclared"
+
+
+def _encoded(*, setup: str | None, **mechanism_input: Any) -> SettlementOption:
+    clause = _clause(**mechanism_input).model_copy(deep=True)
+    recurring = {"period": "PT15M", "reserve_ahead_seconds": 1800, "payee_notice_seconds": 30,
+                 **({"setup_amount": setup} if setup is not None else {})}
+    clause = SettlementPublicationClause.model_validate({**clause.model_dump(mode="json"), "recurring": recurring})
+    servicing = RateServicing({ARKHAI_PAYMENTS_MECHANISM: RateServicingDeclaration(
+        ARKHAI_PAYMENTS_MECHANISM, frozenset({"charged", "returned"}), setup=setup is not None,
+    )})
+    option = derive_rate_preset(
+        clause, helper=PaymentsRatePresetHelper(), servicing=servicing, authorities=(_authority(),),
+        max_duration_seconds=3600, available_until_utc=None, delivery_deadline_seconds=30,
+        now=datetime(2027, 1, 1, tzinfo=timezone.utc), default_penalty_periods=24,
+    )
+    assert not isinstance(option, RatePresetRefusal), option
+    return SettlementOption.model_validate(option)
+
+
+@pytest.mark.parametrize("setup", [None, "2500"])
+def test_build_encodes_the_rate_parameters_under_their_option_identity(setup):
+    option = _encoded(setup=setup)
+    settlement = option.settlement_params
+    assert {key: settlement.get(key) for key in ("payee_account", "approval_window", "period",
+                                                 "reserve_ahead_seconds", "setup_amount")} == {
+        "payee_account": PAYEE, "approval_window": "PT10M", "period": "PT15M",
+        "reserve_ahead_seconds": 1800, "setup_amount": setup,
+    }
+    # The setup charge is present only when the seller priced one, and the
+    # option identity binds every encoded term.
+    assert ("setup_amount" in settlement) == (setup is not None)
+    assert option.option_id == derive_settlement_option_id(
+        price=option.price, settlement=option.settlement, lifecycle=option.lifecycle,
+    )
+    assert option.price.rates[0].value == 6000 and option.price.asset == "USD/2"
+
+
+def test_build_writes_approval_window_whichever_name_the_clause_used():
+    clause_input = {"window": "PT10M", "approval_window": None}
+    option = _encoded(setup=None, **clause_input)
+    assert option.settlement_params["approval_window"] == "PT10M"
+    assert "window" not in option.settlement_params
+
+
+def test_pricing_refuses_a_clause_whose_asset_differs_from_its_payment_input():
+    clause = SettlementPublicationClause.model_validate({
+        **_clause().model_dump(mode="json"), "asset": "USD/6",
+    })
+    with pytest.raises(ValueError, match="matching asset"):
+        PaymentsRatePresetHelper().pricing(clause, (_authority(),))
+
+
+def test_the_timing_projection_reads_the_options_period_and_approval_window():
+    option = _encoded(setup=None)
+    timing = rate_term_timing(option, authorities=(_authority(),))
+    assert (timing.period_seconds, timing.approval_window_seconds) == (900, 600)
+    settlement = {"schema": ARKHAI_PAYMENTS_MECHANISM, "payee_account": PAYEE, "window": "PT10M"}
+    once = SettlementOption(
+        option_id=derive_settlement_option_id(price=option.price, settlement=settlement),
+        price=option.price, settlement=settlement,
+    )
+    with pytest.raises(ValueError, match="recurring payment option"):
+        rate_term_timing(once, authorities=(_authority(),))
 
 
 @pytest.mark.parametrize(("rate", "per", "asset", "minor"), [

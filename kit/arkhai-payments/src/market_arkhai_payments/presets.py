@@ -105,7 +105,7 @@ class PaymentsRatePresetHelper:
         params = ArkhaiPaymentsPublicationInput.model_validate(request.clause.mechanism_input)
         preset = request.preset
         encoded = PaymentsOptionParams(
-            payee_account=params.payee_account, approval_window=params.approval_window or params.window,
+            payee_account=params.payee_account, approval_window=params.approval_term,
             deposit_agreement=params.deposit_agreement, period=preset.period,
             reserve_ahead_seconds=preset.reserve_ahead_seconds, setup_amount=preset.setup_amount,
         )

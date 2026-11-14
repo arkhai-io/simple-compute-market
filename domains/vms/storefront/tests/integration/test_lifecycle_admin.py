@@ -76,6 +76,8 @@ def approve_rate(h, *, entitled, payer_notice=300):
     stamp = datetime.fromtimestamp(now, timezone.utc).isoformat().replace("+00:00", "Z")
     agreement.update(start_utc=stamp, accepted_at=stamp)
     option = agreement["settlement"]
+    # A rate option names approval expiry `approval_window`, never also `window`.
+    option["settlement"].pop("window", None)
     option["settlement"].update(period="PT60S", reserve_ahead_seconds=120, approval_window="PT60S")
     option["price"]["rates"] = [{"field": "amount", "per": "hour", "value": 6000}]
     rights = {"payer": {"notice_seconds": payer_notice, "settles_through": "started_period"}}

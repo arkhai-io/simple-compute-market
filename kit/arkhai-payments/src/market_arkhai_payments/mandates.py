@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from math import ceil, floor
 import re
@@ -96,15 +97,32 @@ class PaymentsOptionParams(BaseModel):
     setup_amount: str | None = Field(default=None, pattern=r"^[1-9][0-9]{0,37}$")
 
     @property
+    def approval_term(self) -> str:
+        """Approval expiry, whichever of its two names the document carried."""
+
+        return self.approval_window or self.window
+
+    @property
     def approval_seconds(self) -> int:
-        return duration_seconds(self.approval_window or self.window)
+        return duration_seconds(self.approval_term)
+
+    @model_validator(mode="before")
+    @classmethod
+    def one_approval_term(cls, data: Any) -> Any:
+        # `window` and `approval_window` name one term, approval expiry: a reader
+        # accepts either, so documents written under either name keep their
+        # meaning, and refuses a document giving both a value rather than
+        # choosing one. A null names nothing: a dumped model carries its unset
+        # name as null beside the one it was given.
+        if (isinstance(data, Mapping) and data.get("window") is not None
+                and data.get("approval_window") is not None):
+            raise ValueError("invalid payments timing: window and approval_window are one term; carry only one")
+        return data
 
     @model_validator(mode="after")
     def window_is_fixed(self) -> PaymentsOptionParams:
         try:
             duration_seconds(self.window)
-            if self.approval_window is not None and self.window != DEFAULT_WINDOW and self.window != self.approval_window:
-                raise ValueError("window and approval_window conflict")
             if self.approval_seconds <= 0:
                 raise ValueError("approval window must be positive")
             if (self.period is None) != (self.reserve_ahead_seconds is None):

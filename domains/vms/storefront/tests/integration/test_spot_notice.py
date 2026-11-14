@@ -14,10 +14,10 @@ from arkhai_vms_buyer.lifecycle import buyer_lifecycle
 from market_storefront.cli import app as vm_cli
 from market_storefront.groups import deals as vm_deals
 from market_arkhai_payments import PaymentApproval
-from market_arkhai_payments.adapter import pinned_snapshot_verifier
+from market_arkhai_payments.adapter import PaymentAdapter, pinned_snapshot_verifier
 from market_arkhai_payments.errors import PaymentsTransportError
 from market_arkhai_payments.fixtures import FakePaymentsClient
-from market_arkhai_payments.rate_adapter import RatePaymentAdapter
+from market_arkhai_payments.models import StoredEvent
 from market_core.schemas import derive_settlement_option_id
 from market_deal_lifecycle.adapters import submit_payment, PaymentAdapterTable, PaymentBinding
 from market_deal_lifecycle_buyer import FileEvidenceStore
@@ -87,13 +87,19 @@ async def test_preempt_cli_recovers_pending_stop_and_an_earlier_payer_end(make, 
             with pytest.raises(StorefrontClientError) as refused:
                 wrong.notice(NEGOTIATION, operation_key="forbidden")
             assert refused.value.status_code == 403
-        assert h.payments.count("submit_event") == 1
+        # The identical retry resent the stop under its one request identity,
+        # which the authority answered with the stop it had recorded: two sends,
+        # one stop. The changed and unauthorized commands sent nothing.
+        assert h.payments.count("submit_event") == 2
+        stops = [event.root for event in h.payments.get_transaction(h.data.transaction_id).snapshot.events
+                 if isinstance(event.root, StoredEvent) and event.root.event.kind.value == "stop"]
+        assert len(stops) == 1
     async for _ in h.lifecycle.seller.watch(NEGOTIATION):
         pass
     with transaction(h.db.db_path) as conn:
         assert EndSession(conn).requests(NEGOTIATION) == []
     agreement, _ = h.lifecycle.accepted(NEGOTIATION)
-    payer = RatePaymentAdapter(
+    payer = PaymentAdapter(
         agreement, h.data, account=PAYER, client_for_owner=h.payments,
         verify_snapshot=pinned_snapshot_verifier(agreement, h.data, _config()),
         clock=lambda: h.payments.observed_at,

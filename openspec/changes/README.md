@@ -347,6 +347,13 @@ Deliberately outside the goal: postpaid monthly invoicing and on-chain open-ende
 | No end-to-end run produces a per-period Agreement, so none exercises recurring servicing or asserts the money a buyer is shown and approves for one. For `spot-deals-through-arkhai-payments`' planning, once a mechanism can encode a recurring option | `negotiate-open-ended-compute-terms` round 1 owner record, 2026-11-12 |
 | Two packages changed on `dev` after `marketplace-v0.3.0` keep their released versions. `arkhai-core-storefront-client` 0.29.0 renamed `agreed_amount` to `negotiated_scalar` on its negotiation models, an incompatible change. `arkhai-apicredits-domain` 0.9.0 imports `kit/policy`'s renamed `amount_from_proposal`, which first ships in `arkhai-kit-policy` 0.7.0, under a `>=0.6.0` bound. Each owes a bump under `docs/development/RELEASING.md`, "Versioning policy", and the domain owes a raised bound. Revisit before the next release, or with the next change to either package | `negotiate-open-ended-compute-terms` version pass, 2026-11-12 |
 
+### Unowned work found by `spot-deals-through-arkhai-payments`
+
+| Item | Origin |
+|---|---|
+| The staged rename of `arkhai.payments.v1`'s approval expiry from `window` to `approval_window` (`RELEASING.md`'s staged field rename) has two stages left. In the release after the one first shipping readers of both names, once-option writers switch to `approval_window` and the `arkhai_payments.window` discovery field stops answering; in the release after that, readers stop accepting `window`. Each stage is triggered by its release | `spot-deals-through-arkhai-payments` round 1 owner record, R9 |
+| `kit/arkhai-payments` keeps every test in one flat `tests/` root, where `docs/development/TESTING.md`, "Test File Layout", splits a kit library's tests into `unit/` and `integration/`. Moving them means moving the shared term builders (`payment_terms.py`, `rate_terms.py`) the modules import by name | `spot-deals-through-arkhai-payments` section 4A, its compliance check |
+
 ## Unblocking work — the local end-to-end stack
 
 ```text

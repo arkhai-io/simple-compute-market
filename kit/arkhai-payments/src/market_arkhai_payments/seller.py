@@ -17,7 +17,6 @@ from market_settlement_runtime.rate_servicing import RateServicing
 from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand, Pending, Rejected, Unknown
 
 from market_arkhai_payments.adapter import PaymentAdapter
-from market_arkhai_payments.rate_adapter import RatePaymentAdapter
 from market_arkhai_payments.agreement import (
     PaymentSettlementData,
     agreement_from_bytes,
@@ -289,17 +288,10 @@ class PaymentSellerStage:
     ) -> PaymentAdapter:
         """Bind the payee's lifecycle port without taking ownership of its watch cursor."""
 
-        account = selected_payment_option(agreement).payee_account
-        verify = self._snapshot_verifier(agreement, data)
-        if any(part.root.kind == "rate" for part in data.mandate.parts):
-            return RatePaymentAdapter(
-                agreement, data, account=account, client_for_owner=self._client_for_owner,
-                verify_snapshot=verify, minimum_sequence=minimum_sequence,
-                snapshot_freshness_seconds=self.config.snapshot_freshness_seconds,
-            )
         return PaymentAdapter(
-            agreement, data, account=account, client_for_owner=self._client_for_owner,
-            verify_snapshot=verify, minimum_sequence=minimum_sequence,
+            agreement, data, account=selected_payment_option(agreement).payee_account,
+            client_for_owner=self._client_for_owner, verify_snapshot=self._snapshot_verifier(agreement, data),
+            minimum_sequence=minimum_sequence, snapshot_freshness_seconds=self.config.snapshot_freshness_seconds,
         )
 
     def reverse_now(

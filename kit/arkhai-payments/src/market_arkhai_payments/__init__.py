@@ -6,8 +6,7 @@ from .access_check import (
     check_payments_access,
 )
 from .adapter import PaymentAdapter, SnapshotVerifier, pinned_snapshot_verifier
-from .rate_adapter import RatePaymentAdapter
-from .operations import PaymentOperation, operations_digest
+from .operations import PaymentOperation
 from .presets import PaymentsRatePresetHelper, rate_term_timing
 from .reconciliation import (
     ReconciliationPass,
@@ -108,9 +107,7 @@ __all__ = [
     "NotPaid",
     "NothingToReverse",
     "PaymentAdapter",
-    "RatePaymentAdapter",
     "PaymentOperation",
-    "operations_digest",
     "PaymentsRatePresetHelper",
     "rate_term_timing",
     "PaymentApproval",

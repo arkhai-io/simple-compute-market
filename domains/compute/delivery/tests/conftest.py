@@ -366,7 +366,7 @@ class ScriptedAdapter:
         self.calls.append("read")
         return await self.inner.read()
 
-    async def authorize(self, phase, evidence):
+    async def authorize(self, phase, evidence, billing=None):
         self.calls.append("authorize")
         self.authorized.append(phase.value)
         if self.on_authorize is not None:
@@ -374,16 +374,16 @@ class ScriptedAdapter:
         scripted = self.answers.get(phase.value)
         if scripted:
             status = scripted.pop(0)
-            decision = await self.inner.authorize(phase, evidence)
+            decision = await self.inner.authorize(phase, evidence, billing)
             return decision.model_copy(update={"status": status, "reason": f"scripted {status}"})
-        return await self.inner.authorize(phase, evidence)
+        return await self.inner.authorize(phase, evidence, billing)
 
-    async def start_billing(self, operation_key, evidence):
+    async def start_billing(self, keys, evidence):
         self.calls.append("start_billing")
-        self.billing_keys.append(operation_key)
+        self.billing_keys.append(keys.operation_key)
         if self.billing_outcome is not None:
             return BillingStartResult(outcome=self.billing_outcome)
-        started = await self.inner.start_billing(operation_key, evidence)
+        started = await self.inner.start_billing(keys, evidence)
         if self.lose_billing:
             self.lose_billing -= 1
             raise ConnectionError("billing-start acknowledgement lost")

@@ -400,7 +400,7 @@ buyers' adapter construction; docs/development/RELEASING.md;
 openspec/changes/README.md (the staged-rename gap row). Owner record points R9, R12,
 R13, R15 and R19.
 
-- [ ] 4A.1 One payments transaction adapter by composition (D11): implement the
+- [x] 4A.1 One payments transaction adapter by composition (D11): implement the
       foundation's `PaymentAdapter` protocol from shared components (mandate binding,
       verified snapshot reads, reverse, event projection, refusal classification,
       descriptor recording) and per-part-kind behaviour (`once`: reverse, extend,
@@ -409,19 +409,61 @@ R13, R15 and R19.
       the class choice in the seller stage and both buyers, and the stop path's
       pre-read. The protocol's `authorize` gains an optional journaled billing-start
       argument and `start_billing` takes `OperationKeys`.
-- [ ] 4A.2 Descriptor recording through the caller's operation store (D4): every
+      As built: `market_arkhai_payments.adapter.PaymentAdapter` is the one adapter;
+      shared parts in the new `transaction.py` (`VerifiedSnapshots`,
+      `record_descriptors`, `classify_failure`, `recorded_by`), rate behaviour in
+      `rate_parts.py` (`RateParts`, renamed from `rate_adapter.py`; no adapter class),
+      composed in when the mandate has a rate part. `RatePaymentAdapter`,
+      `_allow_rate`, `operations_digest` and both buyers' and the seller stage's class
+      choice are gone. The protocol (`kit/deal-lifecycle`) is
+      `authorize(phase, evidence, billing: JournaledBillingStart | None = None)` and
+      `start_billing(keys: OperationKeys, evidence)`; `OnceDeliveryPolicy`, the
+      Alkahest adapter and end service follow. End service builds the keys over its
+      own `SQLiteOperationStore` and passes the journaled billing start at disclosure
+      only. Every pre-read is gone, the once reverse's too: a stop the authority
+      answers with an already winning stop is accepted only when that stop is
+      effective no later (D4's repeated-stop rule, now applied after the send).
+      Tests: payments `test_payment_adapter.py` (unit, a mixed mandate in one adapter,
+      a once-only no-op billing start, once-only refusal of every rate command, a
+      changed stop retry refused before any call, a seller stop answered by the
+      payer's earlier winning stop accepted with that stop's record),
+      `test_rate_adapter.py` updated (unit); deal-lifecycle `test_adapters.py`,
+      Alkahest `test_payment_adapter.py` (unit); servicing `test_end.py` (library
+      integration, real SQLite: the billing keys carry a `SQLiteOperationStore` over
+      the journal's own database, which refuses a changed digest; once the intent is
+      journaled, commit, dispatch and start receive no billing start and disclosure
+      receives its key and recorded result).
+- [x] 4A.2 Descriptor recording through the caller's operation store (D4): every
       monetary rate call (start, `start_billing`, stop, notice, reverse) requires
       `OperationKeys.store` and records each descriptor's digest with
       `check_and_record` under a part-derived key before any I/O; remove the
       `journaled_digest` parameter; keep `PaymentOperation` and `describe()` exported.
       Tests: a changed retry is refused before any authority call; an identical
       retry reuses its request identity.
-- [ ] 4A.3 Stop requests stay distinct, wire-compatible (D10): the lifecycle `read`
+      As built: the key is `keys.part_event(part, "<kind>-descriptor")`. A rate
+      deal's operations refuse without a store. A once-only reverse records when a
+      store is supplied (`submit_payment` always supplies one) and otherwise relies
+      on the authority's `request_id_reused`: the seller's refund path
+      (`PaymentSellerStage.reverse_now`) holds no store and calls the adapter's
+      synchronous `submit_now`, which refuses for a rate deal, as it already did.
+      Tests: unit, `test_rate_adapter.py` (changed reverse refused with no
+      `reverse` call; identical start retry resends one request identity) and
+      `test_payment_adapter.py` (changed stop retry: no send, no read).
+- [x] 4A.3 Stop requests stay distinct, wire-compatible (D10): the lifecycle `read`
       and `list` routes omit empty `parts` and null `settles_through`; minor-bump
       `kit/deal-lifecycle-contracts`; a test validates a once-deal read against the
       0.1.0 model. Add D10's requirement to the deal-lifecycle and
       settlement-servicing deltas.
-- [ ] 4A.4 The staged `approval_window` rename, release N (D9): readers of
+      As built: the omission lives in the contracts, so every producer of the wire
+      shape omits them: `ReleasedReadShape` drops `PaymentEvent.settles_through`,
+      `AuthorityView.parts` and `DealSummary.parts` at their defaults when dumped;
+      contracts 0.1.0 → 0.2.0. Tests: contracts `test_released_reads.py` (unit,
+      against `released_0_1_0.py`, a frozen copy of 0.1.0's read and list models: a
+      once-deal read and list validate, a reader of 0.2.0 restores them exactly, a
+      rate observation is refused by 0.1.0). Deltas: deal-lifecycle "Stop requests are
+      distinct from final stops, readable by released clients"; settlement-servicing
+      "Rate stop requests are projected apart from final stops".
+- [x] 4A.4 The staged `approval_window` rename, release N (D9): readers of
       `arkhai.payments.v1` option parameters accept `window` and `approval_window` as
       one term and refuse both; rate options write `approval_window`; once options keep
       writing `window`; the `arkhai_payments.approval_window` discovery field replaces
@@ -433,15 +475,91 @@ R13, R15 and R19.
       `teardown` alias removal. A registry acceptance test proves rate options
       carrying `approval_window` pass the registry. Add D9 to the
       settlement-configuration delta.
-- [ ] 4A.5 Kit-level tests (R19): the preset helper (setup, encoding, asset
+      As built: `PaymentsOptionParams.one_approval_term` refuses a document giving
+      both a value (even when they agree), `approval_term` reads either; a null
+      names neither, since the VM publication path dumps its validated clause input
+      with the unset name as null (the VM storefront's
+      `test_a_once_payment_option_publishes_its_clause_s_deadline_where_the_pool_supplies_none`
+      failed until the reader allowed it); the once option
+      builder writes `window` whatever its clause named; `arkhai_payments.window`
+      projects only for once options. No released document carried both names:
+      `approval_window` is new since `dev`. The gap row is under "Unowned work found
+      by `spot-deals-through-arkhai-payments`" and names only the rename; 4B.2 adds
+      the `teardown` alias's removal to it. Tests: payments `test_approval_window.py`
+      (unit); registry `test_listings.py::test_rate_option_naming_approval_window_round_trips`
+      (application integration, the registry app through its typed client). Rate
+      fixtures carrying both names were corrected: payments `rate_terms.py`, VM
+      `test_lifecycle_admin.py`, bare-metal `test_spot_notice.py`.
+- [x] 4A.5 Kit-level tests (R19): the preset helper (setup, encoding, asset
       mismatch, beyond `tests/test_presets.py`); the watch's final-stop recording
       (`kit/deal-servicing`, unit); the composed adapter (a mixed mandate in one
       adapter, a once-only `start_billing` no-op); the alias; the 0.1.0
       compatibility. Add D11's requirement to the settlement-servicing delta.
+      As built: `test_presets.py` gains encoding under the option identity with and
+      without setup, `approval_window` written whichever name the clause used, the
+      asset-mismatch refusal and the timing projection (unit). The watch's
+      final-stop recording is `kit/deal-servicing/tests/integration/test_final_stop.py`,
+      library integration rather than unit: the watch persists through its own
+      SQLite path, and `TESTING.md` puts a test against a real embedded database in
+      `integration/` (a pending request records no end; a maturity with no new
+      sequence records once; a changed replay is refused). Delta:
+      settlement-servicing "One payments transaction adapter serves every part kind
+      by composition", and deal-lifecycle's MODIFIED "Neutral delivery decisions
+      delegate payment interpretation" for the protocol.
 
 Validation: payments, servicing, lifecycle, contracts and buyer-half unit suites and
 typing; both buyers' and both storefronts' suites (the adapter is constructed in
 each); `make check-architecture`.
+
+## Section 4A notes and handoff
+
+- Versions, each one step from `dev`: `arkhai-kit-deal-lifecycle-contracts` 0.2.0,
+  `arkhai-kit-deal-lifecycle` 0.4.0 (protocol), `arkhai-kit-arkhai-payments` 0.8.0
+  (`RatePaymentAdapter` and `operations_digest` removed), `arkhai-kit-deal-servicing`
+  0.3.0, `arkhai-kit-alkahest` 0.13.0. The bare-metal storefront's and buyer's exact
+  `arkhai-payments` pins moved to 0.8.0; the VM storefront, VM buyer and compute
+  delivery raised their bounds to 0.8.0. Every package implementing or calling the
+  protocol raised its bounds to deal-lifecycle 0.4.0, and the composers of end
+  service and the Alkahest adapter (both storefronts, compute delivery) to
+  deal-servicing 0.3.0 and Alkahest 0.13.0. The domain packages whose bounds moved
+  keep their versions, as for their earlier edits in this change.
+- Event projection rule, decided here: in a once-only mandate a part's stop stays the
+  deal's payment end (`kind="stop"`, as before); beside a rate part every raw stop is a
+  `stop_request`, the setup part's terms end at Agreement start included, which the
+  once rule would otherwise have recorded as the deal's end. Whole-part reverse amount
+  inference now applies to every once part, the setup part in a mixed mandate too.
+- Refusal reasons now begin with the authority's code (`insufficient_held_funds: …`,
+  `hold_matured: …`), which the seller's refund classification matches by code.
+- End-to-end scenarios exercising this section once deployed: the once-deal payment
+  scenarios on the composed adapter's once path and the lifecycle read wire —
+  `e2e_vm_payment_deal`, the six `e2e_vm_dispute_*`, `e2e_vm_payment_purchase`,
+  `e2e_bare_metal_payment_deal`, `e2e_credits_payment_deal`. None exercises a rate
+  deal; 4B.5 adds the recurring purchase. Owed by validation: none.
+- `build-constraints.txt` at the repository root, the build-requirement pins every
+  `uv build` reads through `UV_BUILD_CONSTRAINT`, is committed with this section,
+  byte-identical to `dev`'s (commit `cd2506b76`), on the owner's direction: this
+  branch's builds need it and `dev` has it, so the merge sees two identical adds.
+- Evidence: payments kit `make test` (mypy 29 files, vectors, generated models)
+  345 passed; deal-lifecycle 82; contracts 40; servicing 74; Alkahest 465; buyer half
+  22; compute delivery 126; VM buyer 323; bare-metal buyer 68; bare-metal storefront
+  631; VM storefront 1194 unit (1 skipped) and 591 integration, after
+  `test_spot_notice.py` was corrected to the new retry (an identical retry resends
+  under one request identity: two sends, one recorded stop); registry
+  `test_listings.py` round-trip tests 2; `make check-architecture` and
+  `make check-comment-hygiene` pass. Not run here: the payments first-use examples
+  (`examples/rate.py`, VM `examples/preempt.py`), whose execution this step's tooling
+  refuses; `rate.py` is type-checked with the kit.
+- The fresh-context compliance check found: stale locks and unrun storefront suites
+  (relocked by the pre-commit hook; suites run, above); composers' lower bounds below the new protocol (raised); two
+  overstated `test_end.py` claims (the test now proves both); planned behaviour and
+  a version note in the deltas (removed); decisions only in these notes (recorded in
+  design.md D10 and D11); docstrings claiming recording for every operation
+  (qualified); "still" in a comment (removed); no test of the post-send repeated-stop
+  rule (added); a test importing another module's private helper (made local).
+  Declined: moving the kit's tests into `unit/`/`integration/`, a restructuring of
+  the whole flat test root recorded as an unowned gap in `openspec/changes/README.md`;
+  a route-level test of the read omission, since the routes dump these models and the
+  model test proves the shape.
 
 ## 4B. Surfaces, fixtures and lanes
 
