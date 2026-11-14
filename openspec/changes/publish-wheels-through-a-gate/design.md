@@ -152,7 +152,8 @@ the images and the binary, and uploads nothing unless every image was built from
 names it or the individual push targets.
 
 A candidate's versions are not unique: the version
-check compares only with the previous marketplace release, and the versioning policy
+check compares only with recorded marketplace releases, never with an earlier candidate,
+and the versioning policy
 forbids bumping an unreleased version again. So failed candidate A and the next
 candidate B routinely carry one wheel version with different bytes. Likewise, a later
 candidate or a developer push overwrites a chart's OCI tag, which is its version.
@@ -568,6 +569,15 @@ review 52, T1, with V1 of validation 53.)
 When no other tag carries a bill of materials, the check says so and passes; v0.3.0
 carries none. In a load it needs git, the wheelhouse and the pinned Helm; at the cut,
 git alone. A refusal means "bump the version"; the check never chooses one.
+
+**It compares the release tags the checkout holds** (pre-closeout review 70 F1). A
+checkout that has not fetched since the last cut, or a shallow or single-branch clone,
+holds fewer records than were published, and the check passes against what it holds. It
+stays offline rather than reading a remote's tags: at the cut it needs git alone, and no
+remote name is common to every checkout. The release procedure therefore fetches the
+release tags before `make load-candidate` and before the cut, and the operator confirms
+that the check's summary, which names every tag it compared, names the newest
+marketplace release.
 
 **Its scope** (design review 26 F1). The check guards the versions recorded releases
 name, offline. It is not a complete guard against PyPI, whose history includes versions

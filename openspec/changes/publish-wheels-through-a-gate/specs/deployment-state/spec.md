@@ -171,8 +171,9 @@ packaged files; a package storing a path more than once, or a file Git ignores u
 the chart's directory, MUST be refused rather than digested. At the cut, its subject is
 the release's own bill of materials, and it MUST NOT need a build. With no other bill of
 materials it MUST pass and say so. It
-guards the versions recorded releases name and reads no package registry; it is not a
-guard against versions a registry received by other means.
+compares the release tags the checkout holds, and its result MUST name every tag it
+compared. It guards the versions recorded releases name and reads no package registry;
+it is not a guard against versions a registry received by other means.
 
 #### Scenario: A wheel changed without a version bump
 

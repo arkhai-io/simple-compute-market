@@ -2583,6 +2583,20 @@ sections 8 and 11 are described in their notes.
     citations of files the change deleted or renamed that 12.4 records. The index, tasks,
     skills and `openspec validate --strict` checks passed.
 
+### Pre-closeout triage edits (2026-11-14)
+
+The triage of pre-closeout review 70 at `a9560056a` (with validation 69, which passed)
+made documentation edits only:
+- **70 F1:** the version check compares only the release tags the checkout holds. The
+  delta's requirement now says so and requires its result to name every tag it compared,
+  which `test_check_release_versions.py` already asserts. D14 states the precondition and
+  why the check stays offline. 13.9's RELEASING.md bullet gains the preflight.
+- **70 F2:** D3 no longer says the check compares only with the previous release.
+
+`scripts/change-workflow run pre-commit publish-wheels-through-a-gate` after the edits:
+the index, tasks and skills checks and `openspec validate --strict` passed; `pre-commit`
+failed, exit 2, only on the same 16 citations of deleted files that 12.4 records.
+
 ## 13. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`, in order. Closeout changes
@@ -2662,7 +2676,10 @@ documentation only. A part that needs a code edit returns the change to implemen
       wheels only;
     - under "Cutting a release": the cut, `make check-release-record`,
       `make audit-secrets` and the migration-floor judgement (D11, D12, D21);
-    - `make check-release-versions` and its offline scope (D14);
+    - `make check-release-versions` and its offline scope (D14), with its preflight:
+      fetch the release tags before `make load-candidate` and before the cut, and
+      confirm the check's summary names the newest marketplace release, since it
+      compares only the tags the checkout holds (pre-closeout review 70 F1);
     - under "Versioning policy": the pin-move rule (D15);
     - the npm package not being a component until it can be loaded (D19);
     - no patch releases;
