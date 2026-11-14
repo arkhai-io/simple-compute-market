@@ -81,6 +81,13 @@ the locks to it twice:
 The minimum is not an exact pin: a newer uv still runs, and the revision check stops
 its rewrite landing unseen.
 
+uv rewrites a lock only when something in it changes, so relocking a current project
+leaves its revision as it was. To bring such a lock to the running uv's revision,
+relock it in its project with `uv lock --upgrade-package <the project's own
+distribution>`, once the running uv is known to meet the minimum. This moves no
+dependency's version, though the rewrite may restate a marker as the running uv
+writes it.
+
 ## The sync an image runs
 
 An image syncs with `uv sync --locked` and reinstalls every internal package, so a

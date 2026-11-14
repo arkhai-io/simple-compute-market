@@ -65,8 +65,7 @@ live in `tests/fixtures/<module>.py`, importable as `tests.fixtures.<module>` by
 test in the package. For a boundary a separate, higher-level package consumes they
 live in `src/<package>/fixtures/<module>.py` inside the producer's own source
 package, installed with the producer's wheel, so the import mirrors the client import
-it sits beside. A validator no test calls yet says in its module docstring which test
-file is expected to call it.
+it sits beside.
 
 ## Test layout
 

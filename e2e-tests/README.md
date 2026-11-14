@@ -32,12 +32,11 @@ Highest priority wins.
 
 | Priority | Source | Example |
 |----------|--------|---------|
-| 1 | `ARKHAI_*` environment variables | `ARKHAI_RPC__URL=https://…` |
+| 1 | `ARKHAI_*` environment variables, including those the project's `.env` file supplies (a variable already set wins over the file's) | `ARKHAI_RPC__URL=https://…` |
 | 2 | `config-<profile>.yml` files (secrets injected here) |
 | 3 | `config.yml` (in `CONFIG_DIRECTORY`) | base env config |
-| 4 | `.env` file | local development overrides |
-| 5 | `.secrets.toml` | local secrets (gitignored) |
-| 6 | `settings.toml` | project defaults / schema |
+| 4 | `.secrets.toml` | local secrets (gitignored) |
+| 5 | `settings.toml` | project defaults / schema |
 
 ### Config directory and profiles
 

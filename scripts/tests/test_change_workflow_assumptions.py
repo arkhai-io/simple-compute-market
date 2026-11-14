@@ -17,7 +17,10 @@ defines. A make target is the first word after `make` and its flags, kept with t
 directory `-C` names; a repository path is a word under a directory Git tracks at the
 repository's root, or a file there, its heading anchor or line number dropped. A path
 the repository does not track, such as validation's output directory, is listed by
-the documents but not collected, since whether it exists depends on the checkout.
+the documents but not collected, since whether it exists depends on the checkout. A
+directory the provision of the guidance documents every step reads names, written
+with its trailing `/`, provides every Markdown file beneath it; a directory any other
+provision names provides only itself.
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ PROVISIONS = ROOT / "openspec/specs/market-change-workflow/README.md"
 CONFIGURATION = ROOT / ".agents/workflow.toml"
 ROLES_HEADING = "What an adopting repository provides"
 PROVISIONS_HEADING = "How this repository provides the workflow's roles"
+GUIDANCE_ROLE = "The guidance documents every step reads"
 
 # An inline code span, of one backtick or more, which may wrap across lines.
 _SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
@@ -234,9 +238,28 @@ def configured(text: str, root: Root) -> set[str]:
     return listed
 
 
-def unlisted(where: dict[str, set[str]], listed: set[str]) -> list[str]:
+def guidance_directories(markdown: str, heading: str, root: Root) -> tuple[str, ...]:
+    """The directories the provision of the guidance documents every step reads names,
+    each written with its trailing `/`. Every Markdown file beneath one is such a
+    document, as every Markdown file beneath a directory entry of the configuration's
+    `[load]` is one a step loads; a directory another provision names provides only
+    itself."""
+    for table in _tables(section(markdown, heading)):
+        for row in table:
+            if row[0] == GUIDANCE_ROLE:
+                return tuple(sorted(
+                    path for match in (m for cell in row[1:] for m in _SPAN.finditer(cell))
+                    for path in paths(match[2], root) if path.endswith("/")))
+    return ()
+
+
+def unlisted(where: dict[str, set[str]], listed: set[str],
+             directories: tuple[str, ...] = ()) -> list[str]:
+    """Each name in `where` that `listed` does not provide, with where it is named; a
+    Markdown file beneath one of `directories` is provided."""
     return [f"{name} (named in {', '.join(sorted(where[name]))})"
-            for name in sorted(set(where) - listed)]
+            for name in sorted(set(where) - listed)
+            if not (name.endswith(".md") and name.startswith(directories))]
 
 
 def role_problems(general: str, here: str) -> list[str]:
@@ -261,7 +284,9 @@ def listed_here(root: Root) -> set[str]:
 def test_every_target_and_path_the_workflow_names_is_provided_here() -> None:
     root = tracked_root()
 
-    missing = unlisted(collected(root), listed_here(root))
+    missing = unlisted(collected(root), listed_here(root),
+                       guidance_directories(PROVISIONS.read_text("utf-8"),
+                                            PROVISIONS_HEADING, root))
 
     assert not missing, "this repository's provision of the workflow's roles does not " \
                         "list:\n" + "\n".join(missing)
@@ -334,6 +359,24 @@ def test_a_skill_naming_an_unlisted_target_is_named(tmp_path: Path) -> None:
 
     assert missing == [f"make check-something (named in "
                        f"{tmp_path / 'skills/change-extra/SKILL.md'})"]
+
+
+def test_only_the_guidance_provisions_directories_provide_what_lies_beneath() -> None:
+    here = ("## How this repository provides the workflow's roles\n\n"
+            "| Role | Provided by |\n|---|---|\n"
+            "| The guidance documents every step reads | `AGENTS.md` and `docs/guidance/` |\n"
+            "| Where documentation lives | `docs/` and `openspec/` |\n")
+    where = {name: {"a skill"} for name in (
+        "docs/guidance/engineering/test-levels.md", "docs/guidance/engineering/x.toml",
+        "docs/guidance-other.md", "docs/development/TESTING.md")}
+
+    directories = guidance_directories(here, PROVISIONS_HEADING, ROOT_OF_TEST)
+
+    assert directories == ("docs/guidance/",)
+    assert unlisted(where, provided(here, PROVISIONS_HEADING, ROOT_OF_TEST), directories) == [
+        "docs/development/TESTING.md (named in a skill)",
+        "docs/guidance-other.md (named in a skill)",
+        "docs/guidance/engineering/x.toml (named in a skill)"]
 
 
 def test_the_guidance_review_is_read_and_openspecs_own_skills_are_not(tmp_path: Path) -> None:

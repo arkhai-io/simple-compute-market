@@ -80,4 +80,5 @@ not per run, because a run that passes with a skipped stage has not run every ch
 an observation requires. An observation is *made* when every stage requiring it
 passed, *failed* when one failed, and *unproven* when none failed and one skipped
 naming a prerequisite, which the outcome names. A stage the run did not collect
-counts as not run, so deselecting a stage cannot make an observation.
+counts as not run, so deselecting a stage cannot make an observation. An observation
+is made only by the stages requiring it, never inferred from another observation.

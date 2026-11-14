@@ -14,8 +14,9 @@ conventions apply are the engineering packaging guidance:
 
 Nothing here is maintained by hand
 ([`packaging.md`, "Nothing is maintained by hand"](../guidance/engineering/packaging.md#nothing-is-maintained-by-hand)):
-no Makefile, Dockerfile, `pyproject.toml`, or workflow names an internal package or
-repeats a version the project already declares. Nothing chooses the Python version
+each project's `pyproject.toml` declares its own dependencies, and no Makefile,
+Dockerfile, or workflow lists the set of internal packages or repeats a version a
+project declares. Nothing chooses the Python version
 independently: each consumer reads the root declaration, and the one copy that cannot — a
 Dockerfile's `ARG PYTHON_VERSION` default — is checked against it
 ([`packaging.md`, "One declaration of the runtime version"](../guidance/engineering/packaging.md#one-declaration-of-the-runtime-version)).
@@ -124,12 +125,11 @@ Two checks hold the locks steady between uv releases:
 
 The minimum is `MINIMUM` in `scripts/check_uv_version.py`, and the revision
 `LOCK_REVISION` in `scripts/check_locks.py`; CI's `tests.yml` and `e2e.yml` install the
-minimum, uv 0.12.22. uv rewrites a lock only when something in it changes, so relocking
-a current project leaves its revision as it was, and `make lock` upgrades nothing in a lock that names no internal package. To bring such
-a lock to the running uv's revision, relock it in its project with `uv lock
---upgrade-package <its own distribution>`, after `make check-uv-version`; this moves no
-dependency's version, though the rewrite may restate a marker as the running uv writes
-it. A lock that names internal packages takes `make lock PROJECTS=<its project>`, which
+minimum, uv 0.12.22. `make lock` upgrades nothing in a lock that names no internal
+package, so such a lock is brought to the running uv's revision by relocking its
+project, upgrading only its own distribution, after `make check-uv-version`
+([`packaging-uv.md`, "Locks are written by a stated minimum uv"](../guidance/engineering/packaging-uv.md#locks-are-written-by-a-stated-minimum-uv)).
+A lock that names internal packages takes `make lock PROJECTS=<its project>`, which
 rewrites it.
 
 Relocking needs the indexes each lock resolves from. `domains/vms/buyer` and

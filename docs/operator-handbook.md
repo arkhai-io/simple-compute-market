@@ -9,8 +9,7 @@ It sits beside three other kinds of document:
 
 - [`docs/development/DEPLOYMENT_AND_CONFIG.md`](development/DEPLOYMENT_AND_CONFIG.md)
   says how a service resolves its configuration and how that maps onto
-  Kubernetes and Compose, including the method every definition document
-  follows.
+  Kubernetes and Compose.
 - The specifications under [`openspec/specs/`](../openspec/specs/README.md) are
   the contracts: what a service must do, stated as requirements and scenarios.
   Where this handbook and a specification disagree, the specification is right
@@ -27,8 +26,9 @@ relay document, belongs to the VM domain; this chapter covers the first three.
 Each is a YAML file mounted like any
 configuration file, named by its path setting, and under Helm supplied as the
 provisioning chart's `definitions.<kind>` value, which the chart renders,
-mounts, and names for the service. The method every kind follows, the order
-startup imports them in, and what each does to entries it stops naming are in
+mounts, and names for the service. The method every kind follows is
+[`definition-documents.md`](guidance/engineering/definition-documents.md); the
+order startup imports them in, and how each kind here applies the method, are in
 `DEPLOYMENT_AND_CONFIG.md`,
 ["Definition documents"](development/DEPLOYMENT_AND_CONFIG.md#definition-documents).
 

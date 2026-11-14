@@ -32,11 +32,6 @@ higher-level package consumes ships inside the producer's own package, beside th
 client it pairs with, so a consumer that installs the producer gets the fixture with
 no further configuration.
 
-**A producer with no tests yet** still gets its fixtures, with validators no test
-calls yet: they document the contract and give a future producer test an immediate
-hook. Each such validator says which test is expected to call it once the producer
-gains coverage.
-
 ## Signed protocol messages come from the producer's fixture
 
 Neither a test nor a diagnostic frames or signs a protocol message itself. Code that

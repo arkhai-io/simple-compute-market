@@ -12,12 +12,13 @@ anyone maintains by hand. Each tool's form of these rules is a file of its own:
 
 ## Nothing is maintained by hand
 
-Every packaging rule replaces a list someone would otherwise maintain by hand.
-Nothing in a build script, an image definition, a project's manifest, or a CI
-workflow names an internal package or repeats a version the project already
-declares. Whatever needs the set of internal packages derives it from the project's
-lock when it runs, so no caller lists it ([Packaging with uv](packaging-uv.md),
-"Refreshing a same-version wheel").
+Every packaging rule replaces a list someone would otherwise maintain by hand. A
+project's manifest declares its own dependencies ([Dependencies](dependencies.md),
+"Declare what you import"), and nothing else maintained by hand lists internal
+packages: no build script, image definition, or CI workflow names the set of them or
+repeats a version a project already declares. Whatever needs that
+set derives it from the project's lock when it runs, so no caller lists it
+([Packaging with uv](packaging-uv.md), "Refreshing a same-version wheel").
 
 ## One declaration of the runtime version
 

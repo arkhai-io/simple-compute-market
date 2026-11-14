@@ -1658,6 +1658,55 @@ Section 5 notes (handoff):
   files' headings and `packaging.md`, `versioning.md`, `configuration.md`, and
   `helm.md` whole.
 
+Round 4's triage fixes (review 109, validation 110, owner's notes 111), recorded
+here as the last implemented section's:
+
+- 109 F1: `packaging.md`'s "Nothing is maintained by hand" states that a project's
+  manifest declares its own dependencies, as `dependencies.md` says, and that nothing
+  else maintained by hand lists internal packages; `BUILD_AND_PACKAGING.md`'s opening
+  drops `pyproject.toml` from its list, each project declaring its own dependencies,
+  and states the aggregate form. Left for task 6.5's deduplication: the `Makefile`'s
+  `clobber-wheels` names the three client wheels it publishes, which the old wording
+  forbade and whose fit with the aggregate form this triage did not settle.
+- 109 F2: `contract-fixtures.md` drops "A producer with no tests yet", and
+  `testing-python.md` its Python form (a validator no test calls naming its future
+  test); a fixture waits for its producer's test.
+- Section 4's open pair: `system-tests.md`'s "An observation is made, failed, or
+  unproven" adds that an observation is never inferred from another.
+- Section 5's open items: `packaging-uv.md`'s "Locks are written by a stated minimum
+  uv" takes the relock-to-revision rule, `BUILD_AND_PACKAGING.md` keeping its
+  instance (`make check-uv-version`, `make lock PROJECTS=`) and citing it;
+  `e2e-tests/README.md`'s resolution order puts `.env` values in the environment
+  layer, as `test_settings_loader.py` asserts; the operator handbook's opening drops
+  the definition-document method from `DEPLOYMENT_AND_CONFIG.md`'s bullet and its
+  "Definition documents" chapter cites `definition-documents.md` for the method.
+  `implementation-python.md` stays uncreated.
+- 111 O1: `test_change_workflow_assumptions.py` reads a directory the provision "The
+  guidance documents every step reads" names, ending in `/`, as providing every
+  Markdown file beneath it — a directory another provision names (`docs/`,
+  `openspec/`, `.agents/`) still provides only itself — with a unit test; and
+  `market-change-workflow`'s provisions row names `docs/guidance/` in place of its
+  forty-seven guidance files.
+- 111 O4 and O2 amend tasks 6.1, 6.3, and 6.5; 111 O3 is task 9.3 as planned.
+- Evidence: `make test-release-tooling` (unit), 2868 passed, the new
+  `test_only_the_guidance_provisions_directories_provide_what_lies_beneath` and the
+  repository-wide `test_every_target_and_path_the_workflow_names_is_provided_here`
+  among them. `scripts/change-workflow run pre-commit layer-engineering-guidance`,
+  one path outside the inert paths (the assumptions test): `after-functional-change`
+  passed, changing no lock; `pre-commit-functional` passed (`make check-packaging`,
+  every suite of `make test`); the default checks passed, OpenSpec "is valid"; and
+  `make check-repository` failed only on the two the preamble expects — sixteen
+  citations, all from this change's own `design.md`, `inventory.md`, `proposal.md`,
+  and `tasks.md`, of files it creates or removed, and the specification index
+  wanting the twelve `CW-*` entries and CW-pkug's renamed link (task 10.9).
+  End-to-end: none; no scenario reads guidance or the assumptions test. A
+  fresh-context check of the diff found the first form of the O1 test change
+  honouring every provision ending in `/`, which other rows' `docs/`, `openspec/`,
+  `.agents/`, and `e2e-tests/` made nearly every path; the Python form of the
+  dropped fixture rule in `testing-python.md`; `BUILD_AND_PACKAGING.md` left
+  stricter than the recast rule; and two loose phrasings in the packaging texts and
+  this note's count. All fixed, the suite run again after. Declined: nothing.
+
 ## 6. The repository layer at the root and across systems
 
 Delivers the repository layer's root and cross-system guidance (D3, D8 as amended,
@@ -1682,6 +1731,14 @@ checks. Files: `AGENTS.md`; `openspec/README.md`; `docs/development/ARCHITECTURE
   repository's own rules. Verify every repository row of the inventory whose
   destination is `AGENTS.md` sits there, and each exception row cites a guidance
   file and has the kind `selects` or `overrides`.
+  Amended at round 4's triage (111 O4): `AGENTS.md` restates no shared rule. Its
+  layer table links each shared layer's README, whose tag table maps topics to
+  files, rather than listing the shared files; and each of this repository's own
+  rules states only what is particular here — the check that enforces it, the path,
+  the choice made — linking the shared rule it applies by name without paraphrasing
+  it ("Dependencies follow `dependencies.md` and `dependencies-python.md`. Here:"
+  and the repository's bullets). Verify no section of `AGENTS.md` paraphrases a rule
+  of `docs/guidance/`.
 - [ ] 6.2 Finish `openspec/README.md` as this repository's OpenSpec guide (D3, D8):
   frontmatter; its placement table naming `docs/guidance/` and capability guidance
   files beside capabilities; the validator pin; the capability index itself, whose
@@ -1696,6 +1753,12 @@ checks. Files: `AGENTS.md`; `openspec/README.md`; `docs/development/ARCHITECTURE
   "Validation namespaces" to `market-change-workflow`'s README. Verify each document
   opens with its frontmatter and appears in `AGENTS.md`'s layer table, and the
   runbook does neither.
+  Amended at round 4's triage (111 O2): each document's opening states what it holds
+  as the repository layer — `ARCHITECTURE.md` this system's cross-system description
+  and the repository's own rules, `TESTING.md` where this repository's tests live,
+  its lanes and doubles, and its instances of the engineering testing rules, and so
+  for each — rather than a purpose that predates the shared layers. Verify no
+  opening claims what the shared guidance now holds.
 - [ ] 6.4 Write the classification of the checks (D13) in
   `openspec/specs/market-change-workflow/README.md` as `### What each check enforces`
   under "This repository's checks": a table of each check, the rule it enforces
@@ -1708,6 +1771,15 @@ checks. Files: `AGENTS.md`; `openspec/README.md`; `docs/development/ARCHITECTURE
   Amended at round 2's triage (58 O1): `openspec/README.md`'s "Packaging" part is
   reduced to the checks it runs, citing `BUILD_AND_PACKAGING.md` for what each
   enforces rather than restating it.
+  Amended at round 4's triage (111 O2, 111 O4): every instance in the cross-system
+  documents links the shared rule it applies and states only what is particular
+  here, never paraphrasing the rule — `BUILD_AND_PACKAGING.md`'s opening, which
+  restates "Nothing is maintained by hand" before naming this repository's files,
+  is the known case. Verify each section citing `docs/guidance/` adds only this
+  repository's instance.
+  Before the pre-closeout review (111 O2): the owner revisits whether
+  `docs/development/`'s documents split into owner-facing and agent-facing ones, by
+  reader; any refactor the owner decides on is added to this change then.
 - [ ] 6.6 Re-point every citation of what this section moved, and verify the
   section as task 3.10 does. End-to-end: none; no pipeline scenario reads guidance,
   and none is owed.

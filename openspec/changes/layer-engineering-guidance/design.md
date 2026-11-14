@@ -3,7 +3,8 @@
 Status: design settled and reviewed; design review 19's findings are settled in D5,
 D21, and D22. Round 1's triage amended D8 and D10 and settled the decisions under
 "Settled at round 1's triage". Round 2's triage amended D3 and settled the decisions
-under "Settled at round 2's triage".
+under "Settled at round 2's triage"; later triages settled theirs under their own
+"Settled at" headings, round 4's sharpening D3 for `AGENTS.md`.
 
 ## Context
 
@@ -681,6 +682,48 @@ The owner settled these at the triage of review 86, validation 87, and their not
   and exits; the state written to disk, for intervening by hand; the engine, with
   its parts diagram; and customization. Fixed in the triage session, on the owner's
   word, rather than by re-running section 3.
+
+### Settled at round 4's triage
+
+The owner settled these at the triage of review 109, validation 110, and their notes
+111, on sections 4 and 5, the engineering layer.
+
+- **111 O4 — `AGENTS.md` restates no shared rule** (sharpens D3). The entry holds the
+  layer table, each shared layer's README linked for its files, this repository's
+  guidance documents, its tags, its exceptions, and its own rules; each repository
+  rule states only what is particular here and links the shared rule it applies by
+  name, never paraphrasing it. Rejected: a one-line-per-file index of all guidance,
+  which would survive a Codex review's compaction but grows with every file,
+  duplicates the layer READMEs, and repeats what `load.common` already loads;
+  keeping summaries of a few rules, which leaves arbitrary which rules survive
+  compaction.
+- **111 O2 — The cross-system documents are the repository layer, stated so.** Each
+  document's opening states what it holds as the repository layer, and each instance
+  links its shared rule without paraphrasing it (O4's rule). The owner revisits,
+  before the pre-closeout review, whether these documents split by reader into
+  owner-facing and agent-facing ones; a refactor decided then joins this change.
+- **111 O1 and O3 — No list of guidance files kept by hand.** The assumptions test
+  reads a directory the guidance documents' provision names, ending in `/`, as
+  providing every Markdown file beneath it, as D5 reads a directory entry, so
+  `market-change-workflow`'s provisions row names `docs/guidance/` rather than each
+  file; a directory any other provision names provides only itself, so the test
+  still checks every other path a skill names; `load.common` collapses to the same entry
+  at task 9.3, as D5 planned.
+- **Sections 4 and 5's differing pairs (31 O1b, 31 O1e).** Accepted as section 4's
+  and section 5's notes write them: integration's three forms in `test-levels.md`,
+  the merged test-double and dependency statements, the End-to-end pipeline part's
+  one sentence, `rules.md`'s exceptions framework, and the wording each section
+  listed. `system-tests.md` adds that an observation is never inferred from another;
+  the runbook's other two qualification rules stay its own.
+- **109 F1 — The packaging rule is against aggregate lists.** A project's manifest
+  declares what it imports; nothing else lists internal packages. Rejected: an
+  exemption appended to the absolute form.
+- **109 F2 — A contract fixture waits for its producer's test.** The dormant
+  validator is dropped, with its Python form, no tracked code using one. Rejected: keeping it as a stated
+  temporary exception.
+- **Inventory row 384 — No `implementation-python.md`.** The route pattern's package
+  split has no reason particular to Python, so the pattern is `implementation.md`'s
+  alone (D7).
 
 ### Implementation cadence
 
