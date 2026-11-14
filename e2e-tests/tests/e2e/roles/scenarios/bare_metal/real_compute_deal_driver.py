@@ -197,9 +197,10 @@ class RealBareMetalComputeDealDriver(BareMetalDealDriverBase, RealComputeObserva
         return endpoint
 
     def reserve_released_capacity(self, storefront_admin_client: Any, *, listing_id: str, escrow_uid: str) -> Any:
+        # The listing's binding selects its whole machine and one unit.
+        # Required attributes constrain the listing, rather than the site's claim.
         return storefront_admin_client.admin_reserve_capacity(
-            required_attributes={"resource_id": self.reserved_resource_id, "dimensions": {"units": 1}},
-            listing_id=listing_id, escrow_uid=escrow_uid,
+            required_attributes={}, listing_id=listing_id, escrow_uid=escrow_uid,
         )
 
     def dispatched_fulfillment(self, state: RealBareMetalDealState) -> str:
