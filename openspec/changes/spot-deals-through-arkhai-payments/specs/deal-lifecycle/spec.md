@@ -46,6 +46,23 @@ The sole term-end carrier MUST be early_termination.settles_through, distinct fr
 
 kit/deal-servicing MUST own authorize_delivery for commit, dispatch, start and disclose with durable allow/refuse/pending, reason, operation ID and evidence references. The foundation payment-adapter protocol MUST expose authorize(phase, evidence, billing) and start_billing(keys, activated_delivery_evidence). `billing` is optional: end service's journaled billing-start intent, its operation key and, once recorded, its result, which end service MUST pass at disclosure. `keys` are the operation keys of end service's one billing-start intent and MUST carry its operation store, so a mechanism records each operation it derives before any I/O. Generic servicing MUST NOT interpret hosted part fields; once-only adapters MUST validate commitment evidence and use no-op billing start.
 
+While end service services no rate deals, authorize_delivery MUST refuse the commit phase of a deal whose committed seller projection is not once-only, before it asks the payment adapter and without I/O, with the refusal code `rate_servicing_unavailable`; a servicing declaration enables rate offers and MUST NOT by itself enable their delivery. A deal with no committed seller projection MUST be refused without that code. A delivery authorization MAY carry a closed refusal code; every answer other than this refusal MUST omit it, and a journaled authorization recorded without one MUST still read.
+
+#### Scenario: A rate deal is committed before rate servicing exists
+- **GIVEN** a committed deal whose seller projection is not once-only, under a composition declaring the rate treatments its option uses
+- **WHEN** delivery asks authorize_delivery to commit it
+- **THEN** end service refuses with the code `rate_servicing_unavailable` and its reason, without asking the payment adapter
+- **AND** no capacity is placed and no billing intent is journaled for the deal
+
+#### Scenario: A once-only deal is committed
+- **WHEN** delivery asks authorize_delivery to commit a deal whose seller projection is once-only
+- **THEN** end service asks the payment adapter as before, and its answer carries no refusal code
+
+#### Scenario: A refused rate deal passes its delivery deadline
+- **GIVEN** a rate deal refused at commit and never available
+- **WHEN** it is driven after its delivery deadline
+- **THEN** admission records seller non-delivery at the deadline and journals the seller's `delivery_end(cause=payee, delivered=false)` filing
+
 #### Scenario: A financial decision is pending
 
 - **WHEN** the injected adapter cannot resolve authority evidence for dispatch

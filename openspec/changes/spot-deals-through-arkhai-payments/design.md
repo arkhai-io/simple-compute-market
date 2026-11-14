@@ -531,7 +531,9 @@ work accepted before a withdrawal. The preset helper checks no contract revision
 derivation and publication already check the declaration. Convergence owns rate
 startup, recovery and continuation registration; activation owns the production
 switch-on after hosted deployment. Disabling new publication never abandons
-materialized deals. No continuation or production declaration is installed here.
+materialized deals. No continuation or production declaration is installed here, and
+a declaration enables rate offers, not their execution: end service refuses to commit
+a rate deal while it services no rate deals (D12).
 
 Declaring any rate treatment presupposes that the payment authority executes the
 dispute entry's `chosen` stop (D2), which is qualified at switch-on
@@ -579,18 +581,18 @@ payouts. Examples and fixtures use `USD/6`; production reads the Agreement's ass
 |---|---|---|
 | Derivation, authorize phases, the setup part, exceptional-end filing; adapter and vector targets | this change's focused kit suites | pinned-vector support; published conformance only for published bytes |
 | Buyer stop and hint, seller preempt, setup and rate approval fixtures | this change's CLI and application first use | command mechanics, lane-double evidence |
-| One recurring purchase per compute lane through approval | this change's E2E scenarios | lane-double evidence |
+| One recurring purchase per compute lane through approval and commit, refused at commit | this change's E2E scenarios | lane-double evidence |
 | Delivered on-demand and spot, due-work barriers, release and access closure; the rate matrix | convergence | lane-double evidence |
 | Hosted four-path qualification | activation | live evidence, from deployed authorities only |
 
 **The recurring-purchase E2E.** One scenario per compute lane runs from a lane-only
-servicing declaration listing `charged` and `returned` through approval against the
-payments double, asserting the published per-period price, the buyer's pre-approval
-display (per-period charge, setup, initial reserve, maximum term), the approved
-mandate's single rate part charging one period's price, and that delivery is refused
-without the rate continuation. It is labelled lane-double evidence, closes the change
-index's gap row for a recurring purchase, and convergence extends it through
-delivery. Validation runs the compose lanes with Docker and the local Helm part as
+servicing declaration listing `charged` and `returned` through approval and commit
+against the payments double; its shape is D16's. It asserts the published per-period
+price, the buyer's pre-approval display (per-period charge, setup, initial reserve,
+maximum term), the approved mandate's single rate part charging one period's price,
+and that end service refuses the commit (D12). It is labelled lane-double evidence,
+closes the change index's gap row for a recurring purchase, and convergence extends
+it through delivery. Validation runs the compose lanes with Docker and the local Helm part as
 its end-to-end evidence; a lane unrun at closeout is a blocker, not a pass.
 
 Unit and vector targets prove derivation, `partialPeriod` edges and exact event
@@ -701,6 +703,126 @@ switching its rate guard off, is the inverted hierarchy this replaces: two class
 whose behaviours contradict — one refuses what the other does — implement a shared
 interface or derive from a common base holding only what both do.
 
+### D12. End service refuses to commit a rate deal it cannot service
+
+The servicing declaration says which treatments the payment authority executes; it
+does not say that the storefront services a rate deal once it is delivered. Before
+convergence composes rate servicing nothing does, so a delivered rate deal would run
+with billing started and nobody acting on the buyer's stop, on exhaustion or on a
+pending seller stop: the authority still honours each, so the buyer's money is safe,
+but the seller serves to the Agreement's maximum term and a lane run would read as a
+working rate lease. settlement-configuration's "Terms alone MUST NOT enable recurring
+execution" is the invariant this would break.
+
+`kit/deal-servicing`'s `EndService.authorize_delivery` therefore refuses the commit
+phase of a deal with a rate part, before it asks the payment adapter and before the
+compute delivery path places any capacity (the path authorizes commit first). The
+refusal is mechanism-neutral, shared by both compute domains, does no I/O, and sits in
+end service, where convergence's rate servicing lives. It is the only place the
+promise "delivery fails closed before rate servicing" is enforced.
+
+Rejected: a door in the compute delivery path, which would put a rate concept in the
+compute specialization apart from the end service convergence extends, and would need
+a once-only projection through both domains' ports; a door in each storefront's settle
+path, duplicated per domain against sibling parity; a door at the servicing
+declaration's publication, acceptance and materialization doors, which fails before
+any money moves but leaves no lane able to reach approval before convergence and adds
+a second fact gating offers; and correcting the documents alone, or deferring the
+scenario to convergence, either of which leaves a declaration enabling execution.
+
+### D13. The refusal is unconditional until convergence composes servicing
+
+End service refuses every rate deal's commit because it services no rate deals; the
+requirement states that invariant and names no seam. When convergence composes rate
+servicing, its delta modifies the requirement and its code replaces the refusal.
+
+Rejected: an injected servicer that lifts the refusal when present, which would define
+part of convergence's registration before convergence designs it and invite a stub
+that delivers unserviced rate deals again; a configuration switch, which turns fail
+closed into an operator choice; and lifting on the servicing declaration, which is the
+behaviour D12 replaces.
+
+### D14. A refused rate deal waits in repair until the delivery deadline rule
+
+A refused rate deal is `repair_required(rate_servicing_unavailable)`, a new value in
+the compute delivery path's closed set of repair reasons, with no capacity held. A
+storefront that gains rate servicing before the deal's delivery deadline delivers it
+on its next drive. Once the deadline passes with nothing available, end service's
+existing admission rule records the `delivery-deadline` end as seller non-delivery and
+journals the `delivery_end(cause=payee, delivered=false)` filing, so a priced setup
+part returns through mediation's delivered rule and nothing new decides fault. Until
+then the buyer may release its reservation with its own stop. Planning confirms that
+each domain's worker drives a deferred deal again after the deadline, and adds the
+drive where one does not.
+
+End service tells the path why it refused through an optional closed `code` on
+`DeliveryAuthorization` (`kit/deal-lifecycle`), absent on every other answer:
+
+```python
+DeliveryAuthorization(status="refuse", reason="rate servicing is not composed in this storefront",
+                      code="rate_servicing_unavailable",
+                      operation_id="n-123:commit:4", evidence_refs=["tx-abc"])
+```
+
+The path maps that code to the repair reason; every other refusal stays
+`no_accepted_deal`. Earlier journaled acknowledgements, which lack the key, still read.
+
+Rejected: an immediate classified hand-off and filing at refusal, which cannot be
+undone and charges the seller's premature-stop penalty for a configuration mistake
+before the deadline it agreed to; a silent pending, which shows an operator nothing;
+matching the free-text reason, which breaks when the wording changes; and reusing
+`no_accepted_deal`, which reports a missing settlement that is not missing.
+
+### D15. The door recognises a rate deal by the committed seller projection
+
+The door reads `SellerDeal.once_only`, which every domain registers in the
+transaction that registers the deal's delivery record, as the administrator interrupt
+classification (D6) does. A registration that never set the flag reads as a rate deal
+and is refused; a deal with no seller registration is refused without a code and
+reported `no_accepted_deal`.
+
+Rejected: a `once_only` column on the delivery record, which stores the fact twice and
+needs a migration; and asking the payment adapter, which makes every adapter answer a
+question the neutral projection already answers.
+
+### D16. The recurring-purchase scenario runs through commit and ends by the buyer
+
+`market buy` and `market bare-metal buy` approve and commit in one run, so each lane's
+scenario runs through both:
+
+1. The lane declares `charged` and `returned`; the seller publishes a recurring option
+   through a pool override or VM's listing creation, with an approval window leaving
+   runway (approval window + delivery deadline + one period within
+   `max_duration_seconds`).
+2. The shipped `buy` runs with a default buyer; the scenario asserts the published
+   per-period price, the pre-approval display the buyer prints on stderr, and the
+   approved mandate's single rate part charging one period's price.
+3. After commit it asserts what existing interfaces show: the deal never becomes
+   available, the site holds no reservation for it, and the payments double records
+   no rate `start`. The repair reason is proven at the lowest level that sees it —
+   library integration in `kit/deal-servicing` and `domains/compute/delivery` — and
+   asserted by the scenario only where a storefront interface already exposes it.
+4. Cleanup is the buyer's own `end`, the payer's stop and hint, since the seller's
+   refund refuses a rate deal; with zero payer notice and nothing started, the
+   reservation returns, and the scenario asserts the payer's balance restored. It
+   leaves no hold, rule or held loop, and planning settles whether the run ends
+   before the deal's delivery deadline or accounts for the filing the deadline rule
+   makes.
+
+Rejected: an approve-only buyer option, buyer surface that exists only for the test;
+and driving `PaymentApproval` directly, which skips the shipped display the scenario
+asserts.
+
+## Implementation cadence
+
+Round 2 continues with one session per slice, each committed on its own: the
+end-service door with its refusal code, repair reason, tests and the corrected
+`approve_rate` comment in VM's `test_lifecycle_admin.py` (D12–D15); the
+recurring-purchase scenario in both lanes (D16, task 4B.5); the buyer's watchdog
+(4B.6); identity re-anchoring (section 5); and qualification evidence (section 6).
+Round 2's review and validation cover them together, with 4A and 4B.1–4B.4, before
+pre-closeout.
+
 ## Rejected alternatives
 
 - A payee-advanced horizon or vouch: a dishonest seller can advance it; the buyer's own stop and a case over held money are the guarantee.
@@ -775,8 +897,9 @@ the consumption of the journaled exceptional-end filing path; mediation alone ow
 its ruling computation.
 
 Before convergence lands, first use runs on lane-only approval and command
-fixtures, and delivery fails closed without the rate hook: that proves a pending
-authority stop, not a working delivered spot lease. Production rate publication
+fixtures, and end service refuses to commit a rate deal (D12): that proves a pending
+authority stop, not a working delivered spot lease. Convergence modifies that
+requirement when it composes rate servicing (D13). Production rate publication
 stays dark until its servicing doors are composed, and that fixture is not
 production enablement.
 
@@ -799,6 +922,9 @@ Destinations are planned, not claims of implemented behaviour.
 | D9 the staged `approval_window` rename | `openspec/specs/settlement-configuration/spec.md` (wire field and alias); `docs/development/RELEASING.md` |
 | D10 stop requests and final stops | `openspec/specs/deal-lifecycle/spec.md`; `openspec/specs/settlement-servicing/spec.md` |
 | D11 the composed transaction adapter | `openspec/specs/settlement-servicing/spec.md` and `architecture.md`; `openspec/specs/deal-lifecycle/spec.md` for the protocol |
+| D12–D15 end service's refusal of a rate deal it cannot service, its refusal code and the projection it reads | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md` (where fails closed is enforced) |
+| D14's repair reason | `openspec/specs/compute-delivery/spec.md` |
+| D16 the recurring-purchase scenario's shape | `openspec/specs/test-compatibility/spec.md` |
 | Each change is mergeable to `dev` on its own merits | `openspec/README.md` or `docs/agents/change-workflow.md` |
 | Sibling-domain parity is checked before adding behaviour to one domain | `AGENTS.md`, "Package and dependency discipline" |
 | A versioned contract's field is renamed or retired in stages | `docs/development/RELEASING.md` |

@@ -20,3 +20,55 @@ The VM and bare-metal storefronts MUST each serve `POST /api/v1/admin/deals/{neg
 
 - **WHEN** a rate interruption omits its kind, or an unentitled deal is preempted
 - **THEN** either storefront's route answers 409 and records nothing
+
+## MODIFIED Requirements
+
+### Requirement: Delivery is driven one deal at a time and reports where it stands
+
+The library MUST expose `drive(negotiation_id)`, returning one of `waiting(wake_at)`, `pending`, `repair_required(reason)`, `available`, `converged` or `ended`. Each call MUST reconcile the deal's recorded state before acting and MUST be safe to repeat. A fulfillment hook MUST map `available` and `converged` to fulfilled, `waiting`, `pending` and `repair_required` to deferred, and `ended` to failed only once the end hand-off is durable.
+
+`drive` MUST fail closed on state it cannot read. A deal with no servicing delivery record or no verified settlement evidence MUST be `repair_required(no_accepted_deal)` with nothing written. An accepted deal with no progress row is a first drive, whose row MUST be created under admission for `reserve`. An unknown stored step, a malformed or conflicting recorded identity, a port result of the wrong kind or an empty fulfillment result MUST be `repair_required` and MUST NOT lead to a reserve, dispatch, activation or availability on the deal. The reason MUST be one of `no_accepted_deal`, `timing_invalid`, `progress_unreadable`, `domain_result_invalid`, `activation_unexplained`, `site_unanswered` or `rate_servicing_unavailable`. Every `repair_required` and `ended` outcome MUST carry the deal's recorded reservation and fulfillment identities and the reference of the authority evidence it rests on.
+
+#### Scenario: A domain worker resumes a deal
+
+- **WHEN** a storefront's recovery worker calls `drive` for a deal interrupted after dispatch
+- **THEN** the path polls the recorded fulfillment and continues from that step without scheduling or beginning another
+
+#### Scenario: Repair-required stays visible
+
+- **WHEN** a deal's accepted timing is missing or its site activation answer is unexplained
+- **THEN** `drive` returns `repair_required` with the reason, the recorded identities and the authority evidence it rests on, and the deal keeps its recorded resource
+
+#### Scenario: A deal that was never accepted is driven
+
+- **WHEN** `drive` is called for a negotiation with no servicing delivery record
+- **THEN** it returns `repair_required(no_accepted_deal)` and nothing is reserved or written
+
+#### Scenario: A progress row holds an unknown step
+
+- **WHEN** a deal's progress row records a step the library does not know
+- **THEN** `drive` returns `repair_required(progress_unreadable)` with the recorded identities, and no reserve or fulfillment is begun
+
+#### Scenario: A fulfillment result is empty
+
+- **WHEN** the domain port returns an empty result for the recorded fulfillment
+- **THEN** `drive` returns `repair_required(domain_result_invalid)`, the deal is not recorded available, and no replacement fulfillment is begun
+
+### Requirement: Protected steps are authorized and admitted
+
+Before commit, dispatch, billing start and disclosure the path MUST call end service's `authorize_delivery` for that phase, and before activation it MUST pass end service's admission for `activate`. A pending or unknown outcome MUST leave the deal pending and resolve the same attempt; a financial allow MUST NOT override a due local end; a mechanism with no adapter MUST NOT be allowed. A refusal carrying end service's `rate_servicing_unavailable` code, when no end is due, MUST be `repair_required(rate_servicing_unavailable)` with nothing reserved; any other refusal when no end is due MUST be `repair_required(no_accepted_deal)`.
+
+#### Scenario: An end wins before dispatch
+
+- **WHEN** an end is recorded after the dispatch authorization was read but before dispatch
+- **THEN** the stale admission fails, nothing is dispatched, and the deal goes to the end hand-off
+
+#### Scenario: An authorization outcome is unknown
+
+- **WHEN** the payment adapter cannot establish its authorization outcome
+- **THEN** the deal stays pending and the next drive resolves the same authorization
+
+#### Scenario: End service refuses a rate deal at commit
+
+- **WHEN** end service refuses a deal's commit with the code `rate_servicing_unavailable`
+- **THEN** `drive` returns `repair_required(rate_servicing_unavailable)`, no capacity is reserved, and the next drive asks again

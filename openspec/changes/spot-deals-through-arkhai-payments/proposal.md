@@ -88,6 +88,12 @@ continuation is a separate, dependent change.
   `partialPeriod`. An opt-in foreground watchdog in the buyer's `buy` command sends
   the buyer's ordinary stop when the disclosed access fails its configured probes,
   a bound stated as conditional on the command running.
+- A servicing declaration enables rate offers, not their execution: end service
+  refuses to commit a rate deal while it services no rate deals, before any capacity
+  is placed. The refused deal is repair-required with a named reason, carried as a
+  closed refusal code on the delivery authorization, until the existing delivery
+  deadline rule classifies non-delivery and files. Convergence lifts the refusal
+  when it composes rate servicing.
 - A seller's `delivery_end(cause=payee)` is journaled and filed through the dispute
   adapter to the Agreement's dispute authority, never future-dated: a pre-start
   failure journals at once and files at the Agreement start, and the seller sends
@@ -101,7 +107,8 @@ continuation is a separate, dependent change.
 - Mechanics are qualified against published vectors and the in-lane payment and
   mediation doubles, labelled lane-double evidence; live evidence comes only from
   deployed authorities. One recurring-purchase E2E scenario per compute lane runs
-  from a lane-only servicing declaration through approval.
+  from a lane-only servicing declaration through approval and commit, observes end
+  service refuse the commit, and ends by the buyer's own stop.
 
 This change absorbs the mechanics and spot scenarios of the superseded
 `settle-ongoing-compute-through-arkhai-payments` and
@@ -118,8 +125,11 @@ This change absorbs the mechanics and spot scenarios of the superseded
   servicing declaration, and the staged `approval_window` rename.
 - `storefront-publication`: both domains' rate presets and per-option prices.
 - `deal-lifecycle`: the seller notice command, status and operator surface, the
-  administrator interrupt classification, the canonical end verb and committed
-  partial-period treatment, extending the capability the foundation introduces.
+  administrator interrupt classification, the canonical end verb, committed
+  partial-period treatment, and end service's refusal to commit a rate deal it
+  cannot service, extending the capability the foundation introduces.
+- `compute-delivery`: both compute storefronts' administrator interrupt route, and
+  the repair reason a refused rate deal reports.
 - `buyer-orchestration`: payment approval under the run's terms policy.
 - `test-compatibility`: vector and qualification boundaries for rate parts and the
   recurring-purchase E2E.
@@ -191,7 +201,9 @@ teardown` stays an alias for one release.
 
 Affected code: `kit/arkhai-payments` (the composed transaction adapter, presets,
 the `approval_window` alias, approval policy), the lifecycle protocol, contracts,
-client and seller-half command dispatch and interrupt classification, the buyer
+client and seller-half command dispatch and interrupt classification, end
+service's rate-deal refusal and the delivery authorization's refusal code, the
+compute delivery path's repair reasons, the buyer
 half's end and watchdog, both compute storefront compositions, administrator routes
 and operator CLIs, both compute buyers' end verbs and approval, and the two compute
 lanes' qualification and recurring-purchase scenarios. No mechanism kit imports a
@@ -201,7 +213,7 @@ domain or the persistence-owning servicing kit.
 
 - [x] `docs/development/ARCHITECTURE.md` — adapter and servicing ownership, the
   release flow, the subclassing principle and the timestamp principle
-- [x] Existing subsystem specifications — the six capabilities above
+- [x] Existing subsystem specifications — the seven capabilities above
 - [x] `docs/development/RELEASING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`,
   `AGENTS.md` and the change workflow's guidance
 - [ ] New subsystem specification
@@ -245,6 +257,18 @@ domain or the persistence-owning servicing kit.
 - D11 the composed payments transaction adapter:
   `openspec/specs/settlement-servicing/spec.md` and its architecture companion;
   `openspec/specs/deal-lifecycle/spec.md` for the protocol.
+- D12 end service's refusal to commit a rate deal it cannot service, the one place
+  delivery fails closed before rate servicing: `openspec/specs/deal-lifecycle/spec.md`
+  and its architecture companion.
+- D13 the refusal as an unconditional invariant convergence modifies:
+  `openspec/specs/deal-lifecycle/spec.md`.
+- D14 the refused deal's repair state, its `rate_servicing_unavailable` reason and the
+  delivery authorization's refusal code: `openspec/specs/compute-delivery/spec.md`
+  for the reason; `openspec/specs/deal-lifecycle/spec.md` for the code.
+- D15 the door reading the committed seller projection:
+  `openspec/specs/deal-lifecycle/spec.md`.
+- D16 the recurring-purchase scenario through commit, ended by the buyer:
+  `openspec/specs/test-compatibility/spec.md`.
 - Each change is mergeable to `dev` on its own merits: `openspec/README.md` or
   `docs/agents/change-workflow.md`.
 - Check a sibling domain before adding behaviour to one; a difference needs a

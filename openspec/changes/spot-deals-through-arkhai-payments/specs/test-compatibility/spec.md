@@ -22,16 +22,20 @@ Rate mechanics qualification MUST follow "External payment qualification names i
 - **AND** a charged variant is a separate observation whose buyer waives each charged term through its per-term waiver
 
 ### Requirement: A recurring purchase runs end to end in each compute lane
-Each compute lane MUST run one recurring-purchase scenario from a lane-only servicing declaration listing charged and returned, through approval against the payments double, labelled lane-double evidence.
+Each compute lane MUST run one recurring-purchase scenario from a lane-only servicing declaration listing charged and returned, through the shipped buyer's approval and commit against the payments double, labelled lane-double evidence. While end service services no rate deals, the scenario MUST observe the commit refused and MUST end the deal by the buyer's own stop, since the seller's refund refuses a rate deal; it MUST leave no payment hold, mock rule or held loop behind.
 
 #### Scenario: A buyer approves a recurring option
 - **WHEN** a buyer selects a seller's recurring option in a compute lane and approves its mandate
 - **THEN** the scenario asserts the published per-period price, the buyer's pre-approval display of per-period charge, setup, initial reserve and maximum term, and the approved mandate's single rate part charging one period's price
-- **AND** it asserts delivery is refused without the rate continuation
+- **AND** it asserts that end service refused the commit: the deal never becomes available, the site holds no reservation for it, and the payments double records no rate start
+
+#### Scenario: The buyer's stop ends the refused deal
+- **WHEN** the scenario's buyer ends the refused deal through its canonical `end`
+- **THEN** the payer's stop is accepted at the payments double, the unearned reservation returns, and the payer's available balance is restored
 
 #### Scenario: Command first use precedes continuation
-- **WHEN** adapter or notice first use succeeds before rate continuation is installed
-- **THEN** evidence claims only command/authority mechanics and delivery refuses without the rate hook
+- **WHEN** adapter or notice first use succeeds before rate servicing is composed in end service
+- **THEN** evidence claims only command/authority mechanics and end service refuses to commit a rate deal
 - **AND** no both-lane release, due-work completion or hosted qualification is claimed
 
 ## MODIFIED Requirements
