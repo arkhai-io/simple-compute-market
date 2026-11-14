@@ -115,7 +115,7 @@ deployment topology, not a placeholder for a future one.
 
 Every API-credit package resolves its internal dependencies from built
 wheels, not repository-relative editable paths or `pythonpath`
-fallbacks — see `docs/development/ARCHITECTURE.md#wheel-based-development`.
+fallbacks — see `docs/development/BUILD_AND_PACKAGING.md#the-wheelhouse`.
 
 ### Listing bindings and the bound pool
 

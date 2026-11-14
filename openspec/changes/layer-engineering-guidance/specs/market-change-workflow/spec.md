@@ -55,8 +55,8 @@ outside the archived changes and `docs/prompts/`.
 
 #### Scenario: A guidance link's section moved
 
-- **WHEN** a skill links to `openspec/README.md#plan-closeout-requirements` after that
-  section has moved to the workflow's closeout guidance
+- **WHEN** a skill links to a section of a guidance file by its anchor after that
+  section has moved to another guidance file
 - **THEN** the guidance check fails, naming the link and its missing anchor
 
 #### Scenario: An untagged capability guide

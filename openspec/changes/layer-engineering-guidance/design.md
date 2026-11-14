@@ -43,7 +43,7 @@ under "Settled at round 2's triage"; later triages settled theirs under their ow
   OpenSpec documentation model and the closeout parts beside this repository's
   placement table and validator pin.
 - **Citations.** About 286 files cite the main guidance documents; about 74 cite
-  `openspec/README.md#plan-closeout-requirements`, many by part number.
+  `openspec/README.md`, "Plan closeout requirements", many by part number.
   `scripts/check_doc_citations.py` checks that a cited path exists, not its anchor.
 - **Checks that enforce guidance.** Comment hygiene, history wording, local
   imports, decision destinations, version bumps, the capability and specification

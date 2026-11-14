@@ -395,7 +395,7 @@ removed, every citation re-pointed. Files: `docs/guidance/workflow/*.md` (new);
   campaign index currency, the repository's own closeout parts as its root guidance
   names them, promotion, guidance placement, documentation citations, archival —
   each part under its own heading carrying its text from
-  `openspec/README.md#plan-closeout-requirements` with every repository command and
+  `openspec/README.md`, "Plan closeout requirements", with every repository command and
   path replaced by what the repository's guidance names (roadmap currency updates
   "the repository's roadmap", 31 O1f); an engineering principle inside a part, such
   as completion not being proved by the change's own suites, cited from the part and
@@ -518,7 +518,7 @@ removed, every citation re-pointed. Files: `docs/guidance/workflow/*.md` (new);
   `change-closeout`'s count of the parts and their order; `change-workflow`'s README
   and spec text; `openspec/specs/planning-governance/spec.md`'s Evidence, outside
   the archive's merge (D14); and every other document citing
-  `openspec/README.md#plan-closeout-requirements` or another moved heading. The
+  `openspec/README.md`, "Plan closeout requirements", or another moved heading. The
   skills' restatements stay as they are (D11). Verify `grep -rn` over the tracked
   tree outside `openspec/changes/archive/` and `docs/prompts/` finds no citation of
   a heading this section removed.
@@ -2528,7 +2528,7 @@ fixes the check finds in the guidance. Files: `scripts/check_guidance.py` (new),
 `scripts/tests/test_check_change.py`; `Makefile`; `.agents/workflow.toml`; guidance
 files the check finds wanting.
 
-- [ ] 9.1 Write `scripts/check_guidance.py`, standard library only like the other
+- [x] 9.1 Write `scripts/check_guidance.py`, standard library only like the other
   closing checks: the guidance set as D21 gives it — every Markdown file under
   `docs/guidance/`; every Markdown file in a capability directory under
   `openspec/specs/` but its `spec.md`, its companion (`architecture.md`, or
@@ -2550,10 +2550,40 @@ files the check finds wanting.
   section moved", "Engineering guidance links upward"), a passing tree, the archive
   and `docs/prompts/` exclusions, a workflow-tagged file under an engineering
   directory passing, and both listings.
-- [ ] 9.2 Add `make check-guidance` to the `Makefile` and to `scripts/check_change.py`'s
+  Note: a layer's vocabulary is the table under a heading "Tags" whose first row is
+  that layer's tag, kind `layer`, so no vocabulary is found by directory either; an
+  exception table is the table under "Exceptions to shared guidance"; the layer
+  table is `AGENTS.md`'s table headed `Layer | Guidance`, not its other two-column
+  tables (the roles table names the roadmap, which is no guidance). The files read
+  are those Git tracks or would track (`git ls-files --cached --others
+  --exclude-standard`), so a guide written and not yet added is checked before its
+  commit, and an ignored review record is not read. A quoted path is one in
+  backticks or double quotes with an anchor, resolved from the root first; anchors
+  are slugged as GitHub renders them — a code span's text kept as written, a link
+  its text, an HTML tag and emphasis markers dropped outside code — numbered when
+  repeated, with any HTML element's `id` or `name` counted; nothing inside a fenced
+  block (indented ones in list items included, closed only by a fence with no info
+  string) or a code span is a heading or a link. Setext headings, block quotes, and
+  HTML comments are not read: no guidance file uses them. Two conditions beyond the
+  list, each a malformed input the others would misread: tags that are no list, and
+  a document the layer table names that does not exist.
+  `test_check_guidance.py`: 49 passed — unit, `check` and `main` over temporary
+  trees: one test per failure condition, the layer tag no vocabulary defines and
+  eight malformed vocabulary shapes among them, MCW-c4ek's three guidance scenarios,
+  CW-g7lt's "A file states no layer", CW-d2rw's, CW-n6dm's, a passing tree, the
+  archive and `docs/prompts/` exclusions, both listings (CW-x4ex's capability row
+  listed beside the root's), the set — by place, a capability `README.md` beside no
+  index counted, a tagged change document not, tags, the layer table and not the
+  roles table — and the slugs and fences; and one integration test running `git`
+  for the file lister (tracked, untracked, and ignored files).
+- [x] 9.2 Add `make check-guidance` to the `Makefile` and to `scripts/check_change.py`'s
   checks, so `make check-repository` runs it, and name it in `check-repository`'s
   help text. Verify `test_check_change.py` (unit) covers the new check and passes.
-- [ ] 9.3 Collapse `load.common` to `AGENTS.md`, `docs/guidance/`, the cross-system
+  Note: the ninth check, `guidance`, last; the target joins `.PHONY` and carries a
+  comment naming the listings, and `check_change.py`'s docstring names it.
+  `test_check_change.py` (unit, `run_checks` with a fake runner): 18 passed, its
+  command list and every one-failing case now covering `check-guidance`.
+- [x] 9.3 Collapse `load.common` to `AGENTS.md`, `docs/guidance/`, the cross-system
   documents, and `openspec/README.md` (D5), with its comment current. Verify
   `scripts/change-workflow config load common` prints every guidance file sections 3
   to 5 listed by path, and nothing more under `docs/guidance/`.
@@ -2564,7 +2594,23 @@ files the check finds wanting.
   `docs/guidance/` entry, so they agree by the files they name: verify that the
   table's two directories hold every Markdown file `docs/guidance/` expands to, and
   that its other rows are `load.common`'s other entries.
-- [ ] 9.4 Run `make check-guidance` over the tree and fix in the guidance whatever it
+  Note: the edit is the orchestrator's, as every edit of `.agents/workflow.toml` is
+  (task 3.9's correction); the session stopped for it with 9.1, 9.2, and 9.4 done,
+  and the orchestrating session made it on the owner's standing word, as named:
+  `common = ["AGENTS.md", "docs/guidance/", "docs/development/ARCHITECTURE.md",
+  "docs/development/TESTING.md", "docs/development/DEPLOYMENT_AND_CONFIG.md",
+  "openspec/README.md"]`, its comment current. It is committed with the section.
+  `scripts/change-workflow config load common` prints 52 files: `AGENTS.md`, the 40
+  engineering and 7 workflow files sections 3 to 5 listed by path, sorted, and
+  nothing else under `docs/guidance/`, then the three cross-system documents and
+  `openspec/README.md` — the same set as before. Against `AGENTS.md`'s "What every
+  session reads": its two directory rows, `docs/guidance/engineering/` and
+  `docs/guidance/workflow/`, hold every file `docs/guidance/` expands to (no
+  Markdown file sits directly under `docs/guidance/`), and its other five rows are
+  `load.common`'s other five entries. `test_change_workflow_config.py`,
+  `test_post_compaction_context.py` (the hook naming this repository's expanded
+  documents), and `test_change_workflow_assumptions.py` (unit): passed.
+- [x] 9.4 Run `make check-guidance` over the tree and fix in the guidance whatever it
   reports — a missing tag, an unused row, a stale anchor, an upward link — each fix
   following the corrected inventory. Verify `make check-guidance` passes.
   Amended at round 2's triage (56 F1): before that gate, this change's own
@@ -2574,11 +2620,65 @@ files the check finds wanting.
   scenario "A guidance link's section moved" uses a neutral example rather than a
   real removed anchor, which would otherwise fail the check from the permanent
   `spec.md` once archived. Task 10.11 remains the final sweep.
-- [ ] 9.5 Verify the section: `pytest -q scripts/tests/test_check_guidance.py
+  Note: the first run reported ten stale anchors and nothing else — no tag, row,
+  table, exception, or link problem. Seven were this change's own: `design.md`'s
+  Context, `inventory.md`'s two restatement rows, and `tasks.md`'s tasks 3.2 and 3.8
+  and section 10's opening now name "Plan closeout requirements" in prose, and the
+  delta's scenario "A guidance link's section moved" names no path. Three were older
+  breaks the check found, fixed outside the plan: `market-change-workflow`'s README
+  cited `changes.md#knowledge-to-promote`, a heading only inside a fenced template,
+  now "Change documentation requirements"; `api-credits`' companion cited
+  `ARCHITECTURE.md#wheel-based-development`, absent on `dev` too, now
+  `BUILD_AND_PACKAGING.md#the-wheelhouse`; and `multi-domain-storefront-composition`'s
+  promotion record cited `ARCHITECTURE.md#multi-domain-storefront-composition`, never
+  a heading there, now "Capacity publication and multi-domain storefront
+  composition". `make check-guidance`: "OK: 73 guidance files are tagged from their
+  vocabularies, 3 exception rows cite guidance" — 40 engineering, 7 workflow, 19
+  capability, and 7 root and cross-system files, and `AGENTS.md`'s two rows with
+  `change-workflow/diagrams.md`'s.
+- [x] 9.5 Verify the section: `pytest -q scripts/tests/test_check_guidance.py
   scripts/tests/test_check_change.py` (unit), then `make test-release-tooling`, and
   `scripts/change-workflow run pre-commit layer-engineering-guidance`, which now runs
   the guidance check. End-to-end: none; no pipeline scenario runs the closing
   checks, and none is owed.
+  Note: `test_check_guidance.py` and `test_check_change.py` (unit, the lister's one
+  test integration): 67 passed. `make test-release-tooling` (every `scripts/tests`
+  suite): 2937 passed before the fresh-context check's fixes; the functional hooks
+  ran it again after them. `scripts/change-workflow run pre-commit
+  layer-engineering-guidance`, the workflow configuration's edit among its paths:
+  `after-functional-change` passed, no lock changed; `pre-commit-functional` passed
+  (`make check-packaging`, `make test`'s every suite, 2942 in `scripts/tests`); the
+  default checks passed, the change "is valid"; `make check-repository` ran its nine
+  checks — the guidance check passing — and its first run also failed comment
+  hygiene on the test fixtures' change-document file names, renamed since, `make
+  check-comment-hygiene` then passing. A second run failed one test outside the
+  section, `test_change_clone.py::test_the_bootstrap_failed` (`os.waitpid` finding
+  no child, a race in its wait on the bootstrap process); the suite passed alone (80
+  passed) and in the third run, whose hooks all passed. The final run fails only on
+  the two the preamble expects:
+  the citations of `docs/agents/` from this change's own documents (the two files
+  this section creates now exist) and the `CW-*` index entries. End-to-end scenarios
+  covering the section: none confirmed, as planned. Owed by validation: nothing.
+
+Section 9 notes (handoff):
+
+- The guidance check is the closing checks' ninth. It reads the whole tree, not the
+  change's diff, so it fails any change's pre-commit once a heading a document cites
+  moves: other changes in flight meet it at their merge (D15).
+- Closeout's guidance placement part (task 10.10) runs `make check-guidance`; its
+  listings are `scripts/check_guidance.py --list [--tag <tag>]` and
+  `--list-exceptions`, run with `python3`, which no step's rules allow directly —
+  the tests exercise both, and a session needing them asks for a make target.
+- Declined from the fresh-context check: reading setext headings, block quotes, and
+  HTML comments, none of which a guidance file uses; requiring an exception row to
+  cite shared guidance rather than any guidance file, which MCW-c4ek's wording does
+  not ask (CW-x4ex's "shared guidance" is for the owner to weigh at the triage). The
+  check found three older stale anchors outside the plan (task 9.4) and fixed them,
+  one in `multi-domain-storefront-composition`'s own document, which that change
+  meets at its merge.
+- Stale until task 10.9: `market-change-workflow`'s README, "The closing checks",
+  which says `check-repository` holds five rules and does not name the guidance
+  check; the companion's and the index's lines on `[load]` and the inert paths.
 
 ## 10. Closeout
 
@@ -2586,8 +2686,8 @@ The closeout task, in the order this change itself gives it (D8 as amended): the
 workflow's parts from `docs/guidance/workflow/closeout.md`, roadmap currency among
 them, with this repository's parts — packaging and end-to-end pipeline evidence —
 from `openspec/README.md`'s "This repository's closeout parts" at the position the
-list names. They are `openspec/README.md#plan-closeout-requirements`'s eleven
-parts, reordered, plus guidance placement (D16). Replanned against round 1's triage;
+list names. They are the eleven parts of `openspec/README.md`'s former "Plan
+closeout requirements", reordered, plus guidance placement (D16). Replanned against round 1's triage;
 nothing in it had started.
 
 - [ ] 10.1 Comment hygiene. Confirm; do not do it here. Run `make
