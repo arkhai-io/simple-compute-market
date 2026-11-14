@@ -91,8 +91,9 @@ components or development images in a workflow, publish target or lane target.
 #### Scenario: A component is added
 
 - **WHEN** a service image or distribution joins the release
-- **THEN** one declaration is edited, and every publish target loads it without a second
-  edit
+- **THEN** one declaration is edited beside the component's own build, every publish
+  target loads it without a second edit, and the packaging tests fail while the
+  candidate build does not build it
 
 #### Scenario: A publish target names its own list
 
@@ -166,8 +167,10 @@ MUST refuse a wheel whose distribution and version an earlier record names with 
 different SHA-256, or a chart whose version an earlier record names with a different
 content digest. When a candidate is loaded, its subject is the wheelhouse the load built
 and the chart packaged with the pinned Helm, whose content digest is computed over the
-packaged files. At the cut, its subject is the release's own bill of materials, and it
-MUST NOT need a build. With no other bill of materials it MUST pass and say so. It
+packaged files; a package storing a path more than once, or a file Git ignores under
+the chart's directory, MUST be refused rather than digested. At the cut, its subject is
+the release's own bill of materials, and it MUST NOT need a build. With no other bill of
+materials it MUST pass and say so. It
 guards the versions recorded releases name and reads no package registry; it is not a
 guard against versions a registry received by other means.
 
@@ -220,6 +223,12 @@ refuses with the record as its subject.
 - **WHEN** the tag's commit changes any path besides the bill of materials
 - **THEN** the record check fails and names the path
 
+#### Scenario: The release branch has grown past its record
+
+- **WHEN** a `releases/<semver>` branch, locally or as any remote-tracking branch, is at a
+  commit other than the tag's
+- **THEN** the record check fails and names the branch and its commit
+
 #### Scenario: The record names an undeclared or duplicated component
 
 - **WHEN** the bill of materials names a component the declaration does not declare, a
@@ -252,9 +261,13 @@ does not admit.
 
 With `RELEASE_IMAGES=1`, a local end-to-end lane MUST build no declared release image,
 MUST fail naming each declared release image it runs that is missing locally as
-`arkhai:<local><IMAGE_SUFFIX>`, and MUST refuse an empty suffix. After its stack starts it
+`arkhai:<local><IMAGE_SUFFIX>`, MUST fail naming each declared release image its Compose
+files run without the suffix, and MUST refuse an empty suffix. After its stack starts it
 MUST record each release image it runs by published name and manifest digest, failing an
-image without exactly one repo digest. `pull-release-images`, given a registry and a
+image without exactly one repo digest from a registry, a release image its Compose files
+run that no running container runs, and a lane running none of the candidate's release
+images. A repo digest in the local `arkhai` repository names no registry and MUST NOT be
+counted. `pull-release-images`, given a registry and a
 suffix, MUST pull each declared release image by its published name and the suffix, and
 tag it `arkhai:<local><IMAGE_SUFFIX>`.
 
@@ -275,6 +288,24 @@ tag it `arkhai:<local><IMAGE_SUFFIX>`.
 
 - **WHEN** a lane runs with `RELEASE_IMAGES=1` and one of its release images is absent
 - **THEN** the lane fails before starting its stack and names the image
+
+#### Scenario: A lane's Compose files name a release image without the suffix
+
+- **WHEN** a lane runs with `RELEASE_IMAGES=1` and its Compose files name a declared release
+  image by its bare tag
+- **THEN** the lane fails before starting its stack and names the image
+
+#### Scenario: A release image the lane runs has no running container
+
+- **WHEN** a lane's stack is up with `RELEASE_IMAGES=1` and a release image its Compose files
+  run has no running container
+- **THEN** no record is written, and the lane fails naming the image
+
+#### Scenario: A release image has only a local repo digest
+
+- **WHEN** a release image the lane runs has repo digests only in the local `arkhai`
+  repository
+- **THEN** no record is written, and the lane fails naming the image
 
 ### Requirement: The release binary is the buyer CLI with every declared buyer domain
 
@@ -302,6 +333,22 @@ distribution. A published distribution MUST NOT depend on the freezing tool at r
 - **WHEN** the binary's project depends on a distribution that is neither the buyer CLI
   nor a declared buyer domain
 - **THEN** the packaging check fails and names it
+
+## MODIFIED Requirements
+
+### Requirement: A stack's configuration lives in committed files
+
+Every Compose stack the repository runs — each end-to-end lane and the full local stack — MUST take its configuration from committed overlay, profile and secret-overlay files. A Makefile MAY choose which configuration loads, such as the provisioning mode, the runner's profiles, or a release candidate's image suffix, and MUST NOT generate or carry configuration values. A base or domain Compose file MUST carry only values its topology fixes; a deployment's own binds and values MUST be in its overlay, and a base file MUST NOT give a credential or definition document a committed fallback.
+
+#### Scenario: A lane stack is brought up
+
+- **WHEN** a lane target brings its stack up
+- **THEN** it names only the lane's Compose files, the run's provisioning mode and, in release-image mode, the candidate's image suffix, and every value the stack reads is in a committed file
+
+#### Scenario: A base stack runs without its overlay
+
+- **WHEN** an operator brings up a base stack file without an overlay binding its credentials
+- **THEN** the services that need them refuse to start, and no committed development value is used
 
 ## REMOVED Requirements
 

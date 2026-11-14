@@ -959,6 +959,37 @@ test-deployment-packaging` installs Helm through `azure/setup-helm`, sets
 `test-release-tooling` holds the two real-Helm tests in `test_release_bom.py`. Under
 `HELM_REQUIRED=1` a skip fails, so the job passing shows they ran and passed.
 
+**From the triage of the round at `033dd0250`** (2026-11-14; implementation review 52,
+validation 53). Fixed here, the checks recorded in section 12's last note:
+- **V1 and T1: the chart's content digest no longer reads local state.** The real-Helm
+  test asserting that `helm package` stores each subchart's files twice failed in CI:
+  that happens only when `helm dependency update` (`make -C helm init`) has left an
+  archive of each subchart beside its directory, which a clean checkout lacks. The
+  same command leaves a `Chart.lock` stamped with its time, which Helm packages, and
+  the chart's Python tests leave caches; packaged, a fresh lock alone moved the digest
+  of an unchanged chart. Outside the plan:
+  - `helm/.helmignore` names `Chart.lock`, `charts/*.tgz`, `__pycache__/`, `*.pyc`,
+    `.pytest_cache/` and `.port-forward.pids`; the chart stays 0.4.1, which no release
+    records;
+  - `release_bom.package_chart` refuses a package storing a file Git ignores under the
+    chart's directory (`git_ignored_files`, an injected seam);
+  - `archive_digest` refuses any path stored more than once, so two readers of layout
+    1 cannot digest one package two ways;
+  - `helm/Makefile`'s `test-render` comment no longer says `init` keeps a stale archive
+    from being rendered.
+
+  `test_release_bom.py`: the twice-stored test is replaced by one packaging a copy of
+  the chart's tracked files clean and after `helm dependency update`, a cache, a pytest
+  cache and a pid file, to one content digest; a real-Helm case refusing an ignored file
+  the `.helmignore` does not name; unit cases for the refusal, for any repeated path, and
+  for `git_ignored_files` in a scratch repository. D14 records the rule.
+- **52 F2: the record check holds the release branch's tip.** It refused only a tagged
+  commit no `releases/<semver>` ref reached, so a commit added after the record passed.
+  Every ref of that name, local or a remote's, must now be at the tag's commit.
+  `test_check_release_record.py`: a later commit on the branch, and a remote branch at
+  another commit beside one at the tag, each refused. D12's first item, the module
+  docstring and the delta (a scenario) say so.
+
 ## 9. The release binary is PyPI's CLI
 
 Delivers D18, as amended after the section's return to design. Implements the
@@ -2092,6 +2123,17 @@ Declined:
   tags before it builds, and refuses when one cannot be removed, for example while a
   container runs it.
 
+**From the triage of the round at `033dd0250`** (2026-11-14; implementation review 52
+F1). `build-candidate` keeps naming its build targets (D6), and nothing held it to the
+declaration: a declared image it did not build was found only by an operator's load,
+after building everything else. `test_image_publication_contract.py` now follows `make
+build-candidate` through `make -n` as it follows `build-dev`. Every declared image and
+development image's revision tag must be written there, and every command of each
+declared binary's own `target` and of `dist-helm` must run there. The delta's "A
+component is added" scenario now says the declaration is edited beside the component's
+own build, and that the packaging tests fail until the candidate build builds it. D6 says
+so too. The checks are recorded in section 12's last note.
+
 ## 12. The local lanes run a release candidate's images
 
 Delivers D17. Implements the requirement "A local lane can run a release candidate's
@@ -2273,12 +2315,36 @@ images". Touches:
       scenarios. That shows each built image's only repo digests are in the local
       repository. No run shows the final code recording images it accepts. Both runs'
       stacks were taken down with `make -C e2e-tests e2e-bare-metal-down`.
-    - **Unrun: the registry round trip** (steps 1–3 against a registry on `localhost`).
-      This step's rules allow neither `docker push` nor `docker pull`, nor `make -C
-      e2e-tests pull-release-images`. So no run shows `pull` against a real registry,
-      a passing record of pulled images, or the record's digests equal to the pushed
-      manifests'. `pull`'s commands are shown only with `docker` stubbed (12.2).
-      Validation or the owner can make the round trip as 12.3's verification lists it.
+    - **The registry round trip**, unrun by the implementing step, whose rules allow
+      neither `docker push` nor `docker pull`, was run at the owner's request for the
+      round's triage (implementation review 52 F3). It ran at `033dd0250` in a fresh
+      worktree, on Docker 29.8.0 with the containerd image store and Compose 5.5.1,
+      against a disposable `registry:2` on `localhost:5055`:
+      1. `make dist`, then the five release images' build targets with `IMAGE_SUFFIX=`
+         empty, wrote `arkhai:<local>-033dd0250` for each.
+      2. `publish_artifacts.py images --registry localhost:5055 --suffix 033dd0250`,
+         the code `make push-images` runs, pushed each. Each `docker push` digest
+         equalled the registry's `Docker-Content-Digest` for the tag.
+      3. A push alone gives the local image the registry's repo digest on this store,
+         so every tag of the five images was removed and each image confirmed absent
+         first. `make -C e2e-tests pull-release-images DOCKER_REGISTRY=localhost:5055
+         IMAGE_SUFFIX=-033dd0250` then downloaded each and tagged it
+         `arkhai:<local>-033dd0250`, its image ID the pushed manifest digest and its
+         repo digests `arkhai@<digest>` and `localhost:5055/arkhai@<digest>`: the
+         registry's survives the retag.
+      4. `make -C e2e-tests test-e2e-bare-metal RELEASE_IMAGES=1
+         IMAGE_SUFFIX=-033dd0250` passed its check, built only dev-env, the test image
+         and the two lane doubles (the five release images' IDs unchanged), and passed
+         98 scenarios. Its record named `registry`, `provisioning` and
+         `bare-metal-storefront`, each with the pushed manifest digest:
+         `sha256:d3fc37bf…eae7`, `sha256:3b85cff0…1e98` and `sha256:51257c27…d828`.
+
+      With `arkhai:registry-033dd0250` removed, the same lane failed at its first
+      command, naming it, before building or starting anything. Not covered: the VM
+      and API-credit lanes in this mode, and a hosted registry. The run also showed a
+      push gives an image a registry's repo digest on this store, so `record`'s
+      refusal shows the recorded value is a registry's manifest digest, not that the
+      image was pulled (§12 Q1, in the round triage's note below).
 - [x] 12.4 Section verification.
   - Unit: `make test-release-tooling`.
   - Packaging: `make check-packaging`, where 7.5's check covers the lane targets.
@@ -2297,7 +2363,7 @@ images". Touches:
       3013 tests inside the last pre-commit run below.
     - `make check-release-components` passed, with the enumeration rule reading the
       changed lane targets and `pull-release-images`.
-    - Local lane run: 12.3's, with its registry round trip unrun.
+    - Local lane run: 12.3's, its registry round trip run for the round's triage.
     - `scripts/change-workflow run pre-commit publish-wheels-through-a-gate` ran three
       times: before the fresh-context checks and after each one's fixes. Each time its
       functional hooks passed.
@@ -2439,17 +2505,83 @@ Declined:
   your own deployments keep bare tags". A lane run with `RELEASE_IMAGES=1` does not.
   13.9 does not name this document.
 - `docs/development/TESTING.md`: "A lane target names only its Compose files, its
-  project, and the run's provisioning mode" (above), and `COMPOSE_REQUIRED` beside the
-  other required-binary gates wherever they are described.
-- The record shows the manifest digest of each release image the lane ran, pulled from
-  a registry; the deployment's comparison with the pushed manifests is what shows they
-  are the candidate's. RELEASING.md should say so.
+  project, and the run's provisioning mode" (above). `COMPOSE_REQUIRED` is now
+  described beside `HELM_REQUIRED` in "Static Configuration Tests" (the round triage's
+  note below).
+- The record shows each release image's manifest digest under a registry's name, which
+  proves neither a pull nor that the registry holds it; the deployment's comparison with
+  the pushed manifests is what shows they are the candidate's. RELEASING.md should say
+  so.
 - `docs/development/TESTING.md`, "Locally verifiable and external-topology scenarios":
   the release-image mode, the order (check, build, up, record), and the record's shape.
 - `RELEASING.md`: `make -C e2e-tests pull-release-images DOCKER_REGISTRY=…
   IMAGE_SUFFIX=-<rev9>`, then each lane with `RELEASE_IMAGES=1` and the same suffix. A
   suffix is passed as `--suffix=<value>` inside the targets; an operator passes Make
   variables and never meets that.
+
+### Round triage fixes (2026-11-14)
+
+The triage of the round at `033dd0250` (implementation review 52, validation 53, the
+owner's notes 54) accepted the following fixes, made against `033dd0250`. Those of
+sections 8 and 11 are described in their notes.
+- **52 F3: the registry round trip** ran at the owner's request, and 12.3 records it.
+- **§12 Q1: what `record`'s digest rule proves.** The round trip showed that on the
+  containerd store, tagging an image for a registry, as a push does, gives it that
+  registry's repo digest. `record`'s refusal therefore no longer says an image "was not
+  pulled": it has "no repo digest from a registry: its manifest digest is unknown".
+  The module docstring says a registry's repo digest is the image's own manifest digest
+  under a registry's name, proving neither a pull nor that the registry holds it, and
+  that the deployment's comparison with the pushed manifests ties the record to the
+  candidate. D17 and the delta say "from a registry", the local `arkhai` repository not
+  counted.
+- **§12 Q2: the refusals beyond D17's text** are now in D17 and the delta, with three
+  scenarios: a release image named without the suffix; one with no running container;
+  one with only a local repo digest.
+- **§12 Q3: the stale permanent scenario.** The delta modifies "A stack's configuration
+  lives in committed files". A Makefile may also choose a release candidate's image
+  suffix, and "A lane stack is brought up" names it. TESTING.md's matching sentence
+  stays with 13.9.
+- **§12 Q4: test levels.** TESTING.md gains "Static Configuration Tests": a chart render,
+  a Compose render or a `make -n` dry run, asserting on what committed configuration
+  would do without doing it. These sit beside the four levels, run where unit tests run,
+  and are gated by `HELM_REQUIRED` or `COMPOSE_REQUIRED` where the tool may be missing.
+  "Chart Render Tests" points to it. Sections 10–12's `make -n` tests are of this
+  kind; their test code carries no level label to change.
+- **54 O1** (`UV_BUILD_CONSTRAINT` exported with no visible use): no change, by the
+  owner's word.
+
+**Checks of the fixes.**
+- `make test-release-tooling` passed 3027 tests with none skipped. Among them are the new
+  real-Helm cases in `test_release_bom.py`, run with the pinned Helm v4.3.0.
+  - `test_the_deployment_chart_packaged_twice_gives_one_content_digest`, which packages
+    this checkout's `helm/`, passed. That checkout holds an ignored `Chart.lock`, nine
+    `charts/*.tgz` and `tests/__pycache__/`, so the `.helmignore` kept them out and the
+    guard, run through real `git`, passed.
+  - The first run failed one case: the tracked-files copy lacked the new `.helmignore`
+    until it was staged.
+- `make -C helm test-render` passed with the `.helmignore` in place.
+- The fresh-context check of the diff against `033dd0250` raised two fixes and seven
+  points to consider. Fixed:
+  - the digest wording claimed a registry's manifest digest where a tag alone gives
+    one;
+  - this note was cited before it existed;
+  - "tracked files alone" overstated the guard, which refuses ignored files; an
+    untracked file Git does not ignore is an edit D5 tolerates, and D14 says so;
+  - "every remote" is every remote-tracking branch as of the last fetch;
+  - TESTING.md now places the category beside the four levels;
+  - two line-wrapping slips.
+
+  Declined:
+  - the binary and `dist-helm` case comparing commands is brittle if those targets ever
+    enter a subproject Makefile, but it is not vacuous, and it would fail loudly;
+  - `helm/Makefile`'s `init` comment is accurate.
+- `scripts/change-workflow run pre-commit publish-wheels-through-a-gate`, after those
+  fixes:
+  - `after-functional-change` passed, exit 0;
+  - `pre-commit-functional` passed, exit 0, with `make check-packaging` and every suite;
+  - `pre-commit` failed, exit 2, only on the documentation citations: the same 16
+    citations of files the change deleted or renamed that 12.4 records. The index, tasks,
+    skills and `openspec validate --strict` checks passed.
 
 ## 13. Closeout
 

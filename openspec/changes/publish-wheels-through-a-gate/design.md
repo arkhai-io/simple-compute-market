@@ -299,7 +299,11 @@ Who reads it:
   under the revision.
 
 The Makefile still builds everything. The declaration says what a release comprises, not
-how to build it.
+how to build it. `build-candidate`, which the load builds through, names its build targets,
+and a `make -n` test holds it to the declaration: every declared image and development
+image's revision tag, and each declared binary's own `target`. A component joining the
+release therefore takes its declaration entry beside its own build, and the packaging
+tests fail until the candidate build builds it. (Implementation review 52 F1.)
 
 ### D7 — The single-enumeration and workflow-credential checks
 
@@ -448,8 +452,10 @@ commit. Revisit the first time production needs a fix that `main` cannot ship pr
 
 The operator runs `make check-release-record TAG=marketplace-v<semver>` before pushing
 the tag. It refuses unless:
-1. the tag's commit is on `releases/<semver>`, and its parent is reachable from the
-   default branch;
+1. the tag's commit is the tip of `releases/<semver>`, locally and as every
+   remote-tracking branch of that name as of the last fetch, since a release branch
+   never grows past its record (D11), and its
+   parent is reachable from the default branch (implementation review 52 F2);
 2. the commit changes exactly one path, adding `manifests/release-bom.cdx.json`;
 3. the bill of materials is layout 1, carries only layout 1's fields, and has no URL but
    the public vcs link;
@@ -545,6 +551,20 @@ every `Chart.yaml` when packaging and leaves the other files unchanged. `helm pa
 archives differ in tar metadata between runs while the files inside are identical. The
 rewrite may change between Helm versions, so the check pins Helm.
 
+The digest must not follow local state. A package storing a path more
+than once is refused, so a reader counting every stored file and one collapsing repeats
+cannot compute two digests of one package; and a package storing a file Git ignores
+under `helm/` is refused. `helm package` reads whatever the directory holds, and
+`helm dependency update` (`make -C helm init`) leaves a `Chart.lock` stamped with its
+time and an archive of each subchart, which stores the subchart's files a second time
+beside its directory; the chart's Python tests leave their caches. Packaged, a fresh
+lock alone moved the digest of an unchanged chart, so D14's rule would have refused the
+next release after any `test-render`. `helm/.helmignore` names those files, and the
+refusal catches the next one the ignore list does not name. An untracked file Git does
+not ignore is packaged: it is an edit of the tree, which a load does not refuse (D5).
+(Triage of implementation
+review 52, T1, with V1 of validation 53.)
+
 When no other tag carries a bill of materials, the check says so and passes; v0.3.0
 carries none. In a load it needs git, the wheelhouse and the pinned Helm; at the cut,
 git alone. A refusal means "bump the version"; the check never chooses one.
@@ -575,9 +595,9 @@ Alternatives rejected:
 - **A baseline imported from PyPI or from v0.3.0's record.** A permanent migration
   artifact in a second format, covering only what it captured.
 
-The chart package includes `helm/`'s tests and fixtures, since there is no
-`.helmignore`, so a test-only edit inside `helm/` forces a chart version bump. That is
-accepted: a bump is cheap, and a missed change is not.
+The chart package includes `helm/`'s tracked tests and fixtures, since `.helmignore`
+names only local state, so a test-only edit inside `helm/` forces a chart version bump.
+That is accepted: a bump is cheap, and a missed change is not.
 
 Alternative rejected: **the chart directory's git tree id.** It is tied to the source
 layout rather than to what is shipped.
@@ -643,7 +663,9 @@ make -C e2e-tests test-e2e-bare-metal RELEASE_IMAGES=1 IMAGE_SUFFIX=-07af25d57
   API-credit images). It builds no declared release image.
 - **What it checks.** First, that each declared release image the lane's compose files
   reference exists locally as `arkhai:<local><IMAGE_SUFFIX>`, failing with every missing
-  one named. It refuses `RELEASE_IMAGES=1` with an empty suffix.
+  one named. It refuses `RELEASE_IMAGES=1` with an empty suffix, and a release image the
+  compose files run without the suffix, which would run whatever holds the bare tag and
+  which the record would leave out. (Triage of implementation review 52, §12 Q2.)
 - **The compose files.** Each release image is named `arkhai:<local>${IMAGE_SUFFIX:-}`,
   following the bare-metal storefront's existing variable, so one set of files serves
   both modes.
@@ -655,10 +677,23 @@ make -C e2e-tests test-e2e-bare-metal RELEASE_IMAGES=1 IMAGE_SUFFIX=-07af25d57
    "images": {"registry": "sha256:…", "provisioning": "sha256:…", "bare-metal-storefront": "sha256:…"}}
   ```
   - Keys are published names (D6).
-  - Values are the images' manifest digests, from their repo digests, not their local
-    image IDs.
-  - A release image with no repo digest, or with two different ones, fails the lane:
-    choosing between two would need the registry name, which the record never carries.
+  - Values are the images' manifest digests, from their repo digests from a registry,
+    not their local image IDs. A repo digest in the local `arkhai` repository names no
+    registry and is not counted.
+  - A release image with no repo digest from a registry, or with two different ones,
+    fails the lane: choosing between two would need the registry name, which the record
+    never carries.
+  - A release image the compose files run that no running container runs fails the
+    lane, as does a lane running none of the candidate's release images: either would
+    leave the record short without failing. (Triage of implementation review 52, §12 Q2.)
+  - What the digest rule proves. On the containerd image store a local build gives an
+    image a repo digest in the local repository, and tagging it for a registry, as a
+    push does, gives it that registry's, so the recorded value is the image's own
+    manifest digest under a registry's name: it shows neither that the image was pulled
+    nor that the registry holds it. The deployment's comparison of the record with the
+    manifests the candidate's load pushed is what ties the lane to the candidate. A local round trip through a registry confirmed a pulled
+    image keeps the registry's repo digest across the retag, and its record matched the
+    pushed manifests. (Triage of implementation review 52, F3 and §12 Q1.)
 
 Each lane records only the release images it runs. No lane runs `frp-grant-admission`.
 `e2e.yml` is unchanged: it is a CI check that builds from source, not release

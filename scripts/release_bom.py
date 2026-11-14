@@ -27,7 +27,9 @@ path (`AGENTS.md`, "Public repository discipline").
 The chart's content digest is a dirhash of a `helm package` archive's regular
 files, computed from the archive rather than the chart's directory because Helm
 rewrites every `Chart.yaml` it packages. That rewrite may differ between Helm
-versions, so the chart is packaged only by the Helm `.helm-version` pins.
+versions, so the chart is packaged only by the Helm `.helm-version` pins. The
+digest must not follow local state, so a package storing a path twice, or a file
+Git ignores, is refused rather than digested.
 """
 
 from __future__ import annotations
@@ -380,24 +382,40 @@ def files_digest(paths: Iterable[Path]) -> str:
 def archive_digest(archive: Path) -> str:
     """The dirhash of a gzipped tar archive's regular files, by archive path.
 
-    A file is its path and contents, so a path the archive stores more than once
-    with the same contents is one file: `helm package` stores each subchart of a
-    chart whose dependencies live under its `charts/` directory twice. A path
-    stored twice with different contents is refused, since which copy a reader
-    takes is then the reader's choice.
+    An archive storing a path more than once is refused, even with the same
+    contents each time: a reader that counts every stored file and one that
+    collapses repeats would compute two digests of one package. `helm package`
+    stores a path twice only when a subchart's archive lies beside its directory,
+    which the chart's `.helmignore` keeps out of every package.
     """
     files: dict[str, bytes] = {}
     with tarfile.open(archive, "r:gz") as tar:
         for member in tar.getmembers():
             if not member.isreg():
                 continue
+            if member.name in files:
+                raise BomError(f"{archive.name} stores {member.name} more than once")
             handle = tar.extractfile(member)
             assert handle is not None
-            data = handle.read()
-            if files.setdefault(member.name, data) != data:
-                raise BomError(f"{archive.name} stores {member.name} twice with different "
-                               "contents")
+            files[member.name] = handle.read()
     return dirhash(files.items())
+
+
+def archive_paths(archive: Path) -> list[str]:
+    """The paths of a gzipped tar archive's regular files, in the order stored."""
+    with tarfile.open(archive, "r:gz") as tar:
+        return [member.name for member in tar.getmembers() if member.isreg()]
+
+
+def git_ignored_files(chart_dir: Path) -> set[str]:
+    """The files under `chart_dir` that Git ignores, relative to `chart_dir`."""
+    result = subprocess.run(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "-z", "."],
+        cwd=chart_dir, capture_output=True)
+    if result.returncode != 0:
+        raise BomError(f"cannot list the files Git ignores under {chart_dir}: "
+                       f"{result.stderr.decode('utf-8', 'replace').strip()}")
+    return {path for path in result.stdout.decode("utf-8").split("\0") if path}
 
 
 def run_helm(args: list[str]) -> str:
@@ -428,11 +446,16 @@ class ChartPackage:
 
 
 def package_chart(chart_dir: Path, root: Path = REPO_ROOT,
-                  helm: Callable[[list[str]], str] = run_helm) -> ChartPackage:
+                  helm: Callable[[list[str]], str] = run_helm,
+                  ignored: Callable[[Path], set[str]] = git_ignored_files) -> ChartPackage:
     """Package the chart at `chart_dir` with the pinned Helm, as `make dist-helm`
     does, and return its name, version and content digest.
 
-    Refuses under any other Helm, whose `Chart.yaml` rewrite may differ.
+    Refuses under any other Helm, whose `Chart.yaml` rewrite may differ. Refuses a
+    package storing a file Git ignores under `chart_dir`: such a file, a lock
+    `helm dependency update` writes or a test run's cache, is local state, so a
+    digest counting it would change with no tracked file changing. The chart's
+    `.helmignore` keeps the known ones out; this refusal catches the next.
     """
     pinned = pinned_helm(root)
     reported = helm(["version", "--short"]).strip()
@@ -448,4 +471,10 @@ def package_chart(chart_dir: Path, root: Path = REPO_ROOT,
         archive = Path(destination) / f"{name}-{version}.tgz"
         if not archive.is_file():
             raise BomError(f"helm package wrote no {archive.name}")
+        local = ignored(chart_dir)
+        stored = sorted({path.split("/", 1)[1] for path in archive_paths(archive)
+                         if "/" in path} & local)
+        if stored:
+            raise BomError(f"{archive.name} stores {len(stored)} file(s) Git ignores under "
+                           f"{chart_dir}; name them in its .helmignore: " + ", ".join(stored))
         return ChartPackage(name=name, version=version, content_digest=archive_digest(archive))

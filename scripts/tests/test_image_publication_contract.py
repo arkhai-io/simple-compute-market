@@ -6,8 +6,9 @@ A declared image or development image is pushed from `arkhai:<local>-<rev9>`
 tag beside the bare one. The builds are found by following `make build-dev`,
 which builds every image, through `make -n`: the recipes it prints, and those of
 each subproject Makefile it enters with `cd <dir> && make <target>`, which `make
--n` prints rather than runs. The images are read from the declaration, so an
-image joining it is held to a build with no edit here.
+-n` prints rather than runs. `make build-candidate`, which a release candidate's
+load builds through, is followed the same way. The images are read from the
+declaration, so an image joining it is held to a build with no edit here.
 """
 
 from __future__ import annotations
@@ -45,8 +46,8 @@ def _make_n(directory: Path, *arguments: str) -> list[str]:
 
 
 @cache
-def build_commands() -> tuple[tuple[Path, str], ...]:
-    """Each command `make build-dev` runs, with the directory it runs in,
+def build_commands(target: str = "build-dev") -> tuple[tuple[Path, str], ...]:
+    """Each command `make <target>` runs, with the directory it runs in,
     following every subproject Makefile it enters.
 
     `make -n` runs a `$(MAKE)` line rather than printing it, so the wheelhouse
@@ -55,7 +56,7 @@ def build_commands() -> tuple[tuple[Path, str], ...]:
     Makefile's directory relative to the one being read is followed; those
     lines build wheels, not images."""
     commands: list[tuple[Path, str]] = []
-    pending: list[tuple[Path, tuple[str, ...]]] = [(REPO_ROOT, ("build-dev",))]
+    pending: list[tuple[Path, tuple[str, ...]]] = [(REPO_ROOT, (target,))]
     while pending:
         directory, arguments = pending.pop(0)
         for line in _make_n(directory, *arguments):
@@ -68,14 +69,14 @@ def build_commands() -> tuple[tuple[Path, str], ...]:
     return tuple(commands)
 
 
-def _built_tags() -> set[str]:
+def _built_tags(target: str = "build-dev") -> set[str]:
     """The tags a `docker build` writes."""
-    return {tag for _, line in build_commands() for tag in _BUILD_TAG.findall(line)}
+    return {tag for _, line in build_commands(target) for tag in _BUILD_TAG.findall(line)}
 
 
-def _retags() -> set[tuple[str, str]]:
+def _retags(target: str = "build-dev") -> set[tuple[str, str]]:
     """Each `docker tag <source> <tag>` a build runs."""
-    return {pair for _, line in build_commands() for pair in _TAG.findall(line)}
+    return {pair for _, line in build_commands(target) for pair in _TAG.findall(line)}
 
 
 def _written_tags() -> set[str]:
@@ -99,6 +100,33 @@ def test_a_declared_images_build_writes_its_bare_and_revision_tags(image) -> Non
     assert bare in _built_tags(), f"no build writes {bare}"
     assert (bare, f"{bare}-{_revision()}") in _retags(), (
         f"no build tags {bare} with its revision")
+
+
+@pytest.mark.parametrize("image", _every_image(), ids=lambda image: image.name)
+def test_the_candidate_build_writes_every_declared_images_revision_tag(image) -> None:
+    """`make load-candidate` builds through `build-candidate`, which names its
+    build targets: the declaration says what a release comprises, the Makefile
+    how to build it. An image joining the declaration without joining that
+    target fails here rather than at an operator's load, which would refuse it
+    as unbuilt only after building everything else."""
+    bare = f"arkhai:{image.local}"
+
+    assert bare in _built_tags("build-candidate"), f"build-candidate writes no {bare}"
+    assert (bare, f"{bare}-{_revision()}") in _retags("build-candidate"), (
+        f"build-candidate does not tag {bare} with its revision")
+
+
+@pytest.mark.parametrize("target", [*(binary.target for binary in load().binaries), "dist-helm"])
+def test_the_candidate_build_builds_each_declared_binary_and_the_charts_package(
+        target: str) -> None:
+    """Each declared binary's own build target and the chart's packaging run
+    inside `build-candidate`: every command they run, it runs."""
+    candidate = {line for directory, line in build_commands("build-candidate")
+                 if directory == REPO_ROOT}
+    commands = _make_n(REPO_ROOT, target)
+
+    assert commands and set(commands) <= candidate, (
+        f"build-candidate does not run {target}: {sorted(set(commands) - candidate)}")
 
 
 @cache

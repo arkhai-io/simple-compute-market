@@ -4,9 +4,9 @@ The fixture is an example document in layout 1, written one key per line at
 two-space indent. Its digests and revision are placeholders.
 
 The unit cases stub Helm at the reader's own wrapper. The real-Helm cases package
-the deployment chart with the pinned release; they skip where it is not on PATH,
-except under `HELM_REQUIRED=1`, which CI's packaging job sets, where a skip is a
-failure.
+the deployment chart, or a copy of its tracked files, with the pinned release;
+they skip where it is not on PATH, except under `HELM_REQUIRED=1`, which CI's
+packaging job sets, where a skip is a failure.
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tarfile
-from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -30,6 +30,7 @@ from release_bom import (
     archive_digest,
     dirhash,
     files_digest,
+    git_ignored_files,
     package_chart,
     parse,
     pinned_helm,
@@ -312,12 +313,13 @@ def test_two_archives_of_one_file_set_with_different_metadata_give_one_digest(tm
     assert archive_digest(first) == archive_digest(second) == dirhash(files)
 
 
-def test_a_path_an_archive_stores_twice_with_one_content_is_one_file(tmp_path) -> None:
+def test_a_path_an_archive_stores_twice_with_one_content_is_refused(tmp_path) -> None:
     files = [("chart/Chart.yaml", b"name: chart\n"), ("chart/charts/sub/values.yaml", b"a: 1\n")]
 
     archive = _archive(tmp_path / "chart.tgz", files + files[1:], mtime=0, uid=0, mode=0o644)
 
-    assert archive_digest(archive) == dirhash(files)
+    with pytest.raises(BomError, match="stores chart/charts/sub/values.yaml more than once"):
+        archive_digest(archive)
 
 
 def test_a_path_an_archive_stores_twice_with_different_contents_is_refused(tmp_path) -> None:
@@ -326,8 +328,7 @@ def test_a_path_an_archive_stores_twice_with_different_contents_is_refused(tmp_p
 
     archive = _archive(tmp_path / "chart.tgz", files, mtime=0, uid=0, mode=0o644)
 
-    with pytest.raises(BomError, match="stores chart/charts/sub/Chart.yaml twice with "
-                                       "different contents"):
+    with pytest.raises(BomError, match="stores chart/charts/sub/Chart.yaml more than once"):
         archive_digest(archive)
 
 
@@ -398,11 +399,36 @@ def test_the_pinned_helm_packages_and_the_archive_is_digested(tmp_path) -> None:
     files = [("chart/Chart.yaml", b"name: chart\nversion: 0.1.0\n")]
     helm = _StubHelm("v4.3.0+gbec5b06", files)
 
-    package = package_chart(_chart(tmp_path), root=tmp_path, helm=helm)
+    package = package_chart(_chart(tmp_path), root=tmp_path, helm=helm, ignored=lambda _: set())
 
     assert (package.name, package.version, package.content_digest) == (
         "chart", "0.1.0", dirhash(files))
     assert helm.calls[1][:2] == ["package", str(tmp_path / "chart")]
+
+
+def test_a_package_storing_a_file_git_ignores_is_refused(tmp_path) -> None:
+    files = [("chart/Chart.yaml", b"name: chart\nversion: 0.1.0\n"),
+             ("chart/tests/__pycache__/test_render.pyc", b"\x00"),
+             ("chart/values.yaml", b"image: {}\n")]
+    helm = _StubHelm("v4.3.0", files)
+
+    with pytest.raises(BomError, match=r"stores 1 file\(s\) Git ignores .*: "
+                                       r"tests/__pycache__/test_render\.pyc$"):
+        package_chart(_chart(tmp_path), root=tmp_path, helm=helm,
+                      ignored=lambda _: {"tests/__pycache__/test_render.pyc", "Chart.lock"})
+
+
+def test_the_files_git_ignores_are_listed_relative_to_the_chart(tmp_path) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    chart = tmp_path / "chart"
+    (chart / "charts").mkdir(parents=True)
+    (tmp_path / ".gitignore").write_text("chart/charts/*.tgz\n*.pyc\n", "utf-8")
+    (chart / "Chart.yaml").write_text("name: chart\n", "utf-8")
+    (chart / "charts" / "sub-0.1.0.tgz").write_bytes(b"")
+    (chart / "render.pyc").write_bytes(b"")
+    (tmp_path / "outside.pyc").write_bytes(b"")
+
+    assert git_ignored_files(chart) == {"charts/sub-0.1.0.tgz", "render.pyc"}
 
 
 @pytest.fixture
@@ -429,16 +455,45 @@ def test_the_deployment_chart_packaged_twice_gives_one_content_digest() -> None:
     assert first.name == "arkhai-node-operator"
 
 
-@pytest.mark.usefixtures("pinned_helm_on_path")
-def test_the_pinned_helm_stores_the_subcharts_files_twice(tmp_path) -> None:
-    # The premise of counting a repeated path once: the deployment chart keeps its
-    # subcharts under charts/, and the pinned Helm archives each of their files twice.
-    run_helm(["package", str(REPO_ROOT / "helm"), "--destination", str(tmp_path)])
-    archive = next(tmp_path.glob("*.tgz"))
-    with tarfile.open(archive, "r:gz") as tar:
-        names = Counter(member.name for member in tar.getmembers() if member.isreg())
+def _tracked_chart(destination: Path) -> Path:
+    """A copy of the deployment chart's tracked files, and nothing else."""
+    listing = subprocess.run(["git", "ls-files", "-z", "helm"], cwd=REPO_ROOT,
+                             capture_output=True, check=True).stdout.decode("utf-8")
+    for path in filter(None, listing.split("\0")):
+        target = destination / Path(path).relative_to("helm")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPO_ROOT / path, target)
+    return destination
 
-    repeated = {name for name, count in names.items() if count > 1}
-    under_charts = {name for name in names if "/charts/" in name}
-    assert repeated == under_charts != set()
-    assert set(names.values()) == {1, 2}
+
+@pytest.mark.usefixtures("pinned_helm_on_path")
+def test_local_state_under_the_chart_leaves_its_content_digest_unchanged(tmp_path) -> None:
+    # What `helm dependency update` and a test run leave in helm/ is ignored by Git
+    # and must not reach the package: a lock with a timestamp, each subchart's
+    # archive, which would store its files a second time, and Python's caches.
+    clean = _tracked_chart(tmp_path / "clean")
+    local = _tracked_chart(tmp_path / "local")
+    run_helm(["dependency", "update", "--skip-refresh", str(local)])
+    (local / "tests" / "__pycache__").mkdir()
+    (local / "tests" / "__pycache__" / "test_render.cpython-312.pyc").write_bytes(b"\x00")
+    (local / ".pytest_cache").mkdir()
+    (local / ".pytest_cache" / "README.md").write_text("cache\n", "utf-8")
+    (local / ".port-forward.pids").write_text("1234\n", "utf-8")
+    archives = sorted(path.relative_to(local).as_posix()
+                      for path in (local / "charts").glob("*.tgz"))
+    assert (local / "Chart.lock").is_file() and archives
+    left = {"Chart.lock", *archives, "tests/__pycache__/test_render.cpython-312.pyc",
+            ".pytest_cache/README.md", ".port-forward.pids"}
+
+    # package_chart refuses a stored path twice and a stored file in `left`.
+    assert (package_chart(local, ignored=lambda _: left)
+            == package_chart(clean, ignored=lambda _: set()))
+
+
+@pytest.mark.usefixtures("pinned_helm_on_path")
+def test_an_ignored_file_the_helmignore_does_not_name_is_refused(tmp_path) -> None:
+    chart = _tracked_chart(tmp_path / "chart")
+    (chart / "notes.local").write_text("scratch\n", "utf-8")
+
+    with pytest.raises(BomError, match=r"Git ignores .*: notes\.local$"):
+        package_chart(chart, ignored=lambda _: {"notes.local"})

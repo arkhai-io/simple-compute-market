@@ -8,8 +8,9 @@ from, one commit on it adds the bill of materials the deployment built
 `marketplace-v<semver>`. The operator runs this check on the tag before pushing
 it, because a pushed tag is public and permanent. It refuses unless:
 
-1. the tag's commit is on `releases/<semver>`, and its one parent is reachable
-   from the default branch;
+1. the tag's commit is the tip of `releases/<semver>`, locally and as every
+   remote-tracking branch of that name (as of the last fetch), and its one
+   parent is reachable from the default branch;
 2. the commit changes exactly one path, adding the bill of materials;
 3. the bill of materials is layout 1, with only layout 1's fields and no URL but
    the public vcs link (`scripts/release_bom.py`);
@@ -64,6 +65,10 @@ def _branch_refs(root: Path, branch: str) -> list[str]:
 def _reachable(root: Path, commit: str, refs: list[str]) -> bool:
     return any(git(root, "merge-base", "--is-ancestor", commit, ref).returncode == 0
                for ref in refs)
+
+
+def _tip(root: Path, ref: str) -> str:
+    return (_out(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") or "").strip()
 
 
 def _changes(root: Path, parent: str, commit: str) -> list[tuple[str, str]]:
@@ -129,13 +134,20 @@ def check(tag: str, root: Path = REPO_ROOT, default_branch: str = DEFAULT_BRANCH
     parent = parents[0]
     problems: list[str] = []
 
-    # 1. The commit is on its release branch, cut from the default branch.
+    # 1. The commit is the tip of its release branch, cut from the default branch.
+    # Every ref of the branch's name is held to it, a remote-tracking one too: a
+    # release branch never grows past its record, so a ref anywhere else is a branch
+    # of another shape.
     branch = f"releases/{semver}"
     branches = _branch_refs(root, branch)
     if not branches:
         problems.append(f"no branch {branch} exists")
-    elif not _reachable(root, commit, branches):
-        problems.append(f"{tag}'s commit {commit[:9]} is not on {branch}")
+    for ref in branches:
+        tip = _tip(root, ref)
+        if tip != commit:
+            problems.append(f"{ref.removeprefix('refs/heads/').removeprefix('refs/')} is at "
+                            f"{tip[:9]}, not {tag}'s commit {commit[:9]}; a release branch "
+                            "holds only its record")
     defaults = _branch_refs(root, default_branch)
     if not defaults:
         problems.append(f"no {default_branch} branch exists to reach the parent from")

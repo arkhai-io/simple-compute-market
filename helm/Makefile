@@ -83,8 +83,9 @@ template:
 ## Deployment mounts both at /etc/arkhai/ with independent checksums,
 ## and no sensitive keys leak across the boundary. Stable across
 ## cosmetic chart edits (no byte-level snapshots).
-# Repackage every local subchart first: a stale charts/*.tgz would otherwise be
-# rendered in place of the chart directory beside it.
+# init first resolves every dependency Chart.yaml declares against its subchart.
+# The lock and archives it writes are in .helmignore, so the render, like every
+# package, reads the subcharts' directories and never a stale archive.
 test-render: init
 	@./scripts/test-render.sh
 

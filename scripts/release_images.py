@@ -24,8 +24,12 @@ mapping from an image's published name to its local name is applied here alone.
   from a registry, and when it has two different ones: choosing between two would
   need the registry's name, which the record never carries. A repo digest in the
   local `arkhai` repository names no registry, and is not counted: an image store
-  that keeps images in containerd gives a locally built image one, which a pull
-  never would.
+  that keeps images in containerd gives a locally built image one. That store
+  also gives an image a registry's repo digest once it is tagged for the
+  registry, as a push does, so the recorded value is the image's own manifest
+  digest under a registry's name: it shows neither that the image was pulled nor
+  that the registry holds it. The comparison with the manifests the candidate's
+  load pushed is what ties the record to the candidate.
 
 Each command refuses an empty suffix: a candidate's images are named by their
 revision, and the bare tags name whatever was built or pulled last.
@@ -138,8 +142,8 @@ def record(lane: str, images: tuple[Image, ...], compose: str, suffix: str, root
         digests = sorted(set().union(*(registry_digests(repo_digests.get(image_id, []))
                                        for image_id in image_ids[image.name])))
         if not digests:
-            problems.append(f"{local_tag(image, suffix)} has no repo digest from a registry, "
-                            "so it was not pulled: its manifest digest is unknown")
+            problems.append(f"{local_tag(image, suffix)} has no repo digest from a registry: "
+                            "its manifest digest is unknown")
         elif len(digests) > 1:
             problems.append(f"{local_tag(image, suffix)} has repo digests "
                             f"{', '.join(digests)}; the record names one manifest")

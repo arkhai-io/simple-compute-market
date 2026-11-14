@@ -67,7 +67,7 @@ def test_a_name_that_is_not_a_marketplace_tag_is_refused(repo: Repository) -> No
     assert check(TAG, repo.root) == [f"no tag {TAG} exists"]
 
 
-# 1. The commit is on its release branch, cut from the default branch.
+# 1. The commit is the tip of its release branch, cut from the default branch.
 
 
 def test_a_merge_commit_is_not_a_release_commit(repo: Repository) -> None:
@@ -84,10 +84,34 @@ def test_a_merge_commit_is_not_a_release_commit(repo: Repository) -> None:
 
 def test_a_record_on_another_branch_is_refused(repo: Repository) -> None:
     repo.git("branch", "releases/1.0.0", "main")
-    repo.cut("1.0.0", branch="wip")
+    commit = repo.cut("1.0.0", branch="wip")
 
-    assert check(TAG, repo.root) == [f"{TAG}'s commit {repo.head(TAG + '^{commit}')[:9]} "
-                                     "is not on releases/1.0.0"]
+    assert check(TAG, repo.root) == [f"releases/1.0.0 is at {repo.head('main')[:9]}, not "
+                                     f"{TAG}'s commit {commit[:9]}; a release branch holds "
+                                     "only its record"]
+
+
+def test_a_release_branch_with_a_commit_after_its_record_is_refused(repo: Repository) -> None:
+    commit = repo.cut("1.0.0")
+    repo.git("checkout", "-q", "releases/1.0.0")
+    repo.write({"README": "a fix on the release branch\n"})
+    later = repo.commit("a fix on the release branch")
+    repo.git("checkout", "-q", "main")
+
+    assert check(TAG, repo.root) == [f"releases/1.0.0 is at {later[:9]}, not {TAG}'s commit "
+                                     f"{commit[:9]}; a release branch holds only its record"]
+
+
+def test_every_remote_release_branch_is_held_to_the_record(repo: Repository) -> None:
+    commit = repo.cut("1.0.0")
+    repo.git("update-ref", "refs/remotes/origin/releases/1.0.0", commit)
+    assert check(TAG, repo.root) == []
+
+    repo.git("update-ref", "refs/remotes/upstream/releases/1.0.0", repo.head("main"))
+
+    assert check(TAG, repo.root) == [
+        f"remotes/upstream/releases/1.0.0 is at {repo.head('main')[:9]}, not {TAG}'s commit "
+        f"{commit[:9]}; a release branch holds only its record"]
 
 
 def test_a_record_with_no_release_branch_is_refused(repo: Repository) -> None:
