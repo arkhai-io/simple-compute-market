@@ -105,6 +105,41 @@ release, volumes, and pods untouched, under `.snapshot/parallel-validation/<time
 It deploys two changes' releases, so it is a check of the tooling run by hand, not
 part of any change's validation.
 
+The Helm targets carry the namespace and the tags:
+
+- **The namespace's name.** `validate-<change>`, cut to 63 characters with the first
+  eight hex digits of the full name's SHA-256 appended when longer
+  (`scripts/change_namespace.py`). Every `helm/Makefile` target that takes
+  `NAMESPACE=` also takes `CHANGE=`, deriving the namespace the same way; giving both
+  is refused. Release names do not change with the namespace, so the in-cluster
+  Service names `helm/local-values.yaml` states resolve in every one, and the
+  two-release topology fits in it.
+- **The tags.** Every build target appends `IMAGE_SUFFIX`, empty by default: `make
+  build-dev IMAGE_SUFFIX=-<change>` builds `arkhai:storefront-<change>` and its
+  siblings, and the deploy names them through a values overlay naming every `arkhai`
+  image `helm/values.yaml` sets (`change_namespace.py <change> --image-overlay
+  <path>`); a render test holds the overlay to every image the chart renders, so an
+  image added later cannot deploy under its bare tag. Compose, the pipeline lanes, and
+  an operator's own deployments keep bare tags. A suffixed build writes no commit tag;
+  a bare build still writes `arkhai:<tag>-<sha>`, which `make push-images` reads.
+- **The upgrade.** The volumes deleted are the release's volume claims and the deal
+  test's `arkhai-buyer-profiles`; `topology-secrets` creates the namespace's Secrets;
+  `helm upgrade --install` runs with `local-values.yaml` and the change's image
+  overlay, then each workload's replica count is restored and its rollout awaited.
+  The chart's refusal that falls back to uninstalling is `field is immutable`.
+- **Afterwards.** `make -C helm resume CHANGE=<change>` scales the namespace back to
+  the replica counts the installed release states, rendering nothing from the
+  checkout. `make -C helm forward CHANGE=<change>` forwards its services on the usual
+  ports (8545, 8080, 8001, 8081) for running end-to-end targets by hand; the ports are
+  the same for every namespace, so a port another checkout already forwards fails to
+  bind, and `forward` names it and stops.
+- **Teardown.** Archive cleanup records the capacity figure with `make
+  record-capacity` ("Memory is shared, and checked by estimate" below), then runs
+  `make -C helm teardown CHANGE=<change>`, which deletes the change's namespace in
+  `HELM_CONTEXT` (`docker-desktop` by default), with every release, volume, and
+  Secret in it, and removes each image the change's validation build tagged. It
+  takes `CHANGE=` only, so it never deletes `default`.
+
 ### Memory is shared, and checked by estimate
 
 The node's memory is the one resource the namespaces still share. A preflight
@@ -204,6 +239,41 @@ finding them, a written rule nothing checks being a finding waiting to be raised
 check moves each from a review's finding to the change's own work, where the agent
 that breaks it finds it before anyone reads the change.
 
+### What each check enforces
+
+Each check that enforces guidance, the rule it enforces and that rule's layer, and
+where the check runs. The first four are the workflow's default checks, which its
+engine runs; every other is this repository's script, even where its rule is the
+workflow's or the engineering guidance's.
+
+| Check | Rule it enforces | Rule's layer | Where it runs |
+|---|---|---|---|
+| Change index (`scripts/change-workflow check index`; `make check-change-index`) | each row's cells, link, status, and dependencies; one row per active change ([`changes.md`, "The change index"](../../../docs/guidance/workflow/changes.md#the-change-index); [`closeout.md`, "Campaign index currency"](../../../docs/guidance/workflow/closeout.md#campaign-index-currency)) | workflow | the workflow's default checks, in every committing step's `run pre-commit` and in `make check-change` |
+| Task list (`scripts/change-workflow check tasks`; `make check-tasks`) | every numbered task sits under its own section's heading ([`change-workflow`'s companion, "The command and its tiers"](../change-workflow/README.md#the-command-and-its-tiers)) | workflow | the default checks; implementation's entry check |
+| Agent skills (`scripts/change-workflow check skills`; `make check-agent-skills`) | each skill has one source for every harness ([`change-workflow`'s CW-d8de](../change-workflow/spec.md#requirement-cw-d8de-each-skill-has-one-source-for-every-harness)) | workflow | the default checks; the packaging closeout part ([`openspec/README.md`, "Packaging"](../../README.md#packaging)) |
+| Strict OpenSpec validation (`scripts/change-workflow openspec validate <change> --strict`) | a change's delta requirements are well formed and carry scenarios ([`openspec-documentation.md`, "Capability documentation pattern"](../../../docs/guidance/workflow/openspec-documentation.md#capability-documentation-pattern)) | workflow | the default checks; closeout's "Documentation citations", last before the archive |
+| Comment hygiene (`make check-comment-hygiene`) | no change id, section or task number, change document's name, or change directory's name in code ([`change-references.md`](../../../docs/guidance/workflow/change-references.md)), over the file types and exemptions [`AGENTS.md`, "Comments"](../../../AGENTS.md#comments) names | workflow; its file types and exemptions the repository's | `make check-repository`; closeout's "Comment hygiene" |
+| Documentation citations (`make check-doc-citations`) | a cited path resolves and is no tombstone ([`documentation.md`, "Citations resolve"](../../../docs/guidance/engineering/documentation.md#citations-resolve)), over the directories [`AGENTS.md`, "Cross-references must resolve"](../../../AGENTS.md#cross-references-must-resolve) names | engineering; its directories the repository's | `make check-repository`, scoped to the change; closeout's "Documentation citations" |
+| Specification index (`make check-spec-index`) | an indexed capability's `spec.md` and `index.md` agree on its ids, the change's deltas counted ([`openspec-documentation.md`, "A capability organized by an index"](../../../docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index); [`openspec/README.md`, "The index check"](../../README.md#the-index-check)) | workflow | `make check-repository`; closeout's "Promotion" |
+| Decision destinations (`make check-decision-destinations`) | each decision has a "Knowledge to promote" bullet ([`changes.md`, "Knowledge to promote"](../../../docs/guidance/workflow/changes.md#knowledge-to-promote)) | workflow | `make check-repository` |
+| History wording (`make check-history-wording`) | a comment or docstring the change adds describes no history ([`comments.md`, "Comments describe the current system"](../../../docs/guidance/engineering/comments.md#comments-describe-the-current-system)) | engineering | `make check-repository`, against the merge-base with the landing branch |
+| Version bumps (`make check-version-bumps`) | a package's version moves at most one step from the landing branch's ([`versioning.md`, "One bump per unit of work"](../../../docs/guidance/engineering/versioning.md#one-bump-per-unit-of-work)) | engineering | `make check-repository`, against the merge-base |
+| Local imports (`make check-local-imports`) | an import added inside a function gives its reason ([`dependencies-python.md`, "Imports go at module level"](../../../docs/guidance/engineering/dependencies-python.md#imports-go-at-module-level)) | engineering | `make check-repository`, against the merge-base; closeout's "Import placement" |
+| Capability index (`make check-capability-index`) | every capability with a `spec.md` has a row in the capability index, and no row links nothing ([`openspec/README.md`, "Current capability documentation"](../../README.md#current-capability-documentation); the index's role, [`openspec-documentation.md`, "The capability index and the roadmap"](../../../docs/guidance/workflow/openspec-documentation.md#the-capability-index-and-the-roadmap)) | repository | `make check-repository` |
+| `dist`, the prerequisite of `make check-packaging` | none: it builds the wheelhouse the checks read | — | `make check-packaging` |
+| `make check-uv-setup` | internal packages are derived from the lock, never listed ([`packaging.md`, "Nothing is maintained by hand"](../../../docs/guidance/engineering/packaging.md#nothing-is-maintained-by-hand); [`packaging-uv.md`, "Refreshing a same-version wheel"](../../../docs/guidance/engineering/packaging-uv.md#refreshing-a-same-version-wheel)), through `scripts/uv_project.py` ([`BUILD_AND_PACKAGING.md`, "The wheelhouse"](../../../docs/development/BUILD_AND_PACKAGING.md#the-wheelhouse)) | engineering; the script the repository's | `make check-packaging`: the functional pre-commit hook, the pre-archive hook, and validation's local part |
+| `make check-locks` | every lock is current and resolves internal packages from the wheelhouse ([`packaging-uv.md`, "Relock against fresh artifacts"](../../../docs/guidance/engineering/packaging-uv.md#relock-against-fresh-artifacts)), at the one lock revision ([`packaging-uv.md`, "Locks are written by a stated minimum uv"](../../../docs/guidance/engineering/packaging-uv.md#locks-are-written-by-a-stated-minimum-uv); [`BUILD_AND_PACKAGING.md`, "Locks"](../../../docs/development/BUILD_AND_PACKAGING.md#locks)) | engineering; the revision and `.dist` the repository's | `make check-packaging`, wherever it runs |
+| `make check-python-version` | every consumer reads the one runtime declaration ([`packaging.md`, "One declaration of the runtime version"](../../../docs/guidance/engineering/packaging.md#one-declaration-of-the-runtime-version)) | engineering | `make check-packaging`, wherever it runs |
+| `make check-project-layout` | one import package, built with nothing remapped and installed editable ([`packaging-python.md`](../../../docs/guidance/engineering/packaging-python.md); [`packaging-hatchling.md`](../../../docs/guidance/engineering/packaging-hatchling.md); [`packaging-uv.md`, "Every project installs itself editable"](../../../docs/guidance/engineering/packaging-uv.md#every-project-installs-itself-editable) and "No source path to a sibling") | engineering | `make check-packaging`, wherever it runs |
+| `make check-architecture` (its parts `layers`, `scope`, `dependencies`, `kinds`) | the package layer, scope, and kind rules ([`ARCHITECTURE.md`, "Package and dependency layers"](../../../docs/development/ARCHITECTURE.md#package-and-dependency-layers)); its `dependencies` part also a package's declaring what it imports ([`dependencies.md`, "Declare what you import"](../../../docs/guidance/engineering/dependencies.md#declare-what-you-import)) | repository; its `dependencies` part engineering too | `make check-packaging`, wherever it runs; CI's `tests.yml`, on pushes and pull requests to `dev` and `staging` |
+| `make check-architecture-change` | a change owns no architecture exception or override row when archived ([`ARCHITECTURE.md`, "Where the current tree diverges"](../../../docs/development/ARCHITECTURE.md#where-the-current-tree-diverges)) | repository | the pre-archive hook; the packaging closeout part |
+| `make check-uv-version` | the installed uv meets the minimum that writes the locks ([`packaging-uv.md`, "Locks are written by a stated minimum uv"](../../../docs/guidance/engineering/packaging-uv.md#locks-are-written-by-a-stated-minimum-uv)), the minimum itself in [`BUILD_AND_PACKAGING.md`, "Locks"](../../../docs/development/BUILD_AND_PACKAGING.md#locks) | engineering; the minimum the repository's | `make lock`; validation's preflight |
+| Public content (`scripts/check_public_content.py`; `make check-public-content`, with the secret scan) | no recognizable private content in what is published ([`repository-content.md`, "In a public repository"](../../../docs/guidance/engineering/repository-content.md#in-a-public-repository), selected in [`AGENTS.md`, "Exceptions to shared guidance"](../../../AGENTS.md#exceptions-to-shared-guidance)), by the patterns of [Public repository content checks](#public-repository-content-checks) | engineering; the patterns the repository's | the Git pre-commit hook, over staged additions; `make pre-push`; CI's `public-content.yml` |
+| Secret scan (`scripts/check_secrets.py`, gitleaks; `make check-secrets`) | no private key or provider credential ([`repository-content.md`, "No credentials"](../../../docs/guidance/engineering/repository-content.md#no-credentials)) | engineering | the Git pre-commit hook; `make pre-push`; CI's `public-content.yml` |
+| `make pre-push` | the two rows above, over what a push would send | as the two rows above | the Git pre-push hook (`scripts/hooks/pre-push`) and the guarded push (`[hooks].pre-push`) |
+| `make audit-secrets` | reports every gitleaks finding in the tracked tree and refuses nothing ([`repository-content.md`, "No credentials"](../../../docs/guidance/engineering/repository-content.md#no-credentials)) | engineering | by hand before a release ([`RELEASING.md`, "Cutting a release"](../../../docs/development/RELEASING.md#cutting-a-release)); listed so the table is complete |
+| Guidance check (`make check-guidance`) | every guidance file's tags against the vocabularies, the exception tables, the link direction, and the anchors of guidance citations (`change-workflow`'s CW-g7lt, CW-d2rw, and CW-x4ex; [MCW-c4ek](spec.md#requirement-mcw-c4ek-a-changes-closing-checks-enforce-written-rules)) | workflow, enforced from this repository's script | `make check-repository`; closeout's "Guidance placement" |
+
 ### The closing checks
 
 Every step that commits runs `scripts/change-workflow run pre-commit <change>`: the
@@ -271,10 +341,66 @@ pin, so a newer uv still runs; the revision check stops its rewrite landing unse
 The minimum, and how to bring a lock to the running uv's revision, are in
 [`BUILD_AND_PACKAGING.md`, "Locks"](../../../docs/development/BUILD_AND_PACKAGING.md#locks).
 
+### Public repository content checks
+
+This repository selects the public case of the engineering guidance on what enters a
+repository ([`AGENTS.md`, "Exceptions to shared guidance"](../../../AGENTS.md#exceptions-to-shared-guidance)),
+and two checks read content about to be published: `scripts/check_public_content.py`,
+the repository's own rules below, and `scripts/check_secrets.py`, which runs the
+gitleaks secret scanner for private keys and provider credentials. They run
+together. `make check-public-content` runs both over the staged index, and `make
+check-secrets` the second alone. The guarded branch push checks every outgoing
+commit, including intermediate additions and commit messages. The Public content
+CI workflow checks commits against the event base, using `origin/dev` for a
+new branch without a previous tip. This retains inspection of every commit outside
+the product branch, including intermediate changes, without treating existing
+product history as newly published work. It runs after publication and therefore
+provides detection rather than preventing the first upload.
+
+The scanner rejects literal personal home paths and private assistant
+planning/session paths. `example-user` is the synthetic fixture username;
+`appuser` and `ubuntu` are documented runtime-image accounts, and `you` is an
+example placeholder. These names do not authorize publishing actual operator
+paths. Machine-specific names, addresses and other operational identifiers require
+a private local literal denylist; arbitrary identifiers, and secrets in no format
+the secret scan recognizes, are not automatically recognizable. Binary additions
+are refused because this text scanner cannot inspect them. Review remains required.
+Diagnostics report location and rule without echoing matched content.
+
+Enable the repository-owned hooks in each checkout with
+`git config --local core.hooksPath scripts/hooks` after inspecting any existing
+hooks configuration; preserve or chain existing hooks instead of overwriting them.
+The pre-commit hook checks staged additions. The pre-push hook checks the actual
+refs being sent, including ref names and annotated tag content. Each hook runs both
+checks and refuses when either does. Hooks and the guarded push require Python 3.11
+or newer and the pinned gitleaks; hooks may be bypassed by direct
+Git options; they are local safeguards, not server enforcement. Use the guarded
+`make push-branch` path for agent pushes.
+
+Configure deployment-specific literals with
+`git config --local scm.publicContentDenyFile /absolute/path/to/private-denylist.txt`.
+Keep that file outside the repository, one literal per line; blank lines and
+lines starting with `#` are ignored. Matching is case-insensitive. Never commit
+the denylist or use real identifiers in guard tests. A configured file that cannot
+be read fails the check. A CI runner without that private file runs the generic
+rules only. Fetch the target remote before checking outgoing commits. Use
+`python3 scripts/check_public_content.py --base <commit>` to inspect a known
+committed range; this is not a complete historical secret audit.
+
+Private keys and provider credentials are recognized by
+[gitleaks](https://github.com/gitleaks/gitleaks) at the release
+`scripts/gitleaks-pins.toml` pins; `make install-gitleaks` installs it, refusing an
+archive whose sha256 is not the pinned one, and a check that finds no gitleaks, or
+another release, refuses and names that command. The gate, `.gitleaks.toml`, runs
+wherever `check_public_content.py` runs and reports locations, never content.
+`make audit-secrets` runs the gate's rules and the three default rules it turns off
+over the tracked tree, gates nothing, and is run before a release ships. The gate's
+rules, the audit, and what both leave to review are "Secret scanning", below.
+
 ### Secret scanning
 
 The public-content checks — the hooks, the guarded push, and the Public content
-workflow ([`ARCHITECTURE.md`, "Public repository content checks"](../../../docs/development/ARCHITECTURE.md#public-repository-content-checks))
+workflow ([Public repository content checks](#public-repository-content-checks))
 — refuse private keys and provider credentials (MCW-s8gk) through gitleaks rather than rules
 of the repository's own: a maintained scanner knows far more credential formats
 than the repository could keep current. Every check runs one release, pinned with

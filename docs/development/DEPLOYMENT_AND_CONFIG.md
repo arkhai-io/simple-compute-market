@@ -1,7 +1,12 @@
+---
+tags: [repository, configuration, deployment]
+---
+
 # Configuration and Deployment
 
-This document defines how services in this repository resolve
-configuration and how that resolution maps onto Kubernetes deployment.
+This document holds how services in this repository resolve their
+configuration and are deployed: its stacks, its charts, and its migrations
+at startup, as this repository's instances of the engineering guidance.
 It is distinct from `docs/configuration.md`, which documents the
 negotiation/fulfillment *policy plugin* system (how a seller or buyer
 writes a custom pricing or negotiation hook) — a different, unrelated
@@ -70,10 +75,10 @@ Trust follows the same rule
 ([`configuration.md`](../guidance/engineering/configuration.md#trust-is-configured-where-its-client-reads-it)):
 a private CA is a configured bundle path the one client that needs it reads,
 such as `[Settlement.arkhai_payments].ca_bundle_path`, or a
-`[[DisputeCredential]]`'s `ca_bundle_path` for that authority's client. The one
-secret outside the rule is the
-signing credential `ARKHAI_IDENTITY_CREDENTIAL`, which the identity specification
-keeps from the loader, so it reaches a service as a variable sourced from a Secret.
+`[[DisputeCredential]]`'s `ca_bundle_path` for that authority's client. The signing
+credential `ARKHAI_IDENTITY_CREDENTIAL` is the one exception to the rule, declared in
+[`AGENTS.md`, "Exceptions to shared guidance"](../../AGENTS.md#exceptions-to-shared-guidance):
+it reaches a service as a variable sourced from a Secret.
 A buyer's `api_key_env`, in its payments section or a `[[DisputeCredential]]`, is
 not a service's configuration but the buyer's own exact named-variable provider,
 beside its keyring and secret-file providers (see "Marketplace identity
@@ -803,15 +808,17 @@ deployment of other code migrated. A PVC whose release was last installed or
 upgraded without the overlay still carries the annotation, and survives an
 uninstall until it is deleted by hand.
 
-Deploy to a local development cluster with `make -C helm deploy-local`, never with
-`make -C helm deploy` or the root `make deploy`, whether a person or an agent is
-deploying. A local cluster is redeployed with whatever code is checked out, and a
+A local development cluster is deployed only with `make -C helm deploy-local`
+([`AGENTS.md`, "Local deployment"](../../AGENTS.md#local-deployment)) because a
+local cluster is redeployed with whatever code is checked out, and a
 retained volume keeps the state that code wrote — a database another branch
 migrated — for the next deployment to start from. Pre-review validation run in
 `default` refuses to deploy over a release volume that carries the annotation and
 stops to ask, so a local deploy without the overlay costs the next validation a
 decision; a change's validation runs in its own namespace instead and deletes its
-volumes itself ("Validation namespaces", below). `make -C helm deploy` is for a
+volumes itself
+([`market-change-workflow`'s "The change's namespace"](../../openspec/specs/market-change-workflow/README.md#the-changes-namespace)).
+`make -C helm deploy` is for a
 deployment whose state must survive reinstalling.
 
 ### Release topology
@@ -925,69 +932,6 @@ service's pods.
 that no Pod annotated `helm.sh/hook: test` carries all of any Deployment's
 `matchLabels` or any Service's selector, and that each release renders its expected
 test pods.
-
-### Validation namespaces
-
-A change's pre-review validation deploys release 1 into a namespace of the change's
-own, so several changes are validated side by side on one development cluster
-without uninstalling each other's release (this repository's part of the change
-workflow, `openspec/specs/market-change-workflow/spec.md`, MCW-fnuh "Each Helm
-validation deploys into its change's namespace under its change's tag").
-
-- **The namespace.** `validate-<change>`, cut to 63 characters with the first eight
-  hex digits of the full name's SHA-256 appended when longer
-  (`scripts/change_namespace.py`). Every `helm/Makefile` target that takes
-  `NAMESPACE=` also takes `CHANGE=`, deriving the namespace the same way; giving
-  both is refused. Release names do not change with the namespace, so the in-cluster
-  Service names `local-values.yaml` states resolve in every one, and the two-release
-  topology fits in it.
-- **Image tags.** Every build target appends `IMAGE_SUFFIX`, empty by default:
-  `make build-dev IMAGE_SUFFIX=-<change>` builds `arkhai:storefront-<change>` and its
-  siblings, and the deploy names them through a values overlay naming every `arkhai`
-  image `helm/values.yaml` sets (`change_namespace.py <change> --image-overlay
-  <path>`); a render test holds the overlay to every image the chart renders, so an
-  image added later cannot deploy under its bare tag. Compose, the pipeline lanes,
-  and your own deployments keep bare tags. A namespace alone would not isolate
-  images, since every image is pulled `IfNotPresent` from the one Docker daemon the
-  cluster reads. The tag is fixed per change, never per commit: commit-suffixed tags
-  caused repeated image-not-found failures deploying Helm, and a rebuilt image under
-  a fixed tag rolls out by restarting pods. A suffixed build writes no commit tag; a
-  bare build still writes `arkhai:<tag>-<sha>`, which `make push-images` reads.
-- **Upgraded from zero over deleted volumes.** Each validation of the change scales
-  the release's workloads to zero if a crashed run left any up, deletes its pods,
-  its volume claims, and the deal test's `arkhai-buyer-profiles`, and waits until
-  they are gone; creates the namespace's Secrets with `topology-secrets`; and runs
-  `helm upgrade --install` with `local-values.yaml` and the change's image overlay,
-  then restores each workload's replica count and waits for its rollout. Every pod
-  starts new, on the images just built, against empty volumes. An upgrade the chart
-  refuses (`field is immutable`) falls back to uninstalling and installing.
-- **Scaled to zero afterwards.** Once the scenarios have run, validation keeps
-  every pod's log and the namespace's events, then scales the namespace's
-  Deployments and StatefulSets to zero, keeping objects and volumes, so resident
-  memory does not grow with the active changes. `make -C helm resume CHANGE=<change>`
-  scales them back to the replica counts the installed release states, rendering
-  nothing from the checkout.
-- **Manual access.** `make -C helm forward CHANGE=<change>` forwards that
-  namespace's services on the usual ports (8545, 8080, 8001, 8081) for running e2e
-  targets by hand. The ports are the same for every namespace, so one namespace is
-  forwarded at a time: a port another checkout already forwards fails to bind, and
-  `forward` names it and stops. Validation itself forwards nothing.
-- **Capacity.** The node's memory is the one resource the namespaces share.
-  `helm/validation-capacity.toml` records the memory one release needs, when, and
-  from which change's validation it was measured; before deploying, validation
-  compares that figure, times the releases that would then be running, with the
-  node's allocatable memory, and stops for a deployment that would not fit. The
-  check is an estimate that reserves nothing. The figure is measured through the
-  cluster's metrics API and written at archive cleanup (`make record-capacity`)
-  only when the change's latest validation measured one; on a cluster with no
-  metrics source none is recorded, and the check warns that it was skipped. Where
-  two branches' figures conflict at a merge, keep the one whose `measured_at` is
-  later.
-- **Teardown.** Archive cleanup runs `make -C helm teardown CHANGE=<change>`,
-  which deletes the change's namespace in `HELM_CONTEXT` (`docker-desktop` by
-  default), with every release, volume, and Secret in it, and removes each image the
-  change's validation build tagged. It takes `CHANGE=` only, so it never deletes
-  `default`.
 
 ### Combined compute-family storefront
 
@@ -1178,10 +1122,9 @@ are service settings, not pool fields or buyer inputs.
 
 ## Migrations at startup
 
-Every stateful service applies its migrations in a deployment phase before its
-application starts, through its own packaged command, and its application only
-checks the database, as [`migrations.md`](../guidance/engineering/migrations.md)
-describes; for this repository the rules are `deployment-state`'s
+Every stateful service migrates as [`migrations.md`](../guidance/engineering/migrations.md)
+describes, through the command and in the phase below; for this repository the rules
+are `deployment-state`'s
 ["Service-owned migration history"](../../openspec/specs/deployment-state/spec.md#requirement-service-owned-migration-history)
 and the requirements beside it, and the design is its companion's
 ["Migration and initialization boundary"](../../openspec/specs/deployment-state/architecture.md#migration-and-initialization-boundary).
@@ -1208,17 +1151,16 @@ CLI, states it as its `entrypoint`. The registry chart's application container
 states its own `uvicorn` command, since the image's command migrates first for
 Compose.
 
-A migration command reads only its database location and log level
-([`migrations.md`](../guidance/engineering/migrations.md#the-command-reads-only-the-database-location-and-log-level));
-the bare-metal storefront's reads only its `db_path`, logging at INFO. What a
+Each migration command is configured as
+[`migrations.md`](../guidance/engineering/migrations.md#the-command-reads-only-the-database-location-and-log-level)
+says; the bare-metal storefront's reads only its `db_path`, logging at INFO. What a
 deployment configures — a site's pools, their seed, its playbooks, the
 API-credit service's `default` pool — is applied by the service's startup
 after its check passes. Migration creates no pool.
 
-The application's startup opens its database read-only and refuses any
-database but a compatible one
-([`migrations.md`](../guidance/engineering/migrations.md#the-application-opens-its-database-read-only)).
-`<service>-migrate --check` is the check mode
+Each application opens its database as
+[`migrations.md`](../guidance/engineering/migrations.md#the-application-opens-its-database-read-only)
+says, and `<service>-migrate --check` is the check mode
 ([`migrations.md`](../guidance/engineering/migrations.md#a-check-mode-previews)):
 it exits 0 only for a compatible database.
 
@@ -2031,10 +1973,3 @@ Kubernetes deployment topology (no Helm chart), such as the API-credit
 storefront and service, runs only under Compose: it migrates through the same
 command before its application (see "Migrations at startup"), but has no
 equivalent of a chart's configuration delivery.
-
-### Artifact publishing destination
-
-Root publishing targets require explicit `AR_PROJECT` and `AR_LOCATION`, supplied
-on the make command line or in the environment. `AR_PREFIX` defaults to
-`AR_PROJECT`; it selects the repository-name prefix. For example,
-`make push-images AR_PROJECT=<project> AR_LOCATION=<region>`.

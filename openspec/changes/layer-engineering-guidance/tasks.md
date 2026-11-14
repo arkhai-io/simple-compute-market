@@ -1717,7 +1717,7 @@ checks. Files: `AGENTS.md`; `openspec/README.md`; `docs/development/ARCHITECTURE
 `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`, `BUILD_AND_PACKAGING.md`, `RELEASING.md`;
 `openspec/specs/market-change-workflow/README.md`.
 
-- [ ] 6.1 Rewrite `AGENTS.md` (D3, D9, D18): frontmatter `tags: [repository]`; the
+- [x] 6.1 Rewrite `AGENTS.md` (D3, D9, D18): frontmatter `tags: [repository]`; the
   three layers and where each lives; its layer table naming every repository
   guidance document by path, which is the guidance check's manual override (D21),
   with the closeout-parts and roadmap rows of task 3.4; the repository's `## Tags`
@@ -1739,13 +1739,79 @@ checks. Files: `AGENTS.md`; `openspec/README.md`; `docs/development/ARCHITECTURE
   it ("Dependencies follow `dependencies.md` and `dependencies-python.md`. Here:"
   and the repository's bullets). Verify no section of `AGENTS.md` paraphrases a rule
   of `docs/guidance/`.
-- [ ] 6.2 Finish `openspec/README.md` as this repository's OpenSpec guide (D3, D8):
+  Note: `AGENTS.md` now opens with `tags: [repository]`, keeps its opening's
+  reading list, and holds "Where the
+  guidance lives" (the layers by link to the workflow README's "The layers of
+  guidance", and the layer table: one row per shared layer's README, then one per
+  repository document by path — `AGENTS.md`, `openspec/README.md`, and the five
+  `docs/development/` documents — with capability guidance named by place). The
+  amendment's premise that a layer README's tag table maps topics to files is false
+  — each table is `Tag | Kind | Description`, and the files carry their tags in
+  frontmatter — so `AGENTS.md` says that instead; finding a layer's files by tag is
+  the guidance check's `--list --tag` (section 9). Then "Tags",
+  "Exceptions to shared guidance", and "This repository's rules". The closeout-parts
+  and roadmap rows of task 3.4 sit in a second table under the same heading, of the
+  roles the workflow's guidance names, beside the checks those parts run: the roadmap
+  is no guidance document, and a row in the layer table would make D21's manual
+  override take it for one; open for the triage. Tags: `repository` and
+  `architecture` (carried by `ARCHITECTURE.md`); `checks` is left out, since no
+  repository document's whole content needs it (`BUILD_AND_PACKAGING.md`'s checks
+  table is packaging), and is open for the triage, as the inventory records.
+  Exceptions: the public case (`selects`, `repository-content.md`, "In a public
+  repository", its local development configuration public by design), the CLIs'
+  tests (`overrides`, `testing-python.md`, "A command module's factories are its
+  seam"; its reason is an unowned gap rather than a need, as the plan directs, open
+  for the triage against `rules.md`), and `ARKHAI_IDENTITY_CREDENTIAL` (`overrides`,
+  `configuration.md`, "Secrets travel in a secret profile or overlay file"), which
+  names the storefronts and the provisioning service only: the registries read their
+  credential from a mounted file their profile names, so inventory row 525's "every
+  signing service" was wrong of them. `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`,
+  and `ARCHITECTURE.md` cite the table where each stated its exception. Each rule
+  under "This repository's rules" links its shared rule and states what is
+  particular here (the check, the path, the choice): the paraphrases of the
+  dependency, comment, packaging-check, closeout, and citation rules are gone, the
+  fourth dependency bullet reduced to a pointer to `ARCHITECTURE.md`'s "Package and
+  dependency layers" (row 167), and "Documentation ownership" to a pointer to
+  `openspec/README.md`'s placement table (row 148). "Comments" states what `make
+  check-comment-hygiene` scans as the script does — the change-history scan over
+  `.py`, `.yml`, and `.yaml`, the change-directory scan adding `.toml` and exempting
+  `docs/` and `.claude/` — which the earlier text had collapsed. "Public repository
+  discipline" gains the two rules for agents that "Public repository content
+  checks" held (push through `make push-branch`; no real identifier in a guard
+  test), since that section moved to a companion no step loads by default; "Local
+  deployment" is a heading of its own. Every repository row of the
+  inventory destined for `AGENTS.md` sits there (rows 134, 139, 147, 148, 156, 157,
+  161, 169, 170, 173, 174, 180, 183, 185, 186, 190, 192, 246, 247, 252, 450, 525, and
+  554's `deploy-local` rule, which `AGENTS.md` lacked), but for rows 144 and 238's
+  "accepted architecture is in `ARCHITECTURE.md`", whose one home is
+  `openspec/README.md`'s placement paragraph, which "Documentation ownership" cites.
+  Headings kept where something cites them ("Public repository discipline",
+  "Domain docs", "Diagrams", "Documentation ownership"); the diagram exception's
+  sentence stays under "Diagrams" for task 7.2 to move. `DEPLOYMENT_AND_CONFIG.md`
+  keeps the `deploy-local` rule's reason and cites "Local deployment" for the rule
+  (row 554). Evidence: inspected, and by the fresh-context check; no test applies.
+- [x] 6.2 Finish `openspec/README.md` as this repository's OpenSpec guide (D3, D8):
   frontmatter; its placement table naming `docs/guidance/` and capability guidance
   files beside capabilities; the validator pin; the capability index itself, whose
   role the workflow states (31 O1f); its closeout parts naming `make check-guidance`
   where the guidance placement part runs the repository's guidance check (D21).
   Verify it holds no row the inventory tags `workflow`.
-- [ ] 6.3 Give `ARCHITECTURE.md`, `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`,
+  Note: frontmatter `tags: [repository, openspec]`. The placement table gains rows
+  for `AGENTS.md`, `docs/guidance/engineering/` and `docs/guidance/workflow/`, a
+  guidance file beside a capability (with an exception that applies to it alone),
+  and `RELEASING.md`, which had none; the `ARCHITECTURE.md` row takes "the system's
+  shape" and "deployment topology" from `AGENTS.md`'s bullet, and the paragraph
+  below it "neither replaces a specification's normative requirements" (row 148,
+  under "Section 6's differing pairs"). "Current capability documentation" links the
+  index's role in `openspec-documentation.md` and names the index. The checks table
+  gains "Guidance placement | `make check-guidance`", which section 9 writes; until
+  then the row names a target the branch lacks. "Packaging" is reduced to the checks
+  it runs, citing `BUILD_AND_PACKAGING.md`'s "Checks" for what each enforces and
+  `packaging.md` for why (6.5's amendment, 58 O1). Every heading stays, so nothing
+  citing one changes. No row is the inventory's `workflow` material: the opening
+  and the placement table's lead-in only point to the workflow's files. Evidence:
+  inspected; no test applies.
+- [x] 6.3 Give `ARCHITECTURE.md`, `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`,
   `BUILD_AND_PACKAGING.md`, and `RELEASING.md` frontmatter with the tags their
   content needs (D10, D17) — `VALIDATION_RUNBOOK.md` stays outside the guidance set,
   with no frontmatter and no layer-table row (48 F1) — and move what the inventory
@@ -1759,13 +1825,60 @@ checks. Files: `AGENTS.md`; `openspec/README.md`; `docs/development/ARCHITECTURE
   its lanes and doubles, and its instances of the engineering testing rules, and so
   for each — rather than a purpose that predates the shared layers. Verify no
   opening claims what the shared guidance now holds.
-- [ ] 6.4 Write the classification of the checks (D13) in
+  Note: frontmatter — `ARCHITECTURE.md` `[repository, architecture]`, `TESTING.md`
+  `[repository, testing]`, `DEPLOYMENT_AND_CONFIG.md` `[repository, configuration,
+  deployment]`, `BUILD_AND_PACKAGING.md` and `RELEASING.md` `[repository,
+  packaging]`, each its opening or document-level row's tags, the engineering topics
+  as a lower layer's tags (D18); each is a row of `AGENTS.md`'s layer table, and the
+  runbook has neither. Open for the triage: under 31 O1c's conjunctive reading,
+  `DEPLOYMENT_AND_CONFIG.md`'s sections needing `deployment` alone, and
+  `RELEASING.md`'s moved "Artifact publishing destination" (row 590's `deployment`),
+  sit in files whose tags a session without the second topic would not select;
+  section 7's capability moves shrink the first. Openings: `ARCHITECTURE.md`'s purpose is the system's cross-system
+  description and the repository's own rules spanning its systems;
+  `TESTING.md`'s where its tests live, its lanes and doubles, and its instances;
+  `DEPLOYMENT_AND_CONFIG.md`'s how its services resolve configuration and are
+  deployed, as its instances; `BUILD_AND_PACKAGING.md`'s its instances of the
+  packaging files, the scripts and targets, and the checks; `RELEASING.md`'s the
+  procedure, the published set, and where other artifacts are pushed. Moved:
+  `ARCHITECTURE.md`'s "Public repository content checks" to `market-change-workflow`'s
+  README under "This repository's checks", before "Secret scanning", opening with
+  the public-case exception it enforces, its closing link to `RELEASING.md` dropped
+  ("Secret scanning" cites it) and its last sentence pointing to "Secret scanning"
+  below, its agent rules repeated in `AGENTS.md` (task 6.1); "Validation
+  namespaces" into that README's "The change's namespace", as a list of what the
+  Helm targets carry (the name's truncation, the tags, the upgrade's specifics,
+  `resume` and `forward`, teardown), what the README already said dropped and the
+  tag rule's history clause with it (row 558); `DEPLOYMENT_AND_CONFIG.md`'s
+  "Artifact publishing destination" to `RELEASING.md` under that heading (row 590);
+  and `ARCHITECTURE.md`'s "Atomic workload-lifecycle cutovers" instance, a sentence
+  left filed under the concurrency tests once section 5 moved the rule, into
+  "Accepted representations and application views", which cites `persistence.md`.
+  "Durable fulfillment acceptance" stays under "Deterministic database-concurrency
+  tests" for section 7, which moves it to fulfillment's companion (row 435).
+  Evidence: inspected; no test applies.
+- [x] 6.4 Write the classification of the checks (D13) in
   `openspec/specs/market-change-workflow/README.md` as `### What each check enforces`
   under "This repository's checks": a table of each check, the rule it enforces
   linked to its guidance, that rule's layer, and where it runs, from the inventory's
   corrected draft, the guidance check marked as enforcing workflow rules from this
   repository's script. Verify every row of the draft is in the table.
-- [ ] 6.5 Deduplicate the repository material as the preamble says (31 O1b),
+  Note: twenty-five rows, the draft's in its order, each rule linked to the file
+  stating it — a guidance file, `ARCHITECTURE.md`, `openspec/README.md`, or a
+  requirement (CW-d8de, MCW-c4ek), at its heading where one heading states it, the
+  whole file where it does (`change-references.md`, `packaging-python.md`,
+  `packaging-hatchling.md`) — and the repository's part of a rule named beside its
+  layer ("its file types and exemptions the repository's"). The task list's rule has
+  no home of its own: it links the companion's "The command and its tiers", which
+  lists the checks. The guidance check's row reads "workflow, enforced from this
+  repository's script", citing CW-g7lt, CW-d2rw, and CW-x4ex by id unlinked, since
+  they reach `spec.md` only at the archive, and runs in `make check-repository` once
+  section 9 adds it. The lead-in says the first four rows are the workflow's default
+  checks and every other is this repository's script whatever its rule's layer
+  (31 O1f). The architecture check's CI row says `tests.yml` runs on pushes and pull
+  requests to `dev` and `staging`, where the draft said every push. Evidence:
+  inspected, and by the fresh-context check; no test applies.
+- [x] 6.5 Deduplicate the repository material as the preamble says (31 O1b),
   including the handbook and runbook duplicates the inventory recommends for one
   home. Verify every duplicate row this section moves is merged or listed.
   Amended at round 2's triage (58 O1): `openspec/README.md`'s "Packaging" part is
@@ -1780,9 +1893,177 @@ checks. Files: `AGENTS.md`; `openspec/README.md`; `docs/development/ARCHITECTURE
   Before the pre-closeout review (111 O2): the owner revisits whether
   `docs/development/`'s documents split into owner-facing and agent-facing ones, by
   reader; any refactor the owner decides on is added to this change then.
-- [ ] 6.6 Re-point every citation of what this section moved, and verify the
+  Note: the duplicate rows this section's material carries — 148 and 167 (merged),
+  484, 497, and 575 (kept in place, compared, and listed) — and the `Makefile`'s
+  `clobber-wheels` that round 4's triage left here are under "Section 6's differing
+  pairs" below, with the wording the paraphrase sweep changed. The handbook overlaps
+  of rows 550, 565, 570, 571, 578, and 582 are capability sections, which section 7
+  moves and deduplicates (task 7.3); their cells' "section 6's triage" is the old
+  numbering, section 7's now, correcting section 5's note that called them section
+  6's. Every section of the five documents and `openspec/README.md` citing
+  `docs/guidance/` was read: a sentence that restated the shared rule before the
+  instance now names the instance and links the rule (`BUILD_AND_PACKAGING.md`'s
+  opening, its layout, wheelhouse, locks, and images; `ARCHITECTURE.md`'s
+  composition, layer, standalone-component, build, persistence, operator-control,
+  and testing sentences; `TESTING.md`'s private dependencies, doubles, and
+  conformance; `DEPLOYMENT_AND_CONFIG.md`'s migrations; `RELEASING.md`'s layout and
+  versioning); a sentence that leads with the rule's own heading and states the
+  instance after it, as most of `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md` do, was
+  left. Non-guidance documents contradicting the guidance: the validation runbook's
+  section 25 (row 484, below). Outside the plan: `TESTING.md`'s link to the
+  runbook's section 21 named an anchor no heading has
+  (`#21-provide-a-kvm-host`), now `#21-provide-real-compute-hosts`. Evidence:
+  inspected; no test applies.
+- [x] 6.6 Re-point every citation of what this section moved, and verify the
   section as task 3.10 does. End-to-end: none; no pipeline scenario reads guidance,
   and none is owed.
+  Note: re-pointed, from a Grep for each moved heading and anchor and each removed
+  `AGENTS.md` heading's name outside the archive: `RELEASING.md`'s and the README's
+  "Secret scanning" citations of "Public repository content checks";
+  `DEPLOYMENT_AND_CONFIG.md`'s and `TESTING.md`'s of "Validation namespaces";
+  `TESTING.md`'s of `AGENTS.md`'s "Package and dependency discipline", now
+  `ARCHITECTURE.md`'s "Package and dependency layers"; and
+  `scripts/check_capability_index.py`'s docstring citing `AGENTS.md`'s
+  "Documentation ownership" for the capability index, now `openspec/README.md`'s
+  "Current capability documentation". The skills citing `AGENTS.md`'s "Public
+  repository discipline" and "Domain docs" find both headings, each still naming
+  what they cite. `docs/prompts/` is left (D12). Every anchor this section added was
+  checked against its heading by Grep, since the citation check reads paths only,
+  and again by the fresh-context check.
+  Verification, as task 3.10: `make check-agent-skills` OK. `make
+  check-doc-citations CHANGE=` (unscoped) reports, outside this change's own
+  documents, only failures older than section 3 (other changes citing scripts and an
+  `architecture.md` that no longer exist). `scripts/change-workflow run pre-commit
+  layer-engineering-guidance`, run after the fresh-context check's fixes, one path
+  outside the inert paths (`scripts/check_capability_index.py`):
+  `after-functional-change` (relock) passed, changing no lock;
+  `pre-commit-functional` passed (`make check-packaging`, `make test`, every suite,
+  `make test-release-tooling`'s 2868 among them, `test_change_workflow_assumptions.py`
+  and `test_change_workflow_config.py` included, the first reading the
+  `market-change-workflow` README this section edited); the default checks passed,
+  OpenSpec "is valid"; and `make check-repository` failed only on the two the
+  preamble expects — sixteen citations, all from this change's own `design.md`,
+  `inventory.md`, `proposal.md`, and `tasks.md`, of files it creates or removed, and
+  the specification index wanting the twelve `CW-*` entries and CW-pkug's renamed
+  link (task 10.9). Comment hygiene and history wording passed among its other six
+  checks. The two unit suites ran inside `make test-release-tooling` rather than as
+  a direct `pytest` run, as at task 3.15. End-to-end scenarios covering the section:
+  none confirmed, as planned. Owed by validation: nothing.
+
+Section 6's differing pairs (31 O1b), for the round's triage — each the source
+forms, then the text the section wrote:
+
+- **What `ARCHITECTURE.md` and `DEPLOYMENT_AND_CONFIG.md` hold (row 148).**
+  `AGENTS.md`: "`ARCHITECTURE.md` is the repository-wide architecture reference:
+  system shape, dependency layers, authority boundaries, shared vocabulary, major
+  flows, deployment topology, packaging rules, and testing philosophy", and
+  "`DEPLOYMENT_AND_CONFIG.md` holds configuration resolution and deployment
+  conventions; `docs/operator-handbook.md` holds what an operator needs to run a
+  deployment … Neither replaces a specification's normative requirements."
+  `openspec/README.md`'s placement table: `ARCHITECTURE.md` for "repository-wide
+  dependency layers, authority boundaries, common vocabulary, and major flows", and
+  the other two as `AGENTS.md` had them. Proposed, the placement table their one
+  home: the `ARCHITECTURE.md` row adds the system's shape and deployment topology,
+  sections it holds; "packaging rules" and "testing philosophy" stay out, since
+  `BUILD_AND_PACKAGING.md` and `TESTING.md` hold them and `ARCHITECTURE.md`'s
+  sections on them only point there; "neither replaces …" joins the paragraph below
+  the table, naming the three documents.
+- **The architecture check's bullet (row 167).** `AGENTS.md`'s fourth dependency
+  bullet and `ARCHITECTURE.md`'s "Package and dependency layers" and "Where the
+  current tree diverges" agreed (the check, where it runs, exception rows naming
+  their change, never a comment at the import, runtime reasons in `pyproject.toml`,
+  boundary tests only for what the check cannot see); merged into `ARCHITECTURE.md`,
+  `AGENTS.md` keeping a pointer.
+- **The real-provisioning lane (row 484).** `TESTING.md`'s "The real-provisioning
+  lane" against the runbook's sections 21–25 and `e2e-tests/README.md`'s target:
+  they agree on the target's version 2, the memory tolerance (the runbook's 5%), the
+  job bound (its 30 minutes), the heartbeat, and the recovery, but disagree on
+  adoption. The runbook's section 25 fails a rerun on "a listing on the scenario's
+  resource that it cannot adopt — several, a closed one, or one of another shape";
+  `TESTING.md` retains closed historical listings and fails only on closed listings
+  with no open one, several open listings, one of unknown status, or an open one of
+  another shape. Proposed: `TESTING.md`'s form stands, and the runbook's "a closed
+  one" becomes "closed ones with none open", once the triage confirms it against
+  `test_real_provisioning_deal.py`'s adoption. The runbook was compared section by
+  section for 25 only; 21–24 describe the host and target, which `TESTING.md` leaves
+  to them.
+- **The accepted purchase qualification (row 497).** `TESTING.md`'s section and
+  the runbook's section 29 agree: separate identities, the shipped buyer CLI, the
+  typed operator clients, restricted evidence, and the network-policy probe's
+  conditions, the runbook's list of what the probe does not establish being a subset
+  of `TESTING.md`'s (it omits credential, privilege, and universal isolation).
+  Proposed: `TESTING.md` keeps what a qualification claim needs, now citing section
+  29 for the procedure; the runbook is left as it is, since it contradicts nothing.
+- **The migrations after v0.3.0 (row 575).** `DEPLOYMENT_AND_CONFIG.md`'s list and
+  the operator handbook's "What the upgrade from v0.3.0 changes" agree where they
+  overlap (host connections, the storefront tables); each holds items the other
+  does not, for its reader — the migrations by id beside the placement key, delivery
+  activation, and cleared access material, against the release-failed leases, the
+  registry listings, the registries' and storefronts' joint upgrade, and the option
+  identifiers. Proposed: both kept, unchanged.
+- **The `Makefile`'s `clobber-wheels` (109 F1, left for this section).** It names
+  the three client wheels it republishes with their versions read from each
+  `pyproject.toml`: a chosen subset, not the set of internal packages, and no
+  repeated version, so `packaging.md`'s aggregate form admits it. Proposed: no
+  change.
+- **Wording the paraphrase sweep changed.** `ARCHITECTURE.md`: "Where two domains
+  handle one concern differently and nothing in their markets requires the
+  difference, one behavior is chosen for both and composed from the kit both use"
+  reads "VM and bare metal follow" the rule "through the kit both use", the
+  instances following; the atomic-cutover sentence, which restated
+  `persistence.md`'s rule in market words, reads as the instance's mapping (the live
+  records are the active workloads, the external identity their provider-operation
+  identity); "Generic
+  infrastructure … does not belong in a market package; when it is built, it is a
+  standalone component under `tools/`" reads "Generic infrastructure built here is
+  such a standalone component, never part of a market package"; the test-double
+  sentence names the two lane doubles as the subject. `BUILD_AND_PACKAGING.md`:
+  `make lock` "relocks every project against a freshly built wheelhouse,
+  unconditionally" reads "building the wheelhouse first", the relock's rule left to
+  its link, and "run it after editing a project's dependencies" dropped as the
+  rule's. `DEPLOYMENT_AND_CONFIG.md`: "A migration command reads only its database
+  location and log level" reads "Each migration command is configured as
+  `migrations.md` says", and its `deploy-local` rule keeps its reason and cites
+  `AGENTS.md`'s "Local deployment" for the rule (row 554). `TESTING.md`: "a scenario needing a private service's
+  internals, its ledger reads among them" reads "a scenario needing a private
+  service's ledger reads". `RELEASING.md`'s versioning paragraph drops its list of
+  the policy's parts. None changes what this repository does.
+
+Section 6 notes (handoff):
+
+- `AGENTS.md`'s layer table is what section 9's guidance check reads as the manual
+  override (D21): its rows are `| <layer> | <link or path> |`, a shared layer's row
+  linking its README; the roles table under it (closeout parts, their checks, the
+  roadmap) is not the layer table, and its documents are no guidance unless another
+  row names them.
+- Named before section 9 makes them true: `make check-guidance` in
+  `openspec/README.md`'s checks table and in the classification's last row.
+- Left for section 7: the diagram exception's sentence under `AGENTS.md`'s
+  "Diagrams" (task 7.2 moves it to `openspec/specs/change-workflow/diagrams.md`),
+  "Durable fulfillment acceptance" in `ARCHITECTURE.md`, and every capability
+  section of `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md` with its handbook overlap.
+- Open for the triage: `checks` left out of `AGENTS.md`'s table; the roadmap's row
+  in the roles table rather than the layer table; the runbook's adoption sentence
+  (row 484); the CLIs' exception, whose reason is a gap rather than a need; and the
+  conjunctive reach of `DEPLOYMENT_AND_CONFIG.md`'s and `RELEASING.md`'s tags.
+- The fresh-context check's findings, fixed: two statements false of the
+  repository in `AGENTS.md` (the README tag tables mapping topics to files; the
+  registries among the credential's users), the comment check's scans, the CI
+  trigger and the default checks' owner in the classification, the public-case row
+  restating `repository-content.md`, two `ARCHITECTURE.md` sentences still
+  paraphrasing their rules, the `deploy-local` rule stated twice, the agent rules a
+  companion would have hidden, the dropped reading list, the placement rows short of
+  the openings, two phrases relative to a change, and the overstated notes.
+  Declined: naming `make check-guidance` before section 9 writes it, which the plan
+  directs; the validator pin's "do not yet meet … moves the pin forward", a line this
+  section did not touch, about another change's work; and the three statements of
+  the guidance set (`AGENTS.md`'s layer table, the provisions row of what every step
+  reads, and `load.common`), which differ in what each lists for its own purpose —
+  the override's documents, what steps load, what loads now — and which task 9.3's
+  collapse of `load.common` revisits.
+- Not read in full this session: `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md` beyond
+  every passage citing `docs/guidance/`, their openings, and the sections moved or
+  compared; the runbook beyond sections 25 and 29.
 
 ## 7. The repository layer beside each capability
 

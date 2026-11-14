@@ -1,6 +1,10 @@
+---
+tags: [repository, architecture]
+---
+
 # Arkhai Market Stack — Architecture Reference
 
-> **Purpose:** Current repository-wide architecture for implementation and review. Detailed normative subsystem contracts live in [`openspec/specs/`](../../openspec/specs/); proposed transitions live in [`openspec/changes/`](../../openspec/changes/). This document describes what the system is and why its major boundaries exist. It is not a backlog or changelog: the goals being pursued and the value each delivers belong to [`ROADMAP.md`](ROADMAP.md), and delivery readiness belongs to [`openspec/changes/README.md`](../../openspec/changes/README.md).
+> **Purpose:** This system's cross-system description — what the system is and why its major boundaries exist — and the rules of this repository's own that span its systems: its package layers, scope, and kinds, and its instances of the engineering guidance it applies across them. Detailed normative subsystem contracts live in [`openspec/specs/`](../../openspec/specs/); proposed transitions live in [`openspec/changes/`](../../openspec/changes/). It is not a backlog or changelog: the goals being pursued and the value each delivers belong to [`ROADMAP.md`](ROADMAP.md), and delivery readiness belongs to [`openspec/changes/README.md`](../../openspec/changes/README.md).
 
 ## Document map
 
@@ -78,7 +82,7 @@ only the values and hooks that instantiate them.
 
 Two hooks remain separate when core-owned machinery or a typed invariant sits between them. They may be merged when the core does nothing between them and the split would expose only implementation detail.
 
-Where two domains handle one concern differently and nothing in their markets requires the difference, one behavior is chosen for both and composed from the kit both use ([`implementation.md`, "Composition from one component"](../guidance/engineering/implementation.md#composition-from-one-component)). VM and bare metal therefore share the close or hold of a listing left with no settlement option, one site-derivation summary and log, and one answer for a deal settled by introduction, which has no settlement or fulfillment; each keeps only what its market needs, such as its own delivery route surface.
+VM and bare metal follow [`implementation.md`, "Composition from one component"](../guidance/engineering/implementation.md#composition-from-one-component) through the kit both use: they share the close or hold of a listing left with no settlement option, one site-derivation summary and log, and one answer for a deal settled by introduction, which has no settlement or fulfillment; each keeps only what its market needs, such as its own delivery route surface.
 
 The registry is the schema-centralizing point for discovery. A registry publishes one filter/listing schema and remains opaque to market-domain payloads beyond its configured validation and filter vocabulary. A market-domain operator composes the relevant buyer and storefront plugins around that registry schema.
 
@@ -100,7 +104,7 @@ The first two are stated below as rules a check can hold; the third is stated as
 
 The diagram's source is [`diagrams/repository-layers.drawio`](diagrams/repository-layers.drawio); the SVG beside it is the export and also opens in draw.io. The kit areas diagram below uses the same layers and colours and adds scope and kind.
 
-A package depends only on its own layer or a lower one, and dependencies within one layer are acyclic. Any import is a dependency, in every form Python offers, so every layer shares one definition of "depends on" ([`dependencies-python.md`, "Every import form counts"](../guidance/engineering/dependencies-python.md#every-import-form-counts)); and a package declares what it imports in its `pyproject.toml`, an internal distribution declared but never imported being removed or kept for a stated runtime reason ([`dependencies.md`, "Declare what you import"](../guidance/engineering/dependencies.md#declare-what-you-import)). A distribution only a project's tests import belongs in its `dev` dependency group, which is not a runtime dependency and which the check does not read, so a runtime declaration is removed only once neither the source nor the tests import it. The check reads import statements: a package loaded by name through `importlib` or `__import__` is an edge it cannot see, and no internal package is loaded that way.
+A package depends only on its own layer or a lower one, and dependencies within one layer are acyclic. Every layer shares one definition of "depends on": every import form ([`dependencies-python.md`, "Every import form counts"](../guidance/engineering/dependencies-python.md#every-import-form-counts)), and every declaration in the package's `pyproject.toml` ([`dependencies.md`, "Declare what you import"](../guidance/engineering/dependencies.md#declare-what-you-import)). A distribution only a project's tests import belongs in its `dev` dependency group, which is not a runtime dependency and which the check does not read, so a runtime declaration is removed only once neither the source nor the tests import it. The check reads import statements: a package loaded by name through `importlib` or `__import__` is an edge it cannot see, and no internal package is loaded that way.
 
 The layer names what a package may do, not where it lives: a kit is depended on and composes nothing; a specialization is composed and composes nothing; a composition is the only place wiring happens. Role implementations such as the buyer and storefront roles are compositions, as are the deployed services and every market domain's executables. Repository-wide contracts and typed clients are kits; a family's or a domain's contracts and clients are specializations.
 
@@ -154,7 +158,7 @@ The kind words are `contracts` and `client`; the role words `storefront`, `buyer
 
 A **standalone component** under `tools/` is outside it too, but stricter than any layer: it depends on no internal package at all, only on third-party distributions and the standard library, and names no market concept, so it can be lifted into a repository of its own as it stands. Because `make check-architecture` does not read `tools/`, each one holds that boundary in a structure test of its own, and its tests join `make test` through a root target ([`tools/README.md`](../../tools/README.md#standalone-infrastructure-components)). The frps admission plugin, [`tools/frp-grant-admission`](../../tools/frp-grant-admission/README.md), is one ([capability](../../openspec/specs/frp-grant-admission/architecture.md)).
 
-Generic infrastructure that is not specific to this marketplace does not belong in a market package; when it is built, it is a standalone component under `tools/` ([`implementation.md`, "Generic infrastructure is a standalone component"](../guidance/engineering/implementation.md#generic-infrastructure-is-a-standalone-component)).
+Generic infrastructure built here is such a standalone component, never part of a market package ([`implementation.md`, "Generic infrastructure is a standalone component"](../guidance/engineering/implementation.md#generic-infrastructure-is-a-standalone-component)).
 
 Two allowlists bound what a package may depend on. A **kind allowlist**, one per light kind in the rules file, names what a package of that kind may depend on: a **contracts** package on core, the identity, capability-shape, and capability-admissibility foundation kits, and its own family's vocabulary; a **client** on contracts, core, and the identity kit. A **package allowlist** belongs to one package whose lightness is part of its contract — the shape, pricing, and admissibility kits, which import only the standard library and the shape kit, the identity kit, the settlement runtime, the migration engine kit, and the thin contracts and clients — and is stated in its own `pyproject.toml`, as `allowed-dependencies` under `[tool.arkhai.architecture]`: every distribution, internal or third-party, it may declare or import beyond the standard library. Such a package must also declare every third-party distribution it imports. A third-party import matches the distribution of the same normalized name, or one an `import-roots` entry names; that alias is taken as the package states it, because checking it would need installed metadata. Outside packages with an allowlist, whether third-party declarations are complete rests on each project's own environment and tests, and removing a package's allowlist removes its constraint, which is a visible edit to that package. The table may only narrow or annotate its package; it cannot state a layer, kind, or scope, so nothing a package declares about itself widens what its path grants. The plugin entry-point groups are `market.buyer_domains`, `market.storefront_contributions`, and `market.delivery_sinks`, whose owner `kit/delivery` registers its built-in sinks without becoming a plugin.
 
@@ -1124,7 +1128,7 @@ Compose is organized by market domain and includes the shared development chain.
 Two rules govern how stacks receive their configuration:
 
 - **The repository's stacks are configured from committed files** ([`configuration.md`, "A stack's configuration lives in committed files"](../guidance/engineering/configuration.md#a-stacks-configuration-lives-in-committed-files)): each end-to-end lane and the full local stack, a Makefile choosing which configuration loads — a profile, the provisioning mode. See [`DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"](DEPLOYMENT_AND_CONFIG.md#per-domain-stack-composition).
-- **Secrets arrive through a secret profile or overlay** ([`configuration.md`, "Secrets travel in a secret profile or overlay file"](../guidance/engineering/configuration.md#secrets-travel-in-a-secret-profile-or-overlay-file)), and trust is configured where its client reads it ([`configuration.md`, "Trust is configured where its client reads it"](../guidance/engineering/configuration.md#trust-is-configured-where-its-client-reads-it)). The signing credential, `ARKHAI_IDENTITY_CREDENTIAL`, is the one exception: the identity specification keeps it from the loader. See [`DEPLOYMENT_AND_CONFIG.md`, "Profile-based configuration"](DEPLOYMENT_AND_CONFIG.md#profile-based-configuration).
+- **Secrets arrive through a secret profile or overlay** ([`configuration.md`, "Secrets travel in a secret profile or overlay file"](../guidance/engineering/configuration.md#secrets-travel-in-a-secret-profile-or-overlay-file)), and trust is configured where its client reads it ([`configuration.md`, "Trust is configured where its client reads it"](../guidance/engineering/configuration.md#trust-is-configured-where-its-client-reads-it)). The signing credential, `ARKHAI_IDENTITY_CREDENTIAL`, is the one exception ([`AGENTS.md`, "Exceptions to shared guidance"](../../AGENTS.md#exceptions-to-shared-guidance)). See [`DEPLOYMENT_AND_CONFIG.md`, "Profile-based configuration"](DEPLOYMENT_AND_CONFIG.md#profile-based-configuration).
 
 ### Production and staging
 
@@ -1153,7 +1157,7 @@ in place; the rule lapses at 1.0.0.
 
 ## Build, packaging, and initialization
 
-Internal Python packages are built as wheels into the repository `.dist` directory, and every project consumes them from there; no project resolves a sibling through a source path ([`packaging.md`, "Internal packages are consumed as built artifacts"](../guidance/engineering/packaging.md#internal-packages-are-consumed-as-built-artifacts)). A rebuilt wheel keeps its version, so each environment, image, and lock refreshes its internal packages explicitly, and the set is derived from the project's lock when the operation runs rather than listed anywhere:
+Internal Python packages are consumed as built artifacts ([`packaging.md`, "Internal packages are consumed as built artifacts"](../guidance/engineering/packaging.md#internal-packages-are-consumed-as-built-artifacts)): wheels in the repository `.dist` directory, which each environment, image, and lock refreshes explicitly, the set derived from the project's lock:
 
 ```text
 make dist                      build every internal wheel
@@ -1167,11 +1171,11 @@ image build                    install the committed lock unchanged, same intern
 
 One root `.python-version` fixes the interpreter for every environment and image. Docker builds copy `.dist` from the build context into builder stages; runtime stages receive only the finished environment. [`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md) owns the mechanics — `scripts/uv_project.py`, `make lock`, the image layout — and the `make check-packaging` checks that enforce them.
 
-Aggregate Make targets run every included subproject's default tests ([`test-levels.md`, "Aggregate test targets"](../guidance/engineering/test-levels.md#aggregate-test-targets)).
+The aggregate Make targets, `make test` among them, are held to [`test-levels.md`, "Aggregate test targets"](../guidance/engineering/test-levels.md#aggregate-test-targets).
 
 ### Accepted representations and application views
 
-Persisted protocol documents, retained records, and schema changes follow [`persistence.md`](../guidance/engineering/persistence.md): the owner keeps a document's canonical bytes behind its application view, a retained record stays readable while it may be read, and schema changes are additive by default. Here, unsupported mandate forms remain unsupported rather than being inferred from a compatible encoding, and zero nonterminal contracts does not establish that a reader is unused: retained terminal evidence and supported buyer recovery may still require it.
+Persisted protocol documents, retained records, and schema changes follow [`persistence.md`](../guidance/engineering/persistence.md). Here, unsupported mandate forms remain unsupported rather than being inferred from a compatible encoding, and zero nonterminal contracts does not establish that a reader is unused: retained terminal evidence and supported buyer recovery may still require it. In a workload-lifecycle cutover the live records are the active workloads, and the external identity each carries is its known provider-operation identity ([`persistence.md`, "Atomic cutovers of live records"](../guidance/engineering/persistence.md#atomic-cutovers-of-live-records)).
 
 Each stateful service's migration chain begins at a supported baseline, so a
 database is either built by that chain from empty or adopted at the baseline's
@@ -1198,7 +1202,7 @@ The compute provisioner runs three independent timer-driven workers, composed on
 
 ## Operator lifecycle controls
 
-Long-running lifecycle workers follow [`implementation.md`, "Operator lifecycle controls"](../guidance/engineering/implementation.md#operator-lifecycle-controls): a manual cycle invokes the same production handler as the timer-driven worker.
+Long-running lifecycle workers follow [`implementation.md`, "Operator lifecycle controls"](../guidance/engineering/implementation.md#operator-lifecycle-controls).
 
 Each storefront process holds its timer loops with one loop controller from `kit/storefront`. Every loop registers with it, bound to the step that runs one cycle, in one of two forms: a timer loop, whose timer the controller runs over that step, or a fan-out, whose task a composed kit runtime owns and which runs independent cycles in declared children, as the per-site capacity-event pollers are; a fan-out's children are declared when it registers, so status lists them before their first cycle. Starting the registered loops is the only way a loop's task starts. The controller's `run_cycle` is the one place a cycle runs: it holds that loop's lock, so a timer cycle and an operator's step never run together, and records each cycle's outcome — when it finished, whether it completed, and for a failure its stage and error, an error's message only when it is one of the storefront's own disclosed errors. A fan-out serializes each child's cycle under the child's own lock instead and records it through a recorder the controller issues to declared children only. System status reports each loop's state and last outcome as `lifecycle`. The pause route holds every loop at a cycle boundary without cancelling it and each `run-cycle` route runs exactly the operation the loop's timer runs. A loop gates on entry and immediately before its work, and waits between cycles through the controller, which returns on a pause request, so a pause is observed within its bounded wait whatever the interval; a loop's reported state comes from what it has acknowledged at its gate. Kits below `kit/storefront` take the gate and wait as injected callables. Each storefront binds the controller's framework-free route service behind its own administrator authentication.
 
@@ -1210,13 +1214,13 @@ Production code follows [`implementation.md`](../guidance/engineering/implementa
 
 ## Testing strategy
 
-Tests belong at the lowest level that can prove the behavior ([`test-levels.md`](../guidance/engineering/test-levels.md), [`testing.md`](../guidance/engineering/testing.md)). See [`docs/development/TESTING.md`](TESTING.md) for where this repository's tests at each level live, its end-to-end lanes and their doubles, its chart render tests, and offline review validation, and [the testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md) for the normative requirements.
+Tests follow [`test-levels.md`](../guidance/engineering/test-levels.md) and [`testing.md`](../guidance/engineering/testing.md). See [`docs/development/TESTING.md`](TESTING.md) for where this repository's tests at each level live, its end-to-end lanes and their doubles, its chart render tests, and offline review validation, and [the testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md) for the normative requirements.
 
 An end-to-end scenario is locally verifiable, running against this repository's own stack with provisioning mocked and the payments service and the dispute authority replaced by the in-lane doubles, or external-topology, needing services or hosts deployed elsewhere, such as a hosted payments target or a real host; an external-topology scenario that makes a deal extends a locally verifiable one ([`system-tests.md`](../guidance/engineering/system-tests.md#locally-verifiable-and-external-topology-scenarios); here, [`TESTING.md`, "Locally verifiable and external-topology scenarios"](TESTING.md#locally-verifiable-and-external-topology-scenarios)).
 
 An end-to-end test proves a deterministic sequence of state changes, never wall-clock time ([`system-tests.md`](../guidance/engineering/system-tests.md#a-scenario-is-a-sequence-of-state-changes)): a compute-lane pipeline scenario holds the timers its stages can meet, steps each transition itself, and waits only for an effect of its own request ([`TESTING.md`, "The discipline every scenario follows"](TESTING.md#the-discipline-every-scenario-follows)). Today only the lane doubles have a perceived clock a control moves, reset to wall time when the module that moved it ends.
 
-A test double mirrors its producer's API and takes its producer's decisions as programmed answers ([`test-doubles.md`](../guidance/engineering/test-doubles.md#a-double-mirrors-its-producer)). The end-to-end lanes' payments double, `tools/payments-lane-double`, and mediation double, `tools/mediation-lane-double`, are the current examples ([`TESTING.md`, "Private Service Dependencies"](TESTING.md#private-service-dependencies)).
+The end-to-end lanes' payments double, `tools/payments-lane-double`, and mediation double, `tools/mediation-lane-double`, mirror their producers ([`test-doubles.md`, "A double mirrors its producer"](../guidance/engineering/test-doubles.md#a-double-mirrors-its-producer); [`TESTING.md`, "Private Service Dependencies"](TESTING.md#private-service-dependencies)).
 
 ## Capability documentation index
 
@@ -1226,67 +1230,6 @@ The canonical [capability documentation index](../../openspec/specs/README.md) l
 
 Database-concurrency tests follow [`concurrency-tests.md`](../guidance/engineering/concurrency-tests.md).
 
-
-
 ### Durable fulfillment acceptance
 
 The fulfillment kit owns provider-neutral acceptance orchestration. It loads an already-selected settlement resource, freezes provider-specific prepared input and pool configuration in one transaction, dispatches after commit, and acknowledges provider metadata in a second transaction. Preparation receives the acceptance session and uses it for any local resource claims, so a rejected request rolls back those claims with acceptance. Preparation performs no external provider I/O, and validation disables acquisition. Domain adapters own provider-specific payloads and metadata interpretation. Provisioning composition supplies the database unit of work and concrete providers; storefront code does not import provider-specific types.
-
-### Atomic workload-lifecycle cutovers
-
-A schema cutover that transfers ownership of active workloads between persistence models treats the workload and its known provider-operation identity as authoritative ([`persistence.md`, "Atomic cutovers of live records"](../guidance/engineering/persistence.md#atomic-cutovers-of-live-records)).
-
-### Public repository content checks
-
-Two checks read content about to be published: `scripts/check_public_content.py`,
-the repository's own rules below, and `scripts/check_secrets.py`, which runs the
-gitleaks secret scanner for private keys and provider credentials. They run
-together. `make check-public-content` runs both over the staged index, and `make
-check-secrets` the second alone. The guarded branch push checks every outgoing
-commit, including intermediate additions and commit messages. The Public content
-CI workflow checks commits against the event base, using `origin/dev` for a
-new branch without a previous tip. This retains inspection of every commit outside
-the product branch, including intermediate changes, without treating existing
-product history as newly published work. It runs after publication and therefore
-provides detection rather than preventing the first upload.
-
-The scanner rejects literal personal home paths and private assistant
-planning/session paths. `example-user` is the synthetic fixture username;
-`appuser` and `ubuntu` are documented runtime-image accounts, and `you` is an
-example placeholder. These names do not authorize publishing actual operator
-paths. Machine-specific names, addresses and other operational identifiers require
-a private local literal denylist; arbitrary identifiers, and secrets in no format
-the secret scan below recognizes, are not automatically recognizable. Binary additions are refused because this text
-scanner cannot inspect them. Review remains required. Diagnostics report location
-and rule without echoing matched content.
-
-Enable the repository-owned hooks in each checkout with
-`git config --local core.hooksPath scripts/hooks` after inspecting any existing
-hooks configuration; preserve or chain existing hooks instead of overwriting them.
-The pre-commit hook checks staged additions. The pre-push hook checks the actual
-refs being sent, including ref names and annotated tag content. Each hook runs both
-checks and refuses when either does. Hooks and the guarded push require Python 3.11
-or newer and the pinned gitleaks; hooks may be bypassed by direct
-Git options; they are local safeguards, not server enforcement. Use the guarded
-`make push-branch` path for agent pushes.
-
-Configure deployment-specific literals with
-`git config --local scm.publicContentDenyFile /absolute/path/to/private-denylist.txt`.
-Keep that file outside the repository, one literal per line; blank lines and
-lines starting with `#` are ignored. Matching is case-insensitive. Never commit
-the denylist or use real identifiers in guard tests. A configured file that cannot
-be read fails the check. A CI runner without that private file runs the generic
-rules only. Fetch the target remote before checking outgoing commits. Use
-`python3 scripts/check_public_content.py --base <commit>` to inspect a known
-committed range; this is not a complete historical secret audit.
-
-Private keys and provider credentials are recognized by
-[gitleaks](https://github.com/gitleaks/gitleaks) at the release
-`scripts/gitleaks-pins.toml` pins; `make install-gitleaks` installs it, refusing an
-archive whose sha256 is not the pinned one, and a check that finds no gitleaks, or
-another release, refuses and names that command. The gate, `.gitleaks.toml`, runs
-wherever `check_public_content.py` runs and reports locations, never content.
-`make audit-secrets` runs the gate's rules and the three default rules it turns off
-over the tracked tree, gates nothing, and is run before a release ships ([`RELEASING.md`, "Cutting a release"](RELEASING.md#cutting-a-release)).
-The gate's rules, the audit, and what both leave to review:
-[`openspec/specs/market-change-workflow/README.md`, "Secret scanning"](../../openspec/specs/market-change-workflow/README.md#secret-scanning).

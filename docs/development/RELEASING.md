@@ -1,5 +1,11 @@
+---
+tags: [repository, packaging]
+---
+
 # Releasing Python packages
 
+The procedure that publishes this repository's Python packages, the set it
+publishes, and where its other artifacts are pushed.
 `.github/workflows/publish-pypi.yml` publishes the project's Python
 packages to PyPI.
 
@@ -123,11 +129,9 @@ Most packages publish an sdist and a wheel. Packages marked `wheel_only`
 in the table (the two buyer plugins and the VM storefront) are built with
 `uv build --wheel` and publish a wheel only.
 
-No package vendors another's modules. Each package builds exactly one import
-package from `src/<package>`, so a module added there ships without a
-packaging edit
-([`packaging-python.md`](../guidance/engineering/packaging-python.md); this
-repository's layout in
+No package vendors another's modules: each publishes its one import package
+([`packaging-python.md`, "One import package per distribution"](../guidance/engineering/packaging-python.md#one-import-package-per-distribution);
+this repository's layout in
 [`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md#project-layout)). Code
 another package needs is its own wheel and a declared dependency: the VM storefront and buyer depend on
 `arkhai-vms-listings`, `arkhai-vms-negotiation`, and `arkhai-vms-settlement`
@@ -187,7 +191,7 @@ each release, not by default.
 `make audit-secrets` reports what gitleaks' rules find in the tracked tree,
 including the rules the public-content checks turn off, and refuses
 nothing; most of what it lists is the repository's development fixtures
-([`ARCHITECTURE.md`, "Public repository content checks"](ARCHITECTURE.md#public-repository-content-checks)).
+([`market-change-workflow`'s "Public repository content checks"](../../openspec/specs/market-change-workflow/README.md#public-repository-content-checks)).
 
 `workflow_dispatch` forces a publish attempt for every package whose
 current version is not yet on PyPI — useful for bringing up the whole set
@@ -196,10 +200,9 @@ at once.
 ## Versioning policy
 
 This repository's packages follow
-[`versioning.md`](../guidance/engineering/versioning.md): SemVer, the pre-1.0
-rules, versioned contracts never changed in place, and one bump per change
-measured against the branch it merges into, which `make check-version-bumps`
-holds. A `VersionedEnvelope`'s `(kind, schema_version)` is such a versioned
+[`versioning.md`](../guidance/engineering/versioning.md), and `make
+check-version-bumps` holds its one bump per change against the branch the change
+merges into. A `VersionedEnvelope`'s `(kind, schema_version)` is a versioned
 contract. Why the pre-1.0 rules suit this repository is
 [`ARCHITECTURE.md`, "Operators"](ARCHITECTURE.md#operators). Dependencies
 between its packages declare lower bounds in `pyproject.toml`
@@ -236,6 +239,12 @@ publish round-trip ([`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md)). The
 publish workflow passes `--no-sources`, so the only sources a published wheel
 could record are index pins, such as the PyTorch CPU index.
 
+## Artifact publishing destination
+
+Root publishing targets require explicit `AR_PROJECT` and `AR_LOCATION`, supplied
+on the make command line or in the environment. `AR_PREFIX` defaults to
+`AR_PROJECT`; it selects the repository-name prefix. For example,
+`make push-images AR_PROJECT=<project> AR_LOCATION=<region>`.
 
 ## Troubleshooting
 

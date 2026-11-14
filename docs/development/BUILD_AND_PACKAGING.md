@@ -1,43 +1,47 @@
+---
+tags: [repository, packaging]
+---
+
 # Build and packaging
 
-How Python projects in this repository get their environments, locks, and images, and
-which check enforces each convention. The normative requirements live in the
-[deployment and state specification](../../openspec/specs/deployment-state/spec.md);
-the architecture they serve is in
-[`ARCHITECTURE.md`](ARCHITECTURE.md#build-packaging-and-initialization). The rules these
-conventions apply are the engineering packaging guidance:
+This repository's instances of the engineering packaging guidance —
 [`packaging.md`](../guidance/engineering/packaging.md) and its tool forms,
 [`packaging-python.md`](../guidance/engineering/packaging-python.md),
 [`packaging-uv.md`](../guidance/engineering/packaging-uv.md),
 [`packaging-hatchling.md`](../guidance/engineering/packaging-hatchling.md), and
-[`packaging-docker.md`](../guidance/engineering/packaging-docker.md).
+[`packaging-docker.md`](../guidance/engineering/packaging-docker.md): how its Python
+projects get their environments, locks, and images, the scripts and targets that do
+it, and the check enforcing each rule here. The normative requirements live in the
+[deployment and state specification](../../openspec/specs/deployment-state/spec.md);
+the architecture they serve is in
+[`ARCHITECTURE.md`](ARCHITECTURE.md#build-packaging-and-initialization).
 
-Nothing here is maintained by hand
-([`packaging.md`, "Nothing is maintained by hand"](../guidance/engineering/packaging.md#nothing-is-maintained-by-hand)):
-each project's `pyproject.toml` declares its own dependencies, and no Makefile,
-Dockerfile, or workflow lists the set of internal packages or repeats a version a
-project declares. Nothing chooses the Python version
-independently: each consumer reads the root declaration, and the one copy that cannot — a
-Dockerfile's `ARG PYTHON_VERSION` default — is checked against it
-([`packaging.md`, "One declaration of the runtime version"](../guidance/engineering/packaging.md#one-declaration-of-the-runtime-version)).
+Here a project's manifest is its `pyproject.toml`
+([`packaging.md`, "Nothing is maintained by hand"](../guidance/engineering/packaging.md#nothing-is-maintained-by-hand)),
+and the runtime version's one declaration is the root `.python-version`, the one copy
+that cannot read it being a Dockerfile's `ARG PYTHON_VERSION` default
+([`packaging.md`, "One declaration of the runtime version"](../guidance/engineering/packaging.md#one-declaration-of-the-runtime-version);
+"One Python version" below).
 
 ## Project layout
 
-Every distribution builds its wheel with Hatchling, from one import package at
-`src/<package>` with nothing remapped
-([`packaging-python.md`](../guidance/engineering/packaging-python.md); the Hatchling form
-in [`packaging-hatchling.md`](../guidance/engineering/packaging-hatchling.md)):
+Every distribution builds its wheel with Hatchling, laid out as
+[`packaging-python.md`](../guidance/engineering/packaging-python.md) gives it, in the
+Hatchling form of
+[`packaging-hatchling.md`, "The wheel target names the one package"](../guidance/engineering/packaging-hatchling.md#the-wheel-target-names-the-one-package),
+as `arkhai-vms-listings` declares it:
 
 ```toml
 [tool.hatch.build.targets.wheel]
 packages = ["src/arkhai_vms_listings"]
 ```
 
-Every project environment installs its own project editable
-([`packaging-uv.md`, "Every project installs itself editable"](../guidance/engineering/packaging-uv.md#every-project-installs-itself-editable)).
-Data files a package loads, such as the VM negotiation models, live inside the package
-directory
+The VM negotiation models are data files of this kind
 ([`packaging-python.md`, "Data files live inside the package"](../guidance/engineering/packaging-python.md#data-files-live-inside-the-package)).
+Every project installs itself editable
+([`packaging-uv.md`](../guidance/engineering/packaging-uv.md#every-project-installs-itself-editable)),
+and `make check-project-layout` refuses a Makefile, script, or workflow that turns
+that off ("Checks" below).
 
 ## The wheelhouse
 
@@ -50,11 +54,10 @@ every lock records the same registry path. `make dist` builds the lanes' superse
 release set `make dist-release` builds, adding the wheels only tests depend on
 ([`RELEASING.md`](RELEASING.md)).
 
-A rebuilt wheel keeps its version, so refreshing one takes both `--reinstall-package` and
-`--upgrade-package`
-([`packaging-uv.md`, "Refreshing a same-version wheel"](../guidance/engineering/packaging-uv.md#refreshing-a-same-version-wheel)).
 `scripts/uv_project.py` derives the internal packages from the lock whenever it runs and
-passes the flags each operation needs, so no caller lists them.
+passes each operation the flags a same-version wheel's refresh takes
+([`packaging-uv.md`, "Refreshing a same-version wheel"](../guidance/engineering/packaging-uv.md#refreshing-a-same-version-wheel)),
+so no caller lists them.
 
 ## One Python version
 
@@ -101,12 +104,10 @@ wheelhouse must have a `reinit` target.
 ## Locks
 
 `make lock` is the relock
-([`packaging-uv.md`, "Relock against fresh artifacts"](../guidance/engineering/packaging-uv.md#relock-against-fresh-artifacts)):
-it relocks every project against a freshly built wheelhouse, unconditionally, and installs
-nothing; `make lock PROJECTS="kit/site core/buyer"` narrows it. `check-locks` compares
-names and specifiers but not markers, so it does not stand in for the relock. Run it
-after editing a project's dependencies or bumping an internal version, instead of
-reaching for `make test` to do it.
+([`packaging-uv.md`, "Relock against fresh artifacts"](../guidance/engineering/packaging-uv.md#relock-against-fresh-artifacts)),
+building the wheelhouse first and installing nothing; `make lock PROJECTS="kit/site
+core/buyer"` narrows it. `check-locks` compares names and specifiers but not markers,
+so it does not stand in for the relock, and neither does `make test`.
 
 Locks are written by uv 0.12.22 or newer, the first release that writes lock revision 5,
 the revision every committed lock carries
@@ -125,12 +126,11 @@ Two checks hold the locks steady between uv releases:
 
 The minimum is `MINIMUM` in `scripts/check_uv_version.py`, and the revision
 `LOCK_REVISION` in `scripts/check_locks.py`; CI's `tests.yml` and `e2e.yml` install the
-minimum, uv 0.12.22. `make lock` upgrades nothing in a lock that names no internal
-package, so such a lock is brought to the running uv's revision by relocking its
-project, upgrading only its own distribution, after `make check-uv-version`
-([`packaging-uv.md`, "Locks are written by a stated minimum uv"](../guidance/engineering/packaging-uv.md#locks-are-written-by-a-stated-minimum-uv)).
-A lock that names internal packages takes `make lock PROJECTS=<its project>`, which
-rewrites it.
+minimum, uv 0.12.22. A lock that names internal packages is brought to the running
+uv's revision by `make lock PROJECTS=<its project>`, which rewrites it; `make lock`
+upgrades nothing in any other lock, which is relocked in its project as
+[`packaging-uv.md`, "Locks are written by a stated minimum uv"](../guidance/engineering/packaging-uv.md#locks-are-written-by-a-stated-minimum-uv)
+says, after `make check-uv-version`.
 
 Relocking needs the indexes each lock resolves from. `domains/vms/buyer` and
 `domains/vms/storefront` declare the PyTorch CPU index, so relocking them needs
@@ -138,9 +138,9 @@ Relocking needs the indexes each lock resolves from. `domains/vms/buyer` and
 
 ## Images
 
-An image installs the committed lock exactly as it is
-([`packaging-docker.md`, "An image installs the committed lock"](../guidance/engineering/packaging-docker.md#an-image-installs-the-committed-lock)).
-The lock's wheelhouse path is relative, so the image copies the project's
+To install the committed lock
+([`packaging-docker.md`, "An image installs the committed lock"](../guidance/engineering/packaging-docker.md#an-image-installs-the-committed-lock)),
+whose wheelhouse path is relative, an image copies the project's
 `pyproject.toml` and `uv.lock` to the same depth below an image root as below the repository root, with the
 wheelhouse at `<image root>/.dist`. uv will not resolve a path above `/`, so the depth
 must match:
@@ -155,23 +155,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     python3 /repo/scripts/uv_project.py install-wheel --project /repo/domains/vms/storefront
 ```
 
-- `image -- <uv sync options>` runs the sync an image owes — `--locked`, every internal
-  package reinstalled, never `--no-sources`
+- `image -- <uv sync options>` runs the sync an image owes
   ([`packaging-uv.md`, "The sync an image runs"](../guidance/engineering/packaging-uv.md#the-sync-an-image-runs)).
   The Dockerfile chooses groups and extras; the script chooses the packages.
 - `install-wheel` installs the project's own distribution at the version its
   `pyproject.toml` declares, from the wheelhouse only (`--no-index`), into
   `UV_PROJECT_ENVIRONMENT`. Every other repository distribution comes from the lock.
-- The script is copied into builder stages only, and the runtime stage copies the
-  finished environment and never the wheelhouse
+- The script is copied into builder stages only, and the wheelhouse never reaches the
+  runtime stage
   ([`packaging-docker.md`, "Builder and runtime stages"](../guidance/engineering/packaging-docker.md#builder-and-runtime-stages)).
 - A Dockerfile with a deny-all ignore file admits `scripts/uv_project.py` explicitly.
-- An ignore file beside a Dockerfile that admits a tree whole states that tree's
-  exclusions itself
-  ([`packaging-docker.md`, "A Dockerfile's own ignore file"](../guidance/engineering/packaging-docker.md#a-dockerfiles-own-ignore-file)).
-  The provisioning service's `Dockerfile.dockerignore` does this for both IaC trees it
-  copies, Ansible's logs and retry files, an operator's inventories, and Terraform's
-  state and variables among them.
+- The provisioning service's `Dockerfile.dockerignore` admits both IaC trees it
+  copies whole, so it states their exclusions itself
+  ([`packaging-docker.md`, "A Dockerfile's own ignore file"](../guidance/engineering/packaging-docker.md#a-dockerfiles-own-ignore-file)),
+  Ansible's logs and retry files, an operator's inventories, and Terraform's state and
+  variables among them.
 
 A project one level deep can use `/app` itself with the wheelhouse at `/.dist`, which
 keeps an editable install of the project valid in the runtime stage; `e2e-tests` does.

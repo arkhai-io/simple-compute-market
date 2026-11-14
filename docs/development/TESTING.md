@@ -1,9 +1,13 @@
+---
+tags: [repository, testing]
+---
+
 # Testing Strategy
 
-This document holds this repository's testing conventions: where each level's tests
-live here, the end-to-end lanes and their doubles, and this repository's instances
-of the engineering testing rules. The levels, what each may prove, and the rules for
-writing tests are the engineering guidance: [`test-levels.md`](../guidance/engineering/test-levels.md),
+This document holds where this repository's tests at each level live, its end-to-end
+lanes and their doubles, and its instances of the engineering testing rules. The
+levels, what each may prove, and the rules for writing tests are the engineering
+guidance: [`test-levels.md`](../guidance/engineering/test-levels.md),
 [`testing.md`](../guidance/engineering/testing.md), and the files beside them in
 [`docs/guidance/engineering/`](../guidance/engineering/README.md).
 
@@ -28,8 +32,8 @@ are command modules, whose factories are their one seam
 The bare-metal buyer CLI
 (`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`) has this shape:
 its tests replace `fresh_identity`, `recovery_identity`, `registry_client`, and
-`payment_approval`. The other CLIs' tests still replace library and imported
-names; [`ROADMAP.md`](ROADMAP.md) records that gap.
+`payment_approval`. The other CLIs' tests are an exception to the rule, declared in
+[`AGENTS.md`, "Exceptions to shared guidance"](../../AGENTS.md#exceptions-to-shared-guidance).
 
 **Negotiation-runtime convention:** a shared runtime is tested once
 ([`test-seams.md`, "A shared runtime is tested once"](../guidance/engineering/test-seams.md#a-shared-runtime-is-tested-once)).
@@ -507,8 +511,9 @@ scenario that finds a lane setting missing fails rather than skipping.
 
 Pre-review validation also runs the scenarios the default Helm charts can serve
 (`HELM_SCENARIOS` in `scripts/validate_slice.py`) against a Helm release, in the
-change's own namespace ("Validation namespaces" in
-`docs/development/DEPLOYMENT_AND_CONFIG.md`). They run as a pod inside that
+change's own namespace
+([`market-change-workflow`'s "The change's namespace"](../../openspec/specs/market-change-workflow/README.md#the-changes-namespace)).
+They run as a pod inside that
 namespace, the e2e-tests chart's `<release>-e2e-tests-e2e-scenarios` Helm test
 hook, rendered when `scenarios.markers` is set: it runs the change's own
 `e2e-tests` image with the release's `test-config` ConfigMap under the `helm`
@@ -634,7 +639,7 @@ It is in no lane, because the pipeline has no host to provision on. It runs from
 an operator's machine against a deployed stack's forwarded services, signing as
 the `local` profile's principals, with `ACTIVE_PROFILES=local,real-provisioning-target`:
 [`e2e-tests/README.md`](../../e2e-tests/README.md#real-vm-provisioning) gives the
-steps, and [`VALIDATION_RUNBOOK.md`](VALIDATION_RUNBOOK.md#21-provide-a-kvm-host)
+steps, and [`VALIDATION_RUNBOOK.md`](VALIDATION_RUNBOOK.md#21-provide-real-compute-hosts)
 the operator procedure around them. Its target is the `REAL_PROVISIONING_TARGET` section
 of `config-real-provisioning-target.yml`, which an environment owner renders into
 `e2e-tests/config/` beside the committed example, `config-real-provisioning-target.yml.example`,
@@ -1058,7 +1063,7 @@ manifest must fail startup rather than admit mixed identity precedence.
 
 For external physical qualification, use the shipped ordinary buyer CLI to exercise discovery, negotiation, signed TEST payment, delivery, and ordinary teardown. Collect independent lifecycle observations through the supported typed operator clients; do not import a payment-specific full-deal driver merely to obtain operator visibility. Keep buyer credentials separate from operator credentials. Bind source and selected artifacts/configuration to the run and correlate the accepted Agreement, funding evidence, receipt, rental debit, reservation, fulfillment, jobs, delivered access, and teardown observations in restricted evidence. Public summaries omit credentials, private service records, and raw deployment data.
 
-Require actual paid-buyer journeys for claims about tenant identity, negotiated privilege, grant admission, GPU work, delivery, ordinary teardown, fresh access denial, and capacity restoration. A supplemental network-policy probe is admissible only from an actual operator-only CPU guest on the same paid deployment, using the pinned guest base, its actual default bridge and virtio NIC, and the loaded policy structure. It may establish only the finite selectors observed on that path; it establishes none of the paid tenant identity, credential, privilege, grant, GPU, payment, delivery, or lifecycle facts and does not prove universal isolation. A namespace-only probe is not a substitute for this guest-path evidence. Published vectors, local component tests, and controlled smokes are narrower evidence. Record unrun markers as unrun: an equivalent ordinary-buyer method does not mean an older named test marker executed.
+Require actual paid-buyer journeys for claims about tenant identity, negotiated privilege, grant admission, GPU work, delivery, ordinary teardown, fresh access denial, and capacity restoration. A supplemental network-policy probe is admissible only from an actual operator-only CPU guest on the same paid deployment, using the pinned guest base, its actual default bridge and virtio NIC, and the loaded policy structure. It may establish only the finite selectors observed on that path; it establishes none of the paid tenant identity, credential, privilege, grant, GPU, payment, delivery, or lifecycle facts and does not prove universal isolation. A namespace-only probe is not a substitute for this guest-path evidence. Published vectors, local component tests, and controlled smokes are narrower evidence. Record unrun markers as unrun: an equivalent ordinary-buyer method does not mean an older named test marker executed. The procedure is [`VALIDATION_RUNBOOK.md`, section 29](VALIDATION_RUNBOOK.md#29-qualify-an-ordinary-arkhai-purchase).
 
 ## Payment Receipts in Tests
 
@@ -1139,8 +1144,8 @@ deployed authority or monetary ruling execution. See
 A contract moved or renamed at a package boundary is validated as
 [`boundary-changes.md`](../guidance/engineering/boundary-changes.md) lists. Here the
 dependency direction, `TYPE_CHECKING` imports included, is held by
-`make check-architecture` (see `AGENTS.md`'s "Package and dependency
-discipline").
+`make check-architecture`
+([`ARCHITECTURE.md`, "Package and dependency layers"](ARCHITECTURE.md#package-and-dependency-layers)).
 
 CI's test matrix runs `make test` as a change's validation runs it locally: one
 job per target `make test` is made of, each running that target after `make
@@ -1339,8 +1344,8 @@ records whichever version actually ran.
 
 ## Cross-Language Contract Conformance
 
-Independent implementations of one protocol reproduce one shared conformance trace
-([`conformance-tests.md`](../guidance/engineering/conformance-tests.md)).
+This repository's independent implementations of one protocol are held to
+[`conformance-tests.md`](../guidance/engineering/conformance-tests.md).
 
 **Current example:** the API-credits gating middleware's Python
 (reference implementation), TypeScript, and Rust ports all replay
@@ -1358,12 +1363,11 @@ and `domains/apicredits/middleware/rust/tests/conformance.rs`.
 
 ## Private Service Dependencies
 
-This repository is public, so its tests keep private dependencies out ([`repository-content.md`, "Private dependencies stay out of its tests"](../guidance/engineering/repository-content.md#private-dependencies-stay-out-of-its-tests)): a scenario needing a private service's internals, its ledger reads among them, lives in that service's repository, and SCM tests the client side against the service's published contract and a test double at the client kit's boundary.
+This repository is public, so its tests keep private dependencies out ([`repository-content.md`, "Private dependencies stay out of its tests"](../guidance/engineering/repository-content.md#private-dependencies-stay-out-of-its-tests)): here a scenario needing a private service's ledger reads lives in that service's repository, and SCM tests its client kit against the service's published contract and a test double at the kit's boundary.
 
-A double of a private service mirrors its producer and takes the producer's
-decisions as programmed answers
+The doubles here mirror their producers
 ([`test-doubles.md`, "A double mirrors its producer"](../guidance/engineering/test-doubles.md#a-double-mirrors-its-producer)),
-as mock provisioning takes a job's outcome.
+as mock provisioning takes a job's outcome as a programmed answer.
 
 **The lane doubles' controls.** Both lane doubles serve one typed control
 contract, `tools/lane-double-controls`, which the doubles and the end-to-end
