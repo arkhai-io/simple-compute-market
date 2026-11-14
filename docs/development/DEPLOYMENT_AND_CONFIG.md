@@ -1012,12 +1012,16 @@ validation deploys into its change's namespace under its change's tag").
   image `helm/values.yaml` sets (`change_namespace.py <change> --image-overlay
   <path>`); a render test holds the overlay to every image the chart renders, so an
   image added later cannot deploy under its bare tag. Compose, the pipeline lanes,
-  and your own deployments keep bare tags. A namespace alone would not isolate
+  and your own deployments keep bare tags; a lane run with `RELEASE_IMAGES=1` instead
+  runs a release candidate's release images under its `-<rev9>` suffix
+  ([`TESTING.md`, "Locally verifiable and external-topology scenarios"](TESTING.md#locally-verifiable-and-external-topology-scenarios)).
+  A namespace alone would not isolate
   images, since every image is pulled `IfNotPresent` from the one Docker daemon the
   cluster reads. The tag is fixed per change, never per commit: commit-suffixed tags
   caused repeated image-not-found failures deploying Helm, and a rebuilt image under
   a fixed tag rolls out by restarting pods. A suffixed build writes no commit tag; a
-  bare build still writes `arkhai:<tag>-<sha>`, which `make push-images` reads.
+  bare build still writes `arkhai:<tag>-<rev9>`, the nine-character revision, which
+  `make push-images` and `make load-candidate` read.
 - **Upgraded from zero over deleted volumes.** Each validation of the change scales
   the release's workloads to zero if a crashed run left any up, deletes its pods,
   its volume claims, and the deal test's `arkhai-buyer-profiles`, and waits until
@@ -2202,4 +2206,6 @@ equivalent of a chart's configuration delivery.
 Root publishing targets require explicit `AR_PROJECT` and `AR_LOCATION`, supplied
 on the make command line or in the environment. `AR_PREFIX` defaults to
 `AR_PROJECT`; it selects the repository-name prefix. For example,
-`make push-images AR_PROJECT=<project> AR_LOCATION=<region>`.
+`make push-images AR_PROJECT=<project> AR_LOCATION=<region>`. A release candidate is
+loaded with `make load-candidate`, which also writes the candidate store,
+`<prefix>-candidates` ([`RELEASING.md`, "Loading a release candidate"](RELEASING.md#loading-a-release-candidate)).

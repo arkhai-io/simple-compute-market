@@ -89,8 +89,9 @@ comprises are not known when the merge happens.
   packaging check holds to the declaration. `check-uv-setup` reads every Dockerfile and
   refuses any wheelhouse `pip` install that bypasses `scripts/uv_project.py`. PyInstaller
   leaves `arkhai-vms-buyer`'s runtime dependencies.
-- **The curl installer is retired.** `install.sh`, `scripts/install-remote.sh` and
-  `scripts/build-installer.sh` are deleted, and `market-cli-v*` tags are no longer made.
+- **The curl installer is retired.** `install.sh`, and `install-remote.sh` and
+  `build-installer.sh` under `scripts/`, are deleted, and `market-cli-v*` tags are no
+  longer made.
 - **`docs/development/RELEASING.md` describes this repository's half of the release,**
   and the deployment's part as the procedure this repository relies on.
 
@@ -159,13 +160,14 @@ None.
 **Deleted:**
 - `.github/workflows/publish-pypi.yml`, `publish-npm.yml`, `release.yml` and
   `release-cli.yml`;
-- `scripts/verify-marketplace-release.py`;
-- `install.sh`, `scripts/install-remote.sh` and `scripts/build-installer.sh`;
+- the release verifier, `verify-marketplace-release.py` under `scripts/`;
+- `install.sh`, and `install-remote.sh` and `build-installer.sh` under `scripts/`;
 - and their tests.
 
 **Touched:**
 - `manifests/` (renamed and reshaped);
-- `scripts/push-distributions.py` and `scripts/publish_artifacts.py`;
+- `scripts/publish_artifacts.py`, and the wheel pusher `push-distributions.py` under
+  `scripts/`, deleted with `push-wheels`;
 - new scripts for the release-record reader and its two checks, the enumeration and
   upload-step check, and the lanes' image record;
 - the root `Makefile`'s publish and build targets and `GIT_SUFFIX`, and a new

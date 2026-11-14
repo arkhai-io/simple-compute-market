@@ -75,7 +75,7 @@ public artifact.
 ### D1 — Continuous integration publishes nothing
 
 `publish-pypi.yml`, `publish-npm.yml`, `release.yml` and `release-cli.yml` are deleted,
-with `scripts/verify-marketplace-release.py`, the release contract
+with the release verifier (`verify-marketplace-release.py` under `scripts/`), the release contract
 (`arkhai.marketplace-release.v2`) and their tests. CI keeps building and testing. That
 includes building the wheelhouse and resolving every declared distribution against it,
 which was the one useful thing the publishing workflow checked before it uploaded.
@@ -798,8 +798,8 @@ programs sharing one name is the defect.
 A customer installs `market` from PyPI on any platform
 (`uv tool install arkhai-core-buyer --with arkhai-vms-buyer`, pinned to the release's
 versions), or downloads the release's binary on linux/amd64 and checks it against the
-bill of materials. The curl installer — `install.sh`, `scripts/install-remote.sh`,
-`scripts/build-installer.sh` — is deleted. It built the CLI from a source tarball,
+bill of materials. The curl installer — `install.sh`, and `install-remote.sh` and
+`build-installer.sh` under `scripts/` — is deleted. It built the CLI from a source tarball,
 bypassing the released wheels, and it has been broken since a marketplace release became
 GitHub's latest. `market-cli-v*` tags are no longer made.
 
@@ -869,6 +869,118 @@ list a publish target reads.
 `publish-wheels-through-a-gate` no longer describes the scope. Renaming would move the
 clone, the branch, the records and the workflow log for a name the archive keeps only as
 history. The proposal states what the change does.
+
+### Implementation choices
+
+Choices implementation made where D1–D21 are silent, accepted by the implementation and
+pre-closeout reviews, kept here from the section notes they were first recorded in.
+
+- **D7, the checks.**
+  - The enumeration rule refuses a single mention of a declared component in a
+    workflow, publish target or lane target, not only a list: a target naming one
+    component by hand is the drift D7 exists to stop, since the next component added is
+    missed. A publish target is one named `push-*`, `publish-*`, `clobber-*` or
+    `load-candidate`, or one whose recipe runs an uploader; a lane target is one named
+    `test-e2e*`, `build-e2e*` or `pull-release-images`. Make variables a rule references
+    are read as part of it. The chart is found by its declared path or its `Chart.yaml`
+    name.
+  - `permissions: write-all` and `secrets: inherit` are credential grants. The secrets
+    rule reads every `${{ }}` expression, including one on a `#` line inside a block
+    scalar and one continuing past a `}}` inside a string literal, compares names without
+    case as Actions does, and refuses a read naming no secret (`toJSON(secrets)`,
+    `secrets[matrix.name]`). A secret in a bare `if:` is not looked for: Actions does not
+    allow the secrets context there. `docker/build-push-action` is refused for any
+    `push:` but a literal `false`.
+  - The script's four rules (enumeration, credentials, market-binary, revision) run
+    together as `check-release-components`, in `check-packaging`;
+    `check-workflow-credentials` and `check-market-binary` stay as focused runners of one
+    rule each.
+  - The declared-wheel test sits in `test-release-tooling`, after `tests.yml`'s
+    `make dist-ci`, rather than gaining a `dist-release-set` prerequisite that would
+    rebuild every wheel inside the job that has just built them.
+- **D10, this repository's reading of layout 1.** No example document from the
+  deployment is in this repository, so the reader and its fixture follow D10's text; if
+  the deployment's example differs, both follow it.
+  - The npm row has no purl. An image's purl tag is `<name>-` and the first nine
+    characters of the subject's source revision; a wheel's purl names its own
+    distribution and version in its file name. The subject's version may carry a semver
+    prerelease suffix, and a version must begin with a digit.
+  - The reader checks fields, kinds, digest formats and URLs, and refuses a key stated
+    twice, which could hide a `repository_url` behind a clean copy. It does not check
+    key order or the serialization rules, which only fix the bytes the digest is taken
+    of.
+  - Bom-ref names: a wheel's is its declared `dist`, compared as PyPI compares names; the
+    chart's is its `Chart.yaml` name at the branch point; an npm package's is its
+    `package.json` name without `@arkhai/`. The public vcs URL is a constant of the
+    reader.
+- **D12 and D14, the checks on the record.** The record check finds `releases/<semver>`
+  and the default branch locally or as a remote-tracking branch; the default branch is
+  `main`, overridable with `--default-branch`, and a tag on a merge commit is refused
+  first. The record check runs the version check's own functions as its rule 6, rather
+  than a copy, and the reader reads no git. "Every earlier record" is every other tag
+  carrying one, so checking an old tag compares it with later releases too. The version
+  check always builds its subject in a load, even with no earlier record, so every run
+  exercises the Helm pin and the wheelhouse, and it packages the chart itself into a
+  temporary directory with `dist-helm`'s command, so a stale package in `.dist` cannot be
+  its subject.
+- **D15, the pin.** `build-constraints.txt` refuses an inexact pin, including one
+  written with spaces. The chart bumps that removing `appVersion` took were patches:
+  the removed label is in no selector, and nothing reads it.
+- **D3, the load.**
+  - An image without the wheelhouse label counts as built from no wheelhouse. The load
+    cannot tell which images install from `.dist`, since only the Makefiles know which
+    Dockerfile builds each image; a dry-run test holds every declared image whose
+    Dockerfile copies `.dist/` to the label instead. Reading the Dockerfiles in the load
+    was declined: it needs an image-to-Dockerfile map, a second copy of what the
+    Makefiles say.
+  - The load removes each declared image's local revision tag before building, so a tag
+    an earlier build of the revision left cannot pass for this load's, and refuses a
+    removal that fails for any reason but an absent tag. It runs `make` for its version
+    check and builds, so they are the targets an operator runs. A delete answered
+    `NOT_FOUND` counts as already deleted.
+  - Re-digesting the wheels after uploading them was declined: they are read from
+    `.dist` seconds after the check, and a guard for a wheel rebuilt in that window is
+    speculative.
+  - The wheelhouse digest refuses a partial wheelhouse, so `build-seller` builds the
+    release's whole wheel set.
+  - `publish_artifacts.py` derives the generic repositories from the prefix; the Docker
+    and Helm registries stay derived in the Makefile and passed in whole.
+- **D17, the lanes.**
+  - The check runs before `down` and the build: the release images are pulled, not
+    built, so a missing one fails the lane in seconds.
+  - The root `build-e2e-*` targets clear the suffix themselves in release-image mode, so
+    one run directly builds what the lane runs. Which builds a lane drops is named in the
+    root Makefile, not derived from the declaration, since only the Makefile knows which
+    target builds which image; dry-run and Compose tests hold the list to the
+    declaration in both directions.
+  - `BARE_METAL_STOREFRONT_IMAGE`, set in the environment, replaces the bare-metal
+    storefront's image: the bare tag is refused as run bare, the release candidate's tag
+    is checked and recorded, and any other image is an operator's explicit choice that
+    neither command sees.
+  - A lane run with `IMAGE_SUFFIX` and no `RELEASE_IMAGES` builds every image suffixed
+    and runs the release images suffixed; no lane or workflow uses the combination, and
+    nothing refuses it. A suffix not beginning with `-` is not refused either: it names
+    tags no build or pull writes, so the check already fails, naming each image.
+- **D18, the binary.**
+  - `scripts/market_binary.py` holds the binary's build target and project path, so the
+    market-binary rule finds the binary as the build does. A second binary would need a
+    mapping from target to project, and none is speculated.
+  - PyInstaller takes `--hidden-import` for each module a domain's entry point names,
+    since discovery imports it by that name, which import analysis cannot see.
+  - The smoke test compares stdout only, one line per registered entry point, and
+    requires no skipped domain on stderr: the API-credit domain prints warnings on
+    stderr, so the two runs' stderr cannot be compared.
+  - The pip refusal counts `--find-links`/`-f` with any value as reading the wheelhouse,
+    in every stage of a Dockerfile that copies it, since a later stage can reach the
+    copy through `--from`. It does not see an install finding the wheelhouse only through
+    `PIP_FIND_LINKS`, `UV_FIND_LINKS` or a shell variable, nor a Dockerfile that
+    bind-mounts `.dist` without copying it.
+  - `.dockerignore` and the three per-image ignore files admitting `.dist/` whole exclude
+    `.dist/bin`, the binary's output, by its path: a known second copy of the declared
+    path, left without a test, since a moved path would only put the old binary back in
+    build contexts, never in an image.
+  - `uv_project.py lock` locks a named project with no lock afresh, and refuses a named
+    directory declaring no project, which uv would otherwise resolve to an enclosing one.
 
 ### Implementation cadence
 
