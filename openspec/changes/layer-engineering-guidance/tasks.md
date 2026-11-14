@@ -1064,6 +1064,30 @@ triage session (design, "Settled at round 3's triage"):
   `after-functional-change` hook). It found nothing on unimplemented behaviour, links
   and anchors, or wording relative to the change.
 
+Round 3's repeat pass (review 100, validation 97, the owner's notes 99 — none —, the
+orchestrating session's record 98), fixed in its triage session:
+
+- 100 F1: the handbook's opening no longer says validation runs before every review,
+  nor that the workflow reaches a merged pull request. By the owner's choice it
+  describes the whole lifecycle through the merge and says where the workflow stops:
+  archive cleanup ends it, drafting the merge commit message and pull request
+  description and copying the history, the orchestrating session opens the pull
+  request, and its review and merge are the owner's; validation runs "wherever a
+  later step relies on" the change's commits.
+- 98 R1 (validation started waived parts before finding the waiver): no action in
+  this change; the owner deferred it, with 73 R1, to workflow maintenance after this
+  change merges.
+- Evidence: inspected; no focused suite applies to a document. `scripts/change-workflow
+  run pre-commit layer-engineering-guidance` ran `pre-commit` alone, the fix lying
+  only under inert paths: index, tasks, skills, and strict OpenSpec validation
+  passed; `make check-repository` failed only on the two the preamble expects
+  (citations of files the change creates or removed, and the specification index,
+  task 10.9). End-to-end: none.
+- The fresh-context check of the diff against `ad02f56e9` found the first wording
+  had archive cleanup end by drafting, though it copies the history after, and left
+  unsaid who opens the pull request; both fixed. It found the validation clause
+  accurate and nothing on citations or wording relative to the change.
+
 ## 4. The engineering layer: testing
 
 Delivers the engineering layer's README and its testing files (D1, D3, D7, D17–D19;

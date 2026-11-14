@@ -1,12 +1,17 @@
 # The change workflow handbook
 
-The change workflow carries an OpenSpec change from its proposal to a merged pull
-request: design, planning, implementation in reviewed rounds, closeout, and the
-archive. It exists so that your attention, as the repository's owner, goes only where
+An OpenSpec change runs from its proposal to a merged pull request: design, planning,
+implementation in reviewed rounds, closeout, the archive, and your review and merge of
+its pull request. The change workflow carries it through all of that but the last.
+Archive cleanup ends the workflow: it drafts the merge commit message and the pull
+request description and copies the change's history into your workspace, and the
+orchestrating session opens the pull request from those drafts. Reviewing and
+merging the pull request are yours. The
+workflow exists so that your attention, as the repository's owner, goes only where
 your judgement matters — deciding what a change does, and correcting the work where
 the guidance fell short — while agents do the transport around it: carrying a review
-from one agent to another, running the same validation before every review, resuming
-a session that stalled, and choosing which step runs next.
+from one agent to another, validating the change's commits wherever a later step
+relies on them, resuming a session that stalled, and choosing which step runs next.
 
 Each step is a skill an agent harness loads, run headless or in an interactive
 session. A Python engine, `scripts/change-workflow`, starts each step, records its
