@@ -852,6 +852,70 @@ application suites; the compose lanes with Docker and the local Helm part for 4B
   (the alias's help, `SellerServicing.interrupt`'s raises, a test comment) were
   followed by the buyer half's suite only; the commit's own pre-commit run covers
   them.
+- 4B.5 is not started: its premise does not hold, so the change returns to design.
+  The task and test-compatibility's "A buyer approves a recurring option" both
+  require the scenario to assert that delivery is refused without the rate
+  continuation. The design says the same: "delivery fails closed without the rate
+  hook" ("Dependencies and ownership"). No code refuses it, and the delivery path
+  has no rate-hook seam to refuse at. Once a lane declares
+  `[Settlement.rate_servicing.arkhai_payments] treatments = ["charged",
+  "returned"]`, a recurring purchase would be delivered:
+  - Materialization admits it. `PaymentSellerStage.settlement_data` derives the
+    mandate under the composition's declaration
+    (`kit/arkhai-payments/src/market_arkhai_payments/seller.py:203`).
+  - The storefront starts delivery on a verified receipt with no rate check
+    (VM `VmPaymentsCoordinator.start` → `_provision`,
+    `domains/vms/storefront/src/market_storefront/payment_settlement.py:182`).
+  - The shared path authorizes each phase with whatever payment adapter the domain
+    port supplies, `adapter=deal.accepted.payment`
+    (`domains/compute/delivery/src/compute_delivery/path.py:884`). For a rate
+    mandate that is the composed `PaymentAdapter`: VM's
+    `VmDealLifecycle.payment_adapter`, bare metal's `lifecycle.py:109`.
+  - `RateParts.authorize` allows commit on a timely approval, and allows dispatch
+    and start on a verified initial reservation
+    (`kit/arkhai-payments/src/market_arkhai_payments/rate_parts.py:255`).
+  - End service journals the billing start and calls `start_billing`
+    (`kit/deal-servicing/src/market_deal_servicing/end.py:182`). The lane's
+    payments double, which runs the vendored engine, would start the rate.
+
+  A search of `domains/compute/delivery`, both storefronts and
+  `kit/deal-servicing` for a rate hook, a continuation gate or a rate check at
+  delivery finds none. The comment in VM's `test_lifecycle_admin.py`'s
+  `approve_rate` ("the installed delivery hook stays closed") refers to a fixture
+  that skips delivery. Nothing was run: the conclusion is from the code. What
+  design must decide:
+  - **A fail-closed door in end service (recommended).** `kit/deal-servicing`'s
+    `EndService.authorize_delivery` refuses a deal registered as not once-only
+    (`SellerDeal.once_only`) unless the composition installs a rate continuation.
+    It refuses at commit, before any dispatch, and names its reason. Convergence
+    installs the continuation in place of the door. The door is
+    mechanism-neutral, sits where convergence's rate servicing will live, and is
+    shared by both domains. It needs a requirement in the deal-lifecycle or
+    settlement-servicing delta, a library-integration test, and design text
+    saying where "fails closed" is enforced.
+  - **A door in each storefront's payments settle path**, before provisioning.
+    Each domain would duplicate it, against the sibling-parity principle.
+  - **Re-scope the scenario to end at approval**, with no commit, and reword the
+    delta's "delivery is refused" clause. This needs a buyer path that approves
+    without committing; neither buyer's was checked for one.
+  - **Let the scenario run through rate delivery.** That is convergence's row 0,
+    outside this change.
+
+  Whichever is chosen, the scenario's cleanup needs a rule of its own. The seller's
+  refund (`PaymentSellerStage.reverse_now` → `submit_now`) refuses a rate deal,
+  so the buyer's own payer stop has to release the unearned reservation.
+  Shipped presets carry no setup charge, so nothing else would stay held.
+  Findings that still hold for the scenario: a lane publishes a recurring option
+  through a payments publication clause carrying `recurring: {period,
+  reserve_ahead_seconds[, payee_notice_seconds]}`, from a pool override or VM's
+  listing creation; both go through `ClausePublication.publish`. The clause's
+  approval `window` must leave runway, since approval window + delivery deadline +
+  period must fit within `max_duration_seconds`; VM's purchase states `P7D` as its
+  `window`, which leaves none for a one-hour listing. The buyers print the
+  pre-approval display on stderr: the "Accepted Agreement: price, horizon and
+  lifecycle terms before approval" rows from `compute_disclosure` ("Accepted
+  price … per_period", "Setup once charge", "Initial reserve", "Maximum accepted
+  end"). The harness's `MarketRun.stderr()` reads it once the command exits.
 - `bare-metal-and-credits-domain-stacks` has a buyer-orchestration delta requiring
   `market bare-metal teardown --from <run_id>`; whichever of the two changes lands
   second reconciles it with `end` and the alias.
