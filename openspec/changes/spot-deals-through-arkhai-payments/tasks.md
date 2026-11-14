@@ -2,8 +2,10 @@
 
 The owner's design discussion recorded in round 1's owner record stood in for this
 change's design review. Round 1 implemented sections 1–4 with task 2.7; round 2
-implements sections 4A, 4B, 5 and 6, each committed on its own in its own session,
-reviewed and validated together; pre-closeout and closeout follow. No section
+implements sections 4A, 4B, 4C, 4D, 4E, 4F, 5 and 6, each committed on its own,
+reviewed and validated together; pre-closeout and closeout follow. Task 4B.5 returned
+the change to design; sections 4C–4F were planned against the design its return
+settled and design review 18's triage refined (D12–D16, D6a's watchdog status). No section
 implements another verifier, continuation daemon or site renewal policy.
 
 Verification levels follow docs/development/TESTING.md. Every behaviour lands with
@@ -563,6 +565,10 @@ each); `make check-architecture`.
 
 ## 4B. Surfaces, fixtures and lanes
 
+Tasks 4B.5 (the recurring-purchase E2E) and 4B.6 (the buyer's watchdog), unstarted,
+were replanned against the reviewed design as sections 4E and 4F; 4B.1–4B.4 stand as
+built.
+
 Files: kit/deal-servicing (seller half), both storefronts' administrator routes and
 typed admin clients, kit/deal-lifecycle-buyer, both buyers' end verbs and `buy`,
 kit/arkhai-payments fixtures and a shared kit location for the preempt example,
@@ -749,29 +755,8 @@ record points R6, R11, R18, R20, R21 #48 and task 4.5a.
       bare-metal storefront `uv run pytest` after `make -C domains/bare_metal/storefront reinit`
       641 passed (was 636: seven restored items added, two removed). Every restored
       item is named PASSED in the verbose output.
-- [ ] 4B.5 The recurring-purchase E2E (D8): one scenario per compute lane, from a
-      lane-only servicing declaration listing `charged` and `returned`, through
-      approval against the payments double, asserting the published per-period price,
-      the buyer's pre-approval display (per-period charge, setup, initial reserve,
-      maximum term) and the approved mandate's single rate part charging one period's
-      price, and that delivery is refused without the rate continuation. Labelled
-      lane-double evidence; it closes the change index's recurring-purchase gap row.
-- [ ] 4B.6 The buyer's watchdog per D6a: the probe loop in `kit/deal-lifecycle-buyer`
-      with a per-domain injected probe; the opt-in flag on both domains' `buy` commands,
-      which then stay in the foreground from `available` until the stop is sent, the deal
-      ends or the buyer stops them; the opt-in, interval and threshold persisted per deal
-      in the buyer's profile and re-entered by `buy --resume`; `monitored` / `stopped` /
-      `unmonitored` in the deal read; the budget `interval × threshold + probe timeout`
-      in the display. Verify in the kit's unit suite with a clock-injected probe fake
-      (threshold, no stop below it, one stop and one journal entry at it, idempotent on
-      restart); in one application-level test per domain that starts the real `buy
-      --watch`, loses access with the storefront stopped, restarts into `buy --resume`
-      and observes a single buyer stop; and in convergence's rows 1 and 2 as the buyer's
-      stop landing with the storefront absent. Add D6a's watchdog to the deal-lifecycle
-      delta.
-
 Validation: deal-servicing, buyer-half and both buyers' unit suites; both storefronts'
-application suites; the compose lanes with Docker and the local Helm part for 4B.5.
+application suites.
 
 ## Section 4B notes and handoff
 
@@ -928,6 +913,278 @@ application suites; the compose lanes with Docker and the local Helm part for 4B
   `market_settlement_runtime` arrive through the payments kit rather than the dev
   group.
 
+## 4C. End service refuses a rate deal it cannot service
+
+Delivers end service's refusal to commit a rate deal while it services no rate deals,
+the refusal code that carries it and the repair reason the compute delivery path
+reports (D12, D13, D14's code and reason, D15). Requirements: deal-lifecycle MODIFIED
+"Neutral delivery decisions delegate payment interpretation" (its refusal paragraph,
+"A rate deal is committed before rate servicing exists", "A once-only deal is
+committed"); compute-delivery MODIFIED "Delivery is driven one deal at a time and
+reports where it stands" and "Protected steps are authorized and admitted".
+
+Files: kit/deal-lifecycle/src/market_deal_lifecycle/delivery.py
+(`DeliveryAuthorization`) and its unit tests; kit/deal-servicing/src/market_deal_servicing/end.py
+(`EndService.authorize_delivery`) and tests/integration (`test_end.py` or a new
+`test_rate_refusal.py`), with any kit test or example that registers a `SellerDeal`
+without `once_only` and drives a commit; domains/compute/delivery/src/compute_delivery/outcome.py
+(`RepairReason`) and path.py (`_authorized`), tests/integration/test_drive_delivery.py;
+both storefronts' recurring worlds and settlement tests for the application cases;
+any storefront code matching or serializing `RepairReason`;
+domains/vms/storefront/tests/integration/test_lifecycle_admin.py (`approve_rate`'s
+comment); package versions per `docs/development/RELEASING.md`, "Versioning policy".
+
+- [ ] 4C.1 The refusal code (D14): `DeliveryAuthorization` gains an optional closed
+      `code` (`"rate_servicing_unavailable"`), absent by default. Every existing
+      producer (the composed payments adapter, `OnceDeliveryPolicy`, Alkahest's once
+      adapter, end service's own answers) leaves it absent. A journaled authorization
+      acknowledgement recorded without the key still validates. Tests, unit in
+      `kit/deal-lifecycle`: an answer without a code validates and omits nothing it
+      carried; a stored acknowledgement without the key reads; an unknown code is
+      refused. `arkhai-kit-deal-lifecycle` is already one step from `dev` (4A); bump
+      only if the version-bump check asks.
+- [ ] 4C.2 The door (D12, D13, D15): `EndService.authorize_delivery`, for the commit
+      phase only, reads the deal's committed seller projection
+      (`SellerSession(conn).read`) before it asks the payment adapter. A projection
+      that is not once-only (`SellerDeal.once_only`, `False` when unset) is refused
+      with the code and the reason "rate servicing is not composed in this
+      storefront"; a missing projection is refused with no code. Neither does I/O or
+      calls the adapter, and both are journaled and acknowledged as every other
+      authorization is, so the answer is durable with its operation identity. The
+      refusal is unconditional: no seam, switch or injected servicer lifts it (D13).
+      Its comment states the invariant locally — end service watches no rate deal's
+      stops or funding, so a delivered rate deal would run unserviced — and points at
+      `openspec/specs/deal-lifecycle/spec.md`, naming no change. Tests, library
+      integration in `kit/deal-servicing` (real SQLite, a spy adapter): a rate
+      projection's commit is refused with the code, the adapter is never called, and
+      the refusal is journaled; a once-only projection's commit reaches the adapter
+      and its answer carries no code; a missing projection is refused without the
+      code. Kit tests and examples that register a `SellerDeal` without `once_only`
+      and drive a commit set it.
+- [ ] 4C.3 The repair reason (D14): `RepairReason.RATE_SERVICING_UNAVAILABLE`
+      (`"rate_servicing_unavailable"`); `_authorized` maps a refusal carrying the code,
+      when no end is due, to `repair_required(rate_servicing_unavailable)` with the
+      authorization's operation identity as its evidence reference; every other
+      refusal keeps `no_accepted_deal`. Its docstring and the module docstring's
+      account of reasons follow. Search both storefronts for code that matches or
+      serializes the closed set and extend it. Tests, library integration in
+      `domains/compute/delivery` (real end service and SQLite): a deal registered not
+      once-only drives to `repair_required(rate_servicing_unavailable)`, the capacity
+      fake records no reserve and no billing intent is journaled, and a second drive
+      asks again with the same answer; a once-only deal drives as before.
+- [ ] 4C.4 The refusal through each served storefront (D12): one application-integration
+      case per storefront, through its typed clients over real SQLite with the
+      installed recurring wiring and a declaration listing `charged` and `returned`:
+      a recurring deal is approved against the in-process payments engine and settled
+      with its verified receipt, and its delivery is deferred — no capacity reserve,
+      no fulfillment, no rate `start` at the engine. Extend the storefront's recurring
+      world (VM `domains/vms/storefront/tests/recurring_world.py`, bare metal
+      `domains/bare_metal/storefront/tests/recurring_world.py`), which 4B.4 left
+      reaching acceptance on VM and publication on bare metal; where a world cannot
+      reach settlement, extend it rather than seed the database (`TESTING.md`).
+- [ ] 4C.5 Correction 3 of the design discussion: `approve_rate`'s comment in VM's
+      `test_lifecycle_admin.py` states what its fixture does (it skips delivery), not
+      an installed delivery hook.
+- [ ] 4C.6 Verify: after `make dist`, `make -C kit/deal-lifecycle test-unit`,
+      `make -C kit/deal-servicing test`, `make -C domains/compute/delivery test`,
+      `make -C domains/vms/storefront test`, the bare-metal storefront's suite (after
+      its `reinit`, as section 4B's notes say), each changed package's typecheck, then
+      `scripts/change-workflow run pre-commit`. Record the counts and every new case
+      by name in the section's notes.
+      End-to-end: none exercises the refusal until section 4E. The once-only payment
+      scenarios `e2e_vm_payment_deal`, `e2e_vm_payment_purchase` and
+      `e2e_bare_metal_payment_deal` cross the changed commit authorization and must
+      stay green; validation's pipeline reads them.
+      Owed by validation: none.
+
+## 4D. The deadline barrier
+
+Delivers D14's "An earlier buyer stop wins over the deadline" (design review 18 F2):
+for a deal that is not once-only, admission records the delivery-deadline end and its
+filing only after a payment observation made at or after the deadline shows no
+earlier lawful end, and both domains' recovery reads the payment authority before it
+admits a missed deadline. Requirements: deal-lifecycle MODIFIED "Neutral delivery
+decisions delegate payment interpretation" (its barrier paragraph, "A refused rate deal
+passes its delivery deadline", "A buyer stops while the storefront is down", "The
+payment authority is unreadable at the deadline"); compute-delivery MODIFIED "An
+undelivered deal is handed to the end operation with classified evidence".
+
+Files: kit/deal-servicing/src/market_deal_servicing/journal.py (`EndSession.admit`'s
+missed-deadline branch, `_deadline_failure`), watch.py (`DealWatch` records the
+instant of each successful payment observation), schema.py (the storefront chain's
+migration, if the instant needs a column or table), seller.py (`SellerServicing.watch`
+and `read`); domains/vms/storefront/src/market_storefront/deal_lifecycle.py (the
+lifecycle cycle's `admit_deadline` and its order against `seller.watch`);
+domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/lifecycle.py (recovery's
+order of `recover_delivery` against `seller.read`); their tests.
+
+- [ ] 4D.1 The payment observation instant (D14): `DealWatch` records, durably and in
+      the transaction that journals what the observation showed, the storefront-clock
+      instant of each successful verified payment observation of a deal, so a final
+      stop the observation carried is recorded no later than its instant. A failed or
+      unverifiable read records nothing. Use the storefront chain's migration
+      (`market_deal_servicing.schema`) if a column or table is needed. Test, library
+      integration: a successful poll records its instant with any final stop it
+      carried; a failed read leaves the earlier instant.
+- [ ] 4D.2 The barrier (D14): `EndSession.admit`'s missed-deadline branch, for a deal
+      whose committed seller projection is not once-only, records the
+      `delivery-deadline` end and journals its filing only when the latest recorded
+      payment observation was made at or after the deadline; a lawful end selected
+      effective at or before the deadline still wins, as today. Without such an
+      observation it records nothing, files nothing and admits no protected phase;
+      choose the `Admission` answer that says so and state the choice in the
+      section's notes (any new status is internal to `kit/deal-servicing` and its one
+      caller, the compute delivery path, which must then leave the deal where it is).
+      A once-only deal, or one with no seller projection (no seller-half registration,
+      so no payment watch observes it), keeps the released rule. Tests, library
+      integration (real SQLite): the three delta scenarios — a deadline admitted after
+      a post-deadline observation files seller non-delivery; a payer stop effective
+      before the deadline and recorded by a post-deadline observation wins with no
+      filing; with only pre-deadline observations, or an unreadable authority, nothing
+      is recorded or filed and a later drive after a successful read admits the
+      deadline — and a once-only deal past its deadline files as before.
+- [ ] 4D.3 Recovery reads the authority first (D14): VM's lifecycle cycle polls the
+      payment watch before `admit_deadline`; bare metal's recovery reads the authority
+      (`seller.read`) before `recover_delivery` admits; `SellerServicing.watch`
+      dispatches no deadline filing journaled by its own poll before that poll
+      completes. Confirm, with a test, that each domain's recovery reaches a refused
+      rate deal after its deadline (VM's cycle admits every registered deal; bare
+      metal's `recover_delivery` returns early unless the delivery progress is
+      `unstarted` or `active`), and add the drive where one does not (D14, "Planning
+      confirms …").
+- [ ] 4D.4 The storefront down across the deadline: one application-integration case
+      per storefront, through its typed clients and real SQLite with the in-process
+      payments engine: a refused rate deal's buyer stops at the engine before the
+      deadline while the storefront app is stopped, so no hint arrives; the app
+      restarts after the deadline and its recovery runs; the deal's read shows the
+      payer's end and no `delivery_end` filing is journaled. Build on 4C.4's worlds.
+- [ ] 4D.5 compute-delivery's "An undelivered deal is handed to the end operation"
+      names the site's refusal: confirm `path.py` sends an authorization refusal to
+      repair and only a site refusal to `record_end`, and that no docstring says
+      otherwise.
+- [ ] 4D.6 Verify: after `make dist`, `make -C kit/deal-servicing test`,
+      `make -C domains/compute/delivery test`, `make -C domains/vms/storefront test`,
+      the bare-metal storefront's suite, typecheck of each changed package, then
+      `scripts/change-workflow run pre-commit`; counts and new cases by name in the
+      notes.
+      End-to-end: no lane scenario crosses a delivery deadline; section 4E's scenarios
+      end by the buyer's stop and hint before it. The once-only payment scenarios
+      named in 4C.6 cross the changed recovery order and must stay green.
+      Owed by validation: none.
+
+## 4E. The recurring-purchase E2E
+
+Delivers one recurring purchase per compute lane through approval and commit, refused
+at commit and ended by the buyer (D16, D8's E2E). Replans task 4B.5. Requirements:
+test-compatibility "A recurring purchase runs end to end in each compute lane" ("A
+buyer approves a recurring option", "The buyer's stop ends the refused deal", "Command
+first use precedes continuation").
+
+Files: two new scenario modules, `test_vm_recurring_purchase.py` beside the VM
+scenarios and `test_bare_metal_recurring_purchase.py` beside the bare-metal ones
+(e2e-tests/tests/e2e/roles/scenarios/), the shared buyer-purchase stages and drivers
+they reuse; e2e-tests/pyproject.toml
+(markers); e2e-tests/Makefile (each lane's `E2E_MODULE` selection); the compute lanes'
+storefront configuration under e2e-tests/config and the local Helm values that carry
+it; openspec/changes/README.md (the gap row).
+
+- [ ] 4E.1 The lane's recurring offer (D16 step 1): each compute lane's storefront
+      configuration declares `[Settlement.rate_servicing.arkhai_payments] treatments =
+      ["charged", "returned"]`, in the lane's configuration only, with a comment that
+      it is a lane fixture and no shipped default. The seller publishes a recurring
+      option — a bare-metal pool override, VM's listing creation — through a payments
+      clause carrying `recurring: {period, reserve_ahead_seconds}`, its approval
+      window leaving runway: approval window + delivery deadline + one period within
+      `max_duration_seconds` (VM's purchase helper's `P7D` does not fit a one-hour
+      listing). The shipped presets carry no setup charge.
+- [ ] 4E.2 VM scenario, marker `e2e_vm_recurring_purchase`, and bare-metal scenario,
+      marker `e2e_bare_metal_recurring_purchase`, each through the shared purchase
+      stages with the shipped `buy` and a default buyer (D16 steps 2–4):
+      - asserts the published per-period price; the pre-approval display the buyer
+        prints on stderr (`MarketRun.stderr()`: "Accepted price … per_period", "Setup
+        once charge", "Initial reserve", "Maximum accepted end"); and the approved
+        mandate's single rate part charging one period's price, from the payments
+        double's records;
+      - after commit, asserts the deal never becomes available, the site holds no
+        reservation for it and the double records no rate `start`; asserts the repair
+        reason only where a storefront interface already exposes it (4C's tests prove
+        it otherwise);
+      - ends the deal by the buyer's own `end` (the payer's stop and hint), asserts
+        the payer's available balance restored, and asserts the seller's lifecycle
+        read shows the payer's end and no `delivery_end` filing — the run does not
+        wait for the delivery deadline (D16 step 4);
+      - leaves no hold, mock rule or held loop, whether it passes or fails;
+      - is labelled lane-double evidence in its marker description.
+      Register both markers in `e2e-tests/pyproject.toml` and each lane's selection in
+      `e2e-tests/Makefile`.
+- [ ] 4E.3 Close the gap row "No end-to-end run produces a per-period Agreement …"
+      under "Unowned work found by `negotiate-open-ended-compute-terms`" in
+      `openspec/changes/README.md`: the scenarios produce a per-period Agreement and
+      assert the money a buyer is shown and approves; convergence extends them
+      through delivery.
+- [ ] 4E.4 Verify: `make -C e2e-tests test-unit`, collection of each marker in its
+      lane's selection (the harness's collect-only run over `E2E_MODULE`), then
+      `scripts/change-workflow run pre-commit`, whose `make check-repository` covers
+      the new modules' hygiene. The lane runs are
+      validation's, not this session's.
+      End-to-end: `e2e_vm_recurring_purchase` (VM lane) and
+      `e2e_bare_metal_recurring_purchase` (bare-metal lane), run by validation's
+      compose lanes, its local Helm part and the pipeline; a lane unrun at closeout is
+      a blocker, not a pass (D8).
+      Owed by validation: none.
+
+## 4F. The buyer's watchdog
+
+Delivers D6a's watchdog, its status resting on a fresh last probe (design review 18
+F1). Replans task 4B.6. Requirement: deal-lifecycle's watchdog requirement, added
+here.
+
+Files: kit/deal-lifecycle-buyer (the probe loop, the per-deal opt-in, interval,
+threshold and last-probe instant in the buyer's store, the status the buyer half
+composes into the buyer's read) and its unit and integration tests; both buyers' `buy`
+commands (domains/vms/buyer/src/arkhai_vms_buyer/buy_cli.py, the bare-metal buyer's
+`cli.py`), their per-domain probes and deal-read display; both domains' application
+tests; openspec/changes/spot-deals-through-arkhai-payments/specs/deal-lifecycle/spec.md.
+
+- [ ] 4F.1 The loop (D6a): a probe loop in `kit/deal-lifecycle-buyer` with a
+      per-domain injected probe (the VM's or host's reachability on the disclosed
+      address and credential kind; the kit learns no credential format). After
+      `threshold` consecutive failed probes it sends the buyer's ordinary entitled stop
+      and `hint` through the rate buyer end, journals the probe evidence it acted on,
+      and exits; it exits also when the deal ends by another path or the buyer stops
+      it. Defaults are conservative.
+- [ ] 4F.2 The commands (D6a): an opt-in flag on both domains' `buy`, which then stays
+      in the foreground from `available` until the stop is sent, the deal ends or the
+      buyer stops it; the opt-in, interval and threshold persisted per deal in the
+      buyer's store; each domain's resume of a buy run (VM `market buy --from <run>`,
+      one added where bare metal's `buy` has none) re-enters the loop where the deal
+      still runs. The display states the conditional bound `interval × threshold +
+      probe timeout`, only while the monitor runs.
+- [ ] 4F.3 The status (D6a, design review 18 F1): every probe, passed or failed,
+      records its instant per deal beside the opt-in. The buyer's read shows
+      `monitored` while `now − last probe ≤ interval + probe timeout` plus a small
+      fixed grace, `stopped` once the watchdog journaled its stop, and `unmonitored`
+      otherwise, a deal never opted in included. The buyer half computes it when it
+      composes the buyer's read; it is no field of `LifecycleRead` or any lifecycle
+      wire model, and the storefront neither sees nor reports it.
+- [ ] 4F.4 The requirement: add D6a's watchdog, with the status rule, to the
+      deal-lifecycle delta as an ADDED requirement with scenarios for the threshold
+      stop, the stale last probe and the restart.
+- [ ] 4F.5 Verify: unit, in the buyer half with a clock-injected probe fake —
+      threshold reached, no stop below it, one stop and one journal entry at it,
+      idempotent on restart, and `unmonitored` once the last probe is older than
+      `interval + probe timeout` plus the grace; application integration, one per
+      domain, starting the real `buy` with the opt-in against the composed storefront:
+      access lost with the storefront stopped yields a single buyer stop at the
+      payments engine; killing the command leaves the read `unmonitored` once the last
+      probe goes stale; the resumed run reads `monitored` again. Then both buyers'
+      suites, the buyer half's, typecheck, `scripts/change-workflow run pre-commit`.
+      Convergence's rows 1 and 2 consume the buyer's stop landing with the storefront
+      absent; this change runs no lane qualification of it.
+      End-to-end: none; no lane scenario runs `buy` with the opt-in, and none is owed
+      here.
+      Owed by validation: none.
+
 ## 5. Identity re-anchoring
 
 Files: kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py and
@@ -1022,24 +1279,32 @@ change to implementation and review.
 - [ ] 7.2 **Import placement.** Confirm touched imports are at module level unless
       a verified circularity or deliberate lazy-load reason was retained and
       reviewed; a necessary move returns to implementation.
-- [ ] 7.3 **Documentation compliance.** Classify every accepted decision in D1–D8;
-      keep external authority behavior as architecture context, not SCM normative
-      implementation promises. Confirm adapter versus continuation ownership.
+- [ ] 7.3 **Documentation compliance.** Classify every accepted decision in D1–D16,
+      D6a's watchdog status included; keep external authority behavior as architecture
+      context, not SCM normative implementation promises. Confirm adapter versus
+      continuation ownership, and that end service's refusal of a rate deal (D12) is
+      documented as the current invariant convergence modifies, not as a migration
+      step.
 - [ ] 7.4 **Narrative compression.** Compress completed tasks to final behavior,
       material evidence, residuals and permanent destinations, preserving material
       rationale in design.md.
 - [ ] 7.5 **Roadmap currency.** Update Goal 8 in docs/development/ROADMAP.md with
-      both-domain rate mechanics, seller notice and the remaining continuation/
-      hosted activation gap. Remove absorbed-change gap owners and record promotion.
+      both-domain rate mechanics, seller notice, a recurring purchase run end to end
+      through commit in both lanes, delivery refused until rate servicing is composed,
+      and the remaining continuation/hosted activation gap. Remove absorbed-change gap
+      owners and record promotion.
 - [ ] 7.6 **Campaign index currency.** Update openspec/changes/README.md status,
       dependencies and campaign graph; remove absorbed rows and redirect their
-      dependents to this change. Run make check-change-index and record disposition.
+      dependents to this change; confirm 4E.3 closed the per-period gap row, and that
+      `converge-ongoing-compute-leases`' row or notes name the end-service refusal it
+      lifts. Run make check-change-index and record disposition.
 - [ ] 7.7 **Packaging.** Run make check-packaging and
       make check-architecture-change CHANGE=spot-deals-through-arkhai-payments,
       resolving every failure/owned exception. Run make check-agent-skills if
       implementation touched agent instruction directories.
 - [ ] 7.8 **End-to-end pipeline.** Record the complete pipeline run/result and
-      applicable scenarios in section 6. Name exact prerequisites/owning changes
+      applicable scenarios in section 6, `e2e_vm_recurring_purchase` and
+      `e2e_bare_metal_recurring_purchase` among them. Name exact prerequisites/owning changes
       for unrun consumer-enabled or hosted validation; do not mark them passed or
       substitute unit evidence. The rate-consumer scenarios gate convergence's
       acceptance and hosted scenarios gate activation; record their transfer here
@@ -1047,8 +1312,15 @@ change to implementation and review.
 - [ ] 7.9 **Promotion.** Write openspec/specs/settlement-servicing/architecture.md
       (rate operations, partialPeriod and rate-only rotation), storefront-publication/
       architecture.md (presets and independent pricing), deal-lifecycle/
-      architecture.md (notice, rate buyer-end flow and External authorities), test-compatibility/
-      architecture.md (evidence labels), docs/development/ARCHITECTURE.md
+      architecture.md (notice, rate buyer-end flow and External authorities; under
+      "One end instant, transactional admission", end service's refusal of a rate deal
+      as the one place delivery fails closed before rate servicing, and the deadline
+      barrier), compute-delivery/architecture.md ("Commit and hold adoption": the
+      refused rate commit and its repair reason), buyer-orchestration/architecture.md
+      (a new section "The buyer's watchdog": the conditional bound and the
+      last-probe status, buyer-local and off the wire), test-compatibility/
+      architecture.md (evidence labels; "Ordinary Arkhai purchase evidence": the
+      recurring purchase through commit), docs/development/ARCHITECTURE.md
       (Kit areas, Settlement servicing and Release, and the two principles below),
       docs/development/DEPLOYMENT_AND_CONFIG.md (servicing, `snapshot_freshness_seconds`
       and identity overlap), docs/development/RELEASING.md (the staged rename),
@@ -1064,7 +1336,7 @@ change to implementation and review.
       after the foundation; promote rate buyer-end only in deal-lifecycle,
       referenced by buyer-orchestration. Archive writes delta-covered spec.md files
       for settlement-servicing, settlement-configuration, storefront-publication,
-      deal-lifecycle, buyer-orchestration and test-compatibility.
+      deal-lifecycle, buyer-orchestration, test-compatibility and compute-delivery.
 - [ ] 7.10 **Documentation citations.** Run
       make check-doc-citations CHANGE=spot-deals-through-arkhai-payments after
       promotion and resolve every match; run

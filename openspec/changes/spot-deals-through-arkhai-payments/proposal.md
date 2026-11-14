@@ -240,11 +240,13 @@ domain or the persistence-owning servicing kit.
   `openspec/specs/settlement-servicing/spec.md`;
   `openspec/specs/buyer-orchestration/spec.md`.
 - D6 seller notice and the administrator interrupt classification and routes:
-  `openspec/specs/deal-lifecycle/spec.md` and its architecture companion;
-  `openspec/specs/vm-storefront-fulfillment/spec.md`.
+  `openspec/specs/deal-lifecycle/spec.md` and its architecture companion, "Buyer
+  surrender and cases" and "External authorities";
+  `openspec/specs/compute-delivery/spec.md` for both compute storefronts' route.
 - D6a the rate buyer end, the canonical `end` verb and the watchdog, its status
   resting on a fresh last probe: `openspec/specs/deal-lifecycle/spec.md`;
-  `openspec/specs/buyer-orchestration/spec.md` and its architecture companion.
+  `openspec/specs/buyer-orchestration/spec.md` and its architecture companion, a new
+  section "The buyer's watchdog".
 - D7 servicing declarations, the materialization door, the `chosen` presupposition
   and identity rotation: `openspec/specs/settlement-configuration/spec.md`;
   `openspec/specs/settlement-servicing/spec.md`;
@@ -263,18 +265,22 @@ domain or the persistence-owning servicing kit.
   `openspec/specs/deal-lifecycle/spec.md` for the protocol.
 - D12 end service's refusal to commit a rate deal it cannot service, the one place
   delivery fails closed before rate servicing: `openspec/specs/deal-lifecycle/spec.md`
-  and its architecture companion.
+  and its architecture companion, "One end instant, transactional admission";
+  `openspec/specs/compute-delivery/architecture.md`, "Commit and hold adoption", for
+  the refused commit.
 - D13 the refusal as an unconditional invariant convergence modifies:
   `openspec/specs/deal-lifecycle/spec.md`.
 - D14 the refused deal's repair state, its `rate_servicing_unavailable` reason and the
   delivery authorization's refusal code: `openspec/specs/compute-delivery/spec.md`
   for the reason and the site-refusal wording of the undelivered hand-off;
   `openspec/specs/deal-lifecycle/spec.md` for the code and the deadline barrier for
-  a deal that is not once-only.
+  a deal that is not once-only, with the barrier's rationale in its architecture
+  companion, "One end instant, transactional admission".
 - D15 the door reading the committed seller projection:
   `openspec/specs/deal-lifecycle/spec.md`.
 - D16 the recurring-purchase scenario through commit, ended by the buyer:
-  `openspec/specs/test-compatibility/spec.md`.
+  `openspec/specs/test-compatibility/spec.md`; its architecture companion, "Ordinary
+  Arkhai purchase evidence".
 - Each change is mergeable to `dev` on its own merits: `openspec/README.md` or
   `docs/agents/change-workflow.md`.
 - Check a sibling domain before adding behaviour to one; a difference needs a

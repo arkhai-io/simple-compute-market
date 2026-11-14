@@ -499,7 +499,9 @@ configured number of consecutive probes, sends the buyer's ordinary entitled sto
 `hint` through the flow above, journals the probe evidence it acted on, and exits. It
 exits also when the deal ends by any other path, or when the buyer stops it. The
 opt-in, interval and threshold are persisted per deal in the buyer's profile, so
-`buy --resume` re-enters the loop after a restart where the deal is still running. The
+`buy --resume` — each domain's resume of a buy run, VM's `market buy --from <run>`,
+with one added where a domain's `buy` has none — re-enters the loop after a restart
+where the deal is still running. The
 deal read shows `monitored`, `stopped` or `unmonitored`, and a deal whose monitor is
 not running is shown as unmonitored, never as protected.
 
@@ -849,9 +851,13 @@ scenario runs through both:
 4. Cleanup is the buyer's own `end`, the payer's stop and hint, since the seller's
    refund refuses a rate deal; with zero payer notice and nothing started, the
    reservation returns, and the scenario asserts the payer's balance restored. It
-   leaves no hold, rule or held loop, and planning settles whether the run ends
-   before the deal's delivery deadline or accounts for the filing the deadline rule
-   makes.
+   leaves no hold, rule or held loop. It does not wait for the delivery deadline:
+   the buyer's hint makes the storefront poll the payment authority, and the payment
+   watch records the payer's final stop as the deal's selected end, effective before
+   the deadline, so admission never takes the deadline branch and no seller
+   non-delivery is filed (D14's barrier covers a hint that is lost). The scenario
+   asserts that the seller's lifecycle read shows that end and no `delivery_end`
+   filing.
 
 Rejected: an approve-only buyer option, buyer surface that exists only for the test;
 and driving `PaymentApproval` directly, which skips the shipped display the scenario
@@ -966,7 +972,7 @@ Destinations are planned, not claims of implemented behaviour.
 | D9 the staged `approval_window` rename | `openspec/specs/settlement-configuration/spec.md` (wire field and alias); `docs/development/RELEASING.md` |
 | D10 stop requests and final stops | `openspec/specs/deal-lifecycle/spec.md`; `openspec/specs/settlement-servicing/spec.md` |
 | D11 the composed transaction adapter | `openspec/specs/settlement-servicing/spec.md` and `architecture.md`; `openspec/specs/deal-lifecycle/spec.md` for the protocol |
-| D12–D15 end service's refusal of a rate deal it cannot service, its refusal code and the projection it reads | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md` (where fails closed is enforced) |
+| D12–D15 end service's refusal of a rate deal it cannot service, its refusal code and the projection it reads | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md`, "One end instant, transactional admission" (where fails closed is enforced); `openspec/specs/compute-delivery/architecture.md`, "Commit and hold adoption" |
 | D14's repair reason and the site-refusal wording of the undelivered hand-off | `openspec/specs/compute-delivery/spec.md` |
 | D14's deadline barrier for a deal that is not once-only | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md` |
 | D6a's watchdog status: the last-probe freshness rule, buyer-local and off the wire | `openspec/specs/deal-lifecycle/spec.md` (with 4B.6's watchdog requirement); `openspec/specs/buyer-orchestration/architecture.md` |
