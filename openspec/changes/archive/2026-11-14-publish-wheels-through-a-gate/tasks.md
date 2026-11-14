@@ -1073,7 +1073,7 @@ documentation only. A part that needs a code edit returns the change to implemen
       passing; no other job failed. Baseline: `dev`'s `tests.yml` run 43230450813 at
       `07af25d57`, all 20 jobs green.
     - **Release-image mode:** 12.3's local registry round trip, on the bare-metal lane.
-- [ ] 13.9 **Promotion.** Write:
+- [x] 13.9 **Promotion.** Write:
   - `docs/development/RELEASING.md`, rewritten from this repository's side, naming no
     private repository, project, registry or host:
     - the release's five steps;
@@ -1162,15 +1162,27 @@ documentation only. A part that needs a code edit returns the change to implemen
     discipline admits the record before `AGENTS.md` does. Closeout then resumes at 13.9,
     checks it, and runs 13.10 and 13.11. Already run at this commit: the scoped citation
     check passed, and `openspec validate --strict` passed for the change.
-- [ ] 13.10 **Documentation citations.** Run
+  - Resumed (2026-11-14): the paragraph landed verbatim at `b4779715e`, after the
+    paragraph ending "is not an exception.", so RELEASING.md's "The bill of materials" is
+    true as written. Every document 13.9 names is written.
+- [x] 13.10 **Documentation citations.** Run
   `make check-doc-citations CHANGE=publish-wheels-through-a-gate` and resolve every
   match. Then run `scripts/change-workflow openspec validate publish-wheels-through-a-gate
   --strict`.
-- [ ] 13.11 **Archival.** Last: `scripts/change-workflow openspec archive
+  - Done (2026-11-14, at `b4779715e`): the citation check passed over the change's four
+    documents, the strict validation passed, and `scripts/change-workflow run pre-commit`
+    passed every check, exit 0.
+- [x] 13.11 **Archival.** Last: `scripts/change-workflow openspec archive
   publish-wheels-through-a-gate -y`. It merges the deltas: eleven added requirements, and
   the removal of "Release verification is a publication-time activity". Point the index
   row at the archived directory, then run `scripts/change-workflow openspec validate
   --specs --strict`.
+  - Done (2026-11-14): the permanent spec carried none of the added requirements, so the
+    deltas merged (no `--skip-specs`). The archive applied eleven added, one modified ("A
+    stack's configuration lives in committed files") and one removed to
+    `openspec/specs/deployment-state/spec.md`; its diff shows each once, as the delta
+    states it, and nothing else changed. The index row points at
+    `archive/2026-11-14-publish-wheels-through-a-gate/`.
 
 ## Design promotion record
 
