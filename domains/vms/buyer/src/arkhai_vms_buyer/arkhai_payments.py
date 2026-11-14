@@ -14,6 +14,7 @@ from market_arkhai_payments.models import AccountId
 from market_config.config_loader import load_user_config
 from market_core.schemas import AgreedPrice, Agreement
 from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, Pending
+from market_settlement_runtime.buyer_terms import BuyerTermsPolicy
 
 from .evidence import evidence_store
 from .lifecycle import buyer_lifecycle, run_sync
@@ -47,12 +48,19 @@ def payer_selection(selected):
 
 
 def payment_buyer(policy) -> PaymentApproval:
+    """The run's approval, honouring the terms its settlement policy waived.
+
+    The policy's option preference is the run's terms policy; a policy without
+    one approves only what a default buyer accepts.
+    """
     section = load_user_config().get("vms", {})
+    preference = getattr(policy, "option_preference", None)
     return PaymentApproval(
         ArkhaiPaymentsConfig.model_validate(
             policy.config.mechanism_config("arkhai_payments")
         ),
         AccountId.model_validate(section.get("payer_account")).root,
+        terms_policy=preference if isinstance(preference, BuyerTermsPolicy) else None,
     )
 
 

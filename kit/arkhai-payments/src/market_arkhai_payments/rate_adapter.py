@@ -24,7 +24,7 @@ from .mandates import duration_seconds
 from .models import StoredEvent, TransactionSnapshot, RatePart, SignedTransactionSnapshot
 from .operations import PaymentOperation, operations_digest
 from .receipts import SnapshotVerifier
-from .settlement_config import ArkhaiPaymentsConfigurationError
+from .settlement_config import DEFAULT_SNAPSHOT_FRESHNESS_SECONDS, ArkhaiPaymentsConfigurationError
 
 
 class RatePaymentAdapter(PaymentAdapter):
@@ -38,10 +38,14 @@ class RatePaymentAdapter(PaymentAdapter):
 
     def __init__(self, agreement: Mapping[str, Any], data: PaymentSettlementData, *,
                  account: str, client_for_owner: ClientForAccount, verify_snapshot: SnapshotVerifier,
-                 minimum_sequence: int = 0, clock: Callable[[], int] = lambda: int(time.time())) -> None:
+                 minimum_sequence: int = 0, clock: Callable[[], int] = lambda: int(time.time()),
+                 snapshot_freshness_seconds: int = DEFAULT_SNAPSHOT_FRESHNESS_SECONDS) -> None:
         super().__init__(agreement, data, account=account, client_for_owner=client_for_owner,
                          verify_snapshot=verify_snapshot, minimum_sequence=minimum_sequence, _allow_rate=True)
+        if type(snapshot_freshness_seconds) is not int or snapshot_freshness_seconds <= 0:
+            raise ValueError("snapshot freshness must be positive whole seconds")
         self._clock = clock
+        self._freshness = snapshot_freshness_seconds
         self._agreement = dict(agreement)
         self.rate_parts = tuple(str(i) for i, part in enumerate(data.mandate.parts) if part.root.kind == "rate")
         if not self.rate_parts:
@@ -346,8 +350,11 @@ class RatePaymentAdapter(PaymentAdapter):
         snapshot = signed.snapshot
         refs.append(f"{self.commitment_ref}:snapshot:{snapshot.latestEventSequence}:{snapshot.observedAt}")
         now = self._clock()
-        if snapshot.observedAt < now:
-            return answer("pending", "authority observation is stale; refresh at the decision instant")
+        # observedAt is the authority's claim on its own clock, never ordered
+        # against the storefront's. The window only bounds how stale a view may
+        # decide a phase; every bound below is still checked at the storefront's now.
+        if now - snapshot.observedAt > self._freshness:
+            return answer("pending", "authority observation is older than the freshness window; refresh")
         if snapshot.receipt.receipt.approvedAt >= self.data.mandate.expires:
             return answer("refuse", "approval was not timely")
         parts = [part for part in snapshot.parts if str(part.part) in self.rate_parts]

@@ -20,9 +20,13 @@ import time
 import tomllib
 
 import httpx
+from arkhai_bare_metal_storefront import deals_cli as bare_metal_deals
+from arkhai_bare_metal_storefront.cli import app as bare_metal_cli
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from market_arkhai_mediation.adapter import MediationAdapter
+from market_storefront.cli import app as vm_cli
+from market_storefront.groups import deals as vm_deals
 from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.contract import INTERFACE
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
@@ -30,7 +34,7 @@ from market_arkhai_payments import PaymentApproval, PaymentSettlementData, RateP
 from market_arkhai_payments.adapter import pinned_snapshot_verifier
 from market_arkhai_payments.errors import MandatePolicyError, PaymentsTransportError
 from market_arkhai_payments.fixtures import FakePaymentsClient
-from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_context, rate_contract_revision
+from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_context
 from market_arkhai_payments.settlement_config import ArkhaiPaymentsConfig
 from market_core.schemas import Agreement
 from market_deal_lifecycle.adapters import DisputeAdapterTable, PaymentAdapterTable, PaymentSelector
@@ -49,7 +53,7 @@ from market_deal_servicing.evidence import transaction
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime import SettlementPublicationClause
 from market_settlement_runtime.buyer_terms import BuyerTermsPolicy
-from market_settlement_runtime.rate_publication import derive_rate_preset, RatePresetRefusal
+from market_settlement_runtime.rate_publication import DefaultRefusal, derive_rate_preset, RatePresetRefusal
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingDeclaration
 from pydantic import SecretStr
 from storefront_client import SyncStorefrontClient, StorefrontClientError
@@ -58,6 +62,8 @@ from typer.testing import CliRunner
 MECHANISM = "arkhai.payments.v1"
 PAYER = "11111111-1111-4111-8111-111111111111"
 PAYEE = "22222222-2222-4222-8222-222222222222"
+# Each domain's operator CLI and the module whose client factory it calls.
+OPERATOR_CLIS = {"vms": (vm_cli, vm_deals), "bare_metal": (bare_metal_cli, bare_metal_deals)}
 
 
 class LossyPayments(FakePaymentsClient):
@@ -77,12 +83,7 @@ def main(domain: str, output: Path | None, profile_path: Path):
             or not profile["setup_opt_out"] or profile["payments"]["livemode"]
             or domain not in profile["domains"]):
         raise ValueError("preemption fixture requires the lane-only in-process test profile with setup opted out")
-    if domain == "vms":
-        from market_storefront.cli import app as cli
-        from market_storefront.groups import deals as commands
-    else:
-        from arkhai_bare_metal_storefront.cli import app as cli
-        from arkhai_bare_metal_storefront import deals_cli as commands
+    cli, commands = OPERATOR_CLIS[domain]
 
     now = int(time.time())
     buyer, seller, administrator, receipt_signer = (Ed25519Signer(bytes([n]) * 32) for n in (1, 2, 3, 7))
@@ -93,11 +94,10 @@ def main(domain: str, output: Path | None, profile_path: Path):
                           "minimum_case_hold_seconds": None},
     })
     # This declaration is confined to approval/command fixtures. No installed
-    # storefront publication or delivery composition receives it.
-    servicing = RateServicing(
-        required_contracts={MECHANISM: rate_contract_revision()},
-        declarations={MECHANISM: RateServicingDeclaration(MECHANISM, rate_contract_revision(), "published")},
-    )
+    # storefront publication or delivery composition receives it. Every stop
+    # and the term end below charge their started period, and no option has a
+    # setup charge, so it declares exactly that.
+    servicing = RateServicing({MECHANISM: RateServicingDeclaration(MECHANISM, frozenset({"charged"}))})
     config = ArkhaiPaymentsConfig(
         enabled=True, service_identity=receipt_signer.identity, development_auth=True,
         **profile["payments"],
@@ -144,9 +144,14 @@ def main(domain: str, output: Path | None, profile_path: Path):
             else:
                 raise AssertionError("charged term end must be refused by the default buyer")
             terms = decode_terms(option.lifecycle)
+            # A profile accepting unprotected terms waives each charged term the
+            # option carries; the charged payee stop exists only on spot.
+            waivers: frozenset[DefaultRefusal] = frozenset()
+            if profile["buyer"]["allow_unprotected_terms"]:
+                waivers = frozenset({"charged_term_end", *(("charged_preemption",) if payee_notice is not None else ())})
             policy = BuyerTermsPolicy(AuthoritySelection(
                 {"": (entry,)}, contexts={MECHANISM: rate_context((entry,), terms)},
-            ), allow_unprotected_terms=profile["buyer"]["allow_unprotected_terms"])
+            ), waivers=waivers)
             PaymentApproval(config, PAYER, terms_policy=policy).check(json.dumps(agreement), data.to_wire())
             fake = LossyPayments(signer=receipt_signer, observed_at=now)
             fake.engine.fund(PAYER, "USD/2", 1_000_000)

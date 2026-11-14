@@ -1,29 +1,56 @@
 ## MODIFIED Requirements
 
+### Requirement: The mandate binds the deal and its parties
+
+The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sha256(JCS(mandate))`. It MUST name `settlement_params.payer_account` as `from` and the selected option's payee account as `to`, and use the service's published fee policy and the fixed nonce `arkhai.payments.v1`. On once-only options it MUST carry one `once` part for the agreed amount and asset; on rate options, one `rate` part charging the agreed per-period amount, preceded by one `once` setup part for `setup_amount` when the option carries one. Every part MUST carry its own authorities.
+
+#### Scenario: A once-only mandate is bound
+
+- **WHEN** buyer and seller derive the mandate of an accepted once-only payments Agreement
+- **THEN** both derive the same `deal`, transaction ID, `from` and `to`, with one `once` part for the agreed amount and asset
+
+#### Scenario: A rate mandate is bound
+
+- **WHEN** buyer and seller derive the mandate of an accepted per-period payments Agreement whose amount is one period's price
+- **THEN** both derive one `rate` part charging that amount, and no part charging it once or charging a term total
+- **AND** a setup-bearing option adds one `once` setup part for `setup_amount` before the rate part
+
+### Requirement: Mandate holds and approval follow the option's timing
+
+Every `once` hold MUST last at least its part end plus the option's `adjudication.dispute_window_seconds`; prepaid service ends at Agreement term end, and setup encodes its end at Agreement start, clamped effectively to approval if later. Every `rate` hold MUST be `{afterStop: dispute_window}`, so each earned amount stays held until its part's stop plus the window, and every rate part MUST end at `start_utc + duration_seconds`. Approval MUST expire after the option's `approval_window`, which readers also accept under the released name `window`. Each part MUST carry `maxHoldExtension` from `adjudication.case_hold_max_seconds`, `null` when unbounded. A hosted option MUST NOT carry `bond` until payments can hold a seller-funded part.
+
+#### Scenario: An unbounded case hold
+
+- **WHEN** an option's `adjudication.case_hold_max_seconds` is `null`
+- **THEN** every part of its mandate carries `maxHoldExtension: null`
+
+#### Scenario: A rate part's hold follows its stop
+
+- **WHEN** a rate mandate is derived
+- **THEN** its rate part's hold is `{afterStop: dispute_window}` and its end is the Agreement's absolute term end, however late the part starts
+
 ### Requirement: The payments mandate is derived exactly from the Agreement
 
-The mandate MUST be derived only from the exact accepted Agreement, binding its JCS hash, deterministic transaction ID, parties, asset, amounts, part shapes, authorities, holds, caps and approval window. Buyer and seller MUST derive the same mandate under the selected mechanism's vendored contract; unsupported bonds or terms MUST refuse.
-
-#### Scenario: The complete mandate is checked
-
-- **WHEN** buyer and seller derive or verify a mandate before approval
-- **THEN** The mandate MUST bind sha256(JCS(agreement)) as deal, sha256(JCS(mandate)) as transaction ID, settlement_params.payer_account as from and selected payee account as to, the published fee policy and nonce arkhai.payments.v1. Once-only options MUST derive one once part for the agreed amount and asset; rate options MUST derive the selected rate and optional setup parts, all with per-part authorities. Every once hold MUST last at least until its own part end plus adjudication.dispute_window_seconds (prepaid service ends at Agreement term end; setup encodes end at Agreement start, clamped effectively to approval if later). Approval MUST expire after approval_window. Hosted options MUST NOT carry bond until seller-funded parts are supported. Once-only mandates without early-termination entitlements MUST authorize no start or stop. Reverse MUST be authorized for seller and the Agreement's dispute authority, whose account MUST come from the option's adjudication.dispute, never Settlement.arkhai_payments configuration. Only that authority MUST be listed under extend, also authorizing lift. Each part MUST carry maxHoldExtension from adjudication.case_hold_max_seconds, null when unbounded. Reverse MAY name a part and an amount up to what it still holds. Rate authorities and term ends MUST use the deal-lifecycle codec. An optional setup_amount MUST derive one ordinary once part for that amount, owed by the buyer from approval, with encoded end at Agreement start, effectively clamped to approval if later and hold afterStop plus the dispute window. A lawful delivered payer end MUST keep setup; a qualified delivery_end with delivered=false MUST return setup for either cause.
+The mandate MUST be derived only from the exact accepted Agreement, binding its JCS hash, deterministic transaction ID, parties, asset, amounts, part shapes, authorities, holds, caps and approval window. Buyer and seller MUST derive the same mandate under the selected mechanism's vendored contract; unsupported bonds or terms MUST refuse. Rate authorities and term ends MUST use the deal-lifecycle codec. Every part MUST carry its own lifecycle authorities and its maximum hold extension, null where the accepted terms leave the case hold uncapped; the mandate MUST NOT carry mandate-level authorities, and a stored mandate that does is refused, never rewritten.
 
 #### Scenario: Hold and approval expiry follow the accepted timing
-- **WHEN** a once-only mandate is derived from an Agreement accepted at accepted_at
-- **THEN** each prepaid once part has absolute end start_utc + duration_seconds and hold {afterStop: dispute_window}; approval expires at floor(accepted_at) + approval_window
-- **AND** delayed approval does not shift the part end or replace the stop-relative hold with a duration from acceptance; fractional Agreement timestamps remain unchanged in its deal hash
+
+- **WHEN** a seller derives a mandate from an Agreement accepted at `accepted_at`
+- **THEN** each prepaid once part has absolute end start_utc + duration_seconds and hold {afterStop: dispute_window}; approval expires at floor(accepted_at) + approval_window, and fractional Agreement timestamps stay unchanged in its deal hash
+- **AND** delayed approval does not shift the part end or replace the stop-relative hold with a duration from acceptance
 
 #### Scenario: A once mandate is derived
-- **WHEN** the option has only one once part and no early_termination
-- **THEN** it authorizes no start or stop, authorizes reverse for payee and the option's dispute authority, and extend/lift only for that dispute authority
-- **AND** its hold lasts through term end plus dispute window and maxHoldExtension comes from case_hold_max_seconds, null when unbounded
+
+- **WHEN** a mandate is derived from an option with one `once` part and no `early_termination`
+- **THEN** it has no `start` or `stop` authority, only the dispute authority may `extend` or `lift`, and its hold ends no earlier than the dispute window after the term end
 
 #### Scenario: A hosted option names a bond
-- **WHEN** a hosted option includes bond
-- **THEN** publication refuses, naming the unsupported term
+
+- **WHEN** a seller configures a hosted option with `bond`
+- **THEN** the builder refuses to emit it, naming the unsupported term
 
 #### Scenario: A mixed mandate is derived
+
 - **WHEN** a rate option includes setup_amount
 - **THEN** setup once precedes rate, each with per-part authorities and maxHoldExtension
 - **AND** setup's encoded end is Agreement start, effectively clamped to approval if later, both holds are afterStop plus dispute window, and approval expiry still uses approval_window
@@ -36,10 +63,22 @@ The mandate MUST be derived only from the exact accepted Agreement, binding its 
 
 #### Scenario: A mandate in the previous wire is refused
 
-- **WHEN** stored settlement data or a counterparty's mandate carries mandate-level authorities, or a part without its own authorities or maximum hold extension
+- **WHEN** stored settlement data or a counterparty's mandate carries mandate-level `authorities`, or a part without its own authorities or maximum hold extension
 - **THEN** it is refused before any approval or verification, and the stored Agreement bytes and mandate are left as they are
 
 ## ADDED Requirements
+
+### Requirement: A rate mandate authorizes from the accepted rights
+A `rate` part MUST authorize `start` for the payee alone. Its `stop` entries MUST be exactly one per accepted entitlement, carrying that entitlement's `notice_seconds` and the `partialPeriod` its `settles_through` maps to, followed by the dispute authority's `{account, notice: PT0S, partialPeriod: chosen}`; on-demand has no payee entry. It MUST authorize `reverse` for the payee and the dispute authority, and only the dispute authority under `extend`. A setup part MUST use the `once` permissions. The buyer MUST refuse any authority not derived this way before approval.
+
+#### Scenario: Spot and on-demand stop entries
+- **WHEN** a spot mandate and an on-demand mandate are derived from options with the same payer entitlement
+- **THEN** the spot rate part's stop entries are the payer's, the payee's with its notice, and the dispute authority's `chosen` entry, in that order
+- **AND** the on-demand rate part's are the payer's and the dispute authority's only
+
+#### Scenario: A seller stop entry is added without an entitlement
+- **WHEN** the buyer checks a mandate whose rate part carries a stop entry no accepted entitlement derives
+- **THEN** it refuses before approval
 
 ### Requirement: Hosted rate mandates are derived from the selected option
 SCM MUST derive time rate parts through the agreed-price accessor and lifecycle codec, using the selected Agreement's asset, period, reservation lead, absolute term end, adjudication hold and cap. The buyer MUST independently check all parts and authorities before approval, including any disclosed setup once part.
@@ -70,7 +109,7 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 
 #### Scenario: The rate adapter consumes lifecycle treatment
 - **GIVEN** the deal-lifecycle requirements for stop-authority and term-end treatment
-- **WHEN** a returned-capable rate mandate is derived
+- **WHEN** a rate mandate is derived
 - **THEN** the adapter uses the shared codec for rate stop entries and rate end, including the dispute authority's chosen entry
 - **AND** setup once ends retain the published schema's required inert returned partialPeriod, which prices no recurring period
 
@@ -92,7 +131,7 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **AND** its own partialPeriod determines the final period's charge, not a rounded-down term
 
 ### Requirement: Hosted rate commands preserve part identity and uncertain outcomes
-The hosted adapter MUST translate lifecycle commands into explicit per-part events with stable operation-derived request identities. It MUST require the deal-lifecycle versioned activated-delivery envelope for rate start and compare new descriptors against the caller-supplied journaled descriptor/digest. The caller MUST reject changed-content key reuse before I/O. Unknown outcomes MUST resolve by verified read before another monetary delta.
+The hosted adapter MUST translate lifecycle commands into explicit per-part events with stable operation-derived request identities. It MUST require the deal-lifecycle versioned activated-delivery envelope for rate start. Every monetary rate call MUST record each descriptor's digest through the caller's operation store, under a part-derived key, before any I/O, so changed-content key reuse is refused before any authority call. Unknown outcomes MUST resolve by verified read before another monetary delta.
 
 #### Scenario: A start response is lost
 - **GIVEN** the end service's sole durably keyed start_billing intent with verified activation and provisioning-ready evidence
@@ -128,17 +167,17 @@ The hosted adapter MUST translate lifecycle commands into explicit per-part even
 ### Requirement: Rate stops consume authority-priced period treatment
 The hosted rate adapter MUST consume the deal-lifecycle stop-authority mapping and capability refusal rules. It MUST observe the winning authority entry rather than compute cooperative end-price corrections. Seller delivery_end MUST instead be filed through the dispute adapter, with no seller-side stop or reverse for that filing.
 
-#### Scenario: The contract has no partialPeriod field yet
-- **WHEN** an interim spot or on-demand preset is offered against a contract supporting only charged behavior
-- **THEN** every present entitlement and term end commits started_period; absent wire treatment fields use vector-qualified fixed charged semantics, including dispute stops
-- **AND** last_boundary or stop terms refuse before publication or acceptance
-- **AND** the buyer-orchestration default acceptance policy refuses the interim offer; proceeding requires explicit buyer acceptance of started_period on payee stops and any charged term end
-
-#### Scenario: Returned-capable spot reaches default buyers
-- **GIVEN** a vendored revision expressing returned and an offered spot option with payee and term-end settles_through last_boundary
+#### Scenario: Returned spot reaches default buyers
+- **GIVEN** a composition declaring charged and returned and an offered spot option with payee and term-end settles_through last_boundary
 - **WHEN** the buyer's default acceptance policy and exact mandate check run
 - **THEN** those treatments pass policy without loosening it
-- **AND** an unexpressible returned treatment is never replaced with charged
+- **AND** an undeclared returned treatment is refused, never replaced with charged
+
+#### Scenario: A charged spot needs the buyer's waiver
+- **GIVEN** an offered spot option whose payee stop and term end settle through started_period, under a declaration listing charged
+- **WHEN** a default buyer selects or approves it
+- **THEN** it is refused, naming each charged term
+- **AND** a buyer whose run waives each of those terms through its per-term waivers selects and approves it
 
 #### Scenario: Rate earning follows completed periods or stop
 - **WHEN** a rate period begins
@@ -206,11 +245,6 @@ The rate adapter MUST derive end.partialPeriod only from early_termination.settl
 - **THEN** billing keeps 100 for [10,70) and returns the incomplete [70,130) period
 - **AND** delivery still ends at 120 without rounding down the accepted duration
 
-#### Scenario: Only charged absolute ends are expressible
-- **WHEN** an interim spot or on-demand rate preset is published
-- **THEN** its early_termination.settles_through explicitly commits started_period and discloses the final partial-period charge
-- **AND** an option requesting returned or prorated refuses publication and acceptance
-
 ### Requirement: Rate delivery authorization is pure and phase-specific
 The hosted rate adapter MUST implement authorize(phase, evidence) for commit, dispatch, start and disclose without mutation. Results MUST carry allow/refuse/pending, reason, operation identity and verified evidence references. Missing or unverified state MUST NOT allow work. The neutral servicing composition MUST NOT inspect hosted part fields.
 
@@ -238,6 +272,11 @@ The hosted rate adapter MUST implement authorize(phase, evidence) for commit, di
 - **THEN** it returns pending, never allow
 - **AND** an unknown phase or malformed/cross-deal envelope refuses
 - **AND** a known pending stop bound cannot be crossed using stale evidence
+
+#### Scenario: The authority's and the storefront's clocks differ
+- **WHEN** a verified snapshot's observedAt lags the storefront's clock by more than the configured freshness window
+- **THEN** the phase is pending until a fresher snapshot is read
+- **AND** a snapshot observed within the window, or ahead of the storefront's clock, decides the phase with every stop, end and funding bound checked at the storefront's now
 
 ### Requirement: Hosted payments expose no exceptional-end operation
 The hosted payment adapter MUST expose no exceptional-end operation and MUST NOT provide a direct-payment fallback for seller exceptional ends. It MUST consume verified authority effects from the foundation-owned filing path under deal-lifecycle's “A seller's exceptional end is a dispute filing”, without duplicating its journal or mediation's computation.

@@ -8,7 +8,11 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from arkhai_bare_metal_storefront import deals_cli as bare_metal_deals
+from arkhai_bare_metal_storefront.cli import app as bare_metal_cli
 from arkhai_vms_buyer.lifecycle import buyer_lifecycle
+from market_storefront.cli import app as vm_cli
+from market_storefront.groups import deals as vm_deals
 from market_arkhai_payments import PaymentApproval
 from market_arkhai_payments.adapter import pinned_snapshot_verifier
 from market_arkhai_payments.errors import PaymentsTransportError
@@ -29,6 +33,9 @@ from tests.integration.test_payment_settlement import BUYER, SELLER, NEGOTIATION
 from tests.integration.test_payment_settlement import make as make
 from tests.integration.test_lifecycle_admin import approve_rate
 
+# Each domain's operator CLI and the module whose client factory it calls.
+OPERATOR_CLIS = {"vms": (vm_cli, vm_deals), "bare_metal": (bare_metal_cli, bare_metal_deals)}
+
 
 class LossyPayments(FakePaymentsClient):
     lose = False
@@ -47,12 +54,7 @@ async def test_preempt_cli_recovers_pending_stop_and_an_earlier_payer_end(make, 
     h = await make(payments=LossyPayments())
     approve_rate(h, entitled=True, payer_notice=0)
     await h.db.update_listing(listing_id="vm-payment-listing", settlement_options=[])
-    if domain == "vms":
-        from market_storefront.cli import app as cli
-        from market_storefront.groups import deals as commands
-    else:
-        from arkhai_bare_metal_storefront.cli import app as cli
-        from arkhai_bare_metal_storefront import deals_cli as commands
+    cli, commands = OPERATOR_CLIS[domain]
     trust = TrustedIdentitySet(identities=(SELLER.identity,))
     app = FastAPI()
     app.include_router(create_lifecycle_router(lambda _: h.lifecycle.routes(trust)))

@@ -139,7 +139,7 @@ def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: Settlement
     def registry(_config, _identity):
         yield SimpleNamespace(get_listing=lambda _listing_id: listing)
 
-    seen: dict[str, Any] = {"negotiations": [], "acceptances": [], "settlements": []}
+    seen: dict[str, Any] = {"negotiations": [], "acceptances": [], "settlements": [], "approval_policies": []}
 
     def negotiate(**kwargs: Any) -> NegotiationOutcome:
         seen["negotiations"].append(kwargs)
@@ -167,7 +167,11 @@ def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: Settlement
     monkeypatch.setattr(cli, "registry_client", registry)
     monkeypatch.setattr(cli, "negotiate_with_seller", negotiate)
     monkeypatch.setattr(cli, "BUYER_STAGES", {option.settlement_schema: stage})
-    monkeypatch.setattr(cli, "payment_approval", lambda _config: object())
+    def approval(_config: Any, *, terms_policy: Any = None) -> object:
+        seen["approval_policies"].append(terms_policy)
+        return object()
+
+    monkeypatch.setattr(cli, "payment_approval", approval)
     return seen
 
 
@@ -479,6 +483,15 @@ def test_each_waiver_used_is_recorded_and_named_before_approval(
                 "waived by --allow-no-delivery-deadline") in disclosure
         (named,) = [line for line in disclosure.splitlines() if "Waivers in force:" in line]
         assert [flag for flag in recorded if flag in named] == recorded
+    # Payment approval refuses by the same run's policy, so a waived term is
+    # not refused again after the seller accepts.
+    (policy,) = seen["approval_policies"]
+    assert sorted(policy.waivers) == sorted(
+        term for term, flag in (
+            ("no_delivery_deadline", "--allow-no-delivery-deadline"), ("no_penalty", "--allow-no-penalty"),
+            ("charged_preemption", "--allow-charged-preemption"), ("charged_term_end", "--allow-charged-term-end"),
+        ) if flag in recorded
+    )
 
 
 def test_a_run_without_waivers_records_none(

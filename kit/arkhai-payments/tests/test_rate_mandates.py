@@ -6,6 +6,8 @@ import json
 
 import pytest
 from market_core.schemas import derive_settlement_option_id
+from market_deal_lifecycle.selection import AuthoritySelection
+from market_settlement_runtime.buyer_terms import BuyerTermsPolicy
 
 from market_arkhai_payments import (
     MandatePolicyError, PaymentApproval, PaymentApprovalInsufficientFunds, PaymentsAPIError,
@@ -74,6 +76,25 @@ def test_default_buyer_refuses_charged_ends_and_missing_rate_hook_stays_closed()
         PaymentApproval(config(), BUYER).check(json.dumps(raw), rate_data(raw).to_wire())
     with pytest.raises(ValueError):
         PaymentSettlementData.for_agreement(raw, config())
+
+
+@pytest.mark.parametrize("waivers,refused", [
+    (frozenset(), "payee stop does not return"),
+    (frozenset({"charged_term_end"}), "payee stop does not return"),
+    (frozenset({"charged_preemption"}), "term end does not return"),
+    (frozenset({"charged_preemption", "charged_term_end"}), None),
+])
+def test_approval_honours_exactly_the_terms_the_runs_policy_waived(waivers, refused):
+    # The option charges its started period on the payee's stop and at the term
+    # end; approval refuses each such term the buyer's run did not waive.
+    raw = rate_agreement()
+    policy = BuyerTermsPolicy(AuthoritySelection({}, contexts={}), waivers=waivers)
+    approval = PaymentApproval(config(), BUYER, terms_policy=policy)
+    if refused is None:
+        assert approval.check(json.dumps(raw), rate_data(raw).to_wire())[1] == rate_data(raw)
+    else:
+        with pytest.raises(MandatePolicyError, match=refused):
+            approval.check(json.dumps(raw), rate_data(raw).to_wire())
 
 
 @pytest.mark.parametrize("mutation", ["fractional_start", "short_runway", "bond"])

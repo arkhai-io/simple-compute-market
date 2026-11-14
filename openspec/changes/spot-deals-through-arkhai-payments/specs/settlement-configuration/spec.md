@@ -18,32 +18,36 @@ SCM MUST admit period and reserve_ahead_seconds together or neither and require 
 
 #### Scenario: Rate end treatment is explicit
 - **WHEN** a rate option is published or accepted
-- **THEN** only early_termination.settles_through supplies term-end treatment through the deal-lifecycle codec and is checked against vendored end capabilities
-- **AND** an unknown value or unexpressible treatment refuses instead of defaulting from current configuration
+- **THEN** only early_termination.settles_through supplies term-end treatment through the deal-lifecycle codec and is checked against the servicing declaration
+- **AND** an unknown value or undeclared treatment refuses instead of defaulting from current configuration
+
+#### Scenario: A rate option is projected for billing
+- **WHEN** the installed billing projection reads a payments option with paired period and reserve_ahead_seconds, with or without setup_amount
+- **THEN** it projects `per_period` with the period and its seconds
+- **AND** a lone period, a lone reserve_ahead_seconds or a setup_amount without a rate refuses, naming the pairing rule, and nothing projects `total`
 
 #### Scenario: A seller opts out of setup
 - **WHEN** a complete rate option omits setup_amount
 - **THEN** derivation emits no setup part
 - **AND** neither compute domain requires a minimum spend
 
-### Requirement: Rate materialization requires a servicing contract declaration
-SCM MUST refuse rate mandate materialization without a composition's rate-servicing declaration validated under the recurring-servicing declaration contract. This gate MUST also apply to accepted-but-unmaterialized work. Removing publication enablement MUST NOT abandon already materialized deals.
+### Requirement: Rate materialization requires a servicing declaration
+SCM MUST refuse to materialize a rate mandate whose treatments or setup charge the composition's rate-servicing declaration does not list, checking the same declaration the publication and acceptance doors check. The refusal MUST be `RateServicingUnavailable` with the `settlement_option_withdrawn_refetch` code the acceptance door uses. This gate MUST also apply to accepted-but-unmaterialized work. Removing publication enablement MUST NOT abandon already materialized deals.
 
 #### Scenario: An accepted option outlives its declaration
 - **GIVEN** a previously accepted rate option and no current servicing declaration
 - **WHEN** settlement attempts to materialize its mandate
-- **THEN** materialization refuses before approval or delivery
+- **THEN** materialization refuses with `settlement_option_withdrawn_refetch` before approval or delivery
 
-#### Scenario: The declaration validator refuses a target
-- **GIVEN** a proposed declaration rejected by the neutral lane/target/mode validator
+#### Scenario: The declaration lacks a treatment or the setup charge
+- **GIVEN** a declaration listing some treatments but not one the option's entitlements or term end name, or not declaring a setup charge the option carries
 - **WHEN** the materialization door is called
 - **THEN** it refuses before deriving or approving a rate mandate
+- **AND** a declaration listing every treatment and the setup charge the option uses admits it
 
-#### Scenario: A lane-only proposed declaration names the wrong identity
-- **GIVEN** a proposed declaration whose fixture payments identity differs from configured SERVICE_IDENTITY or whose mode is not test mode
-- **WHEN** the materialization door layers its payments-specific identity/mode check on neutral validation
-- **THEN** it refuses before mandate derivation or approval
-- **AND** production cannot admit the lane-only proposed declaration
+#### Scenario: The seller stage reads the composition's declaration
+- **WHEN** a compute composition constructs its payments seller stage
+- **THEN** it passes the declaration its publication and acceptance doors read, so materialization admits exactly what they admit
 
 #### Scenario: Publication is disabled after materialization
 - **WHEN** a previously materialized rate deal is recovered with new publication disabled

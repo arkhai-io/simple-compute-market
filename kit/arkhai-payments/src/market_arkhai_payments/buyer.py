@@ -11,9 +11,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from typing import Any
 
-from market_core.schemas import Agreement, SettlementOption
+from market_core.schemas import Agreement
 from market_settlement_runtime.buyer_terms import BuyerTermsPolicy
-from market_settlement_runtime.rate_publication import default_buyer_refusals
+from market_settlement_runtime.rate_publication import default_buyer_refusal, default_buyer_refused_terms
 from pydantic import ValidationError
 from market_deal_lifecycle.terms import TermContext
 
@@ -105,12 +105,17 @@ class PaymentApproval:
         )
         check(data.mandate, agreement, policy)
         if policy.option.period is not None:
-            if self.terms_policy is not None:
-                self.terms_policy.rank(SettlementOption.model_validate(agreement["settlement"]))
-            else:
-                refusals = default_buyer_refusals(policy.lifecycle, has_adapter=True)
-                if refusals:
-                    raise MandatePolicyError("; ".join(refusals))
+            # Approval refuses the terms a default buyer refuses, less the ones
+            # this buyer's run waived. The dispute authority was ranked against
+            # the listing's registry at selection, which approval cannot see, and
+            # the mandate check above already binds it to the accepted option.
+            waivers = self.terms_policy.waivers if self.terms_policy is not None else frozenset()
+            refused = [
+                term for term in default_buyer_refused_terms(policy.lifecycle, has_adapter=True)
+                if term not in waivers
+            ]
+            if refused:
+                raise MandatePolicyError("; ".join(default_buyer_refusal(term) for term in refused))
         return agreement, data
 
     def approve(

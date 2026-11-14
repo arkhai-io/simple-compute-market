@@ -289,11 +289,17 @@ class PaymentSellerStage:
     ) -> PaymentAdapter:
         """Bind the payee's lifecycle port without taking ownership of its watch cursor."""
 
-        adapter = RatePaymentAdapter if any(part.root.kind == "rate" for part in data.mandate.parts) else PaymentAdapter
-        return adapter(
-            agreement, data, account=selected_payment_option(agreement).payee_account,
-            client_for_owner=self._client_for_owner,
-            verify_snapshot=self._snapshot_verifier(agreement, data), minimum_sequence=minimum_sequence,
+        account = selected_payment_option(agreement).payee_account
+        verify = self._snapshot_verifier(agreement, data)
+        if any(part.root.kind == "rate" for part in data.mandate.parts):
+            return RatePaymentAdapter(
+                agreement, data, account=account, client_for_owner=self._client_for_owner,
+                verify_snapshot=verify, minimum_sequence=minimum_sequence,
+                snapshot_freshness_seconds=self.config.snapshot_freshness_seconds,
+            )
+        return PaymentAdapter(
+            agreement, data, account=account, client_for_owner=self._client_for_owner,
+            verify_snapshot=verify, minimum_sequence=minimum_sequence,
         )
 
     def reverse_now(
@@ -370,7 +376,8 @@ class PaymentSellerStage:
 
 
 def servicing_stage(
-    section: Any, *, client_for_owner: ClientForOwner | None = None
+    section: Any, *, client_for_owner: ClientForOwner | None = None,
+    rate_servicing: RateServicing | None = None,
 ) -> PaymentSellerStage | None:
     """The seller stage for servicing accepted deals, whether or not publishing is enabled.
 
@@ -378,6 +385,8 @@ def servicing_stage(
     stage even when the mechanism is disabled for new deals, so accepted deals
     keep settling and refunding. Without those fields there is nothing to
     service with, and the caller reports accepted deals as needing an operator.
+    ``rate_servicing`` is the composition's declaration, the one its publication
+    and acceptance doors read; without one the stage materializes no rate option.
     """
 
     if section is None:
@@ -387,7 +396,7 @@ def servicing_stage(
     )
     if config.service_url is None or config.service_identity is None:
         return None
-    return PaymentSellerStage(config, client_for_owner=client_for_owner)
+    return PaymentSellerStage(config, client_for_owner=client_for_owner, rate_servicing=rate_servicing)
 
 
 __all__ = [

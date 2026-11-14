@@ -43,8 +43,13 @@ def buyer_lifecycle_disclosure(option, *, waivers: frozenset[DefaultRefusal] = f
     )
 
 
+def buyer_terms_policy(config, *, waivers: frozenset[DefaultRefusal] = frozenset()) -> BuyerTermsPolicy:
+    """The run's terms policy: its accepted authorities and the terms it waived."""
+    return BuyerTermsPolicy(AuthoritySelection(config.dispute_authorities_by_registry, contexts={
+        ARKHAI_PAYMENTS_MECHANISM: buyer_term_context(ARKHAI_PAYMENTS_MECHANISM, waivers=waivers),
+    }), waivers=waivers)
+
+
 def validate_authority(option, config, *, waivers: frozenset[DefaultRefusal] = frozenset()) -> None:
     """An explicit option ID does not bypass the buyer's authority or rights policy."""
-    BuyerTermsPolicy(AuthoritySelection(config.dispute_authorities_by_registry, contexts={
-        ARKHAI_PAYMENTS_MECHANISM: buyer_term_context(ARKHAI_PAYMENTS_MECHANISM, waivers=waivers),
-    }), waivers=waivers).rank(option, registry_url=config.registry_url)
+    buyer_terms_policy(config, waivers=waivers).rank(option, registry_url=config.registry_url)

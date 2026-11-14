@@ -108,8 +108,9 @@ class BuyerCommands:
         self._monkeypatch.setattr(
             buyer_cli,
             "payment_approval",
-            lambda config: PaymentApproval(
-                config.arkhai_payments, config.payer_account, client_for_owner=payments
+            lambda config, *, terms_policy=None: PaymentApproval(
+                config.arkhai_payments, config.payer_account, client_for_owner=payments,
+                terms_policy=terms_policy,
             ),
         )
 

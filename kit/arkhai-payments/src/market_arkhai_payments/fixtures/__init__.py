@@ -20,7 +20,7 @@ from market_arkhai_payments.fixtures.receipts import (
     receipt_parts,
     sign_receipt,
 )
-from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_contract_revision
+from market_arkhai_payments.presets import PaymentsRatePresetHelper
 from market_arkhai_payments.settlement_config import ARKHAI_PAYMENTS_MECHANISM
 
 def dispute_lifecycle(account: str) -> dict:
@@ -48,13 +48,11 @@ def recurring_options(authority: DisputeEntry, *, payee: str) -> dict[str, dict]
     servicing declaration made only for the fixture; the spot option entitles
     the seller to stop with notice.
     """
-    revision = rate_contract_revision()
-    servicing = RateServicing(
-        required_contracts={ARKHAI_PAYMENTS_MECHANISM: revision},
-        declarations={ARKHAI_PAYMENTS_MECHANISM: RateServicingDeclaration(
-            ARKHAI_PAYMENTS_MECHANISM, revision, "published",
-        )},
-    )
+    # The payer's stop charges its started period and the payee's stop and the
+    # term end return the final partial one; neither option has a setup charge.
+    servicing = RateServicing({ARKHAI_PAYMENTS_MECHANISM: RateServicingDeclaration(
+        ARKHAI_PAYMENTS_MECHANISM, frozenset({"charged", "returned"}),
+    )})
 
     def derive(**recurring: int) -> dict:
         clause = SettlementPublicationClause.model_validate({

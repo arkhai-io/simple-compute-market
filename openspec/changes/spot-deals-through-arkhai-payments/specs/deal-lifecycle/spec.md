@@ -1,4 +1,39 @@
+## REMOVED Requirements
+
+### Requirement: Started-period treatment is a committed payment term
+
+**Reason**: Its "Returned treatment is not expressible" scenario describes a contract that never shipped: the vendored published contract expresses `charged`, `returned`, `prorated` and `chosen`, so what limits an offer is the composition's servicing declaration, not the contract.
+
+**Migration**: "Started-period treatment is a committed and declared payment term" carries the same mapping and refusal of storefront refunds, refuses what the servicing declaration does not list, and keeps the one-notice scenario.
+
+## MODIFIED Requirements
+
+### Requirement: Term ends carry their own partial-period treatment
+
+The sole term-end carrier MUST be early_termination.settles_through, distinct from entitlements. The adapter MUST map it to rate end.partialPeriod through the stop-authority mapping. Compute presets MUST use last_boundary/returned, and a term end MAY be offered only under a treatment the composition's servicing declaration lists. No mechanism-specific field MAY duplicate it.
+
+#### Scenario: A rate end is not a billing boundary
+
+- **WHEN** activation starts rate billing after the Agreement start and the absolute term end falls within a billing period
+- **THEN** the compute preset's `end.partialPeriod` is returned, so billing ends at the last boundary without running past the agreed maximum
+- **AND** publication and acceptance refuse that preset where the servicing declaration does not list `returned`
+
 ## ADDED Requirements
+
+### Requirement: Started-period treatment is a committed and declared payment term
+
+The codec MUST map `settles_through` values `started_period`, `last_boundary`, `stop` to payments `partialPeriod` values `charged`, `returned`, `prorated` respectively. Publication and buyer acceptance MUST refuse a value the composition's servicing declaration does not list. SCM MUST NOT replace an entitled stop's committed treatment with a storefront refund; a seller's exceptional end is a dispute filing.
+
+#### Scenario: A treatment is not declared
+
+- **WHEN** a spot option names payee `last_boundary` but the composition's servicing declaration lists only `charged`
+- **THEN** publication and acceptance refuse it, naming the undeclared treatment
+- **AND** the same option publishes under a declaration listing `charged` and `returned`
+
+#### Scenario: Stop authorities use one notice
+
+- **WHEN** an entitlement has `notice_seconds: 0` and `settles_through: started_period`
+- **THEN** its stop entry has zero notice and charged treatment, with no exposure tail
 
 ### Requirement: Seller notice uses lifecycle submit and authority-hosted stop
 The seller half MUST admit a negotiation-keyed notice command only under the accepted payee entitlement. It MUST use the lifecycle submit command contract, submit stop immediately through the payment adapter, and return authority status rather than claim a locally scheduled payment end.

@@ -1,11 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: Rate mechanics qualification consumes the shared lane contract
-Rate mechanics qualification MUST follow "Lane qualification identifies readiness and evidence class". It MUST retain kit/vector and re-anchoring evidence production, while convergence owns rate-lane time and consuming scenarios. It MUST NOT redefine evidence classes or claim live behavior from a double.
+Rate mechanics qualification MUST follow "External payment qualification names its target" and label each result lane-double evidence or live evidence, as "The in-lane payments double mirrors the service and proves its engine's surface" does. It MUST retain kit/vector and re-anchoring evidence production, while convergence owns rate-lane time and consuming scenarios. It MUST NOT add an evidence label or claim live behavior from a double.
 
-#### Scenario: Mechanics run against a proposed contract
-- **WHEN** rate adapter mechanics pass against contract fakes or lane doubles of proposed bytes
-- **THEN** evidence identifies the proposed revision and makes no hosted-readiness or live-authority claim
+#### Scenario: Mechanics run against the lane double
+- **WHEN** rate adapter mechanics pass against contract fakes or the lane double
+- **THEN** evidence is labelled lane-double evidence with the installed contract hashes and makes no hosted-readiness or live-authority claim
 
 #### Scenario: Required authority vectors are absent
 - **WHEN** producer-published signed pre-start/post-start snapshot, start or partial reversal vectors are unavailable
@@ -16,10 +16,18 @@ Rate mechanics qualification MUST follow "Lane qualification identifies readines
 - **WHEN** kit rate integration tests run
 - **THEN** they exercise the shared clock-injected payments authority engine and verified vector fixtures without starting lane HTTP tooling
 
-#### Scenario: Interim fixtures disclose non-default policy
-- **WHEN** a spot or on-demand command fixture offers started_period on an entitlement or term end rejected by default buyer policy
-- **THEN** its committed setup explicitly configures buyer acceptance for every affected term
-- **AND** focused fixture validation records default-policy refusal separately
+#### Scenario: Fixtures use the shipped presets with default buyers
+- **WHEN** a spot or on-demand command fixture is prepared
+- **THEN** it uses the shipped presets under a lane declaration listing returned, with a default buyer
+- **AND** a charged variant is a separate observation whose buyer waives each charged term through its per-term waiver
+
+### Requirement: A recurring purchase runs end to end in each compute lane
+Each compute lane MUST run one recurring-purchase scenario from a lane-only servicing declaration listing charged and returned, through approval against the payments double, labelled lane-double evidence.
+
+#### Scenario: A buyer approves a recurring option
+- **WHEN** a buyer selects a seller's recurring option in a compute lane and approves its mandate
+- **THEN** the scenario asserts the published per-period price, the buyer's pre-approval display of per-period charge, setup, initial reserve and maximum term, and the approved mandate's single rate part charging one period's price
+- **AND** it asserts delivery is refused without the rate continuation
 
 #### Scenario: Command first use precedes continuation
 - **WHEN** adapter or notice first use succeeds before rate continuation is installed

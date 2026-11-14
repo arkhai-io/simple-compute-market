@@ -61,10 +61,10 @@ from market_arkhai_payments import PaymentApproval
 
 from .settlement_composition import (
     BUYER_STAGES, buyer_compute_disclosure, buyer_lifecycle_disclosure,
-    buyer_settlement_registry, validate_authority,
+    buyer_settlement_registry, buyer_terms_policy, validate_authority,
 )
 from market_settlement_runtime.buyer_terms import (
-    UNPROTECTED_TERMS_FLAG, UNPROTECTED_TERMS_HELP, WAIVERS_BY_TERM, option_quote, term_waivers,
+    BuyerTermsPolicy, UNPROTECTED_TERMS_FLAG, UNPROTECTED_TERMS_HELP, WAIVERS_BY_TERM, option_quote, term_waivers,
     waiver_flags,
 )
 from market_settlement_runtime.horizon import check_accepted_horizon
@@ -111,10 +111,16 @@ def registry_client(
     )
 
 
-def payment_approval(config: BareMetalBuyerConfig) -> PaymentApproval:
-    """Approve payments from the configured payer account, and nothing else."""
+def payment_approval(
+    config: BareMetalBuyerConfig, *, terms_policy: BuyerTermsPolicy | None = None,
+) -> PaymentApproval:
+    """Approve payments from the configured payer account, and nothing else.
 
-    return PaymentApproval(config.arkhai_payments, config.payer_account)
+    A purchase passes its run's ``terms_policy`` so approval honours the terms
+    the run waived; without one, approval refuses every term a default buyer does.
+    """
+
+    return PaymentApproval(config.arkhai_payments, config.payer_account, terms_policy=terms_policy)
 
 
 bare_metal_app = typer.Typer(
@@ -529,7 +535,7 @@ def buy_bare_metal(
         default_duration=default_duration,
     ) + buyer_lifecycle_disclosure(selected, waivers=waivers):
         typer.echo(f"  {name}: {value}", err=True)
-    approval = payment_approval(buyer_config)
+    approval = payment_approval(buyer_config, terms_policy=buyer_terms_policy(buyer_config, waivers=waivers))
 
     def validate_acceptance(accepted: Any) -> None:
         try:

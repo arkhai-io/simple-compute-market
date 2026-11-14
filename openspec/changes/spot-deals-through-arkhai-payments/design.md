@@ -11,11 +11,14 @@ selected option's `lifecycle`, beside its `price` and `settlement` (foundation D
 "The option's shape"; terms D4). Payment derivation consumes that shared codec; it
 keeps no mechanism-specific copy of the terms.
 
-`kit/arkhai-payments` derives a single `once` part today. Its vendored schema is an
-earlier publication that predates per-part authorities (the revised contract has no
-mandate-level authorities), `maxHoldExtension` and `pendingStop`. The revised contract
-this design builds on is an implementation gate, not a description of the current
-generated models; the foundation vendors it once for both changes.
+`kit/arkhai-payments` vendors the published per-part contract
+(`kit/arkhai-payments/schema/SOURCE.md`; there is no unpublished candidate): per-part
+authorities with no mandate-level ones, `maxHoldExtension`, `pendingStop`, and stop
+entries and part ends carrying `partialPeriod` — `charged`, `returned`, `prorated`, or
+`chosen` on a stop entry. Every treatment the terms name is expressible, and the code
+assumes that contract. What limits an offer is hosted execution, not the contract: a
+composition offers only the treatments its servicing declaration lists, declared after
+hosted qualification (D7). The foundation vendored the contract once for both changes.
 
 Both compute domains are in scope. API credits stays on `once` parts. The adapter
 is mechanism-owned and stateless; the caller's journal and continuation state live
@@ -42,29 +45,40 @@ one period; for a once-only option it is the term price. The kit never reads the
 negotiated scalar directly and never reinterprets a basis-point multiplier. Both
 sides derive the same parts from the selected immutable option and the rate
 structure bound by the signed acceptance; recovery's accessor is never fed today's
-listing or a registry cache. The accepted-rate carrier or digest that
-`negotiation-driven-capacity-resize` task 2.1a chooses is an input gate: without
-resolvable bound pricing, materialization is refused.
+listing or a registry cache. Rate derivation reads the accepted per-period money
+through `agreed_price` over the monetary `Agreement.amount`, which signed acceptance
+binds; no separate accepted-rate carrier is needed.
+
+The rate parameters are the paired `period` and `reserve_ahead_seconds`, an optional
+`setup_amount`, a finite term, and the asset in `price`. Acceptance horizon resolution
+and mandate derivation share one runway rule, `minimum_rate_duration_seconds`,
+measured from `max(approval expiry, start)`: the term leaves the delivery deadline
+and one whole period after the later of the two. The public discovery projection is
+`arkhai_payments.billing_kind = total | per_period` (setup beside a rate stays
+`per_period`), and `arkhai_payments.period` reads absent as the typed missing value
+`None` under the existing DSL missing-value rule. The installed billing projection
+refuses an unpaired rate rather than label it a total.
 
 **Setup.** An optional `setup_amount`, a positive integer minor-unit string in the
 option's asset, adds a `once` part beside the rate; omission means no setup part.
 It is an additional charge, not `max(setup, usage)`, visible before approval and
 bound into the option ID. A preset populates it from an explicitly configured setup
-price and refuses an incomplete configuration rather than inventing an amount. The
-bare-metal composition's preset ships no default: a bare-metal seller states its
-setup price or publishes no recurring option, since provisioning a host is the
-cost churn imposes. VM's preset may default it to zero. Churn beyond the setup
-charge is the seller's to price differently or to refuse through its negotiation
-policy; neither domain has a required minimum spend.
+price and refuses an incomplete configuration rather than inventing an amount. A
+setup amount is the seller's choice in both domains, as storefront-publication's
+"Recurring publication checks servicing" says; there is no reason for it to differ
+between them, and the bare-metal example configuration and operator documentation
+recommend pricing setup for hosts, since provisioning a host is the cost churn
+imposes. Churn beyond the setup charge is the seller's to price differently or to
+refuse through its negotiation policy; neither domain has a required minimum spend.
 
 Setup is owed from approval because commitment triggers provisioning. A payment stop alone does not reverse it, and lawful preemption after delivery leaves it earned. A qualified delivery_end reverses setup iff delivered=false, for either cause, and keeps it iff true; site activation is not that fact. "For either cause" generalizes the filer, not the ground: setup returns only when the seller never delivered — by the seller's own filing, by its signature on the buyer's claim, or by a person ruling delivered=false on the buyer's evidence — and a buyer's stop, with or without a claim the seller does not sign, keeps it with the seller. The buyer is told before approval that the setup charge is kept if it stops and returns only when the seller never delivered, in those three ways. Parties file or concur through the dispute adapter, with no seller direct payment correction. A lawful controlling end keeps its attribution rather than becoming seller fault, but the claim's delivered value still governs setup.
 
-The setup part remains an ordinary once part. Encode its end at Agreement start so mediation recognizes it (once end at or before Agreement start); payments clamps an end at/before approval to approval without changing mandate bytes, so its effective end/payout anchor is max(Agreement start, approval). No activation-anchored end or payments wire revision is required. Enable setup-bearing presets only after foundation 12.1 vendors delivery_end, its signed payload/concurrence mapping and both signature vectors. Until then disable setup-bearing presets, rather than publishing a setup charge without its remedy. Delivery is the signed claim's delivered fact, not activation or a unilateral flag.
+The setup part remains an ordinary once part. Encode its end at Agreement start so mediation recognizes it (once end at or before Agreement start); payments clamps an end at/before approval to approval without changing mandate bytes, so its effective end/payout anchor is max(Agreement start, approval). No activation-anchored end or payments wire revision is required. The foundation vendored `delivery_end`, its signed payload and concurrence mapping and both signature vectors, so setup's remedy exists; what gates a setup-bearing preset is the composition's servicing declaration, whose `setup` flag says the composition services a setup charge (D7). `supports_setup_delivery_end` stays the mechanism's capability, true for this helper. Delivery is the signed claim's delivered fact, not activation or a unilateral flag.
 
 | Preset | Parts | Entitlements |
 |---|---|---|
-| On-demand | setup `once` by default + time rate | payer `{notice_seconds: 0, settles_through: started_period}`; no seller stop entry |
-| Spot | setup `once` by default + time rate | payer `{notice_seconds: 0, settles_through: started_period}`; payee with its priced notice |
+| On-demand | setup `once` when the seller prices it + time rate | payer `{notice_seconds: 0, settles_through: started_period}`; no seller stop entry |
+| Spot | setup `once` when the seller prices it + time rate | payer `{notice_seconds: 0, settles_through: started_period}`; payee with its priced notice |
 | Reserved | `once` for the committed term | existing `once` semantics |
 
 Every preset also carries `lifecycle.delivery_deadline_seconds`, the pool's value the
@@ -82,6 +96,18 @@ acceptance and display of the penalty are the terms change's.
 
 No class flag is persisted or used for dispatch. One pool may publish on-demand and
 spot at different rates.
+
+**Composition defaults.** Both compute compositions install the payments preset
+helper and its timing projection by default, through one payments-kit function,
+`payments_rate_wiring`, which both call. They stay dark until the composition
+declares rate servicing: publication, acceptance and materialization each refuse a
+rate option whose treatments the declaration does not list. Each composition
+constructs its payments seller stage with the same declaration (`rate_servicing=`),
+so materialization admits exactly what publication and acceptance admit. The helper's
+`pricing()` returns the clause's own `delivery_deadline_seconds` through
+`RatePresetPricing`, which the pool's effective deadline overrides, and `pricing()` and
+`build()` convert the clause's rate to minor units through one conversion that refuses
+a rate finer than the asset's precision.
 
 ### D2. Exact per-part mandate derivation
 
@@ -108,10 +134,9 @@ period boundary under reserve-ahead.
 `end.partialPeriod` is derived exclusively from `early_termination.settles_through`
 through the foundation codec — `started_period` ↔ `charged`, `last_boundary` ↔
 `returned`, `stop` ↔ `prorated` — with no second end-treatment option parameter.
-The intended preset is `last_boundary`. Until `returned` is expressible, every
-interim rate offer, on-demand included, explicitly commits `started_period` at the
-term end and discloses the final partial-period charge; publication and acceptance
-refuse unexpressible terms, and SCM implements no compensating refund.
+The preset is `last_boundary`. A composition may offer a term end only under a
+treatment its servicing declaration lists (D7); publication and acceptance refuse
+any other, and SCM implements no compensating refund.
 
 The foundation owns per-part authority derivation from the common codec. This
 change adds the rate-specific `start` permission, period, reservation and end
@@ -121,12 +146,11 @@ carry the entitled party's `notice_seconds` and the `partialPeriod` mapped from 
 `settles_through` (D5). An exceptional end grants no seller stop entry or implicit
 payment privilege: the seller files a dispute and mediation acts under its own
 entry; there is no additional seller restitution entry and no multiple-entry
-dependency. On the returned-capable revision every rate stop entry and rate end
-carries an explicit `partialPeriod`; the installed schema also requires the foundation's inert `returned` field on `once` ends, and the dispute
+dependency. Every rate stop entry and rate end carries an explicit `partialPeriod`;
+the published schema also requires `partialPeriod` on every part `end`, so `once` and
+setup ends carry the foundation's inert `returned`, which prices nothing. The dispute
 authority's rate stop entry is `{account, notice: PT0S, partialPeriod: chosen}`,
-under which a stop carries its own charged, returned or prorated treatment. On the
-interim revision these fields are absent and the vector-qualified fixed charged
-semantics apply, dispute stops included; chosen-entry treatment is unavailable.
+under which a stop carries its own charged, returned or prorated treatment.
 Only the dispute authority extends and lifts holds. Reverse permissions remain the
 payee's and the dispute authority's. Setup uses the foundation's `once` permissions
 and its own encoded end at Agreement start, effectively clamped to approval if later, without rate start
@@ -145,13 +169,13 @@ configuration cannot alter an accepted mandate.
 
 ### D3. External contract context; one vendoring owner
 
-The revised contract has per-part authorities `{stop: [{account, notice,
-partialPeriod}], reverse, extend, start}`, with `start` on rate parts. Until
-`partialPeriod` is vendored only its expressible charged semantics may be offered;
-D5 defines that fail-closed interim. The contract also carries `maxHoldExtension`,
-an optional per-part `end` (with `partialPeriod` required for rate ends on the
-returned-capable revision), `{afterStop: d}` holds, `start` and `stop` with an
-optional part, `stop` with an optional `at`, and `extend`/`lift`. An entitled stop
+The published contract has per-part authorities `{stop: [{account, notice,
+partialPeriod}], reverse, extend, start}`, with `start` on rate parts, and expresses
+every treatment: stop entries carry `partialPeriod` ∈ `charged | returned | prorated
+| chosen`, every part `end` requires one, and pending and final stop records carry
+the treatment applied. It also carries `maxHoldExtension`, an optional per-part
+`end`, `{afterStop: d}` holds, `start` and `stop` with an optional part, `stop` with
+an optional `at`, and `extend`/`lift`. An entitled stop
 takes effect at `max(at ?? now, now + senderNotice)` at authority receipt and is
 never backdated. There is no implicit role-based or buyer-favourable stop
 privilege, no payee waiver of payer notice, and no payer early-release waiver: each
@@ -163,9 +187,7 @@ The seller's emergency exit, a spot hardware failure included, is the journaled
 `delivery_end` filing, not a payment stop of its own. On-demand's promise not to
 preempt is enforced by remedy rather than by a mandate guarantee of physical
 service: the buyer may enforce the premature-stop penalty through a case over held
-money, and the seller's own exit is the mechanically ruled self-penalty. Interim
-charged-only fixtures prove only their named mechanics and cannot qualify the
-standard returned self-penalty.
+money, and the seller's own exit is the mechanically ruled self-penalty.
 
 Per-part snapshots expose `started`, `stop`, `pendingStop`, `extensions` and
 `releaseAt`, beside rate progress and the causal sequence. Approval reserves the
@@ -187,15 +209,30 @@ remains held. Only the dispute authority opens case extensions and applies rulin
 effects, then lifts that case's refs.
 
 These are external dependencies, not behaviour SCM can implement by asserting it in
-a normative spec. The foundation vendors the schema and vectors and implements
-snapshot-proof verification in its round 2; this change gates on that verified
-interface before reading any snapshot field and supplies no second proof verifier.
+a normative spec. The foundation vendored the schema and vectors and implements
+snapshot-proof verification; this change reads no snapshot field before that
+verification and supplies no second proof verifier.
 
-Outstanding qualification requests to the service: signed snapshot vectors, paired
-snapshots before and after `start`, a mixed `once`/`rate` mandate vector, partial
-rate-reversal integration traces before and after a stop, and the reservation and
-charge behaviour where a late rate start approaches the absolute term bound. A
-missing vector blocks the corresponding conformance claim; double-generated vectors
+**Vectors, as vendored.** The published vectors cover snapshots before and after
+`start`, term ends, a clamped setup-and-rate mandate, partial reversals while
+running and after a stop, and same-key stop replay. Two hosted test-mode facts are
+recorded from the service: a stop's `settled` figures are not restated after a later
+reversal, so reconciliation reads the recorded reversals rather than the stop's
+figures; and approval answers `409 insufficient_funds` when the payer's balance
+cannot cover the first reservation.
+
+**Qualification limits.** These remain the producer's to close and are qualified at
+switch-on (`activate-per-period-compute-servicing`), never by a double:
+
+- the producer's independent HTTP run covered fixed payer and payee treatment only,
+  not `chosen`, term ends or reverse;
+- the stop-retry vectors are fixed-clock fixtures;
+- there is no cross-key producer vector for identity rotation and no stated key
+  retention commitment, so live rotation is qualified at switch-on (D7);
+- declaring any rate treatment presupposes the payment authority executes the
+  dispute entry's `chosen` stop, which hosted execution has not yet shown (D7).
+
+A missing vector blocks the corresponding conformance claim; double-generated traces
 are not published authority evidence.
 
 ### D4. Adapter commands and immutable operation descriptors
@@ -204,11 +241,14 @@ The hosted payment adapter is extended, not the conditional-escrow port. A
 lifecycle `submit {negotiation_id, kind, operation_key, at, payload}` translates
 into explicit per-part events with stable derived keys that include the operation
 and the part. Outcomes are `accepted`, `rejected`, `pending` or `unknown`; `read`
-resolves `unknown` before another monetary delta. The caller's durable journal
-rejects same-key reuse with changed content before any I/O; the stateless adapter
-compares the supplied journaled descriptor or digest with its new descriptor, with
-the authority's `request_id_reused` as the backstop. Actor credentials authorize a
-command; possession of a handle does not.
+resolves `unknown` before another monetary delta. Every monetary rate call — start,
+`start_billing`, stop, notice and reverse — requires the caller's `OperationStore`
+through `OperationKeys.store` and records each descriptor's digest through it with
+`check_and_record`, under a part-derived key, before any I/O: a changed retry is
+refused before any authority call, and an identical retry reuses its request
+identity. The authority's `request_id_reused` is the backstop. There is no
+`journaled_digest` parameter. Actor credentials authorize a command; possession of a
+handle does not.
 
 The adapter provides rate `start` with activated-delivery evidence, the entitled
 stop (a seller notice translates to a stop), voluntary partial reverse, and
@@ -233,10 +273,12 @@ classified seller non-delivery takes the `delivery_end` handoff. Admission and
 disclosure races and the durable journals belong to convergence, not the adapter.
 
 The adapter exports immutable operation descriptors — part, event kind, amount or
-`at`, payload or evidence reference, request identity. It exports no end-pricing
-target or delta API and no started-period correction journal. The caller writes
-each descriptor durably before calling. The adapter has no database and no daemon
-and imports neither `kit/deal-servicing` nor either domain.
+`at`, payload or evidence reference, request identity. `PaymentOperation` stores the
+canonical event JSON and exposes its digest, never mutable event state, and stays
+exported with `describe()` for audit. It exports no end-pricing target or delta API
+and no started-period correction journal. The adapter has no database and no daemon
+and imports neither `kit/deal-servicing` nor either domain. `start_billing` checks
+the activation envelope's version, bindings and activation instant before any call.
 
 A `transaction_stopped` refusal of `start` signals a delivery end, not success. A
 repeated stop is already satisfied only when the verified record shows the same or
@@ -271,9 +313,17 @@ is pending, never allow.
 | disclose | Allow only after a verified rate `start` bound to the journaled billing-start intent and still-valid funding, with no effective stop or end. An unstarted or unresolved start is pending; a definitive start refusal or an effective end refuses. |
 
 A phase invoked at a pending stop's effective instant refreshes authority state;
-stale evidence never authorizes work past a known bound. These are payment choices
-only: availability, deadlines and dispatch or disclosure races remain with the
-neutral composition and the domain, which read no hosted part fields.
+stale evidence never authorizes work past a known bound. A snapshot decides a phase
+only when its `observedAt` lags the storefront's clock by no more than a configured
+freshness window (`snapshot_freshness_seconds`, 5 seconds by default; a snapshot
+observed ahead of the storefront's clock is fresh). The two clocks are independent
+claims and nobody orders them: the window is a seller-side liveness allowance for
+skew and latency, and every bound — stop, end, funding — is still checked against
+the storefront's `now`. A supplied journaled billing-start result, paired with its
+operation key, can definitively refuse disclosure; otherwise a missing verified start
+is pending. These are payment choices only: availability, deadlines and dispatch or
+disclosure races remain with the neutral composition and the domain, which read no
+hosted part fields.
 
 ### D5. Started-period treatment is enforced by the payment authority
 
@@ -295,18 +345,21 @@ seller self-penalty is a separate mediation package whose rate stops are always
 
 The terms change owns the buyer's acceptance policy, which by default refuses a
 payee entitlement or term end whose `settles_through` is not `last_boundary`,
-naming the offending term; a buyer may explicitly loosen it. The rate adapter
-consumes that policy and does not own a second one.
+naming the offending term; a buyer may explicitly loosen it, one term at a time
+through its per-term waivers. The rate adapter consumes that policy and does not own
+a second one: both compute buyers pass their run's `BuyerTermsPolicy` to
+`PaymentApproval`, which refuses at approval exactly the default refusals the run did
+not waive, and with no policy supplied keeps the waiver-free default refusals.
+Approval reads the policy's waivers, not its authority ranking: the dispute authority
+was ranked against the listing's registry at selection, which approval cannot see,
+and the exact mandate check binds it to the accepted option.
 
-Until the returned-capable contract revision is vendored, publication and
-acceptance refuse every unexpressible value. The interim rate offer, spot or
-on-demand, explicitly commits `started_period` on each present entitlement and,
-when only a charged end is expressible, on the term end too. Default buyers refuse
-it: disclosure alone does not override their acceptance policy, and an interim
-scenario configures its buyer to accept `started_period` for every affected term,
-a charged term end included. Rate offers reach default buyers only once the
-vendored revision expresses `returned` on seller stops and term ends. No storefront
-refund restores a missing payment term.
+Because the contract expresses every treatment, the shipped presets — `returned` on
+the payee's stop and at the term end — reach default buyers wherever a composition
+declares those treatments. A seller offering `started_period` on the payee's stop or
+term end does so under a declaration listing `charged`, and default buyers refuse it
+unless the run waives that term; disclosure alone does not override their policy.
+No storefront refund restores a missing payment term.
 
 For authority start S and period P, periods are half-open [S + kP, S + (k+1)P). At
 E = S nothing is earned. With S = 0, P = 60, A = 100 and E = 60 all three
@@ -322,10 +375,10 @@ The verified stop record determines treatment:
 |---|---|
 | Payer or payee stop | that authority entry's `partialPeriod` |
 | Exhaustion (terms) | the `fundedThrough` boundary; no partial period |
-| Absolute part end (terms) | the end's own `partialPeriod`; compute preset `returned`, interim `charged` |
+| Absolute part end (terms) | the end's own `partialPeriod`; compute preset `returned` |
 | Seller `delivery_end` | the seller files through the dispute adapter; mediation's mechanical self-penalty stops rates now with `returned` and reverses unserved earnings and `once` shares; no seller payment calls |
 | `end_delivery` receipt | evidence of surrendered service only; the storefront cannot stop the buyer's billing; the buyer half journals and retries its own stop, and billing runs until it lands |
-| Dispute-authority stop or effects | a human ruling states its chosen-entry treatment; `delivery_end` realizes the payer's notice and treatment; payee-agreed claims are mechanical under the foundation guards; the interim fixed charged semantics remain a qualification gate |
+| Dispute-authority stop or effects | a human ruling states its chosen-entry treatment; `delivery_end` realizes the payer's notice and treatment; payee-agreed claims are mechanical under the foundation guards; hosted execution of the `chosen` entry is a qualification limit (D3) |
 | Superseded or equal-time competing request | the authority's recorded winning stop and entry, never local arrival order |
 | Unknown cause or ambiguous winning entry | surface an unsupported or unknown state; no inferred monetary action |
 
@@ -390,22 +443,33 @@ a push notice and a live storefront are not safety dependencies.
 An on-demand refusal of `notice` identifies `delivery_end` as the path for actual
 seller non-delivery, not a self-interested override or an automatic filing on
 refusal; a lawful end before disclosure keeps its cause without a seller-fault
-filing. The foundation-owned VM admin interrupt route uses `notice` for a lawful
-entitled stop and files `delivery_end` through the dispute adapter for a
-seller-caused emergency failure, spot hardware failure included. Alkahest splitter
-execution and its defects remain outside this work.
+filing. The administrator interrupt route uses `notice` for a lawful entitled stop
+and files `delivery_end` through the dispute adapter for a seller-caused emergency
+failure, spot hardware failure included. Alkahest splitter execution and its
+defects remain outside this work.
 
-The administrator wire selector is `interruption_kind=preemption|failure`, separate
-from the existing free-text `reason`. Existing typed-client callers omit a kind
-and describe operator ends of once-only deals; they retain `failure` as the
-compatibility default. Rate requests must state a kind. The storefront CLI has no
-interrupt verb today; `deals preempt` already sends notice explicitly. The typed
-client exposes the selector and operation key in both sync and async variants.
+The administrator wire selector is `InterruptDealRequest.interruption_kind =
+preemption | failure`, separate from the existing free-text `reason`: required for
+rate deals, `failure` by default for once-only deals, so the released route's
+callers, which omit a kind and describe operator ends of once-only deals, keep
+working. The classification from kind to command lives in `kit/deal-servicing`'s
+seller half, not in a domain: preemption is `notice`, refused without a payee
+entitlement; failure ends delivery and files `delivery_end`; both require the
+reason. Both storefronts mount the administrator interrupt route over that kit
+classification — VM's existing route calls the kit, and bare metal gains the route
+and its typed admin client — since nothing about interruption differs between the
+compute domains. The storefront CLIs have no interrupt verb; `deals preempt` already
+sends notice explicitly. The typed clients expose the selector and operation key in
+both sync and async variants.
 
 ### D6a. The rate buyer end preserves the priced notice
 
 This change owns the rate buyer-end flow the foundation defers to it, in the neutral
-buyer half and in both domains' canonical end verbs. A normal buyer end submits the
+buyer half and in both domains' canonical end verbs. The canonical verb is `end` in
+both domains — `market end` and `bare-metal end`, registered from shared buyer code;
+`bare-metal teardown` is a deprecated alias that prints a notice naming `end` for one
+release and is then removed, and once-only end behaviour is what `teardown` did in
+v0.3.0. A normal buyer end submits the
 payer's stop at the payment authority and sends a `hint`; with a nonzero payer
 notice it does not send `end_delivery`, and delivery continues until `watch`
 observes the effective stop and end service acts. A hint or read failure never
@@ -423,29 +487,61 @@ cooperative payment stop. The buyer's `delivery_end(cause=payer)` case and its h
 Both-authorities-down recovery keeps the journal and retry path. The terms change owns the display of a normal stop against
 an immediate surrender, and of billing that continues while a stop is pending.
 
-**Deferred buyer watchdog.** Goal 8's MVP excludes the foreground watchdog.
-Reachability probes would trigger an irreversible stop, and protection would
-exist only while the foreground buy process runs. This slice builds no probe
-loop, monitor state or buy flags. The buyer can invoke the ordinary stop manually.
+**The buyer's watchdog.** The honest-crash exposure — the resource lost while the
+seller's storefront is down, the buyer charged until its own stop lands (foundation
+D12) — is bounded from the buyer's side by this change's watchdog: a probe loop in
+`kit/deal-lifecycle-buyer` that the buyer's own `buy` command runs in the foreground.
+There is no buyer daemon: the buyer used to run a persistent service and that design
+was retired; what runs the watchdog is the process the buyer already has. With the
+opt-in flag, the `buy` command does not return after delivery: once `available`, it
+probes the disclosed access on the configured interval and, when the resource fails a
+configured number of consecutive probes, sends the buyer's ordinary entitled stop and
+`hint` through the flow above, journals the probe evidence it acted on, and exits. It
+exits also when the deal ends by any other path, or when the buyer stops it. The
+opt-in, interval and threshold are persisted per deal in the buyer's profile, so
+`buy --resume` re-enters the loop after a restart where the deal is still running; the
+deal read shows `monitored`, `stopped` or `unmonitored`, and a deal whose monitor is
+not running is shown as unmonitored, never as protected. The probe is injected per
+domain — the VM's or bare-metal host's reachability on the disclosed address and
+credential kind — so the kit learns no credential format; what "stops answering"
+means is that access, not the buyer's workload.
+
+The bound is conditional and stated as one, wherever the watchdog is described:
+detection takes at most `interval × threshold + probe timeout` after the loss, and
+only while the monitor runs; the stop's acknowledgement at the authority and any
+priced notice come after that, and billing runs until the stop lands. A probe failure
+is the buyer's observation (foundation D9), kept with its instants, and the stop it
+triggers is reversible by nothing, so the default interval and threshold are
+conservative. The watchdog sends nothing the buyer could not send by hand and asks
+nothing new of the authority.
 
 ### D7. Servicing declarations and identity rotation
 
-The terms change owns the neutral servicing declaration, the publication and
-acceptance doors, and the validation of the proposed profile; this change layers
-the payments identity and mode checks on that validation at materialization and
-refuses an absent declaration even for accepted-but-unmaterialized work.
-Convergence owns rate startup, recovery and continuation registration; activation
-owns the production switch-on after hosted deployment. Disabling new publication
-never abandons materialized deals. Hosted enablement is a separate deployment gate.
+The terms change owns the neutral servicing declaration and the publication and
+acceptance doors. The declaration is per mechanism: the `settles_through` treatments
+the composition has qualified against that mechanism's payment authority, named as
+the authority names them — `charged`, `returned`, `prorated` — and whether it services
+a separate setup charge (`setup`). It is declared only after hosted qualification;
+absent or empty means no rate servicing. This change supplies the materialization
+door: `PaymentSettlementData.for_agreement` calls `require_option` on the same
+declaration for a rate option, so an option whose treatments or setup charge are
+undeclared refuses with `RateServicingUnavailable` and its
+`settlement_option_withdrawn_refetch` code, as the acceptance door does, even for
+work accepted before a withdrawal. The preset helper checks no contract revision:
+derivation and publication already check the declaration. Convergence owns rate
+startup, recovery and continuation registration; activation owns the production
+switch-on after hosted deployment. Disabling new publication never abandons
+materialized deals. No continuation or production declaration is installed here.
 
-The lane-only `proposed` declaration binds the fixture payments identity to the
-configured `SERVICE_IDENTITY` in test mode (`livemode = false`). The
-mechanism-specific materialization check layers on the neutral declaration
-validation and refuses mismatched identities, live mode and production use; it
-never queries private control or status routes to establish trust.
+Declaring any rate treatment presupposes that the payment authority executes the
+dispute entry's `chosen` stop (D2), which is qualified at switch-on
+(`activate-per-period-compute-servicing`). The derivation does not change for it:
+every rate part's dispute entry stays `{account, notice: PT0S, partialPeriod:
+chosen}`. If the payments team says hosted cannot execute `chosen`, the fallback is
+the open question below.
 
-Configuration may list current and retiring service identities with retirement
-dates. During the overlap an old receipt remains verifiable and a fresh snapshot
+Configuration lists current and retiring service identities with retirement dates,
+as operator configuration with no hard-coded overlap. During the overlap an old receipt remains verifiable and a fresh snapshot
 under the current identity re-anchors a running deal: the foundation verifier
 accepts current and retiring identities with validity windows and a
 caller-supplied minimum sequence, and the current snapshot attests its embedded
@@ -460,26 +556,42 @@ reports unanchored rate deals. Re-anchoring is scoped to rate deals here. Once-o
 hosted deals are included in the retiring-key dependency inventory and must drain
 before removal; durable once-only re-anchoring is deferred, not assigned silently
 to a rate-only consumer. A retiring key is removed only after running deals have
-re-anchored or drained. No per-deal pin survives revocation, and a `livemode`
-change cannot re-anchor and requires draining. This change owns rotation policy,
-configuration and the adapter seam, not the cryptographic proof implementation.
+re-anchored or drained; a deal not yet re-anchored when a key must retire drains
+first. No per-deal pin survives revocation, rollback is refused, and a `livemode`
+change cannot re-anchor and requires draining. Re-anchoring evidence comes through
+dev's verifier ("Snapshot verification accepts bounded identity history") and is
+proven against an in-process engine signing under two keys. This change owns
+rotation policy, configuration and the adapter seam, not the cryptographic proof
+implementation.
 
 ### D8. Vectors, qualification and consumer scenarios
 
-The three evidence classes are the lane double's, by name — *Qualification against
-the published contract*, *Qualification against a proposed contract*, *Live
-evidence* (its [D6](../add-arkhai-payments-lane-double/design.md#d6-lane-first-use-and-evidence-classes));
-pinned-vector conformance is supporting evidence, not a fourth class. Results keep
-the target identity and mode, hashes and the control trace. Only the external
-service's own suite qualifies its ledger and payouts. Examples and fixtures use
-`USD/6`; production reads the Agreement's asset.
+Evidence carries one of two labels, those of test-compatibility's "The in-lane
+payments double mirrors the service and proves its engine's surface": *lane-double
+evidence*, from the in-lane payments double running the vendored engine, and *live
+evidence*, from deployed authorities only. Pinned-vector conformance is supporting
+evidence, not a third label. Results keep the target identity and mode, hashes and
+the control trace, as test-compatibility's "External payment qualification names its
+target" requires. Only the external service's own suite qualifies its ledger and
+payouts. Examples and fixtures use `USD/6`; production reads the Agreement's asset.
 
 | Scenario or prepared entry point | Executor | Evidence boundary |
 |---|---|---|
 | Derivation, authorize phases, the setup part, exceptional-end filing; adapter and vector targets | this change's focused kit suites | pinned-vector support; published conformance only for published bytes |
-| Buyer stop and hint, seller preempt, setup and rate approval fixtures | this change's CLI and application first use | command mechanics against the named published or proposed contract |
-| Delivered on-demand and spot, due-work barriers, release and access closure; the rate matrix | convergence | published or proposed qualification as the target permits |
+| Buyer stop and hint, seller preempt, setup and rate approval fixtures | this change's CLI and application first use | command mechanics, lane-double evidence |
+| One recurring purchase per compute lane through approval | this change's E2E scenarios | lane-double evidence |
+| Delivered on-demand and spot, due-work barriers, release and access closure; the rate matrix | convergence | lane-double evidence |
 | Hosted four-path qualification | activation | live evidence, from deployed authorities only |
+
+**The recurring-purchase E2E.** One scenario per compute lane runs from a lane-only
+servicing declaration listing `charged` and `returned` through approval against the
+payments double, asserting the published per-period price, the buyer's pre-approval
+display (per-period charge, setup, initial reserve, maximum term), the approved
+mandate's single rate part charging one period's price, and that delivery is refused
+without the rate continuation. It is labelled lane-double evidence, closes the change
+index's gap row for a recurring purchase, and convergence extends it through
+delivery. Validation runs the compose lanes with Docker and the local Helm part as
+its end-to-end evidence; a lane unrun at closeout is a blocker, not a pass.
 
 Unit and vector targets prove derivation, `partialPeriod` edges and exact event
 bytes. Kit library integration uses the single clock-injected payments authority
@@ -500,16 +612,75 @@ its runnable scenarios and their execution; this change prepares its entry point
 — the rate and setup preset and approval fixtures, the typed buyer-end and seller
 notice and preempt commands, the adapter `start` and read seams — and runs no lane
 qualification of them. Physical completion evidence proves release and access
-closure, not `lease_ended` intent alone. A prepared interim rate scenario,
-on-demand included, names its buyer's explicit `started_period` acceptance for the
-payee entitlement and any charged term end, keeping default-policy refusal and
-returned-capable acceptance as distinct observations.
+closure, not `lease_ended` intent alone. The prepared fixtures use the shipped
+presets with default buyers under a lane declaration listing `returned`; a charged
+variant is a separate observation whose buyer waives the term through its per-term
+waiver, never through the all-terms shorthand. Every behaviour lands with permanent
+tests at the level `docs/development/TESTING.md` assigns it.
 
-Published vectors qualify derivation and contract use here; proposed lanes never
-prove hosted internals, and hosted prerequisites are reported before a scenario
-runs. Activation lists the producer-published signed snapshot, start and reversal
+Published vectors qualify derivation and contract use here; lane-double evidence
+never proves hosted internals, and hosted prerequisites are reported before a
+scenario runs. Activation lists the producer-published signed snapshot, start and reversal
 vectors among the blockers to published qualification; double-generated traces
 satisfy none of them and enable no published production servicing.
+
+### D9. `approval_window` and `window` are one term, renamed in stages
+
+Approval expiry has one name, `approval_window`. The released `arkhai.payments.v1`
+option parameter is `window`, and a contract carrying its own version is never
+changed in place (`docs/development/RELEASING.md`), so the rename runs in stages over
+three releases:
+
+1. This change's release: readers of `arkhai.payments.v1` option parameters accept
+   `window` and `approval_window` as one term and refuse a document carrying both;
+   rate options are written with `approval_window`; once options keep writing
+   `window`, so released buyers keep working. The `arkhai_payments.approval_window`
+   discovery field replaces the duplicate projection, with `arkhai_payments.window`
+   kept for once options until writers switch. The alias in code carries a comment
+   stating its invariant.
+2. The next release: once-option writers switch to `approval_window`.
+3. The release after: the `window` alias is removed.
+
+Steps 2 and 3, with the `bare-metal teardown` alias's removal (D6a), are one unowned
+gap row in `openspec/changes/README.md`, each step triggered by its release. A
+registry acceptance test proves rate options carrying `approval_window` pass the
+registry, which holds mechanism parameters opaquely. `RELEASING.md` gains the
+staged-rename rule as a path for deprecating a field, not a limit on how a contract
+may change.
+
+### D10. Stop requests are distinct from final stops, wire-compatible for released readers
+
+A raw `stop_request` event never ends delivery. The lifecycle contracts carry
+`PaymentEvent.settles_through`, `PaymentPartObservation` and `AuthorityView.parts`,
+which hold each part's verified rate bounds and its pending and final stops. Notice
+maturity can reuse the stop request's original sequence, so the watch reads each
+part's final stop outside its event cursor and records it once by authority record;
+a changed replay is refused. The lifecycle `read` and `list` routes omit empty `parts`
+and null `settles_through`, so a once-deal read stays valid for
+`kit/deal-lifecycle-contracts` 0.1.0 clients; the contracts take a minor version, and
+a test validates a once-deal read against the 0.1.0 model. A `VersionedEnvelope`
+covers an incompatible lifecycle-read change if one is ever needed; nothing else is
+added for versioning.
+
+### D11. One payments transaction adapter, by composition
+
+One payments transaction adapter implements the foundation's `PaymentAdapter`
+protocol (`kit/deal-lifecycle/src/market_deal_lifecycle/adapters.py`). It is composed
+of shared components — mandate binding, verified snapshot reads, reverse, event
+projection, refusal classification and D4's descriptor recording — and per-part-kind
+behaviour: `once` parts reverse, extend and observe; `rate` parts start, stop, take
+notice, observe and answer the rate `authorize` phases. A once-only mandate's
+`start_billing` is a no-op. There is no inheritance between once and rate behaviour:
+no private flag switching a once-only guard off, and no class choice in the seller
+stage or either buyer. The stop path does not pre-read, since D4's recording refuses
+a changed retry. The protocol's `authorize` gains an optional journaled billing-start
+argument, and `start_billing` takes `OperationKeys` instead of a bare key, so it can
+carry the caller's operation store.
+
+The adapter's earlier shape, a rate class subclassing the once-only one and
+switching its rate guard off, is the inverted hierarchy this replaces: two classes
+whose behaviours contradict — one refuses what the other does — implement a shared
+interface or derive from a common base holding only what both do.
 
 ## Rejected alternatives
 
@@ -528,11 +699,25 @@ satisfy none of them and enable no published production servicing.
 - An unsupported post-stop refund journal: reverse already works after a stop while money is held, and paid-out money is outside that primitive.
 - Storefront cumulative-target end refunds: they bind only a cooperative seller, race independent authority rulings, and absorb unrelated discounts.
 - Boundary-aligned seller notices as a substitute for `partialPeriod`: they change the offered notice and cannot encode an arbitrary committed treatment.
-- Local final-period pricing: the payment term and the authority decide it, the explicitly charged interim preset included.
+- Local final-period pricing: the payment term and the authority decide it.
 - A separate per-period mechanism or domain adapter: generic parts and authorities serve both domains.
 - A new preemption route or an escrow-keyed admin verb: lifecycle `submit` is already the authenticated command boundary.
 - Pinning accepting keys forever, or draining every deal on each rotation: a bounded overlap with re-anchoring preserves running deals without trusting revoked keys.
 - Proposed qualification as live proof: a double cannot establish deployed authority behaviour.
+- An interim contract revision with only fixed charged semantics, and offers fixed to `started_period` until `returned` became expressible: the published contract already expresses every treatment, so the limit is hosted execution, which the servicing declaration expresses (D7).
+- A lane-only `proposed` declaration binding a fixture payments identity and mode at materialization: the servicing declaration is treatments and a setup flag, declared after qualification, and identity is the receipt verifier's (D7).
+- A bare-metal preset with no setup default and a VM preset defaulting to zero: setup is the seller's choice in both domains, and the domains differ only where an explicit need is identified (D1).
+- Keeping the released `window` as the only name: one name keeps the client and model clean, and the staged rename keeps released buyers working (D9).
+- Keeping the rate adapter as a subclass of the once-only adapter, with its guard switched off by a private flag or a class-level declaration: contradictory behaviours do not subclass one another (D11).
+- Refusing any snapshot observed before the storefront's `now`: two observers' clocks cannot be ordered across a network boundary, so a strict comparison only turns skew into pending answers; a bounded freshness window with bounds checked at the storefront's clock is the liveness rule (D4).
+- Moving sections 4–6 out of this change to the Goal 8 MVP replan: each change is mergeable to `dev` on its own merits, and splitting a change under development would undercut the premises of code already built.
+
+## Open questions
+
+- **A bound fallback for the dispute entry.** If the payments team says hosted cannot
+  execute the dispute entry's `chosen` stop, a rate option would bind a fixed
+  `charged` dispute entry into its settlement parameters instead. Until then the
+  derivation keeps `chosen` (D7), and nothing here builds the fallback.
 
 ## Dependencies and ownership
 
@@ -543,14 +728,13 @@ satisfy none of them and enable no published production servicing.
   rotation verifier's inputs. The seller never substitutes direct payment calls
   for the filing path; a spot emergency exit uses it rather than an extra stop
   entry.
-- `negotiate-open-ended-compute-terms` (whole change): the agreed-price accessor
-  and period unit, the listing bounds, the accepted pricing carrier (resize task
-  2.1a), the option shape and start-identity rule, the servicing declaration, the
-  whole-second start resolution before signature, and the publication and
-  acceptance doors. The terms change owns generic publication emission through an
-  injected preset-helper interface; this change supplies the hosted helper, the
-  materialization door, and its payments identity and mode check. Convergence
-  alone owns startup.
+- `negotiate-open-ended-compute-terms` (whole change, archived): the agreed-price
+  accessor and period unit, the listing bounds, the option shape and start-identity
+  rule, the servicing declaration, the whole-second start resolution before
+  signature, the per-term buyer waivers, and the publication and acceptance doors.
+  The terms change owns generic publication emission through an injected
+  preset-helper interface; this change supplies the hosted helper and the
+  materialization door. Convergence alone owns startup.
 - The foundation's in-process contract fakes gate kit library integration; the
   runnable lane doubles gate lane evidence only, and no kit imports the double
   tooling.
@@ -577,30 +761,6 @@ authority stop, not a working delivered spot lease. Production rate publication
 stays dark until its servicing doors are composed, and that fixture is not
 production enablement.
 
-## Status
-
-Design, reconciled onto the lifecycle foundation on 2026-10-29 from the earlier
-`settle-ongoing-compute-through-arkhai-payments` and
-`publish-and-preempt-spot-compute` designs, which this change absorbs. Two review
-rounds shaped it: the first fixed the whole-second start rule, the activated
-evidence envelope's contents and the caller-owned journal comparison; the second
-removed the seller
-restitution entries and the cooperative storefront payment stop. The owner revision supersedes the human-only buyer-end rule: end_delivery embeds the signed claim for receipt concurrence, and delivery_end uses payee agreement under mapping/time/replay guards, otherwise triage, and deferred a
-compound payment termination until hosted bonds exist. The option shape,
-zero-notice presets and the bare-metal setup rule follow Goal 8's fourth review
-round with the owner.
-
-Strict OpenSpec validation passes on the pinned 1.14.0; `make check-change` passes
-apart from the citation of `openspec/specs/deal-lifecycle/architecture.md`, which
-the foundation's closeout creates. No implementation, deployment or product
-qualification is claimed.
-
-## Implementation slice (sections 1–3)
-
-The dependency checkpoint in `dependency-contracts.md` reconciles the draft with the installed foundation and terms contracts, including the published schema's required, inert once-end partialPeriod. This slice leaves declarations absent in deployed compositions, does not implement seller notice or re-anchoring, and does not claim full qualification or closeout. Maintainer design review remains pending on the stacked PR.
-
-The public projection decision is `arkhai_payments.billing_kind = total | per_period`; setup beside rate stays per_period. `arkhai_payments.period` returns text or the existing typed missing value None, with the existing DSL missing-value rule rather than new presence syntax. `approval_window` is the public rate-preset field; once window remains readable. `PaymentOperation` stores canonical event JSON and exposes a digest, never mutable event state. A supplied journaled billing-start result paired with its operation key can definitively refuse disclosure; otherwise a missing verified start is pending. Neutral `AuthorityView.parts` carries verified rate bounds and pending/final stops. Raw `stop_request` events never end delivery; notice maturity can reuse its original sequence, so watch observes its final per-part record outside the event cursor. These interface details promote with D4/D7 to settlement-servicing and settlement-configuration; no journal owner or continuation is added here.
-
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behaviour.
@@ -611,7 +771,19 @@ Destinations are planned, not claims of implemented behaviour.
 | D3 external contract context | `openspec/specs/deal-lifecycle/architecture.md`, "External authorities" |
 | D4–D5 pure rate authorization, envelope consumption, operation identity, authority-priced `partialPeriod` and the journaled exceptional-end filing | `openspec/specs/settlement-servicing/spec.md` and `architecture.md` |
 | D6–D6a seller notice, the rate buyer end and the CLI | `deal-lifecycle` `spec.md` (foundation-created; [delta](specs/deal-lifecycle/spec.md)) and `architecture.md`; `docs/development/ARCHITECTURE.md`, "Release" |
-| D7 declarations and rotation | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/settlement-servicing/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
-| D8 vectors and evidence classes | `openspec/specs/test-compatibility/spec.md` and `architecture.md`; `kit/arkhai-payments/README.md` |
+| D4's freshness window | `openspec/specs/settlement-servicing/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` for `snapshot_freshness_seconds` |
+| D5's approval policy | `openspec/specs/buyer-orchestration/spec.md` |
+| D6's administrator interrupt classification and routes | `deal-lifecycle` `spec.md` and `architecture.md`; `openspec/specs/vm-storefront-fulfillment/spec.md` for the VM route; no bare-metal storefront specification exists, so section 4B names the capability that owns bare metal's route |
+| D6a's end verb | `deal-lifecycle` `spec.md`; `openspec/specs/buyer-orchestration/spec.md` |
+| D7 declarations, the materialization door, the `chosen` presupposition and rotation | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/deal-lifecycle/architecture.md`, "External authorities"; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| D8 vectors, evidence labels and the recurring-purchase E2E | `openspec/specs/test-compatibility/spec.md` and `architecture.md`; `kit/arkhai-payments/README.md` |
+| D9 the staged `approval_window` rename | `openspec/specs/settlement-configuration/spec.md` (wire field and alias); `docs/development/RELEASING.md` |
+| D10 stop requests and final stops | `openspec/specs/deal-lifecycle/spec.md`; `openspec/specs/settlement-servicing/spec.md` |
+| D11 the composed transaction adapter | `openspec/specs/settlement-servicing/spec.md` and `architecture.md`; `openspec/specs/deal-lifecycle/spec.md` for the protocol |
+| Each change is mergeable to `dev` on its own merits | `openspec/README.md` or `docs/agents/change-workflow.md` |
+| Sibling-domain parity is checked before adding behaviour to one domain | `AGENTS.md`, "Package and dependency discipline" |
+| A versioned contract's field is renamed or retired in stages | `docs/development/RELEASING.md` |
+| Contradictory classes do not subclass one another | `docs/development/ARCHITECTURE.md` |
+| A timestamp is its source's claim, never an ordering | `docs/development/ARCHITECTURE.md`, authority boundaries |
 | The adapter and continuation boundary | `docs/development/ARCHITECTURE.md`, "Kit areas" and "Settlement servicing" |
 | Campaign and Goal 8 currency | `openspec/changes/README.md` and `docs/development/ROADMAP.md`, at design merge and again at closeout |

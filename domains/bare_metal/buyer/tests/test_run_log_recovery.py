@@ -357,11 +357,12 @@ def test_a_deal_bought_is_recovered_from_the_run_log_buy_wrote(
 
             yield Registry()
 
-        def payment_approval(buyer_config: Any) -> PaymentApproval:
+        def payment_approval(buyer_config: Any, *, terms_policy: Any = None) -> PaymentApproval:
             return PaymentApproval(
                 buyer_config.arkhai_payments,
                 buyer_config.payer_account,
                 client_for_owner=payments,
+                terms_policy=terms_policy,
             )
 
         def no_fresh_identity() -> ResolvedBuyerIdentity:

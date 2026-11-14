@@ -24,7 +24,7 @@ from market_arkhai_payments.buyer import PaymentApproval
 from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
 from market_arkhai_payments.errors import PaymentsTransportError
 from market_arkhai_payments.operations import operations_digest
-from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_contract_revision
+from market_arkhai_payments.presets import PaymentsRatePresetHelper
 from market_arkhai_payments.rate_adapter import RatePaymentAdapter
 from market_arkhai_payments.settlement_config import ArkhaiPaymentsConfig
 
@@ -43,10 +43,12 @@ async def main() -> None:
         "advertisement": {"mechanisms": [MECHANISM], "minimum_dispute_window_seconds": 0,
                           "minimum_case_hold_seconds": None},
     })
-    servicing = RateServicing(
-        required_contracts={MECHANISM: rate_contract_revision()},
-        declarations={MECHANISM: RateServicingDeclaration(MECHANISM, rate_contract_revision(), "published")},
-    )
+    # Declared only for this fixture: the payer's stop charges its started
+    # period, the payee's stop and the term end return the final partial one,
+    # and the option carries a setup charge.
+    servicing = RateServicing({MECHANISM: RateServicingDeclaration(
+        MECHANISM, frozenset({"charged", "returned"}), setup=True,
+    )})
     clause = SettlementPublicationClause.model_validate({
         "mechanism": MECHANISM, "asset": "USD/2", "rate": "60", "per": "hour",
         "mechanism_input": {"asset": "USD/2", "payee_account": PAYEE,

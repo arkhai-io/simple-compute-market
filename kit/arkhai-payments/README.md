@@ -367,13 +367,27 @@ beside rate remains `per_period`; there is no fabricated zero-length period.
 Missing values use the existing clause descriptor's missing-value rule; no
 presence operator is added.
 
-A composition's `RateServicing` must select `rate_contract_revision()` at
-publication, acceptance and new materialization. The default deployed
-compositions have no declaration and emit no recurring offers. Withdrawal refuses
-new materialization but does not reinterpret stored mandates during recovery.
-The helper and a passing fixture are not a running continuation or live authority
-qualification. Bare-metal supplies its own explicit setup price or opts out; the
-helper invents no domain setup default.
+A composition's `RateServicing` declares, per mechanism, the treatments
+(`charged`, `returned`, `prorated`) it has qualified and whether it services a
+setup charge. Publication, acceptance and new materialization each refuse a rate
+option whose treatments or setup charge it does not list;
+`PaymentSettlementData.for_agreement` refuses with `RateServicingUnavailable` and
+`settlement_option_withdrawn_refetch`. `payments_rate_wiring` supplies the helper
+and timing projection both compute compositions install, and `servicing_stage`
+takes the composition's declaration. The default deployed compositions have no
+declaration and emit no recurring offers. Withdrawal refuses new materialization
+but does not reinterpret stored mandates during recovery. The helper and a
+passing fixture are not a running continuation or live authority qualification.
+A setup price is the seller's explicit choice in either domain; the helper
+invents no domain setup default. The helper's `pricing()` returns its clause's
+own delivery deadline, and one conversion, `clause_rate_minor_units`, turns a
+clause's rate into minor units, refusing a rate finer than the asset's precision.
+
+The rate `authorize` decides on a verified snapshot whose `observedAt` lags the
+storefront's clock by at most `[Settlement.arkhai_payments]
+snapshot_freshness_seconds` (default 5); every stop, end and funding bound is
+still checked at the storefront's clock. `PaymentApproval(terms_policy=...)`
+refuses at approval the default-buyer refusals the run's policy did not waive.
 
 `RatePaymentAdapter` accepts an exact stored commitment, account credential
 factory, snapshot verifier, durable sequence floor and injectable clock. It

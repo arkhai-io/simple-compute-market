@@ -48,6 +48,9 @@ from market_arkhai_payments.receipts import ReceiptIdentity
 
 ARKHAI_PAYMENTS_MECHANISM = "arkhai.payments.v1"
 ARKHAI_PAYMENTS_CONFIG_KEY = "arkhai_payments"
+#: Seconds a verified snapshot's ``observedAt`` may lag the storefront's clock
+#: when it decides a rate delivery phase, unless the seller configures another.
+DEFAULT_SNAPSHOT_FRESHNESS_SECONDS = 5
 
 _ENVIRONMENT_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 _CAPABILITIES = ("agreement.v1", "receipt.v1")
@@ -91,6 +94,11 @@ class ArkhaiPaymentsConfig(BaseModel):
     # The service mode whose receipts this role accepts. Live payments services
     # sign livemode=true; test and development services sign false.
     livemode: bool = False
+    # Seller role: how far, in seconds, a verified snapshot's observedAt may lag
+    # the storefront's clock and still decide a rate delivery phase. The two
+    # clocks are independent claims, so this is a liveness allowance for skew
+    # and latency, not an ordering; bounds are still checked at the storefront's now.
+    snapshot_freshness_seconds: int = Field(default=DEFAULT_SNAPSHOT_FRESHNESS_SECONDS, gt=0, le=300)
     # Buyer role only: deposit the exact Agreement with the approval. Off by
     # default because the Agreement discloses both parties and provision terms
     # to the payments service, and a deposit cannot be withdrawn.
@@ -403,6 +411,25 @@ def _option_params(option: Any) -> PaymentsOptionParams | None:
         return None
 
 
+def clause_rate_minor_units(rate: str, per: str, asset: str) -> int:
+    """A publication clause's advertised rate in the asset's minor units.
+
+    An hourly rate is stated in major units and scaled by the asset's precision,
+    refusing a rate finer than that precision rather than rounding it. Any other
+    unit's rate is already integer minor units, which the precision must not
+    scale a second time; domains own that unit vocabulary.
+    """
+    if per == "hour":
+        precision = int(asset.rsplit("/", 1)[1]) if "/" in asset else 0
+        scaled = Decimal(rate) * (Decimal(10) ** precision)
+        if scaled != scaled.to_integral_value():
+            raise ValueError(f"payment rate has more than {precision} decimal places for {asset}")
+        return int(scaled)
+    if not rate.isdecimal():
+        raise ValueError("payment unit rate must be integer base units")
+    return int(rate)
+
+
 def arkhai_payments_option_builder(
     section: BaseModel,
     readiness: MechanismReadiness,
@@ -458,23 +485,12 @@ def arkhai_payments_option_builder(
 
     rates: list[RateValue] = []
     if clause.rate is not None:
-        if clause.per == "hour":
-            precision = (
-                int(params.asset.rsplit("/", 1)[1]) if "/" in params.asset else 0
-            )
-            scaled = Decimal(clause.rate) * (Decimal(10) ** precision)
-            if scaled != scaled.to_integral_value():
-                raise ValueError(
-                    f"payment rate has more than {precision} decimal places for {params.asset}"
-                )
-            value = int(scaled)
-        else:
-            # Unit prices are already integer base units; asset precision
-            # must not scale them a second time. Domains own the unit vocabulary.
-            if clause.per is None or not clause.rate.isdigit():
-                raise ValueError("payment unit rate must be integer base units")
-            value = int(clause.rate)
-        rates.append(RateValue(field="amount", per=clause.per, value=value))
+        if clause.per is None:
+            raise ValueError("payment unit rate must be integer base units")
+        rates.append(RateValue(
+            field="amount", per=clause.per,
+            value=clause_rate_minor_units(clause.rate, clause.per, params.asset),
+        ))
 
     option_params = params.model_dump(mode="json", exclude_none=True, exclude={
         "asset", "dispute_window_seconds", "case_hold_max_seconds", "delivery_deadline_seconds",

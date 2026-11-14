@@ -11,8 +11,10 @@ from market_arkhai_payments.errors import PaymentsAPIError, PaymentsTransportErr
 from market_arkhai_payments.fixtures import FakePaymentsClient
 from market_arkhai_payments.fixtures.authority import sign_snapshot
 from market_arkhai_payments.operations import operations_digest
+from market_arkhai_payments.rate_adapter import RatePaymentAdapter
+from market_arkhai_payments.seller import PaymentSellerStage
 
-from payment_terms import BUYER
+from payment_terms import BUYER, PAYEE, config
 from rate_terms import NOW, approved
 
 
@@ -95,7 +97,7 @@ def test_authorization_phase_table_is_pure_and_uses_verified_current_bounds(phas
         if state == "approval_expired":
             fake.observed_at += 61
         if state == "stale":
-            adapter._clock = lambda: NOW + 1
+            adapter._clock = lambda: NOW + 6
         if state == "unavailable":
             fake.unavailable = True
         if state == "unverified":
@@ -110,6 +112,63 @@ def test_authorization_phase_table_is_pure_and_uses_verified_current_bounds(phas
         assert answer.operation_id and answer.evidence_refs
         assert fake.count("submit_event") == count
     asyncio.run(drive())
+
+
+@pytest.mark.parametrize("storefront_skew,expected", [
+    (-3600, "allow"), (-1, "allow"), (0, "allow"), (5, "allow"), (6, "pending"), (3600, "pending"),
+])
+def test_a_snapshot_decides_a_phase_only_within_the_freshness_window(storefront_skew, expected):
+    # The authority's observedAt and the storefront's clock are independent
+    # claims. A view observed ahead of the storefront's clock is as fresh as it
+    # gets; one lagging it by more than the window must be refreshed first.
+    async def drive():
+        _, _, _, adapter, evidence = approved(client_type=ControlledPayments)
+        adapter._clock = lambda: NOW + storefront_skew
+        assert (await adapter.authorize(DeliveryPhase.START, evidence)).status == expected
+    asyncio.run(drive())
+
+
+def test_bounds_are_checked_at_the_storefronts_clock_inside_the_window():
+    # The authority observed the pending stop before it took effect, but by the
+    # storefront's clock it already has: the phase is refused, not allowed on
+    # the authority's older view of time.
+    async def drive():
+        _, _, fake, adapter, evidence = approved(client_type=ControlledPayments)
+        assert (await send(adapter, "stop", part="1")).status == "accepted"
+        stop_at = NOW + 30
+        fake.observed_at = stop_at - 2
+        adapter._clock = lambda: stop_at + 1
+        assert (await adapter.authorize(DeliveryPhase.START, evidence)).status == "refuse"
+    asyncio.run(drive())
+
+
+def test_the_seller_stage_decides_with_the_configured_freshness_window():
+    # A storefront eight seconds ahead of the authority is outside the default
+    # window but inside a configured ten-second one.
+    raw, data, fake, _, evidence = approved(client_type=ControlledPayments)
+
+    def answer(**settings):
+        stage = PaymentSellerStage(config(**settings), client_for_owner=fake)
+        adapter = stage.payment_adapter(raw, data)
+        adapter._clock = lambda: NOW + 8
+        return asyncio.run(adapter.authorize(DeliveryPhase.START, evidence)).status
+
+    assert answer() == "pending"
+    assert answer(snapshot_freshness_seconds=10) == "allow"
+
+
+@pytest.mark.parametrize("window", [0, 301])
+def test_the_configured_freshness_window_is_bounded(window):
+    with pytest.raises(ValueError, match="snapshot_freshness_seconds"):
+        config(snapshot_freshness_seconds=window)
+
+
+def test_the_freshness_window_is_positive_whole_seconds():
+    raw, data, fake, _, _ = approved(client_type=ControlledPayments)
+    for window in (0, -1, 1.5):
+        with pytest.raises(ValueError, match="freshness"):
+            RatePaymentAdapter(raw, data, account=PAYEE, client_for_owner=fake,
+                               verify_snapshot=lambda signed, floor: True, snapshot_freshness_seconds=window)
 
 
 def test_start_stop_and_reverse_have_distinct_stable_keys_and_recover_lost_answers():
