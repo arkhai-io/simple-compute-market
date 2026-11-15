@@ -227,8 +227,6 @@ switch-on (`activate-per-period-compute-servicing`), never by a double:
 - the producer's independent HTTP run covered fixed payer and payee treatment only,
   not `chosen`, term ends or reverse;
 - the stop-retry vectors are fixed-clock fixtures;
-- there is no cross-key producer vector for identity rotation and no stated key
-  retention commitment, so live rotation is qualified at switch-on (D7);
 - declaring any rate treatment presupposes the payment authority executes the
   dispute entry's `chosen` stop, which hosted execution has not yet shown (D7).
 
@@ -574,50 +572,11 @@ every rate part's dispute entry stays `{account, notice: PT0S, partialPeriod:
 chosen}`. If the payments team says hosted cannot execute `chosen`, the fallback is
 the open question below.
 
-Configuration lists current and retiring service identities with retirement dates,
-as operator configuration with no hard-coded overlap. During the overlap an old receipt remains verifiable and a fresh snapshot
-under the current identity re-anchors a running deal: the foundation verifier
-accepts current and retiring identities with validity windows and a
-caller-supplied minimum sequence, and the current snapshot attests its embedded
-old receipt, whose binding to the persisted mandate, parties, mode and sequence is
-verified. The re-anchored snapshot is stored durably as new approval evidence
-before dependence on the retiring key is removed, and the original signed bytes
-are kept for disputes. A stale or rolled-back snapshot cannot restore a retired
-trust anchor.
-
-The kit returns re-anchoring evidence for rate deals; convergence persists it and
-reports unanchored rate deals. Re-anchoring is scoped to rate deals here. Once-only
-hosted deals are included in the retiring-key dependency inventory and must drain
-before removal; durable once-only re-anchoring is deferred, not assigned silently
-to a rate-only consumer. A retiring key is removed only after running deals have
-re-anchored or drained; a deal not yet re-anchored when a key must retire drains
-first. No per-deal pin survives revocation, rollback is refused, and a `livemode`
-change cannot re-anchor and requires draining. Re-anchoring evidence comes through
-dev's verifier ("Snapshot verification accepts bounded identity history") and is
-proven against an in-process engine signing under two keys. This change owns
-rotation policy, configuration and the adapter seam, not the cryptographic proof
-implementation.
-
-Proposed by section 5's work in progress, which returned the change to design
-to settle it (the section's notes in tasks.md list the open questions): the shared
-verifier takes the deal's persisted anchor as an optional input: a configured key's earlier attestation of the exact embedded receipt stands
-in for the receipt issuer's pin, so a re-anchored deal keeps verifying once the
-retiring key is removed, and stops verifying once the anchor's own signer is
-removed (a later rotation re-anchors it again). The evidence store holds each
-re-anchoring snapshot as an item of its own beside the original receipt, and the
-deal's anchor is the latest one by sequence, then by the authority's observation
-instant (an idle deal re-anchored at a later rotation keeps its sequence), so a
-stale item never displaces it. The verifier does not re-prove an anchor's origin:
-like the minimum sequence, the anchor is the caller's own durable record of a
-re-anchoring the kit accepted, and only such a record may be supplied. The seller
-stage's receipt checks and stored-receipt revalidation take the same anchor;
-supplying it from the evidence store is convergence's composition. Configuration
-admits exactly one non-retiring identity, the current one, so "signed by a current
-identity" is unambiguous. Rejected: keeping a retired key's pin configured for as
-long as a re-anchored deal runs, which is the forever-pin the overlap replaces; and
-treating every configured key's snapshot as attesting its embedded receipt without a
-re-anchoring record, which would trust a receipt no verifiable issuer was ever seen
-to sign.
+A change of the payments receipt identity is a cutover (D17): open payment deals
+approved under the old identity are drained, or refunded, before it leaves
+configuration, and nothing re-anchors a running deal to the new key. The shared
+snapshot verifier and the foundation's `receipt_identities` are used as they are
+(D18, D22).
 
 ### D8. Vectors, qualification and consumer scenarios
 
@@ -659,8 +618,8 @@ delegation and both domains' preset integration. Smoke is readiness and
 authentication only. E2e proves cross-service effects, not arithmetic permutations.
 
 Rate-lane time and progress follow convergence's "Scenarios and evidence" and the
-lane double's typed control contract; this change produces kit, vector and
-re-anchoring evidence and defines no parallel lane clock or progress rule.
+lane double's typed control contract; this change produces kit and vector
+evidence and defines no parallel lane clock or progress rule.
 Convergence alone owns the consolidated rate qualification matrix
 ([Scenarios and evidence](../converge-ongoing-compute-leases/design.md#scenarios-and-evidence)),
 its runnable scenarios and their execution; this change prepares its entry points
@@ -908,15 +867,146 @@ Rejected: an approve-only buyer option, buyer surface that exists only for the t
 and driving `PaymentApproval` directly, which skips the shipped display the scenario
 asserts.
 
+### D17. A receipt identity change is a cutover
+
+When the payments service changes the key that signs its receipts, every buyer and
+storefront moves its configuration to the new identity, and open payment deals
+approved under the old one are drained, or refunded, before it leaves configuration.
+Nothing re-anchors a running deal to the new key. Once the old identity is no longer
+trusted, each deal it approved stops verifying everywhere: snapshot reads, admission,
+stored-receipt revalidation and the storefront's refund, which then answers that no
+verified payment exists — so refunds come first. The foundation's
+`receipt_identities` may list both keys for the moment of the switch, so a fresh
+approval does not fail while clocks and configurations differ; it keeps no deal alive
+past the date the old entry is removed.
+
+Draining is viable because no deployed deal outlives one. The released marketplace's
+payment deals are once-only with a guaranteed end, and no rate deal exists before
+convergence composes rate servicing and activation switches it on: end service refuses
+to commit one (D12). Migration and backwards compatibility are engineered only for
+what has been deployed, so rotation machinery for rate deals that have never run is
+not built ahead of them. A drain can still last as long as the dispute window and any
+hold extension, unbounded when `case_hold_max_seconds` is omitted; a seller facing a
+fixed switch date ends or refunds what remains. The switch needs advance notice of
+the rotation from the payments service, which publishes no rotation mechanism today.
+
+The key's retention matters only for what a party must keep verifying. The verifier
+accepts an embedded old receipt only while its issuer is configured — through the
+receipt's own signature, or as a configured retiring identity's receipt attested by a
+current-key snapshot — and every snapshot must be signed by an identity valid at the
+snapshot's own claimed `observedAt`. A retired identity left configured with a closed
+window therefore still lets a holder of that key, were it compromised, sign a snapshot
+backdated into its window; removing the identity at the cutover ends that.
+
+Rejected, until a deployed deal outlives a drain (the unowned gap D24 records):
+
+- **A caller-held anchor in the verifier**: a persisted current-key snapshot standing
+  in for the receipt issuer's pin. It adds a trust input that cannot be re-proved once
+  the issuer is removed, has to reach every seller verification (adapter, admission,
+  stored-receipt revalidation, refund) and both buyers, makes convergence supply it to
+  every read, and still drains once-only deals.
+- **Current-key attestation with no issuer pin**: a current-key snapshot vouching for
+  any embedded receipt bound to the deal. It drops the receipt's own signature from
+  every snapshot path, and stored-receipt revalidation still needs the old key.
+- **Retired identities that verify receipts only**: a third identity state verifying
+  receipts approved in its window and no snapshot. It closes the backdating exposure
+  without per-deal work, and is the design to resume from when the gap is picked up.
+- **Closed-window identities kept until every dependent deal drains, with no switch
+  date**: the backdating exposure lasts as long as the longest case.
+
+### D18. The shared verifier is used unchanged
+
+Settlement-servicing's "Snapshot verification accepts bounded identity history" stays
+as the foundation left it, and this change modifies no verifier. The foundation is
+archived with its snapshot verification complete, so the verifier is permanent code in
+`kit/arkhai-payments`, consumed here; no foundation round remains to own a change to
+it. Rejected: a MODIFIED delta extending the verifier, which D17 leaves without a
+purpose.
+
+### D19. Buyers follow the same cutover
+
+Both compute buyers move `service_identity` to the new key at the switch, as the
+storefront does, and need no code: their lifecycle reads verify under their own
+configuration, and a buyer's open deals drain with the seller's. Rejected: buyers
+holding an anchor of their own, which only D17's rejected anchor would need.
+
+### D20. Draining is the operator's procedure
+
+The payments kit carries no retirement inventory. The operator finds a seller's open
+payment deals through the seller read and list that already exist, and follows the
+cutover rule in `docs/development/DEPLOYMENT_AND_CONFIG.md`: drain or refund before the
+change. A `livemode` change is the same cutover, as that rule already states. Rejected:
+a kit inventory of the deals resting on a retiring key, which served only re-anchoring.
+
+### D21. Convergence takes on no rotation work
+
+`converge-ongoing-compute-leases` consumes no re-anchoring evidence and reports no
+retiring-key dependency. Withdrawn from it: the overlap paragraph of its D7, task 3.5's
+re-anchoring, its deal-lifecycle requirement that servicing request and persist
+re-anchoring evidence during an overlap, and row 11 of its qualification matrix.
+Convergence is in design and owes a reverification of its design against the code; its
+own design amends its documents, and this change names the withdrawal in "Dependencies
+and ownership" and in convergence's index notes rather than editing its directory.
+
+### D22. Configuration stays as the foundation built it, less one defect
+
+`receipt_identities` keeps the foundation's validation: the current `service_identity`
+listed, and retiring entries dated. The validation section 5's work in progress added
+— one non-retiring identity, none listed twice — is withdrawn: it made "current"
+unambiguous for re-anchoring alone. Kept: `pinned_snapshot_verifier`, which the kit's
+examples and several kit and domain tests compose, binds `config.receipt_trust` rather
+than `service_identity` alone, so it honours the configuration the seller stage's own
+verifier already honoured, and the stage delegates to it rather than bind its own
+copy. That is a small, understood defect against "Snapshot verification accepts
+bounded identity history", fixed here
+(`openspec/README.md#defects-found-during-a-change`).
+
+### D23. No anchor reaches the seller's refund
+
+With no anchor (D17), nothing needs to reach `reverse_now`, the storefronts'
+stored-receipt revalidation sites or a `ReanchoringEvidence` constructor. The refund's
+`NotPaid` answer for a deal whose identity was removed is why D17 refunds before the
+switch.
+
+### D24. Documents that follow the cutover
+
+The proposal's overlap-and-re-anchoring bullet, its once-only re-anchoring non-goal and
+settlement-servicing's "rate-deal identity re-anchoring" capability line give way to the
+cutover. D3's qualification limits drop rotation: there is no cross-key vector to want
+and no live rotation to qualify at switch-on. The roadmap drops "a rotation re-anchored"
+from this change's row and "identity-rotation overlap" from convergence's, and
+`openspec/changes/README.md` records one unowned gap in place of section 5's buyer row:
+a receipt key change drains every open payment deal, and re-anchoring running deals
+across it is not designed, to be revisited when rate deals whose maximum term makes
+draining impractical reach production or when the payments service publishes a
+rotation mechanism. Section 6's qualification task drops rotation-overlap preparation
+and adapter re-anchoring evidence.
+
+### D25. Implementation cadence
+
+Recorded under "Implementation cadence" below.
+
+### D26. A buyer updates its receipt identity before approving
+
+The buyer checks the payments receipt only after `approve` has moved funds, so a buyer
+whose configuration still names the old identity after a switch has its funds approved
+and held while its `buy` fails, and never posts settlement. The cutover rule in
+`docs/development/DEPLOYMENT_AND_CONFIG.md` states it: buyers update their receipt
+identity before approving after the change. Rejected: checking the service's current
+key before approval, which needs the service to publish its key and is migration
+engineering for a rotation never deployed.
+
 ## Implementation cadence
 
 Round 2 continues with one session per slice, each committed on its own: the
 end-service door with its refusal code, repair reason, tests and the corrected
 `approve_rate` comment in VM's `test_lifecycle_admin.py` (D12–D15); the
 recurring-purchase scenario in both lanes (D16, task 4B.5); the buyer's watchdog
-(4B.6); identity re-anchoring (section 5); and qualification evidence (section 6).
-Round 2's review and validation cover them together, with 4A and 4B.1–4B.4, before
-pre-closeout.
+(4B.6); section 5, now one short session that withdraws section 5's work in progress
+— its anchor, re-anchoring module, inventory, configuration validation, README section,
+deployment-guide edit and their tests — keeping the `pinned_snapshot_verifier` binding
+and its test (D17–D22); and qualification evidence (section 6). Round 2's review and
+validation cover them together, with 4A and 4B.1–4B.4, before pre-closeout.
 
 ## Rejected alternatives
 
@@ -938,7 +1028,7 @@ pre-closeout.
 - Local final-period pricing: the payment term and the authority decide it.
 - A separate per-period mechanism or domain adapter: generic parts and authorities serve both domains.
 - A new preemption route or an escrow-keyed admin verb: lifecycle `submit` is already the authenticated command boundary.
-- Pinning accepting keys forever, or draining every deal on each rotation: a bounded overlap with re-anchoring preserves running deals without trusting revoked keys.
+- Re-anchoring running deals across a receipt key change, by an anchor, by current-key attestation or by receipt-only retired identities: no deployed deal outlives a drain, so a key change is a cutover (D17).
 - Proposed qualification as live proof: a double cannot establish deployed authority behaviour.
 - An interim contract revision with only fixed charged semantics, and offers fixed to `started_period` until `returned` became expressible: the published contract already expresses every treatment, so the limit is hosted execution, which the servicing declaration expresses (D7).
 - A lane-only `proposed` declaration binding a fixture payments identity and mode at materialization: the servicing declaration is treatments and a setup flag, declared after qualification, and identity is the receipt verifier's (D7).
@@ -958,10 +1048,9 @@ pre-closeout.
 ## Dependencies and ownership
 
 - `agreed-evidence-and-early-termination` (whole change): the codec and authority
-  derivation, the vendored contract and verified snapshots (its round 2 owns the
-  proof implementation, not duplicated here), the dispute intents and mediation's
-  published self-penalty mapping, the activated-delivery envelope, and the
-  rotation verifier's inputs. The seller never substitutes direct payment calls
+  derivation, the vendored contract and the shared snapshot verifier, used unchanged
+  (D18), the dispute intents and mediation's published self-penalty mapping, and the
+  activated-delivery envelope. The seller never substitutes direct payment calls
   for the filing path; a spot emergency exit uses it rather than an extra stop
   entry.
 - `negotiate-open-ended-compute-terms` (whole change, archived): the agreed-price
@@ -975,8 +1064,8 @@ pre-closeout.
   runnable lane doubles gate lane evidence only, and no kit imports the double
   tooling.
 - `converge-ongoing-compute-leases` depends on this change and on
-  `unify-compute-delivery-path` as whole changes; it owns funding timers,
-  persisted rate re-anchoring and the complete rate qualification matrix.
+  `unify-compute-delivery-path` as whole changes; it owns funding timers and the
+  complete rate qualification matrix, and takes on no rotation work (D21).
   `activate-per-period-compute-servicing` owns the hosted four-path execution.
 
 The shared requirement "The payments mandate is derived exactly from the
@@ -1012,7 +1101,14 @@ Destinations are planned, not claims of implemented behaviour.
 | D5's approval policy | `openspec/specs/buyer-orchestration/spec.md` |
 | D6's administrator interrupt classification and routes | `deal-lifecycle` `spec.md` and `architecture.md` for the kit classification; `openspec/specs/compute-delivery/spec.md` for both compute storefronts' route, since no bare-metal storefront specification exists and compute-delivery is the capability whose requirements bind both ([delta](specs/compute-delivery/spec.md)) |
 | D6a's end verb | `deal-lifecycle` `spec.md`; `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/test-compatibility/spec.md` for the bare-metal purchase's `end`; `deal-lifecycle` and `buyer-orchestration` `architecture.md`, which still name `market bare-metal teardown` |
-| D7 declarations, the materialization door, the `chosen` presupposition and rotation | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/deal-lifecycle/architecture.md`, "External authorities"; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| D7 declarations, the materialization door and the `chosen` presupposition | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/deal-lifecycle/architecture.md`, "External authorities"; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| D17 a receipt identity change is a drained cutover, and why draining suffices | `openspec/specs/settlement-configuration/spec.md` ([delta](specs/settlement-configuration/spec.md)); `openspec/specs/settlement-servicing/architecture.md`, "Charge-first payment settlement", beside its current/retiring pins, for why a key change drains rather than re-anchors; `docs/development/DEPLOYMENT_AND_CONFIG.md`, its cutover paragraph |
+| D18–D20, D23 the verifier unchanged, buyers alike, draining by procedure, no anchor | No permanent destination beyond D17's: each states what the system does not add |
+| D21 convergence's withdrawn rotation work | `openspec/changes/README.md`, convergence's notes (its own design amends its documents) |
+| D22 `pinned_snapshot_verifier` honours `receipt_identities` | No new destination: the existing settlement-servicing requirement "Snapshot verification accepts bounded identity history" already requires it |
+| D24 the re-anchoring gap and roadmap criteria | `openspec/changes/README.md`, unowned gaps; `docs/development/ROADMAP.md` |
+| D26 buyers update their receipt identity before approving after a switch | `docs/development/DEPLOYMENT_AND_CONFIG.md`, its cutover paragraph |
+| Migration and backwards compatibility are engineered only for what has been deployed | `docs/development/RELEASING.md`, its compatibility policy, with a pointer from `docs/development/ARCHITECTURE.md` |
 | D8 vectors, evidence labels and the recurring-purchase E2E | `openspec/specs/test-compatibility/spec.md` and `architecture.md`; `kit/arkhai-payments/README.md` |
 | D9 the staged `approval_window` rename | `openspec/specs/settlement-configuration/spec.md` (wire field and alias); `docs/development/RELEASING.md` |
 | D10 stop requests and final stops | `openspec/specs/deal-lifecycle/spec.md`; `openspec/specs/settlement-servicing/spec.md` |

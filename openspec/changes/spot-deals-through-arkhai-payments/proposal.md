@@ -105,9 +105,10 @@ continuation is a separate, dependent change.
   (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), applies. The adapter consumes the
   foundation's dispute intent, request vocabulary and published mapping, and
   neither calculates nor partially applies the package.
-- Service-identity overlap and re-anchoring run through the foundation's
-  verified-snapshot interface; snapshot-proof verification itself stays with the
-  foundation's round 2.
+- A change of the payments receipt identity stays a cutover: open payment deals
+  approved under the old identity are drained, or refunded, before it leaves
+  configuration, and no running deal is re-anchored to the new key. The shared
+  snapshot verifier is used unchanged.
 - Mechanics are qualified against published vectors and the in-lane payment and
   mediation doubles, labelled lane-double evidence; live evidence comes only from
   deployed authorities. One recurring-purchase E2E scenario per compute lane runs
@@ -123,10 +124,10 @@ This change absorbs the mechanics and spot scenarios of the superseded
 ### Modified Capabilities
 
 - `settlement-servicing`: rate mandates, adapter events, start and stop
-  translation, authority-enforced started-period terms and rate-deal identity
-  re-anchoring.
+  translation, and authority-enforced started-period terms.
 - `settlement-configuration`: typed rate parameters, the materialization door on the
-  servicing declaration, and the staged `approval_window` rename.
+  servicing declaration, the staged `approval_window` rename, and the receipt
+  identity cutover.
 - `storefront-publication`: both domains' rate presets and per-option prices.
 - `deal-lifecycle`: the seller notice command, status and operator surface, the
   administrator interrupt classification, the canonical end verb, committed
@@ -146,11 +147,11 @@ None.
 
 Implementation builds on:
 
-1. `agreed-evidence-and-early-termination`: the term codec, hosted contract
-   vendoring and the `once`-part adapter, lifecycle commands, dispute intents and
-   mediation's published self-penalty mapping, the evidence stores and verified
-   snapshots (its round 2). This change consumes those facilities and duplicates
-   none.
+1. `agreed-evidence-and-early-termination` (archived): the term codec, hosted
+   contract vendoring and the `once`-part adapter, lifecycle commands, dispute
+   intents and mediation's published self-penalty mapping, the evidence stores and
+   the shared snapshot verifier. This change consumes those facilities and
+   duplicates none.
 2. `negotiate-open-ended-compute-terms` (archived): the agreed-price accessor and
    period unit, the listing bounds, the option shape, the servicing declaration,
    the per-term buyer waivers, the whole-second start resolution before signature,
@@ -179,13 +180,15 @@ or dispute authority.
   the design records the rejected payment primitives.
 - Storefront continuation loops, queues, funding timers, site deadline or renewal
   policy, provisioning or teardown.
-- Snapshot-proof verification, immediate `end_delivery` transport and evidence
-  capture, and mediation rulings, which are the foundation's. The rate buyer end
-  is in scope.
+- Changes to snapshot-proof verification, which this change consumes as the
+  foundation left it; immediate `end_delivery` transport and evidence capture, and
+  mediation rulings, which are the foundation's. The rate buyer end is in scope.
 - Cooperative corrections to entitled stop pricing, a second seller-command
   journal, or seller-side exceptional-end payment effects; mediation's published
   self-penalty mapping is foundation-owned and consumed here.
-- Durable once-only identity re-anchoring; those deals drain before a key retires.
+- Re-anchoring running deals across a receipt key change, for rate and once-only
+  deals alike; open deals drain before the key changes. It is an unowned gap until
+  deals outlive a drain.
 - Discovery sugar, automated preemption strategy, Alkahest splitter execution,
   API-credit rate servicing, metering other than time, and reserved fixed-interval
   deals expressed as rate parts.
@@ -201,7 +204,11 @@ IDs. Reserved and API-credit options keep `once`-part mechanics. Examples use
 clients keep working across this release: once options keep writing `window`, the
 lifecycle reads stay valid for `kit/deal-lifecycle-contracts` 0.1.0 clients, the
 administrator interrupt keeps `failure` as the once-only default, and `bare-metal
-teardown` stays an alias for one release.
+teardown` stays an alias for one release. A receipt key change is a cutover, as the
+deployment guide already states: open payment deals drain or are refunded first, and
+buyers update their receipt identity before approving afterwards. Migration and
+compatibility are engineered only for what has been deployed, and the released
+marketplace's payment deals are once-only with a guaranteed end.
 
 Affected code: `kit/arkhai-payments` (the composed transaction adapter, presets,
 the `approval_window` alias, approval policy), the lifecycle protocol, contracts,
@@ -247,8 +254,8 @@ domain or the persistence-owning servicing kit.
   resting on a fresh last probe: `openspec/specs/deal-lifecycle/spec.md`;
   `openspec/specs/buyer-orchestration/spec.md` and its architecture companion, a new
   section "The buyer's watchdog".
-- D7 servicing declarations, the materialization door, the `chosen` presupposition
-  and identity rotation: `openspec/specs/settlement-configuration/spec.md`;
+- D7 servicing declarations, the materialization door and the `chosen`
+  presupposition: `openspec/specs/settlement-configuration/spec.md`;
   `openspec/specs/settlement-servicing/spec.md`;
   `openspec/specs/deal-lifecycle/architecture.md`;
   `docs/development/DEPLOYMENT_AND_CONFIG.md`.
@@ -281,6 +288,30 @@ domain or the persistence-owning servicing kit.
 - D16 the recurring-purchase scenario through commit, ended by the buyer:
   `openspec/specs/test-compatibility/spec.md`; its architecture companion, "Ordinary
   Arkhai purchase evidence".
+- D17 a receipt identity change is a drained cutover, and why draining suffices:
+  `openspec/specs/settlement-configuration/spec.md`;
+  `openspec/specs/settlement-servicing/architecture.md`, "Charge-first payment
+  settlement"; `docs/development/DEPLOYMENT_AND_CONFIG.md`, its cutover paragraph.
+- D18: no permanent destination — the shared verifier is used unchanged, and its
+  requirement stays as the foundation left it.
+- D19: no permanent destination — buyers follow D17's cutover with no behaviour of
+  their own.
+- D20: no permanent destination — draining is D17's procedure, already in the
+  deployment guide's cutover paragraph.
+- D21 convergence's withdrawn rotation work: `openspec/changes/README.md`,
+  convergence's notes; its own design amends its documents.
+- D22: no permanent destination — `pinned_snapshot_verifier` honouring
+  `receipt_identities` is what the existing settlement-servicing requirement
+  "Snapshot verification accepts bounded identity history" already requires.
+- D23: no permanent destination — no anchor exists to reach anything.
+- D24 the re-anchoring gap and the roadmap criteria: `openspec/changes/README.md`,
+  unowned gaps; `docs/development/ROADMAP.md`.
+- D25: no permanent destination — the implementation cadence is planning's.
+- D26 buyers update their receipt identity before approving after a switch:
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, its cutover paragraph.
+- Migration and backwards compatibility are engineered only for what has been
+  deployed: `docs/development/RELEASING.md`, its compatibility policy, with a
+  pointer from `docs/development/ARCHITECTURE.md`.
 - Each change is mergeable to `dev` on its own merits: `openspec/README.md` or
   `docs/agents/change-workflow.md`.
 - Check a sibling domain before adding behaviour to one; a difference needs a

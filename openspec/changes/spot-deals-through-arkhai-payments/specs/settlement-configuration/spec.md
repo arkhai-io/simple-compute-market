@@ -74,16 +74,13 @@ Approval expiry in `arkhai.payments.v1` option parameters MUST be read under eit
 - **WHEN** a storefront publishes a rate option naming `approval_window`
 - **THEN** the registry accepts and returns it unchanged, holding mechanism parameters opaquely
 
-### Requirement: Receipt identity overlap is operator configuration
-`[Settlement.arkhai_payments].receipt_identities` MUST list the current `service_identity`, not retiring, beside any retiring identities, each retiring entry with its retirement date as `valid_until`. It MUST list no other identity as not retiring, and no identity twice. The kit MUST NOT hard-code an overlap: without the list the current identity alone is trusted, and an overlap lasts exactly as long as the operator's retiring entries say.
+### Requirement: A receipt identity change is a cutover
+A payments receipt identity that a buyer's or storefront's configuration no longer trusts — neither its `service_identity` nor an entry of `receipt_identities` — MUST stop proving any deal it approved: that deal's snapshots, receipt checks and stored-receipt revalidation MUST refuse it, as for any unconfigured issuer. No record a party holds MAY keep a removed identity trusted, and the payments kit MUST NOT re-anchor a running deal to another key. Open payment deals approved under an identity are drained, or refunded, before the identity leaves configuration.
 
-#### Scenario: An operator rotates the receipt key
-- **WHEN** a configuration names the new key as `service_identity` and lists it beside the old key, retiring at a stated `valid_until`
-- **THEN** both pins verify within their windows, and only the new key counts as current
-
-#### Scenario: A rotation is configured ambiguously
-- **WHEN** `receipt_identities` omits the current identity, lists a second identity as not retiring, lists an identity twice, or lists a retiring identity without `valid_until`
-- **THEN** the configuration is refused, naming the rule it breaks
+#### Scenario: A deal approved under a removed identity
+- **GIVEN** a payment deal whose receipt the old identity signed
+- **WHEN** the storefront's configuration names only the new identity and the deal is read, admitted or its stored receipt revalidated
+- **THEN** each check refuses the deal, whether or not a snapshot signed by the new identity embeds its receipt
 
 ### Requirement: Compute buyers select what the payments buyer helper can approve
 Both compute buyers MUST take the lifecycle capabilities of their payments term context — a stoppable rate part and the partial-period treatments the vendored contract encodes — from the payments kit's buyer helper, the same set mandate derivation and seller presets use, rather than declare their own. Other mechanisms keep their own contexts. A buyer whose term validation or dispute-authority acceptance refused every advertised option MUST be told each distinct reason at normal verbosity, and a `buy` that finds nothing for that reason MUST NOT exit as a successful empty search.
