@@ -615,7 +615,10 @@ evidence*, from deployed authorities only. Pinned-vector conformance is supporti
 evidence, not a third label. Results keep the target identity and mode, hashes and
 the control trace, as test-compatibility's "External payment qualification names its
 target" requires. Only the external service's own suite qualifies its ledger and
-payouts. Examples and fixtures use `USD/6`; production reads the Agreement's asset.
+payouts. This change's first-use examples, and the qualification evidence they
+produce, use `USD/6`, the asset of the published vectors; other tests keep the asset
+they were written with, often `USD/2`, since derivation reads the scale from the
+asset named; production reads the Agreement's asset (implementation review 69 F1).
 
 | Scenario or prepared entry point | Executor | Evidence boundary |
 |---|---|---|

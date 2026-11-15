@@ -201,9 +201,10 @@ or dispute authority.
 
 No backwards-compatibility promise for pre-upgrade hosted mandates; rollout is
 forward only, as in the foundation. New rate and setup shapes receive new option
-IDs. Reserved and API-credit options keep `once`-part mechanics. Examples use
-`USD/6`; production derivation reads the selected Agreement's asset. Released
-clients keep working across this release: once options keep writing `window`, the
+IDs. Reserved and API-credit options keep `once`-part mechanics. The first-use
+examples use `USD/6`; production derivation reads the selected Agreement's
+asset. Released clients keep working across this release: once options keep
+writing `window`, the
 lifecycle reads stay valid for `kit/deal-lifecycle-contracts` 0.1.0 clients, the
 administrator interrupt keeps `failure` as the once-only default, and `bare-metal
 teardown` stays an alias for one release. A receipt key change is a cutover, as the

@@ -2562,6 +2562,11 @@ hosted-target evidence.
       the VM storefront's `examples/payment_smoke.py` with its README. Derivation
       in `USD/6` is exercised by the rate example's test, which asserts its setup
       and rate parts' amounts.
+      Narrowed by the round's triage (implementation review 69 F1, the owner's
+      note 67 O2): `USD/6` is the asset of this change's first-use examples and
+      their evidence, as D8 and the proposal now say; the fixtures, term builders
+      and smoke example above keep `USD/2`, since derivation reads the scale from
+      the asset named and none of their tests depends on which.
 - [x] 6.2 Supply evidence metadata at the adapter/command first-use boundary:
       contract revision, target class/mode, hashes and control trace. Readiness
       gates scenario runs, not a claim that the target was prepared here.
