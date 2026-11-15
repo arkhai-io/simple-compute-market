@@ -446,7 +446,8 @@ Rejected: a separate `layer:` key; TOML frontmatter.
 The engineering and workflow tables sit in their layers' `README.md`; the layer
 tags are defined with the layer model. Each layer's table lists its own layer tag as
 its first row, as the example shows, so `engineering` is a row of the engineering
-table, `workflow` of the workflow table, and `repository` of `AGENTS.md`'s. The
+table, `workflow` of the workflow table, and `repository` of the repository table in
+`docs/guidance/repository/README.md`. The
 layer model itself — the test and the link direction — is workflow material, stated
 for readers in `docs/guidance/workflow/README.md` and normatively by CW-g7lt and
 CW-d2rw; a row naming another layer's word is not a link, so the engineering table's
@@ -661,7 +662,12 @@ written together and reviewed together. The pre-closeout review and its validati
 owed when the change returned to design, follow that round.
 
 Rejected: an inventory round corrected before any text moves, then the moves, as
-rounds 1 and 3 did; three rounds, which add a review cycle while two changes wait.
+rounds 1 and 3 did, which adds a review and validation cycle while two changes wait
+to spare what one round costs instead: a row the owner corrects is a fix to a
+document move, made in the same triage with the inventory as its map; the session
+stopping for the owner on the `Ambiguous` rows before moving them, which pauses the
+round for the same correction its triage makes (170 F1, reaffirmed); three rounds,
+which add a review cycle while two changes wait.
 
 ### D31 — `openspec/README.md` stays beside `openspec/`
 

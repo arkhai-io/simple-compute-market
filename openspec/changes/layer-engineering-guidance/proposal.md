@@ -41,8 +41,10 @@ cites guidance held elsewhere.
   names nothing of one; repository guidance names this repository. A lower layer
   never links to a higher one.
 - **An inventory, made in implementation.** Every section gets a layer, tags, a
-  destination, and a reason, with ambiguous rows flagged; the owner corrects it
-  before any text moves.
+  destination, and a reason, with ambiguous rows flagged; the owner corrects the
+  first round's inventory before any text moves. The inventory of the repository's
+  documents by kind is written before its text moves and reviewed with the moves,
+  a row the owner corrects becoming a fix to the move (D30, D34).
 - **Shared guidance in `docs/guidance/`.** Engineering and workflow guidance move
   into files under `docs/guidance/engineering/` and `docs/guidance/workflow/`,
   general rules given neutral examples. The directories are organization for
@@ -220,7 +222,7 @@ changes.
 - D15, the anchor check: `openspec/specs/market-change-workflow/spec.md` (MCW-c4ek); `openspec/specs/market-change-workflow/README.md`, "The closing checks"
 - D16, the guidance placement part: `docs/guidance/workflow/closeout.md`; `.agents/skills/change-closeout/SKILL.md`; `openspec/specs/market-change-workflow/spec.md` (MCW-c4ek) for its mechanical rule
 - D17, the frontmatter: `openspec/specs/change-workflow/spec.md` (CW-g7lt); `docs/guidance/engineering/README.md`
-- D18, the vocabulary tables: `docs/guidance/engineering/README.md`; `docs/guidance/workflow/README.md`; `AGENTS.md`
+- D18, the vocabulary tables: `docs/guidance/engineering/README.md`; `docs/guidance/workflow/README.md`; `docs/guidance/repository/README.md` (D32)
 - D19, flat files: `openspec/specs/change-workflow/README.md`, "The repository's guidance is layered", with directories carrying no meaning (CW-n6dm)
 - D20: no permanent destination — superseded by D3
 - D21, `make check-guidance`: `openspec/specs/market-change-workflow/spec.md` (MCW-c4ek); `openspec/specs/market-change-workflow/README.md`, "The closing checks"; `openspec/README.md`, "This repository's closeout parts", which names the command
