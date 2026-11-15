@@ -5,6 +5,8 @@
 
 # ── Internal package wheels (built by make dist before docker build) ─
 !.dist/
+# The `market` binary's build output, which no image installs.
+.dist/bin
 
 # ── Shared uv entry point ────────────────────────────────────────────
 !scripts/

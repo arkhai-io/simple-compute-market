@@ -26,8 +26,8 @@ Escrow is Alkahest's model, but it still sits in shared carriers. `SettlementObl
   one opening shape and the driver hook goes.
 - Rename the kit/site quota ledger's `escrow_uid` correlation API/persistence coordinate to a neutral name with its owning ledger and all consumers changed together. Credits issuance currently supplies its negotiation-derived fulfillment ID there, not an escrow or grant alias; domain-local renaming must not create another compatibility projection. This includes shared capacity `deal_ref` consumers, not just the credits service.
 - Escrow-shaped code leaves the foundation kits and the buyer core, so that no kit
-  other than Alkahest's holds Alkahest in its scope (`ARCHITECTURE.md`, "Where the
-  current tree diverges"):
+  other than Alkahest's holds Alkahest in its scope
+  (`docs/guidance/repository/package-layers.md`, "Where the current tree diverges"):
   - `kit/policy/scalar_policies.py` splits. The scalar-amount half — bisection,
     listed price, counter guards, wire-amount parsing, `selected_settlement_artifact`
     — is mechanism-neutral (Arkhai payments uses it; contact exchange declines it)
@@ -74,7 +74,7 @@ Escrow is Alkahest's model, but it still sits in shared carriers. `SettlementObl
     mechanism-neutral steps.
 - The VM listing and negotiation specializations stop importing `kit/alkahest`,
   since neither carries a mechanism in its name and so neither may know one
-  (`ARCHITECTURE.md`, "Scope"):
+  (`docs/guidance/repository/package-layers.md`, "Scope"):
   - `arkhai_vms_listings` types `accepted_escrows` with `AcceptedEscrow` and
     `EscrowDemand` and resolves `ERC20TokenMetadata` through
     `resolve_token_cached` in `models.py` and `resources.py`, and reads

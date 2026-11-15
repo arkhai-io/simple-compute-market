@@ -2,9 +2,9 @@
 """Fail if a change moves a package's version more than one SemVer step.
 
 A package a change alters is bumped once for the change, not once per commit
-(`docs/development/RELEASING.md`, "Versioning policy"). Each `pyproject.toml`
-whose version differs from its version at the merge-base with the branch the
-change lands on must be exactly one step from it: the next patch, minor, or
+(`docs/guidance/engineering/versioning.md`, "One bump per unit of work"). Each
+`pyproject.toml` whose version differs from its version at the merge-base with
+the branch the change lands on must be exactly one step from it: the next patch, minor, or
 major, with the lower parts reset. A larger bump replacing a smaller one is
 therefore one step from the merge-base, and passes. A package the change leaves
 at its version is not checked, since the rule asks for no bump, and neither is
@@ -102,7 +102,8 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
         print("\n".join(found))
         print()
         print("FAIL: a package is bumped once per change, by one SemVer step from the version")
-        print("it has where the change began (docs/development/RELEASING.md, \"Versioning policy\").")
+        print("it has where the change began")
+        print("(docs/guidance/engineering/versioning.md, \"One bump per unit of work\").")
         return 1
     print(f"OK: every package version the change moves since {args.base} moves one step.")
     return 0

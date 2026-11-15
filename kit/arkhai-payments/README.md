@@ -41,7 +41,7 @@ an attacker. Keep `fee_bps` in the caller's trusted service policy. The dispute
 authority comes from the selected option's `lifecycle.adjudication.dispute`;
 `[Settlement.arkhai_payments].dispute_authority` is rejected with a diagnostic
 naming root `[[Dispute]]` preferences. See
-[dispute authority preferences](../../docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences)
+[dispute authority preferences](../../openspec/specs/settlement-configuration/configuration.md#dispute-authority-preferences)
 for local preferences, registry recommendations and identity-bound credentials.
 Authorities are explicit per-part permissions; the service has no implicit
 privileged dispute account.
@@ -250,7 +250,8 @@ Construction takes the acting account, `client_for_owner`, a required
 and retiring receipt identities (`receipt_identities`, or `service_identity` alone
 without one). A deal approved under an identity the configuration does not list
 stops verifying, so a receipt identity change drains open deals first
-(`docs/development/DEPLOYMENT_AND_CONFIG.md`). Reads reject unverified,
+(`openspec/specs/settlement-configuration/configuration.md`, "Settlement consumer
+configuration and cutover"). Reads reject unverified,
 cross-commitment, incomplete or regressing authority records. They return all
 per-part events for the seller watch to replay, and open extensions independently
 by ref and case. Partial refunds never imply a delivery end. Once-only delivery

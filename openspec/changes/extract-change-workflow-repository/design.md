@@ -13,7 +13,7 @@ questions" is undecided.
   - The ten `change-*` skills.
   - `.agents/change-outcome.schema.json`.
   - The `change-workflow` specification and its architecture companion.
-  - `docs/agents/change-workflow.md`.
+  - `docs/change-workflow-handbook.md`.
   - The workflow's tests in `scripts/tests/`.
 
   `specify-change-workflow-and-engine` produces the authoritative list.

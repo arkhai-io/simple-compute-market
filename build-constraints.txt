@@ -2,5 +2,6 @@
 # Every Makefile that runs `uv build` exports this file as UV_BUILD_CONSTRAINT;
 # `make check-build-requirements` refuses a requirement it does not pin. Moving a
 # pin changes every wheel's bytes, so it bumps every declared distribution's
-# version (docs/development/RELEASING.md, "Versioning policy").
+# version (docs/guidance/repository/package-versions.md, "A version changes when
+# its contents change").
 hatchling==1.33.0

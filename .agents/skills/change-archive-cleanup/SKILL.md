@@ -153,7 +153,7 @@ above.
   waiver, its reason the owner's. Otherwise stop and ask the owner, naming the paths
   and the commits that changed them, whether the correction is validated first
   (`make validate CHANGE=<change>`) or they waive the check. Recommend the waiver
-  when a criterion of `docs/agents/change-workflow.md`'s "Waivers" holds, naming
+  when a criterion of `change-workflow`'s CW-q3dm holds, naming
   the criterion and its evidence; with none holding, recommend none. Interactively, the
   owner answers in the session: record a waiver as their direction, and compute
   again, which then names archive cleanup:
@@ -218,8 +218,8 @@ If any check fails, stop and say why.
 
 ## 2. Load the context
 
-Read in full: `openspec/README.md#plan-closeout-requirements` (part 6 states the
-dependent rules), and `openspec/changes/README.md` — its legend, the change's row
+Read in full: `docs/guidance/workflow/closeout.md#campaign-index-currency`, which
+states the dependent rules, and `openspec/changes/README.md` — its legend, the change's row
 and campaign, and every row and dependency graph that names the change. From the
 archived change read `proposal.md`, `design.md`'s design-promotion record,
 `tasks.md`'s closeout section with its end-to-end evidence, and the latest passing
@@ -280,8 +280,9 @@ Draft, for the owner to use when the branch is merged:
   exercised the change — from the closeout section and the validation record; and
   what it deliberately leaves to other changes, by their names.
 
-Both are as public as the code, so `AGENTS.md#public-repository-discipline`
-applies to every word. When the branch carries another change that is not archived,
+Both are as public as the code, so `AGENTS.md#public-repository-discipline`, the
+public case of `docs/guidance/engineering/repository-content.md`, applies to every
+word. When the branch carries another change that is not archived,
 say so: the pull request would merge that change too, so the owner decides when to
 open it, and the drafts cover this change only.
 

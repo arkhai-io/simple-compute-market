@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow.records import changed_since, exempting, validation_problem
+from change_workflow.config import DEFAULT_INERT_PATHS
+from change_workflow.records import changed_since, exempting, inert, validation_problem
 from change_workflow_fixtures import (CHANGE, HEAD, RECORDS, VALIDATED, repository, reviews_of,
                                       validation_text)
 
@@ -50,20 +51,34 @@ def test_a_validation_of_an_ancestor_clears_head_when_only_records_changed(
 
 
 @pytest.mark.parametrize("inert_paths, path, exempt", [
-    (("openspec/", "docs/"), "docs/agents/change-workflow.md", True),
+    (("openspec/", "docs/"), "docs/change-workflow-handbook.md", True),
     (("openspec/", "docs/"), "openspec/specs/x/spec.md", True),
     (("openspec/", "docs/"), "docsite/index.md", False),
     (("openspec/", "docs/"), "scripts/x.py", False),
     (("docs/", "assets/"), "assets/logo.svg", True),
     (("docs/", "assets/"), "openspec/changes/README.md", False),
-    # With no inert path declared, only changes' records are exempt.
-    (None, "docs/agents/change-workflow.md", False),
-    (None, f"{RECORDS}/interventions.jsonl", True),
+    # Given no inert path, as under an empty declaration, only changes' records are
+    # exempt.
+    ((), "docs/change-workflow-handbook.md", False),
+    ((), f"{RECORDS}/interventions.jsonl", True),
     ((), f"{RECORDS}/reviews/05-validation.md", True),
+    # The workflow's default, where a repository declares none: OpenSpec's tree and
+    # every Markdown file, however deep, and nothing else.
+    (DEFAULT_INERT_PATHS, "tools/x/guides/setup.md", True),
+    (DEFAULT_INERT_PATHS, "README.md", True),
+    (DEFAULT_INERT_PATHS, "openspec/specs/x/diagram.svg", True),
+    (DEFAULT_INERT_PATHS, "tools/x/setup.py", False),
+    (DEFAULT_INERT_PATHS, "tools/x/notes.mdx", False),
 ])
 def test_a_path_is_exempt_when_it_is_a_record_or_inert(inert_paths, path: str,
                                                        exempt: bool) -> None:
     assert exempting(inert_paths)(path) is exempt
+
+
+def test_a_nested_markdown_file_is_inert_under_the_default() -> None:
+    """CW-n7ra: `**/*.md` spans any number of directories."""
+    assert inert("services/a/b/c/notes.md", DEFAULT_INERT_PATHS)
+    assert not inert("services/a/b/c/notes.py", DEFAULT_INERT_PATHS)
 
 
 def test_a_validation_of_an_ancestor_clears_head_past_inert_paths_when_asked(

@@ -34,8 +34,8 @@ Core and registry-client markers/config exist, but core typecheck fails and mark
   fact. The architecture check, `make check-architecture`, holds the internal one:
   `market_alkahest` is an `undeclared_import` exception row in
   `docs/development/ARCHITECTURE.toml` owned by `move-escrow-into-alkahest`,
-  whose move removes it (`docs/development/ARCHITECTURE.md`, "Where the current
-  tree diverges"). The check requires third-party declarations only of a package
+  whose move removes it (`docs/guidance/repository/package-layers.md`, "Where the
+  current tree diverges"). The check requires third-party declarations only of a package
   with a package allowlist, which `core/storefront` has not, so `web3` and
   `fastapi` are this ratchet's to catch. Suggested resolution: add "every distribution the source imports is declared,
   and every declared internal distribution is imported or carries a stated runtime
@@ -47,9 +47,9 @@ Core and registry-client markers/config exist, but core typecheck fails and mark
   driver — the VM storefront's two bare-metal declarations install the bare-metal
   contribution into the compute shell — and such a reason is recorded in the
   declaring package's `[tool.arkhai.architecture.runtime-dependencies]`
-  (`docs/development/ARCHITECTURE.md`, "Repository layers"). Task 2.5 is the decision gate for
+  (`docs/guidance/repository/package-layers.md`, "Where the current tree diverges"). Task 2.5 is the decision gate for
   the "`kit/site` question" and stays one; the recommended answer for it is that
-  `kit/site` passes `ARCHITECTURE.md`'s third-domain placement test because API
+  `kit/site` passes `family-kits.md`'s third-domain placement test because API
   credits composes it, stays repository-wide, and belongs in a kit typing ratchet
   rather than this core campaign.
 

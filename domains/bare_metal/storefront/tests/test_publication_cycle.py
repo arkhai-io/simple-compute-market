@@ -10,7 +10,8 @@ run polls every site first, as the lane steps ``site-projections`` before
 publication; a site that has never answered is a storefront restarted while it
 was unreachable.
 
-This is not integration evidence under ``docs/development/TESTING.md``. The
+This is not integration evidence under
+``docs/guidance/engineering/test-levels.md``. The
 bare-metal storefront is an application, and the site authority and the
 registry are this repository's own services rather than external boundaries,
 so these tests prove how a run orchestrates, persists, closes, holds, and

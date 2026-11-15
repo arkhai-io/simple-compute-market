@@ -1,0 +1,1350 @@
+# Inventory of the guidance
+
+This inventory is change history. It applies `design.md`'s layer test (D1) to every
+section of the guidance and proposes, for each, a layer, tags, and a destination; it
+is not a permanent document, and nothing cites it once the change is archived. The
+owner corrects its rows in round 1's triage, before any text moves, and the rows as
+corrected govern every later section of `tasks.md`: a destination named in a task, or
+in `design.md`'s hard-case sample, gives way to the corrected row (D2). A row showing
+a rule of the design is wrong returns the change to design.
+
+The documents the change removed are named by their former paths without the leading
+`docs/`: `agents/change-workflow.md` (moved to `docs/change-workflow-handbook.md`),
+`agents/domain.md`, `development/BUILD_AND_PACKAGING.md`, and
+`development/RELEASING.md`.
+
+The rows below are as round 1's triage corrected them. The owner settled the
+`Ambiguous` cells by type, each type by one rule, stated under "Rules from round 1's
+triage" below; a row's `Reason` names the rule that decided it.
+
+How to read it:
+
+- **One layer per row.** A section whose text holds several layers is split into one
+  row per layer, its `Source` naming the part of the section's text the row covers.
+- **Destinations.** `engineering/<file>` and `workflow/<file>` abbreviate
+  `docs/guidance/engineering/<file>` and `docs/guidance/workflow/<file>`, provisional
+  names as the hard-case sample gives them; `specs/<capability>/<file>` abbreviates a
+  guidance file the change would create in `openspec/specs/<capability>/`, such as
+  `specs/resource-pool-management/testing.md`. An existing file is named by its full
+  path. `stays` keeps the text where it is, under
+  the heading it has. A destination for repository material in `AGENTS.md` or
+  `openspec/README.md` means those documents as sections 3 and 5 rewrite them.
+  "Neutralized" means the text is reworded to name what the shared layer can state
+  without this repository (a neutral example, "the repository's citation check"),
+  the repository's form staying in the row that names it.
+- **Closeout parts.** Each part of `openspec/README.md`'s closeout list has its own
+  row: its layer is the part's, and its `Reason` names the layer of the rule it
+  confirms (D8).
+- **Exceptions.** A row whose text states an exception to shared guidance — a case
+  this repository selects, or a shared rule it overrides — begins its `Reason` with
+  **Exception (selects)** or **Exception (overrides)** and names the table it goes in
+  (D9). A row that might be one, depending on a decision, says so in `Ambiguous`.
+- **Tags.** Tags come from the proposed vocabulary under "Proposed vocabulary"
+  below, one table per layer as D18 shapes them. Workflow rows name the steps by the
+  workflow's own step names (`plan`, `implement`, `validate`), not the sample's
+  `planning`, so a later loader can select a step's guidance by the step's name.
+- **`grep -n '^#'` hits inside fenced blocks.** `AGENTS.md`'s lines 98–100 and 106
+  are comment examples in code blocks, covered by the rows of "Python comments and
+  docstrings". `openspec/README.md`'s lines 80, 87, and 130 are template headings
+  inside fenced blocks, as is `agents/change-workflow.md`'s line 837; each has
+  a row of its own, beside its section's. `DEPLOYMENT_AND_CONFIG.md`'s lines 1773,
+  1960, 1968, 2015, and 2020 are TOML comments, and `VALIDATION_RUNBOOK.md`'s lines
+  852 and 1035 shell comments, inside fenced blocks; each has a row naming the
+  section it sits in.
+- **Documents classified at document level.** `BUILD_AND_PACKAGING.md`,
+  `VALIDATION_RUNBOOK.md`, and `RELEASING.md` open with a document-level row giving
+  the document's tags (D10); every heading then has a row, most of them `stays`, and
+  a section holding general method has a row of its own for it. The runbook is
+  outside the guidance set (48 F1): its document row gives it no frontmatter and no
+  layer-table row, and its rows' tags record only what each passage concerns.
+- **Section 2's further tables.** After the sections: the restatements of guidance
+  in the skills and `openspec/config.yaml` (D11, D23), the proposed vocabulary (D18),
+  and the draft classification of the checks (D13), and the files each shared layer
+  gets with the tags each carries (31 O1c).
+- **`Ambiguous`.** Empty where the triage decided the row. Otherwise it names what
+  remains open and where it is settled: a duplicate whose copies differ, or wording
+  the move would change, is reviewed in the triage of the round that moves it
+  (31 O1b, 31 O1e).
+
+## Rules from round 1's triage
+
+- **31 O1a — General in form, stated in this repository's terms.** Guidance that
+  fits other systems of its kind is engineering, moved with a neutral example, even
+  where many repositories have no clients or no end-to-end tests; this repository's
+  statement stays as its instance and cites the engineering file. One instance is
+  enough. A description of this system — its architecture, one capability's
+  mechanism, a workaround tied to its environment or tools — is repository material,
+  staying or going to the capability's companion. Where a form depends on a
+  language, that is a tool tag (31 O1c), not a layer.
+- **31 O1b — Duplicates.** The guidance is deduplicated. Copies that agree merge into
+  one home, the destination the layer test gives, the other text deleted or left as
+  a citation where its reader needs a pointer. Where the copies differ, or the merge
+  would change what the guidance says, the section moving it proposes one text and
+  lists the pair in its notes, and that round's triage reviews both forms with the
+  owner; a change to what guidance says is reviewed, never assumed, a contradiction
+  above all. A document outside the guidance — the operator handbook, a runbook, a
+  README — does not move, but where decided guidance contradicts it, it is brought in
+  line in the same round's fixes.
+- **31 O1c — Tags are atoms, and a file carries only the tags its content needs.** A
+  file is relevant to a session that has every tag the file carries; there are no
+  compound tags. A file carries only the tags without which its content is
+  irrelevant, and content needing another set of tags goes in another file. Tools a
+  developer, a build, or a deployment runs carry tool tags (`python`, `uv`,
+  `hatchling`, `docker`, `kubernetes`, `helm`, `ansible`); a library the code imports
+  (Dynaconf, SQLAlchemy, `httpx`, `unittest.mock`) carries its language's tag.
+  "This repository uses X" is repository material; how to use X well is engineering
+  tagged X, whatever X is. A tool tag exists only once a file holds guidance on that
+  tool (D18), so `drawio` and `make` have none yet.
+- **29 F1 — The project layout splits by tool.** Python rules, uv rules, the
+  Hatchling form, and this repository's selection of Hatchling are four rows.
+- **31 O1d — Which capability.** A section goes beside the capability whose
+  specification owns what it governs — the declarations it configures, the decision
+  it tests, the state it reads — never beside a service that merely reads or
+  enforces it. Parts with different owners that separate cleanly are split; a
+  section whose parts do not separate, or that no capability owns whole, stays
+  cross-system. A capability-named example illustrating a shared rule stays with
+  the rule's repository instance.
+- **31 O1e — Rows turning on a settled decision.** "Amend a rule or comply" is
+  reworded as a framework for when an exception is expected, since shared guidance
+  that other repositories change makes exceptions expected; its wording is reviewed
+  in section 4's triage. The hand-laid change-workflow graph is a temporary
+  exception until its generator exists, its row in a new guidance file beside the
+  capability, `openspec/specs/change-workflow/diagrams.md` (CW-x4ex, 48 F2). `agents/domain.md`
+  is removed once its rows move. D10 is amended: a procedure stays whole, but a
+  section of one stating policy rather than a step is classified by D1, so
+  `RELEASING.md`'s versioning policy moves to engineering. The validation runbook is
+  not guidance and nothing moves out of it; it carries no frontmatter and no
+  layer-table row (48 F1).
+- **31 O1f — Workflow or repository until the extraction decides.** Scripts and
+  checks this repository provides stay repository material; migrating them is the
+  extraction's work, and workflow text names each by role. Every adopting repository
+  keeps the roadmap and the OpenSpec change organization this repository uses, so
+  their roles are workflow material and only their paths and contents are this
+  repository's: the capability index's purpose, and what goes to the roadmap rather
+  than the capability index, are workflow material, the index itself repository.
+  D8 is amended: roadmap currency is a workflow closeout part, "the repository's
+  roadmap"; this repository's own parts are packaging and end-to-end pipeline
+  evidence.
+- **31 O1g — Which file within a layer.** Each row keeps the file its layer gives,
+  with a neutral example where the source's names this repository; a principle the
+  rules above make engineering moves even when it sits inside a workflow part (the
+  part citing it), and a rule whose halves need different tags splits (31 O1c).
+
+## Sections
+
+### `AGENTS.md`
+
+| Source | Layer | Tags | Destination | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Repository Engineering Guidance`, its opening paragraph (the file defines repository-wide rules; read it with `ARCHITECTURE.md`, `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md`) | repository | repository | `AGENTS.md`, its opening as the entry (section 5) | names this repository's documents | |
+| `## Working model`, its opening sentence (discuss, plan, implement for non-trivial changes) | workflow | workflow, design, plan, implement | `workflow/working-model.md` | presupposes changes and phases | |
+| `### Discuss` | workflow | workflow, design | `workflow/working-model.md` | names the permanent specifications, the active change, `design.md`, and `proposal.md` | |
+| `### Plan`, every bullet but the closeout one (preserve completed tasks, name the files, a permanent destination for every decision, focused validation and integration suites) | workflow | workflow, plan | `workflow/working-model.md` | the plan is the workflow's `tasks.md` | |
+| `### Plan`, the closeout bullet (end the plan with the closeout task; its parts listed; promotion after code review) | workflow | workflow, plan | `workflow/working-model.md`, citing `workflow/closeout.md` by name | the closeout task is the workflow's (D8); it cites `closeout.md` and "the repository's own parts" without listing them, since a repeated list goes stale whenever the parts are reordered or a repository adds its own (31 O1g) | |
+| `### Plan`, the closeout bullet's naming of packaging and end-to-end pipeline evidence | repository | repository, plan, closeout | `AGENTS.md`, the layer-table row naming `openspec/README.md`'s "This repository's closeout parts" (task 3.4) | these are this repository's parts (D8 as 31 O1f amends it); the bullet's roadmap currency is the workflow's part, cited with `closeout.md` in the row above | |
+| `### Implement`, the criteria naming the workflow's documents (planned code and tests; behaviour in `spec.md`; rationale in `architecture.md`; the change records each decision's destination) | workflow | workflow, implement | `workflow/working-model.md` | spec, companion, and promotion record are the workflow's | |
+| `### Implement`, "permanent documentation describes the current system rather than announcing completion" | engineering | engineering, documentation | `engineering/documentation.md` | holds in a repository without the workflow | |
+| `### Implement`, "temporary migration and changelog commentary has been removed from production code" | engineering | engineering, comments | `engineering/comments.md` | the comment rule's history clause, holding anywhere | |
+| `### Implement`, "the relevant focused, integration, packaging, and typing checks have been run or any unrun checks are disclosed" | workflow | workflow, implement | `workflow/working-model.md` | disclosing unrun checks is what the workflow's validation and review read; the kinds named ("packaging, and typing") are this repository's choice, neutralized to "the checks the plan names", the kinds left to `AGENTS.md` (31 O1g) | |
+| `### Implement`, "accepted repository-wide architecture is present in `docs/development/ARCHITECTURE.md`" and "`make check-packaging` passes" | repository | repository, implement, packaging | `AGENTS.md`, this repository's own rules; corrected at round 5's triage (127 O1): `make check-packaging` in `BUILD_AND_PACKAGING.md`'s "Checks", the architecture document's role in `openspec/README.md`'s placement table | names a document and a make target of this repository | |
+| `### Asking the owner` | workflow | workflow, owner | `workflow/working-model.md` | the owner's role is the workflow's | |
+| `### Amend a rule or comply`, the rule (amend the rule first or comply; never record a private exception) | engineering | engineering, documentation | `engineering/rules.md`, reworded as a framework for when an exception is expected | holds in any repository with written rules; "never" was right while this repository was the guidance's one consumer, but once shared guidance is changed by other repositories too, exceptions are expected, and the rule says when: shared guidance the repository does not own conflicts with a need it can state; the exception is declared, with its reason, beside what it applies to; it never stands in for amending a rule the repository owns, and declaring everything an exception is the abuse the rule prevents (31 O1e). Topic `documentation`, since no other row would use a topic of its own | Wording (31 O1e): section 4 drafts the framework and its triage reviews it with the owner |
+| `### Amend a rule or comply`, its example (the testing levels change only by changing `docs/development/TESTING.md`) | repository | repository, testing | `AGENTS.md`; corrected at round 5's triage (127 O1): dropped, an illustration of `rules.md` with no repository fact of its own | names this repository's testing document | |
+| `## Documentation ownership`, the bullets on `ARCHITECTURE.md` and on `DEPLOYMENT_AND_CONFIG.md` with `docs/operator-handbook.md` | repository | repository, documentation | `AGENTS.md`, its layer table (section 5) | names this repository's documents; they restate the placement table's rows naming `docs/development/`, so the placement table is their one home and `AGENTS.md`'s layer table only names the documents (31 O1b) | Duplicate (31 O1b): where the bullets and the placement table's rows differ, the two forms are reviewed in section 5's triage |
+| `## Documentation ownership`, the bullets on `spec.md`, the companion (`architecture.md`, or `README.md` beside an `index.md`), and `openspec/changes/`; "Production code must not depend on `openspec/changes`"; the promotion paragraph; companions not synchronized by OpenSpec | workflow | workflow, openspec | `workflow/openspec-documentation.md` | the OpenSpec documentation model, which the workflow requires (D1); it duplicates `openspec/README.md`'s introduction and "Capability documentation pattern", merged into one statement in `openspec-documentation.md` (31 O1b); the promotion paragraph's "repository-wide `ARCHITECTURE.md`" is neutralized to "the repository's cross-system documents" | Duplicate (31 O1b): where the copies differ, the two forms are reviewed in section 3's triage |
+| `## Documentation ownership`, "`openspec/specs/README.md` is the canonical capability documentation index", the role: a repository keeps a canonical capability documentation index | workflow | workflow, openspec | `workflow/openspec-documentation.md`, with what goes to the roadmap rather than the capability index | every adopting repository keeps the OpenSpec organization this repository uses, so the index's purpose is workflow material (31 O1f) | |
+| `## Documentation ownership`, "`openspec/specs/README.md` is the canonical capability documentation index", its path and contents, and its check `make check-capability-index` (MCW-c4ek) | repository | repository, openspec, documentation | `openspec/README.md`, "Current capability documentation" | the index itself is this repository's; its check stays this repository's script, since migrating scripts is the extraction's work (31 O1f) | |
+| `## Documentation ownership`, "Git history and pull requests contain provenance and change history" | engineering | engineering, documentation | `engineering/documentation.md` | provenance in version control holds anywhere | |
+| `## Python comments and docstrings`, the neutral rule: comments describe the current system; do not reference previous file locations, the feature, migration, or review that introduced the code, tombstones or generated-artifact instructions, or temporary phases; what comments are for; say why the current invariant holds; state the rule locally and link to a stable heading; a bare pointer is no substitute | engineering | engineering, comments | `engineering/comments.md`, with a neutral example | holds in any repository; "link to a stable heading in `openspec/specs` or `ARCHITECTURE.md`" is neutralized to "a stable heading of a permanent document" | |
+| `## Python comments and docstrings`, the docstrings | engineering | engineering, comments | `engineering/comments.md`, named neutrally ("documentation strings") | the section states no rule only Python has, "docstring" being its one Python word, so no `comments-python.md` is created (31 O1c) | |
+| `## Python comments and docstrings`, the workflow's clauses: never reference change IDs, task numbers, or `tasks.md`; never name a change directory, landed or not, since the name goes stale at archive; a reason that is only "a change is coming" describes a plan; the Avoid example ("Moved here during POOLS-7 task 1.8") | workflow | workflow, comments | `workflow/change-references.md` | names the workflow's changes and tasks | |
+| `## Python comments and docstrings`, `make check-comment-hygiene` and its file types (`.py`, `.toml`, `.yml`, `.yaml`); `docs/` exempt because naming the change that owns a gap is the roadmap's job | repository | repository, comments, checks | `AGENTS.md`, this repository's own rules; its row in "What each check enforces" (D13); corrected at round 5's triage (127 O1): `market-change-workflow`'s README, "The closing checks", beside the check | names this repository's check, file types, and roadmap | |
+| `## Python comments and docstrings`, the Prefer example (fulfillment's dependency boundary, lines 98–100) | repository | repository, comments | `AGENTS.md`, as local illustration of the comment rule; corrected at round 5's triage (127 O1): with the rule's repository instance in `market-change-workflow`'s README, "The closing checks" | names a capability; `comments.md` takes a neutral example (D7, task 4.2); it illustrates a shared rule rather than guiding work on fulfillment, so it stays with the rule's repository instance (31 O1d) | |
+| `## Diagrams`, the principle (a diagram is held to code only when generated deterministically from a structured source; otherwise it is documentation maintained by review) | engineering | engineering, diagrams | `engineering/diagrams.md` | holds anywhere | |
+| `## Diagrams`, the change workflow's graph, drawn by hand from its graph table and compared with it until a deterministic layout reads as well | repository | repository, diagrams | `openspec/specs/change-workflow/diagrams.md` (new, `tags: [repository, diagrams]`), `## Exceptions to shared guidance` (section 6, task 6.2) | **Exception (overrides):** the change workflow's graph is laid out by hand and compared with its graph table, overriding `diagrams.md`'s rule that a diagram held to its source is generated from it, because a generated layout came out far larger than the hand-laid SVG; temporary, until the gap `openspec/specs/change-workflow/README.md`'s "Current limits" records (the graph's diagram laid out by hand) closes (31 O1e). Table: beside the one capability it applies to (CW-x4ex), in a guidance file created for it, which every step reading `change-workflow` reads (CW-r8cg; 48 F2); the engineering rule itself is unchanged | |
+| `## Diagrams`, "Keep a diagram's `.drawio` source beside its `.svg` export, and embed the export in the document that explains it", the neutral rule (keep a diagram's editable source beside its export; embed the export in the document that explains it) | engineering | engineering, diagrams | `engineering/diagrams.md` | holds anywhere; draw.io is this repository's selection, not guidance on using draw.io (31 O1c) | |
+| `## Diagrams`, draw.io as the diagram tool | repository | repository, diagrams | `AGENTS.md`, this repository's own rules; corrected at round 5's triage (127 O1): `openspec/README.md`, below the placement table | "this repository uses draw.io" is a selection; no `drawio` tag exists until a file holds guidance on using it (31 O1c) | |
+| `## Package and dependency discipline`, first bullet (follow the layer, scope, and kind rules of `ARCHITECTURE.md#package-and-dependency-layers` and the subsystem's specification) | repository | repository, dependencies | stays as `AGENTS.md`'s pointer to `ARCHITECTURE.md`, "Package and dependency layers" | names this repository's architecture | Duplicate (31 O1b): its second sentence — edges pointing permitted ways answer direction and knowledge, not ownership, which review answers — restates `ARCHITECTURE.md`'s three questions, which move to `engineering/dependencies.md` (31 O1a); the two forms are reviewed in section 4's triage where they differ |
+| `## Package and dependency discipline`, second bullet's principle (any import is an architectural dependency; a lazy import does not soften the edge; move the code rather than defer the import) | engineering | engineering, dependencies | `engineering/dependencies.md` | holds in any language | |
+| `## Package and dependency discipline`, second bullet's Python forms (module-level, function-local, under `TYPE_CHECKING`, behind `try`/`except`) and third bullet's `pyproject.toml` | engineering | engineering, dependencies, python | `engineering/dependencies-python.md` | D7 | |
+| `## Package and dependency discipline`, third bullet's principle (declare every distribution a package imports; a declared internal distribution never imported is removed or kept for a stated runtime reason) | engineering | engineering, dependencies | `engineering/dependencies.md` | holds anywhere | |
+| `## Package and dependency discipline`, third bullet's placement ("where `ARCHITECTURE.md` says its scope puts it") | repository | repository, dependencies | stays in `ARCHITECTURE.md`, "Scope", which states it | names this repository's architecture | |
+| `## Package and dependency discipline`, fourth bullet (`make check-architecture`; per-package boundary tests; review answers ownership; exception rows in `ARCHITECTURE.toml`; `[tool.arkhai.architecture.runtime-dependencies]`) | repository | repository, dependencies, checks | `ARCHITECTURE.md`, which states the same in "Package and dependency layers" (the check, where it runs, review answering ownership) and "Where the current tree diverges" (the exception rows, the runtime reasons, the boundary tests) | names this repository's check and files. `ARCHITECTURE.toml`'s exception rows excuse edges against this repository's own rules, not shared guidance, so they are not D9 exceptions. It duplicates `ARCHITECTURE.md`, which is its one home, named by `AGENTS.md`'s layer table (31 O1b) | Duplicate (31 O1b): where the bullet and `ARCHITECTURE.md` differ, the two forms are reviewed in section 5's triage |
+| `## Tests and diagnostics`, the lowest level that can prove the behaviour; observable seams, injected dependencies, deterministic controls over sleeps and patching; diagnostic steps for a failure not reproduced locally; a hard-to-test failure as a reason to refactor for testability | engineering | engineering, testing | `engineering/testing.md` | holds anywhere; the pointer to `TESTING.md` becomes one to `engineering/test-levels.md` | |
+| `## Tests and diagnostics`, "Run `make check-comment-hygiene` before implementation is considered complete" | repository | repository, comments, checks | `AGENTS.md`, this repository's own rules; corrected at round 5's triage (127 O1): dropped, since `make check-repository` runs it before every commit and closeout's part confirms it | names a make target | |
+| `## Tests and diagnostics`, "run `make check-packaging` and resolve every failure before the work is committed" | repository | repository, packaging, testing | `AGENTS.md`, this repository's own rules; corrected at round 5's triage (127 O1): `BUILD_AND_PACKAGING.md`'s "Checks", with the typing checks | names a make target | |
+| `## Tests and diagnostics`, the reason for that rule (tests passing against an environment a stale or hand-maintained refresh left prove nothing about the next rebuild, so the packaging checks run before a commit) | engineering | engineering, packaging | `engineering/packaging.md` | holds wherever environments are built from locks; section 2 settled it as a packaging rule, beside `BUILD_AND_PACKAGING.md`'s opening principle, rather than a uv one, since no uv mechanism is named | |
+| `## Public repository discipline`, its opening (everything in a public repository is world-readable, permanently, including after a later edit) | engineering | engineering, repository-content | `engineering/repository-content.md`, its public-repository part | D6: what a public repository refuses, and why | |
+| `## Public repository discipline`, "This repository is public" | repository | repository, repository-content | `AGENTS.md`, `## Exceptions to shared guidance` | **Exception (selects):** this repository selects the public case of `repository-content.md` (D6, D9; CW-x4ex "A repository is public"); table: `AGENTS.md` | |
+| `## Public repository discipline`, "Some work here is paired with work in separate private repositories. That pairing never appears here." | repository | repository, repository-content | `AGENTS.md`, this repository's own rules | a rule about this repository's own pairing, not a selection of a shared case | |
+| `### Never enters this repository`, credentials of any kind, expired or test-only included | engineering | engineering, repository-content | `engineering/repository-content.md`, the part holding in every repository | D6: no credential enters any repository | |
+| `### Never enters this repository`, private repository names, branches, and commits; cloud identifiers; internal endpoints; private paths; raw logs and evidence from private tooling; private planning documents | engineering | engineering, repository-content | `engineering/repository-content.md`, its public-repository part | D6: what a public repository additionally refuses | |
+| `### Never enters this repository`, wallet addresses | engineering | engineering, repository-content | `engineering/repository-content.md`, its public-repository part | an address is an identifier, not a credential, so it falls under what a public repository refuses rather than what every repository does (D6); the rule reads "account identifiers", with wallet addresses as the example (31 O1a) | |
+| `### Never enters this repository`, "A change document, a `design.md` rationale, and a task note are as public as production code" and "'It is only in the change directory' is not an exception" | workflow | workflow, changes | `workflow/changes.md` | names the workflow's documents; `repository-content.md` takes the neutral example ("a design note is as public as code") (31 O1g) | |
+| `### Test fixtures and local development configuration`, deterministic development values with a comment saying they are fixtures never used on a public network; a plausible value with no comment is worse than none | engineering | engineering, repository-content | `engineering/repository-content.md`, the part holding in every repository | D6 | |
+| `### Test fixtures and local development configuration`, "Local development configuration in this repository is public by design and must stay obviously so" | repository | repository, repository-content | `AGENTS.md`, with the public-case exception row | states this repository's case | |
+| `### Referring to work that is not here` | engineering | engineering, repository-content | `engineering/repository-content.md`, the part holding in every repository | D6: requirements described by the repository's own behaviour | |
+| `### Cross-references must resolve`, the rule (a cited path exists on the branch citing it; a permanent document describing behaviour the branch does not implement is not a harmless forward reference; an unresolvable citation is a blocking defect) | engineering | engineering, documentation | `engineering/documentation.md` | holds anywhere (D6) | |
+| `### Cross-references must resolve`, the cited paths it covers (`openspec/`, `docs/`, `tools/`, `scripts/`, `e2e-tests/`, `.agents/`) | repository | repository, documentation, checks | `AGENTS.md`, this repository's own rules; the citation check's row in "What each check enforces" (D13); corrected at round 5's triage (127 O1): `market-change-workflow`'s README, "The closing checks", beside the check | names this repository's directories | |
+| `### Cross-references must resolve`, the promotion story (a closeout commit promoted a section from another plan epoch; path permissions cannot detect it; run a cross-reference check before promoting) | workflow | workflow, closeout | `workflow/closeout.md`, "Promotion" and "Documentation citations" | D6, D8; its `dev`, this repository's integration branch, is neutralized to "the branch the change lands on" | |
+| `## Agent skills` (no text of its own) | repository | repository, skills | `AGENTS.md`, its layer table; corrected at round 5's triage (127 O1): the heading goes | the root's pointer to the workflow's guidance | |
+| `### Change workflow`, the pointer (each step a leaf skill under `.agents/skills/`, started through make, a slash command, or `make orchestrate`; see `agents/change-workflow.md`) | repository | repository, skills | `AGENTS.md`, its layer table; corrected at round 5's triage (127 O1): `AGENTS.md`'s first section, "The change workflow", saying where the workflow is, how steps run being the handbook's | the root entry naming where the workflow's guidance lives (D3) | |
+| `### Change workflow`, a change's records kept in its clone until archive cleanup copies them; `scripts/change-workflow find --records` | workflow | workflow, engine, records | `agents/change-workflow.md`, the paragraph "History and removal" under "A change in its own clone", which states it | the workflow's records; a duplicate of the guide, which is its one home, so it is removed from `AGENTS.md`, the layer table naming the guide (31 O1b) | Duplicate (31 O1b): where the two differ, the forms are reviewed in section 3's triage |
+| `### Deferred work`, recorded in the open change owning its area, a new change, or an unowned gap in `openspec/changes/README.md` | workflow | workflow, plan | `workflow/working-model.md` | the change index's gaps are the workflow's | |
+| `### Deferred work`, the roadmap as a home for unowned gaps, beside the change index | workflow | workflow, plan | `workflow/working-model.md` | every adopting repository keeps the roadmap this repository uses, so its role is the workflow's (31 O1f) | |
+| `### Deferred work`, the roadmap's path `docs/development/ROADMAP.md`; no GitHub Issues; the issue-discovery harness (`docs/development/ISSUE_DISCOVERY.md`) | repository | repository, plan | `AGENTS.md`, this repository's own rules | names this repository's documents and practice; the roadmap's path is this repository's, its role the workflow's (31 O1f) | |
+| `### Domain docs`, a subsystem's terms in its specification, and the workflow's in its specification's "Terms" | workflow | workflow, terms | `workflow/terms.md` | the documentation model's home for a subsystem's terms, and the workflow's own vocabulary (as `agents/domain.md`'s rows) | |
+| `### Domain docs`, the market's terms in `ARCHITECTURE.md`, and the pointer to `agents/domain.md` | repository | repository, terms | `AGENTS.md`, this repository's own rules | names this repository's homes; the pointer goes, since `agents/domain.md` is removed once its rows move (31 O1e) | |
+
+### `openspec/README.md`
+
+| Source | Layer | Tags | Destination | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Arkhai OpenSpec Guide`, the opening sentence and the bullets on `spec.md`, the companion, `changes/`, `changes/archive/`, and `config.yaml` | workflow | workflow, openspec | `workflow/openspec-documentation.md` | the OpenSpec layout; the archive bullet's "where repository-wide, `docs/development/ARCHITECTURE.md`" is neutralized to "the repository's cross-system documents" | |
+| `# Arkhai OpenSpec Guide`, the bullet on `specs/README.md`, the capability index, its role | workflow | workflow, openspec | `workflow/openspec-documentation.md` | the index's purpose is the workflow's (31 O1f, as `AGENTS.md`'s row); merged with that row's statement (31 O1b) | Duplicate (31 O1b): where the two statements differ, the forms are reviewed in section 3's triage |
+| `# Arkhai OpenSpec Guide`, the bullet on `specs/README.md`, its path | repository | repository, openspec | `openspec/README.md`, "Current capability documentation" | the index itself is this repository's (31 O1f) | |
+| `# Arkhai OpenSpec Guide`, the bullet on `changes/README.md`, which groups active changes into campaigns | workflow | workflow, changes | `workflow/changes.md` | the change index is the workflow's: its check is a default check (`check index`), and campaign index currency a workflow part | |
+| `# Arkhai OpenSpec Guide`, the title's "Arkhai" and the validator pin (`bunx @fission-ai/openspec@1.14.0`, why 1.14.0, `shorten-long-requirements`) | repository | repository, openspec | stays | the pin and its command are this repository's | |
+| `## Documentation placement`, the rows for `spec.md`, the companion, `index.md`, `proposal.md` and `design.md`, and `tasks.md` | workflow | workflow, openspec | `workflow/openspec-documentation.md` | the workflow's placement | |
+| `## Documentation placement`, the row "Change provenance and review discussion → Git history and pull requests" | engineering | engineering, documentation | `engineering/documentation.md` | the same rule as `AGENTS.md`'s provenance bullet | |
+| `## Documentation placement`, the `ROADMAP.md` row's role: goals and their gaps go to the roadmap, rather than the change index or the capability index | workflow | workflow, openspec | `workflow/openspec-documentation.md` | every adopting repository keeps the roadmap, so what goes there is the workflow's (31 O1f) | |
+| `## Documentation placement`, the rows naming `ARCHITECTURE.md`, `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`, `docs/operator-handbook.md`, `BUILD_AND_PACKAGING.md`, and `ROADMAP.md`'s path | repository | repository, documentation | stays: this repository's placement table, to which section 5 adds `docs/guidance/` and capability guidance files | names this repository's documents (31 O1f for the roadmap's path) | |
+| `## Documentation placement`, "`ARCHITECTURE.md` is a current-state cross-system map; link to subsystem specifications rather than duplicate them" | repository | repository, documentation | stays | names this repository's document | |
+| `## Documentation placement`, specifications may hold short rationale, broader prose belongs in the companion, and neither preserves chronology | workflow | workflow, openspec | `workflow/openspec-documentation.md` | the spec and companion split | |
+| `## Capability documentation pattern` | workflow | workflow, openspec | `workflow/openspec-documentation.md` | the specification and companion model; its example "completed in POOLS-7" is a made-up change id, neutral as it stands | |
+| `### A capability organized by an index`, the layout, ids, the index's shape, retired ids, citing by id, and the closing paragraph (closeout's promotion writes a new id's entry) | workflow | workflow, openspec | `workflow/openspec-documentation.md` | the indexed capability is a documentation form any adopter may use; the closing paragraph's "part 9" is cited by name, "Promotion" (D8) | |
+| `### A capability organized by an index`, "The check." (`make check-spec-index`, `scripts/check_spec_index.py`, its conditions) and the ids bullet's "the check below catches it" | repository | repository, openspec, checks | stays, as this repository's guide names the check; its row in "What each check enforces" (D13) | names this repository's check; it stays this repository's script, migrating scripts being the extraction's work, and workflow text names it by role, "the repository's index check" (31 O1f) | |
+| `## Change documentation requirements` (the permanent-documentation template, implementation-ready tasks naming promotion work, and a workflow change naming each public interface it changes, CW-c2tw) | workflow | workflow, changes, design, plan | `workflow/changes.md` | the change's documents; the template's checkbox `docs/development/ARCHITECTURE.md` is neutralized to "the repository's architecture document"; the template's headings are read by this repository's decision-destinations check, so `changes.md` keeps them verbatim; "the engine carries no version of its own until it is extracted" stays with the interface rule until the extraction gives the engine a version and rewrites it (31 O1g) | |
+| `## Permanent documentation impact` (line 80, a template heading inside a fenced block of "Change documentation requirements") | workflow | workflow, changes | `workflow/changes.md`, with its section | a template line, not a heading of the document | |
+| `### Knowledge to promote` (line 87, a template heading inside the same fenced block) | workflow | workflow, changes | `workflow/changes.md`, with its section | a template line, not a heading of the document | |
+| `## Open questions and prescribed tasks` | workflow | workflow, changes, design, plan | `workflow/changes.md` | a rule of the change's design and task list | |
+| `## Plan closeout requirements`, the opening paragraph (every `tasks.md` ends with the closeout task; its parts in order; archival last; closeout changes documentation only) | workflow | workflow, plan, closeout | `workflow/closeout.md`, its opening | D8; "eleven parts" becomes the workflow's own count, roadmap currency among them (31 O1f), with the position at which the repository's parts — packaging and end-to-end pipeline — run | |
+| `## Plan closeout requirements`, part 1, "Comment hygiene" | workflow | workflow, closeout | `workflow/closeout.md`, "Comment hygiene" | the part is the workflow's; it confirms an engineering rule (comments describe the current system) and a workflow rule (no change or task references). `make check-comment-hygiene` becomes "the repository's comment checks", which `openspec/README.md`'s closeout parts name (D8); its citation of `AGENTS.md`'s "Python comments and docstrings" is re-pointed to `engineering/comments.md` and `workflow/change-references.md` | |
+| `## Plan closeout requirements`, part 2, "Import placement", the part (confirm, not do; check the imports the change added; one that should move returns the change to implementation) | workflow | workflow, closeout, implement | `workflow/closeout.md`, "Import placement" | the part is the workflow's; it confirms an engineering rule of the Python form (imports at module level unless a verified reason keeps one local) | |
+| `## Plan closeout requirements`, part 2's rule itself (migrate local imports to module level where safe; verify a circular import by attempting the move; a documented lazy-load reason; check what was added, not every import; verify against the real suite) | engineering | engineering, dependencies, python | `engineering/dependencies-python.md` | a Python rule that holds without the workflow, stated today inside the part; its scoping to "the section's own diff" reads "what a change adds" in the engineering file, the per-section scoping staying in the part (31 O1g) | |
+| `## Plan closeout requirements`, part 3, "Documentation compliance" | workflow | workflow, closeout | `workflow/closeout.md`, "Documentation compliance" | confirms a workflow rule (the documentation model's placement) and, through the repository's placement table, repository rules; "this document's placement rules" becomes `openspec-documentation.md` and "the repository's placement table" | |
+| `## Plan closeout requirements`, part 4, "Narrative compression" | workflow | workflow, closeout | `workflow/closeout.md`, "Narrative compression" | confirms a workflow rule (task notes as change history) | |
+| `## Plan closeout requirements`, part 5, "Roadmap currency" | workflow | workflow, closeout | `workflow/closeout.md`, "Roadmap currency", worded "the repository's roadmap" | every adopting repository keeps the roadmap, so its currency is a workflow part (D8 as 31 O1f amends it); confirms a workflow rule (the roadmap's role), the path `docs/development/ROADMAP.md` staying in this repository's placement table | |
+| `## Plan closeout requirements`, part 6, "Campaign index currency" | workflow | workflow, closeout | `workflow/closeout.md`, "Campaign index currency" | confirms a workflow rule (the index's currency) and an engineering rule (citations resolve); `make check-change-index` is the workflow's default index check; its citation of `AGENTS.md`'s cross-reference rule is re-pointed to `engineering/documentation.md`; its account of archive cleanup releasing dependents stays with the part, which closeout reads (31 O1g) | |
+| `## Plan closeout requirements`, part 7, "Packaging" | repository | repository, closeout, packaging | `openspec/README.md`, `## This repository's closeout parts` | names `make check-packaging`, `make check-architecture-change`, and `BUILD_AND_PACKAGING.md`; confirms repository rules (D8); its sentence on `make check-agent-skills` stays in this repository's part, which names the command, the check staying this repository's script until the extraction (31 O1f) | |
+| `## Plan closeout requirements`, part 8, "End-to-end pipeline" | repository | repository, closeout, testing | `openspec/README.md`, `## This repository's closeout parts` | names this repository's pipeline; confirms a repository rule (D8); it cites `engineering/testing.md` for its reason (the row below) | |
+| `## Plan closeout requirements`, part 8's reason, "a change is not complete because its own suites are green" | engineering | engineering, testing | `engineering/testing.md`, worded for any unit of work | a general testing principle: work is not complete because its own tests pass (31 O1a, 31 O1g) | |
+| `## Plan closeout requirements`, part 9, "Promotion" | workflow | workflow, closeout | `workflow/closeout.md`, "Promotion" | confirms a workflow rule (promotion, the index entries); "`ARCHITECTURE.md`, other documents under `docs/`, `openspec/specs/README.md`" is neutralized to "the repository's permanent documents the closeout task names" | |
+| `## Plan closeout requirements`, part 10, "Documentation citations", the part (after promotion; resolve every match; strict validation last; scoped to the change on purpose) | workflow | workflow, closeout | `workflow/closeout.md`, "Documentation citations" | confirms an engineering rule (citations resolve); `make check-doc-citations` becomes "the repository's citation check"; its citation of `AGENTS.md` is re-pointed to `engineering/documentation.md` | |
+| `## Plan closeout requirements`, part 10's account of the check rejecting a citation of a tombstone | repository | repository, documentation, checks | `openspec/specs/market-change-workflow/README.md`, "The closing checks" | describes this repository's citation check, beside the other checks' descriptions (31 O1f) | |
+| `## Plan closeout requirements`, part 11, "Archival" | workflow | workflow, closeout | `workflow/closeout.md`, "Archival" | confirms a workflow rule (the spec deltas merge at the archive, last, so the closeout review reads the archived change); the archive runs through the workflow's OpenSpec command | |
+| `## Plan closeout requirements`, "If a plan's closeout task grows unusually large…" | workflow | workflow, plan, closeout | `workflow/closeout.md` | a judgement the plan and closeout make | |
+| `## Plan closeout requirements`, the promotion record (maintained during implementation; its example table; it is change history) | workflow | workflow, changes, implement | `workflow/changes.md`, cited by `closeout.md`'s "Promotion" | a change document, kept through implementation, so `changes.md` rather than `closeout.md` (31 O1g); the example's rows naming fulfillment's specification and an `ARCHITECTURE.md` heading get a neutral example | |
+| `## Design promotion record` (line 130, a template heading inside the promotion record's fenced block) | workflow | workflow, changes | `workflow/changes.md`, with the promotion record | a template line, not a heading of the document | |
+| `## Defects found during a change` | workflow | workflow, changes, plan, implement | `workflow/changes.md` | a judgement made while working a change, in `changes.md` as the sample places it (31 O1g); its link to `ARCHITECTURE.md`'s "Composition from above and below" becomes one to the engineering rule that row now states (31 O1a), as the direction rule needs; its citation of `AGENTS.md`'s "Deferred work" goes to `working-model.md` | |
+| `## Implementation completion checklist`, the items naming the workflow's material (the change specification; completed tasks preserved; each decision classified; subsystem knowledge in `openspec/specs`; production code with no reference to `openspec/changes` or task IDs; the design-promotion record; validation evidence and unrun suites disclosed) | workflow | workflow, implement | `workflow/working-model.md` | the workflow's completion criteria; it duplicates "Working model"'s Implement, merged into one list in `working-model.md` (31 O1b) | Duplicate (31 O1b): where the two lists differ, the forms are reviewed in section 3's triage |
+| `## Implementation completion checklist`, "Permanent documents describe current state rather than completion history" | engineering | engineering, documentation | `engineering/documentation.md` | the same rule as Implement's engineering row | |
+| `## Implementation completion checklist`, "Non-obvious comments communicate local rationale and invariants", and the production-code item's "previous file locations, or migration provenance" | engineering | engineering, comments | `engineering/comments.md` | the comment rule, holding anywhere | |
+| `## Implementation completion checklist`, "Repository-wide durable knowledge is present in `ARCHITECTURE.md`" and "`make check-comment-hygiene` passes" | repository | repository, implement | `AGENTS.md`, this repository's own rules, merged with Implement's repository row | names a document and a make target | |
+| `## Current capability documentation` | repository | repository, openspec | stays | points to this repository's capability index | |
+| `## Contributor workflow` | workflow | workflow, design, plan, implement | `workflow/working-model.md` | the workflow's sequence; it duplicates "Working model", merged into it (31 O1b); its first step's `AGENTS.md` and `ARCHITECTURE.md` are neutralized to "the repository's root guidance and architecture", and its sixth step's kinds of check ("package, typing") to "the checks the plan names", as Implement's row (31 O1g) | Duplicate (31 O1b): where it and "Working model" differ, the forms are reviewed in section 3's triage |
+
+### `agents/domain.md`
+
+| Source | Layer | Tags | Destination | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Domain Docs`, its opening ("where this repository's vocabulary is defined") | repository | repository, terms | `AGENTS.md`, with the market's homes | names this repository; the file is removed in section 3 once its rows move, its repository rows joining `AGENTS.md` and its one citation, `AGENTS.md`'s "Domain docs", re-pointed (31 O1e) | |
+| `## Where terms live`, the market's row (`ARCHITECTURE.md`, "Shared vocabulary and identities") | repository | repository, terms | `AGENTS.md` | names this repository's home | |
+| `## Where terms live`, the subsystem row (a capability's specification) and "A subsystem's definition wins inside that subsystem" | workflow | workflow, terms | `workflow/terms.md` | a subsystem's terms in its specification is the documentation model's; its link to the capability index is neutralized | |
+| `## Where terms live`, the change workflow's row (`openspec/specs/change-workflow/spec.md`, "Terms") | workflow | workflow, terms | `workflow/terms.md` | the workflow's own terms | |
+| `## The rule for terms`, use the established term from its home and no synonym; define a new term where it first appears and mark it new | engineering | engineering, terms | `engineering/terms.md` | holds in any repository with defined vocabulary, "one home per term" included; the workflow's additions are in `workflow/terms.md` (31 O1a) | |
+| `## The rule for terms`, a term that stays is added to its home in the same change; answering the owner's question in established terms and correcting the description or proposing the entry | workflow | workflow, terms, owner | `workflow/terms.md` | names the change and the owner | |
+| `## The rule for terms`, "a synonym `ARCHITECTURE.md`'s 'One name per concept' rules out" | repository | repository, terms | `AGENTS.md`, with the market's homes | names this repository's rule | |
+
+### `agents/change-workflow.md`
+
+Reclassified at section 3's re-run (task 3.11) by 58 O5's test, since the guide
+becomes the change workflow's operator handbook, `docs/change-workflow-handbook.md`
+(D3 as amended, 58 O7). Each row names one of three homes: the workflow's
+**specification** or its companion (wrong if the engine or a skill behaved
+otherwise), the workflow's **guidance** (wrong if a change's work product were
+otherwise), or the **handbook** (telling the owner what to do or type). The
+repository rows section 1 found (its former rows 259, 261–266, 269, 271, 273, 275,
+279, and 281) moved to `openspec/specs/market-change-workflow/README.md` at task
+3.6, the guide's text neutralized; the rows below classify the neutralized text. A
+statement whose home is the specification and that a requirement already states is
+deleted, the handbook citing the requirement where the owner needs it (31 O1b);
+"proposed" marks a home given to a statement no requirement states, for the round's
+triage (72 F2), listed in section 3's notes.
+
+Round 3's triage restructured the handbook (88 O1–O4) and removed its requirement
+ids (88 O2): the handbook headings the rows name are its earlier layout, and a row's
+"citing" names the requirement that is the statement's home, which the handbook no
+longer cites. Round 3's triage kept every proposed home (72 F2).
+
+| Source | Layer | Tags | Destination | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| The opening: what the document covers, and where the contract, companion, guidance, and change index are | workflow | workflow | handbook, its opening | tells the owner where to look; the handbook's map | |
+| The opening: an adopting repository states its own part | workflow | workflow | specification: CW-m4ps states it; deleted | wrong if the engine or a skill behaved otherwise | |
+| `## Skills`, skills from one source and their harness links; a skill does one step and stops | workflow | workflow | specification: CW-d8de, and the companion's "Leaf skills from one source"; deleted, the handbook citing CW-d8de | the skills' behaviour | |
+| `## Skills`, start each step in a fresh session; the step table's "Start it with" column; `UNATTENDED=1`, `FRESH=1`; the review always unattended | workflow | workflow | handbook, "Starting a step" | tells the owner what to type | |
+| `## Skills`, the step table's "Writes" column | workflow | workflow | specification: CW-uj2q, CW-pehu, CW-p2b2, CW-tc82, CW-g4oz, CW-j1ab, CW-l866, CW-5vkd, CW-g3zn, CW-ksnu, CW-ikmm, CW-hak6, CW-p8fy, CW-op72, and the companion's "A step run's life"; deleted, the handbook citing the companion | what each step writes is the steps' behaviour | "Design writes one commit once the design is settled" is stated by none; left to the skill, as the step's own procedure |
+| `## Skills`, outcomes naming exits as targets; the wrapper's validation target | workflow | workflow | specification: CW-5ldi, CW-js86, CW-0wna, CW-9fbu; deleted | the engine's behaviour | |
+| `## Skills`, an interactive step records its outcome with `record`; a session closed before it records | workflow | workflow | handbook, "Starting a step", citing CW-mzyz and CW-gnqh | the owner runs `record` or resumes the session | |
+| `## Skills`, an unattended step runs one command per Bash call, reads a refused path with the Read tool; the harness's refused shapes | workflow | workflow | specification, proposed: CW-b5cf in this change's delta; the refused shapes explained in the companion's "Restrictions bind unattended runs only" | a rule a step must follow that no requirement states (72 F2) | proposed |
+| `## Skills`, SIGTERM and SIGKILL | workflow | workflow | specification: CW-1a4d, the companion's "The orchestrator relays and routes"; deleted | the wrapper's behaviour | |
+| `## Skills`, every committing step pushes through the guarded push; a pushed branch starts nothing | workflow | workflow | specification: CW-pehu, CW-qu42, CW-59c7, the companion's "Pushing is guarded, never repaired"; deleted, the handbook citing CW-pehu and CW-59c7 | the steps' behaviour | |
+| `## Skills`, "The repository's hooks": hooks declared and run through `run`, the functional tier, staging what the hooks rebuilt, `pre-archive`, validation's parts, `run cleanup`, `config load`, `openspec` | workflow | workflow | specification: CW-f3qk, CW-b2xr, CW-u4pc, CW-k9vd, CW-e1sg, CW-n7ra, CW-g4oz, CW-ikmm, CW-l7hn, CW-i2we, and the companion's "The hooks" and "Interfaces are tiered"; deleted | the engine's behaviour | |
+| `## Skills`, no step edits the configuration | workflow | workflow | specification: CW-z5me, CW-drf6; the handbook's "The step table and the models" cites them | the owner commits such an edit, or has the orchestrating session commit it | |
+| `## Skills`, the owed `ci` part's dispatch, marker, fixed list, collect, and failure classes | workflow | workflow | specification: CW-g4oz, CW-x9bt; this repository's list and classes in `market-change-workflow`'s README, "Evidence only a push produces" (MCW-3i99, MCW-2lzw, MCW-3yqn); deleted, the handbook keeping that only the owner extends the list | the engine's and this repository's behaviour | |
+| `## Skills`, the order of the steps; a review is not a gate; a triage's exits; `## Next` unrouted; a confirmed return afresh | workflow | workflow | specification: CW-ab9h, CW-nfdb, CW-hdxi, CW-ksnu, CW-trdu, CW-m4qe, CW-x9tb, CW-qtxb, CW-9pbk, CW-l866, CW-izj1; the companion's "The owner is interrupted only for judgement"; the graph diagram embedded in the handbook | the workflow's routing; the owner reads it from the diagram | |
+| `## Skills`, the graph table, its hand-laid diagram, and redrawing it | workflow | workflow | specification: CW-ak1z, CW-66kx, and the companion's "Routing is code, with the model as backstop"; deleted | the engine's behaviour and its maintenance | |
+| `## Skills`, a step in the wrong state refuses; steps after the archive find the change by name | workflow | workflow | specification: CW-1iaz, CW-xo82; the handbook's "Starting a step" cites them | the owner meets the refusal | |
+| `## Skills`, planning, the merge, closeout, and archive cleanup ask the computation as they start; steps acting on a task list check it first | workflow | workflow | specification, proposed: CW-e3gt in this change's delta | a rule a step must follow that no requirement states (72 F2) | proposed |
+| `## Skills`, `pre-commit`'s default checks; the merge-base of a diff-reading check; `make check-tasks` | workflow | workflow | specification: CW-c8lw, CW-v2dq, CW-s3ju, CW-m7fk; `market-change-workflow`'s README, "The closing checks"; deleted | the engine's behaviour | |
+| `## Skills`, ask the owner in prose | workflow | workflow | guidance: `working-model.md`, "Asking the owner"; deleted | a duplicate of the guidance (31 O1b) | |
+| `## Skills`, one change per branch; a note in another change's documents lands with the current change; a prerequisite proposed apart | workflow | workflow | guidance, proposed: `changes.md`, "One change per branch", citing CW-dtpz for the prerequisite | what a change's work lands as; no guidance or requirement stated the notes rule (72 F2) | proposed |
+| `## Skills`, a skill restates guidance briefly, never stricter than its source | workflow | workflow | specification, proposed: CW-s7rq in this change's delta | how a skill is written is the skills' behaviour (72 F2's known case) | proposed |
+| `## The engine's command`, one executable; the subcommand list; `start`'s checks and refusals; exit statuses; `find --json`; `clone where`; `clone-remove --base`; `push`; `run`; `config`; `wait`; the make fragment; the interface tiers; a workflow proposal names its interfaces | workflow | workflow | specification: CW-r3ka, CW-5qne, CW-m7fk, CW-t5hz, CW-1iaz, CW-k6qa, CW-w2ld, CW-s3ju, CW-xx5f, CW-59c7, CW-p7kq, CW-u4pc, CW-v2dq, CW-q5fy, CW-o6kc, CW-h8vm, CW-c2tw; the list and the details no requirement holds — `find --json`'s fields, `wait`'s bound, `start`'s refusals as the code makes them — explained in the companion's "The command and its tiers"; the handbook's "The engine's command" cites it | the engine's interface | the guide said `start` refuses an archived change for the merge and a round view for every step; the companion states what the code does: neither for the merge, and the round view for implementation and later steps |
+| `## Orchestrating a change`, its opening: the session runs what the computation names, relays, commits nothing while a step runs, its commits, its stops for the owner | workflow | workflow | handbook, "Orchestrating a change", citing CW-5jlj, CW-yvo1, CW-op72, CW-9pbk | the owner starts it and answers it | |
+| "Starting and resuming", "Stating the cadence", "Following a running step" | workflow | workflow | handbook, citing CW-ms3j, CW-al17, CW-v6nj | the owner's commands and the cadence the owner settles | |
+| "Following a running step", the session says when it starts a long turn; "Answering and taking over", the session rereads the files, starts nothing for a closed interactive step, and gives the owner the command | workflow | workflow | specification, proposed: CW-o9hd in this change's delta; the handbook says what the owner sees | rules the orchestrating session follows that no requirement states (72 F2) | proposed |
+| "Answering and taking over", resuming by `seq`, `claude --resume`, handing back | workflow | workflow | handbook, citing CW-xgq3 | the owner's actions | |
+| "Directing a change", the `note` command and its flags; the merge after the archive on the owner's word | workflow | workflow | handbook, citing CW-jtsl, CW-zcx8, CW-uhdy, CW-m4qe | the owner's command | the refused nodes' list is CW-uhdy's, CW-xo82's, CW-m4qe's, CW-iaeh's, CW-eups's, and CW-9tzd's, cited by one example in the handbook |
+| "Interrupting a running step" | workflow | workflow | handbook, citing CW-k2rv, CW-w4ne; the stop's checks are CW-h7lq's, deleted | the owner's command | |
+| "Revisiting a default acceptance" | workflow | workflow | handbook, citing CW-r8vz | the owner's procedure | |
+| "Converting a change's records" | workflow | workflow | handbook, citing CW-qj77; what the conversion does is CW-ajcm's, CW-o1ca's, CW-zniv's, and CW-42me's, deleted | the owner's command | |
+| "Maintaining the step table", "Granting a rule for one run" | workflow | workflow | handbook, citing CW-z5me, CW-drf6, CW-vdqj, CW-zq4h, CW-tl5v; the deny-rule reading is CW-2lvd's and CW-5rmh's, deleted | the owner's edits and grants | |
+| "Commits" | workflow | workflow | handbook, citing CW-pehu, CW-ajo9, CW-bsmk | what the owner may ask of the orchestrating session | the orchestrating session's commit of a stopped run's work to a separate branch, on the owner's word, is stated by CW-op72 only as work the owner asks for |
+| "The merge before closeout", "The merge after the archive", "Merging the landing branch at other times" | workflow | workflow | handbook, citing CW-hdxi, CW-s3ju, CW-a6ow, CW-5vkd, CW-g3zn, CW-x9tb, CW-bsmk, CW-tax4; the merge's own reconciliation, recording, and repair are CW-hdxi's, CW-5vkd's, CW-tnp6's, CW-r2hu's, and the companion's "The merge before closeout", deleted | the owner's directions and confirmations | what the merge after the archive keeps of both sides is the companion's "The merge after the archive", no requirement's |
+| "Continuing an implementation session", "A run's earlier outcomes", "Reading the cost" | workflow | workflow | handbook, citing CW-0ia3, CW-1a4d, CW-u7da | the owner's commands | the guide said inseparable dollars show "as a range"; the handbook says "partial", as CW-yzer and the cost report's `usd_partial` do |
+| `## A change in its own clone`, its opening, "Creating it", "The bootstrap", "Running steps" | workflow | workflow | handbook, citing CW-yib2, CW-4x66, CW-s3ju, CW-8jyb, CW-8npg; the clone's remotes and branch are CW-8jyb's and the companion's, deleted | the owner's commands | |
+| "Reading a round", the owner's commits during a view | workflow | workflow | handbook, "Reading a round", citing CW-4svs, CW-aoby, CW-rgws, CW-n44s, CW-uq5q, CW-gd24, CW-te38, CW-9mrq | the owner's reading and its refusals' remedies | `round-view`'s refusals of a dirty workspace, a diverged branch, and an unpulled commit, and `round-done`'s restoring the workspace and dropping an empty commit, are stated by no requirement; kept in the handbook as what the owner meets running the commands |
+| "History and removal", "A change worked in the workspace", "Moving a change already under way into a clone" | workflow | workflow | handbook, citing CW-hak6, CW-c3he, CW-xx5f, CW-78ul, CW-4x66; the copy's rules are CW-rf50's and CW-p8fy's, deleted | the owner's commands and procedure | `change-clone-remove`'s refusals while a run or bootstrap is in progress, of a stash, and its counting of a squash merge are stated by no requirement; kept in the handbook as above |
+| `## Reviews`, `make review` and its variables (`FRESH`, `REVIEW_BASE`, `REVIEW_MODEL`, `REVIEW_EFFORT`, `UNVALIDATED`, `make design-review`) | workflow | workflow | handbook, "Reviews", citing CW-ebmo, CW-r9d2, CW-d1sm, CW-gqav | the owner's command | |
+| `## Reviews`, the format check, send-back, `check review`, alternatives; an external review saved and triaged | workflow | workflow | specification: CW-r9d2, CW-r8fb, CW-c4rv, CW-a2lf, CW-p2b2, CW-mzyz; the check's reading of kind, change, and section order, the `sent_back` and `refused` fields, and the external review's triage explained in the companion's "Reviews are files"; the triage's assignment of an external review's fields proposed in CW-t2lw | the reviewer's and triage's behaviour | proposed, for the external review's triage |
+| `## Reviews`, `Owed by validation:` on its own line of a section's verification task | workflow | workflow | guidance, proposed: `working-model.md`, "Plan", citing CW-5h8e | what a plan contains; only `change-plan` stated it (72 F2) | proposed |
+| `## Reviews`, every validation dispatches the owed workflow; the record's `ci` part, `**CI:**` line, and `## CI`; the failure classes; closeout records the owed observations | workflow | workflow | specification: CW-5h8e and CW-g4oz for the dispatch; the companion's "Sections are slices, sessions are the owner's" for closeout recording the owed observations, which no requirement states; this repository's classes in `market-change-workflow`'s README; deleted | validation's and closeout's behaviour, restated by `change-validate` and `change-closeout` (D11) | the record's `## CI` layout, and closeout's recording of the owed observations, are stated by no requirement; left to the companion and the skills that do them |
+| `## Reviews`, the owner reads a round before triage; the repeat pass | workflow | workflow | handbook, "Reviews" and "Reading a round", citing CW-qtxb, CW-rb5n, CW-9mrq | the owner's reading | the guide said every step that could commit refuses during a workspace view; CW-78ul names review, validation, triage, and implementation, as the handbook now says |
+| `### Default acceptance`, the rule's conditions, discussion one per message, the table, advancing as the default exit | workflow | workflow | handbook, "Default acceptance", citing CW-d5ac, CW-neua, CW-t9bx, CW-9pbk; the conditions deleted, as CW-d5ac and the companion's "Triage" state them | what the owner sees and how to revisit it | |
+| `### Default acceptance`, the `Classification:` line and its example; the table's heading; default fixes made with the round's others | workflow | workflow | specification, proposed: CW-t2lw in this change's delta | triage's record shape, stated only by `change-triage` (72 F2) | proposed |
+| `#### Accepted by default` (a template heading inside a fenced block) | workflow | workflow | handbook, with its section | a template line, not a heading of the document | |
+| `### The review directory`: the tree, numbering, the rejected draft, transcripts, `workflow.jsonl`'s writer and lines, the index check | workflow | workflow | companion: "Reviews are files", which takes the tree and the log's lines; specification: CW-p2b2, CW-r8fb, CW-5e24, CW-hak6, CW-lyr4, CW-jyff, CW-uj2q; the handbook cites "Reviews are files" and `log` | the record set is the workflow's; the tree explains it | the record names (`.triage.md`, `-implementation-owner`, `-orchestrator`, `pull-request.md`, `workflow.jsonl`) are stated by no requirement; the companion describes them |
+| `## Waivers`, its opening and the criteria | workflow | workflow | handbook, "Waivers", citing CW-q3dm, CW-n6wy, CW-a6ow, CW-x9tb; the criteria deleted, as CW-q3dm states them | the owner waives | |
+| `## Waivers`, the recommendation made in the step's existing message; planning's and the merge after the archive's recommendations; validation reading waivers only from the log; a standing waiver's ledger line | workflow | workflow | specification, proposed: CW-w6vy in this change's delta; the ledger lines explained in the companion's "The intervention ledger" | rules steps follow that no requirement states (72 F2) | proposed |
+| `## Waivers`, "Waiving parts of validation" and its command | workflow | workflow | handbook, citing CW-e7lm | the owner's decision and command | |
+| `## The ledger`, what it records and why | workflow | workflow | handbook, "The ledger", citing CW-zidp, CW-xe8m, CW-n6wy, CW-v1rk, CW-g6ua | the record of the owner's corrections | |
+| `## The ledger`, the JSON line, its keys, `revises`, the advancing exit's `next`, cleanup's `validated` line | workflow | workflow | companion: "The intervention ledger", the line and its example; specification, proposed: CW-t2lw (the keys, `revises`, `next`) and CW-w6vy (`validated`) | triage's and cleanup's record shape (72 F2) | proposed |
+
+Section 1's rows for the guide, superseded by the table above (task 3.11), are kept
+below as change history:
+
+| Source | Layer | Tags | Destination | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# The change workflow`, its opening (what the guide covers; the workflow's contract, index, and companion) | workflow | workflow | stays, with frontmatter tagging it `workflow` (task 3.5) | the workflow's guide (D3); "the phases, the closeout parts, and the rules each step follows are in `openspec/README.md`" is re-pointed to `docs/guidance/workflow/` | |
+| `# The change workflow`, "This repository's own part — its validation parts, its Helm validation namespace, and how it provides each role — is `market-change-workflow`" | repository | repository | `openspec/specs/market-change-workflow/README.md`, its opening | D1's direction: a workflow file links to no repository file | |
+| `## Skills`, the skills and their links from `.claude/` and `.codex/`; the step table but for its instantiations; unattended runs; outcomes and `record`; the harness's refused shapes; the guarded push; the order and the graph; refusals; `make check-tasks`; asking the owner; one change per branch; restating guidance | workflow | workflow, skills, engine | stays | the workflow's steps and engine; its citations of `AGENTS.md` ("Asking the owner", "Amend a rule or comply") are re-pointed to `working-model.md` and `engineering/rules.md` | |
+| `## Skills`, the step table's instantiations: the Validation row's "here the uv version check, the pipeline, each CI workflow…, the local part, and the Helm part"; the Archive cleanup row's capacity record, namespace teardown, and "here the capacity figure" | repository | repository, validate, archive-cleanup | `openspec/specs/market-change-workflow/README.md`, "Validation's parts", which describes them | D1's direction (the sample) | |
+| `## Skills`, "The repository's hooks" paragraph's instantiations: the inert paths "here", `make lock`, `make dist-clean`, `make check-packaging`, `make test`, the pre-archive targets, `make check-uv-version` | repository | repository, engine, checks | `openspec/specs/market-change-workflow/README.md`, "How this repository provides the workflow's roles" | names this repository's configuration | |
+| `## Skills`, the owed CI paragraph's instantiations: `make run-ci`, `scripts/ci_evidence.py` and its list holding `tests.yml`, `make validate-ci`, `.snapshot/validation/<short commit>/ci/`, and "the latest completed `dev` run" as the baseline | repository | repository, validate | `openspec/specs/market-change-workflow/README.md`, "Evidence only a push produces" | `scripts/ci_evidence.py` is this repository's script, outside the engine's package | |
+| `## Skills`, the Helm namespace paragraph (`validate-<change>`, `DEPLOYMENT_AND_CONFIG.md`'s "Validation namespaces", `make validate-parallel`) | repository | repository, validate, deployment | `openspec/specs/market-change-workflow/README.md`, "The change's namespace" | names this repository's Helm part | |
+| `## Skills`, the closing check's repository part: `make check-change` and `make check-repository` (`scripts/check_change.py`), the five rules, "None has an exception marker", the diff-reading checks' merge-base and `CHANGE_BASE` | repository | repository, checks | `openspec/specs/market-change-workflow/README.md`, "The closing checks", which describes them (MCW-c4ek) | the root `Makefile`'s targets and this repository's checks; the default checks `pre-commit` runs and `scripts/change-workflow check change` stay in the guide as the workflow's | |
+| `## Skills`, "a prerequisite … is proposed from `dev` instead" | repository | repository, design | the guide neutralized to "proposed from the branch the change lands on"; `dev` named in `openspec/specs/market-change-workflow/README.md`, "Branches, models, and the clone's bootstrap" | `dev` is this repository's integration branch | |
+| `## The engine's command` | workflow | workflow, engine | stays | the engine's interface; `workflow.mk` is the engine's own make fragment | |
+| `## Orchestrating a change`, all but its naming of `dev` | workflow | workflow, orchestrate | stays | the orchestrating session | |
+| `## Orchestrating a change`, "merges of `dev`" and "**Merging `dev` at other times.**"; "**Commits.**"'s protected branches "`main` and `dev`"; the `ALLOW` example's `Bash(make check-packaging)`; the completion script `scripts/completions/make-change.bash` | repository | repository, orchestrate | the guide neutralized to "the branch the change lands on", "the configuration's protected branches", and an example rule naming no make target; `dev` named in `openspec/specs/market-change-workflow/README.md`, "Branches, models, and the clone's bootstrap" | `dev` is this repository's integration branch; "merging `dev` at other times" means the landing branch in general; the completion script, outside the engine's package though it completes the engine's targets, stays this repository's until the extraction moves it with `workflow.mk`, migrating scripts being the extraction's work (31 O1f) | |
+| `## A change in its own clone`, all but its instantiations | workflow | workflow, engine, orchestrate | stays | the clone, its bootstrap, history, and removal | |
+| `## A change in its own clone`, "`origin` here" and "`make init` here"; "Merge `dev` into the change's branch, so its tooling knows clones"; the evidence paths `.snapshot/validation/<commit>/` and `.snapshot/e2e-logs/<run>/` in "**History and removal.**" and the move into a clone | repository | repository, engine | the guide neutralized ("the evidence directories the validation parts name", "the branch the change lands on"); the instances in `openspec/specs/market-change-workflow/README.md`, "Branches, models, and the clone's bootstrap" and "Validation's parts" | names this repository's remote, bootstrap, branch, and validation parts' evidence paths, which `.agents/workflow.toml` declares | |
+| `## Reviews`, its paragraphs (the reviewer and its fallback, the format check and send-back, the review base, the pre-closeout refusal, owed CI evidence, external reviews, alternatives, the owner's reading) | workflow | workflow, review, validate | stays | the workflow's reviews | |
+| `## Reviews`, the owed CI paragraph's "the `dev` baseline run" and "already failing on `dev`" | repository | repository, validate | the guide neutralized to "the landing branch's latest run"; `dev` named in `openspec/specs/market-change-workflow/README.md`, "Evidence only a push produces" | `dev` is this repository's integration branch | |
+| `### Default acceptance` | workflow | workflow, triage | stays | CW-d5ac's rule | |
+| `### Default acceptance`, the example table's finding (a `ROADMAP` heading renamed; `#goal-8-post-commitment-lifecycle`) | repository | repository, triage | the guide given a neutral example | names this repository's roadmap and one of its goals; the example illustrates the workflow's table, not this repository, so it is replaced rather than moved (31 O1g) | |
+| `#### Accepted by default` (a template heading inside a fenced block) | workflow | workflow, triage | stays, with its section | a template line, not a heading of the document | |
+| `### The review directory` | workflow | workflow, records | stays | the record set | |
+| `## Waivers`, all but its naming of this repository's parts and paths | workflow | workflow, triage, validate, records | stays | the workflow's waivers | |
+| `## Waivers`, "**Waiving parts of validation.**"'s naming of the local, Helm, pipeline, and CI parts and its example ("the Helm and pipeline parts…"); the first criterion's paths (`openspec/`, `docs/`) | repository | repository, validate | the guide neutralized ("a part of validation"; "the configuration's inert paths"); the parts named in `openspec/specs/market-change-workflow/README.md`, "Validation's parts" | names this repository's parts and inert paths; the guide keeps a neutral example, so the mechanism still reads concretely (31 O1g) | |
+| `## The ledger` | workflow | workflow, triage, records | stays | the intervention ledger | |
+| `## The ledger`, the second example line's "cite the goal's row in ROADMAP's table" | repository | repository, triage | the guide given a neutral example, as the default-acceptance table's | names this repository's roadmap; replaced by a neutral example, as the default-acceptance example (31 O1g) | |
+
+### `docs/development/ARCHITECTURE.md`
+
+| Source | Layer | Tags | Destination | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Arkhai Market Stack — Architecture Reference`, its purpose | repository | repository, architecture | stays | the cross-system document (D10) | |
+| `## Document map` | repository | repository, architecture | stays, its rows for moved sections removed | the document's own map | |
+| `## System overview` | repository | repository, architecture | stays | cross-system | |
+| `## Composition from above and below`, the rule (two parts of a system handling one concern differently, with nothing requiring it, get one behaviour composed from a shared component) | engineering | engineering, implementation | `engineering/implementation.md`, with a neutral example | guidance that fits other systems of its kind (31 O1a); `workflow/changes.md`'s "Defects found during a change" cites it there | |
+| `## Composition from above and below`, the market's core, kit, domain, and composition | repository | repository, architecture | stays, citing `engineering/implementation.md` for the rule | this repository's instance of the rule (31 O1a) | |
+| `## Package and dependency layers`, the three questions (direction, knowledge, ownership; edges pointing permitted ways answer the first two, review the third) | engineering | engineering, dependencies | `engineering/dependencies.md`, its opening, with a neutral example | guidance that fits any system with dependency rules (31 O1a) | |
+| `## Package and dependency layers`, its opening's instance (layer, scope, and kind; `make check-architecture`; `ARCHITECTURE.toml`) | repository | repository, dependencies, checks | stays, citing `engineering/dependencies.md` for the questions | cross-system (the sample); layer, scope, and kind are this repository's model (31 O1a) | |
+| `### Repository layers` | repository | repository, dependencies | stays | this repository's layers; its sentences "any import is a dependency…" and on declared distributions restate `AGENTS.md`'s, whose engineering statement moves to `engineering/dependencies.md`, this section keeping its instance and a citation (31 O1b) | Duplicate (31 O1b): where the two statements differ, the forms are reviewed in section 4's triage |
+| `### Scope` | repository | repository, dependencies | stays | this repository's scope rule | |
+| `### Kind`, all but the standalone-component principle | repository | repository, dependencies | stays | this repository's kinds, paths, and allowlists | |
+| `### Kind`, "Generic infrastructure that is not specific to this marketplace does not belong in a market package…" (building it is a warning sign; a standalone component publishes its interface and the consumer reads the producer) | engineering | engineering, implementation | `engineering/implementation.md`, beside "Prefer an existing library" | general in form (31 O1a); "market package" and "market concept" are neutralized to "a domain package" and "a domain concept" | |
+| `### Where the current tree diverges` | repository | repository, dependencies, checks | stays | this repository's divergences | |
+| `### Family kits` | repository | repository, dependencies, architecture | stays | this repository's family model | |
+| `### Kit areas` | repository | repository, dependencies, architecture | stays | this repository's kits | |
+| `### Marketplace identity` | repository | repository, architecture | stays | the cross-system map's summary of a capability, linking its specification: a description of the system, not guidance, so it stays, as do the summaries marked "as 'Marketplace identity'" (31 O1a); `openspec/README.md` asks the map to link capabilities rather than duplicate them | |
+| `### Registry self-description` | repository | repository, architecture | stays | as "Marketplace identity": a description of the system (31 O1a) | |
+| `### Capacity publication and multi-domain storefront composition` | repository | repository, architecture | stays | cross-system: storefronts, sites, registries | |
+| `### Settlement configuration` | repository | repository, architecture | stays | as "Marketplace identity": a description of the system (31 O1a) | |
+| `## Runtime service map` | repository | repository, architecture | stays | cross-system | |
+| `## Service Architecture`, "controllers stay thin…; business rules, orchestration, and I/O composition live in the service layer beneath them" | engineering | engineering, implementation | `engineering/implementation.md` | general in form: it fits any service with controllers (31 O1a) | |
+| `## Service Architecture`, "a per-service breakdown of its own layers belongs in that subsystem's `architecture.md`, not here" | repository | repository, architecture, documentation | stays | names this document | |
+| `### Route contracts and their HTTP binding`, the pattern (a capability serving HTTP routes splits into a typed client, a route contract, wire models, a thin HTTP binding, and a framework-free route service, the client in a package of its own depending only on the models and the contract so a caller does not install service code; a request is checked in the order of what it takes to judge it; one pure function compares stored and proposed state for every write path) | engineering | engineering, implementation | `engineering/implementation.md`, with a neutral example and the diagram redrawn neutrally | compatible with other systems serving HTTP routes, though many repositories have none; the language's form is a matter of tagging, not layering (31 O1a) | Python form (31 O1a): where the package split answers Python's import constraints, that reason goes to a Python-tagged form (`implementation-python.md`, tagged `implementation`, `python`); section 4 states it from the source, and its triage reviews it, the source naming no such constraint in words today |
+| `### Route contracts and their HTTP binding`, its instances (the packages owning each piece, the provisioning service's composed route table and contract-overlap refusal, the restricted path-pattern grammar, the unmatched-request answers, `kit/pool-overrides` as reference and `kit/site`'s router) | repository | repository, architecture | stays, citing `engineering/implementation.md` for the pattern | names this repository's packages and the owner of each piece (31 O1a) | |
+| `## Authority boundaries` | repository | repository, architecture | stays | cross-system | |
+| `### Post-commitment counterparts` | repository | repository, architecture | stays | cross-system | |
+| `### Deciding which party is authoritative`, the test (authority is the party that can make its answer stick; anything a counterparty can send is handled on its own terms) | engineering | engineering, implementation | `engineering/implementation.md`, with a neutral example | guidance that fits any system with several parties (31 O1a) | |
+| `### Deciding which party is authoritative`, its application to the storefront–site boundary | repository | repository, architecture | stays, citing `engineering/implementation.md` for the test | cross-system; this repository's instance (31 O1a) | |
+| `### Omission states no commitment` | repository | repository, architecture | stays | cross-system | |
+| `### Holding or closing a listing the storefront cannot fully derive` | repository | repository, architecture | stays | as "Marketplace identity" (storefront publication): a description of the system (31 O1a) | |
+| `### Storefront capacity boundary` | repository | repository, architecture | stays | cross-system: storefront and site | |
+| `### Site authority` | repository | repository, architecture | stays | as "Marketplace identity" (site capacity): a description of the system (31 O1a) | |
+| `### Resource pools` | repository | repository, architecture | stays | as "Marketplace identity" (resource-pool management): a description of the system (31 O1a) | |
+| `## Shared vocabulary and identities` (no text of its own) | repository | repository, terms | stays | the market's home for terms | |
+| `### Marketplace principals` | repository | repository, terms | stays | the market's terms | |
+| `### Authenticated service boundaries` | repository | repository, architecture | stays | cross-system | |
+| `### Terms` | repository | repository, terms | stays | the market's terms | |
+| `### One name per concept` | repository | repository, terms | stays | the market's terms | |
+| `### Identifiers` | repository | repository, terms | stays | the market's identifiers | |
+| `## Major lifecycle flows` (no text of its own) | repository | repository, architecture | stays | cross-system | |
+| `### Discovery and negotiation` | repository | repository, architecture | stays | cross-system | |
+| `### Settlement servicing` | repository | repository, architecture | stays | cross-system | |
+| `### Capacity reservation` | repository | repository, architecture | stays | cross-system | |
+| `#### Layered placement ownership` | repository | repository, architecture | stays | cross-system | |
+| `### Fulfillment` | repository | repository, architecture | stays | cross-system | |
+| `### Fulfillment status and results` | repository | repository, architecture | stays | cross-system | |
+| `### Release` | repository | repository, architecture | stays | cross-system | |
+| `## Deployment topology` (no text of its own) | repository | repository, deployment | stays | cross-system | |
+| `### Local development`, the Compose and local Kubernetes topology | repository | repository, deployment | stays | cross-system | |
+| `### Local development`, its two rules' principles (a stack is configured from committed files a Makefile selects and never generates; secrets through a secret profile or overlay, never an environment variable the configuration names; a private CA configured where its client reads it) | engineering | engineering, configuration | `engineering/configuration.md` | general; section 2 moved `DEPLOYMENT_AND_CONFIG.md`'s principle to `configuration.md`, so these follow it, as this row anticipated; "committed files" holds for the repository's own stacks, a deployment's secret file being the operator's, a distinction the engineering wording keeps | |
+| `### Local development`, the rules' instances (the end-to-end lanes and the full local stack, `ARKHAI_IDENTITY_CREDENTIAL` as the one exception, the pointers to `DEPLOYMENT_AND_CONFIG.md`) | repository | repository, configuration, deployment | stays | cross-system; the identity credential's exception is the row under `DEPLOYMENT_AND_CONFIG.md`'s "Profile-based configuration", **Exception (overrides)** in `AGENTS.md` | |
+| `### Production and staging` | repository | repository, deployment | stays | cross-system | |
+| `### Operators` | repository | repository, deployment | stays | this repository's operators and its pre-1.0 versioning rule; it keeps its reasons (one operator; pre-1.0 packages) and cites `engineering/versioning.md` for the policy (31 O1e) | |
+| `## Build, packaging, and initialization`, the wheels, `make dist` and `make reinit`, `.python-version`, and `BUILD_AND_PACKAGING.md`'s ownership | repository | repository, packaging | stays | names this repository's build | |
+| `## Build, packaging, and initialization`, "Aggregate Make targets must run every included subproject's default tests…" | engineering | engineering, testing | `engineering/test-levels.md` | general: an aggregate test target runs every included project's tests, worded for any build tool, a testing rule (31 O1a, 31 O1c) | |
+| `### Accepted representations and application views`, its first two paragraphs (a persisted protocol document projected into a view without the view becoming evidence; the canonical bytes retained; compatibility while a retained record may be read) | engineering | engineering, persistence | `engineering/persistence.md` | general in form (31 O1a); its mandates and evidence ("unsupported mandate forms") stay as repository illustration | |
+| `### Accepted representations and application views`, its third paragraph's general rules (schema changes additive by default; expand and contract across releases; operational seeding in runtime initialization, migrations seeding only deterministic system rows) | engineering | engineering, persistence | `engineering/persistence.md` | general | |
+| `### Accepted representations and application views`, its third paragraph's repository rules (each service's migration chain from a supported baseline; the VM, bare-metal, and API-credit schemas needing fresh databases) | repository | repository, persistence, deployment | stays | names this repository's services | |
+| `## Recovery workers` | repository | repository, architecture | stays | the compute provisioner's workers | |
+| `## Operator lifecycle controls`, its first paragraph (a manual cycle invokes the same production handler as the timer; bounded diagnostics) | engineering | engineering, implementation | `engineering/implementation.md`, citing `test-seams.md` | general in form; the production half of the rule whose test half is `TESTING.md`'s "Pause the loop, then advance it explicitly", split because a session writing a loop has `implementation` without `testing` (31 O1c, 31 O1g) | |
+| `## Operator lifecycle controls`, the storefront loop controller and the trading pause | repository | repository, architecture | stays | names `kit/storefront`; as "Marketplace identity", a description of the system (31 O1a) | |
+| `## Implementation rules` (no text of its own) | engineering | engineering, implementation | `engineering/implementation.md` | the sample | |
+| `### No speculative guard code` | engineering | engineering, implementation | `engineering/implementation.md` | holds anywhere | |
+| `### Prefer an existing library`, the rule | engineering | engineering, implementation | `engineering/implementation.md` | holds anywhere | |
+| `### Prefer an existing library`, its examples (`frp-grant-admission`, gitleaks) | repository | repository, implementation | stays, as local illustration | the sample | |
+| `## Testing strategy`, its first paragraph (tests at the lowest level that can prove the behaviour; the levels) | engineering | engineering, testing | `engineering/test-levels.md` | holds anywhere; its pointers to `TESTING.md` and `test-compatibility` stay in `ARCHITECTURE.md` | |
+| `## Testing strategy`, locally verifiable and external-topology scenarios | repository | repository, testing | stays | names this repository's lanes, doubles, and stack | |
+| `## Testing strategy`, "an end-to-end test proves a deterministic sequence of state changes, never wall-clock time", and driving a decision derived from a record and a timestamp by moving the service's perceived clock | engineering | engineering, testing | `engineering/system-tests.md` | general; section 2 moved it from `engineering/testing.md` to join `TESTING.md`'s "The discipline every scenario follows", the same rule | |
+| `## Testing strategy`, that paragraph's compute-lane and lane-double specifics | repository | repository, testing | stays, as local illustration | names this repository's lanes | |
+| `## Testing strategy`, the test-double paragraph | engineering | engineering, testing | `engineering/test-doubles.md` | the sample | |
+| `## Testing strategy`, the payments and mediation doubles as examples | repository | repository, testing | stays, as local illustration | the sample | |
+| `## Capability documentation index` | repository | repository, openspec, documentation | stays | points to this repository's capability index | |
+| `## Deterministic database-concurrency tests` | engineering | engineering, testing, persistence | `engineering/concurrency-tests.md` | the sample | |
+| `### Durable fulfillment acceptance` | repository | repository, architecture | beside `fulfillment` (the sample): `openspec/specs/fulfillment/architecture.md` | pertains to one capability, and describes the system — how acceptance is orchestrated — rather than how to work on it, so it joins fulfillment's companion, which the guidance set excludes (D21), with no frontmatter (31 O1a) | |
+| `### Atomic workload-lifecycle cutovers` | engineering | engineering, persistence | `engineering/persistence.md`, reworded neutrally ("live records and the external identities they carry") | general in form: a cutover of live records validates the whole population and writes atomically (31 O1a) | |
+| `### Public repository content checks` | repository | repository, repository-content, checks | `openspec/specs/market-change-workflow/README.md`, under "This repository's checks", beside "Secret scanning" | the sample: misfiled under the concurrency tests | |
+
+### `docs/development/TESTING.md`
+
+| Source | Layer | Tags | Destination | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Testing Strategy`, its opening (the document's purpose for this repository; read it with `ARCHITECTURE.md` and `openspec/README.md`; its pointer to `AGENTS.md`'s "Tests and diagnostics") | repository | repository, testing | stays, its pointers re-pointed to `engineering/test-levels.md` and `engineering/testing.md` (section 4) | the cross-system testing document's own opening (D10); its clause that the document describes current practice and is corrected in place restates `engineering/documentation.md`'s current-state rule, its one home, so the clause is dropped (31 O1b) | |
+| `## Four-Level Hierarchy` (no text of its own) | engineering | engineering, testing | `engineering/test-levels.md` | the sample | |
+| `### 1. Unit Tests`, "What they cover" and "What they do not cover" | engineering | engineering, testing | `engineering/test-levels.md` | the sample | |
+| `### 1. Unit Tests`, the mocking convention's principle (collaborators are injected through the constructor; a test never patches a module-level import around that seam, which breaks when call structure changes though behaviour did not) | engineering | engineering, testing | `engineering/test-seams.md` | holds in any language with injected collaborators; "the dependency-injection composition pattern used throughout this repository" is neutralized | |
+| `### 1. Unit Tests`, the mocking convention's Python form (`unittest.mock.MagicMock` and `AsyncMock` for injected collaborators) | engineering | engineering, testing, python | `engineering/testing-python.md` | D7: a language form beside its principle; every Python testing form goes to one file tagged `testing` and `python`, since a session testing Python wants them all and the `python` tag already spares other languages (31 O1c) | |
+| `### 1. Unit Tests`, the command-module convention's rule (a module with no constructor is its own composition root; its factory functions are its one seam; a test replaces a factory on the defining module only, never a library name or one the module imports, which an import-style change silently undoes) | engineering | engineering, testing, python | `engineering/testing-python.md` | module-level functions and patching by name are Python's form of the seam rule; its neutral principle is the mocking convention's, so it is Python-only (31 O1c) | |
+| `### 1. Unit Tests`, the command-module convention's instance (the bare-metal buyer CLI and the factories its tests replace) | repository | repository, testing | stays, as local illustration | names a package of this repository (the sample) | |
+| `### 1. Unit Tests`, "The other CLIs' tests still replace library and imported names; `ROADMAP.md` records that gap" | repository | repository, testing | `AGENTS.md`, `## Exceptions to shared guidance` | **Exception (overrides):** the buyer CLIs other than bare metal's override `testing-python.md`'s command-module rule until the roadmap's gap closes (D9); table: `AGENTS.md`, since several domains' CLIs are affected. Corrected at round 5's triage: not an exception but the roadmap's unowned gap, which `TESTING.md` names | |
+| `### 1. Unit Tests`, the composition-boundary convention (inject a distinct compatible object and assert identity at each constructor boundary; fail-closed cases at the composition root assert persistence, network, and worker collaborators were never built) | engineering | engineering, testing | `engineering/test-seams.md` | general; "a versioned domain contract" is neutralized to "a versioned contract" | |
+| `### 1. Unit Tests`, the negotiation-runtime convention's rule (a shared runtime's invariants are tested once, each consumer testing only its adapters) | engineering | engineering, testing | `engineering/test-seams.md`, with a neutral example | guidance that fits any system with a shared runtime; one instance is enough (31 O1a) | |
+| `### 1. Unit Tests`, the negotiation-runtime convention, its instance | repository | repository, testing | `specs/negotiation-protocol/testing.md`, citing `engineering/test-seams.md` | one capability (the sample); this repository's instance (31 O1a) | |
+| `### 2. Integration Tests`, "What they cover", "What they do not cover", and "External boundary definition" | engineering | engineering, testing | `engineering/test-levels.md` | the levels | |
+| `### 2. Integration Tests`, "Library packages" (a library's integration test drives its public API against a real embedded database, the persistence it owns, with collaborators it does not own injected; such tests prove transactions, locking, and concurrency; they do not replace the composing service's tests; one in `unit/` touching a real database moves when next touched) | engineering | engineering, testing | `engineering/test-levels.md` | holds for any library owning persistence; "kit library" is neutralized; its `tests/integration` layout sentence is Python's and goes to `testing-python.md` (31 O1c) | |
+| `### 2. Integration Tests`, "Registration and traffic are different proofs", the rule | engineering | engineering, testing | `engineering/testing.md` | general | |
+| `### 2. Integration Tests`, "Registration and traffic are different proofs", its instance (the frps admission plugin's real-frp tests) | repository | repository, testing | stays, as local illustration | names a tool of this repository | |
+| `### 2. Integration Tests`, the third flavour of integration test (real external processes the test starts, skipped in the default suite without their binaries, run in a gate that fails on a skip) | engineering | engineering, testing | `engineering/test-levels.md` | general | |
+| `### 2. Integration Tests`, "Test setup pattern" (`httpx.AsyncClient` with `ASGITransport` against the real application, the typed client constructed with that transport, DI providers overridden and restored) | engineering | engineering, testing, python | `engineering/testing-python.md` | D7 | |
+| `### 2. Integration Tests`, "Typed client contract verification — the 'no raw calls' rule" and its two exceptions | engineering | engineering, testing | `engineering/integration-tests.md` | holds for any service with a typed client | |
+| `### 2. Integration Tests`, "Sync/async client parity" | engineering | engineering, testing | `engineering/integration-tests.md` | general | |
+| `### 2. Integration Tests`, "Async test discipline — no sleeps", the rule (no sleep or timeout race; an injectable callback at the point the test synchronizes on, absent and free in production; adding a missing seam is the fix) | engineering | engineering, testing | `engineering/test-determinism.md` | general | |
+| `### 2. Integration Tests`, "Async test discipline — no sleeps", its Python form (`asyncio.Event`, `asyncio.wait_for`, and `AsyncJobQueue`'s `on_job_started`) | engineering | engineering, testing, python | `engineering/testing-python.md`, with a neutral example | D7; `AsyncJobQueue` is this repository's, so the Python file takes a neutral example and the queue stays in `TESTING.md` as illustration | |
+| `### 2. Integration Tests`, "Tests wait on events, never on durations", the rule | engineering | engineering, testing | `engineering/test-determinism.md` | general | |
+| `### 2. Integration Tests`, "Tests wait on events, never on durations", its standing exception (`socketserver`'s `serve_forever` with a short `poll_interval`; the storefronts' loopback uvicorn servers stopping on an event) | engineering | engineering, testing, python | `engineering/testing-python.md` | a Python library's form; the storefronts' servers are this repository's instance, staying as illustration | |
+| `### 2. Integration Tests`, "Leave nothing held", the rule (a test that holds work at a gate ends the hold itself; it waits on the execution, never the job's status) | engineering | engineering, testing | `engineering/test-determinism.md` | general; `MockRuleSet` and `AsyncJobQueue` stay in `TESTING.md` as illustration | |
+| `### 2. Integration Tests`, "Pause the loop, then advance it explicitly", its opening rule (each background loop offers a pause and a single step that works while paused, so a scenario drives transitions instead of waiting for a timer) | engineering | engineering, testing | `engineering/test-seams.md`, citing `implementation.md` | general; the test half of the rule whose production half, `ARCHITECTURE.md`'s "Operator lifecycle controls", goes to `implementation.md`: each half needs a different tag (31 O1c, 31 O1g) | |
+| `### 2. Integration Tests`, "Pause the loop, then advance it explicitly", its instances (the table of loops and routes, the worker's `at_gate`, the storefront loop controller, source confirmation, the compute lanes' module-wide holds, `buy_to_ready`, the hold helpers and their source checks) | repository | repository, testing | stays | cross-system: provisioning, every storefront, and the end-to-end lanes | |
+| `### 2. Integration Tests`, "Traps this has already sprung", as lessons (a loop with no pause is not paused; a "run one cycle" endpoint is not necessarily a step; a loop that sleeps its interval is held late) | engineering | engineering, testing | `engineering/test-seams.md`, with neutral examples | general; their convergence, claim, and kit-runner details stay in `TESTING.md` as the repository's instances | |
+| `### 3. Smoke Tests (Deployment Validation)`, "What they cover", "What they do not cover", and "A smoke check that writes state belongs in an integration test instead" | engineering | engineering, testing | `engineering/test-levels.md` | the levels | |
+| `### 3. Smoke Tests (Deployment Validation)`, "Current location" and the provisioning smoke markers and chart hook | repository | repository, testing, deployment | stays | names this repository's paths, markers, and chart; the provisioning markers do not separate from the umbrella chart's test hook, so the section stays cross-system (31 O1d) | |
+| `### 4. System Integration Tests (End-to-End)`, "What they cover" and "What they do not cover" | engineering | engineering, testing | `engineering/test-levels.md` | the levels | |
+| `### 4. System Integration Tests (End-to-End)`, "Current location", each deployable domain's release-qualified complete-deal scenario, and the paragraph introducing the three diagrams | repository | repository, testing | stays | cross-system: the market's domains | |
+| `#### The discipline every scenario follows`, the method (a sequence of state changes, never wall-clock time; hold every loop once; preview, advance one side effect, measure through typed clients; wait only on an effect of the stage's own request; drive a time-derived decision by moving the service's perceived clock; prove a window's elapsing where the clock can be driven) | engineering | engineering, testing | `engineering/system-tests.md` | general method; its first sentence is the rule of `ARCHITECTURE.md`'s "Testing strategy" row, which joins it here | |
+| `#### The discipline every scenario follows`, its instances (`wait_until`, the lane doubles' clock and `lane_double_clock`, Mailpit, the introduction retention sweep), the stage-discipline diagram, `DomainDealState`, `require_state`, and the opaque domain helpers | repository | repository, testing | stays | names the lanes, fixtures, and diagram; the diagram draws the method through this system's storefront and provisioning controls, a description of the system, so it stays (31 O1a) | |
+| `#### The canonical compute deal`, its rule (a shared stage never depends on a mock profile, since a gate a real driver answers with a no-op reports a hold that never happened) | engineering | engineering, testing | `engineering/test-doubles.md`, with a neutral example | guidance that fits any system testing against doubles and real drivers (31 O1a) | |
+| `#### The canonical compute deal` | repository | repository, testing | stays, citing `engineering/test-doubles.md` for the rule | cross-system (the sample); the compute stages are the rule's instance (31 O1a) | |
+| `#### One part, zoomed in`, the settle part and its diagram | repository | repository, testing | stays | the compute deal | |
+| `#### One part, zoomed in`, "The e2e test pod cannot import service internals — it uses typed clients, explicit test controllers, and stage/event APIs over HTTP" | engineering | engineering, testing | `engineering/system-tests.md` | general: a system test reaches services only through their public interfaces | |
+| `#### One part, zoomed in`, the lanes (one per domain, each its own compose project), the doubles each runs, `PROVISIONING_MODE` and the mock executors, `make -C e2e-tests test-e2e`, the Helm validation scenarios and check pods, the release-qualified bare-metal deal, the VM multi-registry scenario, and `make run-e2e` with `make fetch-e2e-logs` | repository | repository, testing, deployment | stays | cross-system: every lane and the release; `make run-e2e` and `make fetch-e2e-logs`, validation's pipeline part, stay this repository's targets, `market-change-workflow`'s README naming the part (31 O1f) | |
+| `#### One part, zoomed in`, "A mock's default output is what the shipped configuration prints for the job", the principle (a mock answers as the real producer would, so the real reader runs) | engineering | engineering, testing | `engineering/test-doubles.md` | general; the Ansible fact formats are this repository's instance, staying as illustration | |
+| `#### Locally verifiable and external-topology scenarios`, the method (two kinds and what each proves; an external scenario minimally extends a local one; setup needing knowledge the repository lacks is the deployment's; evidence is supplied free-form by whoever deploys, raw records never entering the repository; an observation is made, failed, or unproven, and a stage not collected counts as not run) | engineering | engineering, testing | `engineering/system-tests.md` | general method; `ARCHITECTURE.md`'s summary of it stays repository (section 1), keeping its lanes and citing this file (31 O1g) | |
+| `#### Locally verifiable and external-topology scenarios`, its instances (the real-provisioning qualification modules, observations 2, 4, 5, and 6, `qualification.py`, the VM lease-end step) | repository | repository, testing | stays | names this repository's modules and runbook | |
+| `#### The real-provisioning lane` | repository | repository, testing | stays | cross-system: VM and bare-metal sites, relays, storefronts; the runbook holds the procedure and this section what the lane proves | Duplicate (31 O1b): overlaps `VALIDATION_RUNBOOK.md`'s sections 21–25 and `e2e-tests/README.md`, which it cites for the steps; section 5's triage reviews both forms, and the runbook or README is brought in line where the decided text contradicts it |
+| `## Coverage Contract Between Levels` | engineering | engineering, testing | `engineering/test-levels.md` | the sample | |
+| `## Contract Fixtures`, the method (a `build_*` and `validate_*` pair shared by producer and consumer; when a boundary earns one; sentinel values and range assertions; import direction from producer to consumer; dormant validators) | engineering | engineering, testing | `engineering/contract-fixtures.md` | general | |
+| `## Contract Fixtures`, where they live (`tests/fixtures/<module>.py`; `src/<package>/fixtures/`, installed with the producer's wheel; a dormant validator's module docstring) | engineering | engineering, testing, python | `engineering/testing-python.md` | D7; the two example paths are this repository's and stay in `TESTING.md` as illustration | |
+| `## Test File Layout`, the split into `unit/` and `integration/` under a project's `tests/`, an `integration/` package permitting shared basenames | engineering | engineering, testing, python | `engineering/testing-python.md` | a Python project's layout | |
+| `## Test File Layout`, the `e2e-tests` package's split and a chart's `tests/` directory | repository | repository, testing | stays | names this repository's packages | |
+| `## Migration Tests`, the method (a migration chain proven against real database files at the lowest level; a floor fixture of a release's schema; baselines reproduce it; adoption applies only later migrations; a rerun changes nothing; a refused database is left unchanged; a test needing a migrated database migrates it through the chain; opening a store creates no table) | engineering | engineering, testing, persistence | `engineering/migration-tests.md` | general method; "`create_all`" is SQLAlchemy's, an imported library, so `testing-python.md` names it under the `python` tag (31 O1c) | |
+| `## Migration Tests`, its instances (`kit/schema-migrations`, the `v0_3_0_floor` fixtures, each service's chain, command, store-open test, and init container, the lanes' fresh databases) | repository | repository, testing, persistence | stays | cross-system: every stateful service's chain is named, and no one capability owns them all (31 O1d) | |
+| `## Pool Offering-Mode Enforcement` | repository | repository, testing | `specs/resource-pool-management/testing.md` | one capability (the sample); its closing paragraph, making an executor-default inventory part of closeout for changes to this boundary, is a repository rule addressed to a workflow step, which repository guidance may state (D1), and moves with the section (31 O1g) | |
+| `## Host Requirement Enforcement` | repository | repository, testing | `specs/site-capacity/testing.md` | one rule, the usable-host rule, which `site-capacity` states with `physical-provisioning` and `fulfillment`; `site-capacity` owns admission and the offered read the rule governs (31 O1d) | |
+| `## Multi-Domain Storefront Composition` | repository | repository, testing | `specs/market-composition/testing.md` | one capability: the common storefront shell composing domain contributions | |
+| `## Marketplace Identity Verification`, its secret-canary method (seed recognizable canaries and reject them in every public artifact) | engineering | engineering, repository-content | `engineering/repository-content.md`, its public-repository part, with a neutral example | guidance that fits any repository publishing artifacts; one instance is enough (31 O1a) | |
+| `## Marketplace Identity Verification` | repository | repository, testing | `specs/marketplace-identity/testing.md`, citing `engineering/repository-content.md` for the canary method | one capability; this repository's instance of the method (31 O1a) | |
+| `## Accepted Arkhai purchase qualification` | repository | repository, testing | stays | cross-system: buyer CLI, payments, provisioning, delivery | Duplicate (31 O1b): overlaps `VALIDATION_RUNBOOK.md`'s much longer section 29 substantially — its separated identities, the network-policy probe, and unrun markers; the runbook is not guidance and does not move, so section 5's triage reviews both forms, decides what this section says, and the runbook is brought in line where it contradicts it |
+| `## Payment Receipts in Tests` | repository | repository, testing | `specs/test-compatibility/testing.md` | one capability: `test-compatibility`'s specification states the receipt fixture, naming `build_signed_receipt` (31 O1d); its general rule is the row below | |
+| `## Payment Receipts in Tests`, its rule (a test never frames or signs a protocol message itself, using the producer's fixture pinned by its vectors) | engineering | engineering, testing | `engineering/contract-fixtures.md`, a neutral sentence | general (31 O1a) | |
+| `## Boundary-Change Validation`, the list but its repository items (build and artifact contents, typing, dependency direction, old import removal, every consumer's suites, composition startup, idempotent retry, lifecycle events without sleeps) | engineering | engineering, testing, dependencies | `engineering/boundary-changes.md` | general: what a moved contract needs validated; "including `TYPE_CHECKING` imports" is the Python form, carried by `dependencies-python.md` (31 O1c) | |
+| `## Boundary-Change Validation`, `make check-architecture` with its pointer to `AGENTS.md`, and the CI matrix paragraph (`make test`, `make dist-ci`, `test_tests_workflow.py`, `_TYPER_FORCE_DISABLE_TERMINAL`) | repository | repository, testing, checks | stays | names this repository's targets and CI | |
+| `## Ansible Syntax and Native Checks`, the method (a syntax check does not follow `include_tasks`, so a parse-only playbook imports each task file through `import_role`; its first task refuses to run and is tagged `always`) | engineering | engineering, testing, ansible | `engineering/ansible-checks.md` | D7: an Ansible tool form | |
+| `## Ansible Syntax and Native Checks`, the VM IaC playbooks, `validate_playbooks.sh`, the native gates and their make targets, the pipeline's `native-ansible-gate` job, and the bare-metal working-data helper's evidence boundaries | repository | repository, testing | stays | cross-system: both domains' IaC and the provisioning image; the working-data helper paragraph is described through the gates and does not separate from them (31 O1d) | |
+| `## Chart Render Tests`, what a render test is, covers, and does not cover, and "How to write one" | engineering | engineering, testing, helm | `engineering/helm-render-tests.md` | the sample; its comparison with `e2e-tests/tests/unit/`'s checks and its "dev cluster" are neutralized ("a static configuration test needing Helm, not a cluster"); "use the standard library only" reads "assert on rendered text where the runner has no YAML parser", the reason — this repository's `test-render.sh` runs a plain `python3` — staying in `TESTING.md` (31 O1c) | |
+| `## Chart Render Tests`, the pinned Helm, `test-render.sh`, where each chart's tests live and what each asserts, the storefront loaders' checks, and release tooling's read-back | repository | repository, testing, deployment | stays | names this repository's charts and targets (the sample) | |
+| `## Chart Render Tests`, "A values schema generated from typed models", the principle (a chart's values schema generated from the service's typed configuration models, a drift test failing when a model changes without regenerating) | engineering | engineering, testing, helm | `engineering/helm-render-tests.md` | general; the `accepting_null` form and the storefront generators are repository instances, staying | |
+| `## Chart Render Tests`, "Obtaining Helm where its download host is unreachable" | repository | repository, deployment | stays | names a redistribution and this repository's CI pin: an environment workaround tied to the pin, a description of this system (31 O1a) | |
+| `## Cross-Language Contract Conformance`, the rule | engineering | engineering, testing | `engineering/conformance-tests.md` | general | |
+| `## Cross-Language Contract Conformance`, its current example (the API-credits middleware's three ports and `session.json`) | repository | repository, testing | stays, as local illustration | names packages of this repository; it illustrates the shared rule, so it stays with the rule's repository instance rather than beside `api-credits` (31 O1d) | |
+| `## Private Service Dependencies`, its first paragraph's rule (a public repository's tests pass without credentials for anything private; a scenario needing a private service's internals lives in that service's repository; otherwise the client is tested against the published contract and a double) | engineering | engineering, repository-content | `engineering/repository-content.md`, its public-repository part | D6: what a public repository's tests may need; "this repository is public" and its short name are this repository's statement, which the public-case exception row covers | |
+| `## Private Service Dependencies`, its second paragraph (a double mirrors its producer's API and takes the producer's decisions as programmed answers) | engineering | engineering, testing | `engineering/test-doubles.md` | the rule of `ARCHITECTURE.md`'s test-double paragraph (section 1), merged into one statement in `test-doubles.md` (31 O1b) | Duplicate (31 O1b): where the two statements differ, the forms are reviewed in section 4's triage |
+| `## Private Service Dependencies`, the controls' design (each control of a double a deterministic step; a fault never applied to a control route) | engineering | engineering, testing | `engineering/test-doubles.md`, with a neutral example | guidance that fits any system testing against controllable doubles (31 O1a) | |
+| `## Private Service Dependencies`, the lane doubles' controls, the lanes' payments and mediation targets, the lane-doubles evidence, the payments helper, and the current example | repository | repository, testing | stays, citing `engineering/test-doubles.md` for the controls' design | cross-system: every lane; the lane doubles are the rule's instance (31 O1a) | |
+| `## Offline Review Validation` | repository | repository, testing, packaging | stays | names this repository's review tooling; its scoped wheelhouse, per-project locks, and configurable interpreter describe one tool's mechanism, a description of this system (31 O1a) | |
+
+### `docs/development/DEPLOYMENT_AND_CONFIG.md`
+
+| Source | Layer | Tags | Destination | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Configuration and Deployment`, its opening (how this repository's services resolve configuration; distinct from `docs/configuration.md`; read it with `ARCHITECTURE.md` and `openspec/README.md`) | repository | repository, configuration, deployment | stays | the cross-system document's opening (D10); its current-practice clause restates `engineering/documentation.md`'s current-state rule, its one home, so the clause is dropped, as in `TESTING.md`'s opening (31 O1b) | |
+| `## Profile-based configuration`, the principle (committed defaults, then profile files in order, then environment variables as an escape hatch only; why application settings never go into an image's or a pod's environment; only the resolver variables, and a subprocess's own variable read from settings and exported once, set outside) | engineering | engineering, configuration | `engineering/configuration.md` | general; `ANSIBLE_CONFIG` serves as a neutral example as it stands | |
+| `## Profile-based configuration`, its Dynaconf form (`settings.toml`, `config-<profile>.yml`, `envvar_prefix`, `environments=False`, `includes`, `merge_enabled`, dotenv contributing to the environment layer) | engineering | engineering, configuration, python | `engineering/configuration-python.md` | D7: a library form beside its principle; Dynaconf is a library the code imports, so it carries the language's tag, not a tag of its own (31 O1c) | |
+| `## Profile-based configuration`, which services use it, the registry's difference, `arkhai-kit-config`'s boundary, and the services' prefixes | repository | repository, configuration | stays | names this repository's services | |
+| `## Profile-based configuration`, "Secrets travel in a secret profile or overlay file, never in a variable the configuration names", the rule and its trust corollary (a private CA is a configured bundle path its one client reads, never `SSL_CERT_FILE`) | engineering | engineering, configuration | `engineering/configuration.md` | general; `ARCHITECTURE.md`'s "Local development" principles join it (section 1's row, split by this section) | |
+| `## Profile-based configuration`, "The one secret outside the rule is the signing credential `ARKHAI_IDENTITY_CREDENTIAL`" | repository | repository, configuration | `AGENTS.md`, `## Exceptions to shared guidance` | **Exception (overrides):** every signing service takes its credential from an environment variable sourced from a Secret, overriding `configuration.md`'s secrets rule, because the identity specification keeps it from the loader (D9); table: `AGENTS.md`, since registries, storefronts, and provisioning are all affected, though `marketplace-identity`'s specification gives its reason (D9, 31 O1d) | |
+| `## Profile-based configuration`, the buyer's `api_key_env` beside its keyring and secret-file providers | repository | repository, configuration | stays | names this repository's settings | |
+| `## Profile-based configuration`, "A setting that belongs to one domain is named for it", the principle (a renamed setting is refused rather than ignored, naming its replacement; a setting retired because nothing needs it is ignored) | engineering | engineering, configuration | `engineering/configuration.md` | general | |
+| `## Profile-based configuration`, that principle's instances (the playbook paths, `inventory_ini`, the retired pool and host keys) and the pre-1.0 key-meaning sentence | repository | repository, configuration | stays | names the provisioning service's settings and `RELEASING.md`; the key-meaning sentence keeps its pre-1.0 reason and cites `engineering/versioning.md` for the policy (31 O1e) | |
+| `## Kubernetes: ConfigMap and Secret mounting`, the opening rule and the pattern's general bullets (configuration travels through mounted files, Helm test pods too; non-secret values render into a ConfigMap profile and secret ones into a Secret holding its own profile, mounted at the same directory; a pod sets only the resolver variables) | engineering | engineering, kubernetes | `engineering/kubernetes.md` | D7: the Kubernetes form of the configuration principle; the sample kept the section whole as cross-system, and this row splits out what holds for any service on Kubernetes, the charts staying (D10, 31 O1a) | |
+| `## Kubernetes: ConfigMap and Secret mounting`, the registry chart's exception, the JSON-syntax profiles for EIP-191 identifiers, and the provisioning chart's `configFiles` map | repository | repository, configuration, deployment | stays | names this repository's charts; the source calls the registry chart "the exception", but it is not a D9 exception, since the registry still reads a mounted profile file and sets only the resolver variables, as `kubernetes.md`'s rule asks, its chart differing only in the profile's dotenv syntax | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "The rule behind the pod rule", the principle (every value reaches a service through its configuration system; a value travels outside it only to select which configuration loads; a chart knows a value only for a stated deployment reason; conformance is judged in the source and charts, never refused at runtime) | engineering | engineering, configuration | `engineering/configuration.md` | general; the source states it of storefronts, neutralized to any service, and its carve-out for a value "kept from the loader" is the signing credential's alone, so it stays out of the shared rule and is the exception row under "Profile-based configuration" | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "The rule behind the pod rule", the storefronts' instance (`XDG_CONFIG_HOME`, their secrets, `enableServiceLinks: false`) | repository | repository, configuration, deployment | stays | names this repository's storefront charts; the storefront instance of the trap below (31 O1a) | |
+| `## Kubernetes: ConfigMap and Secret mounting`, the trap `enableServiceLinks: false` guards (Service variables land in a configuration loader's override layer) | engineering | engineering, kubernetes | `engineering/kubernetes.md` | a general Kubernetes trap: how to use Kubernetes well (31 O1a, 31 O1c) | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "A deployment does not wait on a service's dependencies", the principle (no init container or in-process wait on a dependency; the service starts degraded, reports each unreachable dependency, and retries; its one init container is its own migration; a startup probe on a process check) | engineering | engineering, deployment | `engineering/deployment.md`, but for its `startupProbe` sentence | general | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "A deployment does not wait…", the `startupProbe` sentence (a startup probe on a process check) | engineering | engineering, kubernetes | `engineering/kubernetes.md` | the Kubernetes form of the rule above (31 O1c) | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "A deployment does not wait…", the charts' render tests asserting it | repository | repository, deployment, testing | stays | names this repository's charts | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "A private CA is mounted once, and each client names it" (one mount, each client naming the file; a chart derives the path from the mount; where the setting sits in a Secret the chart cannot see, whoever writes it states the mount path and a test proves the two agree; a bundle loads when its client is built) | engineering | engineering, configuration | `engineering/configuration.md`, the neutral rule | general | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "A private CA is mounted once…", the chart's derivation of the path from the mount | engineering | engineering, helm | `engineering/helm.md` | the Helm form of the rule above (31 O1c) | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "Toggling a mock/test profile" (a chart value appends a profile selecting a mock implementation, the profile supplying safe values) | engineering | engineering, helm | `engineering/helm.md` | general; `mockMode` is this repository's value, neutralized to an example name | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "The umbrella's smoke-test profile" | repository | repository, deployment, testing | stays | names the umbrella's profile, charts, and Secrets | |
+| `## Kubernetes: ConfigMap and Secret mounting`, the YAML trap stated in "The umbrella's smoke-test profile" and in the pattern's JSON-syntax bullet (a YAML loader reads an unquoted `0x`-prefixed value as an integer, and Helm's encoder leaves a long hex address unquoted, so a profile quotes every hex value or is written in JSON syntax) | engineering | engineering, helm | `engineering/helm.md` | general; the EIP-191 identifiers and the Secret's profile are this repository's instances, staying as illustration | |
+| `### Storefront agents: pass-through configuration` | repository | repository, configuration, deployment | stays | the VM and bare-metal storefronts' charts in the umbrella: two storefronts' deployment, the umbrella's derivations, and the registry's and provisioning's trust, which no one capability owns and which do not separate (31 O1d) | |
+| `### Storefront agents: pass-through configuration`, "key it, do not list it" (Helm merges maps key by key and replaces lists whole) and "every number in a values file passes through a float; write an integer above 2^53 as a string" | engineering | engineering, helm | `engineering/helm.md` | general Helm behaviour | |
+| `## Storefront startup and site trust`, "A service refuses to start on its own incoherent state, never on a dependency", the principle | engineering | engineering, deployment | `engineering/deployment.md`, beside "does not wait" | general | |
+| `## Storefront startup and site trust`, "A storefront that cannot publish refuses to start", "A storefront starts with its dependencies unreachable", "Durations are positive seconds", "The settlement servicing interval", and "System status" | repository | repository, configuration | `specs/storefront-publication/configuration.md` | the storefronts' startup refusals, publication, and status: one capability across three storefronts, `storefront-publication` owning publication and its status (31 O1d) | |
+| `## Storefront startup and site trust`, the Alkahest instances under "A service refuses to start…", "An Alkahest section that cannot settle makes Alkahest unready", and "Alkahest probes its chains" | repository | repository, configuration | `specs/settlement-configuration/configuration.md` | Alkahest's readiness and probe: one capability | |
+| `## Storefront startup and site trust`, the provisioning service's refusal under "A service refuses to start…" (a stored pool lacking valid declarations, or naming a provider no handler serves) | repository | repository, configuration | `specs/resource-pool-management/configuration.md` | one capability's stored pools: `resource-pool-management` owns the declarations, `physical-provisioning` only refuses them (31 O1d) | |
+| `## Storefront startup and site trust`, "A site's authority URL is an origin" and "Each site is trusted through its service peer" | repository | repository, configuration | `specs/site-capacity/configuration.md` | the storefronts' site bindings, which `site-capacity` owns (31 O1d) | |
+| `## Marketplace identity configuration` | repository | repository, configuration | `specs/marketplace-identity/configuration.md` | one capability (the sample); the operator handbook has no identity section, so no overlap was found | |
+| `## Registry descriptor configuration` | repository | repository, configuration | `specs/registry-discovery/configuration.md` | one capability: the registry | Duplicate (31 O1b): overlaps the operator handbook's "Registry secret profile", which it cites for the move, and `core/registry/README.md`'s settings list; section 6's triage reviews the forms, and the handbook or README is brought in line where the decided text contradicts it |
+| `## Per-domain stack composition`, "A stack's configuration lives in committed files" (a Makefile chooses which configuration loads and never generates or carries a value; a base file binds no identity and gives none a fallback; a deployment's values are in its overlay) | engineering | engineering, configuration | `engineering/configuration.md` | general, beside `ARCHITECTURE.md`'s "Local development" principles; "committed" holds for development stacks, a deployment's secret file being the operator's, which the neutral wording keeps | |
+| `## Per-domain stack composition`, the stack files, overlays, committed sources, the full local stack, `PROVISIONING_MODE`, the VM development stack, the bare-metal wrapper, images, credentials, and bare-metal publication | repository | repository, deployment | stays | cross-system (D10) | |
+| `## Stateful service persistence`, the principle (a single-writer store's service deploys with `Recreate` over a `ReadWriteOnce` volume, since overlapping pods would share it) | engineering | engineering, kubernetes | `engineering/kubernetes.md` | general | |
+| `## Stateful service persistence`, each service's own database, the images' `/app/data` ownership, the charts' `resource-policy: keep` and `retainOnUninstall`, and `deploy-local` rather than `deploy` | repository | repository, deployment | stays | names this repository's charts and targets; "deploy to a local cluster with `make -C helm deploy-local`, never `deploy`" binds agents as well, so `AGENTS.md`'s own rules name it, the reason staying here (31 O1g); corrected at round 5's triage (127 O1): the rule stays here too, beside its reason, a topic's repository instance | |
+| `### Release topology` | repository | repository, deployment | stays | cross-system | |
+| `### Release topology`, "A local release configures a service through the values a deployment uses", the principle (the local release rehearses a deployment's shape, never a development-only mode) | engineering | engineering, deployment | `engineering/deployment.md` | general; payments are this repository's example, staying | |
+| `### Release topology`, "Helm test pods carry no workload selector label", the principle (a test pod lacks the label every workload selector requires; selectors are immutable, so the test pod is the one that differs) | engineering | engineering, kubernetes | `engineering/kubernetes.md` | general; the `<chart>.testLabels` helpers and the topology render test stay as this repository's instance | |
+| `### Validation namespaces` | repository | repository, deployment | `openspec/specs/market-change-workflow/README.md`, "The change's namespace", beside section 1's row for the workflow guide's namespace paragraph | one capability: this repository's part of the workflow (MCW-fnuh). D22 rejects folding capability guidance into companions, but this text describes how validation deploys rather than how to work on the capability, so it is companion material, as for "Durable fulfillment acceptance" (31 O1a, 31 O1d); its image-tag reason (commit-suffixed tags caused failures) is history, restated as the rule's present reason only | |
+| `### Combined compute-family storefront`, the combined image, `storefront_domains`, its secrets boundary, and its startup refusals | repository | repository, configuration, deployment | `specs/market-composition/configuration.md` | one capability | |
+| `### Combined compute-family storefront`, the listing bindings' backing and closure triggers, and the storefront-wide terms of sale | repository | repository, configuration | `specs/storefront-publication/configuration.md` | publication's terms | |
+| `## Definition documents`, its opening principle (a document describing resources is mounted configuration, not a Secret, carrying the names of keys and never a credential; its path is derived from the document's presence rather than set beside it, since two settings can disagree silently) | engineering | engineering, configuration | `engineering/definition-documents.md` | the sample | |
+| `## Definition documents`, the four settings, the provisioning chart's `definitions` values, and startup's dependency order | repository | repository, configuration | `specs/physical-provisioning/configuration.md` | the provisioning service's documents, which `physical-provisioning` owns (31 O1d) | |
+| `### The method a document kind follows`, the method | engineering | engineering, configuration | `engineering/definition-documents.md` | the sample; the provisioning chart, `configFiles`, and the pools validation route are neutralized | Duplicate (31 O1b): its "Validate before the release" bullet overlaps the operator handbook's "Validate a changed document before the release that mounts it"; section 4's triage reviews both forms, and the handbook is brought in line where the decided rule contradicts it |
+| `### The method a document kind follows`, which kinds diverge from the method, and how | repository | repository, configuration | `specs/physical-provisioning/configuration.md` | names the provisioning service's kinds | |
+| `### Pool definitions` | repository | repository, configuration | `specs/resource-pool-management/configuration.md` | one capability's document: `resource-pool-management` owns the pool declarations (31 O1d) | Duplicate (31 O1b): overlaps the operator handbook's "Pool definitions", which it cites; section 6's triage reviews both forms, and the handbook is brought in line where the decided text contradicts it |
+| `### Reconciliation follows the document, not the process` | engineering | engineering, configuration | `engineering/definition-documents.md` | the sample: a document applied at every start would undo administrative work, so its digest is recorded in the apply's transaction | |
+| `### What a document does to entries it stops naming`, the principle (each kind states its rule for the entries it stops naming, weighing what removing one would break) | engineering | engineering, configuration | `engineering/definition-documents.md` | general | |
+| `### What a document does to entries it stops naming`, the per-kind rules for relays, capacity declarations, and hosts (retained) | repository | repository, configuration | `specs/physical-provisioning/configuration.md` | the provisioning service's kinds, which `physical-provisioning` owns (31 O1d) | |
+| `### What a document does to entries it stops naming`, the pool rule (pools a document stops naming are disabled) | repository | repository, configuration | `specs/resource-pool-management/configuration.md`, beside "Pool definitions" | `resource-pool-management` owns the pool declarations, and the sentence separates cleanly (31 O1d) | |
+| `### Host definitions` | repository | repository, configuration | `specs/physical-provisioning/configuration.md` | one capability | Duplicate (31 O1b): overlaps the operator handbook's "Host definitions", which it cites; section 6's triage reviews both forms, and the handbook is brought in line where the decided text contradicts it |
+| `### Capacity definitions` | repository | repository, configuration | `specs/physical-provisioning/configuration.md` | one capability's document: its import is a `physical-provisioning` requirement, so `physical-provisioning` owns it, though it also cites `site-capacity` (31 O1d) | Duplicate (31 O1b): overlaps the operator handbook's "Capacity definitions"; section 6's triage reviews both forms, and the handbook is brought in line where the decided text contradicts it |
+| `### Secrets are named, not carried`, the principle (a document names the key holding a secret; the key is resolved when the resource is created and never re-read, so a rotation is not reverted; an unknown key fails the import rather than deferring the failure to its use) | engineering | engineering, configuration | `engineering/definition-documents.md` | the sample | |
+| `### Secrets are named, not carried`, the relay grant key's encoding and rotation, the grace and reuse-margin settings, and clock skew | repository | repository, configuration | `specs/physical-provisioning/configuration.md` | the provisioning service's relays: `physical-provisioning` owns relay leases, the plugin's clock in `frp-grant-admission` only reading them (31 O1d) | |
+| `## Migrations at startup`, the principle (migrations run in a deployment phase before the application, through the service's own command; the command reads only the database location and log level; the application opens its database read-only, issues no DDL, and refuses an incompatible one naming the command; a check mode previews; migrations fail forward, a rollback restoring the backup taken before; no two versions share a database) | engineering | engineering, persistence, deployment | `engineering/migrations.md` | general; `deployment-state` states it normatively for this repository, and the engineering file states it without the services | |
+| `## Migrations at startup`, the services' commands and phases, the result table's remedies, the v0.3.0 floors, the migrations after the baseline, canonical principals, and the identity-contract cutover | repository | repository, persistence, deployment | stays | cross-system: every stateful service (31 O1d) | Duplicate (31 O1b): overlaps the operator handbook's "Upgrading a deployment", whose "What the upgrade from v0.3.0 changes" restates the migrations list; section 5's triage reviews both forms, and the handbook is brought in line where the decided text contradicts it |
+| `## Storefront listing shapes and pool overrides`, but for its compute provisioning contract paragraph | repository | repository, configuration | `specs/storefront-publication/configuration.md` | one capability: publication's shapes, rates, constraints, and overrides (31 O1d) | |
+| `## Storefront listing shapes and pool overrides`, the compute provisioning contract paragraph (the contract at major 3; every party upgrading and rolling back together; a mismatch refused by contract version) | repository | repository, configuration | `specs/compute-provisioning-contract/configuration.md` | about the contract, whose specification it cites, not publication; it separates cleanly (31 O1d) | |
+| `## Settlement consumer configuration and cutover` | repository | repository, configuration | `specs/settlement-configuration/configuration.md`, but for the last paragraphs filed under its "Alkahest release models": the publication migration to `specs/storefront-publication/configuration.md`, the VM storefront's retired inventory keys to `DEPLOYMENT_AND_CONFIG.md`'s retired-settings list in "Storefront agents", the API-credit services' own state to its "Stateful service persistence", and the production cutover sequence to `docs/operator-handbook.md`'s "Migrating settlement and publication configuration" under "Upgrading a deployment" | one capability, but for what it filed that is another capability's rule, cross-service, or an operator's upgrade procedure (31 O1d; round 6's triage, 141 F1) | Duplicate (31 O1b): its storefront payments check overlaps the operator handbook's "Payments access", whose step table gains the two conditions it lacked (round 6's triage); the cutover sequence, once in the handbook, has no other copy |
+| `### Alkahest release models` | repository | repository, configuration | `specs/settlement-configuration/configuration.md`, but for its last paragraphs, whose destinations row 578 lists | one capability | |
+| `# Configure interruptible_oracle_addresses with a trusted third-party oracle.` (line 1773, a TOML comment inside the fenced block of "Alkahest release models") | repository | repository, configuration | with its section | a comment in an example, not a heading of the document | |
+| `### Seller servicing budget diagnostics` | repository | repository, configuration | `specs/settlement-servicing/configuration.md` | one capability: `kit/deal-servicing`'s budget, which `settlement-servicing` owns, though it cites `deal-lifecycle`'s companion (31 O1d) | |
+| `### Dispute authority preferences` | repository | repository, configuration | `specs/settlement-configuration/configuration.md` | one capability, whose specification it cites | Duplicate (31 O1b): its credential paragraph overlaps the operator handbook's "Payments access"; section 6's triage reviews both forms, and the handbook is brought in line where the decided text contradicts it |
+| `# A storefront's storefront.secrets.toml` and `# A buyer's public TOML` (lines 1960 and 1968, TOML comments inside the fenced block of "Dispute authority preferences") | repository | repository, configuration | with their section | comments in an example, not headings of the document | |
+| `### Contact-exchange contacts` | repository | repository, configuration | `specs/contact-exchange-settlement/configuration.md` | one capability | |
+| `# One storefront, one origin site: the single form.` and `# One storefront, several seller sites: a contact per origin.` (lines 2015 and 2020, TOML comments inside the fenced block of "Contact-exchange contacts") | repository | repository, configuration | with their section | comments in an example, not headings of the document | |
+| `### Introduction delivery` | repository | repository, configuration | `specs/introduction-delivery/configuration.md` | one capability | |
+| `### Contact-exchange retention` | repository | repository, configuration | `specs/contact-exchange-settlement/configuration.md` | one capability | |
+| `### Bare-metal role configuration` | repository | repository, configuration, deployment | stays | cross-system: the bare-metal buyer and storefront, their chart and Compose; no capability is the bare-metal domain's alone (31 O1d) | |
+| `## Current limits` | repository | repository, deployment | stays | the document's own limits | |
+| `### Artifact publishing destination` | repository | repository, deployment | `development/RELEASING.md`, when section 5 tags the documents | names this repository's publishing targets, a release target (31 O1g) | |
+
+### `development/BUILD_AND_PACKAGING.md`
+
+| Source | Layer | Tags | Destination | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| The document as a whole | repository | repository, packaging | stays, with frontmatter (section 5) | this repository's build, environments, locks, and images, and the checks enforcing them (D10) | |
+| `# Build and packaging`, its opening's principle (every rule replaces a list someone maintained by hand; nothing repeats a version the project declares; every consumer reads the one declaration, and the copy that cannot is checked against it) | engineering | engineering, packaging | `engineering/packaging.md` | general | |
+| `# Build and packaging`, its pointers to `deployment-state` and `ARCHITECTURE.md` | repository | repository, packaging | stays | names this repository's documents | |
+| `## Project layout`, its Python rules (one import package per distribution at `src/<package>`; nothing remaps, includes, or excludes files, so a module added ships without a packaging edit and the installed name is the directory name; data files a package loads live inside the package directory) | engineering | engineering, packaging, python | `engineering/packaging-python.md` | D7: a Python form (29 F1) | |
+| `## Project layout`, its uv rules (every project environment installs its own project editable; no project declares `cache-keys`; a virtual project, `[tool.uv] package = false`, builds no wheel and is outside the rule) | engineering | engineering, packaging, uv | `engineering/packaging-uv.md` | D7: a uv form (29 F1); the history clause ("both were workarounds for packages whose directory did not match their import path") becomes the present reason: neither is needed where the directory matches the import path | |
+| `## Project layout`, its Hatchling form (the wheel target's `packages` entry naming `src/<package>`, with a neutral package name) | engineering | engineering, packaging, hatchling | `engineering/packaging-hatchling.md` | how to use Hatchling well, tagged with the tool (29 F1, 31 O1c) | |
+| `## Project layout`, every wheel built with Hatchling, the example package name, and the VM negotiation models as the data-file example | repository | repository, packaging | stays | this repository's selection of Hatchling and its examples (29 F1, 31 O1c) | |
+| `## The wheelhouse`, the principle (internal distributions are built as artifacts and consumed from there, never through a sibling's source path; a lock resolving anything from another local directory is an error) | engineering | engineering, packaging | `engineering/packaging.md` | general | |
+| `## The wheelhouse`, the same-version wheel's two uv flags | engineering | engineering, packaging, uv | `engineering/packaging-uv.md` | D7: a uv form | |
+| `## The wheelhouse`, `.dist`, `make dist`, `make dist-release`, and `scripts/uv_project.py` | repository | repository, packaging | stays | names this repository's targets and script | |
+| `## One Python version`, its uv forms (`--python` from the root declaration, `UV_PYTHON` exported by each Makefile, set in each CI job after checkout) | engineering | engineering, packaging, uv | `engineering/packaging-uv.md` | D7; the principle is the opening's, in `packaging.md` | |
+| `## One Python version`, its Dockerfile form (`ARG PYTHON_VERSION` before the first `FROM`, used in each) | engineering | engineering, packaging, docker | `engineering/packaging-docker.md` | D7: a Docker form | |
+| `## One Python version`, the root `.python-version`, `scripts/uv_project.py reinit`, and `make check-python-version` | repository | repository, packaging | stays | names this repository's files and target | |
+| `## Project environments` | repository | repository, packaging | stays | this repository's `reinit` target and script | |
+| `## Locks`, the principle (relock against freshly built artifacts, unconditionally, after editing dependencies; locks are written by a stated minimum tool version and their format revision is checked, since tool releases rewrite locks differently) | engineering | engineering, packaging, uv | `engineering/packaging-uv.md` | general to uv | |
+| `## Locks`, `make lock`, uv 0.12.22, revision 5, `check_uv_version.py`, `check_locks.py`, and the PyTorch index | repository | repository, packaging | stays | this repository's minimum, revision, and targets | |
+| `## Images`, the principle (an image installs the committed lock exactly and never relocks; the build tooling lives in builder stages, and the runtime stage copies the finished environment and never the artifact store) | engineering | engineering, packaging, docker | `engineering/packaging-docker.md` | general | |
+| `## Images`, the uv sync forms (`--locked`, reinstalling internal packages, never `--no-sources`) | engineering | engineering, packaging, uv | `engineering/packaging-uv.md` | D7 | |
+| `## Images`, an ignore file beside a Dockerfile replacing the root one, so one admitting a tree whole states that tree's exclusions | engineering | engineering, packaging, docker | `engineering/packaging-docker.md` | D7 | |
+| `## Images`, the image-root layout, `install-wheel`, the provisioning service's ignore file, and the projects keeping editable installs | repository | repository, packaging | stays | names this repository's script and projects | |
+| `## Checks` | repository | repository, packaging, checks | stays; each row in "What each check enforces" (D13, section 5) | this repository's packaging targets | |
+
+### `docs/development/VALIDATION_RUNBOOK.md`
+
+| Source | Layer | Tags | Destination | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| The document as a whole | repository | repository, testing, deployment | stays whole, outside the guidance set: no frontmatter, no layer-table row (48 F1) | a procedure (D10): the local pass, a clean host, the cloud proof, real hosts, relays, and qualification; the runbook is not guidance, and nothing moves out of it (31 O1e) | |
+| `# Full Validation Runbook` | repository | repository, testing, deployment | stays | procedure (D10) | |
+| `## Notes` | repository | repository, testing | stays | procedure (D10) | |
+| `## Local Mock Pass Criteria` | repository | repository, testing | stays | procedure (D10) | |
+| `## Running The Local Pass` | repository | repository, testing | stays | procedure (D10) | |
+| `## 1. Prerequisites` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 2. Clean Fixed Docker Names` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 3. Build Artifacts And Images` | repository | repository, packaging | stays | procedure (D10) | |
+| `## 4. Code-Level Tests` | repository | repository, testing | stays | procedure (D10) | |
+| `## 5. Optional Environment-Dependent Local Tests` | repository | repository, testing | stays | procedure (D10) | |
+| `## 6. Known Exclusions For Local Mock Validation` | repository | repository, testing | stays | procedure (D10) | |
+| `## 7. Redis Override` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 8. Bring Up Local Stack` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 9. Manual Readiness Checks` | repository | repository, testing | stays | procedure (D10) | |
+| `## 10. Failure Diagnostics` | repository | repository, testing | stays | procedure (D10); its first instruction, capture state before changing it, is general, but the runbook is not guidance and `engineering/testing.md` already asks for diagnostic steps (31 O1e) | |
+| `## 11. Deployment Smoke Tests` | repository | repository, testing | stays | procedure (D10) | |
+| `## 12. System Integration / E2E Tests` | repository | repository, testing | stays | procedure (D10) | |
+| `## 13. Optional Single-Pass Integration-Test Sweep` | repository | repository, testing | stays | procedure (D10) | |
+| `## 14. Teardown` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 15. Clean Ubuntu Host Bootstrap` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 16. Manual Multipass Clean Host` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 17. GCP Proof Overview And Preflight` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 18. GCP Platform Bootstrap` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 19. Runtime Inputs` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 20. Kubernetes App Bootstrap In Mock Mode` | repository | repository, deployment | stays | procedure (D10) | |
+| `### Settlement by introduction on a Helm release` | repository | repository, testing | stays | procedure (D10) | |
+| `# Confirm the Service names this release rendered before forwarding.` (line 852, a shell comment inside the fenced block of "Settlement by introduction on a Helm release") | repository | repository, testing | with its section | a comment in a command block, not a heading of the document | |
+| `## 21. Provide Real Compute Hosts` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 22. Prepare The Host` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 23. Run Provisioning For Real` | repository | repository, testing | stays | procedure (D10) | |
+| `## 24. Describe The Target` | repository | repository, testing | stays | procedure (D10) | |
+| `## 25. Run The Real-Provisioning Scenario` | repository | repository, testing | stays | procedure (D10) | |
+| `# Run the separate bare-metal lane against its configured BARE_METAL_LANE services:` (line 1035, a shell comment inside the fenced block of "25. Run The Real-Provisioning Scenario") | repository | repository, testing | with its section | a comment in a command block, not a heading of the document | |
+| `### Run the qualification scenarios on a candidate` | repository | repository, testing | stays | procedure (D10) | |
+| `## 26. Restore And Cleanup` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 27. Running Live Lanes` | repository | repository, testing | stays | procedure (D10) | |
+| `## 28. Prepare And Operate Buyer Relays` | repository | repository, deployment | stays | procedure (D10) | |
+| `### Establish the signing authority` | repository | repository, deployment | stays | procedure (D10) | |
+| `### Native systemd relay` | repository | repository, deployment | stays | procedure (D10) | |
+| `### Container relay` | repository | repository, deployment | stays | procedure (D10) | |
+| `### Prove admission before enabling a pool` | repository | repository, testing | stays | procedure (D10) | |
+| `### Rotate keys and change admission policy` | repository | repository, deployment | stays | procedure (D10) | |
+| `### Contain access when teardown cannot reach a host` | repository | repository, deployment | stays | procedure (D10) | |
+| `## 29. Qualify an ordinary Arkhai purchase` | repository | repository, testing | stays | procedure (D10); `TESTING.md`'s "Accepted Arkhai purchase qualification" overlaps it, reviewed under that row (31 O1b) | |
+| `### Observations the qualification owes`, the method (an observation is never inferred from another; failed and unproven are recorded as such and their check stays open; a failed or unproven outcome is sorted by its cause; the candidate is frozen and every observation made again on a new one) | repository | repository, testing | stays | the runbook is not guidance and does not move (31 O1e); `engineering/system-tests.md` states the same rule from `TESTING.md`'s per-observation outcome | Duplicate (31 O1b): section 4's triage reviews the runbook's form beside `system-tests.md`'s, and the runbook is brought in line where the decided rule contradicts it |
+| `### Observations the qualification owes`, the six observations and the offers kept closed until each passes | repository | repository, testing | stays | procedure (D10) | |
+
+### `development/RELEASING.md`
+
+| Source | Layer | Tags | Destination | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| The document as a whole | repository | repository, packaging | stays, with frontmatter (section 5), but for the two policy rows below, which move; once they do, its content needs `packaging` alone, the migration-floor decision under "Cutting a release" being a step of the release (31 O1c) | a procedure (D10 as 31 O1e amends it: a section stating policy rather than a step is classified by D1): publishing this repository's packages | |
+| `# Releasing Python packages` | repository | repository, packaging | stays | names this repository's workflows, packages, and wheelhouse | |
+| `## Published packages` | repository | repository, packaging | stays | this repository's package table and its check | |
+| `## How the workflow works` | repository | repository, packaging | stays | this repository's publish workflow; its paragraph that no package vendors another's modules restates the project layout's rule, and stays as the publishing consequence, a step of the procedure (D10, 31 O1b) | |
+| `## One-time setup (per package)` | repository | repository, packaging | stays | procedure (D10) | |
+| `## Cutting a release` | repository | repository, packaging, persistence | stays | procedure (D10), with the migration-floor decision | |
+| `## Versioning policy` (SemVer; before 1.0.0 an incompatible change takes a minor bump; a contract carrying its own version is never changed in place; a change bumps each package once, measured against the branch it merges into; no per-release list of incompatible changes) | engineering | engineering, versioning | `engineering/versioning.md` | policy rather than a step of the procedure, holding across every repository (D10 as 31 O1e amends it); SemVer's rules name nothing of this repository; `VersionedEnvelope`, this repository's type, is neutralized to "a versioned envelope", and "a change" read as any merged unit of work; `ARCHITECTURE.md`'s "Operators" and `DEPLOYMENT_AND_CONFIG.md`'s key-meaning sentence keep the repository's reasons (one operator; pre-1.0 packages) and cite `versioning.md` | |
+| `### Import package renames`, its table of renamed import packages | repository | repository, packaging | stays | names this repository's packages and releases; the table records what consumers must change rather than how the rule arose, so it stays as upgrade information | |
+| `### Import package renames`, its closing paragraph (cross-package compatibility through `pyproject.toml` lower bounds) | engineering | engineering, versioning, python | `engineering/versioning-python.md` | a Python form of declaring compatible versions, a convention rather than a step of the procedure (D10 as 31 O1e amends it, 31 O1c) | |
+| `## Local development` | repository | repository, packaging | stays | restates `BUILD_AND_PACKAGING.md`'s wheelhouse for publishing | |
+| `## Troubleshooting` | repository | repository, packaging | stays | procedure (D10) | |
+
+## Restatements
+
+Every place a `change-*` or `guidance-review` skill, or `openspec/config.yaml`,
+restates or cites a guidance rule (D11, D23): the file and its section, what it
+restates or cites, the rule's source today, and where the rule moves. The skills
+keep their restatements (D11); sections 3 to 6 re-point each citation, by heading
+and never by part number (D8), and the loader change inherits this list. A
+`agents/change-workflow.md` heading stays where it is (section 1), so its
+citations need no re-pointing; they are listed so the list is complete. Correction,
+task 3.14: the guide became the owner's handbook, and its citations below were
+re-pointed to the requirements stating each rule — the "Waivers" criteria to CW-q3dm,
+"Default acceptance" to CW-d5ac, CW-t9bx, and CW-9pbk, "Revisiting a default
+acceptance" to CW-r8vz, "Interrupting a running step" to CW-k2rv, "History and
+removal" to CW-hak6 — and `change-orchestrate`'s move into a clone to the handbook,
+an owner's procedure. The search
+was `grep` over `.agents/skills/{change-*,guidance-review}/SKILL.md` and
+`openspec/config.yaml` for the guidance documents' paths and headings, for "in
+prose", "current system", "lowest level", and "module level", and a reading of each
+skill's loading and checking steps.
+
+| File and section | Restates or cites | Source today | Destination |
+|---|---|---|---|
+| `change-design`, `change-plan`, `change-implement`, `change-triage`, `change-validate`, `change-merge`, `change-closeout`, and `change-archive-cleanup`, each "Running unattended", "A stop for the owner is a question" | asking the owner: what was found, the options, and a recommendation | `AGENTS.md`, "Asking the owner" | `workflow/working-model.md` |
+| `change-closeout`, the frontmatter description and the opening | the eleven parts in `openspec/README.md`, "Plan closeout requirements", cited then by its anchor | `openspec/README.md`, "Plan closeout requirements" | `workflow/closeout.md`, with this repository's parts in `openspec/README.md`'s "This repository's closeout parts"; the count becomes the workflow's own (D8) |
+| `change-closeout`, "2. Load the context" | the roadmap "`openspec/README.md`'s documentation placement names" | `openspec/README.md`, "Documentation placement" | the roadmap's role to `workflow/openspec-documentation.md` (31 O1f); its path in `openspec/README.md`'s placement table (stays) |
+| `change-closeout`, "3. Work through the closeout task" | the order of the parts; each part restated (comment hygiene and import placement confirmed, documentation compliance, narrative compression, roadmap currency, campaign index currency "part 6", packaging, end-to-end pipeline) | `openspec/README.md`, "Plan closeout requirements" and "Documentation placement" | `workflow/closeout.md`'s headings, roadmap currency among them (31 O1f), and `openspec/README.md`'s "This repository's closeout parts" for packaging and end-to-end pipeline; "Documentation placement" to `workflow/openspec-documentation.md` and this repository's placement table |
+| `change-closeout`, "3. Work through the closeout task", its closing paragraph | a decision put to the owner in prose, with the options and a recommendation | `AGENTS.md`, "Asking the owner" | `workflow/working-model.md` |
+| `change-closeout`, "4. Promote, check, then archive" | promotion, `index.md` entries (citing `#capability-documentation-pattern`), documentation citations, and archival | `openspec/README.md`, "Plan closeout requirements" parts 9–11 and "Capability documentation pattern" | `workflow/closeout.md`, "Promotion", "Documentation citations", "Archival"; `workflow/openspec-documentation.md` |
+| `change-review`, "1. Load everything first" | the roadmap "`openspec/README.md`'s documentation placement names" | `openspec/README.md`, "Documentation placement" | the roadmap's role to `workflow/openspec-documentation.md` (31 O1f); its path in `openspec/README.md`'s placement table (stays) |
+| `change-review`, "Design review", question 3 (`architecture`) | `ARCHITECTURE.md`'s layers, authority boundaries, and the authoritative-party test | `ARCHITECTURE.md` | stays |
+| `change-review`, "Design review", question 4 (`documentation`); `change-plan`, "5. Check the plan"; `change-design`, "6. Record the settled design" | `#open-questions-and-prescribed-tasks` | `openspec/README.md`, "Open questions and prescribed tasks" | `workflow/changes.md` |
+| `change-review`, "Design review" question 5, "Implementation review" question 5, "Pre-closeout review" question 2; `change-design`, "5. Check the whole before recording" | `#defects-found-during-a-change` | `openspec/README.md`, "Defects found during a change" | `workflow/changes.md` |
+| `change-review`, "Implementation review", question 2 (`testing`) | `TESTING.md`'s level definitions and coverage jurisdiction; the typed-client rule restated | `TESTING.md`, "Four-Level Hierarchy", "Coverage Contract Between Levels", "Typed client contract verification" | `engineering/test-levels.md`, `engineering/integration-tests.md` |
+| `change-review`, "Implementation review", question 3 (`documentation`) | compliance with `AGENTS.md`, `ARCHITECTURE.md`, and `openspec/README.md`: comments describing the current system, permanent documents current, promotion | `AGENTS.md`, "Python comments and docstrings"; `openspec/README.md` | `engineering/comments.md`, `workflow/change-references.md`, `engineering/documentation.md`, `workflow/openspec-documentation.md`, `workflow/closeout.md`; the three documents named become the layers' homes |
+| `change-review`, "Implementation review", question 4 (`architecture`) | `ARCHITECTURE.md`'s layers; core, kit, and domain | `ARCHITECTURE.md`, "Package and dependency layers", "Composition from above and below" | stays |
+| `change-review`, "Pre-closeout review", question 3 (`documentation`) | the comment rule, and imports at module level unless a recorded reason keeps one local, citing "parts 1 and 2" | `AGENTS.md`, "Python comments and docstrings"; `openspec/README.md`, "Plan closeout requirements" parts 1–2 | `engineering/comments.md`, `workflow/change-references.md`, `engineering/dependencies-python.md`; `workflow/closeout.md`, "Comment hygiene" and "Import placement" |
+| `change-review`, "Closeout review", question 1 | each part of `#plan-closeout-requirements` | `openspec/README.md`, "Plan closeout requirements" | `workflow/closeout.md` and `openspec/README.md`'s "This repository's closeout parts" |
+| `change-review`, "4. Classify every finding", basis `guidance` | a written rule "in `AGENTS.md`, `docs/development/`, or `openspec/README.md`" | the guidance documents as they stand | the guidance set: `docs/guidance/`, the capability guidance files, and the documents `AGENTS.md`'s layer table names |
+| `change-plan`, "2. Load what the plan needs" | `#plan-closeout-requirements` and `openspec/config.yaml`'s task rules | `openspec/README.md`, "Plan closeout requirements" | `workflow/closeout.md` and `openspec/README.md`'s "This repository's closeout parts"; `openspec/config.yaml` stays |
+| `change-plan`, "3. Record the conversation before planning from it"; `change-design`, "7. Hand off to design review"; `change-triage`, "1. Find the review and load the context"; `change-archive-cleanup`, "1. Check that cleanup may start"; `change-merge`, "After the archive"; `change-validate`, "5. Settle environmental failures with the owner"; `guidance-review`, "2. Report the figures" | `agents/change-workflow.md`'s "Waivers" | `agents/change-workflow.md`, "Waivers" | `change-workflow`'s CW-q3dm, which states the criteria (task 3.14) |
+| `change-plan`, "4. Write the plan", "Sections are slices" | test levels "as `docs/development/TESTING.md` defines them (unit, library integration, application integration through the typed client, system)"; the lowest level that can prove the behaviour | `TESTING.md`, "Four-Level Hierarchy"; `AGENTS.md`, "Tests and diagnostics" | `engineering/test-levels.md`, `engineering/testing.md`. The four names differ from `TESTING.md`'s (unit, integration, smoke, system); section 4 reconciles them in `test-levels.md` |
+| `change-plan`, "4. Write the plan", "Order by real dependencies, then by the cadence" | lower layers before the layers composing them — "foundation kit before kit before domain before composition root" — and verification before documentation, "per the task rules in `openspec/config.yaml`" | `ARCHITECTURE.md`, "Package and dependency layers"; `openspec/config.yaml`, `rules.tasks` | `ARCHITECTURE.md` stays; the layer names are this repository's in a workflow skill, which keeps its restatement (D11), the neutral form ("lower layers first") being `engineering/dependencies.md`'s |
+| `change-plan`, "4. Write the plan", "Every task is traceable" | the verification, packaging, promotion, and closeout work "`openspec/README.md` and `openspec/config.yaml` require" | `openspec/README.md`, "Change documentation requirements" and "Plan closeout requirements" | `workflow/changes.md`, `workflow/closeout.md`, `openspec/README.md`'s "This repository's closeout parts"; `openspec/config.yaml` stays |
+| `change-plan`, "4. Write the plan", "Name the permanent destinations" | `docs/development/ARCHITECTURE.md` where the design says so | `openspec/README.md`, "Documentation placement" | stays: this repository's placement table |
+| `change-plan`, "4. Write the plan", "End with the closeout task" | its eleven parts from `openspec/README.md`, "Plan closeout requirements", cited then by its anchor, in that order | `openspec/README.md`, "Plan closeout requirements" | `workflow/closeout.md`, in its order, with this repository's parts at the position it names; the count changes (D8) |
+| `change-design`, "3. Open the discussion" and "Classify each decision" | the trade-off's layer or authority boundary in `ARCHITECTURE.md`'s vocabulary; a consequence of a principle in `ARCHITECTURE.md` | `ARCHITECTURE.md` | stays; an engineering principle is now also one in `docs/guidance/engineering/` |
+| `change-design`, "3. Open the discussion", its opening and "Classify each decision" | one decision per message, each with context, alternatives, and a recommendation, in prose | `AGENTS.md`, "Asking the owner" | `workflow/working-model.md` |
+| `change-design`, "Classify each decision", its closing paragraph | the test level "from `TESTING.md`", stated provisionally | `TESTING.md` | `engineering/test-levels.md` |
+| `change-design`, "Do not argue from absence of a caller alone" | `docs/development/ROADMAP.md` | `openspec/README.md`, "Documentation placement" | the roadmap's role to `workflow/openspec-documentation.md` (31 O1f); the path stays in this repository's placement table, and the skill keeps its restatement (D11) |
+| `change-design`, "4. Iterate" and "5. Check the whole before recording" | principles the owner states that no document records are candidates for `ARCHITECTURE.md` | `ARCHITECTURE.md` | stays; recommend the skill name `docs/guidance/engineering/` too, for a principle holding in any repository, when section 4 re-points it |
+| `change-design`, "When the design needs another change first" | one change per branch; a prerequisite proposed from `dev` | `agents/change-workflow.md`, "Skills" | the guide's neutralized statement ("the branch the change lands on", section 1's row); `dev` named in `market-change-workflow`'s README. The skill names `dev` itself, a repository name in a workflow skill; it keeps its restatement (D11). One change per branch is now `workflow/changes.md`, "One change per branch" (task 3.12) |
+| `change-design`, "6. Record the settled design" | the proposal's "Permanent documentation impact" and "Knowledge to promote", a `D<n>` bullet per decision | `openspec/README.md`, "Change documentation requirements" | `workflow/changes.md` |
+| `change-implement`, "3. Implement the section", the defect bullet | "`AGENTS.md`'s 'Deferred work'" and `#defects-found-during-a-change` | `AGENTS.md`, "Deferred work"; `openspec/README.md`, "Defects found during a change" | `workflow/working-model.md`, `workflow/changes.md` |
+| `change-implement`, "3. Implement the section", the test-level bullet | the lowest test level that can prove it (`TESTING.md`); seams and injected dependencies over patching | `AGENTS.md`, "Tests and diagnostics"; `TESTING.md` | `engineering/testing.md`, `engineering/test-levels.md`, `engineering/test-seams.md` |
+| `change-implement`, "3. Implement the section", the layering bullet | the dependency layers in `ARCHITECTURE.md`; `TYPE_CHECKING` imports count; internal dependencies from wheels and locks | `AGENTS.md`, "Package and dependency discipline"; `ARCHITECTURE.md`; `BUILD_AND_PACKAGING.md` | `engineering/dependencies.md`, `engineering/dependencies-python.md`; `ARCHITECTURE.md` and `BUILD_AND_PACKAGING.md` stay |
+| `change-implement`, "3. Implement the section", the comments bullet | comments describe the current system, never a change, task, review, or history | `AGENTS.md`, "Python comments and docstrings" | `engineering/comments.md`, `workflow/change-references.md` |
+| `change-implement`, "3. Implement the section", the imports bullet | imports at module level unless a verified reason, recorded beside it, keeps one local; "part 2" | `openspec/README.md`, "Plan closeout requirements" part 2 | `engineering/dependencies-python.md`; `workflow/closeout.md`, "Import placement" |
+| `change-implement`, "3. Implement the section", the evidence bullet; `change-triage`, "5. Carry out the accepted outcomes", fix | each suite's level "as `TESTING.md` defines them" (unit, library integration, application integration, system) | `TESTING.md`, "Four-Level Hierarchy" | `engineering/test-levels.md`; the names differ from `TESTING.md`'s, as under `change-plan` |
+| `change-implement`, "5. Check before committing", the fresh-context check | the guidance the diff must keep: layering, comments, test level, documentation placement, packaging | the documents `config load implement` prints | the layers' files `load.common` lists (section 3 onward) |
+| `change-triage`, "2. Check every finding", the disposition of an out-of-scope defect; "5. Carry out the accepted outcomes", none | "`AGENTS.md`'s 'Deferred work'" and `#defects-found-during-a-change` | `AGENTS.md`, "Deferred work"; `openspec/README.md`, "Defects found during a change" | `workflow/working-model.md`, `workflow/changes.md` |
+| `change-triage`, "2. Check every finding", "3. Present every discussed finding", "6. Choose the exit", "7. A revisit after the triage finished"; `guidance-review`, its opening; `change-orchestrate`, "Interrupting and revisiting" | "Default acceptance", "Revisiting a default acceptance", "Interrupting a running step" | `agents/change-workflow.md` | `change-workflow`'s CW-d5ac, CW-t9bx, CW-9pbk, CW-r8vz, and CW-k2rv (task 3.14) |
+| `change-triage`, "3. Present every discussed finding", the example table of default acceptances, and "4. Record the dispositions", the example ledger line | a finding citing a renamed `ROADMAP` heading (`#goal-8-post-commitment-lifecycle`), and the owner's redirection to "the goal's row in ROADMAP's table" | `agents/change-workflow.md`, "Default acceptance" and "The ledger", whose examples section 1 gives neutral replacements | the guide's neutral examples (section 1's rows); the skill names this repository's roadmap and one of its goals, and keeps its restatement (D11) |
+| `change-triage`, "5. Carry out the accepted outcomes", fix | the lowest test level that proves the fix; comments describing the current system | `AGENTS.md`, "Tests and diagnostics" and "Python comments and docstrings" | `engineering/testing.md`, `engineering/comments.md` |
+| `guidance-review`, its opening | "History and removal" | `agents/change-workflow.md`, "A change in its own clone" | `change-workflow`'s CW-hak6 (task 3.14) |
+| `guidance-review`, "What reaches the repository"; `change-archive-cleanup`, "6. Draft the merge" | `AGENTS.md`'s "Public repository discipline" (`#public-repository-discipline`) | `AGENTS.md`, "Public repository discipline" | `engineering/repository-content.md`, and `AGENTS.md`'s exception row selecting the public case |
+| `guidance-review`, "2. Report the figures", terms the owner asked about | the homes "`AGENTS.md`'s 'Domain docs' names" | `AGENTS.md`, "Domain docs" | `workflow/terms.md`, with the market's homes in `AGENTS.md` |
+| `guidance-review`, "3. Cluster the owner's corrections" | the guidance as the documents `config load common` prints, the workflow guide, and the skills | `[load]` in `.agents/workflow.toml` | unchanged in form: `load.common` lists the layers' files (section 3 onward) |
+| `guidance-review`, "4. List the candidate edits" | ask in prose, each option and a recommendation written out | `AGENTS.md`, "Asking the owner" | `workflow/working-model.md` |
+| `guidance-review`, "5. Write the proposal, on the owner's word" | a proposal "as `openspec/README.md` asks" | `openspec/README.md`, "Change documentation requirements" | `workflow/changes.md` |
+| `change-archive-cleanup`, "2. Load the context" | `#plan-closeout-requirements`, "part 6 states the dependent rules" | `openspec/README.md`, "Plan closeout requirements" part 6 | `workflow/closeout.md`, "Campaign index currency" |
+| `change-orchestrate`, "Recover from the files" | evidence and options brought to the owner in prose | `AGENTS.md`, "Asking the owner" | `workflow/working-model.md` |
+| `change-orchestrate`, "Where the change is worked" | moving a change into a clone "as `agents/change-workflow.md` describes" | `agents/change-workflow.md`, "A change in its own clone" | the handbook, `docs/change-workflow-handbook.md`, an owner's procedure (task 3.14) |
+| `openspec/config.yaml`, `context`, its first paragraph | core never imports domain implementations; kit and domain never depend up into composition roots | `ARCHITECTURE.md`, "Package and dependency layers" | stays |
+| `openspec/config.yaml`, `context`, its second paragraph; `rules.specs`, the vocabulary rule | the official vocabulary | `ARCHITECTURE.md`, "Shared vocabulary and identities" | stays |
+| `openspec/config.yaml`, `context`, its third paragraph | uv and bun; minimal changes; wire and persistence compatibility preserved explicitly; the narrowest focused test; behaviour and deltas in OpenSpec, ordinary documents explanatory | `BUILD_AND_PACKAGING.md`; `RELEASING.md`, "Versioning policy", and `ARCHITECTURE.md`, "Accepted representations and application views"; `AGENTS.md`, "Tests and diagnostics" and "Documentation ownership" | `engineering/testing.md`, `engineering/persistence.md`, `workflow/openspec-documentation.md`; `engineering/versioning.md` for the versioning policy (31 O1e); uv stays with `BUILD_AND_PACKAGING.md` |
+| `openspec/config.yaml`, `rules.proposal` | name every capability and non-goals; deferred and blocked work; breaks | `openspec/README.md`, "Change documentation requirements" | `workflow/changes.md` |
+| `openspec/config.yaml`, `rules.specs` | durable observable behaviour and ownership, not source paths alone; WHEN/THEN scenarios; models in the companion; an indexed capability's ids | `openspec/README.md`, "Capability documentation pattern" | `workflow/openspec-documentation.md` |
+| `openspec/config.yaml`, `rules.design` | record compatibility, migration, rollback, and cross-service ownership decisions; prefer capability boundaries that survive package moves, citing paths only as evidence | `openspec/README.md`, "Change documentation requirements"; `ARCHITECTURE.md`, "Authority boundaries" | `workflow/changes.md`; `ARCHITECTURE.md` stays. It cites no heading, so nothing goes stale (D23) |
+| `openspec/config.yaml`, `rules.tasks` | order by real dependencies and keep independently archivable outcomes in separate changes; focused behavioural verification before documentation cleanup; exact promotion destinations — spec, companion, or "repository `ARCHITECTURE.md`" — and an indexed capability's index entries; no changelog or broad documentation work until the behaviour is proven | `openspec/README.md`, "Change documentation requirements" and "Plan closeout requirements" | `workflow/changes.md`, `workflow/closeout.md`; the `ARCHITECTURE.md` destination stays. It cites no heading, so nothing goes stale (D23) |
+
+## Proposed vocabulary
+
+The tables D18 gives, holding exactly the tags the rows use as round 1's triage
+corrected them — `hatchling` added, `dynaconf` folded into `python` and `drawio`
+dropped (29 F1, 31 O1c):
+the engineering and workflow tables for their layers' READMEs (sections 3 and 4),
+and the repository's for `AGENTS.md` (section 5), each listing its own layer tag
+first. Section 1's provisional placements are settled: `configuration`,
+`packaging`, and `deployment` are engineering topics, since each has engineering
+rows (`configuration.md`, `packaging.md`, `deployment.md`), the repository's rows
+using them as a lower layer's tags.
+
+### Engineering
+
+| Tag | Kind | Description |
+|---|---|---|
+| `engineering` | layer | Holds in a repository that uses neither the change workflow nor OpenSpec |
+| `documentation` | topic | Permanent documents: current state, provenance, citations, maintaining written rules |
+| `comments` | topic | Comments and docstrings: what they say and what they never say |
+| `diagrams` | topic | Diagrams, their sources, and what holds them to what they draw |
+| `dependencies` | topic | Imports and declared dependencies, and where a package belongs |
+| `testing` | topic | Test levels, the coverage between them, seams, doubles, and determinism |
+| `implementation` | topic | How production code is written: guards, libraries, service layering, operator controls |
+| `repository-content` | topic | What may enter a repository, private or public |
+| `terms` | topic | Vocabulary: one name per concept, one home per term |
+| `persistence` | topic | Stored representations, schema changes, migrations, and cutovers |
+| `configuration` | topic | How a service resolves its configuration and secrets, and the documents it is given |
+| `packaging` | topic | Builds, artifacts, locks, environments, and images |
+| `deployment` | topic | How a service is deployed and started: dependencies, startup refusals, rehearsal |
+| `versioning` | topic | Version numbers, compatibility commitments, and versioned contracts |
+| `python` | tool | The Python language and the libraries Python code imports, such as Dynaconf and SQLAlchemy (31 O1c) |
+| `uv` | tool | The uv package and project manager |
+| `hatchling` | tool | The Hatchling build backend (29 F1) |
+| `docker` | tool | Dockerfiles and image builds |
+| `kubernetes` | tool | Kubernetes workloads, ConfigMaps, Secrets, and probes |
+| `helm` | tool | Helm charts, values, and render tests |
+| `ansible` | tool | Ansible playbooks and roles |
+
+### Workflow
+
+| Tag | Kind | Description |
+|---|---|---|
+| `workflow` | layer | Holds in any repository adopting the workflow, and names nothing of one |
+| `design` | topic | The design step |
+| `plan` | topic | The planning step |
+| `implement` | topic | The implementation step |
+| `review` | topic | Reviews of a change |
+| `triage` | topic | Triage of reviews, validation, and the owner's notes |
+| `validate` | topic | Validation of a change's commit |
+| `closeout` | topic | The closeout task and its parts |
+| `archive-cleanup` | topic | Archive cleanup |
+| `orchestrate` | topic | The orchestrating session |
+| `openspec` | topic | OpenSpec's documentation model: specifications, companions, indexes, promotion |
+| `changes` | topic | A change's documents and the change index |
+| `owner` | topic | How a step asks the owner and answers the owner's questions |
+| `skills` | topic | The leaf skills and how they restate guidance |
+| `engine` | topic | The engine's command, configuration, hooks, and clones |
+| `records` | topic | A change's records: reviews, the workflow log, the ledger |
+
+### Repository
+
+| Tag | Kind | Description |
+|---|---|---|
+| `repository` | layer | Names this repository's packages, services, tools, deployment, documents, or make targets |
+| `architecture` | topic | This repository's system shape, authorities, and flows |
+| `checks` | topic | This repository's check targets and what each holds |
+
+## Files and their tags
+
+The files each shared layer gets, and the tags each file's frontmatter carries
+(31 O1c). A row's tags record what its passage concerns; a file carries only the tags
+its whole content needs, so it loads wherever any of its rows is needed. Where rows
+bound for one file carried different tags, the row was retagged to the file's set,
+its content needing no more: `diagrams.md`'s principle drops `documentation`;
+`packaging.md`'s packaging-check reason drops `testing`; `implementation.md`'s
+standalone-component rule drops `dependencies`; `repository-content.md`'s
+private-dependency rule drops `testing`; `helm-render-tests.md`'s values-schema
+principle is `testing`, `helm`; `kubernetes.md`'s and `helm.md`'s rows carry their
+tool alone, since a Kubernetes or Helm rule is relevant wherever that tool is used,
+whatever the session's topic; and `configuration.md`'s committed-files rules drop
+`deployment`. Each layer's `README.md` carries its layer tag alone.
+
+### Engineering
+
+| File | Tags |
+|---|---|
+| `engineering/documentation.md` | `engineering`, `documentation` |
+| `engineering/rules.md` | `engineering`, `documentation` |
+| `engineering/comments.md` | `engineering`, `comments` |
+| `engineering/diagrams.md` | `engineering`, `diagrams` |
+| `engineering/dependencies.md` | `engineering`, `dependencies` |
+| `engineering/dependencies-python.md` | `engineering`, `dependencies`, `python` |
+| `engineering/implementation.md` | `engineering`, `implementation` |
+| `engineering/implementation-python.md` | `engineering`, `implementation`, `python` — only if section 4 finds the route pattern's Python form (31 O1a) |
+| `engineering/testing.md` | `engineering`, `testing` |
+| `engineering/test-levels.md` | `engineering`, `testing` |
+| `engineering/test-seams.md` | `engineering`, `testing` |
+| `engineering/test-determinism.md` | `engineering`, `testing` |
+| `engineering/integration-tests.md` | `engineering`, `testing` |
+| `engineering/system-tests.md` | `engineering`, `testing` |
+| `engineering/test-doubles.md` | `engineering`, `testing` |
+| `engineering/contract-fixtures.md` | `engineering`, `testing` |
+| `engineering/conformance-tests.md` | `engineering`, `testing` |
+| `engineering/boundary-changes.md` | `engineering`, `testing`, `dependencies` |
+| `engineering/migration-tests.md` | `engineering`, `testing`, `persistence` |
+| `engineering/concurrency-tests.md` | `engineering`, `testing`, `persistence` |
+| `engineering/testing-python.md` | `engineering`, `testing`, `python` |
+| `engineering/helm-render-tests.md` | `engineering`, `testing`, `helm` |
+| `engineering/ansible-checks.md` | `engineering`, `testing`, `ansible` |
+| `engineering/repository-content.md` | `engineering`, `repository-content` |
+| `engineering/terms.md` | `engineering`, `terms` |
+| `engineering/persistence.md` | `engineering`, `persistence` |
+| `engineering/migrations.md` | `engineering`, `persistence`, `deployment` |
+| `engineering/configuration.md` | `engineering`, `configuration` |
+| `engineering/configuration-python.md` | `engineering`, `configuration`, `python` (the Dynaconf form, 31 O1c) |
+| `engineering/definition-documents.md` | `engineering`, `configuration` |
+| `engineering/deployment.md` | `engineering`, `deployment` |
+| `engineering/kubernetes.md` | `engineering`, `kubernetes` |
+| `engineering/helm.md` | `engineering`, `helm` |
+| `engineering/packaging.md` | `engineering`, `packaging` |
+| `engineering/packaging-python.md` | `engineering`, `packaging`, `python` |
+| `engineering/packaging-uv.md` | `engineering`, `packaging`, `uv` |
+| `engineering/packaging-hatchling.md` | `engineering`, `packaging`, `hatchling` (29 F1) |
+| `engineering/packaging-docker.md` | `engineering`, `packaging`, `docker` |
+| `engineering/versioning.md` | `engineering`, `versioning` (31 O1e) |
+| `engineering/versioning-python.md` | `engineering`, `versioning`, `python` (31 O1e) |
+
+Not created, as section 2's rows had them: `comments-python.md` and
+`diagrams-drawio.md` (31 O1c); `configuration-dynaconf.md` is `configuration-python.md`.
+
+### Workflow
+
+| File | Tags |
+|---|---|
+| `workflow/working-model.md` | `workflow` |
+| `workflow/openspec-documentation.md` | `workflow`, `openspec` |
+| `workflow/changes.md` | `workflow`, `changes` |
+| `workflow/change-references.md` | `workflow`, `comments` |
+| `workflow/closeout.md` | `workflow`, `closeout` |
+| `workflow/terms.md` | `workflow`, `terms` |
+
+The workflow's guide is no longer among them: it is the change workflow's operator
+handbook, `docs/change-workflow-handbook.md`, outside the guidance set, with no
+frontmatter (D3 as amended, 58 O7; task 3.11).
+
+Open: the workflow rows' step tags (`design`, `plan`, `implement`, `review`,
+`triage`, `validate`, `archive-cleanup`, `orchestrate`) and `owner`, `skills`,
+`engine`, and `records` name which steps a passage serves, which are alternatives,
+not a conjunction: `working-model.md` serves every step, and the workflow guide
+holds every step's rules, so no file's frontmatter carries them. Under D18 a table
+row no file uses leaves the vocabulary, unless a later section splits the guide or
+`working-model.md` by step. Which of the two is for section 3's triage. The workflow
+rows were retagged to their file's set as the engineering rows were: a topic tag a
+row carried beyond its file's (`openspec`, `changes`, `closeout`, `comments`,
+`documentation`, `repository-content`) was dropped, and `changes.md`'s rows that
+lacked `changes` gained it; the step and role tags were left on the rows, as the
+open question above covers them. Every workflow topic tag (`openspec`, `changes`,
+`closeout`) is still carried by a file.
+
+### Repository
+
+The repository documents' frontmatter is set by section 5 (tasks 5.1 and 5.3),
+each document's tags those its content needs throughout, as its document-level row
+or its rows give them. `architecture` is carried by
+`docs/development/ARCHITECTURE.md` (`repository`, `architecture`), the system's
+shape, authorities, and flows throughout. `checks` is carried by no document's
+whole content: its rows are passages of `AGENTS.md`, `openspec/README.md`,
+`ARCHITECTURE.md`, `TESTING.md`, and `BUILD_AND_PACKAGING.md`, and the checks'
+descriptions go to `openspec/specs/market-change-workflow/README.md`'s "What each
+check enforces", a companion outside the guidance set (D21). Open, for section 5's
+triage: under D18 `checks` leaves `AGENTS.md`'s table unless section 5 names a
+guidance document whose frontmatter carries it.
+
+## Draft classification of the checks
+
+Each check enforcing guidance (D13), with the rule it enforces, that rule's layer
+and destination as the rows above place it, and where the check runs. Section 5
+writes the corrected draft as `market-change-workflow`'s "What each check
+enforces". The checks `make check-repository` runs (`scripts/check_change.py`),
+those `make check-packaging` runs, and those `make pre-push` runs each have a row.
+
+| Check | Rule it enforces | Rule's layer | Where it runs |
+|---|---|---|---|
+| Change index (`scripts/change-workflow check index`; `make check-change-index`) | each row's cells, link, status against the legend, and dependencies; one row per active change | workflow: `workflow/changes.md`, the change index; `workflow/closeout.md`, "Campaign index currency" | the workflow's default checks, before `check-repository`, in every committing step's `run pre-commit` and `make check-change` |
+| Task list (`check tasks`; `make check-tasks`) | every numbered task sits under its own section's heading | workflow: `workflow/changes.md`, the task list | the default checks; implementation's entry check |
+| Agent skills (`check skills`; `make check-agent-skills`) | the skills, their frontmatter, and their harness links | workflow: `change-workflow`'s CW-d8de, which states it (the guide's "Skills" no longer does, task 3.12) | the default checks; this repository's packaging closeout part names it |
+| Strict OpenSpec validation (`scripts/change-workflow openspec validate <change> --strict`) | delta requirements carry scenarios and are well formed | workflow: `workflow/openspec-documentation.md` | the default checks; closeout's "Documentation citations" runs it last before the archive |
+| Comment hygiene (`make check-comment-hygiene`) | no change id, section or task number, or change document's file name (`tasks.md`, `design.md`, `proposal.md`) on any line of a `.py`, `.yml`, or `.yaml` file outside `openspec/`; no change directory's name in those or a `.toml` file outside `openspec/`, `docs/`, and `.claude/`. It searches lines, not only comments | workflow: `workflow/change-references.md`; the file types and `docs/` exemption are repository (`AGENTS.md`) | `check-repository`; closeout's "Comment hygiene" |
+| Documentation citations (`make check-doc-citations`) | a cited `openspec/`, `docs/`, `tools/`, `scripts/`, `e2e-tests/`, or `.agents/` path exists and is no tombstone | engineering: `engineering/documentation.md`, citations resolve; the directories are repository (`AGENTS.md`) | `check-repository`, scoped to the change; closeout's "Documentation citations" |
+| Specification index (`make check-spec-index`) | an indexed capability's `spec.md` and `index.md` agree on its ids, with the change's deltas counted | workflow: `workflow/openspec-documentation.md`, "A capability organized by an index" | `check-repository` |
+| Decision destinations (`make check-decision-destinations`) | each `### D<n>` decision has a "Knowledge to promote" bullet starting `D<n>` | workflow: `workflow/changes.md`, permanent documentation impact | `check-repository` |
+| History wording (`make check-history-wording`) | a comment or docstring line added since the landing branch describes no history | engineering: `engineering/comments.md` | `check-repository`, against the merge-base with the landing branch |
+| Version bumps (`make check-version-bumps`) | a package's version is at most one SemVer step from its version on the landing branch | engineering: a change bumps each package once, `engineering/versioning.md` (31 O1e) | `check-repository`, against the merge-base |
+| Local imports (`make check-local-imports`) | an import added inside a function has a comment giving its reason | engineering, Python: `engineering/dependencies-python.md` | `check-repository`, against the merge-base; closeout's "Import placement" |
+| Capability index (`make check-capability-index`) | every capability with a `spec.md` has a row in `openspec/specs/README.md`, and no row links nothing | repository: `openspec/README.md`, "Current capability documentation", the index's purpose being workflow material in `workflow/openspec-documentation.md` (31 O1f) | `check-repository` |
+| `dist`, the prerequisite of `make check-packaging` | none: it builds the wheelhouse the checks read | — | `check-packaging` |
+| `make check-uv-setup` | internal packages are derived from the lock, never listed; `reinit` is the script call; images install through the script | engineering: `engineering/packaging.md`, nothing lists what the tool can derive, with its uv form in `engineering/packaging-uv.md`; the script is repository (`BUILD_AND_PACKAGING.md`) | `check-packaging`: the functional pre-commit hook, the pre-archive hook, and validation's local part |
+| `make check-locks` | every lock is current with its project, the wheels the tree builds, and the repository; one lock revision | engineering, uv: `engineering/packaging-uv.md`; the revision and `.dist` are repository | `check-packaging`, wherever it runs, as above |
+| `make check-python-version` | every consumer reads the one Python declaration | engineering: `engineering/packaging.md`, with its uv and Docker forms | `check-packaging`, wherever it runs, as above |
+| `make check-project-layout` | one import package under `src/`, built with nothing remapped; editable installs kept | engineering, Python: `engineering/packaging-python.md`, with its uv and Hatchling forms in `packaging-uv.md` and `packaging-hatchling.md` (29 F1) | `check-packaging`, wherever it runs, as above |
+| `make check-architecture` (its parts `layers`, `scope`, `dependencies`, `kinds`) | the package layer, scope, and kind rules; an imported internal distribution is declared | repository: `ARCHITECTURE.md`, "Package and dependency layers"; the `dependencies` part also enforces an engineering rule, `engineering/dependencies.md`'s "declare what you import" | `check-packaging`, wherever it runs, as above; every push in CI (`tests.yml`) |
+| `make check-architecture-change` | a change owns no architecture exception or override row when archived | repository: `ARCHITECTURE.md`, "Where the current tree diverges"; `openspec/README.md`'s packaging closeout part | the pre-archive hook, at closeout |
+| `make check-uv-version` | the installed uv is at least the minimum that writes the locks | engineering, uv: `engineering/packaging-uv.md`, locks written by a stated minimum version; the minimum itself is repository (`BUILD_AND_PACKAGING.md`, "Locks") | `make lock`; validation's preflight |
+| Public content (`scripts/check_public_content.py`; `make check-public-content` with the secret scan) | no recognizable private content in what is published | engineering: `engineering/repository-content.md`, its public part, selected by `AGENTS.md`'s exception row; the patterns are repository | the Git pre-commit hook (`scripts/hooks/pre-commit`, staged), `make pre-push`, and CI's `public-content.yml` |
+| Secret scan (`scripts/check_secrets.py`, gitleaks; `make check-secrets`) | no private key or provider credential | engineering: `engineering/repository-content.md`, the part holding in every repository | the Git pre-commit hook, `make pre-push`, and CI's `public-content.yml` |
+| `make pre-push` | both checks above, over what a push would send | as the two rows above | the Git pre-push hook (`scripts/hooks/pre-push`) and the guarded push (`[hooks].pre-push`) |
+| `make audit-secrets` | reports every gitleaks finding in the tracked tree, refusing nothing | engineering: `engineering/repository-content.md` | by hand before a release (`RELEASING.md`, "Cutting a release"); it enforces nothing, and is listed so the classification is complete |
+| Guidance check (`make check-guidance`, written in section 8) | tags, the vocabularies, exception tables, the link direction, and anchors into guidance | workflow: CW-g7lt, CW-d2rw, CW-x4ex, MCW-c4ek's guidance conditions; the script is this repository's for now (D13) | `check-repository`, once section 8 adds it |
+
+## Cross-system documents by kind
+
+Written at the return to design, after rounds 1 to 7, and reviewed with the moves in
+the round's triage rather than before them (D30, D34): a row the owner corrects there
+becomes a fix to the move it governs. These rows govern sections 11 to 13 as the rows
+above govern sections 3 to 7. They cover every section of the five cross-system
+documents as they stood when the round began — `docs/development/ARCHITECTURE.md`,
+`TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`, `BUILD_AND_PACKAGING.md`, and `RELEASING.md`
+— and `openspec/README.md`'s draw.io paragraph (D29).
+
+How to read it:
+
+- **Kind**, by D25's test. A `rule` states what a change's work product here must be
+  or do: what every instance of a kind must satisfy, a new one a change adds included,
+  this repository's statement of a shared rule (31 O1a) among them. A `description`
+  states what named components are, do, or are for, and why, even where it cites the
+  rule a component applies. A `procedure` tells the owner or an operator what to do or
+  type. A section whose text holds more than one kind has a row per part, its `Source`
+  naming the part.
+- **Destination.** `stays` keeps a description in its document under the heading it
+  has, or the one the row names. `repository/<file>` abbreviates
+  `docs/guidance/repository/<file>`, the file and, after a comma, the heading the rule
+  takes there. A procedure names the heading it takes in `docs/release-handbook.md`,
+  the owner's handbook (D25). No section of the five documents is an operator's
+  procedure, so none goes to `docs/operator-handbook.md` (141 F1); the operator steps
+  inside descriptions are listed in `Ambiguous` as overlap.
+- **Tags** are the destination file's for a rule (D28), from the repository's table
+  and the engineering table; the three description documents keep theirs (D27). No
+  repository tag is added: every subject a file covers has an engineering topic or
+  tool tag, or `architecture` (D18).
+- **Duplicates** (31 O1b). A rule stated in two documents merges into the file its
+  row names, the row saying "merged"; where the copies differ, the section's notes
+  give both forms and the proposed text.
+- **`Ambiguous`** names what the test did not settle, for the triage.
+
+### `docs/development/ARCHITECTURE.md`
+
+| Source | Kind | Destination | Tags | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Arkhai Market Stack — Architecture Reference`, its purpose line | description | stays, rewritten to say it holds the description and to link the rules and handbooks (13.5) | repository, architecture | the document's opening | |
+| `## Document map` | description | stays; the "Implementation rules" row goes, and the rows for "Package and dependency layers" and "Build, packaging, and initialization" name what stays (13.5) | repository, architecture | the document's own map | |
+| `## System overview` | description | stays | repository, architecture | the system's shape | |
+| `## Composition from above and below` | description | stays | repository, architecture | what core, kit, domain, and composition own, and the instance of composition from one component | |
+| `## Composition from above and below`, "Two hooks remain separate when core-owned machinery or a typed invariant sits between them…" | rule | `repository/production-code.md`, "Domain hooks" | repository, implementation | a criterion for a future design choice that nothing holds, not an account of the system (176 F1); the description links it | |
+| `## Package and dependency layers`, the heading | description | stays, opened by a description of the layers, scope, and kind that links `repository/package-layers.md` for their rules | repository, architecture | the heading anchors the description subsections below it | the known case (D34): the section states its rules through a description of the layers, sentence by sentence; the rows below split it where a paragraph is mostly one kind, and the triage reviews each split |
+| `## Package and dependency layers`, its opening (the three questions here, kind, `make check-architecture`, `ARCHITECTURE.toml`) | rule | `repository/package-layers.md`, its opening | repository, architecture, dependencies | this repository's instance of `dependencies.md`'s three questions and the check holding it (D27's sample) | the known case, as the heading's row says |
+| `### Repository layers`, its diagram, "The layer names what a package may do…", and the family vocabulary paragraph | description | stays | repository, architecture | what the four layers are and what the compute family's vocabulary package is | the known case: the vocabulary paragraph states its package's dependency bound inside the description |
+| `### Repository layers`, "A package depends only on its own layer or a lower one…" (what "depends on" means, the `dev` group, `importlib`) and "Core carrier packages must not import…" | rule | `repository/package-layers.md`, "Layers" | repository, architecture, dependencies | the layer rule the check holds | the known case: the carrier paragraph describes `market_core.settlement`'s exports while stating what core may import; it moves with its rule |
+| `### Scope` | rule | `repository/package-layers.md`, "Scope" | repository, architecture, dependencies | the scope rule, the check's; its last paragraph a rule review holds | |
+| `### Kind` | rule | `repository/package-layers.md`, "Kind" | repository, architecture, dependencies | the kinds, how the check reads a path, the allowlists, override rows, and the standalone-component boundary | the plugin entry-point groups' list is description, kept with the rule naming them |
+| `### Where the current tree diverges` | rule | `repository/package-layers.md`, "Where the current tree diverges" | repository, architecture, dependencies | override and exception rows, their owners, and no new edge of a divergent shape | its second paragraph lists the divergences the check cannot see, a description of today's tree kept beside the rule it excepts |
+| `### Family kits`, its rules (what a family kit is, when a capability belongs in one, what it may depend on, the placement tests, promotion to a repository-wide kit) | rule | `repository/family-kits.md` | repository, architecture, dependencies | how any family kit a change adds is placed | |
+| `### Family kits`, the compute family's kits (from "In the compute family" to the mock routes) | description | stays, under "Family kits" | repository, architecture | what the compute family's kits are | |
+| `### Kit areas` | description | stays | repository, architecture | the map of the kit layer's areas, which it calls "a map, not a checked rule" | its "a kit-to-kit edge those allow but this order forbids is a review finding", "Dependencies never point upward…", "No new site read of pool state should be added while it stands", and "carrier modules … must not import concrete services" are rules review holds, left with the map; they could join `repository/package-layers.md` |
+| `### Marketplace identity` | description | stays | repository, architecture | a capability's summary, linking its specification | |
+| `### Registry self-description` | description | stays | repository, architecture | as "Marketplace identity" | |
+| `### Capacity publication and multi-domain storefront composition` | description | stays | repository, architecture | cross-system | |
+| `### Settlement configuration` | description | stays | repository, architecture | how settlement is configured and decided | "each party derives for itself" is normative in the specifications and stated here as behaviour |
+| `## Runtime service map` | description | stays | repository, architecture | cross-system | |
+| `## Service Architecture` | rule | `repository/production-code.md`, "Services" | repository, implementation | the instance of `implementation.md`'s thin controllers, and where a service's own layers are described | |
+| `### Route contracts and their HTTP binding` | rule | `repository/production-code.md`, "Route contracts and their HTTP binding" | repository, implementation | where each of the five pieces lives here, a contributed router's factory, the restricted path grammar | its account of the provisioning service's composed route table and unmatched-request answers describes the system, and moves with the rules it explains |
+| `## Authority boundaries` and its table | description | stays | repository, architecture | cross-system | |
+| `### Post-commitment counterparts` | description | stays | repository, architecture | cross-system | |
+| `### Deciding which party is authoritative` | description | stays | repository, architecture | how authority falls across the storefront–site boundary | "A rule that must bind every storefront acting for a site belongs in site admission" is a placement rule, left with the account it concludes |
+| `### Omission states no commitment` | description | stays | repository, architecture | the system's semantics of an omitted term | |
+| `### Holding or closing a listing the storefront cannot fully derive` | description | stays | repository, architecture | normative in storefront publication, stated here as behaviour | |
+| `### Storefront capacity boundary` | description | stays | repository, architecture | cross-system | |
+| `### Site authority`, `### Resource pools` | description | stays | repository, architecture | cross-system | |
+| `## Shared vocabulary and identities`, `### Marketplace principals`, `### Authenticated service boundaries`, `### Identifiers` | description | stays | repository, architecture | the cross-subsystem vocabulary `AGENTS.md`'s "Domain docs" names | |
+| `### Terms` | description | stays | repository, architecture | vocabulary (D25) | "Avoid `SettlementTarget` as a noun" is a naming rule, kept with the vocabulary it governs |
+| `### One name per concept` | description | stays | repository, architecture | vocabulary, the home `AGENTS.md` names for the synonyms ruled out | |
+| `## Major lifecycle flows`, `### Discovery and negotiation` | description | stays | repository, architecture | cross-system | its "Code that makes ordinary fulfillment depend on a physical resource identity … is very likely encoding the wrong unit" is a review heuristic left with the model it follows from |
+| `### Settlement servicing`, `### Capacity reservation`, `#### Layered placement ownership`, `### Fulfillment`, `### Fulfillment status and results`, `### Release` | description | stays | repository, architecture | cross-system flows | |
+| `## Deployment topology`, `### Local development`, its first paragraph | description | stays | repository, architecture | the local stacks | |
+| `### Local development`, "Two rules govern how stacks receive their configuration", the first rule | rule | `repository/compose-stacks.md`, merged | repository, configuration, deployment | the same rule as `DEPLOYMENT_AND_CONFIG.md`'s "A stack's configuration lives in committed files" | |
+| `### Local development`, the second rule | rule | `repository/service-configuration.md`, merged | repository, configuration, kubernetes | the same rule as `DEPLOYMENT_AND_CONFIG.md`'s secrets and trust paragraph | |
+| `### Production and staging` | description | stays | repository, architecture | the deployed topology | |
+| `### Operators`, all but its last sentence | description | stays | repository, architecture | who operates the system, and why pre-1.0 versioning suits it | "Designs record where such ordering would matter" is a rule for a change's design, left with the reason it follows from |
+| `### Operators`, "Until then a package's incompatible change takes a minor version…; the rule lapses at 1.0.0" | rule | `repository/package-versions.md`, merged | repository, versioning | the instance of `versioning.md`'s "Before 1.0.0", also stated by `RELEASING.md` | |
+| `## Build, packaging, and initialization`, its first two paragraphs | description | stays, its pointer to `BUILD_AND_PACKAGING.md` re-pointed to the packaging rule files | repository, architecture | the build flow | they restate the wheelhouse's and the one Python version's rules in summary (31 O1b); kept as the description of the flow those rules produce, citing the rule files |
+| `## Build, packaging, and initialization`, "The aggregate Make targets, `make test` among them, are held to…" | rule | `repository/test-targets.md` | repository, testing | the instance of `test-levels.md`'s aggregate targets | |
+| `### Accepted representations and application views`, its first paragraph | rule | `repository/accepted-representations.md` | repository, persistence | the instance of `persistence.md` | |
+| `### Accepted representations and application views`, its second paragraph | description | stays | repository, architecture | the migration floor as the services have it | a summary of `DEPLOYMENT_AND_CONFIG.md`'s floor paragraph, kept as the cross-system summary |
+| `## Recovery workers` | description | stays | repository, architecture | cross-system | |
+| `## Operator lifecycle controls` | description | stays | repository, architecture | the loop controller and the trading pause, citing `implementation.md` | |
+| `## Implementation rules` | rule | `repository/production-code.md`, "Libraries" | repository, implementation | the instance of `implementation.md`'s preference for an existing library | |
+| `## Testing strategy`, its first paragraph | description | stays | repository, architecture | where the tests are described | |
+| `## Testing strategy`, its last three paragraphs (the scenario kinds, the deterministic sequence, the doubles) | rule | `repository/deal-scenarios.md` and `repository/lane-doubles.md`, merged | repository, testing | summaries of `TESTING.md`'s rules, whose home those files are | |
+| `## Capability documentation index` | description | stays | repository, architecture | the map's link to the capability index | |
+| `## Deterministic database-concurrency tests` | rule | `repository/deterministic-tests.md`, "Database concurrency" | repository, testing | the instance of `concurrency-tests.md` | |
+
+### `docs/development/TESTING.md`
+
+| Source | Kind | Destination | Tags | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Testing Strategy`, its opening | description | stays, rewritten (13.5) | repository, testing | the document's opening | |
+| `## Four-Level Hierarchy`, its opening | description | stays | repository, testing | the levels' pointer | |
+| `### 1. Unit Tests` | rule | `repository/test-placement.md`, "Unit tests" | repository, testing, python | constructor doubles and the command-module seam here | its heading stays as a pointer, so the hierarchy keeps its four levels |
+| `### 2. Integration Tests`, its first paragraph | rule | `repository/test-placement.md`, "Integration tests" | repository, testing, python | where a service's and a kit's integration tests run | its heading stays as a pointer |
+| `### 2. Integration Tests`, "Registration and traffic are different proofs" | rule | `repository/test-placement.md`, "Integration tests" | repository, testing, python | the instance of `testing.md`: what the frp admission plugin's integration tests prove and where they run | |
+| `### 2. Integration Tests`, "Async test discipline — no sleeps", "Tests wait on events, never on durations", "Leave nothing held" | rule | `repository/deterministic-tests.md` | repository, testing | instances of `test-determinism.md` | |
+| `### 2. Integration Tests`, "Pause the loop, then advance it explicitly": the control table, the gates, the kit loop controller, the source-confirmation window, the lane's holds, `buy_to_ready`, the hold helpers and their source checks, and the traps | rule | `repository/deterministic-tests.md`, "Pause the loop, then advance it explicitly" | repository, testing | the hold every compute-lane scenario module takes and the controls it uses | the control table and gate semantics describe the services' test surface; they move with the rule they serve, and could stay in `TESTING.md` |
+| `### 3. Smoke Tests (Deployment Validation)` | description | stays | repository, testing | where the smoke tests are and what they mark | |
+| `### 4. System Integration Tests (End-to-End)`, "Every deployable domain owns one release-qualified complete-deal scenario…" | rule | `repository/deal-scenarios.md`, "A complete deal per domain" | repository, testing | what every domain's scenarios must hold | |
+| `### 4. System Integration Tests (End-to-End)`, the paragraph introducing the diagrams | description | stays, naming two diagrams here and the discipline's beside its rule | repository, testing | the section's map | |
+| `#### The discipline every scenario follows` | rule | `repository/deal-scenarios.md`, "The discipline every scenario follows", its diagram embedded from `docs/development/diagrams/` | repository, testing | the instance of `system-tests.md`'s sequence of state changes | the diagram is description; it moves with the text it draws |
+| `#### The canonical compute deal` | description | stays | repository, testing | the canonical deal, its stages and drivers (D27) | "A shared stage never depends on the mock profile…" is an instance of `test-doubles.md`, kept with the stage set it constrains and the test holding it |
+| `#### One part, zoomed in`, its first paragraph and diagram | description | stays | repository, testing | the settle part drawn open | |
+| `#### One part, zoomed in`, "The e2e test pod reaches services only through their interfaces…" | rule | `repository/deal-scenarios.md`, "Through interfaces" | repository, testing | the instance of `system-tests.md` | |
+| `#### One part, zoomed in`, the lanes, from "The pipeline runs one lane per market domain" through the compute lanes' mock executors | description | stays | repository, testing | the lanes (D27) | |
+| `#### One part, zoomed in`, "A lane target names only its Compose files, its project, and the run's provisioning mode…" | rule | `repository/compose-stacks.md`, merged | repository, configuration, deployment | the same rule as `DEPLOYMENT_AND_CONFIG.md`'s lane targets | |
+| `#### One part, zoomed in`, "A mock's default output is what the shipped configuration prints…" | rule | `repository/lane-doubles.md`, "Mock output" | repository, testing, repository-content | the instance of `test-doubles.md` | |
+| `#### One part, zoomed in`, "`make -C e2e-tests test-e2e` runs the three in turn…" | description | stays | repository, testing | how the full run sequences the lanes | |
+| `#### One part, zoomed in`, "A lane provides its own configuration, so a scenario that finds a lane setting missing fails rather than skipping" | rule | `repository/deal-scenarios.md`, "A lane's configuration" | repository, testing | what every scenario does with a missing lane setting | |
+| `#### One part, zoomed in`, pre-review validation's Helm scenarios and check pods | description | stays | repository, testing | what validation runs against a release | "A scenario on that list reads only what the `e2e-tests` image copies … never a file from the checkout" is a rule on the listed scenarios |
+| `#### One part, zoomed in`, the mock-provisioned deal and the VM multi-registry scenario | description | stays | repository, testing | what the lanes prove and do not | |
+| `#### One part, zoomed in`, "To run the lanes in GitHub Actions…" through the fetched logs | description | stays | repository, testing | what `make run-e2e` and `make fetch-e2e-logs` do | its opening two sentences, a procedure, went to `e2e-tests/README.md`'s "End-to-end lanes" at closeout (184 F1, D25 as amended), the targets' behaviour staying |
+| `#### Locally verifiable and external-topology scenarios` | rule | `repository/deal-scenarios.md`, "Locally verifiable and external-topology scenarios" | repository, testing | the instance of `system-tests.md`'s two kinds and per-observation outcomes | |
+| `#### The real-provisioning lane` | description | stays | repository, testing | the real lane and the qualification modules | its step "Set the allowance before publishing an offer" went to `e2e-tests/README.md`'s "Real-provisioning qualification" at closeout (184 F1), the dispute window's constraint staying |
+| `## Contract Fixtures` | rule | `repository/test-placement.md`, "Contract fixtures" | repository, testing, python | the instance of `contract-fixtures.md` | |
+| `## Test File Layout` | rule | `repository/test-placement.md`, "Test file layout" | repository, testing, python | the instance of `testing-python.md`'s layout | |
+| `## Migration Tests` | rule | `repository/migration-chain-tests.md` | repository, testing, persistence | the instance of `migration-tests.md` | |
+| `## Accepted Arkhai purchase qualification` | rule | `repository/qualification-evidence.md` | repository, testing | what a physical-qualification claim must rest on | its first paragraph's steps went to the runbook's section 29 at closeout (184 F1), the paragraph reworded as the rules they rest on |
+| `## Boundary-Change Validation`, its first paragraph | rule | `repository/package-layers.md`, "A boundary change" | repository, architecture, dependencies | the instance of `boundary-changes.md`, whose check here is `make check-architecture` | a testing rule placed with the layer rules it validates; it could be a file of its own |
+| `## Boundary-Change Validation`, its CI matrix paragraph | rule | `repository/test-targets.md`, "CI runs `make test`'s targets" | repository, testing | what CI's matrix must match, held by `test_tests_workflow.py` | |
+| `## Ansible Syntax and Native Checks` | rule | `repository/ansible-gates.md` | repository, testing, ansible | the instance of `ansible-checks.md` and the gates' evidence boundaries | |
+| `## Chart Render Tests` | rule | `repository/chart-render-tests.md` | repository, testing, helm | the instance of `helm-render-tests.md` (D27's sample) | "Obtaining Helm where its download host is unreachable", a developer's procedure, went to the runbook's section 5 at closeout (184 F1), its rule (keep the copy out of the repository) staying under "The supported Helm" |
+| `## Cross-Language Contract Conformance` | rule | `repository/contract-conformance.md` | repository, testing | the instance of `conformance-tests.md` | |
+| `## Private Service Dependencies`, its first two paragraphs | rule | `repository/lane-doubles.md` | repository, testing, repository-content | instances of `repository-content.md` and `test-doubles.md` | |
+| `## Private Service Dependencies`, the controls, the payments and mediation targets, the evidence label, the payments helper, and the current example | description | stays | repository, testing | the doubles (D27) | "A scenario installs its rules through the `lane_double_rules` fixture…" and "A control no scenario exercises is proven by its double's own suite" are rules, left with the controls they concern |
+| `## Offline Review Validation`, all but its Makefile sentence | description | stays | repository, testing | what the review wheelhouse is | |
+| `## Offline Review Validation`, "A project's own `Makefile` must keep its interpreter selection configurable…" | rule | `repository/project-environments.md` | repository, packaging, uv | what every project's Makefile must allow | |
+
+### `docs/development/DEPLOYMENT_AND_CONFIG.md`
+
+| Source | Kind | Destination | Tags | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Configuration and Deployment`, its opening | description | stays, rewritten (13.5) | repository, configuration, deployment | the document's opening | |
+| `## Profile-based configuration`, the resolver (the registry's exception, the resolver variables and prefixes, `arkhai-kit-config`'s boundary, dotenv) | description | stays | repository, configuration, deployment | how the services resolve configuration | |
+| `## Profile-based configuration`, from "Application settings stay out of the environment" through "A setting that belongs to one domain is named for it" and its refusals | rule | `repository/service-configuration.md` | repository, configuration, kubernetes | instances of `configuration.md` | the retired-key refusals describe the provisioning service's startup, and move with the naming rule they enforce |
+| `## Profile-based configuration`, "Before a package reaches 1.0.0, the meaning of a configuration key it reads may change…" | rule | `repository/package-versions.md`, merged | repository, versioning | the instance of `versioning.md` for configuration keys | |
+| `## Kubernetes: ConfigMap and Secret mounting`, its opening sentence | rule | `repository/helm-charts.md`, "Configuration through mounted files" | repository, helm, kubernetes, deployment | the instance of `kubernetes.md`, every chart's | |
+| `## Kubernetes: ConfigMap and Secret mounting`, where the charts differ | description | stays, under a lead linking `repository/helm-charts.md` | repository, configuration, deployment | the registry, provisioning, and `configFiles` particulars | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "The rule behind the pod rule" | rule | `repository/service-configuration.md`, "A storefront's configuration" | repository, configuration, kubernetes | the instance of `configuration.md` and `kubernetes.md` for every storefront | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "A deployment does not wait on a service's dependencies" | rule | `repository/helm-charts.md`, "No wait on a dependency" | repository, helm, kubernetes, deployment | the instance of `deployment.md` and `kubernetes.md`, and what the render tests assert | |
+| `## Kubernetes: ConfigMap and Secret mounting`, the `mockMode` sentence and "The umbrella's smoke-test profile" | description | stays | repository, configuration, deployment | one chart's particulars | |
+| `### Storefront agents: pass-through configuration`, all but two sentences | description | stays | repository, configuration, deployment | how the storefront charts render an agent | its operator instructions ("To set a value to `None`…", "recover with `helm rollback`") went to the operator handbook's "Storefront configuration under Helm" at closeout (184 F1, D34), the behaviour they follow from staying; the retired-keys paragraph says where a change retires a storefront key (the one catalogue), a rule left with the catalogue it describes |
+| `### Storefront agents: pass-through configuration`, "A chart renders a check of a setting it cannot see only where a value names the check's target…" | rule | `repository/helm-charts.md`, "A check of a setting the chart cannot see" | repository, helm, kubernetes, deployment | what every chart's check pod rests on | |
+| `### Storefront agents: pass-through configuration`, "Write an integer above 2^53 in a values file as a string" | rule | `repository/helm-charts.md`, "Values" | repository, helm, kubernetes, deployment | the instance of `helm.md` | |
+| `## Per-domain stack composition`, its stack list | description | stays | repository, configuration, deployment | which stacks there are | |
+| `## Per-domain stack composition`, "A stack's configuration lives in committed files…", the base files' topology-only rule, and the overlays' rule | rule | `repository/compose-stacks.md` | repository, configuration, deployment | the instance of `configuration.md`, every stack's | |
+| `## Per-domain stack composition`, the overlay table, the committed sources, the bare-metal storefront's mounted files, and the full local stack's command | description | stays | repository, configuration, deployment | which overlay binds what | |
+| `## Per-domain stack composition`, "each end-to-end lane's target … names only its compose project and files and the run's mode" | rule | `repository/compose-stacks.md`, merged | repository, configuration, deployment | the same rule as `TESTING.md`'s | |
+| `## Per-domain stack composition`, `PROVISIONING_MODE`, the VM development stack, the bare-metal wrapper | description | stays | repository, configuration, deployment | how the stacks are composed | "chosen per run, not per stack file and never by a storefront" is a rule, left with the mechanism |
+| `## Per-domain stack composition`, "Storefront images install their distributions from the staged `.dist` wheelhouse…" | rule | `repository/images.md`, merged | repository, packaging, docker | the same rule as `BUILD_AND_PACKAGING.md`'s "Images" | |
+| `## Per-domain stack composition`, "Stack files carry public URLs…" and what missing material blocks | rule | `repository/compose-stacks.md`, "No fallback" | repository, configuration, deployment | what every stack file binds and refuses | |
+| `## Per-domain stack composition`, the bare-metal storefront's publication loop | description | stays | repository, configuration, deployment | the bare-metal stack's lane evidence | |
+| `## Stateful service persistence`, "Each service owns its own database…" and its `Recreate` sentence, and the API-credit services' paragraph | rule | `repository/service-databases.md` | repository, persistence, deployment, kubernetes | instances of `kubernetes.md`'s single-writer store and the specification's persistence ownership | "Restart either against its own volume" is an operator step, kept with the rule |
+| `## Stateful service persistence`, the runtime images' `/app/data` and the PVC annotation | description | stays | repository, configuration, deployment | what the images and charts do | |
+| `## Stateful service persistence`, "A local development cluster is deployed with `make -C helm deploy-local`, never…" | rule | `repository/local-clusters.md` | repository, deployment, helm | binds whoever deploys locally, an agent included | it is an operator's practice too; the rule is what work here must follow |
+| `### Release topology`, the supported topology and the two local releases | description | stays | repository, configuration, deployment | release topology (D27) | |
+| `### Release topology`, "A local release configures a service through the values a deployment uses", with its first example sentence | rule | `repository/local-clusters.md`, "The values a deployment uses" | repository, deployment, helm | the instance of `deployment.md` | |
+| `### Release topology`, the doubles in the local release and the topology targets | description | stays | repository, configuration, deployment | what the local release runs and what each target does | the targets' bullets overlap the validation runbook's procedures |
+| `### Release topology`, "An end-to-end scenario that needs release 2 states `make helm-topology-up`…" | rule | `repository/local-clusters.md`, "A scenario needing release 2" | repository, deployment, helm | what such a scenario's target and docstring state | |
+| `### Release topology`, "Helm test pods carry no workload selector label" | rule | `repository/helm-charts.md`, "Test pods" | repository, helm, kubernetes, deployment | the instance of `kubernetes.md`, and the test holding it | |
+| `## Migrations at startup`, its opening, the service table, and the paragraphs on the `migrate` target, the init container and Compose command, the command's configuration, and the read-only open and check mode | rule | `repository/migrations-at-startup.md` | repository, persistence, deployment | instances of `migrations.md` (D27's sample) | the service table describes each service's command, kept with the rule it instantiates |
+| `## Migrations at startup`, the check results table | description | stays | repository, configuration, deployment | what the check mode reports | its Remedy column is an operator's step; the operator handbook's "Upgrading a deployment" is the procedure |
+| `## Migrations at startup`, the floor and adoption, the pointer to the tests, and the later migrations | description | stays | repository, configuration, deployment | what each chain holds | |
+| `## Migrations at startup`, "These migrations are fail-forward… No two versions of a service share a database…" | rule | `repository/migrations-at-startup.md` (fail-forward) and `repository/service-databases.md` (`Recreate`, merged) | repository, persistence, deployment | instances of `migrations.md` | |
+| `## Migrations at startup`, canonical principals and the identity cutover | description | stays | repository, configuration, deployment | what a supported database holds and how a cutover recovers | "operators recover by rolling forward" is an operator's practice, stated as the limit of rollback |
+| `## Bare-metal role configuration` | description | stays | repository, configuration, deployment | the bare-metal roles' configuration | |
+| `## Current limits` | description | stays | repository, configuration, deployment | the pattern's limits | |
+
+### `development/BUILD_AND_PACKAGING.md`
+
+The document is removed once every row has moved (12.3), with its row in `AGENTS.md`'s
+layer table.
+
+| Source | Kind | Destination | Tags | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Build and packaging`, its first paragraph | description | the openings of the packaging rule files, each saying what it holds | repository, packaging | what the document held | |
+| `# Build and packaging`, its second paragraph (the manifest, the one `.python-version`) | rule | `repository/python-version.md`, its opening | repository, packaging, python, uv, docker | the instance of `packaging.md`'s one declaration | |
+| `## Project layout` | rule | `repository/project-layout.md` | repository, packaging, python, hatchling | the instance of `packaging-python.md` and `packaging-hatchling.md` (29 F1) | |
+| `## The wheelhouse` | rule | `repository/wheelhouse.md` | repository, packaging, uv | the instance of `packaging.md`'s built artifacts | |
+| `## One Python version` | rule | `repository/python-version.md` | repository, packaging, python, uv, docker | the instance of `packaging-uv.md` and `packaging-docker.md`'s one runtime version | |
+| `## Project environments` | rule | `repository/project-environments.md` | repository, packaging, uv | the `reinit` target every project with wheelhouse packages has | |
+| `## Locks` | rule | `repository/locks.md` | repository, packaging, uv | the relock and the minimum uv | |
+| `## Images` | rule | `repository/images.md` | repository, packaging, docker | the instance of `packaging-docker.md` | |
+| `## Checks` | rule | `repository/packaging-checks.md` | repository, packaging | what each packaging check fails on (58 O1) | |
+
+### `development/RELEASING.md`
+
+The document is removed once every row has moved (12.3), with its row in `AGENTS.md`'s
+layer table.
+
+| Source | Kind | Destination | Tags | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Releasing Python packages`, its first paragraph | description | `docs/release-handbook.md`, its opening, rewritten to say who reads the handbook and what it holds | — | the document's opening | the document dissolves, so its opening has nowhere to stay; the handbook's opening replaces it |
+| `# Releasing Python packages`, what is published and what is not, the release wheelhouse, the `arkhai-` prefix | rule | `repository/published-packages.md`, its opening | repository, packaging, versioning, python | which distributions a change publishes and how they are named | |
+| `## Published packages` | rule | `repository/published-packages.md`, "Published packages" | repository, packaging, versioning, python | the table `scripts/tests/test_publish_matrix.py` holds to the workflow and each `pyproject.toml` | adding a package includes the owner's one-time PyPI setup, a procedure the rule links |
+| `## How the workflow works`, its bullets, `wheel_only`, and the build order | procedure | `docs/release-handbook.md`, "How the publish workflow works" | — | what the owner relies on when publishing, as task 12.2 names it | by the part's own test it describes a named component, the publish workflow; it goes to the handbook as the plan gives it, since `RELEASING.md` dissolves and its owner is the one who runs the workflow |
+| `## How the workflow works`, "No package vendors another's modules…" | rule | `repository/published-packages.md`, "One import package each" | repository, packaging, versioning, python | the instance of `packaging-python.md` for published packages | |
+| `## One-time setup (per package)` | procedure | `docs/release-handbook.md`, "One-time setup for a package" | — | the owner's steps on PyPI and GitHub | |
+| `## Cutting a release`, its steps, the audit paragraph, and `workflow_dispatch` | procedure | `docs/release-handbook.md`, "Cutting a release" | — | the owner's steps | |
+| `## Cutting a release`, the migration-floor decision | procedure | `docs/release-handbook.md`, "The migration floor" | — | the owner's decision at each release | it restates the floor's mechanics, which `DEPLOYMENT_AND_CONFIG.md`'s floor paragraph describes |
+| `## Versioning policy` | rule | `repository/package-versions.md` | repository, versioning | the instance of `versioning.md` and `versioning-python.md` | |
+| `### Import package renames` | procedure | `docs/release-handbook.md`, "Import package renames" | — | what a consumer of the renamed releases changes | a record of published releases, none of D25's kinds exactly; the triage may drop it |
+| `## Local development` | rule | `repository/wheelhouse.md`, merged | repository, packaging, uv | the same rule as `BUILD_AND_PACKAGING.md`'s wheelhouse, with the publish workflow's `--no-sources` | |
+| `## Artifact publishing destination` | procedure | `docs/release-handbook.md`, "Where artifacts are pushed" | — | what the owner supplies to the publishing targets | |
+| `## Troubleshooting` | procedure | `docs/release-handbook.md`, "Troubleshooting" | — | the owner's diagnosis of a failed publish | |
+
+### `openspec/README.md`
+
+| Source | Kind | Destination | Tags | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `## Documentation placement`, "Diagrams follow `diagrams.md`. Here they are drawn in draw.io…" | rule | `repository/diagrams.md` | repository, diagrams | the repository's drawing tool and its source beside its export (D29) | |
+
+### Repository files and their tags
+
+Each file under `docs/guidance/repository/`, with its tags (D28) and the rows it takes.
+
+| File | Tags | Rows |
+|---|---|---|
+| `README.md` | repository | the layer, its organization, and its tag table, moved from `AGENTS.md`'s "Tags" (D32) |
+| `diagrams.md` | repository, diagrams | `openspec/README.md`'s draw.io paragraph (D29) |
+| `package-layers.md` | repository, architecture, dependencies | `ARCHITECTURE.md`'s layer opening, the layer rules, "Scope", "Kind", "Where the current tree diverges"; `TESTING.md`'s boundary-change paragraph |
+| `family-kits.md` | repository, architecture, dependencies | `ARCHITECTURE.md`'s family-kit rules |
+| `production-code.md` | repository, implementation | `ARCHITECTURE.md`'s "Service Architecture", "Route contracts and their HTTP binding", "Implementation rules", and the hook-merging criterion (176 F1) |
+| `service-configuration.md` | repository, configuration, kubernetes | `DEPLOYMENT_AND_CONFIG.md`'s configuration rules and "The rule behind the pod rule"; `ARCHITECTURE.md`'s secrets rule, merged |
+| `compose-stacks.md` | repository, configuration, deployment | `DEPLOYMENT_AND_CONFIG.md`'s stack rules; the lane-target rule of both documents, merged; `ARCHITECTURE.md`'s committed-files rule, merged |
+| `helm-charts.md` | repository, helm, kubernetes, deployment | `DEPLOYMENT_AND_CONFIG.md`'s mounted files, no wait on a dependency, a check the chart cannot see, values, test pods |
+| `local-clusters.md` | repository, deployment, helm | `DEPLOYMENT_AND_CONFIG.md`'s local deploy, a local release's values, a scenario needing release 2 |
+| `service-databases.md` | repository, persistence, deployment, kubernetes | `DEPLOYMENT_AND_CONFIG.md`'s persistence rules and `Recreate`, merged with "No two versions share a database" |
+| `migrations-at-startup.md` | repository, persistence, deployment | `DEPLOYMENT_AND_CONFIG.md`'s migration rules |
+| `accepted-representations.md` | repository, persistence | `ARCHITECTURE.md`'s accepted representations |
+| `test-placement.md` | repository, testing, python | `TESTING.md`'s unit and integration placement, registration and traffic, "Contract Fixtures", "Test File Layout" |
+| `deterministic-tests.md` | repository, testing | `TESTING.md`'s determinism instances and "Pause the loop"; `ARCHITECTURE.md`'s database-concurrency tests |
+| `deal-scenarios.md` | repository, testing | `TESTING.md`'s complete deal per domain, the discipline, through interfaces, a lane's configuration, the two kinds of scenario; `ARCHITECTURE.md`'s testing summaries, merged |
+| `lane-doubles.md` | repository, testing, repository-content | `TESTING.md`'s private dependencies, doubles mirroring producers, mock output; `ARCHITECTURE.md`'s doubles summary, merged |
+| `migration-chain-tests.md` | repository, testing, persistence | `TESTING.md`'s "Migration Tests" |
+| `qualification-evidence.md` | repository, testing | `TESTING.md`'s "Accepted Arkhai purchase qualification" |
+| `test-targets.md` | repository, testing | `TESTING.md`'s CI matrix; `ARCHITECTURE.md`'s aggregate targets |
+| `ansible-gates.md` | repository, testing, ansible | `TESTING.md`'s "Ansible Syntax and Native Checks" |
+| `chart-render-tests.md` | repository, testing, helm | `TESTING.md`'s "Chart Render Tests" |
+| `contract-conformance.md` | repository, testing | `TESTING.md`'s "Cross-Language Contract Conformance" |
+| `project-layout.md` | repository, packaging, python, hatchling | `BUILD_AND_PACKAGING.md`'s "Project layout" |
+| `wheelhouse.md` | repository, packaging, uv | `BUILD_AND_PACKAGING.md`'s "The wheelhouse"; `RELEASING.md`'s "Local development", merged |
+| `python-version.md` | repository, packaging, python, uv, docker | `BUILD_AND_PACKAGING.md`'s manifest sentence and "One Python version" |
+| `project-environments.md` | repository, packaging, uv | `BUILD_AND_PACKAGING.md`'s "Project environments"; `TESTING.md`'s Makefile interpreter rule |
+| `locks.md` | repository, packaging, uv | `BUILD_AND_PACKAGING.md`'s "Locks" |
+| `images.md` | repository, packaging, docker | `BUILD_AND_PACKAGING.md`'s "Images"; `DEPLOYMENT_AND_CONFIG.md`'s storefront images, merged |
+| `packaging-checks.md` | repository, packaging | `BUILD_AND_PACKAGING.md`'s "Checks" |
+| `published-packages.md` | repository, packaging, versioning, python | `RELEASING.md`'s published set, "Published packages", one import package each |
+| `package-versions.md` | repository, versioning | `RELEASING.md`'s "Versioning policy"; `ARCHITECTURE.md`'s pre-1.0 rule and `DEPLOYMENT_AND_CONFIG.md`'s configuration keys, merged |
+
+The description documents keep their tags (D27): `ARCHITECTURE.md` `repository`,
+`architecture`; `TESTING.md` `repository`, `testing`; `DEPLOYMENT_AND_CONFIG.md`
+`repository`, `configuration`, `deployment`. `docs/release-handbook.md` carries no
+frontmatter, outside the guidance set (D25).
+
+### Capability guidance tags
+
+D28 has the round set each file's tags to what it covers, the capability configuration
+files holding startup refusals and the contract's versioning among them. A startup
+refusal is `deployment`'s ("startup refusals"), a versioned contract `versioning`'s. A
+file covers a subject substantially, for its tags, when a section of it — a heading
+and its text — is on that subject; a sentence on it within a section on another does
+not (D28: "content on another subject goes in another file"). So the files below gain
+the tag, and `physical-provisioning`'s, `site-capacity`'s, `introduction-delivery`'s,
+and `contact-exchange-settlement`'s configuration files, each refusing one setting at
+startup within a section on that setting, do not.
+
+| File | Tags as they stand | Tags by D28 | Reason |
+|---|---|---|---|
+| `openspec/specs/compute-provisioning-contract/configuration.md` | repository, configuration | repository, configuration, versioning | it states the contract's major and what a mismatch refuses |
+| `openspec/specs/resource-pool-management/configuration.md` | repository, configuration | repository, configuration, deployment | "A stored pool the service cannot serve refuses startup" |
+| `openspec/specs/settlement-configuration/configuration.md` | repository, configuration | repository, configuration, deployment | its refusals at startup, its readiness, and its cutover |
+| `openspec/specs/storefront-publication/configuration.md` | repository, configuration | repository, configuration, deployment | "A storefront that cannot publish refuses to start" and "A storefront starts with its dependencies unreachable" |
+
+The other capability guidance files were read against the same test and keep their
+tags. The shared layers' files were tagged at rounds 3 and 4 by the rows above, under
+31 O1c's assumption; this part does not re-read them against D28, which only names
+the capability configuration files. Whether any shared file's tags misdescribe it —
+`engineering/kubernetes.md`, holding a startup probe and `Recreate`, is the likeliest
+— is open for the round's triage, or for guidance placement at closeout (task 14.10).
+
+## Dev's packaging and release changes, for the merge
+
+Written at round 8's triage (178 O1), for the merge of `dev` before closeout. It
+classifies, by D25's test and this part's "How to read it" above, what
+`publish-wheels-through-a-gate` (archived on `dev` as
+`2026-11-14-publish-wheels-through-a-gate`) wrote in the documents this change splits,
+and names where each goes on this branch. No text moves here: the merge places it. It
+was read from the owner's workspace at `dev` `cd2506b76`, its working tree and that
+change's tasks 13.3 and 13.9, since this clone could not fetch `dev`; the merge checks it
+against the `dev` it fetches and classifies anything later the same way. `dev`'s other
+change since the merge base, `negotiate-open-ended-compute-terms`, is outside this part.
+
+For the merge:
+
+- `development/RELEASING.md` and `development/BUILD_AND_PACKAGING.md` come
+  back as modify/delete conflicts. Keep them deleted; place `dev`'s text by the rows
+  below, never by restoring either document.
+- The rows' last column names what `dev`'s facts overturn here. Each is rewritten to
+  `dev`'s state in the merge: a description or rule left describing CI publication, the
+  `PACKAGES` table, or `release.yml` describes a system the merged tree no longer has.
+- `Candidate` marks a rule that looks portable, a candidate for the engineering layer.
+  The merge writes none of them into `docs/guidance/engineering/`: each is new shared
+  guidance for a later change of its own, recorded where deferred work goes. The
+  merge places only its repository instance.
+- 178 O2's question — whether the published-packages table, which nothing reads, is
+  kept — is the row in `openspec/changes/README.md`'s unowned gaps. The merge carries
+  the table as `dev` holds it, held to the declaration, and does not decide it.
+
+| `dev` source | Kind | Destination here | Tags | Overturns here, or note |
+|---|---|---|---|---|
+| `RELEASING.md`, its opening (CI publishes nothing; a contributor bumps and merges) | description and rule | the release handbook's opening for who reads it; "merging publishes nothing" to `repository/published-packages.md`, its opening; "a contributor bumps where contents change" to `repository/package-versions.md` | repository, packaging, versioning | the handbook's opening, its "setting up a package for PyPI", and its "`publish-pypi.yml` publishes the Python packages to PyPI" |
+| `RELEASING.md`, "Terms" | description | `ARCHITECTURE.md`, "Shared vocabulary and identities", or "Build, packaging, and initialization" beside the release paragraph | repository, architecture | release candidate, marketplace release, release component, and candidate store are cross-system terms (`docs/guidance/workflow/terms.md`) |
+| `RELEASING.md`, "What a release comprises" (the declaration, its keys, its reader's refusals, `check-release-components`, the npm package) | rule | `repository/published-packages.md`, its opening and "Published packages", rewritten to the declaration | repository, packaging, versioning, python | `published-packages.md`'s "defined once, by the `PACKAGES` table in the workflow's `detect-changes` job" and its paragraph on `release.yml`'s wheelhouse archive |
+| `RELEASING.md`, "The release" (its five steps) | procedure | the release handbook, a new opening section before "Cutting a release" | — | the handbook's "How the publish workflow works", which describes a workflow `dev` deleted; that section goes |
+| `RELEASING.md`, "Loading a release candidate" | procedure | the release handbook, a new section "Loading a release candidate" | — | the handbook's "Where artifacts are pushed" (from `DEPLOYMENT_AND_CONFIG.md`'s "Artifact publishing destination", which `dev` amended to name the load) merges into it |
+| `RELEASING.md`, "The version check", what it refuses, its subjects, and the chart digest's computation | rule | `repository/package-versions.md`, a new section "A version changes when its contents change" | repository, versioning | Candidate: a version changes whenever its contents change (`versioning.md`). The digest's computation is what the check must compute, so it is the rule's |
+| `RELEASING.md`, "The version check", the preflight (fetch the tags, confirm the summary) | procedure | the release handbook, under "Loading a release candidate" and "Cutting a release" | — | |
+| `RELEASING.md`, "The deployment's part" | description | the release handbook, a new section "The deployment's part" | — | Ambiguous: it describes another system's duties, which no description document here holds, since each describes this system; the handbook keeps it as what the owner relies on when releasing. Its paragraph on a new distribution's PyPI project overturns the handbook's "One-time setup for a package" (trusted publishing for `publish-pypi.yml`), which goes, with `published-packages.md`'s link to it in "Published packages" |
+| `RELEASING.md`, "The bill of materials" | description | `ARCHITECTURE.md`, "Build, packaging, and initialization", for layout 1 and what it holds; the admission is the row below | repository, architecture | |
+| `AGENTS.md`, "Public repository discipline", the admitted bill of materials | rule | an exception row in `AGENTS.md`'s "Exceptions to shared guidance": `repository-content.md`'s run-artifact line, kind `overrides`, the bill of materials admitted, enforced by `make check-release-record` | repository, repository-content | this branch's `AGENTS.md` holds no "Never enters this repository" list to amend, so `dev`'s paragraph has no place to land as written |
+| `RELEASING.md`, "Running the lanes on a release candidate's images" | procedure | the release handbook, a new section "Running the lanes on a release candidate's images" | — | its refusals are `TESTING.md`'s, the row below |
+| `RELEASING.md`, "Cutting a release", the steps and `make audit-secrets` | procedure | the release handbook, "Cutting a release" | — | the handbook's steps 2–4 (bump, push to `main`, the workflow publishes) and its `workflow_dispatch` paragraph |
+| `RELEASING.md`, "Cutting a release", `make check-release-record`'s six refusals and "A release branch never grows past its record" | rule | `repository/published-packages.md` or a new `repository/release-records.md` | repository, versioning | |
+| `RELEASING.md`, "Cutting a release", the migration floor | procedure | the release handbook, "The migration floor" | — | unchanged but for "an official marketplace release is promoted" becoming "a marketplace release is cut" |
+| `RELEASING.md`, "Published packages" | rule | `repository/published-packages.md`, "Published packages", the table held to `manifests/release-components.json` | repository, packaging, versioning, python | the section's closing paragraph (the `PACKAGES` table, filters, push paths); `test_publish_matrix.py` follows `dev`'s, reading this file |
+| `RELEASING.md`, "Versioning policy", "Compatibility is owed to what a release has shipped" | rule | `repository/package-versions.md` | repository, versioning | Candidate (`versioning.md`), unless it reached `dev` from another change; check its origin at the merge |
+| `RELEASING.md`, "Versioning policy", the pin move | rule | `repository/package-versions.md`, beside the version check | repository, versioning | Candidate: moving a build backend's pin is a release-wide bump (`packaging-python.md` or `versioning-python.md`) |
+| `RELEASING.md`, "Troubleshooting" | procedure | the release handbook, "Troubleshooting" | — | every item there, all of them the deleted workflow's |
+| `ARCHITECTURE.md`, "Build, packaging, and initialization", "Nothing reaches a public channel except bytes a deployment validated…" | description | stays, its link to `RELEASING.md` re-pointed to the release handbook and `published-packages.md` | repository, architecture | Candidate, its rule form: nothing reaches a public channel except bytes a deployment validated (`deployment.md` or `packaging.md`) |
+| `BUILD_AND_PACKAGING.md`, "One Python version", `build-constraints.txt` and `.helm-version` | rule | `repository/python-version.md`; `.helm-version` to `repository/chart-render-tests.md`, "The supported Helm" | repository, packaging, python, uv, docker | Candidate: a wheel's build requirements are pinned (`packaging-python.md`) |
+| `BUILD_AND_PACKAGING.md`, "One Python version", the binary's build image pinned by digest | rule | `repository/python-version.md` | repository, packaging, python, uv, docker | |
+| `BUILD_AND_PACKAGING.md`, "Locks", the first lock by `make lock PROJECTS=` | rule | `repository/locks.md` | repository, packaging, uv | |
+| `BUILD_AND_PACKAGING.md`, "Images", `WHEELHOUSE_DIGEST` and its label | rule | `repository/images.md` | repository, packaging, docker | |
+| `BUILD_AND_PACKAGING.md`, "Images", the `market` binary's locked virtual project | rule | `repository/images.md`, or `repository/project-layout.md` for the project | repository, packaging, docker | |
+| `BUILD_AND_PACKAGING.md`, "Checks", `check-release-components`, `check-build-requirements`, `check-market-binary`, `check-workflow-credentials`, and the amended `check-uv-setup` and `check-python-version` rows | rule | `repository/packaging-checks.md`, "Checks" | repository, packaging | |
+| `TESTING.md`, "Locally verifiable and external-topology scenarios", the release-image mode and its record | description | stays in `TESTING.md`, beside the lanes, as a mode of the lane targets | repository, testing | the refusals are what the targets do; the rule they serve is `repository/compose-stacks.md`'s lane-target rule, whose "its mode" gains the suffix |
+| `TESTING.md`, the lane target's release-image suffix (in the lanes' description) | rule | `repository/compose-stacks.md`, "A lane target names only its files, its project, and its mode" | repository, configuration, deployment | |
+| `TESTING.md`, "Static Configuration Tests" | rule, with its repository instance | its definition — a kind beside the four levels, its cover, and its gate variables — to `repository/test-targets.md` or a new `repository/static-configuration-tests.md`; the examples stay with it | repository, testing | Candidate: the kind itself (`test-levels.md`), which `helm-render-tests.md` and `chart-render-tests.md` here already name without defining |
+| `TESTING.md`, "Chart Render Tests", the Helm pin the chart digest enforces and the two new chart tests | rule | `repository/chart-render-tests.md`, "The supported Helm" and "Where they live and how they run" | repository, testing, helm | |
+| `DEPLOYMENT_AND_CONFIG.md`, "Release topology", the bare tags an upgrade leaves | description | stays | repository, configuration, deployment | |
+| `DEPLOYMENT_AND_CONFIG.md`, "Validation namespaces", the image tags and `-<rev9>` | description | `openspec/specs/market-change-workflow/README.md`, "The change's namespace", "The tags", where this branch keeps the validation namespaces | — | that bullet's "Compose, the pipeline lanes … keep bare tags" and "a bare build still writes `arkhai:<tag>-<sha>`, which `make push-images` reads": `dev` corrected both (its task 13.3), to the release-image mode's suffix and `-<rev9>`, read by `make load-candidate` too |
+| `DEPLOYMENT_AND_CONFIG.md`, "Artifact publishing destination", the load | procedure | the release handbook, merged into "Loading a release candidate" | — | the handbook's "Where artifacts are pushed" |
+
+Placed at the merge, against `dev` at `cd2506b76`, the commit the rows were read from:
+
+- Where a row named two destinations, the merge took: `make check-release-record`'s
+  refusals to `repository/published-packages.md`, "The release record"; "Static
+  Configuration Tests" to a new `repository/static-configuration-tests.md` (repository,
+  testing); the version check to `repository/package-versions.md`, "A version changes
+  when its contents change", "The version check"; the release-image mode to
+  `TESTING.md`, "Release-image mode", beside the lanes; the terms to `ARCHITECTURE.md`'s
+  "Terms" table; the bill of materials to `ARCHITECTURE.md`, "The bill of materials",
+  under "Build, packaging, and initialization".
+- "Compatibility is owed to what a release has shipped" reached `dev` from
+  `negotiate-open-ended-compute-terms`, whose closeout promoted it as a principle into
+  `RELEASING.md`'s versioning policy. It is placed in `repository/package-versions.md`,
+  and recorded with the candidates in `openspec/changes/README.md`'s unowned gaps.
+- `negotiate-open-ended-compute-terms`'s other edits to the documents this change
+  splits, classified by the same test: the sibling-domains rule in `ARCHITECTURE.md`'s
+  "Family kits" is a rule, to `repository/family-kits.md`, "Sibling domains behave
+  alike"; its `DEPLOYMENT_AND_CONFIG.md` edits (the penalty multiple's startup refusal,
+  the storefront-wide terms, the five clause tiers, the capacity bounds, the on-demand
+  penalty, the bare-metal override's bounds) describe one capability's configuration,
+  to `openspec/specs/storefront-publication/configuration.md`, and its rate-servicing
+  declaration to `openspec/specs/settlement-configuration/configuration.md`, where
+  this branch moved the sections they edit; its `ARCHITECTURE.md` descriptions stay.

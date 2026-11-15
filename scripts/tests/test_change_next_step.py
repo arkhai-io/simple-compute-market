@@ -941,7 +941,7 @@ def test_a_validation_naming_another_exit_than_its_target_goes_to_the_owner(
 # After a pre-closeout review, closeout's own checks read the documentation, so a
 # triage's commit of documents alone needs no validation; before it, only records.
 DOCUMENTS = ["openspec/changes/README.md", f"openspec/changes/{CHANGE}/specs/x/spec.md",
-             "docs/agents/change-workflow.md"]
+             "docs/change-workflow-handbook.md"]
 
 
 def test_a_merge_bringing_only_documents_goes_to_closeout_unvalidated(
@@ -997,13 +997,14 @@ def test_a_documentation_correction_at_closeout_needs_no_validation(tmp_path: Pa
     root = _repository(tmp_path, "in closeout", archived=True)
     _closeout_triaged(root)
 
-    result = _next(root, changed=["docs/agents/change-workflow.md",
+    result = _next(root, changed=["docs/change-workflow-handbook.md",
                                   "openspec/specs/change-workflow/spec.md"])
 
     assert result["step"] == "archive-cleanup"
 
 
-# The inert paths are the repository's (CW-n7ra): the engine reads none of its own.
+# The inert paths are the repository's declaration, or the workflow's default where
+# it declares none (CW-n7ra).
 
 def test_a_repository_marks_images_inert(tmp_path: Path) -> None:
     """CW-n7ra's scenario, the inert paths read from the repository's own
@@ -1023,22 +1024,34 @@ def test_a_repository_marks_images_inert(tmp_path: Path) -> None:
     (lambda root: _pre_closeout(root, to=_to("review", "pre-closeout"), reviewed="e" * 40),
      DOCUMENTS),
 ])
-def test_with_no_inert_path_declared_documents_are_read_as_code(tmp_path: Path, arrange,
-                                                                changed) -> None:
+def test_with_an_empty_declaration_documents_are_read_as_code(tmp_path: Path, arrange,
+                                                              changed) -> None:
     root = _repository(tmp_path, "in implementation")
     arrange(root)
 
-    assert _next(root, changed=changed, inert_paths=lambda _: None)["step"] == "validate"
+    assert _next(root, changed=changed, inert_paths=lambda _: ())["step"] == "validate"
     # Changes' records stay exempt whatever the repository declares.
-    assert _next(root, changed=RECORDS_ONLY, inert_paths=lambda _: None)["step"] != "validate"
+    assert _next(root, changed=RECORDS_ONLY, inert_paths=lambda _: ())["step"] != "validate"
 
 
-def test_with_no_inert_path_declared_a_documentation_correction_is_validated(
+def test_with_no_inert_path_declared_the_default_makes_documents_inert(tmp_path: Path) -> None:
+    """CW-n7ra's scenario "A repository declares no inert paths", the default read
+    through the repository's own configuration file."""
+    root = _repository(tmp_path, "in implementation")
+    configured(root, "[repository]\nprotected-branches = []\n")
+    _merged(root, reviewed="e" * 40)
+
+    assert _next(root, changed=DOCUMENTS, inert_paths=nxt._inert_paths)["step"] == "closeout"
+    assert _next(root, changed=DOCUMENTS + FIX, inert_paths=nxt._inert_paths)["step"] \
+        == "validate"
+
+
+def test_with_an_empty_declaration_a_documentation_correction_is_validated(
         tmp_path: Path) -> None:
     root = _repository(tmp_path, "in closeout", archived=True)
     _closeout_triaged(root)
 
-    result = _next(root, changed=["docs/agents/change-workflow.md"], inert_paths=lambda _: None)
+    result = _next(root, changed=["docs/change-workflow-handbook.md"], inert_paths=lambda _: ())
 
     assert (result["step"], result["target"]) == ("validate", {"step": "archive-cleanup"})
 

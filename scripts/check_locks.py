@@ -38,7 +38,8 @@ without the lock being stale; such requirements are checked in the "removed"
 direction only. A same-version wheel that changes only a marker is not seen
 here; `make lock` followed by an unchanged tree covers it.
 
-Conventions: docs/development/BUILD_AND_PACKAGING.md.
+Rules: docs/guidance/engineering/packaging-uv.md and packaging.md beside it.
+Conventions: docs/guidance/repository/locks.md and wheelhouse.md beside it.
 """
 
 from __future__ import annotations
@@ -287,7 +288,7 @@ def main() -> int:
     for problem in found:
         print(problem)
     if found:
-        print(f"\n{len(found)} lock problem(s). See docs/development/BUILD_AND_PACKAGING.md.")
+        print(f"\n{len(found)} lock problem(s). See docs/guidance/repository/locks.md.")
         return 1
     print("OK: every lock matches its project, the wheels this tree builds, and the wheelhouse.")
     return 0

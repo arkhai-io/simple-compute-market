@@ -73,5 +73,33 @@ def test_this_repositorys_hook_names_its_configured_documents() -> None:
 
     text = hook.context(repository)
 
-    for document in config.load(repository).documents("common"):
+    for document in config.load(repository).documents("common", repository):
         assert f"- {document}\n" in text
+
+
+def test_a_directory_entry_is_named_as_the_files_beneath_it(tmp_path: Path) -> None:
+    """CW-l7hn's scenario "A directory entry": the hook names each file, not the
+    directory."""
+    configured(tmp_path, '[load]\ncommon = ["AGENTS.md", "docs/guidance/"]\n')
+    for path in ("docs/guidance/workflow/closeout.md", "docs/guidance/engineering/comments.md"):
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text("# x\n", "utf-8")
+
+    text = hook.context(tmp_path)
+
+    assert ("- AGENTS.md\n- docs/guidance/engineering/comments.md\n"
+            "- docs/guidance/workflow/closeout.md\n") in text
+    assert "- docs/guidance/\n" not in text
+
+
+def test_a_directory_entry_naming_nothing_leaves_the_documents_unknown(tmp_path: Path) -> None:
+    """CW-l7hn's scenario "A directory entry names nothing": the session is told the
+    documents to re-read are unknown, naming the entry, and no list is given."""
+    configured(tmp_path, '[load]\ncommon = ["AGENTS.md", "docs/guidens/"]\n')
+
+    text = hook.context(tmp_path)
+
+    assert "The documents to re-read are unknown" in text
+    assert "docs/guidens/" in text
+    assert "- AGENTS.md" not in text
+    assert "Re-read the repository's guidance" in text

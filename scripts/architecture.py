@@ -3,7 +3,7 @@
 Every project outside the tooling paths is classified by layer, kind, and scope
 from its path and name, and its dependencies are every import statement under
 ``src/`` and every internal distribution its ``pyproject.toml`` declares. The
-rules of ``docs/development/ARCHITECTURE.md`` ("Package and dependency layers")
+rules of ``docs/guidance/repository/package-layers.md``
 are evaluated over that graph against the tables in
 ``docs/development/ARCHITECTURE.toml``.
 
@@ -971,8 +971,8 @@ def main(group: str, argv: list[str] | None = None) -> int:
     for finding in warnings:
         print(f"warning: {finding.render()}")
     if failures:
-        print(f"FAIL: {len(failures)} {group} finding(s). See docs/development/ARCHITECTURE.md, "
-              "\"Package and dependency layers\".")
+        print(f"FAIL: {len(failures)} {group} finding(s). See "
+              "docs/guidance/repository/package-layers.md.")
         return 1
     print(f"OK: the {group} rules hold" + (f" ({len(warnings)} warning(s))." if warnings else "."))
     return 0

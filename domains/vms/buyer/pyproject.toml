@@ -1,14 +1,13 @@
 [project]
 name = "arkhai-vms-buyer"
-version = "0.11.0"
+version = "0.12.0"
 license = "MIT"
-description = "Buyer-side CLI for the market: discover sellers, negotiate, place orders. Pure HTTP client; no server, no agent runtime."
+description = "The VM buyer domain of the market CLI: discover sellers, negotiate, place orders. Pure HTTP client; no server, no agent runtime."
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "typer>=0.12.0",
   "rich>=13.7.0",
   "PyYAML>=6.0.0",
-  "pyinstaller>=6.19.0",
   "eth-account>=0.13.0",
   # Needed by the buyer orchestrator (market buy-sync) for in-process
   # on-chain escrow creation. Imported lazily from the domain-owned

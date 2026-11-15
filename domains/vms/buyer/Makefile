@@ -4,7 +4,7 @@ export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(err
 REPO_ROOT := $(shell git rev-parse --show-toplevel)
 DIST_DIR ?= ../../../.dist
 
-.PHONY: build init reinit test smoke-test
+.PHONY: init reinit test
 
 init: reinit
 
@@ -13,9 +13,3 @@ reinit:
 
 test: reinit
 	uv run --find-links $(DIST_DIR) pytest tests -q
-
-build: reinit
-	uv run --no-sync pyinstaller --onefile --name market ./src/arkhai_vms_buyer/main.py
-
-smoke-test:
-	cd dist && ./market -v
