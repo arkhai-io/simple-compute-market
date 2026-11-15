@@ -58,7 +58,11 @@ from .fulfillment import BareMetalFulfillmentTransport
 from .evidence import evidence_store
 from .lifecycle import buyer_lifecycle, run_sync
 from market_arkhai_payments import PaymentApproval
-from market_deal_lifecycle_buyer import EndTarget, register_end_command
+from market_deal_lifecycle_buyer import (
+    RUN_SPELLINGS, EndTarget, Probe, WaitClock, WatchdogJournal, register_end_command, register_read_command,
+    run_monitor, tcp_reachable, wait_until_available, watchdog_interval_option, watchdog_option,
+    watchdog_settings, watchdog_threshold_option,
+)
 
 from .settlement_composition import (
     BUYER_STAGES, buyer_compute_disclosure, buyer_lifecycle_disclosure,
@@ -320,11 +324,6 @@ def fulfillment_access(
     _json(fulfillment.access(deal.negotiation_id))
 
 
-def _lifecycle_for_run(run_id: str, config_path: str | None):
-    deal, context, _ = _run_lifecycle(run_id, config_path)
-    return deal, context
-
-
 def _run_lifecycle(run_id: str, config_path: str | None):
     deal, identity, trust = _recovered_deal(run_id, config_path)
     config = load_bare_metal_buyer_config(config_path)
@@ -338,23 +337,8 @@ def _run_lifecycle(run_id: str, config_path: str | None):
     ), identity
 
 
-@bare_metal_app.command("delivery")
-def delivery_status(
-    run_id: str = typer.Option(...),
-    config: str | None = typer.Option(None, "--config"),
-) -> None:
-    """Read delivery, site reports and authority progress independently."""
-    deal, context = _lifecycle_for_run(run_id, config)
-
-    async def read():
-        async with context as lifecycle:
-            return await lifecycle.read(deal.negotiation_id)
-
-    _json(run_sync(read))
-
-
 def end_target(run_id: str, config: str | None) -> EndTarget:
-    """The run's deal, its lifecycle, and its run log for the ``end`` verb."""
+    """The run's deal, its lifecycle, and its run log for the ``end`` and read verbs."""
     deal, context, identity = _run_lifecycle(run_id, config)
     log = open_run_log(run_id, signer=identity.signer, profile_id=identity.profile_id)
     return EndTarget(
@@ -363,12 +347,98 @@ def end_target(run_id: str, config: str | None) -> EndTarget:
     )
 
 
+def watchdog_journal() -> WatchdogJournal:
+    """The buyer's per-deal watchdog record, in its evidence store."""
+    return evidence_store().watchdog
+
+
+def wait_clock() -> WaitClock:
+    """The clock ``buy``'s waits run on: its commit, availability and watchdog."""
+    return WaitClock()
+
+
+def watchdog_probe(run_id: str, config: str | None) -> Probe:
+    """Reachability of the host's SSH endpoint, as the storefront disclosed it.
+
+    The access is read once, when the monitor starts: each probe then reaches
+    the host alone, so a storefront outage is never read as the host's loss.
+    The probe asks only whether the endpoint accepts a connection.
+    """
+    deal, _, fulfillment = _recovered_transports(run_id, config)
+    access = fulfillment.access(deal.negotiation_id)
+    host, port = access.get("host"), access.get("port")
+    if not host or not port:
+        raise ValueError("the storefront disclosed no SSH endpoint for the watchdog to probe")
+    return lambda: tcp_reachable(str(host), int(port))
+
+
 # ``end`` is the buyer's canonical verb in every compute domain. ``teardown`` is
 # its deprecated alias and keeps the output scripts written against it parse.
 register_end_command(
     bare_metal_app, lambda run_id, config: end_target(run_id, config),
     configurable=True, deprecated_alias="teardown",
 )
+# The deal read is ``delivery``, taking any run spelling and ``--config``; the
+# watchdog's status sits beside the lifecycle read.
+register_read_command(
+    bare_metal_app, lambda run_id, config: end_target(run_id, config), configurable=True,
+)
+
+
+#: The exit status of a purchase that ran out of a wait: its commit's, or, with
+#: ``--watchdog``, its deal's availability. VM's ``buy`` exits 4 the same way.
+UNAVAILABLE_EXIT_CODE = 4
+
+
+def _deliver_and_watch(run_id: str, config: str | None, *, timeout: float, poll_interval: float) -> dict[str, Any]:
+    """Wait for the run's deal to become available, then run its watchdog.
+
+    Reached only for a deal that opted in. A deal never available within
+    ``timeout`` is left unmonitored, with nothing probed and nothing sent.
+    """
+    target = end_target(run_id, config)
+    clock = wait_clock()
+    waited = run_sync(lambda: wait_until_available(
+        target, timeout=timeout, poll_interval=poll_interval, clock=clock,
+    ))
+    if waited != "available":
+        # An ended deal needs no watchdog; one never available is left unmonitored.
+        return {"run_id": run_id, "negotiation_id": target.negotiation_id, "available": False,
+                "watchdog": "ended" if waited == "ended" else None}
+    try:
+        probe = watchdog_probe(run_id, config)
+    except ValueError as exc:
+        typer.echo(f"Watchdog not running: {exc}; the deal is unmonitored.", err=True)
+        outcome = None
+    else:
+        outcome = run_monitor(end_target(run_id, config), probe=probe, clock=clock)
+    return {
+        "run_id": run_id, "negotiation_id": target.negotiation_id, "available": True,
+        "watchdog": outcome.reason if outcome is not None else None,
+    }
+
+
+def _resume_buy(run_id: str, config: str | None, *, timeout: float, poll_interval: float) -> None:
+    """Re-enter the watchdog of a committed run's deal that opted in and still runs."""
+    try:
+        target = end_target(run_id, config)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    state = watchdog_journal().state(target.negotiation_id)
+    if state is None:
+        _json({"run_id": run_id, "negotiation_id": target.negotiation_id, "watchdog": None})
+        return
+    if state.stop is not None:
+        # The journaled stop is carried to the authority with no availability
+        # wait or probe: the storefront may be the party that is down.
+        outcome = run_monitor(target, probe=None, clock=wait_clock())
+        _json({"run_id": run_id, "negotiation_id": target.negotiation_id,
+               "watchdog": outcome.reason if outcome is not None else None})
+        return
+    result = _deliver_and_watch(run_id, config, timeout=timeout, poll_interval=poll_interval)
+    _json(result)
+    if not result["available"] and result["watchdog"] != "ended":
+        raise typer.Exit(UNAVAILABLE_EXIT_CODE)
 
 
 
@@ -433,9 +503,26 @@ settlement_app.add_typer(
 
 @bare_metal_app.command("buy")
 def buy_bare_metal(
-    listing_id: str,
-    option_id: str = typer.Option(...),
-    ssh_public_key: str = typer.Option(..., "--ssh-public-key"),
+    listing_id: str | None = typer.Argument(None, help="The listing to buy from; omitted when resuming a run."),
+    option_id: str | None = typer.Option(None, help="The advertised option to buy; required for a new purchase."),
+    ssh_public_key: str | None = typer.Option(
+        None, "--ssh-public-key", help="The SSH key the host is provisioned with; required for a new purchase.",
+    ),
+    from_run: str | None = typer.Option(
+        None, *RUN_SPELLINGS,
+        help="Resume a committed run: wait for its deal to become available and re-enter the "
+        "watchdog it opted into, where the deal still runs.",
+    ),
+    watchdog: bool = watchdog_option(),
+    watchdog_interval: int = watchdog_interval_option(),
+    watchdog_threshold: int = watchdog_threshold_option(),
+    delivery_timeout_seconds: float = typer.Option(
+        600.0, "--delivery-timeout-seconds", min=1.0,
+        help="With --watchdog, how long to wait for the deal to become available; the command "
+        "then exits 4, leaving the deal unmonitored.",
+    ),
+    poll_interval: float = typer.Option(5.0, "--poll-interval", min=0.01,
+                                        help="Seconds between delivery reads while waiting."),
     duration_seconds: int | None = typer.Option(
         None, min=1,
         help="Lease duration in seconds. A reserved option defaults to the buyer "
@@ -463,12 +550,33 @@ def buy_bare_metal(
     payment_timeout_seconds: float = typer.Option(300.0, min=1.0, max=3600.0),
     config: str | None = typer.Option(None, "--config"),
 ) -> None:
-    """Approve one exact Arkhai option and provision after its receipt verifies."""
+    """Approve one exact Arkhai option and provision after its receipt verifies.
+
+    With ``--watchdog`` the command stays in the foreground: it waits for the
+    deal to become available, then probes its access and sends the ordinary
+    rate stop after ``--watchdog-threshold`` consecutive failed probes. Only
+    while it runs, a lost host is detected within at most interval x threshold +
+    probe timeout; the authority's acknowledgement and any priced notice come
+    after that, and billing continues until the stop lands. ``--from <run>``
+    resumes that wait and watchdog after a restart.
+    """
     waivers = term_waivers(
         no_delivery_deadline=allow_no_delivery_deadline, no_penalty=allow_no_penalty,
         charged_preemption=allow_charged_preemption, charged_term_end=allow_charged_term_end,
         unprotected_terms=allow_unprotected_terms,
     )
+    if from_run is not None:
+        if (listing_id is not None or option_id is not None or ssh_public_key is not None
+                or duration_seconds is not None or waivers or watchdog):
+            raise typer.BadParameter(
+                "a resume names its run, not a purchase: it re-enters the watchdog its deal "
+                "opted into, with the interval and threshold that deal persisted"
+            )
+        _resume_buy(from_run, config, timeout=delivery_timeout_seconds, poll_interval=poll_interval)
+        return
+    if listing_id is None or option_id is None or ssh_public_key is None:
+        raise typer.BadParameter("a new purchase names its listing, --option-id and --ssh-public-key")
+    monitor = watchdog_settings(watchdog, watchdog_interval, watchdog_threshold)
     buyer_config = load_bare_metal_buyer_config(config)
     if buyer_config.payer_account is None:
         raise typer.BadParameter("bare-metal buyer config requires payer_account")
@@ -635,16 +743,31 @@ def buy_bare_metal(
         outcome.agreement.settlement, agreement=outcome.agreement,
     ) + buyer_lifecycle_disclosure(outcome.agreement.settlement, waivers=waivers):
         typer.echo(f"  {name}: {value}", err=True)
-    transaction, fulfillment = stage.settle(
-        outcome=outcome,
-        approval=approval,
-        seller_url=listing.storefront_url,
-        signer=identity.signer,
-        publishers=seller_principals,
-        config=buyer_config,
-        timeout=payment_timeout_seconds,
-        run_log=run_log,
-    )
+    if monitor is not None:
+        # Persisted before approval and commit, so a restart's resume finds it;
+        # it records only that the buyer asked for a monitor.
+        watchdog_journal().opt_in(outcome.negotiation_id, monitor)
+        run_log.event("watchdog_opted_in", negotiation_id=outcome.negotiation_id, **monitor.to_json())
+    try:
+        transaction, fulfillment = stage.settle(
+            outcome=outcome,
+            approval=approval,
+            seller_url=listing.storefront_url,
+            signer=identity.signer,
+            publishers=seller_principals,
+            config=buyer_config,
+            timeout=payment_timeout_seconds,
+            run_log=run_log,
+            clock=wait_clock(),
+        )
+    except TimeoutError as exc:
+        # A wait that runs out, the approval's poll or the commit's, ends the
+        # run ``timeout``. A payment approved by then stays held at the
+        # authority, where the buyer's ``end`` stops it.
+        run_log.end("timeout", negotiation_id=outcome.negotiation_id, reason=str(exc))
+        _json({"run_id": run_log.run_id, "status": "timeout", "reason": str(exc),
+               "negotiation_id": outcome.negotiation_id})
+        raise typer.Exit(code=UNAVAILABLE_EXIT_CODE) from None
     run_log.end(
         "agreed",
         negotiation_id=outcome.negotiation_id,
@@ -667,6 +790,15 @@ def buy_bare_metal(
             "fulfillment": fulfillment,
         }
     )
+    if monitor is None:
+        return
+    # ``buy`` returns at commit; the watchdog runs only from availability.
+    watched = _deliver_and_watch(
+        run_log.run_id, config, timeout=delivery_timeout_seconds, poll_interval=poll_interval,
+    )
+    _json(watched)
+    if not watched["available"] and watched["watchdog"] != "ended":
+        raise typer.Exit(UNAVAILABLE_EXIT_CODE)
 
 
 @bare_metal_app.command("request-introduction")

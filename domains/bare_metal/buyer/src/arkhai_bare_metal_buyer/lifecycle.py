@@ -134,7 +134,7 @@ async def buyer_lifecycle(*, agreement_bytes, settlement_data, seller_url, signe
                 deal=lambda negotiation_id: deal, peer=peer, operations=store,
                 payments=PaymentAdapterTable([(deal.payment.selector, lambda _: payment)] if payment else []),
                 disputes=DisputeAdapterTable(disputes), evidence=store,
-                end_journal=store.end_journal,
+                end_journal=store.end_journal, watchdog=store.watchdog,
             )
     finally:
         if mediation is not None:

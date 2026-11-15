@@ -34,7 +34,7 @@ def test_end_selects_normal_or_explicit_surrender_and_reports_payment_separately
                         lambda *args, **kwargs: (SimpleNamespace(negotiation_id="deal"), Mock(), context()))
     app = typer.Typer()
     end_cli.register(app)
-    args = ["--from", "run"]
+    args = ["end", "--from", "run"]
     if surrender:
         args.append("--end-now-regardless")
     if wait:

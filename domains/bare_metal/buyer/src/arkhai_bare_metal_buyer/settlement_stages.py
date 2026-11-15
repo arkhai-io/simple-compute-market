@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
-import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +10,7 @@ from market_arkhai_payments import PaymentApproval, create_arkhai_payments_regis
 from market_core.schemas import AgreedPrice, rate_scales_by_time
 from market_settlement_runtime.buyer_terms import option_quote
 from market_settlement_runtime import SettlementConfigurationRegistry
+from market_deal_lifecycle_buyer import WaitClock
 from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, Pending
 
 from .evidence import evidence_store
@@ -127,8 +126,13 @@ class PaymentStage:
         config: Any,
         timeout: float,
         run_log: Any,
+        clock: WaitClock = WaitClock(),
     ) -> tuple[str, dict[str, Any]]:
-        """Approve the exact mandate, then commit through the buyer half."""
+        """Approve the exact mandate, then commit through the buyer half.
+
+        A commit the seller answers pending is retried on ``clock`` until
+        ``timeout``, which then raises ``TimeoutError``.
+        """
         transaction = approval.approve(
             _agreement_bytes(outcome), outcome.settlement_data, timeout=timeout,
         )
@@ -141,7 +145,7 @@ class PaymentStage:
                 seller_url=seller_url, signer=signer, publishers=publishers,
                 config=config, approval=approval,
             ) as lifecycle:
-                deadline = time.monotonic() + timeout
+                deadline = clock.monotonic() + timeout
                 message = CommitMessage(
                     negotiation_id=outcome.negotiation_id, commitment_ref=transaction,
                     operation_key="commit:" + transaction,
@@ -152,10 +156,10 @@ class PaymentStage:
                         return
                     if not isinstance(result, Pending):
                         raise RuntimeError("seller commit: " + result.model_dump_json())
-                    remaining = deadline - time.monotonic()
+                    remaining = deadline - clock.monotonic()
                     if remaining <= 0:
                         raise TimeoutError("seller has not observed the verified payment receipt")
-                    await asyncio.sleep(min(1.0, remaining))
+                    await clock.sleep(min(1.0, remaining))
 
         run_sync(commit)
         # Delivery remains the domain's projection, not a payment acknowledgement.

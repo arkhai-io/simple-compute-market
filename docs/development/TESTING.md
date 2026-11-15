@@ -52,7 +52,8 @@ change can silently undo such a patch, and the test then runs the real
 collaborator. The bare-metal buyer CLI
 (`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`) has this shape:
 its tests replace `fresh_identity`, `recovery_identity`, `registry_client`,
-`payment_approval`, and `end_target`. The other CLIs' tests still replace library and imported
+`payment_approval`, `end_target`, `watchdog_journal`, `watchdog_probe` and
+`wait_clock`. The other CLIs' tests still replace library and imported
 names; [`ROADMAP.md`](ROADMAP.md) records that gap.
 
 **Composition-boundary convention:** When a role receives a versioned domain contract, unit tests should inject a distinct compatible object and assert object identity at each constructor boundary rather than patching the default resolver. Fail-closed cases belong at the composition root and must assert that persistence, network, and worker collaborators were not constructed. Existing integration tests remain responsible for public behavior and persisted-state parity.

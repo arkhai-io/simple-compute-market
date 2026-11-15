@@ -1,8 +1,8 @@
-"""The VM buyer's canonical ``end`` verb, registered from the buyer half."""
+"""The VM buyer's canonical ``end`` and deal-read verbs, registered from the buyer half."""
 
 from __future__ import annotations
 
-from market_deal_lifecycle_buyer import EndTarget, register_end_command
+from market_deal_lifecycle_buyer import EndTarget, register_end_command, register_read_command
 from rich.console import Console
 
 from . import common
@@ -30,7 +30,7 @@ def end_context(run_id, *, poll_interval, identity):
 
 
 def end_target(run_id: str, _config: str | None = None) -> EndTarget:
-    """The run's deal, its lifecycle, and its run log for the ``end`` verb.
+    """The run's deal, its lifecycle, and its run log for the ``end`` and read verbs.
 
     The VM buyer reads no ``--config``. The resume context's poll interval paces
     settlement polling, which an end does not do.
@@ -44,3 +44,4 @@ def end_target(run_id: str, _config: str | None = None) -> EndTarget:
 
 def register(app):
     register_end_command(app, end_target)
+    register_read_command(app, end_target)

@@ -948,6 +948,7 @@ rl = [
 [package.dev-dependencies]
 dev = [
     { name = "arkhai-core-buyer" },
+    { name = "arkhai-kit-deal-lifecycle-buyer" },
     { name = "arkhai-vms-buyer" },
     { name = "jsonschema" },
     { name = "nest-asyncio" },
@@ -1025,6 +1026,7 @@ provides-extras = ["rl", "jupyter", "lint"]
 [package.metadata.requires-dev]
 dev = [
     { name = "arkhai-core-buyer", specifier = ">=0.6.0" },
+    { name = "arkhai-kit-deal-lifecycle-buyer", specifier = ">=0.2.0" },
     { name = "arkhai-vms-buyer", specifier = ">=0.11.0" },
     { name = "jsonschema", specifier = ">=4.0" },
     { name = "nest-asyncio", specifier = ">=1.6.0,<2.0.0" },

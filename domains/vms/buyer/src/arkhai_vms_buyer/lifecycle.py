@@ -145,7 +145,7 @@ async def buyer_lifecycle(
         ) as peer:
             yield BuyerLifecycle(
                 deal=lambda _: deal, peer=peer, operations=store, evidence=store,
-                end_journal=store.end_journal,
+                end_journal=store.end_journal, watchdog=store.watchdog,
                 payments=PaymentAdapterTable([(deal.payment.selector, lambda _: payment)] if payment else []),
                 disputes=DisputeAdapterTable(dispute_entries),
             )

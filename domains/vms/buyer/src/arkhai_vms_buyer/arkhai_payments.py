@@ -103,10 +103,11 @@ def settle_payment(
     deadline = time.monotonic() + timeout
 
     async def commit():
+        # ``timeout`` bounds the whole wait; each request keeps the lifecycle
+        # client's own timeout, so a wait nearly spent still sends its commit.
         async with buyer_lifecycle(
             agreement_bytes=raw, settlement_data=settlement_data, seller_url=seller_url,
             signer=signer, publishers=resolve_seller_principals(), approval=buyer,
-            timeout=timeout,
         ) as lifecycle:
             message = CommitMessage(
                 negotiation_id=negotiation_id, commitment_ref=transaction,
@@ -162,21 +163,36 @@ def make_payment_settle_hook(
             )
             if not confirm_settlement(terms, match):
                 return BuyResult(status="exited", reason="user_declined")
-        final = settle_payment(
-            buyer=payment_buyer(policy),
-            agreement_bytes=outcome.agreement_bytes,
-            settlement_data=outcome.settlement_data or {},
-            seller_url=seller_url,
-            principal=config.principal,
-            signer=config.signer,
-            resolve_seller_principals=make_publisher_trust_resolver(
-                config=config, listing=match
-            ),
-            negotiation_id=outcome.negotiation_id,
-            timeout=timeout,
-            interval=interval,
-            on_event=on_event,
-        )
+        try:
+            final = settle_payment(
+                buyer=payment_buyer(policy),
+                agreement_bytes=outcome.agreement_bytes,
+                settlement_data=outcome.settlement_data or {},
+                seller_url=seller_url,
+                principal=config.principal,
+                signer=config.signer,
+                resolve_seller_principals=make_publisher_trust_resolver(
+                    config=config, listing=match
+                ),
+                negotiation_id=outcome.negotiation_id,
+                timeout=timeout,
+                interval=interval,
+                on_event=on_event,
+            )
+        except TimeoutError as exc:
+            # A wait that runs out, the approval's poll, the commit's or the
+            # settle status's, ends the run ``timeout``, as the Alkahest hook's
+            # does; a payment approved by then is resumed from the run's log.
+            return BuyResult(
+                status="timeout",
+                seller_url=seller_url,
+                negotiation_id=outcome.negotiation_id,
+                agreed_amount=outcome.agreed_amount,
+                escrow_uid=outcome.negotiation_id,
+                reason=str(exc),
+                rounds=outcome.rounds,
+                attempts=negotiation.attempts,
+            )
         return BuyResult(
             status=final.get("status", "failed"),
             seller_url=seller_url,

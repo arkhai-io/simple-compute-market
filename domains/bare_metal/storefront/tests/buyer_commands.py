@@ -74,6 +74,8 @@ class BuyerCommands:
             profile_id=str(uuid.uuid4()), principal=signer.identity, signer=signer
         )
         monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        # The buyer keeps its evidence beside its profile store; here, the test's.
+        monkeypatch.setenv("ARKHAI_BUYER_PROFILE_STORE", str(tmp_path / "buyer" / "profiles.json"))
         monkeypatch.setattr(buyer_cli, "fresh_identity", lambda: identity)
         monkeypatch.setattr(buyer_cli, "recovery_identity", lambda run_id: identity)
         registry = registry_principal.model_dump(mode="json")
@@ -114,10 +116,10 @@ class BuyerCommands:
             ),
         )
 
+    def invoke(self, *arguments: str) -> Any:
+        """Run ``market bare-metal <arguments>`` and return its result, whatever its exit status."""
+        return self._runner.invoke(self._app, ["bare-metal", *arguments, "--config", str(self.config)])
+
     def run(self, *arguments: str) -> dict:
         """Run ``market bare-metal <arguments>`` and return the JSON it printed last."""
-        return last_json_line(
-            self._runner.invoke(
-                self._app, ["bare-metal", *arguments, "--config", str(self.config)]
-            )
-        )
+        return last_json_line(self.invoke(*arguments))

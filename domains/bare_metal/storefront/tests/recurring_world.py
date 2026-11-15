@@ -39,7 +39,8 @@ from storefront_client import StorefrontClient
 from arkhai_bare_metal_storefront.settlement_composition import (
     build_bare_metal_settlement_registry,
 )
-from test_http_system import SELLER_SIGNER, _admin_client, _app, _derivation_runtime
+from loopback import serving
+from test_http_system import ADMIN_SIGNER, SELLER_SIGNER, _admin_client, _app, _derivation_runtime
 from test_publication_cycle import Site, member, pool
 
 MECHANISM = "arkhai.payments.v1"
@@ -153,6 +154,8 @@ class RecurringWorld:
     declarations: dict[str, RateServicingDeclaration]
     #: The buyer's typed client of the app's lifecycle routes.
     buyer_lifecycle: LifecycleClient
+    #: The app's loopback base URL when it is served, for a buyer's own commands.
+    url: str | None = None
 
     def declare(self, treatments: frozenset[str] | None, *, setup: bool = False) -> None:
         """Declare ``treatments`` for payments, or withdraw its declaration."""
@@ -180,6 +183,7 @@ async def recurring_world(
     clause_deadline: int | None = None,
     payments: FakePaymentsClient | None = None,
     clock: Callable[[], int] | None = None,
+    serve: bool = False,
 ) -> AsyncIterator[RecurringWorld]:
     """The running bare-metal app over one bounded pool, publishing the configured
     Alkahest clause beside the three payment clauses of ``payment_clauses``.
@@ -195,7 +199,9 @@ async def recurring_world(
     engine a buyer approves at, so a deal can settle through the app; a test
     restarting the app over the same ``tmp_path`` passes the same one, since the
     payments service outlives a storefront restart. ``clock`` is the runtime's
-    lifecycle clock, wall time unless given.
+    lifecycle clock, wall time unless given. ``serve`` runs the app on a
+    loopback port, its lifespan uvicorn's, so a buyer's own commands reach it
+    over HTTP; the world's clients then use that port too.
     """
     declarations: dict[str, RateServicingDeclaration] = {}
     site = Site(pool(POOL_ID, member("r1", POOL_ID), policy_tags={"capacity_bounds": {
@@ -238,15 +244,27 @@ async def recurring_world(
             **({"lifecycle_clock": clock} if clock is not None else {}),
         )
         app = _app(runtime)
+        publisher = TrustedIdentitySet(identities=(SELLER_SIGNER.identity,))
+        if serve:
+            with serving(app) as url:
+                async with StorefrontClient(
+                    url, signer=ADMIN_SIGNER, caller_role="admin", expected_publishers=publisher,
+                ) as admin, StorefrontClient(
+                    url, signer=BUYER_SIGNER, caller_role="buyer", expected_publishers=publisher,
+                ) as buyer, LifecycleClient(url, BUYER_SIGNER, publisher) as buyer_lifecycle:
+                    world = RecurringWorld(admin, buyer, runtime.db, declarations, buyer_lifecycle, url)
+                    world.declare(treatments)
+                    yield world
+            return
         async with app.router.lifespan_context(app):
             async with _admin_client(app) as admin, StorefrontClient(
                 "http://seller",
                 signer=BUYER_SIGNER,
                 caller_role="buyer",
-                expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+                expected_publishers=publisher,
                 transport=httpx.ASGITransport(app=app),
             ) as buyer, LifecycleClient(
-                "http://seller", BUYER_SIGNER, TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+                "http://seller", BUYER_SIGNER, publisher,
                 transport=httpx.ASGITransport(app=app),
             ) as buyer_lifecycle:
                 world = RecurringWorld(admin, buyer, runtime.db, declarations, buyer_lifecycle)

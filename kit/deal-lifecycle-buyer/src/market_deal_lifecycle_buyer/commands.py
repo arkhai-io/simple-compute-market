@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 import inspect
 import json
 import time
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 import typer
 
@@ -18,6 +18,10 @@ from market_deal_lifecycle_buyer.export import export_case
 from market_deal_lifecycle_buyer.lifecycle import BuyerLifecycle
 from market_deal_lifecycle_buyer.retention import DealReader, prune_command
 from market_deal_lifecycle_buyer.store import FileEvidenceStore
+from market_deal_lifecycle_buyer.watchdog import (
+    DEFAULT_INTERVAL_SECONDS, DEFAULT_THRESHOLD, Probe, WaitClock, WatchdogJournal, WatchdogOutcome,
+    WatchdogSettings, watch_deal,
+)
 
 T = TypeVar("T")
 
@@ -132,7 +136,7 @@ def register_end_command(
         if code:
             raise typer.Exit(code)
 
-    run_option = typer.Option(..., "--from", "--run", "--run-id", "-r", help="The run whose deal to end.")
+    run_option = typer.Option(..., *RUN_SPELLINGS, help="The run whose deal to end.")
     wait_option = typer.Option(0, "--wait-timeout", min=0, help="Seconds to wait for capacity release.")
     poll_option = typer.Option(1, "--poll-interval", min=0.01)
     surrender_option = typer.Option(
@@ -174,6 +178,172 @@ def register_end_command(
             "progress alone and exits 0, without the delivery read or capacity release.\n"
         )
         app.command(deprecated_alias)(alias)
+
+
+#: The run spellings every verb that opens a run's deal accepts.
+RUN_SPELLINGS = ("--from", "--run", "--run-id", "-r")
+
+
+async def read_deal(target: EndTarget) -> dict[str, Any]:
+    """The buyer's read of the run's deal, with the watchdog's status."""
+    async with target.lifecycle as lifecycle:
+        return await lifecycle.buyer_read(target.negotiation_id)
+
+
+def register_read_command(
+    app: typer.Typer, open_target: Callable[[str, str | None], EndTarget], *,
+    name: str = "delivery", configurable: bool = False,
+) -> None:
+    """Register the buyer's read of a run's deal on a domain's command group.
+
+    ``open_target`` is the domain's ``end`` seam, called as ``register_end_command``
+    calls it. The output is the lifecycle read with the watchdog's status beside it:
+    ``monitored`` only while a probe ran recently, ``stopped`` once the watchdog
+    journaled its stop, and ``unmonitored`` otherwise.
+    """
+
+    def run(run_id: str, config: str | None) -> None:
+        try:
+            result = _run(lambda: read_deal(open_target(run_id, config)))
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        typer.echo(json.dumps(result, sort_keys=True))
+
+    run_option = typer.Option(..., *RUN_SPELLINGS, help="The run whose deal to read.")
+    if configurable:
+        def command(run_id: str = run_option, config: str | None = typer.Option(None, "--config")) -> None:
+            run(run_id, config)
+    else:
+        def command(run_id: str = run_option) -> None:  # type: ignore[misc]
+            run(run_id, None)
+
+    command.__doc__ = "Read delivery, site reports, authority progress and the watchdog's status independently."
+    app.command(name)(command)
+
+
+def watchdog_option() -> Any:
+    return typer.Option(
+        False, "--watchdog",
+        help="Stay in the foreground once the deal is available, probing its access, and send the "
+        "ordinary rate stop after --watchdog-threshold consecutive failed probes. Only while this "
+        "command runs, a lost resource is detected within at most interval x threshold + probe "
+        "timeout; the authority's acknowledgement and any priced notice come after that, and "
+        "billing continues until the stop lands.",
+    )
+
+
+def watchdog_interval_option() -> Any:
+    return typer.Option(DEFAULT_INTERVAL_SECONDS, "--watchdog-interval", min=1,
+                        help="Seconds between the watchdog's probes.")
+
+
+def watchdog_threshold_option() -> Any:
+    return typer.Option(DEFAULT_THRESHOLD, "--watchdog-threshold", min=1,
+                        help="Consecutive failed probes before the watchdog stops the deal.")
+
+
+def watchdog_settings(enabled: bool, interval: int, threshold: int) -> WatchdogSettings | None:
+    """The settings a ``buy`` opt-in persists, or ``None`` without the opt-in."""
+    return WatchdogSettings(interval_seconds=interval, threshold=threshold) if enabled else None
+
+
+def bound_notice(settings: WatchdogSettings) -> str:
+    """The conditional detection bound, stated only while the monitor runs."""
+    return (
+        f"Watchdog running: a lost resource is detected within at most {settings.bound_seconds} seconds "
+        f"(interval {settings.interval_seconds} s x threshold {settings.threshold} + probe timeout "
+        f"{settings.probe_timeout_seconds} s), only while this command runs. The authority's "
+        "acknowledgement of the stop it sends and any priced notice come after that, and billing "
+        "continues until the stop lands."
+    )
+
+
+async def wait_until_available(
+    target: EndTarget, *, timeout: float, poll_interval: float, clock: WaitClock = WaitClock(),
+) -> Literal["available", "ended", "timeout"]:
+    """Poll the deal's delivery read until it is available or has ended, or ``timeout`` passes.
+
+    An unreadable storefront is polled again rather than ending the wait, since
+    only its read says the deal is available.
+    """
+    monotonic, sleep = clock.monotonic, clock.sleep
+    deadline = monotonic() + timeout
+    async with target.lifecycle as lifecycle:
+        while True:
+            try:
+                delivery = (await lifecycle.peer.read(target.negotiation_id)).delivery
+            except Exception:
+                delivery = None
+            if delivery is not None and delivery.progress == "active":
+                return "available"
+            if delivery is not None and delivery.recorded_end is not None:
+                return "ended"
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                return "timeout"
+            await sleep(min(poll_interval, remaining))
+
+
+def run_monitor(
+    target: EndTarget, *, probe: Probe | None, clock: WaitClock = WaitClock(),
+    echo: Callable[[str], None] = lambda text: typer.echo(text, err=True),
+) -> WatchdogOutcome | None:
+    """Run the watchdog over the run's deal in the foreground, when it opted in.
+
+    Returns ``None`` when the deal never opted in, is once-only, or the buyer
+    interrupted the loop; the outcome otherwise. A deal whose watchdog already
+    journaled its stop resumes that stop and sends nothing new; that needs no
+    ``probe``, nor the storefront.
+    """
+    kept: list[WatchdogJournal] = []
+
+    async def watch() -> WatchdogOutcome | None:
+        async with target.lifecycle as lifecycle:
+            journal = lifecycle.watchdog
+            state = journal.state(target.negotiation_id) if journal is not None else None
+            if journal is None or state is None:
+                return None
+            kept.append(journal)
+            if not lifecycle._deal(target.negotiation_id).rate:
+                echo("Watchdog not running: it applies to rate deals, and this deal is once-only.")
+                return None
+            if state.stop is None:
+                echo(bound_notice(state.settings))
+            if target.record is not None:
+                target.record("watchdog_started", state.settings.to_json())
+            outcome = await watch_deal(lifecycle, target.negotiation_id, journal=journal, probe=probe,
+                                       clock=clock.now, sleep=clock.sleep)
+            if target.record is not None:
+                target.record("watchdog_exited", {
+                    "reason": outcome.reason, "resumed": outcome.resumed,
+                    "progress": outcome.progress.model_dump(mode="json") if outcome.progress else None,
+                })
+            return outcome
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # The buyer's interrupt reaches a loop on the main thread; a loop on a
+        # worker thread would keep the command waiting for it.
+        runner: Callable[[], WatchdogOutcome | None] = lambda: asyncio.run(watch())
+    else:
+        runner = lambda: _run(watch)
+    try:
+        outcome = runner()
+    except KeyboardInterrupt:
+        # The interrupt may land after the stop was journaled, even mid-send.
+        state = kept[0].state(target.negotiation_id) if kept else None
+        echo("Watchdog interrupted after it journaled the buyer's stop; resume the run, or run "
+             "'end', to carry that stop to the payment authority." if state is not None and state.stop
+             else "Watchdog stopped by the buyer before deciding to stop; the deal is unmonitored "
+             "and nothing was sent.")
+        return None
+    if outcome is not None:
+        payment = outcome.progress.payment.status if outcome.progress else None
+        echo("Watchdog exited: the deal ended by another path." if outcome.reason == "ended"
+             else f"Watchdog's journaled stop carried to the payment authority: {payment}."
+             if outcome.resumed else f"Watchdog sent the buyer's stop: {payment}.")
+    return outcome
 
 
 def create_evidence_command_group(

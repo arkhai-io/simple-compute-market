@@ -215,3 +215,23 @@ The buyer half MUST normally submit rate stop at the payment authority and send 
 #### Scenario: The payment authority cannot be reached
 - **WHEN** the buyer invokes end but payment stop is unknown or unavailable
 - **THEN** the buyer follows buyer-orchestration's “The buyer's end is backed by its own stop or a case”, including its foundation-owned outage recovery rather than a rate-specific duplicate
+
+### Requirement: The buyer's watchdog bounds detection only while it runs
+The buyer half MUST provide a watchdog for a rate deal: a probe loop that the buyer's own `buy` command runs in the foreground, with no buyer daemon, when the buyer gives its opt-in flag. The loop MUST probe the deal's disclosed access through a probe each compute domain injects, so the buyer half learns no credential format, on the configured interval; after the configured threshold of consecutive failed probes it MUST journal the probe evidence it acted on and then send the buyer's ordinary entitled stop and hint through the canonical rate buyer end, and exit. It MUST exit also when the deal ends by another path or the buyer interrupts it, and it MUST NOT send anything the buyer could not send by hand. The opt-in, interval and threshold MUST be persisted per deal in the buyer's store, and each domain's resume of a buy run MUST re-enter the loop where the deal still runs. A loop restarted after its stop was journaled MUST send no second stop: it resumes the journaled one under its operation key until it lands. Every probe, passed or failed, MUST record its instant per deal beside the opt-in. The buyer's read of a run's deal, registered from the buyer half for both compute domains, MUST show `monitored` while `now − last probe ≤ interval + probe timeout` plus a small fixed grace, `stopped` once the watchdog has journaled its stop, and `unmonitored` otherwise, a deal never opted in included. The buyer half MUST compute the status when it composes the buyer's read; it MUST NOT be a field of `LifecycleRead` or any lifecycle wire model, and the storefront neither sees nor reports it. Wherever the watchdog is described, its bound MUST be stated as conditional: detection within at most `interval × threshold + probe timeout` after the loss, only while the monitor runs, with the stop's acknowledgement and any priced notice after that and billing running until the stop lands. The `buy` command MUST state that bound only while the monitor runs.
+
+#### Scenario: The threshold of failed probes is reached
+- **GIVEN** a rate deal whose buyer opted into the watchdog with threshold 3
+- **WHEN** three consecutive probes of its disclosed access fail, with no passing probe between them
+- **THEN** the watchdog journals the three failed probes with their instants, sends one ordinary payer stop and hint, and exits
+- **AND** two failures followed by a passing probe send nothing
+
+#### Scenario: The last probe is stale
+- **GIVEN** a deal that opted in, whose `buy` command was killed after its last probe
+- **WHEN** the buyer reads the deal later than one interval, the probe timeout and the grace after that probe
+- **THEN** the read shows `unmonitored`, never `monitored`, although the opt-in is unchanged
+
+#### Scenario: A restarted run resumes the watchdog
+- **GIVEN** a deal that opted in and still runs, and a `buy` command that stopped
+- **WHEN** the buyer resumes the buy run
+- **THEN** the loop re-enters and the read shows `monitored` once it records a probe
+- **AND** when the watchdog had already journaled its stop, the resumed loop sends no second stop and the read shows `stopped`

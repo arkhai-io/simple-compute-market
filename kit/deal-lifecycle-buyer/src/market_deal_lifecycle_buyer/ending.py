@@ -72,6 +72,12 @@ class BuyerEndJournal:
             raise ValueError("buyer end journal names a different committed deal")
         return plan
 
+    def read(self, negotiation_id: str) -> EndPlan | None:
+        """The deal's journaled end, or ``None`` when no end has begun."""
+        with sqlite3.connect(self.path, timeout=30) as db:
+            row = db.execute("SELECT plan FROM buyer_delivery_ends WHERE negotiation_id=?", (negotiation_id,)).fetchone()
+        return self._decode_plan(row[0]) if row is not None else None
+
     def save(self, previous: EndPlan, **updates) -> EndPlan:
         updated = previous.model_copy(update={**updates, "revision": previous.revision + 1})
         negotiation_id = previous.progress.negotiation_id

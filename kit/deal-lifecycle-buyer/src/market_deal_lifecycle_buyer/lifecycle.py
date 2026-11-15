@@ -21,6 +21,7 @@ from market_deal_lifecycle_contracts.models import (
 from market_identity import Identity, canonical_json
 
 from .ending import BuyerEndJournal, EndDeliveryProgress, end_delivery, end_rate
+from .watchdog import WatchdogJournal, watchdog_view
 
 
 class BuyerPeer(Protocol):
@@ -64,6 +65,7 @@ class BuyerLifecycle:
         disputes: DisputeAdapterTable, operations: OperationStore, peer: BuyerPeer,
         observe_hint: HintObserver | None = None,
         end_journal: BuyerEndJournal | None = None, evidence: EvidenceStore | None = None,
+        watchdog: WatchdogJournal | None = None,
         clock: Callable[[], int] = lambda: int(time.time()),
     ) -> None:
         self._resolve = deal
@@ -74,6 +76,7 @@ class BuyerLifecycle:
         self.observe_hint = observe_hint
         self.end_journal = end_journal
         self.evidence = evidence
+        self.watchdog = watchdog
         self.clock = clock
 
     def _deal(self, negotiation_id: str) -> BuyerDeal:
@@ -175,3 +178,14 @@ class BuyerLifecycle:
             negotiation_id=negotiation_id, commitment_ref=deal.commitment_ref,
             authority=authority, delivery=delivery.delivery,
         )
+
+    async def buyer_read(self, negotiation_id: str) -> dict:
+        """The buyer's read of the deal: its lifecycle read and the watchdog's status.
+
+        The status is the buyer's knowledge of its own monitor, composed here and
+        never a field of ``LifecycleRead`` or any lifecycle wire model, so the
+        storefront neither sees nor reports it.
+        """
+        read = await self.read(negotiation_id)
+        state = self.watchdog.state(negotiation_id) if self.watchdog is not None else None
+        return {**read.model_dump(mode="json"), "watchdog": watchdog_view(state, self.clock())}

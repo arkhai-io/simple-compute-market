@@ -21,14 +21,43 @@ from __future__ import annotations
 
 import json
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.registry_config import RegistryAuthority
+from arkhai_vms_buyer import buy_cli, end_cli
 from arkhai_vms_buyer.buy_orchestrator import BuyResult
 from arkhai_vms_buyer.cli import app
 from arkhai_vms_buyer.run_log import RunLog, list_runs, read_run
+from market_deal_lifecycle.adapters import (
+    DisputeAdapterTable,
+    PaymentAdapterTable,
+    PaymentBinding,
+    PaymentSelector,
+)
+from market_deal_lifecycle_buyer import (
+    BuyerDeal,
+    BuyerLifecycle,
+    EndDeliveryProgress,
+    EndTarget,
+    WaitClock,
+    WatchdogSettings,
+    WatchdogState,
+    WatchdogStop,
+)
+from market_deal_lifecycle_buyer.watchdog import GRACE_SECONDS, ProbeObservation
+from market_deal_lifecycle_contracts.models import (
+    Accepted,
+    AuthorityView,
+    DeliveryView,
+    LifecycleRead,
+    RecordedEnd,
+    Rejected,
+)
 from identity_helpers import (
     BUYER_SIGNER,
     seller_principals,
@@ -664,3 +693,278 @@ def _stub_fresh_alkahest_buy(monkeypatch) -> tuple[dict, dict]:
 
     monkeypatch.setattr("arkhai_vms_buyer.buy_cli.run_buy", fake_run_buy)
     return listing, captured
+
+
+# ---------------------------------------------------------------------------
+# The watchdog: `market buy --watchdog`, its resume, and `market delivery`
+# ---------------------------------------------------------------------------
+
+
+class _Journal:
+    """The watchdog journal's interface, in memory."""
+
+    def __init__(self):
+        self.states = {}
+
+    def opt_in(self, negotiation_id, settings):
+        state = self.states.get(negotiation_id)
+        self.states[negotiation_id] = WatchdogState(
+            settings, state.last_probe_at if state else None, state.stop if state else None,
+        )
+
+    def state(self, negotiation_id):
+        return self.states.get(negotiation_id)
+
+    def record_probe(self, negotiation_id, at):
+        state = self.states[negotiation_id]
+        self.states[negotiation_id] = WatchdogState(state.settings, at, state.stop)
+
+    def record_stop(self, negotiation_id, stop):
+        state = self.states[negotiation_id]
+        self.states[negotiation_id] = WatchdogState(state.settings, state.last_probe_at, state.stop or stop)
+        return self.states[negotiation_id].stop
+
+
+#: One failed probe reaches the threshold, so the loop never sleeps.
+_IMMEDIATE = WatchdogSettings(interval_seconds=1, threshold=1, probe_timeout_seconds=1)
+#: Where a delivered VM's SSH endpoint answers; a documentation address.
+_DETAILS = json.dumps({"host": "192.0.2.10", "port": 22, "user": "tenant"})
+
+
+class _Clock:
+    """Fake time: sleeping advances it, and it stamps probes."""
+
+    def __init__(self, now=1000):
+        self.now = now
+
+    async def sleep(self, seconds):
+        self.now += seconds
+
+    def wait_clock(self):
+        return WaitClock(now=lambda: int(self.now), monotonic=lambda: self.now, sleep=self.sleep)
+
+
+_ACTIVE = DeliveryView(progress="active")
+_ENDED = DeliveryView(progress="end_recorded", recorded_end=RecordedEnd(
+    ended_at=1, actor=BUYER_SIGNER.identity, cause="payer", source="watch",
+))
+
+
+def _watchdog_seams(monkeypatch, journal, clock=None, *, reads=(_ACTIVE,), answers=(False,),
+                    negotiation_id="neg-1"):
+    """Replace the buy command's watchdog seams. The storefront answers ``reads``
+    in turn, then the last again; each probe answers the next of ``answers``."""
+    clock = clock or _Clock()
+    stopped = EndDeliveryProgress(negotiation_id=negotiation_id, observed_at=1, mode="normal_stop",
+                                  payment=Accepted())
+    remaining = list(reads)
+
+    async def read(_negotiation_id):
+        return SimpleNamespace(delivery=remaining.pop(0) if len(remaining) > 1 else remaining[0])
+
+    lifecycle = SimpleNamespace(
+        _deal=lambda _: SimpleNamespace(rate=True, buyer=None, payment=None),
+        end=AsyncMock(return_value=stopped),
+        end_journal=SimpleNamespace(read=lambda _: None),
+        evidence=None, watchdog=journal,
+        payments=SimpleNamespace(resolve=lambda _: None),
+        peer=SimpleNamespace(read=AsyncMock(side_effect=read)),
+    )
+    opened, probed, scripted = [], [], list(answers)
+
+    def watchdog_target(run_id):
+        opened.append(run_id)
+
+        @asynccontextmanager
+        async def context():
+            yield lifecycle
+
+        return EndTarget(negotiation_id=negotiation_id, lifecycle=context())
+
+    def watchdog_probe(details):
+        async def probe():
+            probed.append(details)
+            return scripted.pop(0)
+
+        return probe
+
+    monkeypatch.setattr(buy_cli, "watchdog_journal", lambda: journal)
+    monkeypatch.setattr(buy_cli, "watchdog_target", watchdog_target)
+    monkeypatch.setattr(buy_cli, "watchdog_probe", watchdog_probe)
+    monkeypatch.setattr(buy_cli, "wait_clock", clock.wait_clock)
+    return lifecycle, opened, probed
+
+
+def _paid_run_buy(monkeypatch, status):
+    """``run_buy`` approving a payment, then ending at ``status``."""
+
+    def fake_run_buy(**kwargs):
+        kwargs["on_event"]("payment_approved", {"transaction_id": "tx-1", "negotiation_id": "neg-1"})
+        return BuyResult(status=status, negotiation_id="neg-1", rounds=1, connection_details=_DETAILS)
+
+    monkeypatch.setattr(buy_cli, "buy_orchestration", lambda: fake_run_buy)
+
+
+def _settled(monkeypatch, settle):
+    """The resumed settlement ``buy --from`` runs, through its factory."""
+    monkeypatch.setattr(buy_cli, "settle_resumption", lambda: settle)
+
+
+#: A fresh buy's arguments; the SSH key is a placeholder, never a credential.
+_FRESH = ["buy", "--duration-hours", "1", "--ssh-public-key", "ssh-ed25519 AAAA buyer@test",
+          "--registry-urls", "http://reg"]
+
+
+class TestBuyWatchdog:
+    def test_the_opt_in_interval_and_threshold_are_persisted_and_the_bound_shown_while_it_runs(
+        self, runner, monkeypatch,
+    ):
+        _stub_fresh_alkahest_buy(monkeypatch)
+        _paid_run_buy(monkeypatch, "ready")
+        journal = _Journal()
+        # The deal ends by another path before the first probe.
+        lifecycle, opened, probed = _watchdog_seams(monkeypatch, journal, reads=(_ENDED,))
+
+        result = runner.invoke(app, [*_FRESH, "--watchdog", "--watchdog-interval", "7",
+                                     "--watchdog-threshold", "2"])
+
+        assert result.exit_code == 0, result.output
+        assert journal.state("neg-1").settings == WatchdogSettings(7, 2, 10)
+        events = [event["event"] for event in read_run(list_runs()[0].run_id, signer=BUYER_SIGNER)]
+        assert events.index("watchdog_opted_in") < events.index("run_ended")
+        output = " ".join(result.output.split())
+        assert "at most 24 seconds" in output and "only while this command runs" in output
+        assert "the deal ended by another path" in output
+        assert len(opened) == 1 and probed == []
+        lifecycle.end.assert_not_awaited()
+
+    def test_a_deal_never_ready_keeps_its_opt_in_and_is_never_watched(self, runner, monkeypatch):
+        _stub_fresh_alkahest_buy(monkeypatch)
+        _paid_run_buy(monkeypatch, "timeout")
+        journal = _Journal()
+        _, opened, probed = _watchdog_seams(monkeypatch, journal)
+
+        result = runner.invoke(app, [*_FRESH, "--watchdog"])
+
+        assert result.exit_code == 4, result.output
+        assert journal.state("neg-1").settings == WatchdogSettings()
+        assert opened == [] and probed == []
+        assert "Watchdog running" not in result.output
+
+    def test_without_the_opt_in_nothing_is_persisted_or_watched(self, runner, monkeypatch):
+        _stub_fresh_alkahest_buy(monkeypatch)
+        _paid_run_buy(monkeypatch, "ready")
+        journal = _Journal()
+        _, opened, _ = _watchdog_seams(monkeypatch, journal)
+
+        result = runner.invoke(app, _FRESH)
+
+        assert result.exit_code == 0, result.output
+        assert journal.states == {} and opened == []
+
+    def test_a_resume_re_enters_the_watchdog_and_a_resume_refuses_the_flag(self, runner, monkeypatch):
+        run_id = _seed_agreed_negotiation("http://seller:8001", "L-1")
+        _settled(monkeypatch, lambda **kw: {"status": "ready", "negotiation_id": "neg-1",
+                                            "connection_details": _DETAILS})
+        journal = _Journal()
+        journal.opt_in("neg-1", _IMMEDIATE)
+        lifecycle, opened, probed = _watchdog_seams(monkeypatch, journal)
+
+        refused = runner.invoke(app, ["buy", "--from", run_id, "--watchdog"])
+        assert refused.exit_code == 2 and opened == []
+
+        result = runner.invoke(app, ["buy", "--run-id", run_id])
+
+        assert result.exit_code == 0, result.output
+        assert opened == [run_id] and probed == [_DETAILS]
+        lifecycle.end.assert_awaited_once_with("neg-1")
+        assert journal.state("neg-1").stop is not None
+        assert "at most 2 seconds" in " ".join(result.output.split())
+
+    def test_the_probe_reaches_the_disclosed_ssh_endpoint_and_refuses_a_delivery_naming_none(self):
+        assert callable(buy_cli.watchdog_probe(_DETAILS))
+        assert callable(buy_cli.watchdog_probe({"host": "192.0.2.10", "port": 22}))
+        with pytest.raises(ValueError, match="no SSH endpoint"):
+            buy_cli.watchdog_probe(json.dumps({"user": "tenant"}))
+
+    def test_a_journaled_stop_is_carried_on_resume_with_no_settle_or_probe(self, runner, monkeypatch):
+        run_id = _seed_agreed_negotiation("http://seller:8001", "L-1")
+        _settled(monkeypatch, lambda **kw: pytest.fail("a journaled stop needs no settle; the storefront may be down"))
+        monkeypatch.setattr(buy_cli, "run_negotiation_id", lambda run, signer: "neg-done")
+        journal = _Journal()
+        # The seeded run's accepted deal.
+        journal.opt_in("neg-done", _IMMEDIATE)
+        journal.record_stop("neg-done", WatchdogStop(990, (ProbeObservation(980, "probe timed out"),)))
+        lifecycle, opened, probed = _watchdog_seams(monkeypatch, journal, negotiation_id="neg-done")
+
+        result = runner.invoke(app, ["buy", "--from", run_id])
+
+        assert result.exit_code == 0, result.output
+        assert opened == [run_id] and probed == []
+        lifecycle.end.assert_awaited_once_with("neg-done")
+        assert lifecycle.peer.read.await_count == 0
+        assert "carried to the payment authority" in " ".join(result.output.split())
+
+    def test_the_read_shows_monitored_while_a_resumed_loop_probes_unmonitored_after_a_kill_and_stopped(
+        self, runner, monkeypatch,
+    ):
+        journal = _Journal()
+        clock = _Clock()
+
+        class Peer:
+            async def read(self, negotiation_id):
+                return LifecycleRead(negotiation_id=negotiation_id,
+                                     authority=AuthorityView(outcome=Rejected(reason="x")),
+                                     delivery=DeliveryView(progress="active"))
+
+        def end_context(run_id, **_kwargs):
+            deal = BuyerDeal("neg-1", "commitment", PaymentBinding("neg-1", PaymentSelector("fixture.payment")),
+                             rate=True)
+
+            @asynccontextmanager
+            async def context():
+                yield BuyerLifecycle(deal=lambda _: deal, payments=PaymentAdapterTable([]),
+                                     disputes=DisputeAdapterTable([]), operations=None, peer=Peer(),
+                                     watchdog=journal, clock=lambda: int(clock.now))
+
+            return SimpleNamespace(negotiation_id="neg-1"), None, context()
+
+        monkeypatch.setattr(end_cli, "end_context", end_context)
+
+        def read():
+            result = runner.invoke(app, ["delivery", "--run", "run"])
+            assert result.exit_code == 0, result.output
+            view = json.loads(result.stdout)
+            assert view["delivery"]["progress"] == "active"
+            return view["watchdog"]["status"]
+
+        assert read() == "unmonitored"
+        journal.opt_in("neg-1", WatchdogSettings(interval_seconds=60, threshold=3, probe_timeout_seconds=10))
+        # The opt-in alone is no protection.
+        assert read() == "unmonitored"
+
+        run_id = _seed_agreed_negotiation("http://seller:8001", "L-1")
+        _settled(monkeypatch, lambda **kw: {"status": "ready", "negotiation_id": "neg-1",
+                                            "connection_details": _DETAILS})
+
+        def resume():
+            result = runner.invoke(app, ["buy", "--from", run_id])
+            assert result.exit_code == 0, result.output
+
+        # A resumed loop probes once, the access answering, and exits when the
+        # deal then ends by another path: its probe is the freshest instant.
+        _watchdog_seams(monkeypatch, journal, clock, reads=(_ACTIVE, _ENDED), answers=(True,))
+        resume()
+        assert journal.state("neg-1").last_probe_at == 1000
+        clock.now = 1000 + 60 + 10 + GRACE_SECONDS
+        assert read() == "monitored"
+        # The command is gone: no probe follows, so the last one goes stale.
+        clock.now += 1
+        assert read() == "unmonitored"
+
+        # Resumed again, the loop finds the access lost and stops the deal.
+        journal.opt_in("neg-1", _IMMEDIATE)
+        lifecycle, _, _ = _watchdog_seams(monkeypatch, journal, clock)
+        resume()
+        lifecycle.end.assert_awaited_once_with("neg-1")
+        assert read() == "stopped"

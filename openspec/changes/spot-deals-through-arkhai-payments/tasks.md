@@ -1652,14 +1652,35 @@ reads; both buyers' suites; both storefronts' integration suites for the real-`b
 cases; openspec/changes/spot-deals-through-arkhai-payments/specs/deal-lifecycle/spec.md;
 openspec/changes/README.md (convergence's row).
 
-- [ ] 4F.1 The loop (D6a): a probe loop in `kit/deal-lifecycle-buyer` with a
+- [x] 4F.1 The loop (D6a): a probe loop in `kit/deal-lifecycle-buyer` with a
       per-domain injected probe (the VM's or host's reachability on the disclosed
       address and credential kind; the kit learns no credential format). After
       `threshold` consecutive failed probes it sends the buyer's ordinary entitled stop
       and `hint` through the rate buyer end, journals the probe evidence it acted on,
       and exits; it exits also when the deal ends by another path or the buyer stops
       it. Defaults are conservative.
-- [ ] 4F.2 The commands (D6a): an opt-in flag on both domains' `buy`, which then stays
+      As built: `watch_deal` in the new
+      `kit/deal-lifecycle-buyer/src/market_deal_lifecycle_buyer/watchdog.py`. A probe
+      is an async callable answering whether the access answered; an exception or one
+      outlasting `probe_timeout_seconds` is a failure. At the threshold it journals a
+      `WatchdogStop` (the failed probes with their instants) and keeps it as a
+      `watchdog_probe_failures` buyer-observation evidence item, then sends
+      `BuyerLifecycle.end` (the rate buyer end), resent under its one key every
+      interval until the payment outcome is accepted or rejected; a loop restarted
+      after that decision sends nothing when the journaled end's payment is accepted
+      or rejected and otherwise resumes that one end the same way, with no probe
+      (`BuyerEndJournal.read`, added). Probes start on a fixed schedule, one every
+      interval from the loop's start, and the ended-check is cut off at the probe
+      timeout like the probe, so the bound and the status's freshness window hold
+      while the loop runs.
+      It refuses a once-only deal. "Ended by another path" is `deal_ended`: the
+      buyer's own end journal holds an end, the payment authority's read shows a
+      final stop, or the storefront's read shows a recorded end or a release, each
+      read independently. The buyer stops it by interrupting the command (Ctrl-C).
+      Defaults: interval 60 s, threshold 5, probe timeout 10 s (bound 310 s).
+      `tcp_reachable` is the shared probe body both domains use (a TCP connect to
+      the disclosed SSH endpoint; host and port only, no credential).
+- [x] 4F.2 The commands (D6a): an opt-in flag on both domains' `buy`, which then stays
       in the foreground from `available` until the stop is sent, the deal ends or the
       buyer stops it; bare metal's `buy`, which returns at commit, polls the deal's
       delivery read until `available` (or its timeout) when the opt-in is given. The
@@ -1673,17 +1694,56 @@ openspec/changes/README.md (convergence's row).
       seam; VM gains `market delivery --run`, and bare metal's `delivery --run-id`
       moves onto the registration, keeping its options and output with the status
       added. Each domain's resume and read accept the run spellings `end` accepts.
-- [ ] 4F.3 The status (D6a, design review 18 F1): every probe, passed or failed,
+      As built: the buyer half's `commands.py` gives both domains `--watchdog`,
+      `--watchdog-interval` and `--watchdog-threshold` (option factories),
+      `run_monitor` (opens the run's deal through the domain's seam, refuses a
+      once-only deal, prints `bound_notice` only when the loop starts, records
+      `watchdog_started`/`watchdog_exited` in the run log, and runs the loop on the
+      main thread so Ctrl-C reaches it), `wait_until_available` (bare metal's poll of
+      the delivery read until progress `active`), `register_read_command` and
+      `RUN_SPELLINGS` (`--from`, `--run`, `--run-id`, `-r`, now also `end`'s).
+      `WatchdogJournal` (table `buyer_watchdogs`) sits beside `BuyerEndJournal` in
+      `FileEvidenceStore`'s file, which deletes its row with the deal's evidence;
+      `BuyerLifecycle` takes it as `watchdog=`, and both domains' compositions pass
+      `store.watchdog`.
+      VM (`buy_cli.py`): the opt-in is persisted at the payments settle hook's
+      `payment_approved` event, before commit; after `ready`, `_watch` runs the
+      monitor when the deal opted in, with the probe built from the delivery's
+      `connection_details`; `--from` (now also `--run`, `--run-id`, `-r`) re-enters
+      it after settling; `--watchdog` with `--from` is refused, since the resume uses
+      the deal's persisted opt-in. Seams: `watchdog_journal`, `watchdog_target`,
+      `watchdog_probe`. `end_cli.py` registers `market delivery`.
+      Bare metal (`cli.py`): the opt-in is persisted before approval; after commit
+      the purchase JSON prints as before, then `_deliver_and_watch` polls until
+      available or `--delivery-timeout-seconds` (default 600, `--poll-interval` 5),
+      prints a second JSON line (`available`, `watchdog`), and exits 4 when the deal
+      never became available. `buy --from <run>` (the listing, `--option-id` and
+      `--ssh-public-key` are now optional, required for a new purchase) re-enters the
+      wait and monitor of a committed run that opted in, and only those: it prints
+      `watchdog: null` for a run that never opted in. The probe reads the host's
+      access once when the monitor starts, so a storefront outage never reads as the
+      host's loss. Seams: `end_target`, `watchdog_journal`, `watchdog_probe`.
+      `delivery` moved onto `register_read_command` with `--run-id` and `--config`;
+      `_lifecycle_for_run`, its only user gone, is removed.
+- [x] 4F.3 The status (D6a, design review 18 F1): every probe, passed or failed,
       records its instant per deal beside the opt-in. The buyer's read shows
       `monitored` while `now − last probe ≤ interval + probe timeout` plus a small
       fixed grace, `stopped` once the watchdog journaled its stop, and `unmonitored`
       otherwise, a deal never opted in included. The buyer half computes it when it
       composes the buyer's read; it is no field of `LifecycleRead` or any lifecycle
       wire model, and the storefront neither sees nor reports it.
-- [ ] 4F.4 The requirement: add D6a's watchdog, with the status rule, to the
+      As built: `watchdog_status` and `watchdog_view` in `watchdog.py` (grace
+      `GRACE_SECONDS = 5`); `BuyerLifecycle.buyer_read` returns the lifecycle read's
+      JSON with `"watchdog": {"status", "last_probe_at"}` beside it, which the
+      shared read verb prints. `LifecycleRead` and the wire models are unchanged.
+- [x] 4F.4 The requirement: add D6a's watchdog, with the status rule, to the
       deal-lifecycle delta as an ADDED requirement with scenarios for the threshold
       stop, the stale last probe and the restart.
-- [ ] 4F.5 Verify, without a delivered deal (D6a):
+      As built: "The buyer's watchdog bounds detection only while it runs", with
+      scenarios "The threshold of failed probes is reached", "The last probe is
+      stale" and "A restarted run resumes the watchdog". `watchdog.py`'s module
+      docstring cites it by that heading.
+- [x] 4F.5 Verify, without a delivered deal (D6a):
       - unit, in the buyer half with a clock-injected probe fake: threshold reached, no
         stop below it, one stop and one journal entry at it, idempotent on restart, and
         `unmonitored` once the last probe is older than `interval + probe timeout` plus
@@ -1710,15 +1770,173 @@ openspec/changes/README.md (convergence's row).
       End-to-end: none; no lane scenario runs `buy` with the opt-in, and none is owed
       here.
       Owed by validation: none.
-- [ ] 4F.6 Transfer (D6a, D8): the delivered-deal cases — the real `buy` with the
+      As built, each in fake time (a probe raising `TimeoutError` stands for one the
+      loop's bounded wait cut off; the commands' waits run on an injected
+      `WaitClock`):
+      - unit, `kit/deal-lifecycle-buyer/tests/unit/test_watchdog.py` (15 cases, the
+        lifecycle and journal doubled): the threshold sends one stop and journals the
+        three failed probes; a passing probe resets the count, nothing sent; probes
+        start on the fixed schedule however long each takes; a stop not landed is
+        resent every interval until it lands; `deal_ended` from the buyer's own end
+        and from an authority final stop, and not from a running authority with the
+        storefront down; `tcp_reachable` against a loopback listener and its closed
+        port; a timed-out probe fails (its `TimeoutError` raised by the probe double,
+        standing for the bounded wait's); a restart after a landed stop sends and
+        probes nothing, and one before it resumes that one stop; a once-only deal is
+        refused; the status rule at the freshness edge; the bound; `run_monitor`
+        states the bound (with the acknowledgement and priced notice) only when the
+        loop starts and nothing for a deal never opted in; an interrupt's message
+        before and after the stop is journaled; a journaled stop resumed with no probe
+        and no bound.
+        Library integration, `tests/integration/test_watchdog_journal.py`: the opt-in,
+        probe instant and first stop survive a reopen of the SQLite file, the read shows
+        each status, a repeated opt-in keeps the stop, and the deal's deletion removes
+        the row. Buyer half: 43 passed.
+      - library integration, `test_watchdog_rate_stop.py` in each buyer: the domain's
+        `buyer_lifecycle` with the composed payments adapter over
+        `FakePaymentsClient`'s engine holding a mandate approved at the engine's clock
+        (the fake's own `approve` signs at a fixed 2027 instant, past the deal's term),
+        the storefront on the discard port, a probe raising `ConnectionRefusedError`:
+        one `submit_event`, the unstarted rate part stopped with cause `payer`, the
+        hint `unknown`, the three probes journaled and kept as evidence, and a restarted
+        loop that probes and sends nothing more.
+      - CLI cases, unit, over each command module's seams. Bare metal,
+        `domains/bare_metal/buyer/tests/test_watchdog_cli.py` (7 cases): `buy --from`
+        re-enters the loop and states the bound; a deal never available waits out its
+        timeout in fake time (7 reads over 30 s) with no bound, probe or stop; a
+        journaled stop is carried with the storefront unreadable, no wait and no probe;
+        a deal that has ended reports `ended`, exit 0, watching nothing; a run never
+        opted in runs nothing; a resume naming a listing is refused; and
+        the read through the real `BuyerLifecycle.buyer_read`: `unmonitored` before and
+        after the opt-in, `monitored` after a resumed loop records a passing probe,
+        `unmonitored` once that probe is stale, `stopped` after a resumed loop stops.
+        `test_run_log_recovery.py` gains the fresh `buy --watchdog --watchdog-interval 7
+        --watchdog-threshold 2` against its fake seller: the settings persisted per deal
+        before `payment_approved`, exit 4 at the delivery timeout, no probe, no bound.
+        VM, `TestBuyWatchdog` in `domains/vms/buyer/tests/test_buy_resume_cli.py`
+        (7 cases): the fresh opt-in persisted (7, 2) with the bound shown and the loop
+        exiting when the deal ends by another path; a run not ready keeps its opt-in and
+        opens nothing; no opt-in, nothing persisted; `buy --run-id` re-enters and stops,
+        and `--watchdog` with `--from` is refused; the real probe factory over a
+        disclosed endpoint and its refusal of a delivery naming none; a journaled stop
+        is carried with no settle and no probe; the `market delivery --run` read
+        sequence as bare metal's. They replace only `buy_cli`'s factories:
+        `buy_orchestration` and `settle_resumption`, added beside the watchdog's, as
+        well as `run_negotiation_id`. Not covered by a test: bare metal's real
+        `watchdog_probe` factory (an `access` read, then `tcp_reachable`) and VM's
+        payments resume ending `timeout` (`PaymentsBuyerStage.resume` has no seam
+        short of patching its imports).
+      - application integration, `tests/integration/test_watchdog_buy.py` in each
+        storefront: the real `buy --watchdog` against the composed storefront served on
+        loopback, on the published on-demand option, approving at the shared engine:
+        the commit is accepted and the deal never reads `active` (bare metal: purchase
+        JSON `committed`, then `available: false`; VM: settle status stays
+        `provisioning`); the refusal's code is 4C's library tests', which these do not
+        assert, exit 4 at the
+        timeout (bare metal's delivery wait in fake time through `wait_clock`; VM's
+        settle wait a deadline of now, `--settlement-timeout 0`), no "Watchdog
+        running", no `submit_event`, the opt-in in the buyer's journal with no probe and
+        no stop, and the deal read `unmonitored`. Bare metal's `recurring_world` gains
+        `serve=True` (uvicorn's lifespan, clients over the port); VM's runs uvicorn on
+        the test's own loop (`loopback.served`), since a thread's loop closes before the
+        world's teardown awaits the storefront's delivery task. VM's replaces
+        identity, registry discovery, `fetch_listing_dict` in core and `payment_buyer`
+        by name, as its docstring lists.
+      Suites: buyer half 43 passed; VM buyer 331 passed; bare-metal buyer 81 passed;
+      the storefronts' suites ran in `scripts/change-workflow run pre-commit`'s
+      `make test`, recorded in the section's notes. No typecheck target exists for
+      these packages.
+- [x] 4F.6 Transfer (D6a, D8): the delivered-deal cases — the real `buy` with the
       opt-in from `available`, access lost with the storefront stopped yielding a
       single buyer stop, a killed command reading `unmonitored` once its last probe
       goes stale, the resumed run reading `monitored` — are convergence's, beside its
       rows 1 and 2. Name them in `converge-ongoing-compute-leases`' row Notes in
       `openspec/changes/README.md`; closeout's 7.8 records the transfer.
+      As built: named in that row's Notes.
 
 ## Section 4F notes and handoff
 
+- Implemented after the replan, in a second session; every task is checked. What
+  follows this session's bullets is the first session's record, which returned the
+  section to planning before any code was written.
+- Outside the plan, fixed and recorded here: a payments purchase that ran out of its
+  wait ended in an uncaught `TimeoutError` (the unowned gap row 4E recorded, now
+  removed from `openspec/changes/README.md`). VM's payments settle hook
+  (`arkhai_payments.py`) ends the run `timeout`, exit 4, as its Alkahest hook does;
+  VM's payments resume (`PaymentsBuyerStage.resume`) ends it `timeout`, exit 7, its
+  not-ready exit; bare metal's `buy` ends its commit wait `timeout`, exit 4
+  (`UNAVAILABLE_EXIT_CODE`). The VM storefront case relies on the first and
+  `test_run_log_recovery.py` covers the bare-metal commit; no test covers VM's
+  resume. VM's payments settle no longer passes its whole wait as the lifecycle
+  client's per-request timeout (it keeps the client's own, as bare metal's takes its
+  configured one), so a wait nearly spent still sends its commit; the VM storefront
+  case's deadline of now found it.
+  Also outside the plan: `buyer_commands.BuyerCommands` sets
+  `ARKHAI_BUYER_PROFILE_STORE` under the test's directory, so the bare-metal
+  storefront's buyer-command tests no longer keep evidence under the real home
+  directory; bare metal's commit wait runs on the `WaitClock` its command passes.
+- Seams added for fake time: the buyer half's `WaitClock` (`now`, `monotonic`,
+  `sleep`), taken by `run_monitor` and `wait_until_available`; each buyer command
+  builds it through `wait_clock()`, and bare metal's `PaymentStage.settle` takes it
+  for the commit loop. VM's settle poll (core's `wait_for_settlement`) has no clock
+  seam, so the VM storefront case asks for a deadline of now instead.
+- A resume carries a journaled stop before anything else: VM's `buy --from` checks
+  for one (`_carry_journaled_stop`, through the `run_negotiation_id` factory) before
+  settling, and bare metal's before its availability wait, since a settle, a wait or
+  a probe would each need the storefront the watchdog exists to outlast.
+- For convergence, which runs the watchdog from `available`: the probe in each domain
+  is a TCP connect to the disclosed SSH endpoint (VM's `connection_details`, bare
+  metal's `access` read once at the monitor's start). `deal_ended` reads the buyer's
+  end journal, the payment authority and the storefront each per interval; a delivered
+  deal's loop will read the authority every interval, which the lane double serves.
+  VM's `_watch` runs only after `ready`, so a VM deal that becomes available after
+  `buy` gave up is monitored only by `buy --from`.
+- Left for closeout: `watchdog.py`'s module docstring cites deal-lifecycle's "The
+  buyer's watchdog bounds detection only while it runs", which resolves only once the
+  delta archives; promotion of D6a's watchdog (the design promotion record's row) to
+  `deal-lifecycle` `spec.md` and `buyer-orchestration` `architecture.md`, and the
+  buyer documentation of `--watchdog`, `buy --from` on bare metal and `market delivery`.
+- The fresh-context compliance check found 13; fixed: a resume skipping a journaled
+  stop while the storefront is down (both domains); real waits in tests (now fake time
+  or a deadline of now); the stale handoff; the unrecorded outside-plan fixes and VM's
+  resume path still raising `TimeoutError`; the resumed loop's `monitored` untested;
+  the VM storefront docstring overstating its seams; `arkhai-kit-deal-lifecycle-buyer`
+  undeclared in both storefronts' dev groups; the bound text missing acknowledgement
+  and priced notice, and the help missing the bound; the interrupt message claiming
+  nothing was sent after a journaled stop; a comment describing the read verb's move;
+  an unannotated placeholder key. Declined: adding factories for `run_buy` and
+  `run_settle_from_log` (since done, after the second check); calling
+  `BuyerLifecycle._deal` from the watchdog (`ending.py` already does within the
+  package); and splitting the buyer packages' flat test roots, since TESTING's "Test
+  File Layout" binds services and kit libraries, and a domain buyer package is
+  neither.
+- A second fresh-context check, after those fixes, found 14; fixed: probes spaced by
+  interval plus probe and read time, so neither the bound nor the freshness window
+  held (now a fixed schedule with the ended-check cut off at the probe timeout); a
+  stop not landed ending the loop (now resent every interval until it lands); the
+  bound missing from `watchdog.py`'s docstring, bare metal's `buy` help and VM's
+  module docstring; untested paths (`tcp_reachable`, VM's probe factory, the
+  interrupt messages, `deal_ended`'s branches); VM's new cases patching imported
+  names (now `buy_cli` factories); `wait_clock` missing from TESTING's list; a test
+  comment and two timeout comments misstating the code; the storefront cases' claim
+  that they observe the refusal; a resume of an ended deal reporting it never
+  available (now `ended`, exit 0); a resume ignoring purchase options it now refuses
+  (`--duration-seconds` with the rest). Declined: the VM storefront case's
+  replacements in core and other modules, which its docstring now states with
+  ROADMAP's gap; the unchecked-4F.5 and unrecorded-suite findings, settled by this
+  section's checks below; the citation to the delta's heading, closeout's.
+- Pre-commit, `scripts/change-workflow run pre-commit`, run three times: the first
+  passed before the compliance fixes; the second failed only VM's storefront case
+  (its zero settle timeout then also cut off the commit's transport, fixed above);
+  the third, after every fix, passed: after-functional-change (`make lock`),
+  pre-commit-functional (`make dist-clean`, `make check-packaging`, `make test`:
+  every suite, the VM storefront's integration 602 passed and the bare-metal
+  storefront's 645 passed, each with its `test_watchdog_buy.py`) and pre-commit
+  (index, tasks, skills, OpenSpec strict, `make check-repository`).
+- End-to-end scenarios exercising this section: none; no lane scenario runs `buy`
+  with `--watchdog`, and convergence owns the delivered-deal cases (4F.6). The
+  recurring-purchase scenarios still exercise `market bare-metal end` and `market end`,
+  which now share `RUN_SPELLINGS`. Owed by validation: none.
 - Returned to planning before any code was written; no task is checked. The section
   can't be verified as 4F.5 plans it. Its application-integration cases start
   "the real `buy` with the opt-in against the composed storefront" and expect the
