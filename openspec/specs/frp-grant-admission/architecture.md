@@ -148,7 +148,7 @@ traffic, against the frp release the tool pins, from archives verified against a
 SHA-256 recorded in the tool — never against the checksums file served beside the
 release, which proves nothing about an archive from the same place. They run in a CI
 gate that fails on a skip, beside the floor run; the default suite skips them and stays
-offline. See [`TESTING.md`](../../../docs/development/TESTING.md#2-integration-tests).
+offline. See [`test-placement.md`](../../../docs/guidance/repository/test-placement.md#registration-and-traffic-are-different-proofs).
 
 ## Placement
 
@@ -156,7 +156,7 @@ The plugin is generic infrastructure: it names frp and nothing about this market
 It is a standalone component under `tools/`, depending on `cryptography`, PyJWT, and the
 standard library alone, with its own licence and semantic version, and can be lifted into
 a repository of its own as it stands
-([`ARCHITECTURE.md`](../../../docs/development/ARCHITECTURE.md#kind)). It owns its
+([`package-layers.md`](../../../docs/guidance/repository/package-layers.md#kind)). It owns its
 specification, its vector, and its pins file; whatever signs grants conforms to them,
 checking itself against the vector's signing cases, and may read the pins file to install
 and verify the same frp. Nothing in the plugin reads market code.

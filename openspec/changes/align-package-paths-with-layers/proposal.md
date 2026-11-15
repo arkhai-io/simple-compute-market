@@ -1,8 +1,8 @@
 ## Why
 
-`docs/development/ARCHITECTURE.md` makes a package's place in the tree its
+`docs/guidance/repository/package-layers.md` makes a package's place in the tree its
 declaration of layer and scope. Most of the tree already conforms. Ten projects do
-not, and `ARCHITECTURE.md`'s "Where the current tree diverges" names them first
+not, and `package-layers.md`'s "Where the current tree diverges" names them first
 because they are the ones where the directory says something false:
 
 - `provisioning/compute` and its four distributions (`ansible`, `contracts`,
@@ -123,8 +123,8 @@ None.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — the moved projects leave "Where the
-      current tree diverges"; the path conventions gain the roles directory name.
+- [x] `docs/guidance/repository/package-layers.md` — the moved projects leave "Where
+      the current tree diverges"; the path conventions gain the roles directory name.
 - [x] Existing subsystem specification — `deployment-state` for the image layout.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
@@ -132,6 +132,8 @@ None.
 ### Knowledge to promote
 
 - The directory conventions, including the roles directory and the vocabulary
-  placement decided here — `docs/development/ARCHITECTURE.md#package-and-dependency-layers`.
+  placement decided here — `docs/guidance/repository/package-layers.md`, and the
+  vocabulary package's description in `docs/development/ARCHITECTURE.md`'s "Package
+  and dependency layers".
 - `docs/development/BUILD_AND_PACKAGING.md`, and the domain docs (since removed),
   for the new layout.

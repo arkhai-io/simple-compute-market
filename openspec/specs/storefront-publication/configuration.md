@@ -1,5 +1,5 @@
 ---
-tags: [repository, configuration]
+tags: [repository, configuration, deployment]
 ---
 
 # Storefront publication configuration

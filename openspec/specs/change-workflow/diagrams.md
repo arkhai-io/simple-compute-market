@@ -7,7 +7,7 @@ tags: [repository, diagrams]
 How the change workflow's diagrams stand to the shared rule on diagrams,
 [`diagrams.md`](../../../docs/guidance/engineering/diagrams.md). Its diagrams sit in
 [`diagrams/`](diagrams/), each draw.io source beside its SVG export, as
-[`openspec/README.md`, "Documentation placement"](../../README.md#documentation-placement)
+[`docs/guidance/repository/diagrams.md`](../../../docs/guidance/repository/diagrams.md#drawn-in-drawio)
 says of every diagram here.
 
 ## Exceptions to shared guidance

@@ -181,7 +181,7 @@ path.
 
 ## Checks
 
-`make check-packaging` builds the wheelhouse and runs every check, including the package architecture check whose rules [`ARCHITECTURE.md`](ARCHITECTURE.md#package-and-dependency-layers) states and [`ARCHITECTURE.toml`](ARCHITECTURE.toml) encodes. Each is also its own
+`make check-packaging` builds the wheelhouse and runs every check, including the package architecture check whose rules [`package-layers.md`](../guidance/repository/package-layers.md) states and [`ARCHITECTURE.toml`](ARCHITECTURE.toml) encodes. Each is also its own
 target. None resolves dependencies, relocks, or contacts a package index; building the
 wheelhouse fetches only the build backends each project declares. Every change runs it at
 closeout ([this repository's closeout parts, "Packaging"](../../openspec/README.md#packaging)).

@@ -38,9 +38,6 @@ change's documents. This repository's documents beside them:
 
 `ARCHITECTURE.md` is a current-state cross-system map. It should link to detailed subsystem specifications rather than duplicate every endpoint and state transition. It is the cross-system document the workflow's guidance means where it says a change promotes cross-system knowledge. Neither it, `DEPLOYMENT_AND_CONFIG.md`, nor the operator handbook replaces a specification's normative requirements.
 
-Diagrams follow [`diagrams.md`](../docs/guidance/engineering/diagrams.md). Here they
-are drawn in draw.io: a diagram's `.drawio` source sits beside its `.svg` export.
-
 ## The index check
 
 A capability organized by an index

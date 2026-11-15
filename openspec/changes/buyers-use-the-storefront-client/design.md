@@ -4,7 +4,7 @@ Design phase; not planned.
 
 ## Context
 
-`TESTING.md` requires integration and system tests to call a service through its canonical typed client, so route strings, bodies, and response parsing have one owner. Storefront tests follow that rule. Production buyers do not, so the storefront's route contract has two independent implementations.
+The testing guidance (`docs/guidance/repository/test-placement.md`, `deal-scenarios.md`) requires integration and system tests to call a service through its canonical typed client, so route strings, bodies, and response parsing have one owner. Storefront tests follow that rule. Production buyers do not, so the storefront's route contract has two independent implementations.
 
 Buyer storefront calls outside the typed client today:
 

@@ -462,7 +462,7 @@ deploy-compose:
 # document, which names keys by path and carries none, is the provisioning
 # chart's `definitions.hosts` value. It keeps the release's volumes on
 # uninstall; a local development cluster is deployed with
-# `make -C helm deploy-local` instead (docs/development/DEPLOYMENT_AND_CONFIG.md).
+# `make -C helm deploy-local` instead (docs/guidance/repository/local-clusters.md).
 deploy: deploy-helm
 
 deploy-helm:
@@ -665,7 +665,7 @@ check-project-layout: ## Fail if a distribution is not one package under src/ or
 	@python3 scripts/check_project_layout.py
 
 # check-architecture -- the package layer, scope, and kind rules of
-# docs/development/ARCHITECTURE.md, over every import and every declared
+# docs/guidance/repository/package-layers.md, over every import and every declared
 # internal dependency, against docs/development/ARCHITECTURE.toml. Each part
 # runs alone; any part failing fails the whole. It reads only the tree, so it
 # needs no wheelhouse and no project environment.

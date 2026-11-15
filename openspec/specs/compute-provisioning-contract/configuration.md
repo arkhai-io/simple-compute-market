@@ -1,5 +1,5 @@
 ---
-tags: [repository, configuration]
+tags: [repository, configuration, versioning]
 ---
 
 # Compute provisioning contract configuration

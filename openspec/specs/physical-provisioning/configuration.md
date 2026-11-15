@@ -97,7 +97,7 @@ entries have the host registration API's field names; the provisioning chart
 sets it from `definitions.hosts`, and the Compose stacks set
 `PROVISIONING_HOST_DEFINITIONS_PATH` to the document they mount. The retired
 `inventory_ini` and `inventory_path` are refused (see
-[`DEPLOYMENT_AND_CONFIG.md`, "Profile-based configuration"](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#profile-based-configuration)).
+[`service-configuration.md`, "A setting that belongs to one domain is named for it"](../../../docs/guidance/repository/service-configuration.md#a-setting-that-belongs-to-one-domain-is-named-for-it)).
 The contract is the
 [`physical-provisioning` specification](spec.md);
 the format, the export and import routes, and the upgrade from an INI inventory

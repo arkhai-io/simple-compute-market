@@ -25,158 +25,15 @@ tests as this repository places and writes them.
 
 ### 1. Unit Tests
 
-Unit tests take their doubles through the constructor
-([`test-seams.md`](../guidance/engineering/test-seams.md); its Python form in
-[`testing-python.md`](../guidance/engineering/testing-python.md)).
-
-**Command modules.** A storefront's operator commands and a domain's buyer commands
-are command modules, whose factories are their one seam
-([`testing-python.md`, "A command module's factories are its seam"](../guidance/engineering/testing-python.md#a-command-modules-factories-are-its-seam)).
-The bare-metal buyer CLI
-(`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`) has this shape:
-its tests replace `fresh_identity`, `recovery_identity`, `registry_client`, and
-`payment_approval`. The other CLIs' tests, and one unit test in the bare-metal buyer
-package, do not follow the rule: they replace library names and names the module
-imports, an unowned gap in
-[`ROADMAP.md`](ROADMAP.md), and are no model for a new test.
+Where a package's unit tests sit, and the seams they take their doubles through,
+are [`test-placement.md`](../guidance/repository/test-placement.md#unit-tests).
 
 ### 2. Integration Tests
 
-A service's integration tests drive its in-process application through its typed
-client ([`integration-tests.md`](../guidance/engineering/integration-tests.md);
-the setup in [`testing-python.md`, "Integration test setup"](../guidance/engineering/testing-python.md#integration-test-setup)).
-A kit library's are library integration, in its `tests/integration`
-([`test-levels.md`, "Integration tests"](../guidance/engineering/test-levels.md#integration-tests)).
-
-**Registration and traffic are different proofs**
-([`testing.md`](../guidance/engineering/testing.md#registration-and-traffic-are-different-proofs)).
-The frps admission plugin's real-frp tests
-(`tools/frp-grant-admission/tests/frp/`) hold to this: an admitted proxy
-carries bytes from frps's remote port to a listener behind frpc, and a
-proxy that outlives a reload carries traffic on a held connection and a
-new one. Those tests are external-process integration tests, run in a gate
-that fails on a skip, as the native Ansible checks are
-([Ansible Syntax and Native Checks](#ansible-syntax-and-native-checks)).
-
-**Async test discipline — no sleeps**
-([`test-determinism.md`](../guidance/engineering/test-determinism.md#no-sleeps)):
-`AsyncJobQueue.__init__`'s `on_job_started: Optional[Callable[[str], None]]`,
-`None` in production and zero-cost there, is the seam a test of the job queue
-synchronizes on.
-
-**Tests wait on events, never on durations**
-([`test-determinism.md`](../guidance/engineering/test-determinism.md#tests-wait-on-events-never-on-durations)).
-The storefronts' loopback uvicorn servers, which a test cannot replace with an
-in-process transport, stop on an event rather than at uvicorn's poll.
-
-**Leave nothing held**
-([`test-determinism.md`](../guidance/engineering/test-determinism.md#leave-nothing-held)):
-a test that holds a job at a mock rule's gate (`pause_before_result`) ends that
-hold by resuming the rule or by cancelling the job, then waits on the execution —
-`MockRuleSet.wait_until_released` for the gate and `AsyncJobQueue.wait_until_idle`
-for the processing — and asserts the rule's `waiting` count is zero.
-
-**Pause the loop, then advance it explicitly**
-([`test-seams.md`](../guidance/engineering/test-seams.md#pause-the-loop-then-advance-it-explicitly)).
-Here the seam is an HTTP control. The stage discipline
-diagram under [system integration tests](#4-system-integration-tests-end-to-end)
-draws a scenario following this:
-
-| Loop | Pause | Explicit step |
-|---|---|---|
-| Lease watchdog | `POST /api/v1/system/lease-watchdog/pause`, answering `paused` and `at_gate` (`WorkerPauseResponse`) | `POST /api/v1/system/check-leases` |
-| Fulfillment convergence | `POST /api/v1/system/fulfillment-convergence/pause`, answering `paused` and `at_gate` (`WorkerPauseResponse`) | `POST /api/v1/system/fulfillment-convergence/advance-cycle` |
-| VM storefront loops (`publication`, `capacity-events`, `site-projections`, `settlement-servicing`, `fulfillment-resume`, `negotiation-watchdog`, `introduction-retention` while contact exchange is enabled, and `alkahest-chain-probe` while an Alkahest section is configured) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication`, `capacity-events`, and `introduction-retention` |
-| Bare-metal storefront loops (`publication`, `site-projections`, `settlement-servicing`, `negotiation-watchdog`, `payment-reconciliation` while Arkhai payments is composed, `introduction-retention` while contact exchange is enabled, and `alkahest-chain-probe` while Alkahest is composed) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication` and `introduction-retention`; the `bare-metal-storefront publish` command is a client of the `publication` step and its preview |
-| API-credit storefront loops (`capacity-events`, `settlement-servicing`, `negotiation-watchdog`, `payment-reconciliation` while Arkhai payments is composed, `alkahest-chain-probe` while Alkahest is composed, and `listing-seed` while a seed listing is configured) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../capacity-events/dry-run` |
-
-A provisioning worker's pause answers `at_gate` beside `paused`: a cycle that
-began before the pause finishes first, so a caller that needs the worker held
-repeats the pause until `at_gate` is true. A storefront's pause answers each
-loop's gate state the same way. `alkahest-chain-probe` probes every configured
-chain at each step, and settlement readiness reads only its last results, so a
-held storefront judges Alkahest by the probe a stage last stepped.
-`listing-seed` finishes once the configured seed listing exists and waits while
-a dependency it needs cannot be reached.
-
-Every storefront composes its loops onto the one kit loop controller in
-`kit/storefront`, so the routes, response shapes, and the canonical
-`StorefrontClient` methods are the same for every storefront. The storefront
-loops hold no claim between cycles, so their `run-cycle` is a step: it runs
-exactly the cycle the timer runs, through the same locked operation, whether or
-not the loops are held, and records its outcome as the timer's cycle does.
-
-A storefront whose source checks read held projections confirms a listing only
-from a generation polled within its `[capacity].source_confirmation_seconds`. A
-scenario that holds the loops keeps trading, so it steps `site-projections`
-wherever a site changed before stepping publication or negotiating, and the
-end-to-end lanes widen the window to an hour so a scenario's rounds are not
-refused between steps.
-
-Every scenario module a compute pipeline lane selects holds its lane's timers for the
-whole module: the storefront's lifecycle loops, provisioning's fulfillment convergence,
-and its lease watchdog, and in the VM lane also Alice's storefront loops, since her
-publication cycle writes to registries other modules read. Holding every timer the
-lane's stages can meet, rather than those an author judges a module depends on, is
-what keeps a loop no one thought of from racing an observation. The module takes the
-lane's hold fixtures with `usefixtures`, listed first so they are released last. A hold
-is taken before the module's first stage and waits until each loop is at its gate, and
-is released in a finaliser whatever the module's outcome. Stages assert a hold; they
-never pause or resume a service themselves, and a source check enforces it. Two kinds
-of module are outside the rule: one no lane selects, such as the real-host modules an
-operator runs by hand, keeps the holds it has; and one under `scenarios/core/` reaches
-only the dev chain and messages no storefront or provisioning service, so it takes
-none.
-
-With convergence held, a stage makes each transition convergence would make. A buy
-scenario runs `market buy` in the background through `buy_to_ready`
-(`e2e-tests/tests/e2e/roles/helpers/buy.py`): it waits for the buy's escrow and
-settlement events and the storefront's dispatch, drains the mock job queue, advances
-convergence to `active`, and waits for the buy to end `ready`. A foreground buy would
-block on a convergence cycle no one steps. On any failure the helper terminates and
-reaps the buy it started, so a failed stage leaves no buyer polling the stack.
-
-The hold helpers are `storefront_loops_held`, `fulfillment_convergence_held`, and
-`lease_watchdog_held` in `e2e-tests/tests/e2e/roles/helpers/compute_deal.py`; each
-compute lane's `conftest.py` builds its fixtures of the same names on them, and the VM
-lane adds `alice_loops_held` for Alice's storefront. A stage reads a hold back through
-live system status (`assert_storefront_loops_held`, `assert_lease_watchdog_held`), so a
-module that lost its hold fails rather than racing a timer. A lane's cleanup fixtures
-are not autouse: pytest sets an autouse fixture up first and so finalises it after the
-holds, so each module lists its cleanup after its holds, and the holds keep the timers
-stopped while the cleanup runs. `e2e-tests/tests/unit/test_scenario_holds.py` refuses,
-from source, any pause or resume call or route outside the hold helpers and the
-conftests' hold fixtures, and `e2e-tests/tests/unit/test_scenario_cleanup_order.py`
-reads the fixture order pytest resolves for every compute-lane scenario module and
-refuses a hold released before the module's other cleanup.
-`e2e-tests/tests/unit/test_scenario_lane_holds.py` reads each compute lane's marker
-expression from `e2e-tests/Makefile`, where lane membership is written once, collects
-the setup plan pytest resolves for it as the lane's own run collects, with skip marks
-unevaluated so a module skipped where the check runs is still held to the rule, and
-refuses a module missing one of its lane's holds, naming the module and the hold. A
-module joining a lane, from any directory, comes under the rule with no second list to
-update. A module killed by `helm
-test`'s timeout runs no finaliser, and only a restart clears its pause; modules in a
-lane run serially.
-
-The traps [`test-seams.md`](../guidance/engineering/test-seams.md#pause-the-loop-then-advance-it-explicitly)
-lists have each sprung here:
-
-- **A loop with no pause.** Convergence ran a 30s timer with no gate while the
-  scenario around it believed everything was stopped, so it claimed the same rows
-  the test was explicitly advancing.
-- **A "run one cycle" endpoint that is not a step.** Convergence claims a row
-  before polling its provider and, on a pending answer, keeps that claim so the
-  lease spaces the next poll. `advance-cycle` releases the caller's own claims
-  first; `run-cycle` is the production cycle and does not.
-- **A loop that sleeps its interval.** A pause landing in a 30-second interval
-  outlasted the pause's 5-second bounded wait and reported the loop `pausing`.
-  Every timer loop waits through the controller's `idle`, which returns on a pause
-  request, and the kit runners refuse a gate without such a wait. The one kind of
-  loop whose task gates itself is a fan-out — the per-site capacity-event pollers —
-  whose children read their gates under each site's cursor lock. Test it with the
-  real loop body and an interval far longer than the test waits. A test that needs
-  a self-gating body runs it as a fan-out with no children.
+What a service's and a kit library's integration tests drive, and where they sit,
+are [`test-placement.md`](../guidance/repository/test-placement.md#integration-tests);
+the seams they synchronize on, and the pause and step controls of the services' timer
+loops, are [`deterministic-tests.md`](../guidance/repository/deterministic-tests.md).
 
 ### 3. Smoke Tests (Deployment Validation)
 
@@ -195,64 +52,18 @@ the hook to that expression.
 ### 4. System Integration Tests (End-to-End)
 
 **Current location:** `e2e-tests/tests/e2e/`. How a scenario is written is
-[`system-tests.md`](../guidance/engineering/system-tests.md).
+[`system-tests.md`](../guidance/engineering/system-tests.md); what every scenario
+here must hold — a complete deal per domain, the discipline each follows, the two
+kinds of scenario — is [`deal-scenarios.md`](../guidance/repository/deal-scenarios.md).
 
-Every deployable domain owns one release-qualified complete-deal scenario:
-discovery, negotiation, settlement, delivery, and domain-defined teardown.
-The teardown observation follows the resource sold: VM capacity is released,
-an API-credit grant is consumed until the authority returns HTTP 402, and a
-bare-metal lease is released only when authenticated access is revoked and the
-selected-site authority reports teardown. A health check or static Compose
-render is not deal evidence.
-
-Three diagrams carry the rest of this section. The first draws the discipline
-every complete-deal scenario follows, whatever its domain. The second applies
-that discipline to the compute family's canonical deal, part by part, as the
-worked example. The third zooms into one of those parts to show the discipline
+Three diagrams carry the scenarios. The first, beside the rule it draws in
+[`deal-scenarios.md`, "The discipline every scenario follows"](../guidance/repository/deal-scenarios.md#the-discipline-every-scenario-follows),
+draws the discipline every complete-deal scenario follows, whatever its domain. The
+two below apply that discipline to the compute family's canonical deal, part by part,
+as the worked example, and zoom into one of those parts to show the discipline
 inside a single box. Each diagram's source is the `.drawio` file named under it
 in [`diagrams/`](diagrams/); the SVG beside each is its export and also opens
 in draw.io.
-
-#### The discipline every scenario follows
-
-Every scenario follows the discipline of
-[`system-tests.md`, "A scenario is a sequence of state changes"](../guidance/engineering/system-tests.md#a-scenario-is-a-sequence-of-state-changes).
-Here a scenario holds its loops through the pause and step controls under
-["Pause the loop, then advance it explicitly"](#2-integration-tests), and
-initializes what the deal needs. It previews each move through the route's
-evaluate twin or the loop's dry run. The instants a stage may wait for are those
-the deal's Agreement fixes, such as its start, since no control moves the
-storefronts', sites' or buyer's clock (`wait_until` in
-`e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`). Today only the lane
-doubles have a perceived clock a control moves: each reads wall time plus an
-offset that a control moves forward, a scenario advances both doubles together
-through the `lane_double_clock` fixture
-(`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`), whose finaliser resets
-both to wall time whatever the module's outcome, and no storefront step follows
-an advance within its module, since the storefront still reads wall time. What a
-stage produced goes into the shared deal state for the stages that depend on
-it, and whatever happened, the fixture's finaliser resumes the loops.
-
-A message a stage sends off the request path, such as the seller-side
-introduction mail, is read back from the lane's Mailpit. The introduction
-retention sweep, a behaviour defined by a window elapsing, is proven at a level
-that can drive the clock; no pipeline stage waits for it.
-
-![How an end-to-end scenario holds the loops once, then previews, advances, and measures each transition](diagrams/e2e-stage-discipline.svg)
-
-Source: [`diagrams/e2e-stage-discipline.drawio`](diagrams/e2e-stage-discipline.drawio).
-
-The shared deal state is `DomainDealState`, from
-`e2e-tests/tests/e2e/roles/helpers/domain_deal.py`, which the scenarios share
-with exact event ordering, profiled buyer configuration, and the public client
-helpers in `e2e-tests/tests/e2e/roles/buyer_cli.py`. The helpers keep domain
-results opaque: they do not assume a VM listing, provisioning job, host field,
-API key, Physical Resource, site, or teardown payload. A scenario supplies its
-codecs and domain assertions instead of copying another domain's control flow.
-A stage names each earlier result it depends on with `require_state`, one
-exact producer/consumer field at a time. When an earlier stage or external
-authority is unavailable, the dependent stage names that prerequisite and
-remains blocked; it is never counted as a successful live deal.
 
 #### The canonical compute deal
 
@@ -385,15 +196,11 @@ diagram opens the same way, with its own previews, advance, and measurement.
 
 Source: [`diagrams/e2e-settle-zoom.drawio`](diagrams/e2e-settle-zoom.drawio).
 
-The e2e test pod reaches services only through their interfaces
-([`system-tests.md`](../guidance/engineering/system-tests.md#a-system-test-reaches-services-only-through-their-interfaces)):
-typed clients, explicit test controllers, and stage/event APIs over HTTP.
-
 The pipeline runs one lane per market domain, each as its own job, so each
 failure's logs stand alone and one domain's failure never hides another's
 evidence. The native Ansible gate is a pipeline job beside the lanes, not a
-lane, since it composes no stack ([Ansible Syntax and Native
-Checks](#ansible-syntax-and-native-checks)). Each lane builds only the images its stack runs
+lane, since it composes no stack
+([`ansible-gates.md`](../guidance/repository/ansible-gates.md#syntax-and-native-checks)). Each lane builds only the images its stack runs
 (`make build-e2e-<lane>`) and brings up only its own services, as a compose
 project of its own:
 
@@ -467,10 +274,8 @@ names; see [Private Service Dependencies](#private-service-dependencies). The
 VM lane also runs six dispute controls scenarios, each on its own deal, that
 program both doubles through their controls
 ([`e2e-tests/README.md`, "VM dispute controls"](../../e2e-tests/README.md#vm-dispute-controls)).
-A lane target names only its Compose files, its project, and the run's
-provisioning mode: every value its stack reads is in a committed overlay,
-registry or site profile, or secret overlay, and the runner takes the lane's
-committed profiles (`RUNNER_PROFILES`).
+What a lane target names, and where every value its stack reads comes from, is
+[`compose-stacks.md`](../guidance/repository/compose-stacks.md#a-lane-target-names-only-its-files-its-project-and-its-mode).
 
 The compute lanes' provisioning services run their mock profile because the
 run selects it: `PROVISIONING_MODE` (`mock` or `real`, default `mock`) is
@@ -486,21 +291,12 @@ adapter mounts its rules and job dry run under its own prefix, VM's at
 `/test/mock-rules` and `/test/evaluate-job` and bare metal's at
 `/test/bare-metal/mock-rules` and `/test/bare-metal/evaluate-job`, beside the
 shared `/test/jobs/*` routes. None of them is mounted outside the mock profile.
-
-A mock's default output is what the shipped configuration prints for the job
-([`test-doubles.md`, "A double answers as its producer would"](../guidance/engineering/test-doubles.md#a-double-answers-as-its-producer-would)):
-the role's `debug: var:` fact in the YAML result format, then the `debug: msg:`
-JSON copy the shared fact reader reads, rendered from the job's own parameters
-— its guest or host, its tenant account, its action, and booleans where the
-role prints booleans. A fact naming another guest or tenant therefore yields no
-delivery evidence in a mock lane either. The VM scenarios arm no
-create output of their own; every create reads that default. A test that needs
-an output the role would not print for its job states it in a rule.
+What a mock prints by default is
+[`lane-doubles.md`, "A mock's default output"](../guidance/repository/lane-doubles.md#a-mocks-default-output).
 
 `make -C e2e-tests test-e2e` runs the three in turn, taking each stack down
 before the next, because every stack names its chain container `anvil` and
-publishes fixed host ports. A lane provides its own configuration, so a
-scenario that finds a lane setting missing fails rather than skipping.
+publishes fixed host ports.
 
 Pre-review validation also runs the scenarios the default Helm charts can serve
 (`HELM_SCENARIOS` in `scripts/validate_slice.py`) against a Helm release, in the
@@ -575,38 +371,6 @@ Each successful fetch also creates `<run-id>.zip` beside the run directory,
 containing that directory and its logs. Repeated fetches replace the ZIP.
 An unavailable artifact is reported without discarding other logs. A successful
 fetch means diagnostics were retrieved; it does not mean the tests passed.
-
-#### Locally verifiable and external-topology scenarios
-
-End-to-end scenarios come in the two kinds of
-[`system-tests.md`, "Locally verifiable and external-topology scenarios"](../guidance/engineering/system-tests.md#locally-verifiable-and-external-topology-scenarios).
-Here a *locally verifiable* scenario runs against this repository's own stack — a
-lane's Compose project or a Helm release — with provisioning in its mock profile
-and the payments service replaced by the in-lane double. An *external-topology*
-scenario needs a hosted payments target or a real host, and is the only evidence
-for real delivery, access, and revocation on a host, and a payments target's
-records.
-
-The real-provisioning qualification modules for observations 2, 4 and 5 extend the
-lanes' buyer purchases, subclassing their shared stages
-([the real-provisioning lane](#the-real-provisioning-lane)); observation 6's
-module makes no deal, and follows the other two by name on the same stack.
-Funding a payer account at a payment provider's sandbox, and providing the hosts,
-are the deployment's topology. An absent target is a blocked skip. The scenarios
-log the identifiers each stage reads — the buyer run, Agreement, transaction,
-reservation, jobs, relay port, and grant — and no record format is defined for
-the operator's summary.
-
-A qualification module's outcome is per observation
-([`system-tests.md`, "An observation is made, failed, or unproven"](../guidance/engineering/system-tests.md#an-observation-is-made-failed-or-unproven)).
-Every stage of a qualification module requires the module's observations, or its
-cycle's in a module run once per cycle, unless the stage narrows that to fewer; the
-module logs each observation's outcome after its last stage
-(`e2e-tests/tests/e2e/roles/helpers/qualification.py`).
-
-A VM lease's end is reached by moving its agreed end into the past and stepping
-one lease-watchdog cycle with the watchdog held, which runs exactly the service
-code a wall-clock expiry runs; lease durations stay fixed.
 
 #### The real-provisioning lane
 
@@ -787,293 +551,12 @@ naming the field, and each observation requiring that stage is unproven: the
 management reads by observation 2, the admission check by observations 2, 4,
 and 5.
 
-## Contract Fixtures
-
-Contract fixtures follow [`contract-fixtures.md`](../guidance/engineering/contract-fixtures.md),
-placed as [`testing-python.md`, "Contract fixtures"](../guidance/engineering/testing-python.md#contract-fixtures)
-says. A same-package fixture here is
-`domains/vms/storefront/tests/fixtures/publication_cycle.py`; a cross-package one
-is `core/storefront-client/src/storefront_client/fixtures/escrow.py`, imported as
-`from storefront_client.fixtures.escrow import build_claim_response` alongside
-`from storefront_client import SyncStorefrontClient`.
-
-## Test File Layout
-
-A service's and a kit library's tests split into `unit/` and `integration/`
-([`testing-python.md`, "Test layout"](../guidance/engineering/testing-python.md#test-layout)).
-System-level tests live in the separate `e2e-tests` package, itself
-split into `unit/` (its own helper logic), `smoke/`, and `e2e/`. A Helm
-chart's render tests live in its own `tests/` directory (see "Chart Render
-Tests").
-
-## Migration Tests
-
-Each stateful service's migration chain is proven as
-[`migration-tests.md`](../guidance/engineering/migration-tests.md) requires, against
-real SQLite files
-([`deployment-state`, "Migration and initialization boundary"](../../openspec/specs/deployment-state/architecture.md#migration-and-initialization-boundary)):
-
-- **The engine.** `kit/schema-migrations`' unit tests and its library integration
-  tests, which run the engine through both adapters, under every transaction
-  control, and prove that `schema_snapshot` sees what a schema comparison must and
-  ignores how a column was added.
-- **The floor fixture.** Each service whose chain adopts a release's databases
-  commits that release's schema under its `tests/fixtures/v0_3_0_floor/`:
-  `schema.json` (the snapshot), the release's recorded IDs or revision, and
-  `ddl.sql`, as each fixture's README states. A new floor is a release's decision
-  ([`RELEASING.md`](RELEASING.md#cutting-a-release)).
-- **The chain.** Each service's `tests/integration/test_migration_chain.py` (the
-  registry's `test_migrations.py`), its later-migration tests starting from a
-  `ddl.sql` database.
-- **The command and the startup check.** Each service's command is driven
-  through its entry point with its settings in the loader's environment layer,
-  and is shown to import none of the application's configuration. The startup
-  check is proven at the function the application's startup calls, and through the
-  application's own startup for an absent database.
-- **The store-open test.** Each storefront's `tests/integration/test_store_open.py`
-  compares the `schema_snapshot` before and after opening every store it composes.
-- **The init containers.** Each chart's render test asserts its one migration
-  init container ("Chart Render Tests").
-
-In a kit, a test that needs a migrated database migrates it through the kit's own
-baseline. The end-to-end lanes start every service through its migration phase on
-a fresh database; no lane holds a release's database.
-
-## Accepted Arkhai purchase qualification
-
-For external physical qualification, use the shipped ordinary buyer CLI to exercise discovery, negotiation, signed TEST payment, delivery, and ordinary teardown. Collect independent lifecycle observations through the supported typed operator clients; do not import a payment-specific full-deal driver merely to obtain operator visibility. Keep buyer credentials separate from operator credentials. Bind source and selected artifacts/configuration to the run and correlate the accepted Agreement, funding evidence, receipt, rental debit, reservation, fulfillment, jobs, delivered access, and teardown observations in restricted evidence. Public summaries omit credentials, private service records, and raw deployment data.
-
-Require actual paid-buyer journeys for claims about tenant identity, negotiated privilege, grant admission, GPU work, delivery, ordinary teardown, fresh access denial, and capacity restoration. A supplemental network-policy probe is admissible only from an actual operator-only CPU guest on the same paid deployment, using the pinned guest base, its actual default bridge and virtio NIC, and the loaded policy structure. It may establish only the finite selectors observed on that path; it establishes none of the paid tenant identity, credential, privilege, grant, GPU, payment, delivery, or lifecycle facts and does not prove universal isolation. A namespace-only probe is not a substitute for this guest-path evidence. Published vectors, local component tests, and controlled smokes are narrower evidence. Record unrun markers as unrun: an equivalent ordinary-buyer method does not mean an older named test marker executed. The procedure is [`VALIDATION_RUNBOOK.md`, section 29](VALIDATION_RUNBOOK.md#29-qualify-an-ordinary-arkhai-purchase).
-
-## Boundary-Change Validation
-
-A contract moved or renamed at a package boundary is validated as
-[`boundary-changes.md`](../guidance/engineering/boundary-changes.md) lists. Here the
-dependency direction, `TYPE_CHECKING` imports included, is held by
-`make check-architecture`
-([`ARCHITECTURE.md`, "Package and dependency layers"](ARCHITECTURE.md#package-and-dependency-layers)).
-
-CI's test matrix runs `make test` as a change's validation runs it locally: one
-job per target `make test` is made of, each running that target after `make
-dist-ci`, so the Make dependency graph, rather than the workflow, owns the wheel
-inventory, the build order, and how each suite is invoked. A suite passes in CI
-exactly when it passes under `make test`; `scripts/tests/test_tests_workflow.py`
-holds the matrix to `make test`'s targets. The jobs set
-`_TYPER_FORCE_DISABLE_TERMINAL`, because Typer forces Rich's terminal styling
-whenever `GITHUB_ACTIONS` is set, which a local run never sees.
-
-## Ansible Syntax and Native Checks
-
-The roles reach most of their task files through `include_tasks`, so each such
-role has a parse-only playbook, as
-[`ansible-checks.md`](../guidance/engineering/ansible-checks.md) describes:
-`vm-management-task-files.yaml` and `vm-setup-task-files.yaml` in the VM IaC tree.
-
-`domains/vms/provisioning/iac/scripts/validate_playbooks.sh` syntax-checks every playbook the VM IaC tree
-ships from one list, which a structure test holds equal to the playbooks
-present; `make validate-playbooks` runs it. Tests that run shipped tasks through
-real `ansible-playbook` are library integration: the VM suite renders both create
-facts, exercises its family-role call boundary, and runs the host diagnostics
-task file against faked `systemctl` and `virsh`, and the family suite runs its
-installer and authenticated status wait against controlled local file and HTTP
-boundaries. Native tests skip in the default suite without supported Ansible;
-the family HTTP tests also require the `ansible.posix.json` callback.
-
-`make test-provisioning-iac-native` runs the native suites and syntax checks from
-the built provisioning image's packaged IaC trees, with no network but loopback.
-A missing image, supported Ansible or required callback, no native test, or a
-skipped native test fails the gate. Both domains' playbooks are parsed with their
-own configuration and with the shared service configuration and image role path.
-The shared configuration contains no domain path. A structure test holds the VM
-gate's list of native modules to every module defining its skip guard, and the VM
-gate runs its few native tests in series. The compute family's gate
-(`provisioning/compute/iac/scripts/native_gate_runner.py`) runs each native test
-in its own interpreter, as many at once as the host has CPUs, so no test's
-working directory, environment, or umask reaches another; it prints each test's
-output whole under the test's id as the test ends, then a summary of what ran,
-failed, and skipped.
-
-The end-to-end pipeline runs this gate as its own job, `native-ansible-gate`,
-beside the domain lanes: it builds only the wheels and the provisioning image
-(`make build-e2e-native-gate`), composes no stack, and leaves its output in the
-job log.
-
-The bounded bare-metal working-data helper has its own evidence boundaries.
-`make -C domains test-bare-metal-iac` exercises its unit and library-integration behavior;
-`make build-provisioning` followed by `make test-bare-metal-iac-native`
-executes native account, filesystem and IPC behavior in a disposable isolated
-environment and fails on missing prerequisites or skips. Neither gate proves
-that an image contains the intended assets, that the role is active in a
-deployment, or that a real lease is reclaimed. A deployed qualification must additionally observe an actual lease through
-cleanup and successor access; the real-provisioning marker by itself does not
-qualify bounded cleanup. A valid older copy of the host ledger is
-not locally distinguishable from current state; operational rollback response
-is quarantine pending history verification or host decommission, not a passing
-rollback test. A rejected cleanup retains capacity; normal same-job retry is
-distinct from terminal failed-job recovery or force-release.
-
-## Chart Render Tests
-
-What a chart render test is, what it covers, and how to write one are
-[`helm-render-tests.md`](../guidance/engineering/helm-render-tests.md). It is a
-static configuration test, like `e2e-tests/tests/unit/`'s image-pin and stack
-checks.
-
-The supported Helm is the release pinned in
-[`.github/workflows/tests.yml`](../../.github/workflows/tests.yml).
-`helm/scripts/test-render.sh` prints `helm version --short` before its first
-render, so each render log names the Helm it ran. The script does not enforce
-the pin; a render step's result is recorded for the version it reports.
-
-**Where they live and how they run:**
-
-- Umbrella-chart assertions are in `helm/scripts/test-render.sh`, run by
-  `make -C helm test-render` and by the top-level `make test-deployment-packaging`.
-  The umbrella's own Python render tests, such as the two-release topology's
-  `helm/tests/test_release_topology.py`, live in `helm/tests/`, and
-  `test-render.sh` runs them beside each chart's.
-- A chart's own render tests are `helm/charts/<chart>/tests/test_render.py`. Call
-  each from `test-render.sh` so that one target runs every render check; a test
-  reachable only through its chart's own Makefile is easily never run.
-- `make test` runs all of it, through `make test-deployment-packaging`, and all of it
-  needs `helm` on `PATH`.
-- `helm/charts/storefront/tests/test_render.py` also loads one rendered
-  `storefront.json` with the storefront's own configuration loader, through the
-  interpreter `STOREFRONT_PYTHON` names, runs the storefront's startup refusal over
-  it, and derives the local release's Alkahest release conditions over its render;
-  over the chart defaults' render the refusal names the missing settlement
-  mechanism. `test-render.sh` sets it when the VM storefront environment exists
-  (`make init-storefront`). `helm/charts/bare-metal-storefront/tests/test_render.py`
-  does the same through `BARE_METAL_STOREFRONT_PYTHON`, which `test-render.sh` sets
-  when `domains/bare_metal/storefront/.venv` exists (`make
-  init-bare-metal-storefront`; both targets build the wheelhouse first, and `make
-  init` runs both): bare metal's loader, startup
-  refusal, clause compilation, and site binding over the example's rendered
-  document, and the refusal over the defaults'. That shows a rendered configuration
-  is publishable, not that the storefront starts on it, since the runtime also needs
-  the credential, the overlay's wallet key, a writable database, and chain clients.
-  Without its interpreter each check reports a skip. No CI job has both Helm and
-  those environments, so in CI these checks do not run; run them locally before a
-  change to a chart or a loader is reviewed.
-- `helm/charts/storefront/tests/test_render.py` also asserts, over the defaults,
-  the local release, every rendering fixture, and a second agent, that each VM
-  storefront Deployment renders exactly one init container — `migrate`, running
-  `market-storefront-migrate` alone from the application's image and environment
-  over the data volume, without `entrypoint.sh` or ZeroTier — and no `wait-for-`
-  container, and that each carries a `startupProbe` on `/health`, as the
-  bare-metal chart's test asserts of `bare-metal-storefront-migrate`: the
-  storefront migrates its own database first, then starts with its dependencies
-  unreachable and reports them degraded.
-- `helm/charts/registry/tests/test_render.py` asserts, over the defaults, with
-  persistence disabled, with another mount path, and with a secret profile, that
-  the registry Deployment renders exactly one init container running
-  `registry-migrate` from the application's image, with its environment and
-  profile mounts but not its signer credential, over the application's data
-  volume, and that the application container states its own command; in the
-  umbrella with the `api-credits-registry` alias enabled both instances render the
-  same, and with it disabled nothing of the alias renders.
-  `helm/charts/provisioning/tests/test_render.py` asserts the same of
-  `compute-provisioning-migrate`.
-- `helm/tests/test_release_topology.py` asserts, over both topology releases,
-  that no Pod annotated `helm.sh/hook: test` carries all of any Deployment's
-  `matchLabels` or any Service's selector — every test pod carries
-  `app.kubernetes.io/component: test` and its release's instance label and lacks
-  `app.kubernetes.io/name`, which every selector requires — and that each release
-  renders exactly its expected test templates, so a test pod that stops rendering
-  fails rather than leaving nothing to check.
-- Both storefront charts' render tests assert the payments interface: the CA
-  bundle option (`caBundle`) mounted from a ConfigMap or a Secret together with
-  the `ca_bundle_path` it derives into the rendered configuration, neither
-  rendered without it, and the option refused without a payments section; the
-  values schema refusing in public `config` the payments `api_key`, its
-  `api_key_env`, and every `[[DisputeCredential]]` entry; a payments-only
-  storefront rendering with nothing for its removed settings; and the
-  payments-check test pod running the storefront's own command with the
-  Deployment's image, environment, and configuration mounts but no data volume,
-  probes, or ZeroTier device, rendered only with payments and an account. The
-  VM storefront chart's render test asserts the same of the mediation-check test
-  pod, which runs `market-storefront check-mediation --origin` with the CA mount
-  and the Secret overlay present and renders only when `tests.mediationOrigin`
-  names an origin; in the local release Bob's names the mediation double's.
-  `helm/charts/payments-lane-double/tests/test_render.py` and
-  `helm/charts/mediation-lane-double/tests/test_render.py` assert each double is
-  off by default, runs once behind its Service (`payments-double`,
-  `mediation-double`) in the local release and not at all in the bare-metal
-  release, and serves a named TLS Secret over the image's files.
-- `helm/tests/test_release_topology.py` also holds the local release's payments
-  values to the double's committed fixtures, and asserts the registry chart
-  renders its settings as the profile `config-production.env`, sets only
-  `CONFIG_DIRECTORY` and `ACTIVE_PROFILES` in the pod environment, layers a
-  `secretProfile` after it, and refuses the retired `auth.*KeySecret` values
-  naming `secretProfile`. Through the interpreter `REGISTRY_PYTHON` names, which
-  `test-render.sh` sets when `core/registry/.venv` exists, it loads the rendered
-  profile with the registry's own loader; without it that check reports a skip.
-- Release tooling (`make test-release-tooling`) reads back the secret overlays
-  `topology-secrets` writes: the seller payments key in each storefront's
-  runtime overlay, and Bob's `[[DisputeCredential]]` equal to his Compose
-  secret overlay's but for its `ca_bundle_path`, which names the storefront
-  chart's CA file (`storefront.caBundleFile`) rather than the Compose mount
-  (`scripts/tests/test_change_build_and_helm_targets.py`).
-
-**Writing one here:** use the standard library only. `test-render.sh` runs a plain
-`python3`, which has no YAML parser, so a render test passes values as a JSON file
-and asserts on the rendered text; the storefront's `storefront.json` is read back
-with `json`.
-
-**A values schema generated from typed models**
-([`helm-render-tests.md`](../guidance/engineering/helm-render-tests.md#a-values-schema-generated-from-typed-models)).
-Each storefront chart's values
-schema carries a definition generated from that storefront's typed configuration
-models (`make helm-values-schema`, which runs each storefront's generator in its own
-environment). The generator is `kit/config`'s, with its own unit tests over small
-model sets; each storefront supplies only its sections, settlement registrations,
-and discovered delivery sinks, and writes only its own chart's schema. Both
-storefronts opt into the generator's `accepting_null` form: the definition accepts
-`null` wherever it accepts a key, at every depth, including keys inside list
-elements, so the chart can remove it before rendering. A refused key stays
-refused as `null`; the transformation does not widen array item schemas to
-accept null elements. Each storefront's drift test is its own unit test —
-`domains/vms/storefront/tests/unit/test_values_schema.py` and
-`domains/bare_metal/storefront/tests/test_values_schema.py` — so `make test` fails
-when a model or settlement registration changes without regenerating; it runs in
-the storefront's environment because the definition is built from the storefront's
-models and installed sinks. The render tests then assert what the schema refuses
-and accepts.
-
-**Obtaining Helm where its download host is unreachable.** Helm's official
-binaries are served from `get.helm.sh`. An environment that cannot reach it can
-use a redistribution such as the npm package `helm-binary-linux`, which ships
-one binary with no install scripts. Such a copy is unverified and may be an
-older release: inspect the package before running it and keep it out of the
-repository. The supported release is the one CI pins above; the render log
-records whichever version actually ran.
-
-## Cross-Language Contract Conformance
-
-This repository's independent implementations of one protocol are held to
-[`conformance-tests.md`](../guidance/engineering/conformance-tests.md).
-
-**Current example:** the API-credits gating middleware's Python
-(reference implementation), TypeScript, and Rust ports all replay
-`domains/apicredits/middleware/conformance/session.json` — one recorded
-session of requests against the gate, with each step asserting the
-allow/deny decision, the deny body's machine-readable error code,
-whether a `purchase` pointer is present, and call counts against the
-stateful collaborators the step is meant to exercise (cache-hit
-skipping, zero-calls-on-known-exhaustion). See
-`domains/apicredits/middleware/conformance/README.md` for what each step
-field asserts, and the runners at
-`domains/apicredits/middleware/python/tests/conformance_runner.py`,
-`domains/apicredits/middleware/typescript/test/conformanceRunner.ts`,
-and `domains/apicredits/middleware/rust/tests/conformance.rs`.
-
 ## Private Service Dependencies
 
-This repository is public, so its tests keep private dependencies out ([`repository-content.md`, "Private dependencies stay out of its tests"](../guidance/engineering/repository-content.md#private-dependencies-stay-out-of-its-tests)): here a scenario needing a private service's ledger reads lives in that service's repository, and SCM tests its client kit against the service's published contract and a test double at the kit's boundary.
-
-The doubles here mirror their producers
-([`test-doubles.md`, "A double mirrors its producer"](../guidance/engineering/test-doubles.md#a-double-mirrors-its-producer)),
-as mock provisioning takes a job's outcome as a programmed answer.
+The tests keep a private service out, testing its client against a double, and the
+doubles mirror their producers, as
+[`lane-doubles.md`](../guidance/repository/lane-doubles.md) requires. Every lane runs
+two: the payments double and the mediation double.
 
 **The lane doubles' controls.** Both lane doubles serve one typed control
 contract, `tools/lane-double-controls`, which the doubles and the end-to-end
@@ -1128,7 +611,7 @@ runner's environment. Bob's storefront holds his dispute credential, with the
 lane CA as its `ca_bundle_path`, in his secret overlay. The lanes run no
 `check-mediation`: the VM payment scenario's case stages and the VM dispute
 scenarios prove the storefront's mediation access, and the local release's Helm
-test runs the check (["Chart Render Tests"](#chart-render-tests)).
+test runs the check ([`chart-render-tests.md`](../guidance/repository/chart-render-tests.md#where-they-live-and-how-they-run)).
 
 A payment scenario run against both lane-owned doubles logs the label *lane
 doubles* with each double's installed contract hashes, read from its status
@@ -1167,9 +650,9 @@ and Python downloads disabled. The scope resolver accepts an explicit
 project list or a review manifest, and otherwise maps a Git diff to
 repository-owned project roots and applies impact-expansion rules from
 there. Each project keeps its own locked third-party requirements rather
-than being forced into one synthetic shared environment. A project's own
-`Makefile` must keep its interpreter selection configurable so the
-review environment can use the wheelhouse's declared Python version.
+than being forced into one synthetic shared environment; the review environment
+uses the wheelhouse's declared Python version
+([`project-environments.md`](../guidance/repository/project-environments.md#the-interpreter-stays-configurable)).
 
 **Current implementation:** `make review-wheelhouse` (scope preview via
 `make review-wheelhouse-scope`, controlled by `REVIEW_PROJECTS`,

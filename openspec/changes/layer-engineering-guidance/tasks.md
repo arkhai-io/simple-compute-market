@@ -2814,7 +2814,7 @@ the repository's tag table, the rule rows of `ARCHITECTURE.md`, `TESTING.md`, an
 `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`; `AGENTS.md` ("Tags"); `openspec/README.md`;
 `openspec/specs/change-workflow/diagrams.md`; whatever cites a moved section.
 
-- [ ] 11.1 Write `docs/guidance/repository/README.md`, `tags: [repository]`: what the
+- [x] 11.1 Write `docs/guidance/repository/README.md`, `tags: [repository]`: what the
   layer holds (guidance naming this repository's packages, services, tools,
   documents, or targets, spanning its systems — one capability's beside it), how its
   files are organized (flat, one subject each, named by subject; the directory is
@@ -2823,7 +2823,17 @@ the repository's tag table, the rule rows of `ARCHITECTURE.md`, `TESTING.md`, an
   inventory adds. `AGENTS.md`'s "Tags" section is replaced by a sentence linking the
   README's table (D32, D18). Verify `make check-guidance` finds one repository
   vocabulary, in the README.
-- [ ] 11.2 Move each `rule` row of `ARCHITECTURE.md`, `TESTING.md`, and
+  Done: the README holds the layer, its organization, and the table (`repository`,
+  `architecture`; the inventory adds no row). `AGENTS.md` has no "Tags" heading left:
+  the guidance check refuses a "Tags" heading over no table ("the table under "Tags"
+  is malformed: holds no table"), so the linking sentence sits after the roles table
+  in "Where the guidance lives", which task 13.3 rewrites. `make check-guidance`: OK,
+  97 files, one repository vocabulary (a second would fail as "a second vocabulary
+  of the repository layer"). Beyond the task, as section 10's notes say: the four
+  capability configuration files the inventory re-tags carry their new tags
+  (`compute-provisioning-contract` `versioning`; `resource-pool-management`,
+  `settlement-configuration`, `storefront-publication` `deployment`).
+- [x] 11.2 Move each `rule` row of `ARCHITECTURE.md`, `TESTING.md`, and
   `DEPLOYMENT_AND_CONFIG.md` into its file under `docs/guidance/repository/`, with the
   frontmatter the inventory gives, deleting it from its source. Each file opens by
   saying what it holds, and states only what is particular here, linking the shared
@@ -2831,15 +2841,79 @@ the repository's tag table, the rule rows of `ARCHITECTURE.md`, `TESTING.md`, an
   description documents, which are repository guidance. A heading moved whole keeps
   its text, wording changed in the move listed in the notes (31 O1b). Verify each
   `rule` row sits in its destination and its source no longer holds it.
-- [ ] 11.3 Move the draw.io paragraph from `openspec/README.md`'s "Documentation
+  Done: 22 files under `docs/guidance/repository/` hold the three documents' rule
+  rows, each opening with what it holds and linking the description it rests on;
+  where a description reads on from a moved rule, the source keeps a pointer naming
+  what the rule file holds without restating it (tightened after the fresh-context
+  check found pointers that restated their rules). Inspected row by row against the
+  inventory. Two rows land in files section 12 completes:
+  `project-environments.md` holds only `TESTING.md`'s Makefile interpreter rule
+  until section 12 adds "Project environments", and `DEPLOYMENT_AND_CONFIG.md`'s
+  storefront-images sentence, a duplicate of `BUILD_AND_PACKAGING.md`'s "Images",
+  points there until section 12 writes `images.md`, which takes its clause "runtime
+  images do not resolve editable sibling source". `ARCHITECTURE.md`'s document map
+  lost its "Implementation rules" row here rather than in task 13.5, since the
+  row's anchor went with the section. Wording changed in the moves
+  (31 O1b): `package-layers.md` — "beside this document" became "beside the
+  architecture document", "encodes this section" "encodes this file's rules", a lead
+  sentence naming the four layers opens "Layers", "The family-kit placement tests
+  below are the scope rule applied to the compute family" became "The placement
+  tests of `family-kits.md` are the scope rule applied to a market family", and
+  "Kit areas" and the boundary paragraph's layers citation became links;
+  `family-kits.md` — "in this document" became "in this repository's documents",
+  and "Placement tests, applied in order:" a heading; `production-code.md` — "not
+  here" became "not in the architecture document"; `helm-charts.md` — the
+  check-of-a-setting paragraph keeps only the rule and its mediation-check example,
+  its pod's helpers and specification citations staying in `DEPLOYMENT_AND_CONFIG.md`;
+  `local-clusters.md` — the payments example ends at "never `development_auth`", the
+  doubles staying in the description; `migrations-at-startup.md` — "These
+  migrations are fail-forward" became "The migrations after a chain's baseline are
+  fail-forward", and the opening sentence split between the file's opening and
+  "The command and its phase"; `compose-stacks.md` — "a mode" became "the
+  provisioning mode", "the committed files are those below" "the overlays,
+  profiles, and secret overlays `DEPLOYMENT_AND_CONFIG.md` lists", and the
+  lane-target rule joins both documents' copies; `package-versions.md` — a lead
+  clause, "Sites and storefronts are deployed and upgraded together by one
+  business, so", gives `ARCHITECTURE.md`'s reason in place of its "Until then";
+  `project-environments.md` — "the review environment" became "the offline review
+  environment"; `local-clusters.md` — "the annotation" and "the overlay" name
+  `helm.sh/resource-policy: keep` and `helm/local-values.yaml`, which stayed in the
+  description; `qualification-evidence.md` — the runbook pointer moved to the
+  opening; `migration-chain-tests.md` — the opening sentence split between the
+  file's opening and its list's lead; `chart-render-tests.md`, `ansible-gates.md`,
+  and the configuration and chart files — bold lead-ins became headings, their text
+  kept; every relative link re-rooted.
+- [x] 11.3 Move the draw.io paragraph from `openspec/README.md`'s "Documentation
   placement" into `docs/guidance/repository/diagrams.md`, `tags: [repository,
   diagrams]`, linking `docs/guidance/engineering/diagrams.md` (D29), and re-point
   `openspec/specs/change-workflow/diagrams.md`'s opening, which cites the rule in
   `openspec/README.md`. Verify `openspec/README.md` no longer names draw.io.
-- [ ] 11.4 Deduplicate as the preamble says (31 O1b): a rule the inventory marks as
+  Done: `diagrams.md` states the rule under "Drawn in draw.io", linking the
+  engineering file's "Source beside export"; `change-workflow/diagrams.md` cites it.
+  Grep: `openspec/README.md` no longer names draw.io.
+- [x] 11.4 Deduplicate as the preamble says (31 O1b): a rule the inventory marks as
   stated twice merges into one home, and a pair whose copies differ is proposed and
   listed for the triage.
-- [ ] 11.5 Re-point every citation of what this section moved, outside the archive
+  Done. Merged, the copies agreeing: `ARCHITECTURE.md`'s committed-files rule with
+  `DEPLOYMENT_AND_CONFIG.md`'s, in `compose-stacks.md`; `ARCHITECTURE.md`'s secrets
+  rule into `service-configuration.md`, the fuller copy kept; the lane-target rule of
+  `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md`, joined in `compose-stacks.md`;
+  `DEPLOYMENT_AND_CONFIG.md`'s `Recreate` sentence with "No two versions share a
+  database", in `service-databases.md`; `ARCHITECTURE.md`'s doubles summary with
+  `TESTING.md`'s, in `lane-doubles.md`; `ARCHITECTURE.md`'s deterministic-sequence
+  paragraph with `TESTING.md`'s discipline and holds, in `deal-scenarios.md` and
+  `deterministic-tests.md`, adding nothing; `ARCHITECTURE.md`'s pre-1.0 sentence with
+  `DEPLOYMENT_AND_CONFIG.md`'s configuration keys, in `package-versions.md`
+  (`RELEASING.md`'s versioning policy joins it in section 12). For the triage, one
+  pair differs: `TESTING.md` defined a locally verifiable scenario as one with "the
+  payments service replaced by the in-lane double", `ARCHITECTURE.md` as one with
+  "the payments service and the dispute authority replaced by the in-lane doubles",
+  adding that an external-topology scenario making a deal extends a locally
+  verifiable one. Proposed and written in `deal-scenarios.md`: `ARCHITECTURE.md`'s
+  form, since every lane runs the mediation double too.
+  No document outside the guidance was found contradicting the moved rules among
+  those citing them.
+- [x] 11.5 Re-point every citation of what this section moved, outside the archive
   and `docs/prompts/`, as task 7.5 did: the description documents, the handbooks
   and quickstarts, `README.md`, `e2e-tests/README.md`, the runbook, the
   specifications and companions, the skills, the comments of `Makefile`,
@@ -2854,6 +2928,60 @@ the repository's tag table, the rule rows of `ARCHITECTURE.md`, `TESTING.md`, an
   not expect. Fresh-context check of the moves against the inventory. End-to-end:
   none; no pipeline scenario reads guidance, and none is owed. Owed by validation:
   nothing.
+  Done. Re-pointed: the specifications and companions (`market-change-workflow`'s
+  check table and its paths row, `market-composition`, `compute-delivery`,
+  `deployment-state`, `frp-grant-admission`, `test-compatibility`,
+  `physical-provisioning`'s configuration, `change-workflow/diagrams.md`); the
+  operator handbook's migration pointer; `Makefile`, `helm/Makefile`, and
+  `test-render.sh` comments; `docs/development/ARCHITECTURE.toml`'s header; the
+  docstrings of `scripts/architecture.py` and the four `check_architecture_*.py`
+  scripts, and `test_architecture_imports.py`'s; the thirteen `pyproject.toml`
+  comments citing `ARCHITECTURE.md`, "Kind"; `BUILD_AND_PACKAGING.md`'s architecture
+  check sentence; `change-implement`'s SKILL.md, whose dependency-layer bullet named
+  `ARCHITECTURE.md`; and the active changes' documents citing a moved rule —
+  `align-package-paths-with-layers`, `move-escrow-into-alkahest`,
+  `inject-site-pool-authority`, `type-core-packages`, `site-route-contracts`,
+  `kit-owned-storefront-auth-and-persistence`, `kit-owned-storefront-shell`,
+  `deduplicate-dynaconf-bootstrap`, `storefront-domain-parameterization`,
+  `bare-metal-and-credits-domain-stacks`, `buyers-use-the-storefront-client`,
+  `apicredits-end-to-end-lane`, and two rows of the change index. The first Grep, by
+  anchor and quoted name on one line, missed names wrapped across a line break; the
+  fresh-context check found those, now fixed. Beyond comments: `scripts/architecture.py`'s
+  printed failure message named `ARCHITECTURE.md`, "Package and dependency layers",
+  and names `package-layers.md` now — a message string, not a comment, so a code
+  edit beyond D35's list, kept because the message would otherwise send a reader to
+  a description. Not re-pointed: the archived row of the change index recording
+  where an archived change promoted (history), and citations of `ARCHITECTURE.md`'s
+  description that stays (the README, `e2e-tests/README.md`'s pointers to lanes and
+  doubles). Seen and left, as they predate the change and cite no moved section:
+  code comments citing `ARCHITECTURE.md` headings that no longer exist ("Buyer
+  negotiation policy surface", "Capacity and the Site Authority", "API-credits market
+  domain") in `core/buyer`, `core/storefront`, `kit/policy`, `kit/site`, and the
+  domains, and `provisioning/compute/service/tests/integration/`'s "Architecture.md
+  — Testing Strategy — Integration Tests"; for the triage to place as deferred work.
+  Checks: `make check-guidance` OK (97 files); `make check-doc-citations
+  CHANGE=layer-engineering-guidance` reports only the preamble's expected citations;
+  unscoped (`CHANGE=`), it adds only other changes' citations of removed scripts and
+  of `change-workflow/architecture.md`, none from a file this section edited; `make
+  check-agent-skills` OK; `make test-release-tooling` (the scripts' unit suites):
+  2943 passed. `run pre-commit`: after-functional-change (relock, no lock changed)
+  and pre-commit-functional (`make check-packaging`, every architecture part OK, and
+  `make test`) passed; `pre-commit` failed only on the preamble's citations and
+  specification index. Run again after the fresh-context fixes, `make test` failed
+  once in `scripts/tests/test_change_clone.py::test_the_bootstrap_failed`
+  (`ChildProcessError: No child processes`, the test's `os.waitpid` racing the
+  bootstrap child's reaping), which touches nothing this section edits; `make
+  test-release-tooling` run again passed whole (2943), as it had twice before.
+  Fresh-context check: its findings on restated rules in
+  pointers, a lost clause, dangling references in `local-clusters.md`, a misplaced
+  overlay sentence, two inaccurate pointers, the missed wrapped citations, the
+  missing merge and rewordings in these notes, and a stale "shared guidance" in
+  `market-change-workflow`'s paths row were fixed. Declined: citing a heading in the
+  docstrings and `Makefile` comments that cite `package-layers.md` or
+  `local-clusters.md` whole, since each cites the whole file's rules; and the
+  statements made false by the tag table's move — `AGENTS.md`'s opening and "What
+  every session reads", and `openspec/README.md`'s placement rows — which tasks 13.3
+  and 13.4 rewrite in this round.
 
 ## 12. `BUILD_AND_PACKAGING.md` and `RELEASING.md` dissolved; procedures to handbooks
 

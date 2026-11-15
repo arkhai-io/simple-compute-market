@@ -1,7 +1,7 @@
 """VM-specific guardrails the repository architecture check does not express.
 
 `make check-architecture` holds the layer and scope rules for every package
-(docs/development/ARCHITECTURE.md, "Package and dependency layers"). These
+(docs/guidance/repository/package-layers.md). These
 tests hold what is narrower than those rules: VM domain concept modules
 implement core hook shapes from below without importing any core package, the
 storefront builds its domain contract in one place, the VM storefront never

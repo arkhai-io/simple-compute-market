@@ -60,61 +60,16 @@ Dynaconf's dotenv files join the environment layer
 E2e points Dynaconf at its project `.env`. Compute provisioning uses
 Dynaconf's normal `.env` discovery and does not add `.env.local` loading.
 
-Application settings stay out of the environment
-([`configuration.md`](../guidance/engineering/configuration.md#application-settings-stay-out-of-the-environment)):
-a Dockerfile or pod spec sets only `ACTIVE_PROFILES` and
-`CONFIG_DIRECTORY`, and the provisioning service reads `ANSIBLE_CONFIG`
-from its resolved settings at startup and writes it into `os.environ`
-once.
-
-**Secrets travel in a secret profile or overlay file, never in a variable the
-configuration names**
-([`configuration.md`](../guidance/engineering/configuration.md#secrets-travel-in-a-secret-profile-or-overlay-file)).
-Here the file is a Secret-backed `config-<profile>.yml` (or the registry's
-`config-<profile>.env`) added to `ACTIVE_PROFILES`, or a storefront's
-`storefront.secrets.toml` overlay. On a cluster that file is a Kubernetes Secret
-key, which External Secrets writes; under Compose it is a bind-mounted file.
-Trust follows the same rule
-([`configuration.md`](../guidance/engineering/configuration.md#trust-is-configured-where-its-client-reads-it)):
-a private CA is a configured bundle path the one client that needs it reads,
-such as `[Settlement.arkhai_payments].ca_bundle_path`, or a
-`[[DisputeCredential]]`'s `ca_bundle_path` for that authority's client. The signing
-credential `ARKHAI_IDENTITY_CREDENTIAL` is the one exception to the rule, declared in
-[`AGENTS.md`, "Exceptions to shared guidance"](../../AGENTS.md#exceptions-to-shared-guidance):
-it reaches a service as a variable sourced from a Secret.
-A buyer's `api_key_env`, in its payments section or a `[[DisputeCredential]]`, is
-not a service's configuration but the buyer's own exact named-variable provider,
-beside its keyring and secret-file providers (see
-[`marketplace-identity`'s configuration](../../openspec/specs/marketplace-identity/configuration.md)).
-
-**A setting that belongs to one domain is named for it**
-([`configuration.md`](../guidance/engineering/configuration.md#a-setting-that-belongs-to-one-domain-is-named-for-it)).
-The compute provisioning service reads the VM playbook from
-`vm_playbook_path` and the bare-metal playbook from
-`bare_metal_playbook_path`; neither has an alias. Its first startup step
-refuses a configuration stating the retired `playbook_path` in any layer,
-environment included, naming `vm_playbook_path`, and the
-provisioning chart's values schema refuses `config.playbook_path`. The same step
-refuses the retired `inventory_ini` and `inventory_path`, whatever value either
-states, naming `host_definitions_path` (the operator handbook's
-["Upgrading from an INI inventory"](../operator-handbook.md#upgrading-from-an-ini-inventory)
-gives the upgrade). A setting
-retired because the service stopped needing it, such as
-`default_pool_inventory_group` and `default_host_id`, is not refused.
-
-Before a package reaches 1.0.0, the meaning of a configuration key it reads may
-change incompatibly in a minor release (see
-[`versioning.md`](../guidance/engineering/versioning.md)).
+What a service takes from its environment, where its secrets and trust are
+configured, and how its settings are named are
+[`service-configuration.md`](../guidance/repository/service-configuration.md).
 
 ## Kubernetes: ConfigMap and Secret mounting
 
-This repository's charts deliver configuration through mounted files
-([`kubernetes.md`, "Configuration travels through mounted files"](../guidance/engineering/kubernetes.md#configuration-travels-through-mounted-files)),
-the application Deployment and the Helm test pods alike: a ConfigMap
-rendered from the chart's `values.yaml` mounts at `CONFIG_DIRECTORY` as a
-`config-<profile>.yml` file, a Secret holding its own `config-<profile>.yml`
-key mounts beside it, and a pod sets only `ACTIVE_PROFILES` and
-`CONFIG_DIRECTORY`. Where the charts differ:
+What every chart renders for its service is
+[`helm-charts.md`](../guidance/repository/helm-charts.md), and what its render tests
+assert is [`chart-render-tests.md`](../guidance/repository/chart-render-tests.md).
+Where the charts differ:
 
 - The registry chart: the registry is a Pydantic-settings service whose
   profile is a dotenv file, `config-production.env`, and its chart maps
@@ -138,38 +93,8 @@ key mounts beside it, and a pod sets only `ACTIVE_PROFILES` and
   rendered one. Each file renders through `toYaml` and each mount's name is
   quoted, so content and name reach the container exactly as given.
 
-**The rule behind the pod rule.** Every configuration value of a storefront
-reaches it through its configuration system
-([`configuration.md`, "The configuration system carries every value"](../guidance/engineering/configuration.md#the-configuration-system-carries-every-value)).
-Beside the values that select which configuration loads, a storefront takes
-outside that system only the signing credential `ARKHAI_IDENTITY_CREDENTIAL`,
-which must be kept from the loader. The storefront charts know the port their
-container, probes, and Service share, and the path of the CA bundle whose
-`ca_bundle_path` they derive. A storefront's
-secrets — its wallet key, a registry write token, its payments `api_key`, its
-`[[DisputeCredential]]` entries — are settings in its Secret overlay, never pod
-variables, so a storefront pod's environment holds only `XDG_CONFIG_HOME` and the
-signing credential. A storefront does not refuse to start because a value reached
-it through its environment. Both storefront charts set
-`enableServiceLinks: false`
-([`kubernetes.md`](../guidance/engineering/kubernetes.md#service-links-are-off-where-a-loader-reads-a-prefixed-override-layer)),
-since a Service named `storefront…` would land in the storefronts'
-`STOREFRONT_` override layer.
-
-**A deployment does not wait on a service's dependencies**
-([`deployment.md`](../guidance/engineering/deployment.md#a-deployment-does-not-wait-on-a-services-dependencies)).
-The one init container a chart runs for a service is that service's own
-migration — the provisioning service's, each storefront agent's, the bare-metal
-storefront's, and each registry instance's (see "Migrations at startup"). Both
-storefront charts give their container a `startupProbe` on `/health`, a process
-check that calls no dependency
-([`kubernetes.md`](../guidance/engineering/kubernetes.md#a-startup-probe-on-a-process-check)).
-Each storefront
-chart's render tests assert that no `wait-for-` container renders, that exactly
-one init container does — the storefront's migration command from the
-application's image over its data volume — and that the `startupProbe` does; the
-provisioning and registry charts' render tests assert their migration init
-container the same way.
+What a storefront takes outside its configuration files is
+[`service-configuration.md`, "A storefront's configuration"](../guidance/repository/service-configuration.md#a-storefronts-configuration).
 
 The provisioning chart's `mockMode` appends the `mock` profile to
 `ACTIVE_PROFILES`
@@ -309,11 +234,11 @@ pod on another node could not attach, and the `/health` probes, and the VM pod
 the ZeroTier capabilities and device. The check is described under
 [`settlement-configuration`'s "Settlement consumer configuration and cutover"](../../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover).
 
-A chart renders a check of a setting it cannot see only where a value names the
-check's target, and that value is the release's statement that the setting exists.
 The VM chart's `<agent>-mediation-check` pod, from the same helpers and with the
-same absences, is rendered this way, where the agent's `tests.mediationOrigin`
-names a dispute authority, since the agent's `[[DisputeCredential]]` lives in the
+same absences, is rendered where the agent's `tests.mediationOrigin`
+names a dispute authority, as
+[`helm-charts.md`, "A check of a setting the chart cannot see"](../guidance/repository/helm-charts.md#a-check-of-a-setting-the-chart-cannot-see)
+requires, since the agent's `[[DisputeCredential]]` lives in the
 runtime Secret's overlay
 ([deployment-state, "A storefront checks its mediation configuration from its own container"](../../openspec/specs/deployment-state/spec.md#requirement-a-storefront-checks-its-mediation-configuration-from-its-own-container);
 the operator handbook's ["Payments access"](../operator-handbook.md#payments-access)).
@@ -403,8 +328,8 @@ is a test overlay enabling contact exchange for Bob with SMTP delivery to the
 reads back; `docs/development/VALIDATION_RUNBOOK.md` gives the commands.
 
 `storefront.json` is JSON so every string, including a 160-bit address, is read
-back as a string. Write an integer above 2^53 in a values file as a string
-([`helm.md`](../guidance/engineering/helm.md#an-integer-above-253-is-a-string)).
+back as a string; how a values file writes a large integer is
+[`helm-charts.md`](../guidance/repository/helm-charts.md#an-integer-above-253-is-a-string)'s.
 
 ## Per-domain stack composition
 
@@ -419,20 +344,9 @@ authorities:
 - `docker-compose.yml` is the full local stack: it includes `compose.vms.yml`
   and `domains/apicredits/compose.yml`, so the dev chain enters once.
 
-**A stack's configuration lives in committed files**
-([`configuration.md`](../guidance/engineering/configuration.md#a-stacks-configuration-lives-in-committed-files)).
-Here the Makefiles choose the Compose files, a profile, and a mode, and the
-committed files are those below.
-
-Each base file — the domain files and `compose.bare-metal.yml` — composes topology
-only: images, ports, volumes, health checks, the database paths, `REDIS_URL`, a
-callback URL naming a service, and the container paths of definition documents.
-It binds no identity, configuration file or secret and gives none a fallback, so a
-service brought up without an overlay refuses to start for want of its
-credential or document, rather than Compose refusing at parse time. Every
-development binding lives in a root-level overlay layered with `-f`, stated
-literally and relative to the repository root, the project directory of every
-`-f` file:
+What a base file and an overlay may bind is
+[`compose-stacks.md`](../guidance/repository/compose-stacks.md). The overlays, each
+of whose headers gives the command it belongs to:
 
 | Overlay | Binds |
 |---|---|
@@ -474,10 +388,8 @@ The full local stack is
 docker compose -f docker-compose.yml -f compose.vms-local.yml -f compose.apicredits-local.yml up -d
 ```
 
-and each end-to-end lane's target in `e2e-tests/Makefile` (`test-e2e-vm`,
-`test-e2e-bare-metal`, `test-e2e-apicredits`) names only its compose project and
-files and the run's mode; its `-down` and `-logs` targets name the same. Each
-overlay's header gives the command it belongs to.
+and each end-to-end lane's target in `e2e-tests/Makefile` names its own
+([`compose-stacks.md`](../guidance/repository/compose-stacks.md#a-lane-target-names-only-its-files-its-project-and-its-mode)).
 
 Whether a compute stack provisions through its provisioning service's `mock`
 profile is chosen per run, not per stack file and never by a storefront.
@@ -505,16 +417,10 @@ paths. An `include` cannot be used to import a service and redefine it in the sa
 wrapper.
 
 Storefront images install their distributions from the staged `.dist`
-wheelhouse; runtime images do not resolve editable sibling source. API-credit
-and bare-metal SQLite/queue/registry stores occupy separate named volumes.
-
-Stack files carry public URLs, canonical principals, explicit Resource Pool
-offering modes, and exact selected-site bindings. Signer, API-admin,
-provisioning SSH, payment account, and buyer credentials are independent
-service-scoped file references with no committed fallback. Missing identity,
-inventory, pool declaration, site authority, or credential blocks startup or
-scenario preflight; it never selects a test signer, default site, payload-
-guessed domain, direct executor, or provider simulator.
+wheelhouse ([`BUILD_AND_PACKAGING.md`, "Images"](BUILD_AND_PACKAGING.md#images)). API-credit
+and bare-metal SQLite/queue/registry stores occupy separate named volumes. What a
+stack file binds, and that missing material blocks startup rather than taking a
+fallback, are [`compose-stacks.md`, "No fallback"](../guidance/repository/compose-stacks.md#no-fallback).
 
 The bare-metal storefront publishes on a timer loop over the site projections it
 holds, every `[capacity].publication_interval_seconds` and whenever a poll sees a
@@ -528,16 +434,8 @@ access and revocation on a real host.
 
 ## Stateful service persistence
 
-Each service owns its own database; there is no shared database between
-services (see `openspec/specs/deployment-state/spec.md`'s "Explicit
-persistence ownership"). Each SQLite-backed service's chart deploys it with
-the `Recreate` strategy over a `ReadWriteOnce` volume
-([`kubernetes.md`, "A single-writer store deploys with `Recreate`"](../guidance/engineering/kubernetes.md#a-single-writer-store-deploys-with-recreate)).
-
-The API-credit storefront and the credits service each own their own state: the
-credits service owns keys, request-digested grants, balances, quota, credentials,
-and its migration history. Restart either against its own volume. Never
-source-share a sibling package or mount one service's database into the other.
+Who owns each service's state, and how a stateful service is deployed over it, is
+[`service-databases.md`](../guidance/repository/service-databases.md).
 
 Registry and compute-provisioning runtime images create `/app/data` owned by
 their non-root `appuser`. Fresh Compose named volumes inherit that ownership,
@@ -553,20 +451,9 @@ deployment's volumes are deleted with the release, so uninstalling and deploying
 again starts every service from no state rather than from a database an earlier
 deployment of other code migrated. A PVC whose release was last installed or
 upgraded without the overlay still carries the annotation, and survives an
-uninstall until it is deleted by hand.
-
-A local development cluster is deployed with `make -C helm deploy-local`, never
-`make -C helm deploy` or the root `make deploy`, whether a person or an agent is
-deploying, because a local cluster is redeployed with whatever code is checked out, and a
-retained volume keeps the state that code wrote — a database another branch
-migrated — for the next deployment to start from. Pre-review validation run in
-`default` refuses to deploy over a release volume that carries the annotation and
-stops to ask, so a local deploy without the overlay costs the next validation a
-decision; a change's validation runs in its own namespace instead and deletes its
-volumes itself
-([`market-change-workflow`'s "The change's namespace"](../../openspec/specs/market-change-workflow/README.md#the-changes-namespace)).
-`make -C helm deploy` is for a
-deployment whose state must survive reinstalling.
+uninstall until it is deleted by hand. Which target deploys a local development
+cluster follows from this
+([`local-clusters.md`](../guidance/repository/local-clusters.md#a-local-cluster-is-deployed-with-deploy-local)).
 
 ### Release topology
 
@@ -596,13 +483,12 @@ release 1's `dev-env`. Every identity the overlay names is a well-known developm
 value (Anvil accounts 8 and 9) never for a public network. Release 2 reuses release
 1's provisioning SSH and runtime Secrets and reads three of its own.
 
-**A local release configures a service through the values a deployment uses**
-([`deployment.md`](../guidance/engineering/deployment.md#a-local-release-configures-a-service-through-the-values-a-deployment-uses)).
-Payments are the example: both
-storefronts settle in `arkhai.payments.v1` against the payments lane double
+In the local release
+([`local-clusters.md`](../guidance/repository/local-clusters.md#a-local-release-configures-a-service-through-the-values-a-deployment-uses)),
+both storefronts settle in `arkhai.payments.v1` against the payments lane double
 through `[Settlement.arkhai_payments]` in their `config`, the `caBundle` option on
 the `payments-ca-bundle` ConfigMap, and the payments `api_key` in their runtime
-Secret's overlay, never `development_auth`. The double is the `payments-lane-double`
+Secret's overlay. The double is the `payments-lane-double`
 subchart, which `helm/local-values.yaml` enables and no release values do. Its
 Service is named `payments-double`, the name its certificate is issued for, in
 every release, so a namespace runs one: release 2's values disable the subchart,
@@ -663,66 +549,16 @@ double's respondent listing. The release serves no payment or dispute scenario.
   `arkhai_payments.api_key_missing` and its payments check failing at the
   `configuration` step.
 
-An end-to-end scenario that needs release 2 states `make helm-topology-up` on its
-Makefile target and in its suite module's docstring; the Helm validation scenarios
-need release 1 alone.
-
-**Helm test pods carry no workload selector label**
-([`kubernetes.md`](../guidance/engineering/kubernetes.md#test-pods-carry-no-workload-selector-label)).
-Each chart labels its Helm
-test pod through its own `<chart>.testLabels` helper: chart, version, managed-by,
-instance, and `app.kubernetes.io/component: test`, but never
-`app.kubernetes.io/name`, which every Deployment selector requires, so
-`kubectl logs -l <selector>` or `kubectl logs deploy/<name>` finds only the
-service's pods.
-`helm/tests/test_release_topology.py` renders both topology releases and asserts
-that no Pod annotated `helm.sh/hook: test` carries all of any Deployment's
-`matchLabels` or any Service's selector, and that each release renders its expected
-test pods.
+The Helm validation scenarios need release 1 alone. What a scenario needing release 2
+states is [`local-clusters.md`](../guidance/repository/local-clusters.md#a-scenario-needing-release-2)'s,
+and how the releases' Helm test pods are labelled is
+[`helm-charts.md`](../guidance/repository/helm-charts.md#helm-test-pods-carry-no-workload-selector-label)'s.
 
 ## Migrations at startup
 
-Every stateful service migrates as [`migrations.md`](../guidance/engineering/migrations.md)
-describes, through the command and in the phase below; for this repository the rules
-are `deployment-state`'s
-["Service-owned migration history"](../../openspec/specs/deployment-state/spec.md#requirement-service-owned-migration-history)
-and the requirements beside it, and the design is its companion's
-["Migration and initialization boundary"](../../openspec/specs/deployment-state/architecture.md#migration-and-initialization-boundary).
-
-| Service | Command | Deployment phase |
-|---|---|---|
-| Compute provisioning | `compute-provisioning-migrate` | init container in `helm/charts/provisioning`; before the service under Compose |
-| VM storefront | `market-storefront-migrate` | init container per agent in `helm/charts/storefront`; before the storefront under Compose |
-| Bare-metal storefront | `bare-metal-storefront-migrate` | init container in `helm/charts/bare-metal-storefront`; before the storefront under Compose |
-| API-credit storefront | `apicredits-storefront-migrate` | before the storefront under Compose |
-| API-credit service | `apicredits-service-migrate` | before the service under Compose, and in its image's command |
-| Registry | `registry-migrate` | init container in `helm/charts/registry`, for each instance; before the registry under Compose, and in its image's command |
-
-Each service's `Makefile` has a `migrate` target running its command. Under
-Helm the init container runs from the application's image with the
-application's environment, configuration mounts and data volume — the VM
-storefront's without `entrypoint.sh`, which only starts ZeroTier — and is the
-only init container a chart renders for a service (see "Kubernetes: ConfigMap
-and Secret mounting"). Under Compose the service's command is
-`sh -c "<service>-migrate && exec <service command>"`, so the application starts
-only once the migration succeeds; the VM storefront runs it through
-`./entrypoint.sh`, and the bare-metal storefront, whose image's entrypoint is its
-CLI, states it as its `entrypoint`. The registry chart's application container
-states its own `uvicorn` command, since the image's command migrates first for
-Compose.
-
-Each migration command is configured as
-[`migrations.md`](../guidance/engineering/migrations.md#the-command-reads-only-the-database-location-and-log-level)
-says; the bare-metal storefront's reads only its `db_path`, logging at INFO. What a
-deployment configures — a site's pools, their seed, its playbooks, the
-API-credit service's `default` pool — is applied by the service's startup
-after its check passes. Migration creates no pool.
-
-Each application opens its database as
-[`migrations.md`](../guidance/engineering/migrations.md#the-application-opens-its-database-read-only)
-says, and `<service>-migrate --check` is the check mode
-([`migrations.md`](../guidance/engineering/migrations.md#a-check-mode-previews)):
-it exits 0 only for a compatible database.
+Each stateful service's migration command, and the phase it runs in, are
+[`migrations-at-startup.md`](../guidance/repository/migrations-at-startup.md). The command's check mode,
+`<service>-migrate --check`, exits 0 only for a compatible database:
 
 | Result | Meaning | Remedy |
 |---|---|---|
@@ -750,7 +586,7 @@ restoring the backup taken before it. The operator handbook's
 ["Upgrading a deployment"](../operator-handbook.md#upgrading-a-deployment) is the
 procedure.
 
-See [`TESTING.md`, "Migration Tests"](TESTING.md#migration-tests) for how the
+See [`migration-chain-tests.md`](../guidance/repository/migration-chain-tests.md) for how the
 chains are proven: each against its floor fixture, adoption, the store-open
 test, and each service's migration suite.
 
@@ -793,12 +629,8 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
   delivery records and escrows and deletes core `credentials` rows for listings
   no other offering mode binds (`20261106_002_vm_credentials_cleared`).
 
-These migrations are fail-forward
-([`migrations.md`](../guidance/engineering/migrations.md#migrations-fail-forward)).
-No two versions of a service share a database
-([`migrations.md`](../guidance/engineering/migrations.md#no-two-versions-share-a-database)):
-each chart deploys its service with `strategy: Recreate` over one ReadWriteOnce
-volume.
+How these migrations fail is
+[`migrations-at-startup.md`, "Migrations fail forward"](../guidance/repository/migrations-at-startup.md#migrations-fail-forward).
 
 Every supported database already holds canonical principals, since each
 service's v0.3.0 floor converted its identity-bearing rows; authorities still

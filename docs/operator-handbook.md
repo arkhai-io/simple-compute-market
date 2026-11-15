@@ -596,7 +596,7 @@ Every stateful service — compute provisioning, the VM, bare-metal and API-cred
 storefronts, the API-credit service, and the registry — migrates its database
 through its own command before its application starts, and its application
 refuses a database its command has not migrated
-(["Migrations at startup"](development/DEPLOYMENT_AND_CONFIG.md#migrations-at-startup)
+([`migrations-at-startup.md`, "The command and its phase"](guidance/repository/migrations-at-startup.md#the-command-and-its-phase)
 names each command and where it runs). A release can therefore fail to start a
 service; it never starts one on a database it does not understand. A release that
 retires configuration settings is also cut over to a migrated configuration

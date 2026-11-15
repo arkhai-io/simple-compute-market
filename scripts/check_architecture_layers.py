@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail if a package depends upward, a layer has a cycle, or a project is misclassified.
 
-Rules (docs/development/ARCHITECTURE.md, "Package and dependency layers"):
+Rules (docs/guidance/repository/package-layers.md, "Layers" and "Kind"):
 
 - ``unclassified``: a project whose path yields no layer, kind, and scope and
   that has no override row in docs/development/ARCHITECTURE.toml;

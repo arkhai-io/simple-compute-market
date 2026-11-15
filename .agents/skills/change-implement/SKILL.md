@@ -245,7 +245,8 @@ Work through the section's tasks in order. For each:
 - Prove it at the lowest test level that can (`docs/guidance/engineering/testing.md`,
   `test-levels.md`), through the seams and injected dependencies the code already
   offers rather than brute-force patching (`test-seams.md`).
-- Respect the dependency layers in `ARCHITECTURE.md`; `TYPE_CHECKING` imports count
+- Respect the dependency layers in `docs/guidance/repository/package-layers.md`;
+  `TYPE_CHECKING` imports count
   (`docs/guidance/engineering/dependencies-python.md`).
   Internal dependencies come from wheels and locks through `scripts/uv_project.py`,
   never editable sibling paths.

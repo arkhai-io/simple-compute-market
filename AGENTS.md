@@ -76,15 +76,9 @@ index and the cross-system documents are named in `openspec/README.md`:
 | The checks the workflow's closeout parts run | [`openspec/README.md`, "The checks the workflow's parts run here"](openspec/README.md#the-checks-the-workflows-parts-run-here) |
 | The repository's roadmap | [`docs/development/ROADMAP.md`](docs/development/ROADMAP.md) |
 
-## Tags
-
-This repository's tags, beside the shared layers' tables. A capability's guidance is
-located by its directory, so no capability has a tag.
-
-| Tag | Kind | Description |
-|---|---|---|
-| `repository` | layer | Names this repository's packages, services, tools, deployment, documents, or make targets |
-| `architecture` | topic | This repository's system shape, authorities, and flows |
+This repository's tags are the table in
+[`docs/guidance/repository/README.md`, "Tags"](docs/guidance/repository/README.md#tags),
+beside the shared layers' tables.
 
 ## Exceptions to shared guidance
 
