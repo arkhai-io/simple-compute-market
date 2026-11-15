@@ -557,8 +557,9 @@ workflow layer:
 - **Procedures** — what the owner or an operator does or types. They live in
   handbooks in `docs/`, without frontmatter and outside the guidance set, beside the
   operator handbook and the change workflow's handbook; an operator's procedure goes
-  to the operator handbook (141 F1), the owner's to an owner handbook, provisionally
-  `docs/release-handbook.md`.
+  to the operator handbook (141 F1), the owner's to the owner's handbook,
+  `docs/release-handbook.md`, which holds the procedures that publish this
+  repository's packages and artifacts.
 
 The principle holds in any repository, so it is engineering guidance, in
 `docs/guidance/engineering/documentation.md` (D33).
@@ -721,7 +722,11 @@ CW-g7lt, CW-d2rw, CW-p9sa, CW-n6dm, and MCW-c4ek already cover files under
 `docs/guidance/repository/`. The guidance check finds them by place under
 `docs/guidance/` and reads a vocabulary from the table under a "Tags" heading in any
 guidance file (`scripts/check_guidance.py`, `read_guidance`), so moving the
-repository's table (D32) needs no code change.
+repository's table (D32) needs no code change. The round's only code edits follow
+the documents that dissolve (D10 as amended): `scripts/tests/test_publish_matrix.py`
+reads the published-package table from its file under `docs/guidance/repository/`,
+and the packaging checks' docstrings and messages, which name
+`BUILD_AND_PACKAGING.md`, name the files that hold their conventions.
 
 ### Settled at round 1's triage
 
