@@ -18,17 +18,20 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import httpx
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
 from market_arkhai_payments.seller import servicing_stage
 from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
-from market_identity import Ed25519Signer
+from market_deal_lifecycle_client import LifecycleClient
+from market_deal_servicing import create_lifecycle_router
+from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime.rate_publication import DEFAULT_PREMATURE_STOP_PENALTY_PERIODS
 from market_settlement_runtime.rate_servicing import (
     RateServicing,
@@ -51,6 +54,8 @@ from tests._settings_overrides import replaced_setting
 from tests.delivery_fakes import DeliveryProvisioning, DeliverySite
 from tests.fake_site import TEST_MARKETPLACE_SIGNER
 from tests.publication_app import (
+    ADMIN_SIGNER,
+    BUYER_SIGNER,
     SELLER_WALLET,
     SETTLEMENT,
     SITE,
@@ -63,7 +68,8 @@ from tests.publication_app import (
 MECHANISM = "arkhai.payments.v1"
 PAYEE = "22222222-2222-4222-8222-222222222222"
 _DISPUTE_ACCOUNT = "33333333-3333-4333-8333-333333333333"
-_PAYMENTS_SERVICE = Ed25519Signer(bytes(range(1, 33)))
+#: The payments service's receipt and snapshot signer.
+PAYMENTS_SERVICE = Ed25519Signer(bytes(range(1, 33)))
 #: The pool's absolute availability bound. Publication and acceptance read the
 #: wall clock, so this holds only until 2035; until then the relative bound is
 #: the one that limits the default horizon.
@@ -144,7 +150,7 @@ def _settlement_root() -> dict[str, Any]:
         "arkhai_payments": {
             "enabled": True,
             "service_url": "http://127.0.0.1:9",
-            "service_identity": _PAYMENTS_SERVICE.identity.model_dump(mode="json"),
+            "service_identity": PAYMENTS_SERVICE.identity.model_dump(mode="json"),
             "fee_bps": 250,
             "development_auth": True,
         },
@@ -199,6 +205,8 @@ class RecurringSettlement:
     coordinator: VmPaymentsCoordinator
     lifecycle: VmDealLifecycle
     provisioning: DeliveryProvisioning
+    #: The buyer's typed client of the storefront's lifecycle routes.
+    buyer_lifecycle: LifecycleClient
 
     async def delivered(self, negotiation_id: str) -> None:
         """Wait for the delivery drive the settlement started to return."""
@@ -207,8 +215,25 @@ class RecurringSettlement:
             await task
 
 
+class _NoSettlementJobs:
+    """The settlement worker of a composition holding no Alkahest jobs.
+
+    The settlement-servicing loop runs the deal lifecycle's cycle, then the
+    worker's; this world composes no Alkahest settlement, so its worker has
+    nothing to run.
+    """
+
+    async def run_once(self) -> int:
+        return 0
+
+
 @contextlib.asynccontextmanager
-async def settlement(world: RecurringWorld) -> AsyncIterator[RecurringSettlement]:
+async def settlement(
+    world: RecurringWorld,
+    *,
+    payments: FakePaymentsClient | None = None,
+    clock: Callable[[], int] | None = None,
+) -> AsyncIterator[RecurringSettlement]:
     """Compose the payments settle path over ``world``'s served storefront.
 
     The composition gains its payments coordinator and deal lifecycle as
@@ -216,11 +241,15 @@ async def settlement(world: RecurringWorld) -> AsyncIterator[RecurringSettlement
     declaration, with the stage's payments client the in-process engine. The
     settle routes are mounted on the world's app, so a buyer settles through
     the typed client and delivery runs through the real delivery path and end
-    service.
+    service. ``payments`` is the payments service, a fresh engine unless a test
+    passes the one an earlier storefront used, since the service outlives a
+    storefront restart; ``clock`` is the deal lifecycle's, wall time unless
+    given. The settlement-servicing loop runs the lifecycle's recovery cycle,
+    and the lifecycle routes are mounted for the buyer's lifecycle client.
     """
     composition = world.app.composition
     domain = world.app.db.domain_registry.resolve_mode("vm").contract
-    payments = FakePaymentsClient(signer=_PAYMENTS_SERVICE)
+    payments = payments or FakePaymentsClient(signer=PAYMENTS_SERVICE)
     stage = servicing_stage(
         composition.settlement_config.mechanism_config("arkhai_payments"),
         client_for_owner=payments, rate_servicing=composition.rate_servicing,
@@ -232,17 +261,25 @@ async def settlement(world: RecurringWorld) -> AsyncIterator[RecurringSettlement
     )
     lifecycle = VmDealLifecycle(
         world.app.db, TEST_MARKETPLACE_SIGNER, coordinator, composition.disputes, fulfillment=provisioning,
+        **({"clock": clock} if clock is not None else {}),
     )
     coordinator.lifecycle = lifecycle
     previous = container.resolved_settlement_composition
     container.resolved_settlement_composition = replace(
         composition, domain=domain, arkhai_payments_stage=stage,
-        payments_coordinator=coordinator, lifecycle=lifecycle,
+        payments_coordinator=coordinator, lifecycle=lifecycle, worker=_NoSettlementJobs(),
     )
     world.app.app.include_router(settle_router)
     world.app.app.include_router(settlements_router)
+    world.app.app.include_router(create_lifecycle_router(
+        lambda _: lifecycle.routes(TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,))),
+    ))
     try:
-        yield RecurringSettlement(payments, coordinator, lifecycle, provisioning)
+        async with LifecycleClient(
+            "http://test", BUYER_SIGNER, TrustedIdentitySet(identities=(TEST_MARKETPLACE_SIGNER.identity,)),
+            transport=httpx.ASGITransport(app=world.app.app),
+        ) as buyer_lifecycle:
+            yield RecurringSettlement(payments, coordinator, lifecycle, provisioning, buyer_lifecycle)
     finally:
         await coordinator.stop()
         await lifecycle.close()
@@ -290,7 +327,7 @@ async def recurring_world(
             runtime=None,
             coordinator=None,
             worker=None,
-            local_principal=_PAYMENTS_SERVICE.identity,
+            local_principal=PAYMENTS_SERVICE.identity,
             mechanism_clients={},
             evidence_clients={},
             configuration_registry=registry,

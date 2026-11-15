@@ -302,6 +302,16 @@ class VmDealLifecycle:
             except Exception:
                 logger.exception("VM respondent discovery awaits recovery")
         for deal in deals:
+            # The payment authority is read before a missed deadline is admitted,
+            # so a buyer stop it recorded while the storefront was down is the
+            # deal's end rather than seller non-delivery. Admission waits for that
+            # read itself, so a failed one delays the deadline to a later cycle.
+            try:
+                async for _ in self.seller.watch(deal.negotiation_id):
+                    pass
+            except Exception:
+                logger.exception("VM lifecycle watch awaits recovery for %s", deal.negotiation_id)
+
             def admit_deadline(conn):
                 end = EndSession(conn)
                 record = end.read(deal.negotiation_id)
@@ -320,16 +330,17 @@ class VmDealLifecycle:
             except Exception:
                 logger.exception("VM physical end awaits recovery for %s", deal.negotiation_id)
             try:
-                async for _ in self.seller.watch(deal.negotiation_id):
-                    pass
-            except Exception:
-                logger.exception("VM lifecycle watch awaits recovery for %s", deal.negotiation_id)
-            try:
                 await in_transaction(self.path, lambda conn: resolve_site_corrections(
                     EndSession(conn), deal.negotiation_id, now=self.clock(),
                 ))
             except Exception:
                 logger.exception("VM end classification awaits recovery for %s", deal.negotiation_id)
+            try:
+                # The watch dispatched the filings journaled before it; this
+                # dispatches any the deadline or a site correction journaled since.
+                await self.seller.dispatch_filings(deal.negotiation_id)
+            except Exception:
+                logger.exception("VM delivery-end filing awaits recovery for %s", deal.negotiation_id)
             try:
                 await self.end.drive_physical(deal.negotiation_id)
             except Exception:

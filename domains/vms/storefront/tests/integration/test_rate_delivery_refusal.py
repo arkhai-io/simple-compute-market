@@ -19,11 +19,13 @@ from dataclasses import asdict
 
 from arkhai_vms import make_vm_provision_terms
 from market_arkhai_payments import PaymentSettlementData
+from market_arkhai_payments.fixtures import FakePaymentsClient
 from market_deal_lifecycle.delivery import DeliveryAuthorization
-from market_deal_servicing import EndSession
+from market_deal_lifecycle_contracts.models import LifecycleRead
+from market_deal_servicing import DeliveryRecord, EndSession
 from market_deal_servicing.evidence import transaction
 
-from tests.recurring_world import MECHANISM, recurring_world, settlement
+from tests.recurring_world import MECHANISM, PAYMENTS_SERVICE, recurring_world, settlement
 
 #: Fixture payer account; never a real account.
 PAYER = "11111111-1111-4111-8111-111111111111"
@@ -111,3 +113,68 @@ async def test_a_settled_recurring_deal_is_not_delivered_while_rate_servicing_is
                    WHERE negotiation_id=?""", (negotiation_id,),
             ).fetchone()
         assert row == ("provisioning", None, None)
+
+
+async def settled_refused_deal(tmp_path, payments) -> tuple[str, PaymentSettlementData, DeliveryRecord]:
+    """A recurring deal settled and refused at commit by a storefront that then stops."""
+    async with recurring_world(tmp_path) as world, settlement(world, payments=payments) as settled:
+        negotiation_id, data = await accepted_recurring_deal(world)
+        approve(settled, data)
+        await world.app.buyer.settle_agreement(negotiation_id)
+        await settled.delivered(negotiation_id)
+        with transaction(world.app.db.db_path) as conn:
+            record = EndSession(conn).read(negotiation_id)
+    return negotiation_id, data, record
+
+
+async def recovered(tmp_path, payments, negotiation_id, *, at: int) -> LifecycleRead:
+    """Restart the storefront over the same database at ``at``, run its recovery
+    cycle, and return the buyer's lifecycle read of the deal.
+
+    The read is made of the storefront opened again at wall time: lifecycle
+    requests and answers are signed at each side's clock and refused when the
+    two differ by more than their allowed skew, as a clock moved past the
+    deadline does.
+    """
+    payments.observed_at = at
+    async with recurring_world(tmp_path) as world, settlement(world, payments=payments, clock=lambda: at):
+        await world.app.client.admin_run_lifecycle_cycle("settlement-servicing")
+    async with recurring_world(tmp_path) as world, settlement(world, payments=payments) as settled:
+        return await settled.buyer_lifecycle.read(negotiation_id)
+
+
+async def test_a_buyer_stop_while_the_storefront_is_down_wins_over_the_deadline_at_recovery(tmp_path):
+    payments = FakePaymentsClient(signer=PAYMENTS_SERVICE)
+    negotiation_id, data, record = await settled_refused_deal(tmp_path, payments)
+
+    # With the storefront stopped, the buyer stops at the payment authority
+    # before the delivery deadline; no hint reaches the storefront.
+    stopped_at = record.committed_at + 60
+    assert stopped_at < record.deadline
+    payments.observed_at = stopped_at
+    payments.engine.submit(data.transaction_id, {
+        "account": PAYER, "requestId": "buyer-stop", "event": {"kind": "stop"},
+    })
+
+    read = await recovered(tmp_path, payments, negotiation_id, at=record.deadline + 60)
+
+    # The payer's end, recorded from the authority at recovery, is the deal's,
+    # and no seller non-delivery is recorded or filed.
+    assert read.delivery.recorded_end is not None
+    assert (read.delivery.recorded_end.cause, read.delivery.recorded_end.ended_at) == ("payer", stopped_at)
+    assert read.filings == []
+
+
+async def test_recovery_after_the_deadline_records_seller_non_delivery_for_a_refused_rate_deal(tmp_path):
+    payments = FakePaymentsClient(signer=PAYMENTS_SERVICE)
+    negotiation_id, _, record = await settled_refused_deal(tmp_path, payments)
+
+    read = await recovered(tmp_path, payments, negotiation_id, at=record.deadline + 60)
+
+    # The buyer never stopped: recovery reads the authority first, so its one
+    # cycle records the deadline as seller non-delivery and journals the filing.
+    assert read.delivery.recorded_end is not None
+    assert (read.delivery.recorded_end.cause, read.delivery.recorded_end.ended_at) == (
+        "non_delivery", record.deadline,
+    )
+    assert len(read.filings) == 1

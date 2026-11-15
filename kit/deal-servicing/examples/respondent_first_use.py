@@ -16,7 +16,7 @@ from pydantic import SecretStr
 
 from market_deal_servicing import (
     Classification, DeliveryRecord, EndSession, FinalRequest, RespondentPoller,
-    SellerDeal, SellerSession, create_schema,
+    SellerDeal, SellerSession, create_payment_observations, create_schema,
 )
 from market_deal_servicing.evidence import transaction
 
@@ -49,6 +49,7 @@ async def main():
             path = Path(root) / "storefront.sqlite"
             with transaction(path) as conn:
                 create_schema(conn)
+                create_payment_observations(conn)
                 EndSession(conn).register(DeliveryRecord(
                     negotiation_id="example", seller=seller.identity, commitment_ref=binding.commitment_ref,
                     committed_at=now - 100, start_at=now - 100, term_end=now + 1000,

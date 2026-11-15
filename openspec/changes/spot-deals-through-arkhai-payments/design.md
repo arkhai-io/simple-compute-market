@@ -801,6 +801,20 @@ Rejected: recording a provisional deadline observation and holding its filing un
 the stop is resolved, which keeps local progress through an outage but adds a
 provisional state beside a classification that never changes once recorded.
 
+The plan left two choices to implementation, settled as built. Admission answers a
+held deadline with a third status, `awaiting_observation`, at the unchanged
+revision; end service keeps an answer that admits nothing (the coded commit refusal
+stays its journaled answer) and turns an allow into pending, and the compute
+delivery path answers pending. Rejected: `retry`, which callers read as a stale
+revision and retry at once, and `ended` with nothing recorded, which would hand an
+unended deal to the end operation. The observation instant is a new table,
+`servicing_payment_observations`, holding the storefront-clock instant taken before
+each successful payment read, written in the transaction that records what the read
+showed. It is its own schema set, created by an ordinary migration appended to each
+storefront chain, since deployment-state lets only the store-open migration tolerate
+objects already present. Rejected: a column on the watch's tables, which hold a
+contract model that forbids extra fields, and adding the table to the store-open set.
+
 End service tells the path why it refused through an optional closed `code` on
 `DeliveryAuthorization` (`kit/deal-lifecycle`), absent on every other answer:
 
@@ -974,7 +988,7 @@ Destinations are planned, not claims of implemented behaviour.
 | D11 the composed transaction adapter | `openspec/specs/settlement-servicing/spec.md` and `architecture.md`; `openspec/specs/deal-lifecycle/spec.md` for the protocol |
 | D12–D15 end service's refusal of a rate deal it cannot service, its refusal code and the projection it reads | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md`, "One end instant, transactional admission" (where fails closed is enforced); `openspec/specs/compute-delivery/architecture.md`, "Commit and hold adoption" |
 | D14's repair reason and the site-refusal wording of the undelivered hand-off | `openspec/specs/compute-delivery/spec.md` |
-| D14's deadline barrier for a deal that is not once-only | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md` |
+| D14's deadline barrier for a deal that is not once-only, its `awaiting_observation` admission answer and the payment observation instant | `openspec/specs/deal-lifecycle/spec.md` (with "Admission shares the end-service transaction and revision") and `architecture.md`; the observation table's migration in `docs/development/DEPLOYMENT_AND_CONFIG.md` and `kit/deal-servicing/README.md`, "Schema" (both updated with the code) |
 | D6a's watchdog status: the last-probe freshness rule, buyer-local and off the wire | `openspec/specs/deal-lifecycle/spec.md` (with 4B.6's watchdog requirement); `openspec/specs/buyer-orchestration/architecture.md` |
 | D16 the recurring-purchase scenario's shape | `openspec/specs/test-compatibility/spec.md` |
 | Each change is mergeable to `dev` on its own merits | `openspec/README.md` or `docs/agents/change-workflow.md` |

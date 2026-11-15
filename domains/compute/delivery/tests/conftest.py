@@ -30,6 +30,7 @@ from market_deal_lifecycle.adapters import PaymentSelector
 from market_deal_lifecycle.delivery import BillingStartResult, ReadyEvidenceRef
 from market_deal_servicing import (
     DeliveryRecord, EndService, EndSession, PhysicalResult, SellerDeal, SellerSession, create_schema,
+    create_payment_observations,
 )
 from market_deal_servicing.evidence import transaction
 from market_identity import Ed25519Signer
@@ -452,6 +453,7 @@ def rig(tmp_path) -> Rig:
     # session does.
     with transaction(path) as conn:
         create_schema(conn)
+        create_payment_observations(conn)
     clock = [START + 1800]
     site = FakeSite(clock)
     fulfillment = FakeFulfillment(site)

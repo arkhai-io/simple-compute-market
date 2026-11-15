@@ -48,7 +48,7 @@ kit/deal-servicing MUST own authorize_delivery for commit, dispatch, start and d
 
 While end service services no rate deals, authorize_delivery MUST refuse the commit phase of a deal whose committed seller projection is not once-only, before it asks the payment adapter and without I/O, with the refusal code `rate_servicing_unavailable`; a servicing declaration enables rate offers and MUST NOT by itself enable their delivery. A deal with no committed seller projection MUST be refused without that code. A delivery authorization MAY carry a closed refusal code; every answer other than this refusal MUST omit it, and a journaled authorization recorded without one MUST still read.
 
-For a deal whose committed seller projection is not once-only, end service's admission MUST NOT record the delivery-deadline end or journal its filing until a successful payment observation made at or after the deadline shows no lawful end effective at or before it; while the payment authority cannot be read the deal MUST stay unended with nothing filed. Each compute domain's recovery MUST read the payment authority before it admits a missed deadline. A once-only deal keeps admission's deadline rule unchanged.
+For a deal whose committed seller projection is not once-only, end service's admission MUST NOT record the delivery-deadline end or journal its filing until a successful payment observation made at or after the deadline shows no lawful end effective at or before it; while the payment authority cannot be read the deal MUST stay unended with nothing filed. Each compute domain's recovery MUST read the payment authority before it admits a missed deadline. A once-only deal, and a deal with no committed seller projection, which no payment watch observes, keep admission's deadline rule unchanged.
 
 #### Scenario: A rate deal is committed before rate servicing exists
 - **GIVEN** a committed deal whose seller projection is not once-only, under a composition declaring the rate treatments its option uses
@@ -86,6 +86,21 @@ For a deal whose committed seller projection is not once-only, end service's adm
 - **WHEN** delivery asks authorize_delivery to disclose
 - **THEN** the adapter receives that intent's operation key and recorded result
 - **AND** no other phase receives a billing start
+
+### Requirement: Admission shares the end-service transaction and revision
+
+End service MUST provide `admit(negotiation_id, phase, expected_revision) → admitted | ended(T) | awaiting_observation, revision` using the caller's storefront database session. A durable revision/CAS MUST order reservation, dispatch, activation and credential authorization against end recording. Stale revisions MUST retry admission without authorizing effects. `awaiting_observation` is the answer while a missed delivery deadline waits for a payment observation ("Neutral delivery decisions delegate payment interpretation"); it MUST admit no phase, record nothing and leave the revision unchanged, and an authorization answered under it MUST NOT allow.
+
+#### Scenario: A credential authorization races an end
+
+- **WHEN** an end is recorded after a delivery worker reads the revision but before it authorizes credentials
+- **THEN** its stale admission fails and the worker retries against the recorded end, including after restart
+
+#### Scenario: A missed deadline awaits a payment observation
+
+- **GIVEN** a deal that is not once-only, past its delivery deadline, with no payment observation made at or after the deadline
+- **WHEN** a delivery worker asks admission for any phase
+- **THEN** admission answers `awaiting_observation` at the unchanged revision, and the worker authorizes no effect and leaves the deal where it is
 
 ## ADDED Requirements
 

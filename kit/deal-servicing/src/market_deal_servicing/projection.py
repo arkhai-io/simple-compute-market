@@ -1,9 +1,9 @@
 """The seller projection of a committed deal and its read.
 
 The projection is registered by the seller half (``SellerSession.register``)
-in the transaction that records the verified commitment. End service reads it
-too, and the seller half imports end service, so the projection sits below
-both and imports neither.
+in the transaction that records the verified commitment. End service's commit
+door and admission's deadline rule read it too, and the seller half imports
+both, so the projection sits below them and imports none of them.
 """
 
 from __future__ import annotations

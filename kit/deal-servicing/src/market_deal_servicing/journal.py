@@ -18,6 +18,7 @@ from market_identity import Identity, frame_fields
 from pydantic import Field, model_validator
 
 from .evidence import EvidenceSession
+from .projection import read_seller_deal
 
 Revision = Annotated[int, Field(strict=True, ge=0)]
 ClassificationKind = Literal[
@@ -80,7 +81,16 @@ class DeliveryRecord(WireModel):
 
 
 class Admission(WireModel):
-    status: Literal["admitted", "ended", "retry"]
+    """Admission's answer for a protected phase.
+
+    ``admitted`` admits it; ``ended`` reports an end due by now; ``retry``
+    reports a stale expected revision. ``awaiting_observation`` admits nothing
+    and records nothing: the delivery deadline has passed undelivered for a
+    deal that is not once-only, and no payment observation made at or after it
+    has yet shown whether an earlier end wins (``EndSession.admit``).
+    """
+
+    status: Literal["admitted", "ended", "retry", "awaiting_observation"]
     revision: Revision
     ended_at: Instant | None = None
 
@@ -425,6 +435,35 @@ class EndSession:
             filing_intent=self.failure_filing(request, now=now, delivered=False),
         )
 
+    def payment_observed_at(self, negotiation_id: str, commitment_ref: str) -> int | None:
+        """The instant of the latest successful payment observation of the commitment."""
+        row = self.conn.execute(
+            """SELECT observed_at FROM servicing_payment_observations
+               WHERE negotiation_id=? AND commitment_ref=?""", (negotiation_id, commitment_ref),
+        ).fetchone()
+        return row[0] if row else None
+
+    def _deadline_unobserved(self, record: DeliveryRecord) -> bool:
+        """Whether a missed deadline waits for a payment observation made at or after it.
+
+        A rate buyer ends at the payment authority, and its hint to the
+        storefront is lost while the storefront is down, so its stop reaches
+        this journal only through a later payment observation. A recorded seller
+        non-delivery is never reclassified, so for a deal that is not once-only
+        the deadline is recorded only once an observation made at or after it
+        has had the chance to record an earlier end; until then, an authority
+        outage included, nothing is recorded or filed. A once-only buyer ends at
+        the storefront, and a deal with no seller projection has no payment
+        watch, so both keep the deadline rule. See
+        openspec/specs/deal-lifecycle/spec.md, "Neutral delivery decisions
+        delegate payment interpretation".
+        """
+        deal = read_seller_deal(self.conn, record.negotiation_id)
+        if deal is None or deal.once_only:
+            return False
+        observed_at = self.payment_observed_at(record.negotiation_id, record.commitment_ref)
+        return observed_at is None or observed_at < record.deadline
+
     def admit(
         self, negotiation_id: str, phase: DeliveryPhase, expected_revision: int, *, now: int,
     ) -> Admission:
@@ -442,6 +481,8 @@ class EndSession:
             ):
                 return Admission(status="ended", revision=record.revision, ended_at=selected.ended_at)
             if missed_deadline:
+                if self._deadline_unobserved(record):
+                    return Admission(status="awaiting_observation", revision=record.revision)
                 self._deadline_failure(record, now=now)
                 return Admission(status="ended", revision=self.read(negotiation_id).revision, ended_at=record.deadline)
             if now >= record.term_end:

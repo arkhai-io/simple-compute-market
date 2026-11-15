@@ -188,7 +188,15 @@ class EndService:
         admission = session.admit(
             evidence.negotiation_id, phase, expected_revision, now=self.clock(),
         )
-        if admission.status != "admitted":
+        if admission.status == "awaiting_observation":
+            # Nothing is admitted, but an answer that admits nothing stands
+            # unchanged: it is journaled at the same revision as before the
+            # deadline, where a changed answer would be refused.
+            if financial.status == "allow":
+                financial = financial.model_copy(update={
+                    "status": "pending", "reason": "the missed delivery deadline awaits a payment observation",
+                })
+        elif admission.status != "admitted":
             financial = financial.model_copy(update={
                 "status": "pending" if admission.status == "retry" else "refuse",
                 "reason": "stale admission revision" if admission.status == "retry" else "delivery ended",

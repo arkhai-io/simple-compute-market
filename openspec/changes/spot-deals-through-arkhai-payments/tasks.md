@@ -1159,7 +1159,7 @@ lifecycle cycle's `admit_deadline` and its order against `seller.watch`);
 domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/lifecycle.py (recovery's
 order of `recover_delivery` against `seller.read`); their tests.
 
-- [ ] 4D.1 The payment observation instant (D14): `DealWatch` records, durably and in
+- [x] 4D.1 The payment observation instant (D14): `DealWatch` records, durably and in
       the transaction that journals what the observation showed, the storefront-clock
       instant of each successful verified payment observation of a deal, so a final
       stop the observation carried is recorded no later than its instant. A failed or
@@ -1167,7 +1167,33 @@ order of `recover_delivery` against `seller.read`); their tests.
       (`market_deal_servicing.schema`) if a column or table is needed. Test, library
       integration: a successful poll records its instant with any final stop it
       carried; a failed read leaves the earlier instant.
-- [ ] 4D.2 The barrier (D14): `EndSession.admit`'s missed-deadline branch, for a deal
+      As built: a new table, `servicing_payment_observations` (negotiation,
+      commitment, `observed_at`), written by `WatchSession.record_payment_observation`
+      (keeping the latest instant) at the end of `DealWatch._observe`'s transaction for
+      the payment record, after every final stop the view carried, and read by
+      `EndSession.payment_observed_at`. The instant is the watch's clock read before
+      the read is sent, so the authority's answer is no earlier than it. A
+      non-accepted view returns before the transaction, and a refused view (a
+      `ValueError` inside it) rolls the instant back with everything else.
+      The table is its own schema set, `PAYMENT_OBSERVATIONS_SCHEMA` with
+      `create_payment_observations`, plain `CREATE TABLE`, not part of
+      `SERVICING_SCHEMA`: deployment-state's chain requirement lets only the
+      store-open migration tolerate existing objects, so the new table is an ordinary
+      migration appended to each chain (`20261115_001_vm_payment_observations`,
+      `bare-metal-storefront-0019-payment-observations`), and a database that held it
+      already fails it. The kit's rig, `test_filing_owner_recovery`'s rig, both kit
+      examples and the compute-delivery rig apply it beside `create_schema`;
+      `test_review_fix_a`'s rig, which has no payment adapter, and VM's
+      `fulfillment_fixtures`, which runs over a chain-migrated database, do not.
+      Tests: `kit/deal-servicing/tests/integration/test_deadline_barrier.py` (library
+      integration, real SQLite, a stand-in payment adapter):
+      `test_a_successful_poll_records_the_instant_it_began_with_the_stop_it_carried`
+      (the adapter's read advances the clock; the earlier instant is recorded, with
+      the stop) and `test_a_failed_or_refused_read_leaves_the_earlier_instant` (an
+      `Unknown` read and a view changing a recorded stop each leave it);
+      `test_servicing_schema.py`'s
+      `test_a_table_added_since_is_its_own_set_that_tolerates_nothing`.
+- [x] 4D.2 The barrier (D14): `EndSession.admit`'s missed-deadline branch, for a deal
       whose committed seller projection is not once-only, records the
       `delivery-deadline` end and journals its filing only when the latest recorded
       payment observation was made at or after the deadline; a lawful end selected
@@ -1184,7 +1210,43 @@ order of `recover_delivery` against `seller.read`); their tests.
       filing; with only pre-deadline observations, or an unreadable authority, nothing
       is recorded or filed and a later drive after a successful read admits the
       deadline — and a once-only deal past its deadline files as before.
-- [ ] 4D.3 Recovery reads the authority first (D14): VM's lifecycle cycle polls the
+      As built: `EndSession._deadline_unobserved` (with the rule's comment) holds
+      the barrier; `admit`'s missed-deadline branch checks it after the existing
+      selected-end rule, so an end selected effective at or before the deadline still
+      wins first. The answer is a new `Admission` status, `awaiting_observation`
+      (documented on `Admission`), at the unchanged revision. Its callers: end
+      service's `_authorize_delivery` keeps an answer that admits nothing unchanged
+      (the coded commit refusal stays the journaled answer at the same revision,
+      which `acknowledge` would refuse to change) and turns an allow into pending; the
+      compute delivery path's first drive and activation answer pending
+      (`ComputeDeliveryPath._not_admitted`, which also carries the stale-revision
+      case); `available` and `begin_billing` already treat anything not admitted as
+      not admitted, as does VM's `admit_delivery`; every other storefront caller
+      ignores the answer. Tests, library integration in `kit/deal-servicing`
+      (`test_deadline_barrier.py`, real SQLite):
+      `test_a_deadline_admitted_after_a_post_deadline_observation_files_seller_non_delivery`,
+      `test_a_payer_stop_before_the_deadline_recorded_after_it_wins_with_no_filing`,
+      `test_without_a_post_deadline_observation_nothing_is_recorded_until_a_successful_read`
+      (a pre-deadline observation, then an `Unknown` read: no end, no intent and an
+      unchanged revision; then a post-deadline read admits it),
+      `test_a_once_only_deal_past_its_deadline_files_as_before`,
+      `test_a_deal_with_no_seller_projection_keeps_the_deadline_rule`,
+      `test_an_allow_is_pending_while_the_deadline_awaits_an_observation` (a
+      dispatch's allow answers pending, journaled pending, nothing recorded) and
+      `test_the_coded_commit_refusal_stands_while_the_deadline_awaits_an_observation`.
+      `make -C kit/deal-servicing test` 102 passed (was 92). The new status is in the
+      change's deal-lifecycle delta, which now modifies "Admission shares the
+      end-service transaction and revision", and in design D14 with the observation
+      table; both choices the plan left to implementation. Library integration in
+      `domains/compute/delivery` (`test_drive_delivery.py`, real end service and
+      SQLite):
+      `test_a_refused_rate_deal_past_its_deadline_stays_in_repair_until_a_payment_observation`
+      (still `repair_required(rate_servicing_unavailable)` with the same evidence and
+      nothing recorded; once an observation is recorded, the next drive ends it at the
+      deadline with its filing and nothing reserved) and
+      `test_a_rate_deal_first_driven_past_its_deadline_is_pending_with_nothing_begun`.
+      `make -C domains/compute/delivery test` 130 passed (was 128).
+- [x] 4D.3 Recovery reads the authority first (D14): VM's lifecycle cycle polls the
       payment watch before `admit_deadline`; bare metal's recovery reads the authority
       (`seller.read`) before `recover_delivery` admits; `SellerServicing.watch`
       dispatches no deadline filing journaled by its own poll before that poll
@@ -1193,17 +1255,73 @@ order of `recover_delivery` against `seller.read`); their tests.
       metal's `recover_delivery` returns early unless the delivery progress is
       `unstarted` or `active`), and add the drive where one does not (D14, "Planning
       confirms …").
-- [ ] 4D.4 The storefront down across the deadline: one application-integration case
+      As built: VM's `VmDealLifecycle.cycle` runs the seller watch first for each
+      deal, then `admit_deadline`, and dispatches filings after the site corrections
+      (`seller.dispatch_filings`), meant to dispatch a deadline filing in the cycle
+      that journals it, as the later watch did before; no test observes that
+      dispatch (this world's dispute credential is absent, so the filing reports
+      repair). Bare metal's
+      `BareMetalLifecycle.cycle` reads the authority (`seller.read`, for a deal whose
+      commitment is verified, `BareMetalLifecycle.committed`) before
+      `recover_delivery`, and no longer reads it after `reconcile_local`.
+      `SellerServicing.watch` already dispatches filings before its poll, so it
+      dispatches nothing that poll journals: confirmed, unchanged. Admission's
+      barrier holds whatever the order; the order makes a missed deadline admitted in
+      the cycle that observes it rather than a later one. Both recoveries reach a
+      refused rate deal past its deadline: VM's `admit_deadline` admits every
+      registered deal; bare metal's `recover_delivery` drives it (its progress stays
+      `unstarted` while refused) and `reconcile_local` admits every committed deal.
+      Bare metal's lifecycle clock is now injectable, the runtime's
+      `lifecycle_clock` (wall time by default), as VM's `VmDealLifecycle` already
+      took one; 4D.4 restarts each app with a clock past the deadline. Tests: 4D.4's
+      second case in each storefront,
+      `test_recovery_after_the_deadline_records_seller_non_delivery_for_a_refused_rate_deal`
+      (application integration: one recovery cycle of the restarted app, through the
+      admin client, records the deadline's seller non-delivery with its filing, as
+      the buyer's lifecycle read shows). This case is the one that depends on the
+      order: with admission before the read, that first cycle would record nothing.
+      The buyer-stop case passes in either order, since the barrier holds the
+      deadline until the read records the stop.
+- [x] 4D.4 The storefront down across the deadline: one application-integration case
       per storefront, through its typed clients and real SQLite with the in-process
       payments engine: a refused rate deal's buyer stops at the engine before the
       deadline while the storefront app is stopped, so no hint arrives; the app
       restarts after the deadline and its recovery runs; the deal's read shows the
       payer's end and no `delivery_end` filing is journaled. Build on 4C.4's worlds.
-- [ ] 4D.5 compute-delivery's "An undelivered deal is handed to the end operation"
+      As built, in each storefront's `tests/integration/test_rate_delivery_refusal.py`:
+      `test_a_buyer_stop_while_the_storefront_is_down_wins_over_the_deadline_at_recovery`.
+      4C.4's flow settles the refused deal and the world closes; the buyer's stop is
+      submitted at the engine (the payer's `stop`, effective 60 seconds after the
+      commitment, before the deadline); a new world is opened over the same
+      `tmp_path` and database with the same payments engine and its lifecycle clock
+      60 seconds past the deadline (VM: `settlement(world, payments=, clock=)`; bare
+      metal: `recurring_world(..., clock=)`); the recovery runs through the admin
+      client (`admin_run_lifecycle_cycle`, VM's `settlement-servicing`, bare metal's
+      `delivery-recovery`); the storefront is opened once more at wall time, and the
+      buyer's lifecycle read through the typed `LifecycleClient` shows the payer's
+      end at the stop's instant and no filings, so no `delivery_end` filing is
+      journaled. The read cannot be made of the storefront whose clock runs past the
+      deadline: lifecycle requests and answers are signed at each side's clock and
+      refused beyond their allowed skew, in both directions. The engine's clock moves with the
+      storefront's, since a payments read checks no time. VM's world composes an idle
+      settlement worker (`_NoSettlementJobs`) so its servicing loop runs, mounts the
+      lifecycle routes and opens the buyer's lifecycle client, and its payments
+      signer is public (`PAYMENTS_SERVICE`); bare metal's app already serves the
+      routes, and its world opens the buyer's lifecycle client; its token-cache
+      helper (`test_publication_cycle.alkahest_publication`) now tolerates a
+      restart. VM storefront `make -C domains/vms/storefront test` 1194 unit passed
+      (1 skipped) and 601 integration passed (was 599); bare-metal storefront
+      `make -C domains/bare_metal/storefront test` 644 passed (was 642).
+- [x] 4D.5 compute-delivery's "An undelivered deal is handed to the end operation"
       names the site's refusal: confirm `path.py` sends an authorization refusal to
       repair and only a site refusal to `record_end`, and that no docstring says
       otherwise.
-- [ ] 4D.6 Verify: after `make dist`, `make -C kit/deal-servicing test`,
+      As built: confirmed by reading. Every `_hand_off` follows a site refusal or an
+      observed failure (reserve or commit refused, provisioning failed, the window
+      elapsed, activation lapsed); `_authorized` sends a refusal to the end hand-off
+      only when an end is due, otherwise to repair, and its docstring says so. No
+      docstring changed.
+- [x] 4D.6 Verify: after `make dist`, `make -C kit/deal-servicing test`,
       `make -C domains/compute/delivery test`, `make -C domains/vms/storefront test`,
       the bare-metal storefront's suite, typecheck of each changed package, then
       `scripts/change-workflow run pre-commit`; counts and new cases by name in the
@@ -1212,6 +1330,69 @@ order of `recover_delivery` against `seller.read`); their tests.
       end by the buyer's stop and hint before it. The once-only payment scenarios
       named in 4C.6 cross the changed recovery order and must stay green.
       Owed by validation: none.
+      As built: counts and cases are in each task's note. The typecheck was not run:
+      `make -C kit/deal-servicing typecheck` was denied by this step's tooling again,
+      and the other changed packages have no typecheck target.
+      `scripts/change-workflow run pre-commit`: after-functional-change (`make
+      lock`), pre-commit-functional (`make dist-clean`, `make check-packaging`,
+      `make test`, every suite) and pre-commit (index, tasks, skills, OpenSpec
+      strict, `make check-repository`: comment hygiene, documentation citations,
+      decision destinations, version bumps, local imports among them) all passed;
+      it ran again after each round of the fresh-context check's fixes.
+      End-to-end, confirmed by reading, not by a run: no scenario crosses a delivery
+      deadline; the once-only payment scenarios `e2e_vm_payment_deal`,
+      `e2e_vm_payment_purchase` and `e2e_bare_metal_payment_deal` cross the changed
+      recovery order and the new migration, and validation's pipeline runs them.
+
+## Section 4D notes and handoff
+
+- The fresh-context check found no layering, import, comment-hygiene or packaging
+  breach. Fixed: the new admission status contradicted the permanent admission
+  requirement (the delta now modifies it) and, with the observation table, was
+  recorded only here (now in design D14 and its promotion row); the restart cases
+  read through in-process objects (now the buyer's typed lifecycle client); the
+  stop case's comment claimed to show the recovery order, which only the
+  non-delivery case does; a dead dispute instant in `DealWatch.poll`; the path's
+  `_not_admitted` wording; the untested allow-to-pending branch (a kit case added);
+  notes overstating VM's filing dispatch and naming `delivery_read` the seller's
+  read. Its second run found the migration list in
+  `docs/development/DEPLOYMENT_AND_CONFIG.md` and the schema section of
+  `kit/deal-servicing/README.md` stale (both updated: the README now names the
+  new set, and the deployment list the two migrations); `_record_failure`'s and
+  bare metal's `reconcile_local` comments claiming admission always establishes a
+  missed deadline first (both now state the barrier's exception); the delta
+  omitting that a deal with no seller projection keeps the deadline rule; and
+  three note wordings. Declined: none.
+- Outside the plan, from that check: bare metal's `reconcile_local` no longer
+  records the term end while admission holds a deadline for a payment observation.
+  The deadline is capped at the term end, so at equality a lawful terms end
+  recorded during an authority outage would have been selected in place of seller
+  non-delivery. Unreachable while every rate commit is refused and recovery reads
+  the authority first; no test exercises it.
+- The admission answer for the barrier is a new status, `awaiting_observation`,
+  rather than `retry` (which the path and VM's access read treat as a stale revision
+  and retry) or `ended` without a record. It is internal to `kit/deal-servicing` and
+  the compute delivery path; no storefront matches it.
+- For convergence: under the barrier, end service turns an allow into pending at the
+  same revision. A phase allowed and journaled before the deadline and asked again
+  at the same revision after it would then be refused by `EndSession.acknowledge`
+  ("completed intent cannot change"). No rate deal reaches an allow today, since
+  every commit is refused; convergence, which lifts the refusal, decides how a
+  re-asked phase under the barrier answers.
+- The observation instant is the storefront's clock before the read is sent. A
+  payments read checks no snapshot age (only rate `authorize` applies the freshness
+  window), and the in-process engine's snapshot is read fresh, so the instant is a
+  lower bound on what the authority had recorded. If a snapshot source ever serves
+  a cached view, the instant should become the snapshot's own observation time
+  checked against the storefront clock.
+- Restarting a storefront in a test: VM opens a second `recurring_world` and
+  `settlement(world, payments=, clock=)` over the same `tmp_path`; bare metal opens a
+  second `recurring_world(tmp_path, payments=, clock=)`. Pass the same
+  `FakePaymentsClient`, which plays the payments service across the restart. 4E's
+  scenarios do not need this, since they end by the buyer's stop and hint.
+- Outside the plan: bare metal's lifecycle clock became a runtime field
+  (`BareMetalStorefrontRuntime.lifecycle_clock`) so a test can restart the app past
+  a deadline; production keeps wall time.
 
 ## 4E. The recurring-purchase E2E
 

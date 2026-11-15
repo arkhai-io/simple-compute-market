@@ -15,7 +15,7 @@ from market_capacity_publication import CapacityEffects
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_deal_lifecycle.adapters import PaymentSelector
 from market_deal_servicing import (
-    Classification, DeliveryRecord, EndSession, FinalRequest, SellerDeal, SellerSession,
+    Classification, DeliveryRecord, EndSession, FinalRequest, SellerDeal, SellerSession, WatchSession,
 )
 from market_deal_lifecycle_contracts.models import Rejected, Unknown
 from market_identity import Ed25519Signer
@@ -486,6 +486,50 @@ async def test_a_rate_deal_end_service_cannot_service_waits_in_repair_with_nothi
     assert second.reason is RepairReason.RATE_SERVICING_UNAVAILABLE
     assert second.evidence_ref == first.evidence_ref
     assert rig.site.calls == [] and intents(rig, "rate") == [authorization]
+
+
+async def test_a_refused_rate_deal_past_its_deadline_stays_in_repair_until_a_payment_observation(rig):
+    # Committed 600 seconds before the Agreement start with a 600-second
+    # delivery deadline, so the deadline falls 600 seconds after the start.
+    rig.negotiation_id = "rate"
+    rig.register(once_only=False, delivery_deadline_seconds=600)
+    rig.clock[0] = rig.start + 100
+    first = await rig.drive()
+    assert first.reason is RepairReason.RATE_SERVICING_UNAVAILABLE
+
+    # Past the deadline, with no payment observation made since: the deal
+    # stays where it was, with no end recorded and nothing filed.
+    rig.clock[0] = rig.start + 700
+    waiting = await rig.drive()
+    assert waiting.kind is OutcomeKind.REPAIR_REQUIRED
+    assert waiting.reason is RepairReason.RATE_SERVICING_UNAVAILABLE
+    assert waiting.evidence_ref == first.evidence_ref
+    assert requests(rig, "rate") == []
+    assert [intent.kind for intent in intents(rig, "rate")] == ["authorization"]
+
+    # The payment watch records an observation made after the deadline, which
+    # showed no earlier end: the next drive finds the deadline's end.
+    with rig.session() as conn:
+        WatchSession(conn).record_payment_observation("rate", "commitment", rig.start + 700)
+    ended = await rig.drive()
+    assert ended.kind is OutcomeKind.ENDED
+    assert [request.source_ref for request in requests(rig, "rate")] == ["delivery-deadline"]
+    assert "filing" in {intent.kind for intent in intents(rig, "rate")}
+    assert rig.site.rows == {}
+
+
+async def test_a_rate_deal_first_driven_past_its_deadline_is_pending_with_nothing_begun(rig):
+    rig.negotiation_id = "rate"
+    rig.register(once_only=False, delivery_deadline_seconds=600)
+
+    outcome = await rig.drive()
+
+    assert outcome.kind is OutcomeKind.PENDING
+    assert outcome.detail == "the missed delivery deadline awaits a payment observation"
+    with rig.session() as conn:
+        assert rig.progress.load(conn, "rate") is None
+    assert requests(rig, "rate") == [] and intents(rig, "rate") == []
+    assert rig.site.calls == []
 
 
 async def test_a_once_only_deal_beside_a_refused_rate_deal_drives_as_before(rig):

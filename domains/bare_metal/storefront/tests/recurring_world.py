@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,7 @@ import httpx
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
 from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
+from market_deal_lifecycle_client import LifecycleClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime import SettlementPublicationClause
 from market_settlement_runtime.rate_publication import DEFAULT_PREMATURE_STOP_PENALTY_PERIODS
@@ -150,6 +151,8 @@ class RecurringWorld:
     #: between publication and acceptance stands for a storefront restarted under
     #: a different declaration.
     declarations: dict[str, RateServicingDeclaration]
+    #: The buyer's typed client of the app's lifecycle routes.
+    buyer_lifecycle: LifecycleClient
 
     def declare(self, treatments: frozenset[str] | None, *, setup: bool = False) -> None:
         """Declare ``treatments`` for payments, or withdraw its declaration."""
@@ -176,6 +179,7 @@ async def recurring_world(
     pool_deadline: int | None = DELIVERY_DEADLINE_SECONDS,
     clause_deadline: int | None = None,
     payments: FakePaymentsClient | None = None,
+    clock: Callable[[], int] | None = None,
 ) -> AsyncIterator[RecurringWorld]:
     """The running bare-metal app over one bounded pool, publishing the configured
     Alkahest clause beside the three payment clauses of ``payment_clauses``.
@@ -188,7 +192,10 @@ async def recurring_world(
     deployed composition, which wires no pool port; ``clause_deadline`` is the one
     each payment clause configures. ``payments`` is the payments service the
     composition's stage reads receipts and snapshots from, the in-process
-    engine a buyer approves at, so a deal can settle through the app.
+    engine a buyer approves at, so a deal can settle through the app; a test
+    restarting the app over the same ``tmp_path`` passes the same one, since the
+    payments service outlives a storefront restart. ``clock`` is the runtime's
+    lifecycle clock, wall time unless given.
     """
     declarations: dict[str, RateServicingDeclaration] = {}
     site = Site(pool(POOL_ID, member("r1", POOL_ID), policy_tags={"capacity_bounds": {
@@ -228,6 +235,7 @@ async def recurring_world(
             publication_clauses=tuple(
                 SettlementPublicationClause.model_validate(clause) for clause in clauses
             ),
+            **({"lifecycle_clock": clock} if clock is not None else {}),
         )
         app = _app(runtime)
         async with app.router.lifespan_context(app):
@@ -237,7 +245,10 @@ async def recurring_world(
                 caller_role="buyer",
                 expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
                 transport=httpx.ASGITransport(app=app),
-            ) as buyer:
-                world = RecurringWorld(admin, buyer, runtime.db, declarations)
+            ) as buyer, LifecycleClient(
+                "http://seller", BUYER_SIGNER, TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+                transport=httpx.ASGITransport(app=app),
+            ) as buyer_lifecycle:
+                world = RecurringWorld(admin, buyer, runtime.db, declarations, buyer_lifecycle)
                 world.declare(treatments)
                 yield world

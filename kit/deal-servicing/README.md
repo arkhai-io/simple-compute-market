@@ -179,13 +179,16 @@ does), or an existing database worker.
 
 ## Schema
 
-No session or poller creates a table. `SERVICING_SCHEMA` holds every table and
-index the library reads and writes as `CREATE ... IF NOT EXISTS` DDL, and a
-storefront composing it applies that DDL in a migration of its own chain, with
-`create_schema(connection)` as the migration's body, so that opening the
-library's sessions changes no schema. The statements tolerate tables already present, since a
-storefront database built while sessions created these tables on first use may
-hold some of them.
+No session or poller creates a table: a storefront composing the library applies
+its DDL in migrations of its own chain, so that opening the library's sessions
+changes no schema. `SERVICING_SCHEMA` holds the tables and indexes sessions once
+created on first use, as `CREATE ... IF NOT EXISTS` DDL, applied by one migration
+with `create_schema(connection)` as its body; the statements tolerate tables
+already present, since a storefront database built while sessions created these
+tables may hold some of them. A table added since is its own set, applied by an
+ordinary migration later in the chain that tolerates nothing:
+`PAYMENT_OBSERVATIONS_SCHEMA`, the instant of each deal's latest successful
+payment observation, with `create_payment_observations(connection)` as its body.
 
 ## First use
 

@@ -56,6 +56,7 @@ from storefront_client import StorefrontClientError, SyncStorefrontClient
 from market_deal_servicing import (
     DealWatch, DeliveryRecord, EndSession, LifecycleRouteBinding, LifecycleRouteServices,
     SellerDeal, SellerServicing, SellerSession, SQLiteOperationStore, create_lifecycle_router, create_schema,
+    create_payment_observations,
 )
 from market_deal_servicing.evidence import transaction
 
@@ -151,6 +152,7 @@ def main(output: Path | None, profile_path: Path) -> None:
         path = Path(root) / "seller.sqlite"
         with sqlite3.connect(path) as conn:
             create_schema(conn)
+            create_payment_observations(conn)
         agreements, adapters, doubles = {}, {}, {}
         for product_config in profile["products"]:
             product = product_config["name"]
