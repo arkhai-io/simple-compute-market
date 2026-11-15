@@ -57,8 +57,10 @@ import fcntl
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -78,6 +80,7 @@ NAMED = ("after-functional-change", "pre-commit", "pre-commit-functional", "pre-
 # Validation's preflight and parts, `run validation <change> …`, and every part's
 # cleanup, `run cleanup <change>`.
 VALIDATION, CLEANUP, PREFLIGHT = "validation", "cleanup", "preflight"
+TEST_BEFORE = "test-before"
 PHASES = ("run", "start", "collect")
 # The prefix of every line the engine writes about a hook, so a reader tells it from
 # the commands' own output.
@@ -457,6 +460,52 @@ class Hooks:
         self.echo(closing_line(name, ran, commit, part.evidence, part=True))
         return not any(i.failed for i in ran)
 
+    def test_before(self, change: str, base: str | None, commit: str | None,
+                    tests: Sequence[str]) -> bool:
+        """`run test-before <change> --test <path>…`: each test file as `HEAD` holds
+        it, run against the code at `commit`, in a detached worktree of its own that
+        is removed however the run ends, so the change's worktree is never touched.
+        A test that fails there and passes at `HEAD` shows the change made it pass.
+        It passes when every test ran, whatever the tests found: what each found is
+        its own line."""
+        self.allow(TEST_BEFORE)
+        commands = self.configuration.hook(TEST_BEFORE)
+        if not commands:
+            raise HookError("hooks.test-before is not declared, so no test can be run "
+                            "against an earlier commit")
+        if not commit:
+            raise HookError("test-before runs against a commit: give it with --at <commit>; "
+                            "with no round recorded there is no round base to default to")
+        if not tests:
+            raise HookError("test-before names the test files it runs, with --test <path>")
+        for test in tests:
+            if not (self.root / test).is_file() or Path(test).is_absolute() \
+                    or ".." in Path(test).parts:
+                raise HookError(f"{test} is no file of this checkout")
+        values = self.values(change, base, test=tests[0])
+        self.needs(commands, values, f"hooks.{TEST_BEFORE}")
+        scratch = Path(tempfile.mkdtemp(prefix="change-workflow-test-before-"))
+        tree = scratch / "tree"
+        added = subprocess.run(["git", "-C", str(self.root), "worktree", "add", "--detach",
+                                "--quiet", str(tree), commit], capture_output=True, text=True)
+        try:
+            if added.returncode != 0:
+                raise HookError(f"no worktree at {commit}: {added.stderr.strip()}")
+            for test in tests:
+                (tree / test).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(self.root / test, tree / test)
+            for test in tests:
+                filled = {**values, "test": test}
+                ran = [self._timed(lambda command=fill(c, filled): self.shell(command, tree),
+                                   hook=TEST_BEFORE, command=fill(c, filled))
+                       for c in commands]
+                self.echo(closing_line(f"{TEST_BEFORE} {test}", ran, commit))
+        finally:
+            subprocess.run(["git", "-C", str(self.root), "worktree", "remove", "--force",
+                            str(tree)], capture_output=True)
+            shutil.rmtree(scratch, ignore_errors=True)
+        return True
+
     def _start(self, commands: Sequence[str], values: Mapping[str, str],
                labels: Mapping[str, str | None]) -> tuple[list[Invoked], str | None]:
         """Run a `start`'s commands, and return them and the last line its last
@@ -581,6 +630,7 @@ def main(hook: str, change: str, *, root: Path, configuration: Configuration,
          environ: Mapping[str, str], base: str | None = None, part: str | None = None,
          phase: str | None = None, owed: str | None = None,
          waived: Mapping[str, Mapping[str, Any]] | None = None, lapsed: str | None = None,
+         commit: str | None = None, tests: Sequence[str] = (),
          hooks: Hooks | None = None) -> int:
     """`run <hook> <change>`, `run validation <change> preflight|<part> <phase>`, or
     `run cleanup <change>`: 0 when it passed, 1 when it failed or was refused, its
@@ -593,6 +643,8 @@ def main(hook: str, change: str, *, root: Path, configuration: Configuration,
             passed = runner.validation(change, base, part or "", phase, owed, waived, lapsed)
         elif hook == CLEANUP:
             passed = runner.cleanup(change, base)
+        elif hook == TEST_BEFORE:
+            passed = runner.test_before(change, base, commit, tests)
         else:
             passed = runner.named(hook, change, base, lambda: worktree_changes(root))
     except (ChangeNotFound, StepError) as exc:

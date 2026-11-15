@@ -324,6 +324,13 @@ Run each of these, and fix what it reports:
 
 - the focused suites the section's verification point names, and every suite that
   covers code the section changed;
+- where a test you wrote should fail without the change, show it:
+  `scripts/change-workflow run test-before <change> --test <path> [--at <commit>]`
+  runs the test file as `HEAD` holds it against the round's base, or the commit
+  given, in a throwaway worktree, and its closing line says whether it failed
+  there. A test that imports what only the change adds fails as it is collected,
+  which shows less; say which it was. Never stash, check out, or reset to see the
+  old code: the change's worktree is not touched to answer it;
 - `scripts/change-workflow run pre-commit <change>`, the repository's checks
   before a commit. The paths the worktree changes decide what it runs: when any
   lies outside the repository's inert paths, it runs `after-functional-change`,

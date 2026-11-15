@@ -3089,13 +3089,24 @@ The engine MUST hold, beside the graph, which steps may run each hook through `r
 which no repository changes. An unattended run's marker MUST name its step, and `run`
 MUST refuse a hook its step is not listed for, naming both; a run with no marker
 MUST NOT be restricted. `pre-push` and `post-clone` MUST be run only by the engine's
-`push` and `clone`.
+`push` and `clone`. `test-before`, which implementation and triage MAY run, MUST run
+each named test file as `HEAD` holds it against an earlier commit — the round's base
+unless one is given — in a detached worktree it removes however the run ends, and
+MUST NOT change the change's worktree.
 
 #### Scenario: Validation asks for a functional hook
 
 - **WHEN** an unattended validation runs `scripts/change-workflow run
   after-functional-change <change>`
 - **THEN** `run` refuses, naming the hook and the validate step, and runs nothing
+
+#### Scenario: A fix's test is shown to fail before the fix
+
+- **WHEN** a triage runs `scripts/change-workflow run test-before <change> --test
+  <its new test>` with the round's base recorded
+- **THEN** the test runs against the base in a worktree of its own, its closing line
+  says whether it failed there, and afterwards the change's worktree is as it was and
+  no extra worktree remains
 
 ### Requirement: CW-y6mj A pre-commit hook changes nothing
 

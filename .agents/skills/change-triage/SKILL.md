@@ -590,7 +590,9 @@ acceptances' outcomes are carried out with the rest.
   commit it with the round's fixes. Record each in the task notes of the section it
   concerns, naming the finding; a fix that concerns no section goes in a note
   under the last implemented section. Then run `change-implement`'s checks before
-  committing (its step 5): the focused suites, `scripts/change-workflow run
+  committing (its step 5): the focused suites, a fix's new test run against the
+  commit before it with `scripts/change-workflow run test-before` where it should
+  fail there, `scripts/change-workflow run
   pre-commit <change>`, whose hooks follow from the paths the fixes change — a fix
   only under the repository's inert paths runs `pre-commit` alone — staging what
   the hooks rebuilt (before closeout its citations check may report only files the

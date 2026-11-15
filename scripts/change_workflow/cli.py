@@ -388,7 +388,8 @@ def _parser() -> argparse.ArgumentParser:
     run_ = commands.add_parser(
         "run", help="run one of the repository's hooks for a change, as the engine's hook "
                     "table allows the step")
-    run_.add_argument("hook", choices=(*hooks.NAMED, hooks.VALIDATION, hooks.CLEANUP))
+    run_.add_argument("hook", choices=(*hooks.NAMED, hooks.VALIDATION, hooks.CLEANUP,
+                                       hooks.TEST_BEFORE))
     run_.add_argument("change")
     run_.add_argument("part", nargs="?", default=None,
                       help="validation only: `preflight`, or the part to run")
@@ -396,6 +397,12 @@ def _parser() -> argparse.ArgumentParser:
                       help="validation's part only: run, start, or collect")
     run_.add_argument("--owed", default=None,
                       help="an owed part only: the workflow its run is for")
+    run_.add_argument("--test", dest="tests", action="append", default=[],
+                      help="test-before only: a test file, as HEAD holds it, to run against "
+                           "the earlier commit; repeat for more")
+    run_.add_argument("--at", default=None,
+                      help="test-before only: the commit to run against; the current "
+                           "round's base by default")
     run_.add_argument("--lapsed", default=None,
                       help="a part the owner waived only: why the waiver's condition no "
                            "longer holds, so the part runs")
@@ -689,6 +696,13 @@ def _config_parts(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def _round_base(root: Path, change: str) -> str | None:
+    """The commit the change's latest round started from, its round view's base."""
+    path = log_path(root, change)
+    rounds = [e for e in read_log(path) if e.get("outcome") == "round"] if path.exists() else []
+    return rounds[-1].get("commit") if rounds else None
+
+
 def _parts(root: Path, given: str) -> list[str]:
     """The parts a waiver names, each one the configuration declares."""
     names = [name.strip() for name in given.split(",") if name.strip()]
@@ -725,12 +739,16 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
                 raise _Usage("run validation takes `preflight`, or a part and its phase")
         elif (args.part, args.phase, args.owed, args.lapsed) != (None, None, None, None):
             raise _Usage(f"run {args.hook} takes the change alone")
+        if args.hook != hooks.TEST_BEFORE and (args.tests or args.at):
+            raise _Usage("--test and --at belong to run test-before")
         # The branch the change lands on, for a command naming `{base}`: the one
         # given, or the one its clone recorded.
         base = args.base or find.landing_branch(root, args.change)
         return hooks.main(args.hook, args.change, root=root, configuration=config.load(root),
                           environ=environ, base=base, part=args.part, phase=args.phase,
-                          owed=args.owed, lapsed=args.lapsed,
+                          owed=args.owed, lapsed=args.lapsed, tests=args.tests,
+                          commit=(args.at or _round_base(root, args.change)
+                                  if args.hook == hooks.TEST_BEFORE else None),
                           waived=(_waived(root, args.change)
                                   if args.hook == hooks.VALIDATION else None))
     if args.command == "check" and args.check == "change":

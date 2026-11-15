@@ -32,6 +32,10 @@ pre-push = "make pre-push REMOTE={remote}"
 # Engine, `clone`: as a clone is made, in the background; implementation and
 # validation wait for it.
 post-clone = "make init"
+# Engine, `run test-before`, for change-implement and change-triage: one test file,
+# as HEAD holds it, run in a detached worktree of an earlier commit, to show a test
+# fails without the change. The scripts' suites run there with no built environment.
+test-before = "uv run --no-project --with pytest --with pyyaml pytest -q {test}"
 
 [defaults]
 # Engine, `run pre-commit` and `check change`: the workflow's default checks this
