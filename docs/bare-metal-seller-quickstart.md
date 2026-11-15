@@ -574,7 +574,8 @@ the lifecycle pause holds the loop without stopping trading. Each cycle:
 - Leaves a listing its seller closed as it is.
 - Holds, without closing or refreshing, the listings of a site whose projection
   the storefront does not hold or whose projection is malformed, and of a pool
-  whose declarations do not resolve or that resolves no lease bound. A site that
+  whose declarations do not resolve. A pool that resolves no maximum lease
+  duration publishes with no relative limit. A site that
   stops answering keeps its last generation, reported stale,
   and its listings keep deriving from it. The cycle reports each hold; every other
   site is reconciled as usual.

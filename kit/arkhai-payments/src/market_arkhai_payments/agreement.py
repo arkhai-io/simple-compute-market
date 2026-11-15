@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from market_core.schemas import (
+    agreed_price,
     settlement_option_asset,
     settlement_option_lifecycle,
     settlement_option_params,
@@ -29,6 +30,7 @@ from market_arkhai_payments.receipts import transaction_id
 from market_arkhai_payments.settlement_config import (
     ARKHAI_PAYMENTS_MECHANISM,
     ArkhaiPaymentsConfig,
+    payments_billing_basis,
 )
 
 
@@ -108,18 +110,21 @@ def _policy(
             "with a valid payments account"
         ) from exc
     try:
+        quote = agreed_price(agreement, project_billing=payments_billing_basis)
+        if quote.unit != "total" or quote.asset is None:
+            raise MandatePolicyError("the installed payments adapter requires an asset-bearing total quote")
         return MandatePolicy(
             buyer_account=payer,
             option=selected_payment_option(agreement),
             accepted_at=agreement["accepted_at"],
             start_utc=agreement["start_utc"],
             duration_seconds=agreement["duration_seconds"],
-            amount=agreement["amount"],
-            asset=agreement["asset"],
+            amount=quote.amount,
+            asset=quote.asset,
             fee_bps=fee_bps,
             lifecycle=lifecycle,
         )
-    except (KeyError, ValidationError) as exc:
+    except (KeyError, ValueError) as exc:
         raise MandatePolicyError("Agreement lacks the terms a payments mandate needs") from exc
 
 

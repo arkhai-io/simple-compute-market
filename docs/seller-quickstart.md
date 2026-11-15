@@ -39,9 +39,9 @@ cd simple-compute-market
 make build-seller
 ```
 
-`build-seller` builds the two images you need (`arkhai:storefront`,
-`arkhai:compute-provisioning`) and the wheels they consume — ~3 minutes on a
-warm machine. Build on Linux; macOS hits a known cross-platform
+`build-seller` builds the images you need (`arkhai:storefront`,
+`arkhai:bare-metal-storefront`, `arkhai:compute-provisioning`) and the release's
+wheels they are built from — ~3 minutes on a warm machine. Build on Linux; macOS hits a known cross-platform
 `uv sync` issue.
 
 ## 2. Configure

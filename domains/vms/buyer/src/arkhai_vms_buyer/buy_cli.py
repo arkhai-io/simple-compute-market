@@ -32,6 +32,9 @@ from core_buyer.action_policy import (
 from market_alkahest.schemas import EscrowProposal
 from market_alkahest.token import TokenResolutionError, resolve_token
 from market_core.schemas import SettlementSelection
+from market_settlement_runtime.buyer_terms import (
+    UNPROTECTED_TERMS_FLAG, UNPROTECTED_TERMS_HELP, WAIVERS_BY_TERM, term_waivers, waiver_flags,
+)
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -47,6 +50,8 @@ from .buy_orchestrator import (
 from .buyer_client import ResumeState, negotiate_with_seller
 from .cli_helpers import (
     emit_buyer_explanation,
+    emit_lifecycle_disclosure,
+    requested_duration_seconds,
 )
 from .cli_helpers import (
     resolve_prices_from_matches as _resolve_prices_from_matches,
@@ -58,12 +63,18 @@ from .deal_helpers import (
     load_negotiation_resume_point,
     make_publisher_trust_resolver,
     open_run_log,
+    recorded_waivers,
 )
 from .listing_cli import settlement_clause_error_message
+from .negotiation_amounts import priced_at_opening_shape
+from .opening_shape import SHAPE_HELP, SHAPE_OPTION, parse_shape_option, shape_excess
+from .registry_listing import domain_listing_record
 from .run_log import RunLog
 from .settle_cli import run_settle_from_log
 from .settlement_composition import (
     buyer_stage,
+    buyer_compute_disclosure,
+    buyer_lifecycle_disclosure,
     resolve_buyer_settlement_policy,
 )
 
@@ -109,21 +120,21 @@ def _confirm_settlement_interactive(*, terms, listing: dict, console: Console) -
     no on-chain transaction has been emitted and the seller's /settle
     endpoint hasn't been touched yet. Declining here is a clean exit.
 
-    Displays the agreed per-hour rate, duration, total payment (= rate
-    x duration_seconds / 3600), seller URL, and listing ID so the buyer
-    can sanity-check the cost before committing.
+    Show the accepted monetary quote unchanged, with its billing unit, alongside
+    the effective horizon. Confirmation must never rescale accepted money.
     """
     duration_hours = terms.duration_seconds / 3600
-    total = terms.agreed_amount * terms.duration_seconds // 3600
+    quote = getattr(terms, "quote", None)
+    price_unit = f"per_period ({quote.period})" if quote is not None and quote.unit == "per_period" else "total"
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold")
     table.add_column()
     table.add_row("Seller", str(terms.seller_url))
     table.add_row("Listing", str(terms.listing_id))
     table.add_row("Negotiation", str(terms.negotiation_id))
-    table.add_row("Agreed price", f"{terms.agreed_amount} (per hour, raw token units)")
+    table.add_row("Agreed price", f"{terms.agreed_amount} ({price_unit}, raw token units)")
     table.add_row("Duration", f"{terms.duration_seconds}s ({duration_hours:.4g}h)")
-    table.add_row("Total payment", f"{total} (raw token units)")
+    table.add_row("Period charge" if price_unit != "total" else "Total payment", f"{terms.agreed_amount} (raw token units)")
     console.print(Panel(table, title="Confirm settlement", border_style="yellow"))
     try:
         return typer.confirm(
@@ -158,6 +169,10 @@ def _run_resume_from(
                 "--max-price applies only to fresh buys; resume uses the persisted scaled negotiation ceiling"
             )
         resume_point = load_negotiation_resume_point(from_run, signer=signer)
+        try:
+            resumed_waivers = recorded_waivers(from_run, signer=signer)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
         resumed_initial_price = resume_point.initial_price
         resumed_max_price = resume_point.max_price
         run_log = open_run_log(from_run, signer=signer, profile_id=identity.profile_id)
@@ -211,6 +226,7 @@ def _run_resume_from(
                 principal=resume_point.buyer_principal,
                 signer=signer,
                 listing_id=resume_point.listing_id,
+                listing=resume_point.listing_record,
                 initial_price=resumed_initial_price,
                 max_price=resumed_max_price,
                 max_rounds=max_rounds,
@@ -228,6 +244,7 @@ def _run_resume_from(
                 ),
                 resolve_seller_principals=resolve_seller_principals,
                 capture=evidence_store().capture,
+                waivers=resumed_waivers,
             )
         except RuntimeError as exc:
             run_log.event("negotiation_failed", error=str(exc))
@@ -325,7 +342,12 @@ def register(app: typer.Typer) -> None:
             None,
             "--duration-hours",
             "-t",
-            help="Lease duration the buyer wants (hours, fractional ok). Required for fresh runs — sent to the seller's /negotiate/new and validated against the listing's max_duration_seconds. Resumed runs read it from the run-log.",
+            help="Lease duration the buyer wants (hours, fractional ok). Required for reserved selections; optional for recurring selections — sent to the seller's /negotiate/new and validated against the listing's max_duration_seconds. Resumed runs read it from the run-log. Not with --duration-seconds.",
+        ),
+        duration_seconds_option: int | None = typer.Option(
+            None,
+            "--duration-seconds",
+            help="The lease duration in whole seconds; the same request as --duration-hours, which it excludes.",
         ),
         start_utc: str | None = typer.Option(
             None,
@@ -358,6 +380,24 @@ def register(app: typer.Typer) -> None:
             None,
             "--settlement",
             help="Repeatable typed settlement alternative, for example 'mechanism=alkahest.v1'.",
+        ),
+        allow_no_delivery_deadline: bool = typer.Option(
+            False, WAIVERS_BY_TERM["no_delivery_deadline"].flag,
+            help=WAIVERS_BY_TERM["no_delivery_deadline"].help,
+        ),
+        allow_no_penalty: bool = typer.Option(
+            False, WAIVERS_BY_TERM["no_penalty"].flag, help=WAIVERS_BY_TERM["no_penalty"].help,
+        ),
+        allow_charged_preemption: bool = typer.Option(
+            False, WAIVERS_BY_TERM["charged_preemption"].flag,
+            help=WAIVERS_BY_TERM["charged_preemption"].help,
+        ),
+        allow_charged_term_end: bool = typer.Option(
+            False, WAIVERS_BY_TERM["charged_term_end"].flag,
+            help=WAIVERS_BY_TERM["charged_term_end"].help,
+        ),
+        allow_unprotected_terms: bool = typer.Option(
+            False, UNPROTECTED_TERMS_FLAG, help=UNPROTECTED_TERMS_HELP,
         ),
         explain: bool = typer.Option(
             False,
@@ -395,6 +435,7 @@ def register(app: typer.Typer) -> None:
             "--ssh-public-key",
             help="SSH public key for provisioning (default: wallet.ssh_public_key).",
         ),
+        shape: str | None = typer.Option(None, SHAPE_OPTION, help=SHAPE_HELP),
         **policy_values: Any,
     ) -> None:
         """Run or resume a complete buyer lifecycle without a buyer daemon.
@@ -407,6 +448,14 @@ def register(app: typer.Typer) -> None:
         settlement identities rather than discovering or buying again.
         """
         console = Console()
+        duration_seconds = requested_duration_seconds(
+            duration_hours=duration_hours, duration_seconds=duration_seconds_option,
+        )
+        waivers = term_waivers(
+            no_delivery_deadline=allow_no_delivery_deadline, no_penalty=allow_no_penalty,
+            charged_preemption=allow_charged_preemption, charged_term_end=allow_charged_term_end,
+            unprotected_terms=allow_unprotected_terms,
+        )
         policy_params_all: dict[str, Any] = {
             k: v for k, v in policy_values.items() if k != "policy_param"
         }
@@ -417,10 +466,21 @@ def register(app: typer.Typer) -> None:
         )
         initial_price: float | None = policy_params_all.get("initial_price")
         max_price: float | None = policy_params_all.get("max_price")
+        requested_shape = parse_shape_option(shape)
         if from_run:
             if explain:
                 raise typer.BadParameter(
                     "--explain applies to fresh discovery; it cannot resume a run"
+                )
+            if requested_shape is not None:
+                raise typer.BadParameter(
+                    f"{SHAPE_OPTION} applies only to fresh buys; resume uses the "
+                    "shape its negotiation opened with"
+                )
+            if waivers:
+                raise typer.BadParameter(
+                    "default-refusal waivers apply only to fresh buys; resume uses "
+                    "the waivers its run recorded"
                 )
             _run_resume_from(
                 from_run=from_run,
@@ -431,16 +491,6 @@ def register(app: typer.Typer) -> None:
                 console=console,
             )
             return
-        if not explain and (duration_hours is None or duration_hours <= 0):
-            typer.secho(
-                "Fresh `market buy` runs require --duration-hours (the buyer's lease ask).",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-        duration_seconds = (
-            round(duration_hours * 3600) if duration_hours is not None else 0
-        )
         requested_start_utc = _normalize_start_utc(start_utc)
         explicit_prices = initial_price is not None and max_price is not None
         if not explain and (initial_price is not None) != (max_price is not None):
@@ -466,7 +516,7 @@ def register(app: typer.Typer) -> None:
         ssh = None if explain else resolve_ssh_public_key(override=ssh_public_key)
         try:
             settlement_policy = resolve_buyer_settlement_policy(
-                identity=identity, registry_urls=registry_urls,
+                identity=identity, registry_urls=registry_urls, waivers=waivers,
             )
         except ValueError as exc:
             typer.secho(str(exc), err=True, fg=typer.colors.RED)
@@ -553,7 +603,17 @@ def register(app: typer.Typer) -> None:
             selected = buyer_stage(
                 selected.selection.settlement_schema
             ).prepare_selection(selected)
-            normalized = dict(match)
+            try:
+                rows = buyer_compute_disclosure(
+                    selected.option, listing=match, duration_seconds=duration_seconds,
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from exc
+            emit_lifecycle_disclosure(
+                rows + buyer_lifecycle_disclosure(selected.option, waivers=waivers),
+                title=f"Selected option {selected.option.option_id}: price, horizon and lifecycle terms",
+            )
+            normalized = domain_listing_record(match)
             normalized["_selected_settlement"] = selected
             normalized["settlement_options"] = [selected.option.model_dump(mode="json")]
             matches.append(normalized)
@@ -565,6 +625,28 @@ def register(app: typer.Typer) -> None:
                 fg=typer.colors.YELLOW,
             )
             raise typer.Exit(0)
+        if requested_shape is not None:
+            excess = [
+                (match, shape_excess(requested_shape, match)) for match in matches
+            ]
+            matches = [match for match, reasons in excess if not reasons]
+            refusals = [
+                f"{match.get('listing_id')}: {', '.join(reasons)}"
+                for match, reasons in excess
+                if reasons
+            ]
+            if not matches:
+                typer.secho(
+                    "A listing sells at most its advertised shape, and the "
+                    f"{SHAPE_OPTION} exceeds every matching listing's: "
+                    + "; ".join(refusals),
+                    err=True,
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(2)
+            if not quiet:
+                for refusal in refusals:
+                    console.print(f"[dim]skip[/dim]      {refusal}")
         chain_cfg = None
         selected_chain_name = ""
         rpc = ""
@@ -634,8 +716,28 @@ def register(app: typer.Typer) -> None:
         if not explicit_prices:
             from core_buyer.cli import interactive_disposition
 
+            pricing_matches = []
+            priceable = []
+            for match in matches:
+                # A candidate whose selected asset cannot price the shape would
+                # refuse it at the seller; skip it as a too-small one is skipped.
+                try:
+                    pricing_matches.append(priced_at_opening_shape(match, requested_shape))
+                except ValueError as exc:
+                    if not quiet:
+                        console.print(f"[dim]skip[/dim]      {match.get('listing_id')}: {exc}")
+                    continue
+                priceable.append(match)
+            if not priceable:
+                typer.secho(
+                    f"No matching listing can price the {SHAPE_OPTION}.",
+                    err=True,
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(2)
+            matches = priceable
             initial_price, max_price = _resolve_prices_from_matches(
-                matches=matches,
+                matches=pricing_matches,
                 console=console,
                 params=policy_params_all,
                 interactive=interactive_disposition(assume_yes),
@@ -664,6 +766,7 @@ def register(app: typer.Typer) -> None:
             duration_seconds=duration_seconds,
             start_utc=requested_start_utc,
             ssh_public_key=ssh,
+            compute_resource=requested_shape,
         )
 
         def build_escrow_proposal_for_match(
@@ -678,6 +781,7 @@ def register(app: typer.Typer) -> None:
 
         run_log = RunLog.start(
             command="market buy",
+            compute_term_waivers=list(waiver_flags(waivers)),
             profile_id=identity.profile_id,
             principal=identity.principal,
             registry_urls=reg_urls,
@@ -689,6 +793,7 @@ def register(app: typer.Typer) -> None:
             start_utc=requested_start_utc,
             max_matches=max_matches,
             max_rounds=max_rounds,
+            **({"compute_resource": requested_shape} if requested_shape else {}),
             **settlement_policy.public_run_metadata(),
         )
         header = Table.grid(padding=(0, 2))
@@ -771,6 +876,7 @@ def register(app: typer.Typer) -> None:
             derive_prices=None,
             chain=negotiation_chain,
             capture=evidence_store().capture,
+            waivers=waivers,
         )
         settle_hook = make_legacy_settle_hook(
             config=config,

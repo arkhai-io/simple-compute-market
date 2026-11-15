@@ -155,7 +155,7 @@ async def drive(root: Path) -> dict:
                 provision_terms=terms.model_dump(mode="json"),
             )
             await db.commit_agreed_terms(
-                negotiation_id=negotiation_id, agreed_price=100, agreed_duration_seconds=0,
+                negotiation_id=negotiation_id, negotiated_scalar=100, agreed_duration_seconds=0,
                 agreement_bytes=raw, accepted_at=now, agreed_start_utc=now, settlement_data=artifacts,
             )
             await db.update_negotiation_thread_terminal(negotiation_id=negotiation_id, terminal_state="success")

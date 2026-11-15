@@ -32,7 +32,7 @@ change's documents. This repository's documents beside them:
 | The description of this repository's tests: where each level runs, its end-to-end lanes, its canonical deal, and its doubles | `docs/development/TESTING.md` |
 | The description of how this repository's services are configured and deployed: its stacks, charts, release topology, persistence, and migrations | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Operating a deployment: document formats, procedures, upgrade and recovery steps | `docs/operator-handbook.md` |
-| Publishing this repository's packages and artifacts: the publish workflow, a package's one-time setup, cutting a release, the migration floor, and troubleshooting | `docs/release-handbook.md` |
+| Releasing this repository's packages and artifacts: loading a release candidate, the deployment's part, running the lanes on its images, cutting a release, the migration floor, and troubleshooting | `docs/release-handbook.md` |
 | Operating the change workflow | `docs/change-workflow-handbook.md` |
 | The roadmap: directional goals, the value each delivers, current state per goal, and which change owns each open gap | `docs/development/ROADMAP.md` |
 | Change provenance and review discussion | Git history and pull requests ([`documentation.md`, "Provenance lives in version control"](../docs/guidance/engineering/documentation.md#provenance-lives-in-version-control)) |

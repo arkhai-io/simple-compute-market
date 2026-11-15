@@ -12,6 +12,8 @@ from typing import Any
 import httpx
 from market_core.query_dsl import ComparisonOperator, FieldDescriptor, QueryValueType
 from market_core.schemas import (
+    AgreedPrice,
+    PriceBasis,
     RateValue,
     SettlementOption,
     SettlementPrice,
@@ -34,6 +36,8 @@ from market_settlement_runtime import (
     SettlementRole,
 )
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+
+from market_settlement_runtime.presentation import PaymentPresentation, amount_rate_quote
 
 from market_arkhai_payments.client import PaymentsClient
 from market_arkhai_payments.mandates import PaymentsOptionParams
@@ -427,22 +431,26 @@ def arkhai_payments_option_builder(
     if entry is None:
         raise ValueError("no offered dispute authority advertises arkhai.payments.v1")
     AccountId.model_validate(entry.account)
+    # A compute option's deadline is the pool's effective one when the
+    # composition supplies it, so the published term never disagrees with what
+    # the site enforces; otherwise the clause's own, which the seller's servicing
+    # journal files non-delivery at. A compute option with neither publishes
+    # without the term, and the caller reports that a default buyer refuses it.
+    pool_deadline = resources.get("delivery_deadline_seconds") if resources.get("compute") else None
+    deadline = pool_deadline if pool_deadline is not None else params.delivery_deadline_seconds
     lifecycle = LifecycleTerms.model_validate({
         "adjudication": Adjudication(
             version=1, dispute=entry.authority,
             dispute_window_seconds=params.dispute_window_seconds,
             case_hold_max_seconds=params.case_hold_max_seconds,
         ),
-        **({"delivery_deadline_seconds": params.delivery_deadline_seconds}
-           if params.delivery_deadline_seconds is not None else {}),
+        **({"delivery_deadline_seconds": deadline} if deadline is not None else {}),
     })
     validate_terms(encode_terms(lifecycle), TermContext(
         mechanism=ARKHAI_PAYMENTS_MECHANISM, has_adapter=True,
         dispute_interfaces=frozenset(resources.get("dispute_interfaces", ())),
         authority=entry.requirements, compute=bool(resources.get("compute", False)),
     ))
-    if resources.get("compute") and lifecycle.delivery_deadline_seconds is None:
-        raise ValueError("compute option requires delivery_deadline_seconds")
 
     rates: list[RateValue] = []
     if clause.rate is not None:
@@ -543,6 +551,28 @@ def validate_arkhai_payments_publication_input(
     return ArkhaiPaymentsPublicationInput.model_validate(value)
 
 
+def payments_billing_basis(option: SettlementOption) -> PriceBasis:
+    """Project only the payments contract this adapter can actually service.
+
+    The installed adapter supports once parts. Its strict parameter codec
+    refuses rate/setup fields instead of silently labelling them as a total.
+    """
+    if option.settlement_schema != ARKHAI_PAYMENTS_MECHANISM:
+        raise ValueError("billing projection requires an Arkhai payments option")
+    PaymentsOptionParams.model_validate(option.settlement_params)
+    return PriceBasis(unit="total")
+
+
+def payments_payment_presentation(
+    option: SettlementOption, duration_seconds: int | None, quote: AgreedPrice | None,
+) -> PaymentPresentation:
+    """Once-only payments have no separate setup part or recurring reserve."""
+    basis = payments_billing_basis(option)
+    return PaymentPresentation(
+        quote=quote or amount_rate_quote(option, duration_seconds, basis), setup_once=0, initial_reserve=0,
+    )
+
+
 def create_arkhai_payments_registration() -> MechanismRegistration:
     """Register public option construction without escrow servicing hooks."""
     fields = (
@@ -590,6 +620,8 @@ def create_arkhai_payments_registration() -> MechanismRegistration:
         publication_input_model=ArkhaiPaymentsPublicationInput,
         publication_input_validator=validate_arkhai_payments_publication_input,
         negotiates_scalar_amount=True,
+        project_billing=payments_billing_basis,
+        present_payment=payments_payment_presentation,
     )
 
 

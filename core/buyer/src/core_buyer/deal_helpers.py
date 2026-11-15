@@ -15,7 +15,7 @@ from typing import Any
 
 import typer
 from market_identity import Identity, Signer, TrustedIdentitySet
-from market_core.schemas import Agreement, SettlementPlan
+from market_core.schemas import Agreement, BillingProjection, SettlementPlan, agreed_price
 
 from .run_log import RunLog, read_run, read_run_identity
 
@@ -182,7 +182,9 @@ def accepted_seller_principal(deal: DealContext) -> Identity | None:
     return Identity.model_validate(agreement.seller)
 
 
-def exact_agreed_amount(deal: DealContext) -> int | None:
+def exact_agreed_amount(
+    deal: DealContext, *, project_billing: BillingProjection | None = None,
+) -> int | None:
     """The accepted amount in base units, read exactly.
 
     From the accepted Agreement where the run recorded it: the run-log's
@@ -190,7 +192,10 @@ def exact_agreed_amount(deal: DealContext) -> int | None:
     amount.
     """
     if deal.agreement is not None:
-        return Agreement.model_validate(deal.agreement).amount
+        quote = agreed_price(deal.agreement, project_billing=project_billing)
+        if quote.unit != "total":
+            raise ValueError("an escrow payment requires an accepted total, not a per-period quote")
+        return quote.amount
     return int(deal.agreed_amount) if deal.agreed_amount is not None else None
 
 
@@ -896,7 +901,7 @@ def load_negotiation_resume_point(
                     raise typer.BadParameter(
                         f"Run-log {run_id!r} has invalid persisted {field_name}."
                     )
-                parsed_price = float(raw_price)
+                parsed_price = raw_price
                 previous = initial_price if field_name == "initial_price" else max_price
                 if previous is not None and previous != parsed_price:
                     raise typer.BadParameter(

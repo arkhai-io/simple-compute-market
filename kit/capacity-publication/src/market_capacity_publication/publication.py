@@ -87,6 +87,7 @@ class PublicationRepository(Protocol):
         status: str,
         registry_assigned_id: str | None,
         last_error: str | None,
+        published_payload: Any = None,
     ) -> Any: ...
     async def open_listing_ids(self) -> Collection[str]: ...
 
@@ -275,7 +276,7 @@ class PublicationRuntime(Generic[PayloadT]):
             registry_client_factory=self._open_registry_client,
             update_listing_request_factory=self._update_listing_request_factory,
             select_target_registries=self._registries_to_target,
-            record_publications=self._record_publications,
+            record_publications=self._record_reopens,
         )
         if reopened.get("status") == "error":
             return reopened
@@ -565,10 +566,20 @@ class PublicationRuntime(Generic[PayloadT]):
             registry_client_factory=self._open_registry_client,
             update_listing_request_factory=self._update_listing_request_factory,
             select_target_registries=diverged,
-            record_publications=self._record_publications,
+            record_publications=self._record_reopens,
         )
 
     async def _record_publications(
+        self, listing_id: str, results: list[dict[str, Any]]
+    ) -> None:
+        await self._record_results(
+            listing_id,
+            results,
+            success_status="published",
+            publishes_payload=True,
+        )
+
+    async def _record_reopens(
         self, listing_id: str, results: list[dict[str, Any]]
     ) -> None:
         await self._record_results(
@@ -583,16 +594,29 @@ class PublicationRuntime(Generic[PayloadT]):
         results: list[dict[str, Any]],
         *,
         success_status: str,
+        publishes_payload: bool = False,
     ) -> None:
+        """Record each registry's outcome of one fan-out.
+
+        Only a publish the registry accepted replaces the payload it last
+        accepted: the seller prices and pins negotiations from that payload, so
+        a failed attempt, or a status update carrying no listing document, must
+        leave it as it was.
+        """
         for result in results:
+            succeeded = bool(result.get("success"))
+            payload = result.get("payload") or {}
             try:
                 await self._repository.upsert_publication(
                     listing_id=listing_id,
                     registry_url=result["registry_url"],
-                    payload=result.get("payload") or {},
-                    status=success_status if result.get("success") else "failed",
+                    payload=payload,
+                    status=success_status if succeeded else "failed",
                     registry_assigned_id=result.get("registry_assigned_id"),
                     last_error=result.get("error"),
+                    published_payload=(
+                        payload if succeeded and publishes_payload else None
+                    ),
                 )
             except Exception as exc:
                 logger.warning(

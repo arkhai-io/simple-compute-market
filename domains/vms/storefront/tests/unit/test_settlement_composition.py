@@ -169,7 +169,7 @@ async def _persist_accepted_negotiation(
     )
     await db.commit_agreed_terms(
         negotiation_id=negotiation_id,
-        agreed_price=42,
+        negotiated_scalar=42,
         agreed_duration_seconds=3600,
         agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
         settlement_data={"accepted_escrow_proposal": proposal},
@@ -586,6 +586,49 @@ async def test_a_release_model_the_domain_cannot_deliver_refuses_composition(tmp
             alkahest_clients={},
             marketplace_signer=_SELLER_SIGNER,
         )
+
+
+def test_the_configured_rate_servicing_declaration_is_the_compositions(tmp_path):
+    """The seller root's ``rate_servicing`` tables are the one declaration
+    publication and acceptance read."""
+    domain = build_vm_storefront_domain()
+    db = _client(tmp_path / "vm-settlement.db", build_vm_storefront_registry(domain))
+    settlement = {
+        "schema_version": 1,
+        "priority": [],
+        "alkahest": {"enabled": False},
+        "rate_servicing": {"arkhai_payments": {"treatments": ["charged", "returned"]}},
+    }
+
+    with replaced_setting("settlement", settlement):
+        composition = build_vm_settlement_composition(
+            domain=db.domain_registry.resolve_mode("vm").contract,
+            sqlite_client=db,
+            alkahest_clients={},
+            marketplace_signer=_SELLER_SIGNER,
+        )
+
+    assert composition.rate_servicing is composition.settlement_config.rate_servicing
+    declared = composition.rate_servicing.select("arkhai.payments.v1")
+    assert (declared.treatments, declared.setup) == (frozenset({"charged", "returned"}), False)
+
+
+def test_the_configured_penalty_multiple_is_the_compositions(tmp_path):
+    domain = build_vm_storefront_domain()
+    db = _client(tmp_path / "vm-settlement.db", build_vm_storefront_registry(domain))
+    settlement = {"schema_version": 1, "priority": [], "alkahest": {"enabled": False}}
+
+    with replaced_setting("settlement", settlement), replaced_setting(
+        "pricing.default_premature_stop_penalty_periods", 6,
+    ):
+        composition = build_vm_settlement_composition(
+            domain=db.domain_registry.resolve_mode("vm").contract,
+            sqlite_client=db,
+            alkahest_clients={},
+            marketplace_signer=_SELLER_SIGNER,
+        )
+
+    assert composition.default_penalty_periods == 6
 
 
 @pytest.mark.asyncio

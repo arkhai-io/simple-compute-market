@@ -1319,3 +1319,27 @@ For the merge:
 | `DEPLOYMENT_AND_CONFIG.md`, "Release topology", the bare tags an upgrade leaves | description | stays | repository, configuration, deployment | |
 | `DEPLOYMENT_AND_CONFIG.md`, "Validation namespaces", the image tags and `-<rev9>` | description | `openspec/specs/market-change-workflow/README.md`, "The change's namespace", "The tags", where this branch keeps the validation namespaces | — | that bullet's "Compose, the pipeline lanes … keep bare tags" and "a bare build still writes `arkhai:<tag>-<sha>`, which `make push-images` reads": `dev` corrected both (its task 13.3), to the release-image mode's suffix and `-<rev9>`, read by `make load-candidate` too |
 | `DEPLOYMENT_AND_CONFIG.md`, "Artifact publishing destination", the load | procedure | the release handbook, merged into "Loading a release candidate" | — | the handbook's "Where artifacts are pushed" |
+
+Placed at the merge, against `dev` at `cd2506b76`, the commit the rows were read from:
+
+- Where a row named two destinations, the merge took: `make check-release-record`'s
+  refusals to `repository/published-packages.md`, "The release record"; "Static
+  Configuration Tests" to a new `repository/static-configuration-tests.md` (repository,
+  testing); the version check to `repository/package-versions.md`, "A version changes
+  when its contents change", "The version check"; the release-image mode to
+  `TESTING.md`, "Release-image mode", beside the lanes; the terms to `ARCHITECTURE.md`'s
+  "Terms" table; the bill of materials to `ARCHITECTURE.md`, "The bill of materials",
+  under "Build, packaging, and initialization".
+- "Compatibility is owed to what a release has shipped" reached `dev` from
+  `negotiate-open-ended-compute-terms`, whose closeout promoted it as a principle into
+  `RELEASING.md`'s versioning policy. It is placed in `repository/package-versions.md`,
+  and recorded with the candidates in `openspec/changes/README.md`'s unowned gaps.
+- `negotiate-open-ended-compute-terms`'s other edits to the documents this change
+  splits, classified by the same test: the sibling-domains rule in `ARCHITECTURE.md`'s
+  "Family kits" is a rule, to `repository/family-kits.md`, "Sibling domains behave
+  alike"; its `DEPLOYMENT_AND_CONFIG.md` edits (the penalty multiple's startup refusal,
+  the storefront-wide terms, the five clause tiers, the capacity bounds, the on-demand
+  penalty, the bare-metal override's bounds) describe one capability's configuration,
+  to `openspec/specs/storefront-publication/configuration.md`, and its rate-servicing
+  declaration to `openspec/specs/settlement-configuration/configuration.md`, where
+  this branch moved the sections they edit; its `ARCHITECTURE.md` descriptions stay.

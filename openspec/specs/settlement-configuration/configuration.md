@@ -152,6 +152,26 @@ verifying the receipt and before delivering, whenever the buyer did not. The Agr
 discloses both principals, the listing, amount, timing, and provision terms, so enable
 either only where that disclosure to the payments service is intended.
 
+A selling composition declares which recurring treatments it services in its
+`[Settlement]` root, one table per installed mechanism, keyed by the mechanism's
+configuration key:
+
+```toml
+[Settlement.rate_servicing.arkhai_payments]
+treatments = ["charged"]   # as the payment authority names them: charged, returned, prorated
+setup = false              # whether a setup charge beside the rate is serviced
+```
+
+Absent or empty means no rate servicing, so no recurring option publishes; that is
+every shipped configuration, since no installed mechanism services a recurring
+option yet. Publication omits an option naming an undeclared treatment or an
+undeclared setup charge, a cached selection of one is refused before acceptance,
+and its mandate is never derived. Withdrawing a treatment stops new offers only:
+accepted deals keep being serviced. A buyer's root refuses `rate_servicing`, and a
+table naming no installed mechanism, an unknown key or an unknown treatment fails
+validation. The storefront charts' values schemas carry the same table definition
+the loader parses.
+
 Stripe consumer settings are rejected with removal diagnostics; they are not migrated to Arkhai accounts, credentials, or transactions. Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
 
 An Alkahest address book — one deployment's contract addresses, overriding the

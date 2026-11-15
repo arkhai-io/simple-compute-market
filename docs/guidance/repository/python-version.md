@@ -35,4 +35,16 @@ each consumer reads it explicitly
   uses it in each `FROM`.
 
 To change the version, edit `.python-version` and the Dockerfile defaults, then run
-`make check-python-version`.
+`make check-python-version`. The `market` binary's build image is pinned by digest, so a
+Python bump also pins a new digest for it
+([`images.md`, "The `market` binary"](images.md#the-market-binary)).
+
+## Build requirements
+
+`build-constraints.txt`, beside `.python-version`, pins every wheel's build requirements
+exactly. The root Makefile exports it as `UV_BUILD_CONSTRAINT`, as it exports
+`UV_PYTHON`, and so does every subproject Makefile that runs `uv build`, since each also
+runs on its own. The build backend stamps its version into every wheel, so moving a pin
+changes every wheel's bytes and bumps every published distribution
+([`package-versions.md`, "A version changes when its contents change"](package-versions.md#a-version-changes-when-its-contents-change)).
+`make check-build-requirements` holds it ([`packaging-checks.md`](packaging-checks.md#checks)).

@@ -180,7 +180,7 @@ async def main(*, end_before_delivery=False):
         )
         await db.commit_agreed_terms(
             negotiation_id="payment-demo",
-            agreed_price=100,
+            negotiated_scalar=100,
             agreed_duration_seconds=3600,
             agreement_bytes=raw,
             accepted_at=now,

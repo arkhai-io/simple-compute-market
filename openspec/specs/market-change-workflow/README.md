@@ -120,8 +120,12 @@ The Helm targets carry the namespace and the tags:
   image `helm/values.yaml` sets (`change_namespace.py <change> --image-overlay
   <path>`); a render test holds the overlay to every image the chart renders, so an
   image added later cannot deploy under its bare tag. Compose, the pipeline lanes, and
-  an operator's own deployments keep bare tags. A suffixed build writes no commit tag;
-  a bare build still writes `arkhai:<tag>-<sha>`, which `make push-images` reads.
+  an operator's own deployments keep bare tags; a lane run with `RELEASE_IMAGES=1`
+  instead runs a release candidate's release images under its `-<rev9>` suffix
+  ([`TESTING.md`, "Release-image mode"](../../../docs/development/TESTING.md#release-image-mode)).
+  A suffixed build writes no commit tag; a bare build still writes
+  `arkhai:<tag>-<rev9>`, the nine-character revision, which `make push-images` and
+  `make load-candidate` read.
 - **The upgrade.** The volumes deleted are the release's volume claims and the deal
   test's `arkhai-buyer-profiles`; `topology-secrets` creates the namespace's Secrets;
   `helm upgrade --install` runs with `local-values.yaml` and the change's image

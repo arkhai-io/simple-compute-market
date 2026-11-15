@@ -459,9 +459,12 @@ def _listing_response(
     raw = row.get("listing_resource")
     if isinstance(raw, str):
         raw = json.loads(raw)
-    runtime.domain.codecs.listing(raw)
+    runtime.domain.codecs.listing(row)
     normalized = dict(row)
-    normalized["listing_resource"] = raw
+    normalized["listing_resource"] = {
+        name: value for name, value in raw.items()
+        if name not in ("max_duration_seconds", "available_until_utc")
+    }
     return normalized
 
 

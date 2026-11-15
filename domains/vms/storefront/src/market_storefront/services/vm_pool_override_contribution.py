@@ -1,7 +1,7 @@
 """The VM market's contribution to storefront pool overrides.
 
 The pool-override kit stores and checks overrides for any market; for the VM
-offering mode this supplies the two judgements only the VM market can make.
+offering mode this supplies the judgements only the VM market can make.
 Terms are validated by ``VmPoolOverrideTerms``, and asking rates by the VM
 capability vocabulary. Shapes are split and resolved through the admissibility
 kit as publication resolves them, over the storefront's configured default: an
@@ -74,6 +74,14 @@ class VmPoolOverrideContribution:
             rates = resolve_vm_asking_rates({}, override_rates=record.asking_rates)
             problems.extend(f"asking_rates{problem}" for problem in rates.problems)
         return problems
+
+    def projection_problems(
+        self,
+        site_pools: Sequence[Mapping[str, Any]],
+        *,
+        record: PoolOverrideRecord,
+    ) -> Sequence[str]:
+        return []
 
     def _shape_problems(self, listing_shapes: Sequence[Any]) -> list[str]:
         """Every reason publication could not publish one of these shapes.

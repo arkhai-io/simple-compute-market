@@ -34,6 +34,49 @@ Negotiation carries token and other scalar payment values in a uint256 domain, w
 
 Scaling human units into base units belongs to the buyer or domain adapter before negotiation. The protocol preserves the resulting integer through proposals, counters, accepted obligations, and agreed state; it does not apply floating-point pricing conversions at the transport or storage boundary.
 
+## Negotiating a shape
+
+A round after the first may change the capacity shape being sold, as well as the price. The revised shape is a child of `proposal`, because it is part of what the round proposes, and it reuses the opaque `ProvisionTerms` envelope rather than adding a core-level concept, so core stays schema-opaque. The domain's codec is the only component that reads it. Core's request models refuse an unknown top-level key, but that is not what guards a shape: the risk is a nested field passing through unexamined, which would let a buyer claim disk or memory the seller never priced, and core cannot judge nested content without knowing the domain. The VM codec validates the whole family-grouped shape against its capability schema, keeps the opening's duration, start, and delivery credentials, and replaces only the shape. A revision is a whole shape: an omitted family is not inherited from the listing, though round zero's flat form, which may be partial, inherits the listing's omitted dimensions once.
+
+### Why the negotiated quantity is a multiplier
+
+With the shape fixed, negotiating an absolute total works: each round moves one number toward or away from a bound, and who conceded is well defined. Once the shape can vary, a total stops being comparable between rounds — a buyer who asks for less memory and more disk and quotes a different total has not obviously conceded, and the bisection middleware has no axis to bisect. Two other models were rejected:
+
+- **Negotiating the total and re-anchoring the bounds whenever the shape changes** resets the concession history on every change, so a buyer escapes an unfavourable position by perturbing the shape, and convergence need not terminate.
+- **Fixing the rates and letting the buyer choose the shape** leaves nothing to negotiate: it is configure-and-quote, and discards the policy machinery.
+
+So on a shape-priced listing the parties negotiate a multiplier over the listing's advertised rates, carried as integer basis points so the kit's integer amount hooks and the bisection middleware work unchanged. Shape and price vary independently and the multiplier stays one monotone axis. The seller's floor is one bound on it, which applies to every shape without being restated per shape — the restatement where a shape-perturbation attack would otherwise enter. The floor is at most 10,000, so the advertised rates are always a price the storefront accepts; a seller wanting more advertises higher rates, and one clearing idle capacity lowers the floor explicitly.
+
+The quote for a shape is the selected option's advertised rate scaled by the ratio of the requested shape's composed price to the advertised shape's, both evaluated in the option's asset. Scaling the option's already materialized rate reuses its base-unit scale, so the quote needs no token metadata read and infers no decimal precision; the family rates set only the ratio. The ratio, duration, and multiplier are applied in exact arithmetic and the product is rounded up once, so a quote never falls below what the multiplier promises the seller, and a quote too large for uint256 is refused rather than truncated. Both parties derive the quote from the published rates and the round's shape and multiplier; it is not carried on the wire. A flat-priced listing has a rate for its own shape only, so it cannot price another and is shape-fixed by construction.
+
+Because the scalar is a multiplier on one listing and an amount on another, it is never stored or sent under a name that reads as money: the storefront records it as `negotiated_scalar`, and only the derived payment reaches the Agreement, its mandate, and settlement. The buyer's public price surface stays monetary; its amount codec converts the bounds against the shape it opens with and refuses an acceptance whose payment exceeds its ceiling, which keeps overspend impossible once the seller's advertised-shape cap lifts.
+
+### The rates a negotiation is held to
+
+The seller prices and pins a negotiation from its most recent successful registry publication, not from its stored listing record, because that publication is what the buyer read. A failed republication therefore changes nothing a negotiation reads. The pin is a digest of the whole rate structure, so any change to any family's or asset's rates refuses every open thread on the listing, including threads the change does not affect. A narrower pin would need per-thread price derivation at every check; the over-refusal is accepted while sellers rarely reprice live listings. Honouring the old rates instead would bind the seller to rates it withdrew, and repricing a live thread explicitly would change the wire.
+
+Registries whose last accepted rates differ, or a registry holding the listing with no retained payload while another's is known, refuse until they converge, because a buyer at one could otherwise be quoted from rates another serves. A buyer cannot yet name the publication it read, which would let a matching thread continue through a divergence. Exit is never refused, so withdrawn or unpriceable rates never trap a buyer in a thread.
+
+### The agreed price and its unit
+
+The Agreement carries money, never the multiplier: payment mandates bind money, and a buyer or verifier must be able to read what is owed from the Agreement alone. The multiplier stays transcript state. For a recurring option the quote is one period's price, computed from the selected option's period with the same single upward rounding, so `Agreement.amount` is a total for one deal and a per-period price for another. A reader assuming a total would overcharge or overcap a recurring deal, so every reader that spends, caps, displays, recovers or confirms accepted money goes through core's `agreed_price`, which returns the amount with its unit as the selected mechanism's billing projection gives it, and each such reader is tested with a per-period Agreement. A static inventory of every read of an attribute named `amount` was rejected: it cannot tell money from the many other amounts, and a two-party misread fails loudly in an end-to-end run producing a per-period Agreement.
+
+A multiplier-priced acceptance also pins what the money was derived from: the seller's signed acceptance binds the agreed multiplier and the rate-structure digest the opening pinned, and the buyer checks both, with the publication's whole `pricing` object, against the seller's signed publication the registry retains. Returning the seller's stored listing under its existing hash instead was rejected, since it would make a private storage shape a public contract. `Agreement.listing_hash` hashes that stored listing rather than the published document and nothing verifies it, a known gap tabled in the campaign index.
+
+### Acceptance resolves the domain's terms once
+
+A recurring horizon is the Agreement's `duration_seconds`, not an option term, so one option serves every buyer and keeps its ID from the registry to the Agreement; a final option minted at acceptance would need a protocol amendment and a correlation step in discovery to carry a number the Agreement already holds. The schema-opaque runtime therefore fixes one acceptance instant and, on each of its four acceptance paths — opening acceptance, the seller accepting a counter, the buyer accepting, and administrative acceptance — calls the domain's `resolve_acceptance` hook before building artifacts or writing anything, so no artifact is built against one clock and persisted against another. The hook binds the buyer's horizon or the default bound and refuses an expired, excessive, sub-period or no-runway one; the runtime interprets none of it.
+
+### Evaluation order
+
+For a round carrying a shape, the VM seller resolves the shape's policy, checks admissibility, checks feasibility, applies its commercial guard — GPU model and region compared by equality — and only then prices. Each refusal is distinct because each leads the buyer somewhere different: change the ask, retry later, or take the seller's counter. Authoritative feasibility is not composed: the listing-source confirmation concerns only the advertised shape, so until a non-consuming probe of the site is composed, the seller refuses any quantity above the advertised shape. A smaller shape fits wherever the advertised one does; negotiating a larger one needs the probe. Round zero is evaluated by the same composition, so a first-round shape differing from the listing is a proposal, not a defect.
+
+### Current limits
+
+- Requested shapes are capped at the advertised quantities until the feasibility probe is composed.
+- The selected settlement option's rate, which the quote scales, and the `pinned_option_withdrawn` refusal still read the stored listing, which a failed republication can leave ahead of what was last published.
+- A multi-registry seller whose registries diverge refuses every thread on the listing until the targeted resend repairs them.
+
 ## Persistence, continuation, and recovery
 
 The persisted negotiation subject retains its stable negotiation identity, exact buyer and seller principals, authored message history, terminal state, agreed value, and accepted artifacts. A continuation loads that state rather than reconstructing ownership from a request body. Recovery may resume the same nonterminal thread only with the recorded buyer principal or a replacement authorized by a completed rotation, and it does not replay prior policy decisions or change the parties in already accepted Terms.

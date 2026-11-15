@@ -235,6 +235,7 @@ CHAIN: Chain[sqlite3.Connection] = Chain(
         BASELINE,
     ),
     migrations=(
+        *core_migrations.MIGRATIONS,
         Migration("20261106_001_vm_delivery_activation", _add_delivery_activation),
         Migration("20261106_002_vm_credentials_cleared", _clear_vm_credentials),
         Migration("20261109_001_vm_store_open_tables", _create_store_open_tables),

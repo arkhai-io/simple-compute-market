@@ -22,9 +22,7 @@ project's environment from it without a publish round-trip
 the wheelhouse itself: the tools that sync and lock pass it, relative to the project, so
 every lock records the same registry path. `make dist` builds the lanes' superset of the
 release set `make dist-release` builds, adding the wheels only tests depend on
-([`published-packages.md`](published-packages.md)). The publish workflow passes
-`--no-sources`, so the only sources a published wheel could record are index pins, such
-as the PyTorch CPU index.
+([`published-packages.md`](published-packages.md)).
 
 `scripts/uv_project.py` derives the internal packages from the lock whenever it runs and
 passes each operation the flags a same-version wheel's refresh takes

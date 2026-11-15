@@ -18,6 +18,7 @@ import os
 import warnings
 from typing import Any
 
+from arkhai_vms_negotiation.amounts import BASIS_POINTS, multiplier_floor
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from dynaconf import Dynaconf
@@ -38,6 +39,10 @@ from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_settlement_runtime import (
     compile_settlement_publication_clause,
     parse_settlement_publication_clause,
+)
+from market_settlement_runtime.rate_publication import (
+    DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
+    PenaltyPeriods,
 )
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
@@ -292,6 +297,7 @@ def introduction_retention_sweep_interval(seconds: Any) -> float:
 
 _POSITIVE_SECONDS: TypeAdapter[float] = TypeAdapter(PositiveSeconds)
 _SITE_AUTHORITY_URL: TypeAdapter[str] = TypeAdapter(SiteAuthorityUrl)
+_PENALTY_PERIODS: TypeAdapter[int] = TypeAdapter(PenaltyPeriods)
 
 
 def _validated_setting(adapter: TypeAdapter[Any], value: Any) -> tuple[Any, str | None]:
@@ -384,6 +390,50 @@ def source_confirmation_seconds(source: Dynaconf | None = None) -> float:
             f"intervals, which {reason}"
         )
     return window
+
+
+def negotiation_multiplier_floor(source: Dynaconf | None = None) -> int:
+    """`[negotiation].multiplier_floor_bps`: the lowest multiplier, in basis
+    points, the storefront accepts over a shape-priced listing's advertised
+    rates; 10,000 (the advertised rates themselves) unless stated.
+
+    Refused by key unless it is an integer from 0 to 10,000. A floor above the
+    advertised rates would make them a price the storefront refuses, so a buyer
+    reading them from the registry could never accept what was published.
+    """
+
+    active = settings if source is None else source
+    stated = active.get("negotiation.multiplier_floor_bps", BASIS_POINTS)
+    try:
+        return multiplier_floor({"multiplier_floor_bps": stated})
+    except ValueError:
+        raise ValueError(
+            "[negotiation].multiplier_floor_bps must be an integer from 0 to "
+            f"{BASIS_POINTS}: the advertised rates are the most a buyer is asked to pay"
+        ) from None
+
+
+def default_premature_stop_penalty_periods(source: Dynaconf | None = None) -> int:
+    """`[pricing].default_premature_stop_penalty_periods`: how many periods'
+    price an on-demand option's premature-stop penalty is when its clause
+    states none; 24 unless stated. A clause's own penalty, even ``"0"``, wins.
+
+    Refused by key unless it is a positive integer: a seller who means no
+    default penalty states ``"0"`` on the clause, where a buyer reads it.
+    """
+
+    active = settings if source is None else source
+    stated = active.get(
+        "pricing.default_premature_stop_penalty_periods",
+        DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
+    )
+    periods, reason = _validated_setting(_PENALTY_PERIODS, stated)
+    if reason is not None:
+        raise ValueError(
+            "[pricing].default_premature_stop_penalty_periods must be a positive "
+            f"integer: {reason}"
+        )
+    return periods
 
 
 def _positive_seconds(value: Any, *, key: str) -> float:

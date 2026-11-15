@@ -32,10 +32,12 @@ literally and relative to the repository root, the project directory of every
 
 Each end-to-end lane's target in `e2e-tests/Makefile` (`test-e2e-vm`,
 `test-e2e-bare-metal`, `test-e2e-apicredits`) names only its compose project and
-Compose files and the run's provisioning mode: every value its stack reads is in a
-committed overlay, registry or site profile, or secret overlay, and the runner takes
-the lane's committed profiles (`RUNNER_PROFILES`). Its `-down` and `-logs` targets
-name the same.
+Compose files, the run's provisioning mode and, in release-image mode, a release
+candidate's image suffix
+([`TESTING.md`, "Release-image mode"](../../development/TESTING.md#release-image-mode)):
+every value its stack reads is in a committed overlay, registry or site profile, or
+secret overlay, and the runner takes the lane's committed profiles
+(`RUNNER_PROFILES`). Its `-down` and `-logs` targets name the same.
 
 ## No fallback
 

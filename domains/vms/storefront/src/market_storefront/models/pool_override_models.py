@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from arkhai_vms_listings.pricing_resolution import family_rate_terms_problems
+from market_resource_pools_contracts import UtcAvailability
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
 
@@ -26,7 +27,8 @@ class VmPoolOverrideTerms(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sla: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-    max_duration_seconds: StrictInt | None = Field(default=None, gt=0)
+    max_duration_seconds: StrictInt | None = None
+    available_until_utc: UtcAvailability | None = None
     pricing: dict[str, Any] | None = None
 
     @field_validator("pricing")

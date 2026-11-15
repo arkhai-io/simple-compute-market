@@ -13,7 +13,8 @@ minimum uv.
 `make lock` is the relock
 ([`packaging-uv.md`, "Relock against fresh artifacts"](../engineering/packaging-uv.md#relock-against-fresh-artifacts)),
 building the wheelhouse first and installing nothing; `make lock PROJECTS="kit/site
-core/buyer"` narrows it. `check-locks` compares names and specifiers but not markers,
+core/buyer"` narrows it, and a project named in `PROJECTS` with no lock yet is locked
+for the first time. `check-locks` compares names and specifiers but not markers,
 so it does not stand in for the relock, and neither does `make test`.
 
 Locks are written by uv 0.12.22 or newer, the first release that writes lock revision 5,

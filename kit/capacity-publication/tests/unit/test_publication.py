@@ -329,6 +329,82 @@ def _enabled_runtime(repository, hooks, registry):
     )
 
 
+class _PayloadRegistry(_RecordingRegistry):
+    """Reports each request's payload, as the multi-registry client does."""
+
+    def __init__(self, *, publish_succeeds=True):
+        super().__init__()
+        self.publish_succeeds = publish_succeeds
+
+    async def publish_listing_per_registry(self, *, payloads):
+        self.published.extend(payloads.values())
+        return [
+            {
+                "registry_url": url,
+                "success": self.publish_succeeds,
+                "response": {"ok": True} if self.publish_succeeds else None,
+                "error": None if self.publish_succeeds else "registry unavailable",
+                "payload": dict(request),
+            }
+            for url, request in payloads.items()
+        ]
+
+    async def update_listing_per_registry(self, *, listing_id, payloads):
+        self.updates.extend((listing_id, request) for request in payloads.values())
+        return [
+            {
+                "registry_url": url,
+                "success": True,
+                "response": {"ok": True},
+                "payload": dict(request["updates"]),
+            }
+            for url, request in payloads.items()
+        ]
+
+
+def _published_candidate(binding):
+    listing = candidate(binding=binding)
+    listing.payload["storefront_url"] = "https://seller.example"
+    return listing
+
+
+@pytest.mark.asyncio
+async def test_only_an_accepted_publish_records_the_published_payload():
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
+    hooks = Hooks({"listing-1": binding})
+    accepted, refused = Repository(), Repository()
+
+    await _enabled_runtime(accepted, hooks, _PayloadRegistry()).publish(
+        _published_candidate(binding)
+    )
+    await _enabled_runtime(
+        refused, hooks, _PayloadRegistry(publish_succeeds=False)
+    ).publish(_published_candidate(binding))
+
+    (row,) = accepted.publications
+    assert row["status"] == "published"
+    assert row["published_payload"] == row["payload"]
+    assert row["published_payload"]["listing_id"] == "listing-1"
+    (failed,) = refused.publications
+    assert failed["status"] == "failed"
+    assert failed["published_payload"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_reopen_status_update_records_no_published_payload():
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
+    repository = Repository()
+
+    await _enabled_runtime(
+        repository, Hooks({"listing-1": binding}), _PayloadRegistry()
+    ).reopen(_published_candidate(binding), reopened_by="reconciliation")
+
+    published, reopened = repository.publications
+    assert published["published_payload"] == published["payload"]
+    assert reopened["payload"] == {"status": "open"}
+    assert reopened["published_payload"] is None
+
+
 @pytest.mark.asyncio
 async def test_a_failed_local_close_is_raised_before_any_registry_is_told():
     repository = Repository(fail_updates={"listing-1"})

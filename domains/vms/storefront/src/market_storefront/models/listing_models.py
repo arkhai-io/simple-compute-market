@@ -6,7 +6,8 @@ from typing import Any
 
 from core_storefront.models.listing_models import CreateListingRequest
 from market_settlement_runtime import SettlementPublicationClause
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from market_resource_pools_contracts import UtcAvailability, positive_duration_bound
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class VmCapacitySource(BaseModel):
@@ -30,6 +31,12 @@ class VmCapacitySource(BaseModel):
 
 class VmCreateListingRequest(CreateListingRequest):
     """VM listing request with settlement option validation."""
+
+    available_until_utc: UtcAvailability | None = None
+
+    _relative_bound = field_validator("max_duration_seconds", mode="before")(
+        positive_duration_bound
+    )
 
     settlements: list[SettlementPublicationClause] = Field(
         default_factory=list,

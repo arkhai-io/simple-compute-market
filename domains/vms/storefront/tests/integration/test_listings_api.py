@@ -16,7 +16,7 @@ import json
 from collections.abc import AsyncIterator
 from datetime import datetime
 from market_policy.listing_source import ListingSourceVerdict
-from market_core.schemas import RateValue, derive_settlement_option_id
+from market_core.schemas import PriceBasis, RateValue, derive_settlement_option_id
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -467,6 +467,13 @@ async def admin_client(
         # (tests/unit/test_listing_source_check.py, test_negotiate_controller.py).
         return ListingSourceVerdict("matches")
 
+    installed_billing = _negotiation_runtime.build_storefront_settlement_registry().project_billing
+
+    def project_billing(option):
+        if option.settlement_schema == "example.rated.v1":
+            return PriceBasis(unit="total")
+        return installed_billing(option)
+
     _container.resolved_negotiation_runtime = (
         _negotiation_runtime.build_vm_negotiation_runtime(
             registration.contract,
@@ -475,6 +482,7 @@ async def admin_client(
             capacity_runtime=collaborators.capacity_runtime,
             site_projections=site_projections,
             listing_source_check=source_matches,
+            project_billing=project_billing,
         )
     )
 

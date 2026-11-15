@@ -303,7 +303,6 @@ simple-compute-market/
 ├── tools/          # Developer and issue-discovery tools
 ├── make/           # Shared Makefile targets
 ├── Makefile        # Root build, test, and validation entry points
-├── install.sh      # Installation entry point
 ├── openspec/
 │   ├── specs/      # Authoritative implemented contracts
 │   └── changes/    # Proposed changes and implementation plans

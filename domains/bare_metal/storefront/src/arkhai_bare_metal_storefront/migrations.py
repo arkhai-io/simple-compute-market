@@ -297,6 +297,7 @@ CHAIN: Chain[sqlite3.Connection] = Chain(
         BASELINE,
     ),
     migrations=(
+        *core_migrations.MIGRATIONS,
         Migration("bare-metal-storefront-0016-delivery-activation", _add_delivery_activation),
         Migration("bare-metal-storefront-0017-store-open-tables", _create_store_open_tables),
         Migration(

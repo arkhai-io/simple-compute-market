@@ -214,7 +214,7 @@ async def test_the_opening_is_priced_from_the_selected_payment_option(
         negotiation_id=negotiation.outcome.negotiation_id
     )
     assert thread["terminal_state"] == "success"
-    assert int(thread["agreed_price"]) == expected
+    assert int(thread["negotiated_scalar"]) == expected
     agreement = json.loads(thread["agreement_bytes"])
     assert agreement["settlement"]["settlement"]["schema"] == ARKHAI_PAYMENTS_MECHANISM
     assert agreement["settlement"]["option_id"] == option.option_id

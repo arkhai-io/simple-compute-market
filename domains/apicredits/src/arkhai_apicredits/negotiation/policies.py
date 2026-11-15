@@ -36,7 +36,7 @@ from market_alkahest.schemas import (
 )
 from arkhai_apicredits.listings.models import coerce_resource_dict
 from market_policy.scalar_policies import (  # shared alkahest-scalar vocabulary
-    _amount_from_proposal,
+    amount_from_proposal,
     _loads_json_list,
     proposal_uses_scalar_amount,
 )
@@ -192,7 +192,7 @@ def api_credits_round_zero_guard(
     )
     uses_scalar_amount = proposal_uses_scalar_amount(listing, proposal_for_scalar)
     context.intermediate["uses_scalar_amount"] = uses_scalar_amount
-    if uses_scalar_amount and _amount_from_proposal(proposal_for_scalar) is None:
+    if uses_scalar_amount and amount_from_proposal(proposal_for_scalar) is None:
         return (
             NegotiationDecision(
                 action="reject",

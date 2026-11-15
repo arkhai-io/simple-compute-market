@@ -375,6 +375,43 @@ containing that directory and its logs. Repeated fetches replace the ZIP.
 An unavailable artifact is reported without discarding other logs. A successful
 fetch means diagnostics were retrieved; it does not mean the tests passed.
 
+#### Release-image mode
+
+A locally verifiable scenario also runs on a release candidate's images, as part of
+the deployment's release validation, which runs every lane this way. Images do not
+rebuild to the same digest, so a lane that built its own release images would test
+other bytes. With `RELEASE_IMAGES=1` and `IMAGE_SUFFIX=-<rev9>`, a lane target runs the
+release images `make -C e2e-tests pull-release-images` pulled and tagged
+`arkhai:<local><IMAGE_SUFFIX>`, and builds only the wheels, dev-env, the test image and
+its non-release images. Each lane's Compose files name a release image
+`arkhai:<local>${IMAGE_SUFFIX:-}`, so one set of files serves both modes; in the
+pipeline's build mode the suffix is empty and they name the bare tags. In this mode a
+lane target, through `scripts/release_images.py`:
+
+1. **checks**, before it tears down or builds anything, that each declared release image
+   its Compose files run is present under the suffix, naming every missing one; it
+   refuses an empty suffix, and a release image its Compose files run bare, which would
+   run whatever holds the bare tag;
+2. builds, then brings the stack up;
+3. **records**, once the stack is up, each release image its running containers run in
+   `.snapshot/e2e-release-images-<lane>.json`, by published name and manifest digest,
+   read from the image's repo digest from a registry (one in the local `arkhai`
+   repository names no registry and is not counted). It writes no record, and fails
+   the lane, for an image with no such repo digest or two different ones, for a release
+   image its Compose files run that no running container runs, and for a lane running
+   none of the release candidate's images;
+4. runs its scenarios.
+
+Each lane records only the release images it runs; no lane runs
+`frp-grant-admission`, which only the deployment's live tests run. The recorded value is
+the image's own manifest digest under a registry's name, which shows neither a pull nor
+that the registry holds it: the deployment's comparison of the records with the
+manifests the release candidate's load pushed is what ties a lane to the release
+candidate
+([the release handbook, "Running the lanes on a release candidate's images"](../release-handbook.md#running-the-lanes-on-a-release-candidates-images)).
+What a lane target names in this mode is
+[`compose-stacks.md`](../guidance/repository/compose-stacks.md#a-lane-target-names-only-its-files-its-project-and-its-mode).
+
 #### The real-provisioning lane
 
 `e2e_vm_real_provisioning`

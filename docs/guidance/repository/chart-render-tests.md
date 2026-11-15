@@ -7,8 +7,8 @@ tags: [repository, testing, helm]
 Where this repository's chart render tests live, how they run, and how one is written
 here. What a chart render test is, what it covers, and how to write one are
 [`helm-render-tests.md`](../engineering/helm-render-tests.md). It is a
-static configuration test, like `e2e-tests/tests/unit/`'s image-pin and stack
-checks. What every chart renders is [`helm-charts.md`](helm-charts.md).
+[static configuration test](static-configuration-tests.md): it needs Helm, not a
+cluster. What every chart renders is [`helm-charts.md`](helm-charts.md).
 
 ## The supported Helm
 
@@ -16,7 +16,11 @@ The supported Helm is the release pinned in
 [`.github/workflows/tests.yml`](../../../.github/workflows/tests.yml).
 `helm/scripts/test-render.sh` prints `helm version --short` before its first
 render, so each render log names the Helm it ran. The script does not enforce
-the pin; a render step's result is recorded for the version it reports.
+the pin; a render step's result is recorded for the version it reports. The
+chart's content digest does enforce it: `.helm-version` names the Helm the digest is
+computed with, the digest refuses any other
+([`package-versions.md`, "A version changes when its contents change"](package-versions.md#a-version-changes-when-its-contents-change)),
+and a test holds `.helm-version` equal to `tests.yml`'s pin, so a Helm bump edits both.
 
 ## Where they live and how they run
 
@@ -24,7 +28,11 @@ the pin; a render step's result is recorded for the version it reports.
   `make -C helm test-render` and by the top-level `make test-deployment-packaging`.
   The umbrella's own Python render tests, such as the two-release topology's
   `helm/tests/test_release_topology.py`, live in `helm/tests/`, and
-  `test-render.sh` runs them beside each chart's.
+  `test-render.sh` runs them beside each chart's. Among them,
+  `helm/tests/test_default_images.py` holds that the chart's default values name no
+  release — no semver-shaped or revision-suffixed image tag and no digest — and
+  `helm/tests/test_subchart_pins.py` that each of the umbrella's dependency entries
+  names its subchart's own version.
 - A chart's own render tests are `helm/charts/<chart>/tests/test_render.py`. Call
   each from `test-render.sh` so that one target runs every render check; a test
   reachable only through its chart's own Makefile is easily never run.

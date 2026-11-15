@@ -16,7 +16,7 @@ from core_buyer.deal_helpers import (
     load_deal_context,
     load_negotiation_resume_point,
 )
-from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+from market_core.schemas import Agreement, PriceBasis, SettlementOption, derive_settlement_option_id
 import typer
 from core_buyer.profile_service import BuyerProfileService, ProfileServiceError
 from core_buyer.run_log import (
@@ -301,8 +301,16 @@ def test_a_deal_reads_its_agreed_amount_exactly_from_the_agreement(
 
     deal = load(with_agreement)
     assert int(deal.agreed_amount) != amount
-    assert exact_agreed_amount(deal) == amount
+    assert exact_agreed_amount(deal, project_billing=lambda _: PriceBasis(unit="total")) == amount
     assert exact_agreed_amount(load(without)) == 12
+    # An escrow is funded once for the whole term: one period's price is not
+    # a total to fund, whatever the deal's duration, and an unprojected
+    # selected option is not read as one either.
+    per_period = PriceBasis(unit="per_period", period="PT15M", period_seconds=900)
+    with pytest.raises(ValueError, match="requires an accepted total, not a per-period quote"):
+        exact_agreed_amount(deal, project_billing=lambda _: per_period)
+    with pytest.raises(ValueError, match="requires a billing projection"):
+        exact_agreed_amount(deal)
 
 
 def test_a_deals_seller_is_the_one_its_agreement_names_not_a_trusted_publisher(

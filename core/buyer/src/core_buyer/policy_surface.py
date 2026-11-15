@@ -40,8 +40,13 @@ from market_policy.buyer_policy import (
 )
 
 
-def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
-    """Return the primary per-unit rate from the first settlement choice."""
+def extract_seller_min_price(listing: dict[str, Any]) -> Optional[int]:
+    """Return the primary per-unit rate from the first settlement choice.
+
+    The rate is an exact integer of base units: an 18-decimal asset's rate
+    exceeds a float's 53-bit mantissa, and a derived price rounded through one
+    can fall below the rate it was derived from.
+    """
     from market_core.schemas import primary_rate_value
 
     accepted = listing.get("accepted_escrows") or []
@@ -65,8 +70,7 @@ def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
     )
     if not choices or not isinstance(choices[0], dict):
         return None
-    amount = primary_rate_value(choices[0])
-    return float(amount) if amount is not None else None
+    return primary_rate_value(choices[0])
 
 
 def entry_uses_scalar_amount(entry: dict[str, Any]) -> bool:
@@ -162,12 +166,12 @@ def derive_scalar_prices(
     priced_candidates = [(extract_seller_min_price(m), m) for m in matches]
     # Keep listings with amount=0 (free) as legitimate anchors; only filter
     # out None (hidden reserve) where we genuinely have no price signal.
-    priced: list[tuple[float, dict[str, Any]]] = [
+    priced: list[tuple[int, dict[str, Any]]] = [
         (price, match) for price, match in priced_candidates if price is not None
     ]
     if priced:
         priced.sort(key=lambda item: item[0])
-        anchor = int(priced[0][0])
+        anchor = priced[0][0]
 
     if max_price is None and anchor is not None:
         max_price = (

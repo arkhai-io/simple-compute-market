@@ -223,7 +223,8 @@ def write_listing_update(
     updated_at: str | None = None,
     listing_resource: Any | None = None,
     fulfillment_resource: Any | None = None,
-    max_duration_seconds: int | None = None,
+    max_duration_seconds: Any = UNSET,
+    available_until_utc: Any = UNSET,
     storefront_url: str | None = None,
     seller_principal: Identity | None = None,
     oracle_address: str | None = None,
@@ -237,9 +238,9 @@ def write_listing_update(
 ) -> None:
     """Update the supplied listing columns inside the caller's transaction.
 
-    ``None`` on a column means "not supplied", except ``rate_structure``, which
-    is written whenever it is passed: a listing that stops recording a rate
-    structure must have it cleared, not kept.
+    ``None`` on a column means "not supplied", except the capacity bounds and
+    ``rate_structure``, which are written whenever passed: withdrawing a term
+    must clear it rather than keep advertising the previous value.
 
     A change to ``closed`` must name who closed the listing; any other status
     change clears the reason. A change to ``open`` on a listing its seller
@@ -283,7 +284,13 @@ def write_listing_update(
     add("updated_at", updated_at or datetime.now().isoformat())
     add("listing_resource", listing_resource, serialize=True)
     add("fulfillment_resource", fulfillment_resource, serialize=True)
-    add("max_duration_seconds", max_duration_seconds)
+    for name, value in (
+        ("max_duration_seconds", max_duration_seconds),
+        ("available_until_utc", available_until_utc),
+    ):
+        if value is not UNSET:
+            updates.append(f"{name}=?")
+            values.append(value)
     add("storefront_url", storefront_url)
     if seller_principal is not None:
         seller_scheme, seller_identifier = _principal_columns(seller_principal)
@@ -492,6 +499,7 @@ class SQLiteClient:
         demands: Any | None,
         closed_by: str | None = None,
         rate_structure: Any | None = None,
+        available_until_utc: str | None = None,
     ) -> None:
         _require_consistent_closure(status, closed_by)
         # An upsert names no reopener, so it may never overwrite a seller's
@@ -522,9 +530,10 @@ class SQLiteClient:
               publication_clauses,
               demands,
               closed_by,
-              rate_structure
+              rate_structure,
+              available_until_utc
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(listing_id) DO UPDATE SET
               status=excluded.status,
               closed_by=excluded.closed_by,
@@ -541,7 +550,8 @@ class SQLiteClient:
               settlement_options=excluded.settlement_options,
               publication_clauses=excluded.publication_clauses,
               demands=excluded.demands,
-              rate_structure=excluded.rate_structure
+              rate_structure=excluded.rate_structure,
+              available_until_utc=excluded.available_until_utc
             """,
             (
                 listing_id,
@@ -562,6 +572,7 @@ class SQLiteClient:
                 self._serialize_resource(demands),
                 closed_by,
                 self._serialize_resource(rate_structure),
+                available_until_utc,
             ),
         )
 
@@ -585,6 +596,7 @@ class SQLiteClient:
         demands: Any | None = None,
         closed_by: str | None = None,
         rate_structure: Any | None = None,
+        available_until_utc: str | None = None,
     ) -> None:
         def _save() -> None:
             with sqlite3.connect(self.db_path) as conn:
@@ -607,6 +619,7 @@ class SQLiteClient:
                     demands=demands,
                     closed_by=closed_by,
                     rate_structure=rate_structure,
+                    available_until_utc=available_until_utc,
                 )
 
         await asyncio.to_thread(_save)
@@ -631,6 +644,7 @@ class SQLiteClient:
         demands: Any | None = None,
         closed_by: str | None = None,
         rate_structure: Any | None = None,
+        available_until_utc: str | None = None,
     ) -> None:
         """Persist a mutable listing projection and immutable binding atomically."""
 
@@ -667,6 +681,7 @@ class SQLiteClient:
                     demands=demands,
                     closed_by=closed_by,
                     rate_structure=rate_structure,
+                    available_until_utc=available_until_utc,
                 )
                 conn.execute(
                     """
@@ -818,7 +833,8 @@ class SQLiteClient:
         updated_at: str | None = None,
         listing_resource: Any | None = None,
         fulfillment_resource: Any | None = None,
-        max_duration_seconds: int | None = None,
+        max_duration_seconds: Any = UNSET,
+        available_until_utc: Any = UNSET,
         storefront_url: str | None = None,
         seller_principal: Identity | None = None,
         oracle_address: str | None = None,
@@ -850,6 +866,7 @@ class SQLiteClient:
                     listing_resource=listing_resource,
                     fulfillment_resource=fulfillment_resource,
                     max_duration_seconds=max_duration_seconds,
+                    available_until_utc=available_until_utc,
                     storefront_url=storefront_url,
                     seller_principal=seller_principal,
                     oracle_address=oracle_address,
@@ -893,7 +910,8 @@ class SQLiteClient:
                            publication_clauses,
                            demands,
                            closed_by,
-                           rate_structure
+                           rate_structure,
+                           available_until_utc
                     FROM listings WHERE listing_id = ?
                     """,
                     (listing_id,),
@@ -920,6 +938,7 @@ class SQLiteClient:
                     "demands",
                     "closed_by",
                     "rate_structure",
+                    "available_until_utc",
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
@@ -1417,6 +1436,7 @@ class SQLiteClient:
         action_taken: str,
         message_type: str,
         timestamp: str,
+        provision_terms: Mapping[str, Any] | None = None,
     ) -> int:
         """Save a negotiation message to the database.
 
@@ -1495,9 +1515,10 @@ class SQLiteClient:
                     INSERT INTO negotiation_messages(
                         negotiation_id, round, sender_role,
                         sender_scheme, sender_identifier, our_price, their_price,
-                        proposed_price, action_taken, message_type, timestamp
+                        proposed_price, action_taken, message_type, timestamp,
+                        provision_terms
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(negotiation_id, round) DO UPDATE SET
                         sender_role = excluded.sender_role,
                         sender_scheme = excluded.sender_scheme,
@@ -1507,7 +1528,8 @@ class SQLiteClient:
                         proposed_price = excluded.proposed_price,
                         action_taken = excluded.action_taken,
                         message_type = excluded.message_type,
-                        timestamp = excluded.timestamp
+                        timestamp = excluded.timestamp,
+                        provision_terms = excluded.provision_terms
                     """,
                     (
                         negotiation_id,
@@ -1521,6 +1543,8 @@ class SQLiteClient:
                         action_taken,
                         message_type,
                         timestamp,
+                        json.dumps(dict(provision_terms), allow_nan=False)
+                        if provision_terms is not None else None,
                     ),
                 )
                 conn.commit()
@@ -1545,7 +1569,7 @@ class SQLiteClient:
                     """
                     SELECT round, sender_role, sender_scheme, sender_identifier,
                            our_price, their_price, proposed_price,
-                           action_taken, message_type, timestamp
+                           action_taken, message_type, timestamp, provision_terms
                     FROM negotiation_messages
                     WHERE negotiation_id = ?
                     ORDER BY round ASC
@@ -1568,6 +1592,9 @@ class SQLiteClient:
                             "action_taken": row[7],
                             "message_type": row[8],
                             "timestamp": row[9],
+                            "provision_terms": (
+                                json.loads(row[10]) if row[10] is not None else None
+                            ),
                         }
                     )
                 return result
@@ -1606,7 +1633,7 @@ class SQLiteClient:
         self,
         *,
         negotiation_id: str,
-        agreed_price: int | str | float,
+        negotiated_scalar: int | str | float,
         agreed_duration_seconds: int,
         agreed_start_utc: str | None = None,
         accepted_at: str | None = None,
@@ -1619,10 +1646,11 @@ class SQLiteClient:
         run (or be retried) as a separate step by reading these columns,
         without replaying the round-by-round message history.
 
-        ``agreed_price`` is the absolute payment amount in base units of
-        the payment token (the column name is retained from before the
-        per-hour → absolute refactor; semantically it now holds the
-        amount, not a per-hour rate). ``agreed_duration_seconds`` echoes
+        ``negotiated_scalar`` stores the exact domain-negotiated policy
+        quantity, whose units belong to the domain (a basis-point multiplier
+        on shape-priced listings, an absolute amount on flat paths); the
+        accepted Agreement carries the derived monetary amount, when applicable.
+        ``agreed_duration_seconds`` echoes
         the buyer's negotiation-init ask and is used by settlement-time
         arbiter codecs that bind the seller's delivery window.
         """
@@ -1644,11 +1672,11 @@ class SQLiteClient:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
-                agreed_price_text = _amount_to_db_text(agreed_price)
+                negotiated_scalar_text = _amount_to_db_text(negotiated_scalar)
                 cur.execute(
                     """
                     UPDATE negotiation_threads
-                    SET agreed_price = ?,
+                    SET negotiated_scalar = ?,
                         agreed_duration_seconds = ?,
                         requested_start_utc = COALESCE(requested_start_utc, ?),
                         agreed_at = ?,
@@ -1658,7 +1686,7 @@ class SQLiteClient:
                     WHERE negotiation_id = ?
                     """,
                     (
-                        agreed_price_text,
+                        negotiated_scalar_text,
                         int(agreed_duration_seconds),
                         agreed_start_utc,
                         agreed_at_value,
@@ -1769,7 +1797,7 @@ class SQLiteClient:
                            buyer_escrow_proposal,
                            provision_terms,
                            settlement_plan,
-                           agreed_price, agreed_duration_seconds, agreed_at,
+                           negotiated_scalar, agreed_duration_seconds, agreed_at,
                            agreement_bytes, settlement_data, buyer_scheme, buyer_identifier,
                            seller_scheme, seller_identifier, matched_offer_id
                     FROM negotiation_threads WHERE negotiation_id = ?
@@ -1794,7 +1822,7 @@ class SQLiteClient:
                     "buyer_escrow_proposal",
                     "provision_terms",
                     "settlement_plan",
-                    "agreed_price",
+                    "negotiated_scalar",
                     "agreed_duration_seconds",
                     "agreed_at",
                     "agreement_bytes",
@@ -1844,8 +1872,8 @@ class SQLiteClient:
                         result["settlement_data"] = json.loads(raw_settlement_data)
                     except (ValueError, TypeError):
                         pass
-                result["agreed_price"] = _amount_from_db_text(
-                    result.get("agreed_price")
+                result["negotiated_scalar"] = _amount_from_db_text(
+                    result.get("negotiated_scalar")
                 )
                 return result
             finally:
@@ -2644,6 +2672,7 @@ class SQLiteClient:
         registry_assigned_id: str | None = None,
         last_error: str | None = None,
         published_at: int | None = None,
+        published_payload: dict[str, Any] | str | None = None,
     ) -> None:
         """Record (or refresh) a publish attempt for one (listing, registry)
         pair. The row carries the exact payload sent — the registry may have
@@ -2652,6 +2681,11 @@ class SQLiteClient:
 
         ``payload`` accepts a dict (json.dumps'd) or a pre-serialised string.
         ``published_at`` defaults to the current epoch second.
+
+        ``published_payload`` is given only for a publish the registry
+        accepted, and replaces the row's last successfully published payload.
+        Omitted, that payload is kept as it was, so a failed attempt or a
+        status update never loses what the registry last accepted.
         """
 
         def _upsert() -> None:
@@ -2659,6 +2693,10 @@ class SQLiteClient:
                 payload_str = payload
             else:
                 payload_str = json.dumps(payload)
+            if published_payload is None or isinstance(published_payload, str):
+                published_str = published_payload
+            else:
+                published_str = json.dumps(published_payload)
             now = published_at if published_at is not None else int(time.time())
             conn = sqlite3.connect(self.db_path)
             try:
@@ -2666,14 +2704,19 @@ class SQLiteClient:
                     """
                     INSERT INTO publications
                       (listing_id, registry_url, payload_json, published_at,
-                       registry_assigned_id, status, last_error)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                       registry_assigned_id, status, last_error,
+                       published_payload_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id, registry_url) DO UPDATE SET
                       payload_json = excluded.payload_json,
                       published_at = excluded.published_at,
                       registry_assigned_id = excluded.registry_assigned_id,
                       status = excluded.status,
-                      last_error = excluded.last_error
+                      last_error = excluded.last_error,
+                      published_payload_json = COALESCE(
+                        excluded.published_payload_json,
+                        publications.published_payload_json
+                      )
                     """,
                     (
                         listing_id,
@@ -2683,6 +2726,7 @@ class SQLiteClient:
                         registry_assigned_id,
                         status,
                         last_error,
+                        published_str,
                     ),
                 )
                 conn.commit()
@@ -2741,6 +2785,43 @@ class SQLiteClient:
                 return [_publication_row_to_dict(r) for r in rows]
             finally:
                 conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def load_published_payloads(
+        self,
+        *,
+        listing_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        """Each registry's last successfully published payload for one listing.
+
+        Keyed by registry URL. A registry that has never accepted a publish of
+        the listing, or whose recorded payload is not a JSON object, is absent.
+        """
+
+        def _load() -> dict[str, dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT registry_url, published_payload_json
+                    FROM publications
+                    WHERE listing_id = ? AND published_payload_json IS NOT NULL
+                    ORDER BY registry_url
+                    """,
+                    (listing_id,),
+                ).fetchall()
+            finally:
+                conn.close()
+            published: dict[str, dict[str, Any]] = {}
+            for registry_url, payload_json in rows:
+                try:
+                    payload = json.loads(payload_json)
+                except ValueError:
+                    continue
+                if isinstance(payload, dict):
+                    published[str(registry_url)] = payload
+            return published
 
         return await asyncio.to_thread(_load)
 
@@ -3714,7 +3795,8 @@ class SQLiteClient:
                            publication_clauses,
                            demands,
                            closed_by,
-                           rate_structure
+                           rate_structure,
+                           available_until_utc
                     FROM listings {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
@@ -3740,6 +3822,7 @@ class SQLiteClient:
                     "demands",
                     "closed_by",
                     "rate_structure",
+                    "available_until_utc",
                 ]
                 rows = cur.fetchall()
                 result = []
@@ -3844,7 +3927,7 @@ class SQLiteClient:
                            status, terminal_state,
                            requested_duration_seconds,
                            requested_start_utc,
-                           agreed_price, agreed_duration_seconds,
+                           negotiated_scalar, agreed_duration_seconds,
                            agreed_at, created_at, updated_at
                     FROM negotiation_threads
                     {where}
@@ -3864,9 +3947,9 @@ class SQLiteClient:
                     "terminal_state",
                     "requested_duration_seconds",
                     "requested_start_utc",
-                    # Column stays ``agreed_price``; wire field is
-                    # ``agreed_amount`` (absolute amount in base units).
-                    "agreed_amount",
+                    # The wire exposes the domain-negotiated scalar; monetary
+                    # settlement terms are carried by the accepted Agreement.
+                    "negotiated_scalar",
                     "agreed_duration_seconds",
                     "agreed_at",
                     "created_at",
@@ -3884,8 +3967,8 @@ class SQLiteClient:
                         item.pop("seller_identifier"),
                         field="negotiation seller",
                     )
-                    item["agreed_amount"] = _amount_from_db_text(
-                        item.get("agreed_amount"),
+                    item["negotiated_scalar"] = _amount_from_db_text(
+                        item.get("negotiated_scalar"),
                     )
                 return result
             finally:
@@ -3919,7 +4002,7 @@ class SQLiteClient:
                            seller_scheme, seller_identifier,
                            requested_duration_seconds,
                            requested_start_utc,
-                           agreed_price, agreed_duration_seconds, agreed_at,
+                           negotiated_scalar, agreed_duration_seconds, agreed_at,
                            created_at, updated_at
                     FROM negotiation_threads
                     WHERE negotiation_id = ? AND our_listing_id = ?
@@ -3944,10 +4027,9 @@ class SQLiteClient:
                     "seller_identifier",
                     "requested_duration_seconds",
                     "requested_start_utc",
-                    # Column is named ``agreed_price`` (kept from before the
-                    # per-hour → absolute refactor); the wire field is
-                    # ``agreed_amount`` since it holds an absolute amount.
-                    "agreed_amount",
+                    # The column and wire field carry the exact negotiated
+                    # scalar, whose units belong to the domain.
+                    "negotiated_scalar",
                     "agreed_duration_seconds",
                     "agreed_at",
                     "created_at",
@@ -3964,8 +4046,8 @@ class SQLiteClient:
                     thread.pop("seller_identifier"),
                     field="negotiation seller",
                 )
-                thread["agreed_amount"] = _amount_from_db_text(
-                    thread.get("agreed_amount"),
+                thread["negotiated_scalar"] = _amount_from_db_text(
+                    thread.get("negotiated_scalar"),
                 )
 
                 # Message log

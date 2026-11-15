@@ -28,7 +28,7 @@ from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.registry_config import RegistryAuthority
 from arkhai_vms_buyer.buy_orchestrator import BuyResult
 from arkhai_vms_buyer.cli import app
-from arkhai_vms_buyer.run_log import RunLog, read_run
+from arkhai_vms_buyer.run_log import RunLog, list_runs, read_run
 from identity_helpers import (
     BUYER_SIGNER,
     seller_principals,
@@ -36,7 +36,7 @@ from identity_helpers import (
     with_accepted_agreement,
 )
 from market_config.config_loader import ChainConfig
-from market_core.schemas import RateValue
+from market_core.schemas import RateValue, derive_settlement_option_id
 from typer.testing import CliRunner
 
 # Test wallet — derived address must match _BUYER_ADDR below for
@@ -288,8 +288,6 @@ class TestNegotiateFrom:
         assert result.exit_code == 0, result.output
 
         # Find the new run-log (the one that wasn't `original_run`).
-        from arkhai_vms_buyer.run_log import list_runs
-
         new_runs = [r for r in list_runs() if r.run_id != original_run]
         assert len(new_runs) == 1
         events = read_run(new_runs[0].run_id, signer=BUYER_SIGNER)
@@ -434,21 +432,9 @@ class TestBuyFrom:
             "Settlement must not run when negotiation didn't agree"
         )
 
-    def test_buy_fresh_still_requires_duration_hours(self, runner):
-        """Fresh `market buy` (no --from) without --duration-hours fails fast.
-
-        Prices are now optional — when omitted they're derived from each
-        listing's seller-advertised min_price (interactively confirmed by
-        default; non-interactively under --auto-price). Duration is still
-        mandatory because it shapes the buyer's lease ask sent at
-        /negotiate/new.
-        """
-        result = runner.invoke(
-            app,
-            [
-                "buy",
-            ],
-        )
+    def test_buy_fresh_rejects_nonpositive_duration_hours(self, runner):
+        """An explicit duration must be positive; omission is resolved after selection."""
+        result = runner.invoke(app, ["buy", "--duration-hours", "0"])
         assert result.exit_code == 2
         assert "duration-hours" in result.output.lower()
 
@@ -470,92 +456,39 @@ class TestBuyFrom:
             or "max-price" in result.output.lower()
         )
 
+    @pytest.mark.parametrize("command", ["buy", "negotiate"])
+    def test_both_duration_flags_are_refused_before_selection(self, runner, monkeypatch, command):
+        """One duration, in either spelling; naming both is an error naming the conflict."""
+        monkeypatch.setattr(
+            "arkhai_vms_buyer.common.resolve_fresh_buyer_identity",
+            lambda: pytest.fail("a duration conflict is refused before any identity or registry read"),
+        )
+        result = runner.invoke(
+            app, [command, "--duration-seconds", "3600", "--duration-hours", "1"],
+        )
+        assert result.exit_code == 2
+        assert "Pass --duration-seconds or --duration-hours, not both." in result.output
+
+    @pytest.mark.parametrize("command", ["buy", "negotiate"])
+    def test_a_resume_refuses_waiver_flags(self, runner, monkeypatch, command):
+        run_id = _seed_partial_negotiation("http://seller:8001", "L-1")
+        monkeypatch.setattr(
+            "arkhai_vms_buyer.buy_cli.run_settle_from_log",
+            lambda **kw: pytest.fail("a refused resume settles nothing"),
+        )
+        result = runner.invoke(app, [command, "--from", run_id, "--allow-no-penalty"])
+        assert result.exit_code == 2
+        assert "waivers apply only to fresh" in " ".join(result.output.replace("│", " ").split())
+
+    @pytest.mark.parametrize("command", ["buy", "negotiate"])
+    def test_a_nonpositive_duration_in_seconds_is_refused(self, runner, command):
+        result = runner.invoke(app, [command, "--duration-seconds", "0"])
+        assert result.exit_code == 2
+        assert "--duration-seconds must be positive" in result.output
+
     def test_buy_fresh_constructs_buy_config(self, runner, monkeypatch):
         """Fresh buy reaches run_buy with a valid BuyConfig and chain proposal."""
-        listing = {
-            "listing_id": "L-1",
-            "storefront_url": "http://seller:8001",
-            "accepted_escrows": [
-                {
-                    "chain_name": "anvil",
-                    "escrow_address": "0x" + "aa" * 20,
-                    "literal_fields": {"token": "0x" + "bb" * 20},
-                    "rates": [{"field": "amount", "per": "hour", "value": "100"}],
-                }
-            ],
-        }
-        from market_core.schemas import derive_settlement_option_id
-
-        option_params = {"accepted_escrow": listing["accepted_escrows"][0]}
-        option_rates = [
-            RateValue.model_validate(rate)
-            for rate in listing["accepted_escrows"][0]["rates"]
-        ]
-        listing["settlement_options"] = [
-            {
-                "option_id": derive_settlement_option_id(
-                    price={"asset": "0x" + "bb" * 20, "rates": option_rates},
-                    settlement={"schema": "alkahest.v1", **(option_params or {})},
-                ),
-                "price": {"asset": "0x" + "bb" * 20, "rates": option_rates},
-                "settlement": {"schema": "alkahest.v1", **(option_params or {})},
-            }
-        ]
-        captured = {}
-
-        monkeypatch.setattr(
-            "arkhai_vms_buyer.common.chain_by_name",
-            lambda name: ChainConfig(name=name, rpc_url="http://rpc", chain_id=31337),
-        )
-        monkeypatch.setattr(
-            "arkhai_vms_buyer.settlement_composition.load_user_config",
-            lambda: {
-                "Settlement": {
-                    "schema_version": 1,
-                    "priority": ["alkahest.v1"],
-                    "alkahest": {"enabled": True},
-                }
-            },
-        )
-        monkeypatch.setattr(
-            "arkhai_vms_buyer.buy_cli.query_registry_for_matches_multi",
-            lambda *a, **kw: [listing],
-        )
-        monkeypatch.setattr(
-            "arkhai_vms_buyer.buy_cli._resolve_prices_from_matches",
-            lambda **kw: (100, 150),
-        )
-        monkeypatch.setattr(
-            "arkhai_vms_buyer.escrow_client.make_buyer_payment_escrow_terms_fn",
-            lambda **kw: lambda *a, **inner_kw: [],
-        )
-        monkeypatch.setattr(
-            "arkhai_vms_buyer.escrow_client.make_create_escrow_fn",
-            lambda **kw: lambda escrows: [],
-        )
-
-        def fake_make_negotiate_hook(**kwargs):
-            captured["proposal_builder"] = kwargs["build_escrow_proposal"]
-
-            def _hook(*_args, **_kwargs):
-                raise AssertionError("fake run_buy should not call negotiate hook")
-
-            return _hook
-
-        monkeypatch.setattr(
-            "arkhai_vms_buyer.buy_cli.make_legacy_negotiate_hook",
-            fake_make_negotiate_hook,
-        )
-
-        def fake_run_buy(**kwargs):
-            captured["config"] = kwargs["config"]
-            captured["proposal"] = captured["proposal_builder"](kwargs["matches"][0])
-            assert "negotiate" in kwargs
-            assert "settle" in kwargs
-            assert "build_escrow_proposal" not in kwargs
-            return BuyResult(status="ready", negotiation_id="neg-1", rounds=1)
-
-        monkeypatch.setattr("arkhai_vms_buyer.buy_cli.run_buy", fake_run_buy)
+        listing, captured = _stub_fresh_alkahest_buy(monkeypatch)
 
         result = runner.invoke(
             app,
@@ -575,6 +508,38 @@ class TestBuyFrom:
         assert captured["config"].registry_urls == ["http://reg"]
         assert captured["proposal"].settlement_schema == "alkahest.v1"
         assert captured["proposal"].option_id == listing["settlement_options"][0]["option_id"]
+        assert _fresh_run_started()["duration_seconds"] == 3600
+        assert _fresh_run_started()["compute_term_waivers"] == []
+        assert "Waivers in force" not in result.output
+
+    @pytest.mark.parametrize(
+        ("flags", "recorded"),
+        [
+            (["--allow-no-penalty", "--allow-charged-term-end"],
+             ["--allow-no-penalty", "--allow-charged-term-end"]),
+            (["--allow-unprotected-terms"], [
+                "--allow-no-delivery-deadline", "--allow-no-penalty",
+                "--allow-charged-preemption", "--allow-charged-term-end",
+            ]),
+        ],
+        ids=["two-waivers", "the-shorthand"],
+    )
+    def test_buy_fresh_records_and_names_each_waiver_and_a_duration_in_seconds(
+        self, runner, monkeypatch, flags, recorded,
+    ):
+        _stub_fresh_alkahest_buy(monkeypatch)
+
+        result = runner.invoke(app, [
+            "buy", "--duration-seconds", "5400", "--ssh-public-key", "ssh-ed25519 AAAA buyer@test",
+            "--registry-urls", "http://reg", *flags,
+        ])
+
+        assert result.exit_code == 0, result.output
+        started = _fresh_run_started()
+        assert started["duration_seconds"] == 5400
+        assert started["compute_term_waivers"] == recorded
+        (named,) = [line for line in result.output.splitlines() if "Waivers in force:" in line]
+        assert [flag for flag in recorded if flag in named] == recorded
 
     def test_buy_from_rejects_current_max_price_override(
         self,
@@ -599,3 +564,103 @@ class TestBuyFrom:
         )
         assert result.exit_code == 2
         assert "persisted scaled negotiation ceiling" in result.output
+
+
+def _fresh_run_started() -> dict:
+    """The one fresh run's opening event, from the run-log directory the tests isolate."""
+    (run,) = list_runs()
+    return next(
+        event for event in read_run(run.run_id, signer=BUYER_SIGNER) if event["event"] == "run_started"
+    )
+
+
+def _stub_fresh_alkahest_buy(monkeypatch) -> tuple[dict, dict]:
+    """A fresh buy over one Alkahest listing, stopped at ``run_buy``.
+
+    Returns the listing and what the stubs captured. The Alkahest option has no
+    lifecycle adapter, so no default refusal applies to it; the run's waivers are
+    still recorded and named.
+    """
+    listing: dict = {
+        "listing_id": "L-1",
+        "storefront_url": "http://seller:8001",
+        "accepted_escrows": [
+            {
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "aa" * 20,
+                "literal_fields": {"token": "0x" + "bb" * 20},
+                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+            }
+        ],
+    }
+    option_params = {"accepted_escrow": listing["accepted_escrows"][0]}
+    option_rates = [
+        RateValue.model_validate(rate)
+        for rate in listing["accepted_escrows"][0]["rates"]
+    ]
+    listing["settlement_options"] = [
+        {
+            "option_id": derive_settlement_option_id(
+                price={"asset": "0x" + "bb" * 20, "rates": option_rates},
+                settlement={"schema": "alkahest.v1", **option_params},
+            ),
+            "price": {"asset": "0x" + "bb" * 20, "rates": option_rates},
+            "settlement": {"schema": "alkahest.v1", **option_params},
+        }
+    ]
+    captured: dict = {}
+
+    monkeypatch.setattr(
+        "arkhai_vms_buyer.common.chain_by_name",
+        lambda name: ChainConfig(name=name, rpc_url="http://rpc", chain_id=31337),
+    )
+    monkeypatch.setattr(
+        "arkhai_vms_buyer.settlement_composition.load_user_config",
+        lambda: {
+            "Settlement": {
+                "schema_version": 1,
+                "priority": ["alkahest.v1"],
+                "alkahest": {"enabled": True},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "arkhai_vms_buyer.buy_cli.query_registry_for_matches_multi",
+        lambda *a, **kw: [listing],
+    )
+    monkeypatch.setattr(
+        "arkhai_vms_buyer.buy_cli._resolve_prices_from_matches",
+        lambda **kw: (100, 150),
+    )
+    monkeypatch.setattr(
+        "arkhai_vms_buyer.escrow_client.make_buyer_payment_escrow_terms_fn",
+        lambda **kw: lambda *a, **inner_kw: [],
+    )
+    monkeypatch.setattr(
+        "arkhai_vms_buyer.escrow_client.make_create_escrow_fn",
+        lambda **kw: lambda escrows: [],
+    )
+
+    def fake_make_negotiate_hook(**kwargs):
+        captured["proposal_builder"] = kwargs["build_escrow_proposal"]
+
+        def _hook(*_args, **_kwargs):
+            raise AssertionError("fake run_buy should not call negotiate hook")
+
+        return _hook
+
+    monkeypatch.setattr(
+        "arkhai_vms_buyer.buy_cli.make_legacy_negotiate_hook",
+        fake_make_negotiate_hook,
+    )
+
+    def fake_run_buy(**kwargs):
+        captured["config"] = kwargs["config"]
+        captured["proposal"] = captured["proposal_builder"](kwargs["matches"][0])
+        assert "negotiate" in kwargs
+        assert "settle" in kwargs
+        assert "build_escrow_proposal" not in kwargs
+        return BuyResult(status="ready", negotiation_id="neg-1", rounds=1)
+
+    monkeypatch.setattr("arkhai_vms_buyer.buy_cli.run_buy", fake_run_buy)
+    return listing, captured

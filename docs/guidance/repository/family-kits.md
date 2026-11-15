@@ -29,3 +29,7 @@ Applied in order:
 - **Wiring.** Instance wiring, process lifecycle, route mounting, and aggregation of contributions belong in the composition root.
 
 Another market family needing apparently similar behaviour is a signal to evaluate extraction into a repository-wide kit, not an automatic promotion. Promotion is right only when the capability's vocabulary and authority semantics can be made family-neutral without depending on either family's identity or domain meaning; otherwise two family kits are correct.
+
+## Sibling domains behave alike
+
+Sibling domains of one family behave alike unless a reason specific to one of them is stated where the difference lives. A difference with no stated reason is a defect to reconcile, and the reconciled behaviour moves to shared code at the narrowest scope that holds it: a family kit or vocabulary package where it speaks the family's vocabulary, a repository-wide kit where it does not. The VM and bare-metal storefronts' per-clause option derivation (`ClausePublication` in `kit/settlement-runtime`) and their settlement-clause resolver (`listing_terms` in `kit/resource-pools-contracts`) are both repository-wide for that reason: neither names a compute concept, since the step takes whether its options are compute as a flag and the resolver takes the family key as data. Code that looks similar but carries a genuinely different domain meaning stays in its domains.

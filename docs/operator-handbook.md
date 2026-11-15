@@ -759,6 +759,47 @@ sequence:
   option's identifier is not stable across a release that changes the envelope.
   Buyers re-read listings after such an upgrade; a closed listing at a registry
   keeps its older shape as history, and nothing rewrites it.
+- **Open negotiations cross the upgrade one way.** A shape-priced VM listing
+  negotiates a basis-point multiplier over its rates rather than an amount, every
+  storefront stores that negotiated quantity under a renamed column, and a VM
+  storefront pins and prices each negotiation from the rates it last published
+  successfully. None of this is read by an earlier image. Before upgrading a VM
+  storefront, drain it:
+  1. Pause new negotiations (`POST /api/v1/admin/pause`, with the `admin` role).
+  2. Let open negotiation threads end — accepted, exited, or expired.
+  3. Settle the deals already accepted.
+  4. Take the backup (step 1 of the procedure).
+
+  A shape-priced thread left open does not carry across: the upgraded storefront
+  refuses its next round or acceptance — `rate_structure_unpublished` until the
+  listing's next successful publication records what it published, then
+  `rate_structure_changed_reopen` for having no rate pin — and the buyer
+  reopens. A shape-priced listing takes no new negotiation until that
+  publication has succeeded at every configured registry the listing was
+  published to before the upgrade: until then the others may still serve rates
+  the storefront did not record, and it refuses as `rate_structure_divergent`.
+  Registry convergence resends the listing to a registry whose last publish
+  failed; one whose last publish before the upgrade succeeded is sent the
+  listing again only when the listing next changes. Roll back only by deploying
+  the earlier image over that backup; a deal negotiated after the upgrade
+  cannot be carried back.
+- **Bare-metal lease bounds.** A bare-metal pool resolving no positive maximum
+  lease duration — from its storefront override, its `capacity_bounds.bare_metal`
+  hint, or `[pricing].default_max_duration_seconds` — is no longer held as
+  `pool_lease_bound_missing`: its listings publish with no relative maximum, and
+  each reserved deal is bounded only by the duration its buyer names and the
+  pool's `available_until_utc`. To keep a ceiling, set
+  `[pricing].default_max_duration_seconds`, the pool's override, or its hint
+  before upgrading. The derivation no longer reports that hold.
+- **Bare-metal clauses from the pool's `pricing` hint.** A bare-metal storefront
+  resolves a listing's settlement clauses as a VM storefront does: its pool's
+  override, then the pool's `pricing.gpu.<model>.settlements` hint for the
+  machine's GPU model, then the pool's `pricing.settlements`, then
+  `[pricing.defaults.gpu.<model>].settlements`, then `[pricing].settlements`,
+  each list whole. A pool advertising both VM and bare metal whose `pricing`
+  hint states clauses for VM therefore publishes them on its bare-metal
+  listings too; give the bare-metal storefront an override for that pool to
+  keep its own.
 - **Storefront tables.** A storefront creates the tables v0.3.0 created only when
   a store first opened, where they are absent, and drops the inventory tables
   v0.3.0 kept frozen, with their rows; inventory is declared at provisioning

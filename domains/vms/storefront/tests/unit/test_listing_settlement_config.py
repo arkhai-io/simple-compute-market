@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 from market_resource_pools_contracts.backing import BACKED
@@ -165,6 +165,10 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
             "accepted_escrows": [],
             "claimant_principal": TEST_MARKETPLACE_SIGNER.identity,
             "origin": _CAPACITY_SOURCE["site_id"],
+            "pool_id": None,
+            "max_duration_seconds": None,
+            "available_until_utc": None,
+            "publication_diagnostic": ANY,
         },
         clauses=[clause],
     )
@@ -268,6 +272,10 @@ async def test_registration_composition_receives_ordered_example_clauses() -> No
             "accepted_escrows": [],
             "claimant_principal": TEST_MARKETPLACE_SIGNER.identity,
             "origin": "default",
+            "pool_id": None,
+            "max_duration_seconds": None,
+            "available_until_utc": None,
+            "publication_diagnostic": ANY,
         },
         clauses=clauses,
     )

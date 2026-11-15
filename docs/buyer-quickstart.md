@@ -35,42 +35,47 @@ a compatible option. The purchase example below uses Alkahest.
 
 ## 1. Install
 
-From PyPI (lightest — just the buyer CLI). The `market` console script
-ships in `arkhai-core-buyer`; `arkhai-vms-buyer` adds the VM-compute
-plugin:
+From PyPI, on any platform. The `market` console script ships in
+`arkhai-core-buyer`; each buyer domain is a plugin it discovers, and
+`arkhai-vms-buyer` adds VM compute (`arkhai-bare-metal-buyer` and
+`arkhai-apicredits-buyer` add the others):
 
 ```bash
 uv tool install arkhai-core-buyer --with arkhai-vms-buyer
 ```
 
-Released build (latest):
+To install a marketplace release exactly, pin each package to the version that
+release's bill of materials records. The bill of materials is
+`manifests/release-bom.cdx.json` at the release's `marketplace-v<semver>` tag, and
+each wheel's version is on its `wheel/<distribution>` component:
 
 ```bash
-curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | bash
+uv tool install "arkhai-core-buyer==<version>" --with "arkhai-vms-buyer==<version>"
 ```
 
-Installs `market` into `~/.local/bin`. The installer uses `uv` to provision
-the Python version required by the buyer CLI; a literal `python3.12` system
-command is not required. Pin a version with
-`... | bash -s -- --version market-cli-v0.5.3`.
-
-In noninteractive Linux environments, allow apt dependency installation
-explicitly:
+The release's binary, on linux/amd64. Each marketplace release's GitHub release
+carries a `market` binary bundling the buyer CLI and every buyer domain the
+release declares; it is the same program PyPI installs. Check its SHA-256 against
+the `binary/market` component of the release's bill of materials before running
+it:
 
 ```bash
-curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh \
-  | MARKET_INSTALL_ASSUME_YES=1 bash
+sha256sum market   # compare with binary/market's SHA-256 in the bill of materials
+chmod +x market && ./market plugins
 ```
 
-Or from the repo:
+Or from the repository, for development:
 
 ```bash
 git clone https://github.com/arkhai-io/simple-compute-market.git
 cd simple-compute-market
-make build-buyer
+make init-buyer
 export PATH="$PWD/domains/vms/buyer/.venv/bin:$PATH"
 market --version
 ```
+
+`make init-buyer` builds the repository's wheels and installs the VM buyer's
+environment from them, `market` included.
 
 ## 2. Configure
 

@@ -427,7 +427,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     detail = storefront_admin_client.get_negotiation(listing_id, negotiation_id)
     assert detail.terminal_state == "success"
-    assert detail.agreed_amount == _AGREED_AMOUNT
+    assert detail.negotiated_scalar == _AGREED_AMOUNT
 
     escrow_uid = _create_on_chain_escrow(
         case=case,

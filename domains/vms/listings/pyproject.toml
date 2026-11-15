@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-listings"
-version = "0.8.0"
+version = "0.9.0"
 license = "MIT"
 description = "VM listing derivation, pricing resolution, and reconciliation, shared by the VM storefront and buyer."
 requires-python = ">=3.12,<3.14"
@@ -18,7 +18,7 @@ dependencies = [
     # backing's label, and reconciliation asks the delegate what backing means.
     # A contracts package, so the buyer that imports the listing models stays
     # free of the pool authority.
-    "arkhai-kit-resource-pools-contracts>=0.2.0",
+    "arkhai-kit-resource-pools-contracts>=0.4.0",
 ]
 
 [project.optional-dependencies]
