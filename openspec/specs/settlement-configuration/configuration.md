@@ -124,13 +124,13 @@ or `[bare_metal.arkhai_payments]` in the bare-metal buyer's configuration file â
 the service mode whose receipts that process accepts. Receipts sign `livemode`, true only from a live payments service, and a
 receipt verifies only when its signed mode equals the process's setting. The default,
 `false`, accepts only test-mode receipts, so a process against a live service refuses
-every receipt until it sets `livemode = true`; set it on both buyer and storefront
-in the same release that points them at a live service. Mode, service origin, and
-receipt identity change together, and changing them is a cutover: each receipt
-check, including the revalidation of a stored receipt at restart, compares with the
+every receipt until it sets `livemode = true`, buyer and storefront alike. Mode, service origin, and receipt
+identity change together, and changing them is a cutover: each receipt check,
+including the revalidation of a stored receipt at restart, compares with the
 current setting, so a payment deal accepted under the old mode never reaches
-delivery or issuance afterwards. Drain open payment deals, or refund them, before
-the change.
+delivery or issuance afterwards. The operator handbook's
+["Changing the payments service mode"](../../../docs/operator-handbook.md#changing-the-payments-service-mode)
+gives the cutover's procedure.
 
 For signing-key rotation, `receipt_identities` in `[Settlement.arkhai_payments]`
 may list current and retiring identity pins. Each entry has `identity`,

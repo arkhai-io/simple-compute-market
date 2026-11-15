@@ -1720,7 +1720,12 @@ and amended for D24 to D35; nothing in it had started.
   each possibly one capability's; (7) `service-databases.md`'s "each service owns its
   own database", a portable rule with no engineering counterpart; (8)
   `registry-discovery/configuration.md` and `physical-provisioning/configuration.md`
-  possibly owing the `deployment` tag.
+  possibly owing the `deployment` tag. The closeout review's triage settled two of
+  them (196 F1, F2; `design.md`, "Settled at the closeout review's triage"): item 4's
+  payments-mode, pool-constraint rollback, and migration-remedy steps moved to the
+  operator handbook, the rest of item 4 staying; item 2's registry profile and chart
+  paragraphs moved to `deployment-state/configuration.md`. The rest is an unowned row
+  in `openspec/changes/README.md`.
 - [x] 14.11 Documentation citations. Run `make check-doc-citations
   CHANGE=layer-engineering-guidance` and resolve every match, the hard-case
   sample's provisional destinations, the inventory's, and the change's own citations

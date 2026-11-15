@@ -1089,6 +1089,27 @@ sections 10 to 13), or let them stand when presented.
   Dropping it and its tests is code beyond D35, so it is an unowned row under the
   package and release readiness campaign in `openspec/changes/README.md`.
 
+### Settled at the closeout review's triage
+
+The owner settled these at the triage of closeout review 196, on placements closeout's
+14.10 reported.
+
+- **196 F1 — Operator steps leave the capability guidance and the description.** The
+  payments-mode cutover's steps and the rollback past pool constraints went to the
+  operator handbook ("Changing the payments service mode", "Rolling back past pool
+  constraints"), the capability guides keeping the behaviour they rest on;
+  `DEPLOYMENT_AND_CONFIG.md`'s migration-check table lost its "Remedy" column, which
+  restated "Upgrading a deployment". `introduction-delivery`'s re-delivery commands,
+  `settlement-configuration`'s legacy-override rule, and the `pool-override` flags
+  stay, as description and a rule.
+- **196 F2 — The registry's profile and chart material sits beside
+  `deployment-state`.** Its requirement "The registry reads profile-shaped env files"
+  governs it, so the paragraphs moved to `deployment-state/configuration.md`, the
+  descriptor settings and the umbrella alias staying in `registry-discovery`.
+  Rejected: moving the requirement to `registry-discovery`, a change to a
+  specification beyond D35; placing the rest of 14.10's list here, each needing a
+  reading of its own, so it is an unowned row in `openspec/changes/README.md`.
+
 ### Implementation cadence
 
 A review round per layer, so each layer is reviewed by itself, and the code last,

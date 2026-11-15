@@ -545,6 +545,22 @@ It files, rules and changes nothing, and never prints the token:
 | `transport` | the authority could not be reached over a trusted connection, or answered outside its contract | the origin, the network path, the CA bundle |
 | `refused` | the authority refused the read; `code` is its error code | the token |
 
+### Changing the payments service mode
+
+Pointing a buyer and a storefront at a live payments service from a test-mode one,
+or back, is a cutover: a receipt verifies only under the mode its process is set
+to, so a payment deal accepted under the old mode never reaches delivery or
+issuance afterwards (`settlement-configuration`'s
+["Settlement consumer configuration and cutover"](../openspec/specs/settlement-configuration/configuration.md#settlement-consumer-configuration-and-cutover)).
+
+1. Drain the open payment deals, letting each reach delivery or issuance, or
+   refund them.
+2. Set `livemode` in `[Settlement.arkhai_payments]` (`[bare_metal.arkhai_payments]`
+   in the bare-metal buyer's configuration file) on both buyer and storefront, in
+   the same release that points them at the new service's `service_url` and
+   receipt identity.
+3. Rerun the storefront's `check-payments` against the new service.
+
 ## Registry secret profile
 
 The registry chart takes the registry's secret settings — the bootstrap key
@@ -553,7 +569,7 @@ is empty, and the administrator key `REGISTRY_ADMIN_API_KEY` — from a Secret
 holding a profile env file, named by `secretProfile`. It mounts the file beside the
 profile it renders from its values and appends its profile to `ACTIVE_PROFILES`,
 so a setting the file states overrides the rendered one
-(["Registry descriptor configuration"](../openspec/specs/registry-discovery/configuration.md#registry-descriptor-configuration)).
+([`deployment-state`'s "Registry profile configuration"](../openspec/specs/deployment-state/configuration.md#registry-profile-configuration)).
 
 A values file naming `auth.bootstrapKeySecret` or `auth.adminKeySecret` is refused
 at render, naming `secretProfile`. To move off them:
@@ -650,6 +666,16 @@ For each service, in its own deployment:
 
 To roll back, deploy the earlier image over the backup taken in step 1, never
 over the migrated database.
+
+### Rolling back past pool constraints
+
+A storefront or provisioning service of a release without pool constraints holds
+a pool whose hint carries a constraint, and refuses any write that keeps one
+(`storefront-publication`'s
+["Storefront listing shapes and pool overrides"](../openspec/specs/storefront-publication/configuration.md#storefront-listing-shapes-and-pool-overrides)).
+Before rolling sites and storefronts back to such a release, remove every
+constraint mapping from the pools' hints and from the storefronts' stored
+overrides, then roll back both together.
 
 ### Migrating settlement and publication configuration
 

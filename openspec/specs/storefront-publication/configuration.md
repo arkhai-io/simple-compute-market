@@ -348,11 +348,12 @@ system status names the retired keys.
 Constraints are additive: every shape stated without them is valid, and with no
 constraint and no configured default publication is unchanged. Sites and storefronts
 are upgraded together. A constraint written before a storefront can read constraints
-makes that pool's hint unreadable to it, which holds the pool. To roll back to a
-release without constraints, first remove every constraint mapping from pool hints
-and stored overrides: a constraint left
-in place makes the older storefront hold the pool, and the older provisioning service
-refuse any write that keeps it. The contract between a storefront and the
+makes that pool's hint unreadable to it, which holds the pool. The same holds across
+a rollback to a release without constraints: a constraint left in a pool hint or a
+stored override makes the older storefront hold the pool, and the older provisioning
+service refuse any write that keeps it. The operator handbook's
+["Rolling back past pool constraints"](../../../docs/operator-handbook.md#rolling-back-past-pool-constraints)
+gives the rollback's procedure. The contract between a storefront and the
 provisioning service it calls is the
 [compute provisioning contract](../compute-provisioning-contract/spec.md), and the
 major every party accepts is

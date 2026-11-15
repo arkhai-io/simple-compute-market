@@ -39,7 +39,7 @@ in their Dynaconf form
 ([`configuration-python.md`](../guidance/engineering/configuration-python.md)).
 The registry is a Pydantic-settings service that reads profile-shaped env
 files instead; see
-[`registry-discovery`'s "Registry descriptor configuration"](../../openspec/specs/registry-discovery/configuration.md#registry-descriptor-configuration).
+[`deployment-state`'s "Registry profile configuration"](../../openspec/specs/deployment-state/configuration.md#registry-profile-configuration).
 The rest of this section describes the Dynaconf services.
 
 The resolver variables are `ACTIVE_PROFILES`, the comma-separated list of
@@ -78,7 +78,7 @@ Where the charts differ:
   profile is a dotenv file, `config-production.env`, and its chart maps
   each value to its variable by name, so a new registry setting also needs
   a line in its ConfigMap template (see
-  [`registry-discovery`'s "Registry descriptor configuration"](../../openspec/specs/registry-discovery/configuration.md#registry-descriptor-configuration)).
+  [`deployment-state`'s "Registry profile configuration"](../../openspec/specs/deployment-state/configuration.md#registry-profile-configuration)).
 - The provisioning chart and the umbrella's generated smoke-test profile
   write JSON syntax into that YAML profile so 0x-prefixed EIP-191
   identifiers remain strings when Dynaconf reads it
@@ -566,13 +566,13 @@ Each stateful service's migration command, and the phase it runs in, are
 [`migrations-at-startup.md`](../guidance/repository/migrations-at-startup.md). The command's check mode,
 `<service>-migrate --check`, exits 0 only for a compatible database:
 
-| Result | Meaning | Remedy |
-|---|---|---|
-| compatible | the database records exactly the chain's migrations | none |
-| behind | migrations are pending, or a v0.3.0 database awaits adoption | run the command |
-| ahead | the database records a migration this image does not list | restore the pre-upgrade backup, or deploy the image that wrote it |
-| unsupported | tables the chain did not build, part of the floor, or a database older than v0.3.0 | start from a fresh database |
-| absent | no file, or no table but an empty ledger | run the command |
+| Result | Meaning |
+|---|---|
+| compatible | the database records exactly the chain's migrations |
+| behind | migrations are pending, or a v0.3.0 database awaits adoption |
+| ahead | the database records a migration this image does not list |
+| unsupported | tables the chain did not build, part of the floor, or a database older than v0.3.0 |
+| absent | no file, or no table but an empty ledger |
 
 The command refuses an ahead or unsupported database and applies nothing. Each
 in-house service's chain begins at baselines reproducing its v0.3.0 schema; the
