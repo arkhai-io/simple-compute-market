@@ -128,12 +128,22 @@ every receipt until it sets `livemode = true`, buyer and storefront alike. Mode,
 identity change together, and changing them is a cutover: each receipt check,
 including the revalidation of a stored receipt at restart, compares with the
 current setting, so a payment deal accepted under the old mode never reaches
-delivery or issuance afterwards. The operator handbook's
+delivery or issuance afterwards. Open payment deals approved under the old mode or
+identity are therefore drained, or refunded, before the change. Refunds come first:
+once the old identity leaves configuration, each deal it approved stops verifying
+everywhere — snapshot reads, admission, stored-receipt revalidation and the
+storefront's refund, which then answers that no verified payment exists. Nothing
+re-anchors a running deal to a new key. Buyers update their receipt identity before
+approving after the change: a buyer checks the receipt only after approval has moved
+its funds, so a buyer still naming the old identity has its funds approved and held
+while its purchase fails. The operator handbook's
 ["Changing the payments service mode"](../../../docs/operator-handbook.md#changing-the-payments-service-mode)
 gives the cutover's procedure.
 
-For signing-key rotation, `receipt_identities` in `[Settlement.arkhai_payments]`
-may list current and retiring identity pins. Each entry has `identity`,
+For the moment of a signing-key switch, `receipt_identities` in
+`[Settlement.arkhai_payments]` may list the current and the retiring identity pins, so
+a fresh approval does not fail while clocks and configurations differ; it keeps no
+deal alive past the removal of the retiring entry, which ends the cutover. Each entry has `identity`,
 `valid_from` (inclusive Unix seconds, default zero), optional `valid_until`
 (exclusive), and `retiring` (default false). A nonempty list must include the
 current `service_identity` as a non-retiring entry. With no list, that identity
@@ -143,6 +153,14 @@ receipt from a configured retiring identity valid at its approval, without
 rewriting the receipt or its proof. Callers pass their durable minimum event
 sequence to the shared snapshot verifier; wrong mode, deal or regressing state
 is refused before authority state is consumed.
+
+A storefront's `snapshot_freshness_seconds` in `[Settlement.arkhai_payments]`
+(default 5, at most 300) bounds how far a verified snapshot's `observedAt` may lag the
+storefront's clock and still decide a rate delivery phase; a snapshot observed ahead
+of that clock is fresh. The payment authority's clock and the storefront's are
+independent claims, so the window is a liveness allowance for skew and latency, not an
+ordering: every stop, end and funding bound is still checked at the storefront's own
+clock, and a staler snapshot answers pending until it is refreshed.
 
 Agreement attachment is set on each side. A buyer's `attach_agreement` (default `false`)
 attaches the exact Agreement when it approves a payment; setting it in a seller
@@ -163,11 +181,18 @@ setup = false              # whether a setup charge beside the rate is serviced
 ```
 
 Absent or empty means no rate servicing, so no recurring option publishes; that is
-every shipped configuration, since no installed mechanism services a recurring
-option yet. Publication omits an option naming an undeclared treatment or an
-undeclared setup charge, a cached selection of one is refused before acceptance,
-and its mandate is never derived. Withdrawing a treatment stops new offers only:
-accepted deals keep being serviced. A buyer's root refuses `rate_servicing`, and a
+every shipped configuration. Only the compute end-to-end lanes' storefront
+configurations declare `charged` and `returned`, as a lane fixture. Publication omits
+an option naming an undeclared treatment or an undeclared setup charge, a cached
+selection of one is refused before acceptance, and materialization refuses it with
+`settlement_option_withdrawn_refetch`, so its mandate is never derived. Withdrawing a
+treatment therefore stops new offers and the materialization of a deal accepted under
+it; a deal already materialized keeps being serviced. A declaration enables recurring
+offers, not their execution: end service refuses to commit a rate deal while the
+storefront services none
+([`deal-lifecycle` architecture, "One end instant, transactional admission"](../deal-lifecycle/architecture.md#one-end-instant-transactional-admission)).
+Declaring any treatment also presupposes that the payment authority executes the
+dispute authority's `chosen` stop, which hosted qualification has not yet shown. A buyer's root refuses `rate_servicing`, and a
 table naming no installed mechanism, an unknown key or an unknown treatment fails
 validation. The storefront charts' values schemas carry the same table definition
 the loader parses.

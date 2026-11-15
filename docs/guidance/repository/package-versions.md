@@ -37,6 +37,11 @@ configuration key or a hint it reads — is judged under the rules above, so a k
 release accepted keeps the meaning it had, or loses it only with the bump an
 incompatible change takes.
 
+Migration and backwards compatibility are engineered only for what has been deployed.
+A form no deployment has run — a kind of deal, a record, a key's use — owes no
+migration path, compatibility shim or recovery machinery until one does, so none is
+built ahead of it; what a deployment does run keeps the path it is owed.
+
 ## A version changes when its contents change
 
 A contributor bumps a package's version where its contents change, and merges; the
