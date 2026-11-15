@@ -205,6 +205,17 @@ def test_an_untagged_capability_guide(tmp_path: Path) -> None:
         "of engineering, workflow, repository"]
 
 
+def test_an_untagged_architecture_md_beside_an_index(tmp_path: Path) -> None:
+    """Beside an index the companion is `README.md`, so `architecture.md` is guidance
+    found by its place, and fails untagged."""
+    architecture = "openspec/specs/flow/architecture.md"
+    root = _tree(tmp_path, {architecture: "# Flow architecture\n"})
+
+    assert _problems(root) == [
+        f"{architecture}: has no tags in its frontmatter; a guidance file carries one layer "
+        "tag, one of engineering, workflow, repository"]
+
+
 def test_a_file_with_no_layer_tag(tmp_path: Path) -> None:
     """CW-g7lt's scenario "A file states no layer"."""
     root = _tree(tmp_path, _testing_tags("[testing]"))

@@ -2659,6 +2659,25 @@ files the check finds wanting.
   the citations of `docs/agents/` from this change's own documents (the two files
   this section creates now exist) and the `CW-*` index entries. End-to-end scenarios
   covering the section: none confirmed, as planned. Owed by validation: nothing.
+  Fixed at round 7's triage (157 F1): `_capability_guidance` excluded
+  `architecture.md` in every capability, so an indexed capability's `architecture.md`,
+  guidance under CW-r8cg since its companion is `README.md`, escaped the check. The
+  companion is now `README.md` beside an `index.md` and `architecture.md` otherwise,
+  and only it is excluded, as the module docstring and D21 say. A new test,
+  `test_an_untagged_architecture_md_beside_an_index`, fails an untagged
+  `architecture.md` beside an index. `test_check_guidance.py` (unit, over temporary
+  trees): 50 passed. `make check-guidance`: still 73 files and 3 exception rows, since no
+  indexed capability has an `architecture.md`. `scripts/change-workflow run pre-commit
+  layer-engineering-guidance`: `after-functional-change` passed. The first run's
+  `pre-commit-functional` failed two tests in `domains/apicredits`'
+  `test_distribution_install.py`, a built wheel's import in a fresh venv, which the
+  fix does not reach. In the second run they passed (41 passed), as did
+  `pre-commit-functional` ("passed, exit 0", 2943 in `scripts/tests`). The default
+  checks passed, and the change "is valid". `make check-repository` failed only on the
+  two failures the preamble expects: the `docs/agents/` citations and the `CW-*` index
+  entries. Fresh-context check: no violations. It confirmed the code against CW-r8cg,
+  MCW-c4ek and D21, the docstrings agreeing, and the new test failing on the old code,
+  which it judged by reading rather than by running.
 
 Section 9 notes (handoff):
 

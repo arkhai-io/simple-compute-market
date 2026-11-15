@@ -383,9 +383,10 @@ def _capability_guidance(root: Path, path: str) -> bool:
     capability = root / SPECS / parts[0]
     if len(parts) == 2:
         name = parts[1]
-        if name in ("spec.md", "index.md", "architecture.md"):
+        if name in ("spec.md", "index.md"):
             return False
-        if name == "README.md" and (capability / "index.md").is_file():
+        companion = "README.md" if (capability / "index.md").is_file() else "architecture.md"
+        if name == companion:
             return False
     return True
 
