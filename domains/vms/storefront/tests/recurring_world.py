@@ -19,13 +19,13 @@ from __future__ import annotations
 import contextlib
 import json
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
-from market_arkhai_payments.fixtures import dispute_lifecycle
+from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
 from market_arkhai_payments.seller import servicing_stage
 from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
 from market_identity import Ed25519Signer
@@ -36,16 +36,24 @@ from market_settlement_runtime.rate_servicing import (
 )
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 
+import market_storefront.container as container
+from market_storefront.controllers.settle_controller import router as settle_router
+from market_storefront.controllers.settle_controller import settlements_router
+from market_storefront.deal_lifecycle import VmDealLifecycle
 from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.settlement_composition import (
     VmSettlementComposition,
     build_storefront_settlement_registry,
 )
 from market_storefront.utils import config as storefront_config
 from tests._settings_overrides import replaced_setting
+from tests.delivery_fakes import DeliveryProvisioning, DeliverySite
+from tests.fake_site import TEST_MARKETPLACE_SIGNER
 from tests.publication_app import (
     SELLER_WALLET,
     SETTLEMENT,
+    SITE,
     PublicationApp,
     pool,
     publication_app,
@@ -174,6 +182,71 @@ class RecurringWorld:
         """Poll the site, run one publication cycle, and return its report."""
         await self.app.client.admin_run_lifecycle_cycle("site-projections")
         return await self.app.client.admin_run_lifecycle_cycle("publication")
+
+
+@dataclass
+class RecurringSettlement:
+    """The world's payments settle path, its delivery path and the doubles behind them.
+
+    ``payments`` plays the payments service through the in-process engine, so
+    a buyer approval there is what the stage's receipt check reads.
+    ``provisioning`` is the provisioning service's fulfillment surface; the
+    site's capacity is the world's own fake site, through the storefront's
+    capacity runtime.
+    """
+
+    payments: FakePaymentsClient
+    coordinator: VmPaymentsCoordinator
+    lifecycle: VmDealLifecycle
+    provisioning: DeliveryProvisioning
+
+    async def delivered(self, negotiation_id: str) -> None:
+        """Wait for the delivery drive the settlement started to return."""
+        task = self.coordinator.tasks.get(negotiation_id)
+        if task is not None:
+            await task
+
+
+@contextlib.asynccontextmanager
+async def settlement(world: RecurringWorld) -> AsyncIterator[RecurringSettlement]:
+    """Compose the payments settle path over ``world``'s served storefront.
+
+    The composition gains its payments coordinator and deal lifecycle as
+    ``build_vm_settlement_composition`` builds them, over the world's
+    declaration, with the stage's payments client the in-process engine. The
+    settle routes are mounted on the world's app, so a buyer settles through
+    the typed client and delivery runs through the real delivery path and end
+    service.
+    """
+    composition = world.app.composition
+    domain = world.app.db.domain_registry.resolve_mode("vm").contract
+    payments = FakePaymentsClient(signer=_PAYMENTS_SERVICE)
+    stage = servicing_stage(
+        composition.settlement_config.mechanism_config("arkhai_payments"),
+        client_for_owner=payments, rate_servicing=composition.rate_servicing,
+    )
+    provisioning = DeliveryProvisioning(DeliverySite(SITE))
+    coordinator = VmPaymentsCoordinator(
+        domain=domain, db=world.app.db, stage=stage,
+        capacity=container.resolved_capacity_runtime.effects(), fulfillment=provisioning,
+    )
+    lifecycle = VmDealLifecycle(
+        world.app.db, TEST_MARKETPLACE_SIGNER, coordinator, composition.disputes, fulfillment=provisioning,
+    )
+    coordinator.lifecycle = lifecycle
+    previous = container.resolved_settlement_composition
+    container.resolved_settlement_composition = replace(
+        composition, domain=domain, arkhai_payments_stage=stage,
+        payments_coordinator=coordinator, lifecycle=lifecycle,
+    )
+    world.app.app.include_router(settle_router)
+    world.app.app.include_router(settlements_router)
+    try:
+        yield RecurringSettlement(payments, coordinator, lifecycle, provisioning)
+    finally:
+        await coordinator.stop()
+        await lifecycle.close()
+        container.resolved_settlement_composition = previous
 
 
 def undeclared(report: Mapping[str, Any]) -> list[Mapping[str, Any]]:

@@ -934,7 +934,7 @@ any storefront code matching or serializing `RepairReason`;
 domains/vms/storefront/tests/integration/test_lifecycle_admin.py (`approve_rate`'s
 comment); package versions per `docs/development/RELEASING.md`, "Versioning policy".
 
-- [ ] 4C.1 The refusal code (D14): `DeliveryAuthorization` gains an optional closed
+- [x] 4C.1 The refusal code (D14): `DeliveryAuthorization` gains an optional closed
       `code` (`"rate_servicing_unavailable"`), absent by default. Every existing
       producer (the composed payments adapter, `OnceDeliveryPolicy`, Alkahest's once
       adapter, end service's own answers) leaves it absent. A journaled authorization
@@ -943,7 +943,17 @@ comment); package versions per `docs/development/RELEASING.md`, "Versioning poli
       carried; a stored acknowledgement without the key reads; an unknown code is
       refused. `arkhai-kit-deal-lifecycle` is already one step from `dev` (4A); bump
       only if the version-bump check asks.
-- [ ] 4C.2 The door (D12, D13, D15): `EndService.authorize_delivery`, for the commit
+      As built: `market_deal_lifecycle.delivery.RefusalCode` and
+      `DeliveryAuthorization.code`. An answer without a code dumps without the key (a
+      wrap serializer), because end service re-acknowledges an answer at the same key
+      and refuses one that differs from what its journal holds: an authorization
+      journaled before this release must still compare equal. Tests:
+      `kit/deal-lifecycle/tests/unit/test_delivery_authorization.py` (unit, 4 cases:
+      the codeless dump equals its input, a stored acknowledgement without the key
+      reads and re-dumps unchanged, a coded refusal round-trips, an unknown code is
+      refused). `make -C kit/deal-lifecycle test` 86 passed (was 82). No version bump
+      was needed.
+- [x] 4C.2 The door (D12, D13, D15): `EndService.authorize_delivery`, for the commit
       phase only, reads the deal's committed seller projection
       (`SellerSession(conn).read`) before it asks the payment adapter. A projection
       that is not once-only (`SellerDeal.once_only`, `False` when unset) is refused
@@ -961,7 +971,35 @@ comment); package versions per `docs/development/RELEASING.md`, "Versioning poli
       and its answer carries no code; a missing projection is refused without the
       code. Kit tests and examples that register a `SellerDeal` without `once_only`
       and drive a commit set it.
-- [ ] 4C.3 The repair reason (D14): `RepairReason.RATE_SERVICING_UNAVAILABLE`
+      As built: `EndService.authorize_delivery`, for the commit phase only, reads the
+      projection before the adapter-absent check and the adapter, and hands a refusal
+      to `_authorize_delivery` in place of the adapter's answer, so it passes the same
+      commitment and admission checks and is journaled and acknowledged under its
+      `<negotiation>:commit:<revision>` identity (`EndService._unserviceable` holds
+      the rule and its comment). Admission overriding an answer (an end due, a stale
+      revision) now also clears its code. The projection moved to a new module,
+      `market_deal_servicing.projection` (`SellerDeal` and `read_seller_deal`), which
+      `seller.py` re-exports: `seller.py` imports `end.py` for its operation store, so
+      `end.py` importing `seller.py` is a circular import, and 4D's admission in
+      `journal.py`, which `seller.py` also imports, must read the same projection.
+      `SellerSession.read` delegates to `read_seller_deal`. The kit's rig and every
+      example already registered `once_only=True`; no example drives a commit. Tests:
+      `kit/deal-servicing/tests/integration/test_rate_refusal.py` (library
+      integration, real SQLite, a spy adapter; 4 cases: a projection that never stated
+      `once_only` is refused with the code, the adapter never called, the refusal
+      journaled as the only intent and a second ask returns the same answer; a
+      once-only commit reaches the adapter and its journaled answer has no `code` key;
+      a deal with no projection is refused without the code; dispatch is not refused
+      at the door), and 2 more for admission overriding the refusal: an end already
+      due answers "delivery ended" with no code, and a stale revision answers pending
+      with no code. `make -C kit/deal-servicing test` 92 passed (was 86).
+      Outside the plan: VM's `delivery_records.register_delivery` registered every
+      deal `once_only=True`; it now reads the mandate's parts for a payments deal, as
+      bare metal's `register_agreement` and VM's `VmDealLifecycle.register` already
+      did. VM registers a payments deal through `VmDealLifecycle.register` at
+      settlement first, and `register_delivery` returns early once a record exists, so
+      the hard-coded value was latent; no test exercises the corrected branch.
+- [x] 4C.3 The repair reason (D14): `RepairReason.RATE_SERVICING_UNAVAILABLE`
       (`"rate_servicing_unavailable"`); `_authorized` maps a refusal carrying the code,
       when no end is due, to `repair_required(rate_servicing_unavailable)` with the
       authorization's operation identity as its evidence reference; every other
@@ -972,7 +1010,24 @@ comment); package versions per `docs/development/RELEASING.md`, "Versioning poli
       once-only drives to `repair_required(rate_servicing_unavailable)`, the capacity
       fake records no reserve and no billing intent is journaled, and a second drive
       asks again with the same answer; a once-only deal drives as before.
-- [ ] 4C.4 The refusal through each served storefront (D12): one application-integration
+      As built: `RepairReason.RATE_SERVICING_UNAVAILABLE`; `_authorized` maps the
+      coded refusal, when no end is due, with the authorization's journaled identity
+      as the outcome's `evidence_ref`. The enum's and `_authorized`'s docstrings and
+      the module docstring say so. Neither storefront matches the closed set: both
+      log `outcome.reason.value` only. The test rig's `register` now registers the
+      deal's seller projection too (once-only by default, `once_only=False` for a rate
+      deal), and the hosted once-only payment test registers its own, since a deal with
+      no projection is now refused. Tests:
+      `domains/compute/delivery/tests/integration/test_drive_delivery.py` (library
+      integration, real end service and SQLite):
+      `test_a_rate_deal_end_service_cannot_service_waits_in_repair_with_nothing_reserved`
+      (repair with the reason, no reservation, no site call, the adapter never asked,
+      no billing intent and no end; a second drive returns the same answer with one
+      journaled authorization) and
+      `test_a_once_only_deal_beside_a_refused_rate_deal_drives_as_before` (in one
+      journal, the rate deal is refused, then the once-only deal converges holding the
+      one reservation). `make -C domains/compute/delivery test` 128 passed (was 126).
+- [x] 4C.4 The refusal through each served storefront (D12): one application-integration
       case per storefront, through its typed clients over real SQLite with the
       installed recurring wiring and a declaration listing `charged` and `returned`:
       a recurring deal is approved against the in-process payments engine and settled
@@ -982,10 +1037,39 @@ comment); package versions per `docs/development/RELEASING.md`, "Versioning poli
       `domains/bare_metal/storefront/tests/recurring_world.py`), which 4B.4 left
       reaching acceptance on VM and publication on bare metal; where a world cannot
       reach settlement, extend it rather than seed the database (`TESTING.md`).
-- [ ] 4C.5 Correction 3 of the design discussion: `approve_rate`'s comment in VM's
+      As built, both through the buyer's typed client from publication to settlement,
+      with nothing seeded: the buyer negotiates the published on-demand option to
+      acceptance, its mandate is funded and approved at the in-process engine
+      (`FakePaymentsClient.engine`), and the buyer settles. VM's world gains
+      `settlement(world)`, which composes the payments coordinator and deal lifecycle
+      as `build_vm_settlement_composition` does, over the world's declaration, with
+      the engine as the stage's client, the world's fake site through the
+      storefront's capacity runtime and `tests.delivery_fakes`' provisioning surface,
+      and mounts the settle routes on the world's app. Bare metal's world gains a
+      `payments` parameter, the composition's `payments_client_for_owner`; its app
+      already serves negotiation and settlement. Tests, application integration:
+      VM `tests/integration/test_rate_delivery_refusal.py` and bare metal
+      `tests/integration/test_rate_delivery_refusal.py`, each
+      `test_a_settled_recurring_deal_is_not_delivered_while_rate_servicing_is_not_composed`:
+      the receipt verifies and the servicing record is committed; the journaled commit
+      authorization is the coded refusal; no billing intent; no submit at the engine,
+      so no rate start; VM's acceptance holds are unchanged and none is leased, and its
+      delivery record is `provisioning` with no reservation or fulfillment; bare
+      metal's settle answers `planning` with no reservation or fulfillment, and its
+      fulfillment row is `planning` with neither. The settle composition is built by
+      the test as production builds it, with site and provisioning doubles injected;
+      "installed recurring wiring" covers publication, acceptance and the stage's
+      declaration. VM storefront `make -C domains/vms/storefront test` 1194 unit
+      passed (1 skipped) and 599 integration passed (was 598); bare-metal storefront
+      `cd domains/bare_metal/storefront && uv run pytest` after its `reinit` 642
+      passed (was 641).
+- [x] 4C.5 Correction 3 of the design discussion: `approve_rate`'s comment in VM's
       `test_lifecycle_admin.py` states what its fixture does (it skips delivery), not
       an installed delivery hook.
-- [ ] 4C.6 Verify: after `make dist`, `make -C kit/deal-lifecycle test-unit`,
+      As built: the docstring says the fixture approves and registers the rate deal and
+      marks it started in the delivery double without any drive, so the refusal is
+      never reached there.
+- [x] 4C.6 Verify: after `make dist`, `make -C kit/deal-lifecycle test-unit`,
       `make -C kit/deal-servicing test`, `make -C domains/compute/delivery test`,
       `make -C domains/vms/storefront test`, the bare-metal storefront's suite (after
       its `reinit`, as section 4B's notes say), each changed package's typecheck, then
@@ -996,6 +1080,63 @@ comment); package versions per `docs/development/RELEASING.md`, "Versioning poli
       `e2e_bare_metal_payment_deal` cross the changed commit authorization and must
       stay green; validation's pipeline reads them.
       Owed by validation: none.
+      As built: `kit/deal-lifecycle` has no `test-unit` target; `make -C
+      kit/deal-lifecycle test` ran its unit suite. Counts are in each task's note. The
+      typecheck of the changed packages was not run: `make -C kit/deal-servicing
+      typecheck` was denied by this step's tooling, and `kit/deal-lifecycle` and
+      `domains/compute/delivery` have no typecheck target. `scripts/change-workflow
+      run pre-commit`: after-functional-change (`make lock`), pre-commit-functional
+      (`make dist-clean`, `make check-packaging`, `make test`, every suite) and
+      pre-commit (index, tasks, skills, OpenSpec strict, `make check-repository`) all
+      passed; it ran again after the fresh-context check's fixes (below).
+      End-to-end confirmed: none exercises the refusal until section 4E; the once-only
+      payment scenarios named above cross the changed commit authorization.
+
+## Section 4C notes and handoff
+
+- The fresh-context check found no layering, import, test-level or packaging breach.
+  Fixed: the repair reason's docstring claimed a later drive commits once the
+  storefront can service the deal, which no storefront can today (now "each drive
+  asks end service again"); `projection.py` claimed admission reads the projection,
+  which is 4D's work (now end service only); `DeliveryAuthorization`'s docstring had
+  history wording; the bare-metal case passed vacuously on an absent fulfillment row
+  and never read the settle's answer (both asserted now); the coded refusal through
+  an admission override was untested (two kit cases added); the compute-delivery
+  "beside it" case ran alone (it now drives a refused rate deal first); undisclosed
+  run results and the injected settle doubles (now in the notes); a private
+  `_PAYMENTS_SERVICE` import (now the world's public `PAYMENTS_SERVICE`).
+- For convergence, found by that check and not changed here: the refusal is
+  journaled as a done authorization under `<negotiation>:commit:<revision>`, and the
+  payments adapter and `OnceDeliveryPolicy` answer under the same
+  `<negotiation>:commit` identity. A storefront that later services the deal and
+  answers allow at the same revision would be refused by `EndSession.acknowledge`
+  ("completed intent cannot change"). D14's "delivers it on its next drive" assumes
+  that cannot happen; convergence, which replaces the refusal (D13), decides how a
+  refused deal's next commit is keyed.
+- For 4D: `journal.py`'s admission can read the seller projection through
+  `market_deal_servicing.projection.read_seller_deal` without a circular import
+  (`seller.py` imports `journal.py` and `end.py`; `projection.py` imports neither).
+  The barrier needs the instant of the latest successful payment observation, which
+  no table records today: `servicing_watch` and `servicing_observations` hold an
+  `AuthorityView` (extra fields forbidden) and no time. A new table in
+  `SERVICING_SCHEMA` reaches an existing database only through a new migration in
+  each storefront chain (`domains/vms/storefront/src/market_storefront/utils/migrations.py`,
+  `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/migrations.py`),
+  each calling `create_servicing_schema`, whose statements are `IF NOT EXISTS`.
+  `EndSession.admit` has many callers (the compute delivery path, VM's
+  `deal_lifecycle.py` and `failure_actions.py`, bare metal's `lifecycle.py`), so
+  the barrier belongs inside `admit`. 4C.4's two cases are the base for 4D.4: VM's
+  `settlement(world)` and bare metal's `payments=` parameter settle a refused rate
+  deal through the typed clients; VM's world restarts as a second
+  `publication_app` over the same `tmp_path`.
+- Running a single bare-metal storefront test file: `cd domains/bare_metal/storefront
+  && uv run pytest <file>` after its `reinit` works; for the VM storefront only `make
+  -C domains/vms/storefront test-integration` (the whole suite, about 30 seconds)
+  was used, since a plain `uv run` there relocks.
+- Section 4D was not started in this session: section 4C alone grew the session
+  large (two kit packages, the delivery path, both storefronts' worlds and their
+  settle composition), and 4D adds a migration per storefront chain, admission's
+  barrier and both domains' recovery order with a restart case each.
 
 ## 4D. The deadline barrier
 

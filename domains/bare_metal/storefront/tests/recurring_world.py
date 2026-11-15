@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
-from market_arkhai_payments.fixtures import dispute_lifecycle
+from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
 from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime import SettlementPublicationClause
@@ -44,7 +44,8 @@ from test_publication_cycle import Site, member, pool
 MECHANISM = "arkhai.payments.v1"
 PAYEE = "22222222-2222-4222-8222-222222222222"
 _DISPUTE_ACCOUNT = "33333333-3333-4333-8333-333333333333"
-_PAYMENTS_SERVICE = Ed25519Signer(bytes(range(1, 33)))
+#: The payments service's receipt and snapshot signer.
+PAYMENTS_SERVICE = Ed25519Signer(bytes(range(1, 33)))
 #: The buyer's request signer.
 BUYER_SIGNER = Ed25519Signer(bytes(range(2, 34)))
 SITE = "site-a"
@@ -121,7 +122,7 @@ def _settlement_root(alkahest: Mapping[str, Any]) -> dict[str, Any]:
         "arkhai_payments": {
             "enabled": True,
             "service_url": "http://127.0.0.1:9",
-            "service_identity": _PAYMENTS_SERVICE.identity.model_dump(mode="json"),
+            "service_identity": PAYMENTS_SERVICE.identity.model_dump(mode="json"),
             "fee_bps": 250,
             "development_auth": True,
         },
@@ -174,6 +175,7 @@ async def recurring_world(
     default_penalty_periods: int = DEFAULT_PREMATURE_STOP_PENALTY_PERIODS,
     pool_deadline: int | None = DELIVERY_DEADLINE_SECONDS,
     clause_deadline: int | None = None,
+    payments: FakePaymentsClient | None = None,
 ) -> AsyncIterator[RecurringWorld]:
     """The running bare-metal app over one bounded pool, publishing the configured
     Alkahest clause beside the three payment clauses of ``payment_clauses``.
@@ -184,7 +186,9 @@ async def recurring_world(
     composition's configured penalty multiple. ``pool_deadline`` is the pool's
     effective delivery deadline, ``None`` where the pool supplies none, as in a
     deployed composition, which wires no pool port; ``clause_deadline`` is the one
-    each payment clause configures.
+    each payment clause configures. ``payments`` is the payments service the
+    composition's stage reads receipts and snapshots from, the in-process
+    engine a buyer approves at, so a deal can settle through the app.
     """
     declarations: dict[str, RateServicingDeclaration] = {}
     site = Site(pool(POOL_ID, member("r1", POOL_ID), policy_tags={"capacity_bounds": {
@@ -212,6 +216,7 @@ async def recurring_world(
             rate_term_projections=None,
             delivery_deadline_for_pool=lambda _site, _pool: pool_deadline,
             default_penalty_periods=default_penalty_periods,
+            payments_client_for_owner=payments,
         )
         clauses = [
             *(clause.model_dump(mode="json", exclude_none=True) for clause in runtime.publication_clauses),

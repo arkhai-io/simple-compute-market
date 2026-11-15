@@ -13,21 +13,21 @@ from typing import Any, Literal, NamedTuple
 
 from market_deal_lifecycle.adapters import (
     DisputeAdapter, DisputeAdapterTable, DisputeBinding,
-    PaymentAdapter, PaymentAdapterTable, PaymentBinding, PaymentSelector,
+    PaymentAdapter, PaymentAdapterTable, PaymentBinding,
     submit_dispute, submit_payment,
 )
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, DealPage, DealSummary, DeliveryView, EvidenceItem, LifecycleCommand, LifecycleOutcome,
-    FilingProgress, LifecycleRead, LifecycleState, ListDealsRequest, Pending, Reference, Rejected, SubmitResponse,
-    Unknown, WireModel,
+    FilingProgress, LifecycleRead, LifecycleState, ListDealsRequest, Pending, Rejected, SubmitResponse,
+    Unknown,
 )
 from market_identity import Identity, canonical_json
-from pydantic import Field, JsonValue
 
 from .end import SQLiteOperationStore
 from .evidence import EvidenceSession, in_transaction, transaction
 from .journal import Classification, EndSession, FinalRequest, JournalIntent, atomic, stable_ref
+from .projection import SellerDeal, read_seller_deal
 from .watch import DealWatch, WatchSession
 
 logger = logging.getLogger(__name__)
@@ -49,23 +49,6 @@ class InterruptResult(NamedTuple):
     @property
     def settlement_action(self) -> Literal["notice_stop", "delivery_end_filing"]:
         return "notice_stop" if self.kind == "notice" else "delivery_end_filing"
-
-
-class SellerDeal(WireModel):
-    """Immutable projection supplied from the verified committed Agreement."""
-
-    negotiation_id: Reference
-    commitment_ref: Reference
-    domain: Reference
-    buyer: Identity
-    payment: PaymentSelector
-    dispute: DisputeAuthority | None = None
-    entitlements: dict[str, JsonValue] = Field(default_factory=dict)
-    once_only: bool = False
-
-    @property
-    def dispute_binding(self) -> DisputeBinding | None:
-        return DisputeBinding(self.negotiation_id, self.commitment_ref, self.dispute) if self.dispute else None
 
 
 def interrupt_command(
@@ -138,12 +121,10 @@ class SellerSession:
             )
 
     def read(self, negotiation_id: str) -> SellerDeal:
-        row = self.conn.execute(
-            "SELECT deal FROM servicing_seller_deals WHERE negotiation_id=?", (negotiation_id,),
-        ).fetchone()
-        if row is None:
+        deal = read_seller_deal(self.conn, negotiation_id)
+        if deal is None:
             raise KeyError(negotiation_id)
-        return SellerDeal.model_validate_json(row[0])
+        return deal
 
     def page(self, request: ListDealsRequest, *, committed_only: bool = True) -> tuple[list[SellerDeal], str | None]:
         # The opaque token is the last immutable ID, not an offset into a mutable set.

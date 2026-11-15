@@ -18,6 +18,7 @@ from .evidence import in_transaction, transaction
 from .journal import (
     EndSession, JournalIntent, PhysicalProgress, stable_ref,
 )
+from .projection import SellerDeal, read_seller_deal
 
 
 class PhysicalResult(WireModel):
@@ -101,6 +102,16 @@ class EndService:
         Financial evidence only narrows admission; a concurrent end invalidates
         the expected revision before the protected write can run.
         """
+        if phase == DeliveryPhase.COMMIT:
+            refusal = await in_transaction(self.path, lambda conn: self._unserviceable(
+                read_seller_deal(conn, evidence.negotiation_id), evidence,
+            ))
+            if refusal is not None:
+                # Journaled through admission like the adapter's answer, so
+                # the refusal is durable under its operation identity.
+                return await in_transaction(self.path, lambda conn: self._authorize_delivery(
+                    phase, evidence, refusal, EndSession(conn), expected_revision,
+                ))
         if adapter is None:
             return DeliveryAuthorization(
                 status="refuse", reason="selected mechanism has no delivery adapter",
@@ -122,6 +133,30 @@ class EndService:
             return result
 
         return await in_transaction(self.path, authorize)
+
+    @staticmethod
+    def _unserviceable(deal: SellerDeal | None, evidence: DeliveryEvidence) -> DeliveryAuthorization | None:
+        """The refusal of a commit end service could not service once delivered.
+
+        End service watches no rate deal's stops, funding or pending seller
+        stop, so a delivered rate deal would run unserviced to its maximum
+        term. Every deal whose seller projection is not once-only is therefore
+        refused before the payment adapter is asked, whatever the servicing
+        declaration lists; no switch or injected servicer lifts it. A deal the
+        seller half never registered has no projection to read and is refused
+        without the code. See openspec/specs/deal-lifecycle/spec.md,
+        "Neutral delivery decisions delegate payment interpretation".
+        """
+        if deal is not None and deal.once_only:
+            return None
+        return DeliveryAuthorization(
+            status="refuse",
+            reason="the deal has no seller registration" if deal is None
+            else "rate servicing is not composed in this storefront",
+            code=None if deal is None else "rate_servicing_unavailable",
+            operation_id=f"{evidence.negotiation_id}:{DeliveryPhase.COMMIT.value}",
+            evidence_refs=[evidence.commitment_ref],
+        )
 
     @staticmethod
     def _journaled_billing(session: EndSession, negotiation_id: str) -> JournaledBillingStart | None:
@@ -157,6 +192,7 @@ class EndService:
             financial = financial.model_copy(update={
                 "status": "pending" if admission.status == "retry" else "refuse",
                 "reason": "stale admission revision" if admission.status == "retry" else "delivery ended",
+                "code": None,
             })
         if phase == DeliveryPhase.DISCLOSE and financial.status == "allow":
             billing = [item for item in session.intents(evidence.negotiation_id) if item.kind == "billing"]

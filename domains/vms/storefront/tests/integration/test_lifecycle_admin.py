@@ -70,7 +70,11 @@ class Notice:
 
 
 def approve_rate(h, *, entitled, payer_notice=300):
-    """Lane-only approved command fixture; the installed delivery hook stays closed."""
+    """Approve a rate mandate for the deal and register it, skipping delivery.
+
+    The deal is marked started in the delivery double without any drive, so
+    end service's refusal to commit a rate deal is never reached here.
+    """
     agreement, _ = h.lifecycle.accepted(NEGOTIATION)
     now = h.lifecycle.clock()
     stamp = datetime.fromtimestamp(now, timezone.utc).isoformat().replace("+00:00", "Z")

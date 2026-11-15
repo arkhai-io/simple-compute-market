@@ -13,7 +13,10 @@ from market_arkhai_payments.agreement import PaymentSettlementData
 from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
 from market_capacity_publication import CapacityEffects
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
-from market_deal_servicing import Classification, DeliveryRecord, EndSession, FinalRequest
+from market_deal_lifecycle.adapters import PaymentSelector
+from market_deal_servicing import (
+    Classification, DeliveryRecord, EndSession, FinalRequest, SellerDeal, SellerSession,
+)
 from market_deal_lifecycle_contracts.models import Rejected, Unknown
 from market_identity import Ed25519Signer
 from market_site_client import SiteCapacityClientError
@@ -443,6 +446,10 @@ async def test_a_hosted_once_only_payment_deal_starts_billing_as_a_no_op(rig):
             negotiation_id="paid", seller=SELLER.identity, commitment_ref=data.transaction_id,
             start_at=rig.start, term_end=rig.start + 7200, committed_at=rig.start - 600,
         ))
+        SellerSession(conn).register(SellerDeal(
+            negotiation_id="paid", commitment_ref=data.transaction_id, domain="vms", buyer=BUYER.identity,
+            payment=PaymentSelector(ARKHAI_PAYMENTS_MECHANISM), once_only=True,
+        ))
     domain = type(rig.domain)(AcceptedDeal(
         commitment_ref=data.transaction_id, binding=rig.domain.accepted.binding, payment=adapter,
     ))
@@ -456,3 +463,39 @@ async def test_a_hosted_once_only_payment_deal_starts_billing_as_a_no_op(rig):
     assert billing.result["outcome"]["status"] == "accepted" and billing.result["no_op"] is True
     # Each authorized phase was checked against the hosted authority's signed snapshot.
     assert peer.count("get_transaction") >= 4
+
+
+async def test_a_rate_deal_end_service_cannot_service_waits_in_repair_with_nothing_reserved(rig):
+    rig.negotiation_id = "rate"
+    rig.register(once_only=False)
+
+    first = await rig.drive()
+
+    assert first.kind is OutcomeKind.REPAIR_REQUIRED
+    assert first.reason is RepairReason.RATE_SERVICING_UNAVAILABLE
+    assert first.capacity_reservation_id is None and first.hook_disposition == "deferred"
+    [authorization] = intents(rig, "rate")
+    assert authorization.kind == "authorization" and first.evidence_ref == authorization.intent_ref
+    assert "reserve" not in rig.site.calls and rig.site.rows == {}
+    assert "authorize" not in rig.adapter.calls and rig.adapter.billing_keys == []
+    assert requests(rig, "rate") == []
+
+    # The next drive asks end service again and receives the same answer.
+    second = await rig.drive()
+    assert second.kind is OutcomeKind.REPAIR_REQUIRED
+    assert second.reason is RepairReason.RATE_SERVICING_UNAVAILABLE
+    assert second.evidence_ref == first.evidence_ref
+    assert rig.site.calls == [] and intents(rig, "rate") == [authorization]
+
+
+async def test_a_once_only_deal_beside_a_refused_rate_deal_drives_as_before(rig):
+    rig.negotiation_id = "rate"
+    rig.register(once_only=False)
+    assert (await rig.drive()).reason is RepairReason.RATE_SERVICING_UNAVAILABLE
+
+    rig.negotiation_id = "deal"
+    outcome = await rig.drive()
+
+    assert outcome.kind is OutcomeKind.CONVERGED
+    assert rig.adapter.authorized[0] == "commit"
+    assert list(rig.site.rows) == ["res-1"]

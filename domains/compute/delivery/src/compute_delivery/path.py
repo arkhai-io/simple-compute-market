@@ -876,8 +876,12 @@ class ComputeDeliveryPath:
 
         A refusal because an end is due goes to the end hand-off; an unknown
         or pending answer leaves the deal pending, and the next drive resolves
-        the same authorization; any other refusal is the payment authority's
-        refusal of the commitment, which no retry changes.
+        the same authorization. A refusal coded ``rate_servicing_unavailable``
+        is end service declining to commit a deal it could not service: the
+        deal waits in repair with nothing reserved, and each drive asks again.
+        Any other refusal is the payment authority's refusal of the
+        commitment, which no retry changes. No authorization refusal enters
+        the end operation; only a due end does.
         """
         nid = deal.negotiation_id
         revision = await self._transaction(lambda conn: EndSession(conn).read(nid).revision)
@@ -891,9 +895,11 @@ class ComputeDeliveryPath:
             return await self._ended(deal)
         if authorization.status == "pending":
             return self._outcome(OutcomeKind.PENDING, deal, detail=authorization.reason)
-        return self._repair_deal(
-            deal, RepairReason.NO_ACCEPTED_DEAL, authorization.operation_id, authorization.reason,
+        reason = (
+            RepairReason.RATE_SERVICING_UNAVAILABLE if authorization.code == "rate_servicing_unavailable"
+            else RepairReason.NO_ACCEPTED_DEAL
         )
+        return self._repair_deal(deal, reason, authorization.operation_id, authorization.reason)
 
     def _end_due(self, conn: sqlite3.Connection, nid: str) -> bool:
         session = EndSession(conn)
