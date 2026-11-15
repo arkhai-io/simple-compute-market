@@ -6,7 +6,10 @@ implements sections 4A, 4B, 4C, 4D, 4E, 4F, 5 and 6, each committed on its own,
 reviewed and validated together; pre-closeout and closeout follow. Task 4B.5 returned
 the change to design; sections 4C–4F were planned against the design its return
 settled and design review 18's triage refined (D12–D16, D6a's watchdog status). No section
-implements another verifier, continuation daemon or site renewal policy.
+implements another verifier, continuation daemon or site renewal policy. Section 5
+returned the change to design again; section 5 and tasks 4F.7, 6.3 and 7.3–7.9 were
+replanned against the design that return settled (D17–D26) and design review 35's
+triage refined (D18's renamed requirement, D6a's narrowed probe and bound).
 
 Verification levels follow docs/development/TESTING.md. Every behaviour lands with
 permanent tests at the level that proves it, with the fix or feature it covers.
@@ -1853,6 +1856,21 @@ openspec/changes/README.md (convergence's row).
       rows 1 and 2. Name them in `converge-ongoing-compute-leases`' row Notes in
       `openspec/changes/README.md`; closeout's 7.8 records the transfer.
       As built: named in that row's Notes.
+- [ ] 4F.7 Narrow the stated bound (D6a, design review 35 F2; deal-lifecycle's
+      watchdog requirement, "the one failure it covers"). Wherever the watchdog's
+      bound is stated, it covers one failure, the deal's disclosed SSH endpoint no
+      longer accepting connections, and detection runs from that loss, not from a
+      "lost resource", "lost VM" or "lost host". The probes already test only that
+      reachability and use no credential, so no probe changes. Files:
+      `kit/deal-lifecycle-buyer/src/market_deal_lifecycle_buyer/commands.py`
+      (`watchdog_option`'s help and `bound_notice`), `watchdog.py`'s module docstring,
+      `domains/vms/buyer/src/arkhai_vms_buyer/buy_cli.py`'s module docstring, and the
+      bare-metal buyer's `cli.py` `buy` docstring; any test asserting the notice's text.
+      Verify: `kit/deal-lifecycle-buyer`'s unit suite and both buyers' suites (unit),
+      with a unit case asserting `bound_notice` names the endpoint accepting
+      connections and states the bound only while the command runs.
+      End-to-end: none exercises the watchdog (4F.6 moved the delivered-deal cases to
+      convergence). Owed by validation: none.
 
 ## Section 4F notes and handoff
 
@@ -2006,118 +2024,92 @@ openspec/changes/README.md (convergence's row).
     read is `market bare-metal delivery --run-id`. VM has no deal-read verb in
     `buy_cli.py`, so planning should name where VM's read shows the status.
 
-## 5. Identity re-anchoring
+## 5. Receipt identity cutover
 
-Files: kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py and
-adapter re-anchoring helper; kit/arkhai-payments/tests/test_settlement_config.py,
-test_receipts.py as verifier consumers (not proof implementation);
-lane profile configuration under e2e-tests/config. Foundation evidence stores and
-convergence persist outputs through their existing ports.
+Replanned against the design section 5's return settled (D17–D26) and design review
+35's triage refined: a receipt identity change is a drained cutover with no
+re-anchoring, so this section withdraws the work in progress committed as
+`9a3e6cbb3` and keeps only `pinned_snapshot_verifier`'s binding (D22). The superseded
+tasks 5.2 and 5.3 (configured overlap and re-anchoring evidence; durable anchor
+replacement and the retirement inventory) are replaced by 5.4–5.6; none was checked.
+Requirements: settlement-configuration's "A receipt identity change is a cutover";
+settlement-servicing's "Snapshot verification accepts configured identity history".
+
+Files: kit/arkhai-payments/src/market_arkhai_payments/ (`receipts.py`, `adapter.py`,
+`seller.py`, `settlement_config.py`, `__init__.py`; `reanchoring.py` deleted),
+kit/arkhai-payments/README.md, kit/arkhai-payments/tests/ (`test_reanchoring.py`
+deleted; `test_settlement_config.py`; a new `test_receipt_identity_cutover.py`),
+domains/bare_metal/storefront/tests/test_http_settlement.py,
+docs/development/DEPLOYMENT_AND_CONFIG.md.
 
 - 5.1 The lane-only proposed declaration is dropped: the servicing declaration is
       treatments and a setup flag (D7), and identity is the receipt verifier's.
-- [ ] 5.2 Add configured retiring identities with retirement dates alongside the
-      current identity, as operator configuration with no hard-coded overlap.
-      Return a fresh current-key snapshot as re-anchoring
-      evidence only after foundation verification of mandate, parties, mode and
-      sequence; embedded old receipt is attested by that snapshot. Gate on the
-      foundation verifier accepting identity sets with validity windows, embedded
-      receipt attestation and a caller-supplied minimum sequence; do not implement
-      a parallel proof verifier.
-      As built: the gate held — the foundation's `ReceiptIdentity` (`valid_from`,
-      `valid_until`, `retiring`), `[Settlement.arkhai_payments].receipt_identities`
-      and `verify_snapshot`'s windows, attestation and minimum sequence were already
-      in `receipts.py` and `settlement_config.py`. Configuration now also admits only
-      the current `service_identity` as not retiring and no identity twice
-      (`current_receipt_identity`), so "current" is unambiguous; nothing hard-codes
-      an overlap. The new `market_arkhai_payments.reanchoring.reanchoring_evidence`
-      returns `ReanchoringEvidence` only after `verify_snapshot` accepts the snapshot
-      (mandate, parties, mode, identity windows, sequence floor), the snapshot embeds
-      the deal's original receipt exactly, and a current, not retiring, pin signed it
-      (`receipts.snapshot_signer`); it refuses a once-only mandate and a mode change
-      (`ReanchoringRefused`). `PaymentSellerStage.reanchoring_evidence_now` reads the
-      deal fresh under the payee's credential and calls it. Outside the plan, found
-      on the way: `pinned_snapshot_verifier`, which the kit's examples and several
-      kit and domain tests compose (production goes through the stage's verifier,
-      which already bound every configured pin), bound only `service_identity`; it
-      now binds `config.receipt_trust`, unchanged for a configuration without a
-      list, and the stage's verifier delegates to it.
-      Tests: payments `test_reanchoring.py` (unit, over in-process doubles: the
-      kit's engine signing under two keys and a protocol-faithful in-memory
-      evidence store, not a consumer's): during the overlap the old receipt
-      verifies without an anchor; a snapshot from the not-yet-rotated engine
-      verifies but is refused as evidence (retiring signer); a mode change and a
-      once-only mandate are refused;
-      `test_settlement_config.py`'s
-      `test_receipt_identities_name_one_current_key_beside_dated_retiring_ones` (unit:
-      an overlap's trust order, no list means the current key alone, and each
-      refusal).
-- [ ] 5.3 Integrate durable anchor replacement via the evidence-store port while
-      keeping original bytes; expose dependent/unanchored deals for convergence's
-      status. Refuse stale-anchor rollback and mode-change re-anchoring. Document
-      retirement only after rate deals re-anchor or drain and once-only deals
-      drain; a deal not re-anchored when a key must retire drains first. Inventory
-      all dependent hosted deals; do not claim durable once-only re-anchoring
-      without a consumer. Re-anchoring evidence comes through dev's verifier
-      ("Snapshot verification accepts bounded identity history"). Record in the
-      settlement-configuration and settlement-servicing deltas, and in
-      `docs/development/DEPLOYMENT_AND_CONFIG.md` at closeout.
-      As built: `record_reanchoring(store, evidence, recorded_at=)` puts the snapshot
-      through the lifecycle `EvidenceStore` port as an item of its own (kind
-      `arkhai.payments.reanchoring-snapshot.v1`, ID the digest of its wire JSON),
-      beside the untouched original receipt, refusing evidence older than the
-      persisted anchor or attesting another receipt or mode;
-      `reanchored_snapshot(record)` returns the deal's anchor, its latest
-      re-anchoring snapshot by sequence, then by the authority's `observedAt` (an
-      idle deal keeps its sequence across rotations). The shared verifier takes that
-      anchor (`verify_snapshot(..., anchor=)`; `pinned_snapshot_verifier(...,
-      anchor=)`; the stage's `payment_adapter`, `check_receipt(_now)` and
-      `receipt_matches`, each `anchor=`): a configured key's earlier attestation of
-      the exact embedded receipt stands in for the issuer's pin, so a re-anchored
-      deal verifies after the retiring key is removed, and stops once the anchor's
-      own signer is removed too. The verifier does not re-prove the anchor's
-      origin: like the minimum sequence it is the caller's own durable record
-      (design D7, as built; settlement-servicing MODIFIED "Snapshot verification
-      accepts bounded identity history"). One verifier, not a parallel one.
-      `reverse_now` takes no anchor: it refuses a rate deal, the only kind that
-      re-anchors. `retirement_inventory(deals, retiring, livemode=)` over
-      `AnchoredDeal`s lists `reanchor` (rate deals in the configured mode whose trust
-      rests on the key) and `must_drain` (once-only deals, and deals in the other
-      mode); `removable` when both are empty. Which deals are still serviced, when to
-      re-anchor, and the seller read's status are convergence's. Deltas:
-      settlement-configuration ADDED "Receipt identity overlap is operator
-      configuration"; settlement-servicing "Running hosted rate deals can re-anchor
-      during identity overlap" rewritten to the built behaviour, with new scenarios
-      for the anchor outliving the key and a retiring signer. The deployment
-      document's `receipt_identities` paragraph now states the new validation (it
-      would otherwise misdescribe the model); the retirement procedure is closeout's
-      (7.9). The kit README gains "Receipt key rotation and re-anchoring".
-      Tests, payments `test_reanchoring.py` (unit, as above): across a rate deal,
-      billing started under the old key, the engine rotates, the stage produces
-      evidence signed by the new key embedding the old receipt unchanged, it is
-      recorded twice (idempotent) and read back; with the old key removed an
-      adapter, receipt check and receipt revalidation without the anchor fail and
-      with it pass, the anchored adapter sends the payee's stop, and once the
-      anchor's signer is removed too it does not verify; an idle deal re-anchors at
-      a second rotation at the same sequence, the later anchor wins, the first key's
-      inventory is then empty and the deal verifies with only the newest key;
-      another deal's anchor neither verifies nor re-anchors this deal, and a store
-      holding it refuses this deal's evidence; evidence older than the persisted
-      anchor is refused, a stale item put anyway does not displace the anchor, and a
-      stale snapshot is refused against the anchor and against the caller's floor;
-      the retirement inventory over five deals.
-      Not claimed: a consumer's durable persistence or restart, which waits for
-      convergence; the store here is an in-memory fake of the port.
-      `make -C kit/arkhai-payments test`: mypy (30 files), vectors, generated models
-      and 355 passed (9 new re-anchoring cases, 1 new configuration case).
-
-Validation: configuration unit cases for retiring identities, rollback and mode
-change; kit integration with an in-process engine signing under two keys across a
-rate deal.
-Use the foundation's verified-snapshot fixtures. Consumer persistence/restart
-evidence waits for convergence; do not claim it from a stateless adapter test.
+- [ ] 5.4 Withdraw the work in progress (D17, D18, D19, D20, D22, D23). Restore to
+      their content at `a547604e7`: `receipts.py` (no `anchor`, `_anchors` or
+      `snapshot_signer`), `settlement_config.py` (the foundation's validation only:
+      the current `service_identity` listed, retiring entries dated; no
+      one-current or no-duplicate rule) and its test file, and the
+      `receipt_identities` paragraph of `DEPLOYMENT_AND_CONFIG.md`. Delete
+      `reanchoring.py` and `test_reanchoring.py`, drop their exports from
+      `__init__.py`, and remove the README's "Receipt key rotation and
+      re-anchoring". In `seller.py` remove every `anchor` parameter (`payment_adapter`,
+      `check_receipt(_now)`, `receipt_matches`, the `snapshot_verifier` factory's
+      third argument) and `reanchoring_evidence_now`, so `receipt_matches` is again
+      `verify_receipt` under `config.receipt_trust`. Keep (D22): `adapter.py`'s
+      `pinned_snapshot_verifier` binding `config.receipt_trust`, without `anchor`,
+      its docstring saying it binds the configured current and retiring identities;
+      and the stage's `_verifier_for` delegating to it. Remove the remaining
+      `openspec/changes/README.md` reference only if implementation finds one: the
+      design already replaced section 5's buyer gap row (D24).
+      Verify: `git diff a547604e7 -- kit/arkhai-payments docs/development/DEPLOYMENT_AND_CONFIG.md`
+      shows only the D22 binding and the tests of 5.5; `make -C kit/arkhai-payments test`
+      (mypy, vectors, generated models and the unit suite) passes.
+- [ ] 5.5 Prove the kept binding and the cutover at the kit (D18, D22, D17).
+      `test_receipt_identity_cutover.py` (unit, over the kit's clock-injected
+      `PaymentsAuthority` engine signing under two keys through `FakePaymentsClient`,
+      receipts from `build_signed_receipt`, deterministic development keys commented
+      as such): with an overlap configuration, `pinned_snapshot_verifier` and the
+      stage's verifier both accept a current-key snapshot embedding a receipt the
+      configured retiring identity signed within its window (settlement-servicing's
+      scenario "A current-key snapshot attests a retiring identity's receipt"); with a
+      configuration naming only the new identity, `pinned_snapshot_verifier`,
+      `check_receipt_now` and `receipt_matches` each refuse the deal the old identity
+      approved, although a new-key snapshot embeds its receipt
+      (settlement-configuration's scenario "A deal approved under a removed
+      identity"); a configuration without `receipt_identities` trusts
+      `service_identity` alone, as before.
+      Verify: `make -C kit/arkhai-payments test`.
+- [ ] 5.6 Prove the cutover in a running storefront (D17). In
+      `domains/bare_metal/storefront/tests/test_http_settlement.py` (integration: the
+      storefront's settlement and fulfillment services over its real SQLite database,
+      with `FakePaymentsClient` at the payments boundary), beside
+      `test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart`: a deal
+      verified and delivered under the old identity, then the storefront restarted
+      with a configuration naming only the new identity, refuses its stored receipt
+      at the fulfillment status and a repeated settle request ("stored payment
+      receipt does not prove this Agreement" or "is invalid"), with no second
+      reservation or provisioning call.
+      Verify: the bare-metal storefront's suite; `scripts/change-workflow run pre-commit`.
+      End-to-end: none rotates a receipt key. Every payments scenario
+      (`e2e_vm_payment_deal`, `e2e_vm_payment_purchase`, the six `e2e_vm_dispute_*`,
+      `e2e_bare_metal_payment_deal`, `e2e_credits_payment_deal` and both recurring
+      purchases) crosses the stage's verifier and `verify_snapshot`, which behave as
+      at `a547604e7` but for `pinned_snapshot_verifier`'s binding, unchanged for a
+      configuration without `receipt_identities`. Owed by validation: none.
 
 ## Section 5 notes and handoff
+
+- **Replanned; what follows this bullet is the withdrawn first session's record.**
+  That session built re-anchoring (`9a3e6cbb3`) and returned the change to design,
+  which settled that a receipt identity change is a drained cutover (D17–D26):
+  none of its "As built", its instructions "For convergence", or its references to
+  "Snapshot verification accepts bounded identity history" (now "… configured
+  identity history", D18) stand. Its five questions are answered: (1) neither
+  anchor nor retained pin, a cutover (D17); (2) no verifier change (D18); (3)
+  buyers follow the same cutover (D19); (4) no anchor reaches `reverse_now`, and
+  refunds precede the switch (D23, D17); convergence takes on no rotation work
+  (D21); (5) moot. Of its work, only `pinned_snapshot_verifier`'s binding of
+  `config.receipt_trust` is kept (D22, task 5.4).
 
 - **Returned to design; work in progress, no task checked.** The task notes above
   say "As built" for what the work-in-progress commit holds; none of it is
@@ -2260,20 +2252,30 @@ hosted-target evidence.
 - [ ] 6.3 Reference convergence's sole consolidated rate qualification matrix
       (its design's Scenarios and evidence); do not reproduce it here. Retain
       spot's prepared fixtures and typed entry points for its executor. Activation
-      owns hosted qualification.
+      owns hosted qualification. (Replanned against D17, D21 and D24: this change
+      produces no re-anchoring evidence, and the matrix carries no rotation row.)
       Consume convergence's lane-time requirements and the lane-double-owned readiness/evidence
-      contract; retain adapter re-anchoring evidence production, not a second lane-time contract.
+      contract; retain kit and vector evidence production
+      (test-compatibility's "Rate mechanics qualification consumes the shared lane
+      contract"), not a second lane-time contract.
       Activation must list producer snapshot, start and reversal vectors among
       blockers to published qualification; double traces do not satisfy them.
-      Check that the matrix consumes maximum-term, on-demand refusal/self-penalty filing
-      and rotation-overlap preparation; report missing coverage to convergence
-      rather than maintain another matrix. Require physical release/access closure rather
+      Check that the matrix consumes maximum-term and on-demand refusal/self-penalty
+      filing; report missing coverage to convergence rather than maintain another
+      matrix, and report its row 11 (identity rotation overlap) as withdrawn by D21
+      if its design has not yet removed it. Require physical release/access closure rather
       than a lease_ended intent report. Promote no unrun consumer requirement here.
 - [ ] 6.4 Check the changed imports, comments and public artifacts before code
       review. Move touched local imports to module level where safe, retaining
       only verified circularity or deliberate lazy-load reasons. Run focused
       domain integration and typing, then make check-packaging; fix failures
       before committing implementation.
+      End-to-end: the payments scenarios (`e2e_vm_payment_deal`,
+      `e2e_vm_payment_purchase`, `e2e_bare_metal_payment_deal`,
+      `e2e_credits_payment_deal`) and both recurring purchases
+      (`e2e_vm_recurring_purchase`, `e2e_bare_metal_recurring_purchase`) cross the
+      kit seams this section's examples and evidence metadata touch; validation's
+      pipeline run is their evidence. Owed by validation: none.
 - [ ] 6.5 Obtain pre-closeout code review. Confirm adapter/servicing ownership and
       that partialPeriod is enforceable at the payment authority, with no local
       correction substituted for the buyer's authority/dispute guarantee. Verify
@@ -2298,12 +2300,15 @@ change to implementation and review.
 - [ ] 7.2 **Import placement.** Confirm touched imports are at module level unless
       a verified circularity or deliberate lazy-load reason was retained and
       reviewed; a necessary move returns to implementation.
-- [ ] 7.3 **Documentation compliance.** Classify every accepted decision in D1–D16,
-      D6a's watchdog status included; keep external authority behavior as architecture
+- [ ] 7.3 **Documentation compliance.** Classify every accepted decision in D1–D26,
+      D6a's watchdog status and narrowed probe and bound included; keep external authority behavior as architecture
       context, not SCM normative implementation promises. Confirm adapter versus
       continuation ownership, and that end service's refusal of a rate deal (D12) is
       documented as the current invariant convergence modifies, not as a migration
-      step.
+      step. Confirm no permanent document promises receipt key re-anchoring or an
+      overlap that keeps open deals alive past a key change (D17, D24), and that the
+      watchdog is described nowhere as detecting more than its disclosed endpoint no
+      longer accepting connections (D6a).
 - [ ] 7.4 **Narrative compression.** Compress completed tasks to final behavior,
       material evidence, residuals and permanent destinations, preserving material
       rationale in design.md.
@@ -2311,12 +2316,17 @@ change to implementation and review.
       both-domain rate mechanics, seller notice, a recurring purchase run end to end
       through commit in both lanes, delivery refused until rate servicing is composed,
       and the remaining continuation/hosted activation gap. Remove absorbed-change gap
-      owners and record promotion.
+      owners and record promotion. In Goal 8's accepted limitations, the watchdog's
+      bound runs from the disclosed endpoint no longer accepting connections, the one
+      failure it covers, not from "the loss" of the resource (D6a). Confirm this
+      change's and convergence's rows carry no rotation criterion (D24).
 - [ ] 7.6 **Campaign index currency.** Update openspec/changes/README.md status,
       dependencies and campaign graph; remove absorbed rows and redirect their
       dependents to this change; confirm 4E.3 closed the per-period gap row, and that
       `converge-ongoing-compute-leases`' row or notes name the end-service refusal it
-      lifts. Run make check-change-index and record disposition.
+      lifts and the rotation work D21 withdrew, and that the unowned gap row "A receipt
+      key change drains every open payment deal" (D24) stands. Run make
+      check-change-index and record disposition.
 - [ ] 7.7 **Packaging.** Run make check-packaging and
       make check-architecture-change CHANGE=spot-deals-through-arkhai-payments,
       resolving every failure/owned exception. Run make check-agent-skills if
@@ -2330,26 +2340,40 @@ change to implementation and review.
       acceptance and hosted scenarios gate activation; record their transfer here
       without making this prerequisite wait for a dependent's archival.
 - [ ] 7.9 **Promotion.** Write openspec/specs/settlement-servicing/architecture.md
-      (rate operations, partialPeriod and rate-only rotation), storefront-publication/
+      (rate operations and partialPeriod; under "Charge-first payment settlement",
+      beside its current/retiring pins, why a receipt key change drains rather than
+      re-anchors: no deployed deal outlives a drain, and a retired identity left
+      configured can still sign backdated snapshots, D17), storefront-publication/
       architecture.md (presets and independent pricing), deal-lifecycle/
       architecture.md (notice, rate buyer-end flow and External authorities; under
       "One end instant, transactional admission", end service's refusal of a rate deal
       as the one place delivery fails closed before rate servicing, and the deadline
       barrier), compute-delivery/architecture.md ("Commit and hold adoption": the
       refused rate commit and its repair reason), buyer-orchestration/architecture.md
-      (a new section "The buyer's watchdog": the conditional bound and the
-      last-probe status, buyer-local and off the wire), test-compatibility/
+      (a new section "The buyer's watchdog": the conditional bound covering the
+      disclosed endpoint no longer accepting connections, the probe using no
+      credential, the authenticated probe rejected, and the last-probe status,
+      buyer-local and off the wire), test-compatibility/
       architecture.md (evidence labels; "Ordinary Arkhai purchase evidence": the
       recurring purchase through commit), docs/development/ARCHITECTURE.md
       (Kit areas, Settlement servicing and Release, and the two principles below),
-      docs/development/DEPLOYMENT_AND_CONFIG.md (servicing, `snapshot_freshness_seconds`
-      and identity overlap), docs/development/RELEASING.md (the staged rename),
+      docs/development/DEPLOYMENT_AND_CONFIG.md (servicing, `snapshot_freshness_seconds`;
+      in the payments paragraph that calls a receipt identity change a cutover: open
+      payment deals drained or refunded before the change, refunds first since a
+      refund afterwards finds no verified payment, `receipt_identities` listing both
+      keys only for the moment of the switch, and buyers updating their receipt
+      identity before approving after it, D17, D26), docs/development/RELEASING.md
+      (the staged rename, and in its compatibility policy that migration and
+      backwards compatibility are engineered only for what has been deployed, with a
+      pointer from docs/development/ARCHITECTURE.md),
       and openspec/specs/README.md capability index as needed. Promote the owner's
       principles in the wording design.md's promotion record and the owner record's
       R24 settle: each change mergeable to dev on its own merits (openspec/README.md
       or docs/agents/change-workflow.md); sibling-domain parity (one line in
       AGENTS.md, "Package and dependency discipline"); the staged field rename
-      (RELEASING.md); contradictory classes do not subclass one another, and a
+      (RELEASING.md); migration and backwards compatibility only for what has been
+      deployed (RELEASING.md, pointer from ARCHITECTURE.md); contradictory classes
+      do not subclass one another, and a
       timestamp is its source's claim (ARCHITECTURE.md). The per-boundary
       compatibility posture is not promoted. Complete this change's design-promotion
       record. Preserve the shared mandate requirement's once clauses and archive

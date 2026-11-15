@@ -1028,7 +1028,9 @@ recurring-purchase scenario in both lanes (D16, task 4B.5); the buyer's watchdog
 (4B.6); section 5, now one short session that withdraws section 5's work in progress
 — its anchor, re-anchoring module, inventory, configuration validation, README section,
 deployment-guide edit and their tests — keeping the `pinned_snapshot_verifier` binding
-and its test (D17–D22); and qualification evidence (section 6). Round 2's review and
+and its test (D17–D22), together with the wording correction design review 35's
+triage made to the watchdog's stated bound (D6a, task 4F.7), the other small
+correction left from a design review; and qualification evidence (section 6). Round 2's review and
 validation cover them together, with 4A and 4B.1–4B.4, before pre-closeout.
 
 ## Rejected alternatives
