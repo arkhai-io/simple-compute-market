@@ -1684,6 +1684,75 @@ tests; openspec/changes/spot-deals-through-arkhai-payments/specs/deal-lifecycle/
       here.
       Owed by validation: none.
 
+## Section 4F notes and handoff
+
+- Returned to planning before any code was written; no task is checked. The section
+  can't be verified as 4F.5 plans it. Its application-integration cases start
+  "the real `buy` with the opt-in against the composed storefront" and expect the
+  loop to run from `available` and probe the disclosed access. No rate deal reaches
+  `available` in a composed storefront in this change:
+  - D12/D13: `EndService.authorize_delivery` refuses every rate deal's commit, with
+    no seam, switch or injected servicer to lift it (4C.2,
+    `kit/deal-servicing/src/market_deal_servicing/end.py`, `_unserviceable`). The
+    deal waits in `repair_required(rate_servicing_unavailable)` with nothing
+    reserved (4C.3).
+  - VM: `market buy` polls the settle status, which stays `provisioning` for a
+    refused rate deal and never reads `ready` (4C.4, and 4E's `Recurring06`).
+    Bare metal: `market bare-metal buy` returns at commit
+    (`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/settlement_stages.py`,
+    `PaymentStage.settle`), and its settle answers `planning` (4C.4).
+  - Disclosure needs a verified rate `start` (D4's disclose phase), and no rate
+    deal starts, so neither domain discloses an address or credential kind for a
+    probe to reach.
+  The watchdog is rate-only by D6a's purpose: it bounds billing that runs until the
+  buyer's own stop lands. Its action is "the buyer's ordinary entitled stop and
+  `hint` through the flow above", the rate buyer end. So no deal it applies to can
+  reach the planned cases' starting condition before convergence lifts the refusal.
+- Options, for planning (or design, for option 2):
+  1. Recommended, a plan amendment: replace 4F.5's per-domain application cases
+     with cases that reach the loop without a delivered rate deal, and move the
+     cases that run the real `buy` from `available` to convergence. Convergence
+     lifts D12, and its rows 1 and 2 already consume the buyer's stop landing with
+     the storefront absent. This fits D8, under which this change prepares entry
+     points and runs no delivered-lease qualification. Here:
+     (a) one library-integration case per domain buyer: the domain's real buyer
+     lifecycle composition, with the composed payments adapter over the in-process
+     payments engine (`FakePaymentsClient.engine`) and an approved rate mandate. The
+     storefront peer is unreachable and an injected probe fails. Expected: exactly
+     one payer stop at the engine, one journaled stop with its probe evidence, and
+     a restart that sends nothing more;
+     (b) CLI-level cases in each buyer's suite, over the injected lifecycle and
+     probe seams `domains/bare_metal/buyer/tests/test_rate_end_cli.py` uses. They
+     cover the opt-in flag, its interval and threshold persisted per deal, the
+     resume re-entering the loop, the bound shown only while the monitor runs, and
+     the read's `monitored`/`unmonitored`/`stopped` after a kill and a resume;
+     (c) the unit cases 4F.5 already names, unchanged.
+     4F.1–4F.4 stay as planned.
+  2. A design change: let the watchdog apply to once-only payment deals, which do
+     reach `available`, so the planned cases can run on one. Design would then have
+     to decide what the watchdog sends for a once-only deal. `BuyerLifecycle.end`
+     surrenders and files a case there, and D6a's purpose doesn't cover it. Not
+     recommended.
+  3. Rejected: a test-only storefront composition that skips the refusal. D13
+     allows no seam, and such a case wouldn't run against the composed storefront.
+- For whoever implements 4F after the amendment, from reading the code:
+  - Bare metal's `buy` returns at commit, so with the opt-in it must poll the
+    delivery read until `available` before it probes. It has no resume, which 4F.2
+    adds. VM's resume is `market buy --from <run>` (`_run_resume_from` →
+    `run_settle_from_log` in `domains/vms/buyer/src/arkhai_vms_buyer/buy_cli.py`).
+  - The loop's action is `BuyerLifecycle.end(negotiation_id)`: for a rate deal,
+    `end_rate` in `kit/deal-lifecycle-buyer/src/market_deal_lifecycle_buyer/ending.py`.
+    It journals the stop in `BuyerEndJournal` before I/O and keys it by deal, so a
+    restarted loop resumes that one stop rather than sending a second. The per-deal
+    opt-in, interval, threshold and last-probe instant fit beside that journal in
+    `FileEvidenceStore`'s SQLite file (`store.py`). The status composes in
+    `BuyerLifecycle.read` or beside it, never on `LifecycleRead`.
+  - Each domain opens its lifecycle per run through `end_target`
+    (`domains/vms/buyer/src/arkhai_vms_buyer/end_cli.py`, the bare-metal buyer's
+    `cli.py`). That's the same seam the watchdog's open needs. Bare metal's deal
+    read is `market bare-metal delivery --run-id`. VM has no deal-read verb in
+    `buy_cli.py`, so planning should name where VM's read shows the status.
+
 ## 5. Identity re-anchoring
 
 Files: kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py and
