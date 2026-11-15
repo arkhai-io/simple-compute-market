@@ -12,8 +12,8 @@ from market_settlement_runtime import SettlementPublicationClause
 from market_arkhai_payments.fixtures import dispute_lifecycle
 from market_arkhai_payments.mandates import PaymentsOptionParams
 from market_arkhai_payments.settlement_config import (
-    ARKHAI_PAYMENTS_MECHANISM, arkhai_payments_option_builder, arkhai_payments_preflight,
-    create_arkhai_payments_registration,
+    ARKHAI_PAYMENTS_MECHANISM, ArkhaiPaymentsPublicationInput, arkhai_payments_option_builder,
+    arkhai_payments_preflight, create_arkhai_payments_registration,
 )
 
 from payment_terms import DISPUTE, PAYEE, config
@@ -50,6 +50,27 @@ def test_a_null_name_beside_a_given_one_names_nothing():
 
 def test_neither_name_keeps_the_released_default():
     assert PaymentsOptionParams.model_validate({"payee_account": PAYEE}).approval_term == "P7D"
+
+
+@pytest.mark.parametrize("mode", ["python", "json"])
+def test_a_dump_names_the_approval_term_it_was_given_and_validates_again(mode):
+    # A storefront compiles a clause's dumped publication input again, so the
+    # dump must not carry `window`'s default beside a given `approval_window`.
+    given = {"payee_account": PAYEE, "asset": "USD/6", "approval_window": "PT5M",
+             "dispute_window_seconds": 900, "delivery_deadline_seconds": 300, **RATE}
+    dumped = ArkhaiPaymentsPublicationInput.model_validate(given).model_dump(mode=mode)
+    assert "window" not in dumped and dumped["approval_window"] == "PT5M"
+    assert ArkhaiPaymentsPublicationInput.model_validate(dumped).approval_seconds == 300
+    assert PaymentsOptionParams.model_validate(
+        {"payee_account": PAYEE, "approval_window": "PT5M"}).model_dump()["approval_window"] == "PT5M"
+
+
+def test_a_dump_of_a_model_given_window_is_unchanged():
+    dumped = PaymentsOptionParams.model_validate({"payee_account": PAYEE, "window": "PT10M"}).model_dump(mode="json")
+    assert dumped == {"payee_account": PAYEE, "window": "PT10M", "deposit_agreement": False,
+                      "approval_window": None, "period": None, "reserve_ahead_seconds": None,
+                      "setup_amount": None}
+    assert PaymentsOptionParams.model_validate(dumped).approval_seconds == 600
 
 
 @pytest.mark.parametrize("name", ["window", "approval_window"])

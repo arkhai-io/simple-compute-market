@@ -26,7 +26,8 @@ Each compute lane MUST run one recurring-purchase scenario from a lane-only serv
 
 #### Scenario: A buyer approves a recurring option
 - **WHEN** a buyer selects a seller's recurring option in a compute lane and approves its mandate
-- **THEN** the scenario asserts the published per-period price, the buyer's pre-approval display of per-period charge, setup, initial reserve and maximum term, and the approved mandate's single rate part charging one period's price
+- **THEN** the scenario asserts the published per-period price, the accepted Agreement's per-period charge, setup, initial reserve and maximum term as the buyer displays them, and the approved mandate's single rate part charging one period's price
+- **AND** that the buyer displays them before its settlement stage approves is proved by each buyer's own application tests, not by the lane scenario
 - **AND** it asserts that end service refused the commit: the deal never becomes available, the site holds no reservation for it, and the payments double records no rate start
 
 #### Scenario: The buyer's stop ends the refused deal

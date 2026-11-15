@@ -181,6 +181,40 @@ def test_a_journaled_stop_is_carried_on_resume_while_the_storefront_is_down(monk
     assert "carried to the payment authority" in result.stderr
 
 
+REFUSED = EndDeliveryProgress(negotiation_id="deal", observed_at=1, mode="normal_stop",
+                              payment=Rejected(reason="account has no entitled stop authority"))
+
+
+def test_a_stop_the_authority_refuses_is_reported_rejected_and_fails_the_command(monkeypatch):
+    journal = Journal()
+    journal.opt_in("deal", IMMEDIATE)
+    lifecycle, _, _ = install(monkeypatch, journal, Clock())
+    lifecycle.end.return_value = REFUSED
+
+    result = CliRunner().invoke(cli.bare_metal_app, ["buy", "--from", "run"])
+
+    assert result.exit_code == cli.WATCHDOG_REJECTED_EXIT_CODE == 1, result.output
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == {
+        "run_id": "run", "negotiation_id": "deal", "available": True, "watchdog": "rejected",
+    }
+    assert "refused by the payment authority" in result.stderr and "billing continues" in result.stderr
+    lifecycle.end.assert_awaited_once_with("deal")
+
+
+def test_a_journaled_stop_refused_on_resume_is_reported_rejected_and_fails_the_command(monkeypatch):
+    journal = Journal()
+    journal.opt_in("deal", IMMEDIATE)
+    journal.record_stop("deal", WatchdogStop(990, (ProbeObservation(980, "probe timed out"),)))
+    lifecycle, _, probes = install(monkeypatch, journal, Clock(), reads=(None,))
+    lifecycle.end.return_value = REFUSED
+
+    result = CliRunner().invoke(cli.bare_metal_app, ["buy", "--from", "run"])
+
+    assert result.exit_code == cli.WATCHDOG_REJECTED_EXIT_CODE, result.output
+    assert json.loads(result.stdout.strip().splitlines()[-1])["watchdog"] == "rejected"
+    assert probes == [] and "carried to the payment authority" not in result.stderr
+
+
 def test_a_resume_of_a_deal_that_has_ended_reports_the_end_and_watches_nothing(monkeypatch):
     journal = Journal()
     journal.opt_in("deal", IMMEDIATE)

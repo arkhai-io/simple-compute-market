@@ -87,6 +87,7 @@ from tests.recurring_world import (
     recurring_world,
     undeclared,
 )
+from tests.recurring_world import payment_clause as recurring_payment_clause
 from tests.recurring_world import clauses as recurring_clauses
 
 pytestmark = pytest.mark.asyncio
@@ -2491,6 +2492,31 @@ async def test_a_clause_s_deadline_publishes_where_the_pool_supplies_none(
     refusals = [item for item in report["actions"] if item.get("reason") == "default_buyer_refusal"]
     assert len(refusals) == refused
     assert all(item["detail"].endswith("no delivery deadline") for item in refusals)
+
+
+@pytest.mark.parametrize("recurring", [None, {"period": "PT15M", "reserve_ahead_seconds": 1800}],
+                         ids=["once", "recurring"])
+async def test_a_clause_naming_approval_window_publishes_through_listing_derivation(
+    tmp_path, recurring,
+):
+    """A payments clause naming its approval term ``approval_window`` publishes.
+    Listing derivation compiles the clause and then compiles its compiled input
+    again, so the dumped input must name the approval term once: a once option
+    is written with ``window``, a recurring one with ``approval_window``."""
+    clause = recurring_payment_clause(recurring=recurring, delivery_deadline_seconds=900)
+    mechanism_input = dict(clause["mechanism_input"])
+    mechanism_input["approval_window"] = mechanism_input.pop("window")
+    async with recurring_world(
+        tmp_path, published=[{**clause, "mechanism_input": mechanism_input}],
+    ) as world:
+        report = await world.publish()
+        validate_cycle_report(report)
+        ((_listing_id, listing),) = (await _listings(world.app)).items()
+
+    (option,) = listing["settlement_options"]
+    name, other = ("approval_window", "window") if recurring is not None else ("window", "approval_window")
+    assert option["settlement"][name] == "PT5M" and other not in option["settlement"]
+    assert ("period" in option["settlement"]) is (recurring is not None)
 
 
 async def test_a_cached_recurring_selection_whose_treatment_is_withdrawn_is_refused(

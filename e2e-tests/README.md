@@ -372,8 +372,10 @@ mandate is one rate part charging one period's price and the payer's balance fel
 by the receipt's reserve; after one servicing step the storefront's lifecycle
 read shows the deal committed and never active, the site holds no reservation,
 and the payments double records no rate start; the buy's stderr showed the
-per-period price, setup charge, initial reserve and maximum end before approval
-(`market buy`, still polling a delivery that never comes, is stopped first); the
+per-period price, setup charge, initial reserve and maximum end (`market buy`,
+still polling a delivery that never comes, is stopped first; that they precede
+the settlement stage that approves is proved by each buyer's own tests, not
+here); the
 buyer's own `end` stops the payment, and the storefront records the payer's end
 with no filing; and the payer's balance is restored. The seller's refund refuses
 a rate deal, so a failed run's cleanup ends an approved deal by the buyer's own

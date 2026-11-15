@@ -10,7 +10,7 @@ import os
 from market_deal_lifecycle.configuration import authorities_by_registry
 import time
 import webbrowser
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import typer
@@ -59,7 +59,8 @@ from .evidence import evidence_store
 from .lifecycle import buyer_lifecycle, run_sync
 from market_arkhai_payments import PaymentApproval
 from market_deal_lifecycle_buyer import (
-    RUN_SPELLINGS, EndTarget, Probe, WaitClock, WatchdogJournal, register_end_command, register_read_command,
+    RUN_SPELLINGS, WATCHDOG_REJECTED_EXIT_CODE, EndTarget, Probe, WaitClock, WatchdogJournal,
+    register_end_command, register_read_command,
     run_monitor, tcp_reachable, wait_until_available, watchdog_interval_option, watchdog_option,
     watchdog_settings, watchdog_threshold_option,
 )
@@ -432,13 +433,23 @@ def _resume_buy(run_id: str, config: str | None, *, timeout: float, poll_interva
         # The journaled stop is carried to the authority with no availability
         # wait or probe: the storefront may be the party that is down.
         outcome = run_monitor(target, probe=None, clock=wait_clock())
-        _json({"run_id": run_id, "negotiation_id": target.negotiation_id,
-               "watchdog": outcome.reason if outcome is not None else None})
+        result = {"run_id": run_id, "negotiation_id": target.negotiation_id,
+                  "watchdog": outcome.reason if outcome is not None else None}
+        _json(result)
+        _exit_on_refused_stop(result)
         return
     result = _deliver_and_watch(run_id, config, timeout=timeout, poll_interval=poll_interval)
     _json(result)
+    _exit_on_refused_stop(result)
     if not result["available"] and result["watchdog"] != "ended":
         raise typer.Exit(UNAVAILABLE_EXIT_CODE)
+
+
+def _exit_on_refused_stop(result: Mapping[str, Any]) -> None:
+    # A stop the payment authority refused leaves the deal billing; the command
+    # fails as ``end`` does on a stop it did not accept.
+    if result["watchdog"] == "rejected":
+        raise typer.Exit(WATCHDOG_REJECTED_EXIT_CODE)
 
 
 
@@ -799,6 +810,7 @@ def buy_bare_metal(
         run_log.run_id, config, timeout=delivery_timeout_seconds, poll_interval=poll_interval,
     )
     _json(watched)
+    _exit_on_refused_stop(watched)
     if not watched["available"] and watched["watchdog"] != "ended":
         raise typer.Exit(UNAVAILABLE_EXIT_CODE)
 

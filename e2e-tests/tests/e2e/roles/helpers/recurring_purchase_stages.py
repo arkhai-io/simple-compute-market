@@ -80,8 +80,8 @@ HOURLY_RATE = "1.00"
 #: One period's price at that rate, in USD/6 base units.
 PERIOD_GROSS = 250_000
 ASSET = "USD/6"
-#: The rows the buyer prints on stderr before it approves, which the shipped
-#: buyers share.
+#: The title of the accepted Agreement's disclosure the shipped buyers print on
+#: stderr, which they share.
 DISCLOSURE_TITLE = "Accepted Agreement: price, horizon and lifecycle terms before approval"
 
 
@@ -144,7 +144,7 @@ class RecurringPurchaseState(PurchaseState):
     receipt_gross: Optional[int] = None
     #: End service refused the commit, and nothing was delivered or started.
     _commit_refused: bool = False
-    #: The purchase command has ended, and its pre-approval display was read.
+    #: The purchase command has ended, and the accepted money its stderr shows was read.
     _purchase_run_closed: bool = False
     #: What the buyer's ``end`` printed once its payer's stop was accepted.
     buyer_end: Optional[dict[str, Any]] = None
@@ -347,18 +347,19 @@ class Recurring05_CommitRefused:
 
 
 class Recurring06_PurchaseRunClosed:
-    def test_r06_the_purchase_command_showed_the_accepted_money_before_approval(
+    def test_r06_the_purchase_command_showed_the_accepted_money(
         self, deal_driver: RecurringPurchaseDriver, deal_state: RecurringPurchaseState,
     ):
         """The purchase command ends, having shown the buyer the money it approved.
 
         How the domain's command ends once its commit is accepted is the
-        driver's. Its stderr holds the accepted Agreement's terms, which the
-        shipped buyers print before they approve: the per-period price, the
-        setup charge, the initial reserve — the receipt's gross, what approval
-        took from the payer — and the maximum accepted end, the Agreement's
-        start plus its duration. That they precede the approval is the buyers'
-        code, not something this stage observes.
+        driver's. Its stderr holds the accepted Agreement's terms: the
+        per-period price, the setup charge, the initial reserve — the receipt's
+        gross, what approval took from the payer — and the maximum accepted end,
+        the Agreement's start plus its duration. This stage observes only that
+        stderr holds them, not when they were printed; each buyer's own tests
+        prove they precede its settlement stage, which approves (bare metal's
+        ``test_cli_completion.py``, VM's ``test_buy_orchestrator.py``).
         """
         require_state(deal_state, "purchase_run", "_commit_refused", "agreement", "receipt_gross")
         run = deal_state.purchase_run
@@ -377,12 +378,12 @@ class Recurring06_PurchaseRunClosed:
         )
         missing = [row for row in expected if row not in shown]
         assert not missing, (
-            f"{deal_driver.buy_command} run {run.run_id} did not show {missing} before "
-            f"approval; its stderr:\n{shown[-3000:]}"
+            f"{deal_driver.buy_command} run {run.run_id} did not show {missing}; "
+            f"its stderr:\n{shown[-3000:]}"
         )
         deal_state._purchase_run_closed = True
-        log.info("[r06] Run %s showed the accepted per-period price, setup, reserve and end "
-                 "before approval", run.run_id)
+        log.info("[r06] Run %s showed the accepted per-period price, setup, reserve and end",
+                 run.run_id)
 
 
 # ===========================================================================

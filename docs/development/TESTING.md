@@ -532,7 +532,9 @@ The modules run the purchase stages through the buy, then those of
 `e2e-tests/tests/e2e/roles/helpers/recurring_purchase_stages.py`: the approved
 mandate and the payer's reservation, the refused commit with nothing reserved at
 the site or started at the payments double, the per-period price, setup charge,
-initial reserve and maximum end the buyer was shown before approval, the
+initial reserve and maximum end the buy's stderr shows (that the buyer prints
+them before its settlement stage approves is each buyer's own test, not the
+lane's), the
 buyer's own `end`, whose payer's stop the storefront records as the deal's end
 with no filing, and the payer's balance restored. Nothing is delivered, so
 neither waits for the delivery deadline.

@@ -189,15 +189,26 @@ def watchdog_view(state: WatchdogState | None, now: int) -> dict:
 
 @dataclass(frozen=True)
 class WatchdogOutcome:
-    """Why the loop exited: it sent the stop, or the deal ended by another path.
+    """Why the loop exited: the authority accepted its stop, refused it, or the
+    deal ended by another path.
 
+    ``rejected`` is the authority's definitive refusal of the one journaled
+    stop: no retry under its operation key can change it, the deal is not
+    stopped, and billing continues, so it is never reported as ``stopped``.
     ``resumed`` marks a stop journaled by an earlier run, which this run only
     carried to the authority or found already there.
     """
 
-    reason: Literal["stopped", "ended"]
+    reason: Literal["stopped", "rejected", "ended"]
     progress: EndDeliveryProgress | None = None
     resumed: bool = False
+
+    @classmethod
+    def of_stop(cls, progress: EndDeliveryProgress, *, resumed: bool = False) -> WatchdogOutcome:
+        """The outcome of a stop that reached a definitive authority answer."""
+        reason: Literal["stopped", "rejected"] = (
+            "rejected" if isinstance(progress.payment, Rejected) else "stopped")
+        return cls(reason, progress, resumed)
 
 
 @dataclass(frozen=True)
@@ -271,11 +282,12 @@ async def _send_stop(
     lifecycle: BuyerLifecycle, negotiation_id: str, *, interval: int,
     sleep: Callable[[float], Awaitable[object]],
 ) -> EndDeliveryProgress:
-    """Send the deal's one stop and retry it, every interval, until it lands.
+    """Send the deal's one stop and retry it, every interval, until the authority answers.
 
     The end journal keys the stop by deal, so every retry, and a restarted loop,
     resends this one stop under its operation key rather than a second. Billing
     runs until the stop lands, which is why the loop keeps the command running.
+    An accepted or refused stop is final under that key: the caller tells them apart.
     """
     plan = lifecycle.end_journal.read(negotiation_id) if lifecycle.end_journal is not None else None
     if plan is not None and isinstance(plan.progress.payment, (Accepted, Rejected)):
@@ -310,6 +322,7 @@ async def _probe_once(probe: Probe, seconds: int) -> tuple[bool, str]:
 async def watch_deal(
     lifecycle: BuyerLifecycle, negotiation_id: str, *, journal: WatchdogJournal, probe: Probe | None,
     clock: Callable[[], int] = lambda: int(time.time()),
+    monotonic: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], Awaitable[object]] = asyncio.sleep,
     ended: Callable[[], Awaitable[bool]] | None = None,
 ) -> WatchdogOutcome:
@@ -318,12 +331,16 @@ async def watch_deal(
     Probes start on a fixed schedule, one every ``interval`` from the loop's
     start, and each probe, with the ended-check run beside it, is cut off at the
     probe timeout, so the detection bound and the status's freshness window both
-    hold while the loop runs. The stop is the buyer's ordinary entitled stop and hint
+    hold while the loop runs. The schedule runs on ``monotonic``, so a step of
+    the wall clock cannot postpone a probe; ``clock`` only stamps the instants
+    kept. The stop is the buyer's ordinary entitled stop and hint
     (``BuyerLifecycle.end`` for a rate deal), sent after the decision and its
-    probe evidence are journaled, and retried until it lands. A loop restarted
-    after that decision sends nothing new and needs no probe: it resumes the one
-    journaled stop until it lands. The loop exits also when the deal ends by
-    another path; the buyer stops it by interrupting its command.
+    probe evidence are journaled, and retried until the authority answers it
+    definitively: accepted, the outcome is ``stopped``; refused, ``rejected``,
+    and the loop sends nothing more. A loop restarted after that decision sends
+    nothing new and needs no probe: it resumes the one journaled stop. The loop
+    exits also when the deal ends by another path; the buyer stops it by
+    interrupting its command.
     """
     if not lifecycle._deal(negotiation_id).rate:
         raise ValueError("the watchdog applies to rate deals; a once-only deal ends by surrender")
@@ -337,12 +354,12 @@ async def watch_deal(
 
     if state.stop is not None:
         await _keep_evidence(lifecycle, negotiation_id, state.stop, settings)
-        return WatchdogOutcome("stopped", await stop_landed(), resumed=True)
+        return WatchdogOutcome.of_stop(await stop_landed(), resumed=True)
     if probe is None:
         raise ValueError("a watchdog with no journaled stop needs a probe of the deal's access")
     check_ended = ended or (lambda: deal_ended(lifecycle, negotiation_id))
     failures: list[ProbeObservation] = []
-    due = clock()
+    due = monotonic()
     while True:
         at = clock()
         # The ended-check runs beside the probe, never ahead of it: each is cut off
@@ -362,6 +379,6 @@ async def watch_deal(
         if len(failures) >= settings.threshold:
             stop = journal.record_stop(negotiation_id, WatchdogStop(clock(), tuple(failures)))
             await _keep_evidence(lifecycle, negotiation_id, stop, settings)
-            return WatchdogOutcome("stopped", await stop_landed())
+            return WatchdogOutcome.of_stop(await stop_landed())
         due += settings.interval_seconds
-        await sleep(max(0, due - clock()))
+        await sleep(max(0, due - monotonic()))

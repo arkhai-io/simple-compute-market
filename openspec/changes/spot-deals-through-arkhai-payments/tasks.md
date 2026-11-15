@@ -1634,6 +1634,40 @@ it; openspec/changes/README.md (the gap row).
   exercise sections 4A (the composed adapter's rate path, the stop request and
   final stop), 4B.2 (`bare-metal end`) and 4C (the refusal); none exercises 4D's
   barrier, since the payer's end precedes the deadline. Owed by validation: none.
+- Round 2 triage fix, validation 45 V1: the scenarios' first run (pipeline run
+  43728489504) failed VM's `e2e_vm_recurring_purchase` at stage 03, listing
+  creation answered 400 `invalid publication input for 'arkhai.payments.v1'`;
+  bare metal's passed. The first assumption above was wrong. VM's listing
+  derivation compiles a clause, which replaces its mechanism input with the
+  validated model's dump, then compiles that clause again. `PaymentsOptionParams`'
+  `window` keeps its `P7D` default beside a given `approval_window` (4A.4), so the
+  dump named both and the second parse refused it. Bare metal parses its overrides
+  once, keeping the input as stated, and VM's once payment listings write `window`
+  only. A VM once clause written with `approval_window` failed the same way. Fixed
+  in `kit/arkhai-payments/src/market_arkhai_payments/mandates.py`: a wrap
+  serializer leaves `window` out of a dump when `approval_window` is set, so a dump
+  names the approval term once and validates again; every option writer already
+  excluded `window` explicitly, so no option ID or once dump changes. Tests:
+  payments `test_approval_window.py`, a dump given `approval_window` validates again
+  (python and JSON modes) and one given `window` is unchanged (unit); VM storefront
+  `test_publication_loop.py::test_a_clause_naming_approval_window_publishes_through_listing_derivation`,
+  once and recurring (application integration), which, with the serializer
+  disabled, failed with the lane's own message. Not run here: the lane; the fix
+  commit's validation re-runs it, and 4E.3's closure of the gap row rests on that run.
+- Round 2 triage fix, review 44 F3: `Recurring06` asserts the disclosure's rows
+  are on stderr, not that they precede approval, while its name and messages said
+  "before approval". The order is now proved at each buyer: bare metal's
+  `test_cli_completion.py::test_the_accepted_agreement_is_shown_before_the_payment_is_approved`
+  records stderr lines and the settlement stage's call in one order (unit); VM's
+  `test_buy_orchestrator.py::test_the_accepted_agreement_is_shown_before_the_settlement_stage_pays`
+  reads stderr when the settle hook's stage pays (unit). VM's stage there is
+  Alkahest's escrow creation: no payments approval is called, and the order it
+  proves is `run_buy` entering the settle hook, whatever the stage, only after the
+  negotiate hook's acceptance check disclosed. The stage is renamed
+  `test_r06_the_purchase_command_showed_the_accepted_money`, its messages and the
+  state field's comment claim only what it reads, and `TESTING.md`,
+  `e2e-tests/README.md`, both marker descriptions, the test-compatibility delta's
+  scenario and D16 now say so.
 
 ## 4F. The buyer's watchdog
 
@@ -2104,6 +2138,35 @@ openspec/changes/README.md (convergence's row).
     `cli.py`). That's the same seam the watchdog's open needs. Bare metal's deal
     read is `market bare-metal delivery --run-id`. VM has no deal-read verb in
     `buy_cli.py`, so planning should name where VM's read shows the status.
+- Round 2 triage fix, review 44 F1: a stop the payment authority refused
+  (`Rejected`, final under its operation key: `end_rate` never resubmits it) ended
+  the loop as `stopped`. Bare metal's `buy` printed `"watchdog": "stopped"` and
+  exited 0, and only the stderr line's trailing status said `rejected`. Now
+  `WatchdogOutcome` has a `rejected` reason (`WatchdogOutcome.of_stop`), fresh or
+  resumed. `run_monitor` says the authority refused the stop, gives its reason,
+  says the deal is not stopped and billing continues, and names `end
+  --end-now-regardless` without taking it. Both `buy` commands exit
+  `WATCHDOG_REJECTED_EXIT_CODE` (1), as `end` exits 1 on a stop not accepted (VM's
+  `_exit_on_refused_stop` in `buy_cli.py`, bare metal's in `cli.py`, with the JSON
+  reporting `"rejected"`). The read keeps `stopped` (journaled), beside the payment
+  state. The deal-lifecycle delta gains the sentence, the read's meaning of
+  `stopped`, and the scenario "The payment authority refuses the watchdog's stop";
+  D6a and the promotion record say the same. Tests: the buyer half's
+  `test_watchdog.py`, a refused stop is `rejected` and not resent, a restart
+  finding one sends nothing, and the monitor's message (unit); bare metal's
+  `test_watchdog_cli.py`, fresh and resumed, JSON and exit 1 (unit); VM's
+  `test_buy_resume_cli.py`, a fresh buy and a resume exit 1 (unit). The
+  `--watchdog-threshold` help and VM's `buy_cli` docstring no longer say the
+  watchdog "stops" the deal.
+- Round 2 triage fix, review 44 F2: the loop's schedule ran on the wall clock, so
+  a backward step postponed the next probe by the step. `watch_deal` now takes
+  `monotonic` for its schedule and `run_monitor` passes `WaitClock.monotonic`;
+  instants are still stamped with `now`. Test: `test_watchdog.py`, a wall clock set
+  back an hour after the first probe leaves the probes at 0, 30 and 60 monotonic
+  seconds (unit); the fake clock there now advances a monotonic count too, and the
+  other loop tests pass it. Accepted limitation, in D6a: the read's freshness rule
+  compares a kept instant with the reader's wall clock, so a backward step there
+  can show a dead loop `monitored` for the size of the step.
 
 ## 5. Receipt identity cutover
 
@@ -2400,6 +2463,33 @@ docs/development/DEPLOYMENT_AND_CONFIG.md.
   pre-commit-functional (`make dist-clean`, `make check-packaging`, `make test`,
   every suite) and failed only history wording on a test docstring ("no longer"),
   since fixed.
+- Round 2 triage fix outside the plan, the orchestrating session's observation 46
+  R1: `make -C kit/deal-servicing typecheck`, planned by 4C and 4D, was denied to
+  every step, and no gate ran it: the kit's `test` ran pytest alone. Its `test`
+  now depends on `typecheck`, as the payments kit's does, so pre-commit's `make
+  test` type-checks it. Its first run found one error, the unannotated unpacking
+  of `asyncio.gather(..., return_exceptions=True)` in `seller.py`'s
+  administrator end, now annotated. The first-use examples, never run on this
+  branch either, are task 6.6.
+- Round 2 triage's checks, over the fixes recorded under 4E, 4F and here, after
+  `make dist`: payments kit `make test` (mypy, vectors, generated models) 351
+  passed (unit); buyer half 49 (unit); bare-metal buyer 84 (unit); VM buyer 334
+  (unit); deal-servicing `make test` with its typecheck, 102 (unit and library
+  integration); VM storefront `test_publication_loop.py` and
+  `test_watchdog_buy.py` 87 (application integration); `make -C e2e-tests
+  test-unit` 911 passed, 1 skipped. `scripts/change-workflow run pre-commit`:
+  after-functional-change passed, pre-commit-functional (`make dist-clean`, `make
+  check-packaging`, `make test`, every suite) passed, pre-commit (index, tasks,
+  skills, OpenSpec strict, `make check-repository`) passed. The fresh-context
+  compliance check found no layering, packaging or comment breach; fixed from it:
+  VM's ordering test's docstring and the documents citing it, which claimed it
+  called a payments approval; the test-compatibility delta's scenario, D16 and
+  the state field's comment still saying the lane asserts a pre-approval display;
+  the deal-lifecycle delta's `stopped` read beside the new scenario, now saying
+  what `stopped` means; two help strings saying the watchdog "stops" the deal.
+  End-to-end: `e2e_vm_recurring_purchase` and `e2e_bare_metal_recurring_purchase`
+  exercise V1's fix and F3's renamed stage; no scenario exercises the watchdog,
+  as 4F's notes say. Owed by validation: the pipeline's VM lane.
 
 ## 6. Qualification scenarios and pre-closeout review
 
@@ -2452,6 +2542,13 @@ hosted-target evidence.
       the command/preset seams here; consumer-enabled
       cross-service acceptance gates convergence and hosted live qualification
       gates activation, not this prerequisite change's archival.
+- [ ] 6.6 Before 6.5's review, run the first-use examples no step has run on this
+      branch, `make -C kit/arkhai-payments first-use-rate` and `make -C
+      kit/deal-servicing first-use`, and record what each shows and any failure's
+      fix (round 2 triage, the orchestrating session's observation 46 R1). The
+      implementation step's table allows no `make -C * first-use*`, so this needs
+      that allow rule, added by the owner or the orchestrating session, or the owner
+      running both commands and recording their output here.
 
 Evidence levels: conformance and kit integration qualify SCM's contract use;
 application integration qualifies both compositions; smoke qualifies wiring/auth;

@@ -12,20 +12,26 @@ from market_deal_lifecycle_buyer import (
 )
 from market_deal_lifecycle_buyer.ending import EndPlan
 from market_deal_lifecycle_buyer.watchdog import GRACE_SECONDS, ProbeObservation, deal_ended
-from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand, Unknown
+from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand, Rejected, Unknown
 
 
 class Clock:
-    """Fake time: sleeping advances it, and every probe reads it."""
+    """Fake time: sleeping advances the wall clock, which stamps every probe, and
+    the monotonic clock the schedule runs on; only the wall clock can be stepped."""
 
     def __init__(self, now=1000):
         self.now = now
+        self.elapsed = 0
 
     def __call__(self):
         return self.now
 
+    def monotonic(self):
+        return self.elapsed
+
     async def sleep(self, seconds):
         self.now += seconds
+        self.elapsed += seconds
 
 
 class Journal:
@@ -94,7 +100,7 @@ SETTINGS = WatchdogSettings(interval_seconds=30, threshold=3, probe_timeout_seco
 async def test_the_threshold_of_consecutive_failures_sends_one_stop_and_journals_its_evidence():
     clock, journal, deal = Clock(), Journal(SETTINGS), lifecycle()
     outcome = await watch_deal(deal, "deal", journal=journal, probe=probes(False, OSError(), False),
-                               clock=clock, sleep=clock.sleep, ended=never_ended)
+                               clock=clock, monotonic=clock.monotonic, sleep=clock.sleep, ended=never_ended)
     assert outcome.reason == "stopped" and outcome.progress.payment == Accepted()
     deal.end.assert_awaited_once_with("deal")
     assert journal.probes == [1000, 1030, 1060]
@@ -114,7 +120,7 @@ async def test_a_passing_probe_resets_the_count_so_nothing_is_sent_below_the_thr
 
     # The round that finds the deal ended runs a probe beside the check, discarded.
     outcome = await watch_deal(deal, "deal", journal=journal, probe=probes(*answers, True),
-                               clock=clock, sleep=clock.sleep, ended=ends_after_the_probes)
+                               clock=clock, monotonic=clock.monotonic, sleep=clock.sleep, ended=ends_after_the_probes)
     assert outcome.reason == "ended" and outcome.progress is None
     deal.end.assert_not_awaited()
     assert journal.state("deal").stop is None and len(journal.probes) == 5
@@ -125,12 +131,54 @@ async def test_probes_start_on_a_fixed_schedule_however_long_each_takes():
     clock, journal, deal = Clock(), Journal(SETTINGS), lifecycle()
 
     async def slow_failure():
-        clock.now += 4  # the probe takes four of its five seconds, then fails
+        await clock.sleep(4)  # the probe takes four of its five seconds, then fails
         return False
 
     await watch_deal(deal, "deal", journal=journal, probe=slow_failure, clock=clock,
-                     sleep=clock.sleep, ended=never_ended)
+                     monotonic=clock.monotonic, sleep=clock.sleep, ended=never_ended)
     assert journal.probes == [1000, 1030, 1060]
+
+
+@pytest.mark.asyncio
+async def test_a_wall_clock_stepped_back_does_not_postpone_the_next_probe():
+    clock, journal, deal = Clock(), Journal(SETTINGS), lifecycle()
+    scheduled = []
+
+    async def failing_probe():
+        scheduled.append(clock.elapsed)
+        if len(scheduled) == 1:
+            clock.now -= 3600  # the system clock is set back an hour after the first probe
+        return False
+
+    await watch_deal(deal, "deal", journal=journal, probe=failing_probe, clock=clock,
+                     monotonic=clock.monotonic, sleep=clock.sleep, ended=never_ended)
+    assert scheduled == [0, 30, 60]
+    # Probe instants are still stamped with the wall clock, as it then read.
+    assert journal.probes == [1000, 1030 - 3600, 1060 - 3600]
+
+
+@pytest.mark.asyncio
+async def test_a_stop_the_authority_refuses_is_rejected_never_stopped_and_not_resent():
+    clock, journal, deal = Clock(), Journal(WatchdogSettings(30, 1, 5)), lifecycle()
+    refusal = Rejected(reason="hold_matured: repair required before another monetary operation")
+    deal.end.return_value = progress(refusal)
+    outcome = await watch_deal(deal, "deal", journal=journal, probe=probes(False), clock=clock,
+                               monotonic=clock.monotonic, sleep=clock.sleep, ended=never_ended)
+    assert outcome.reason == "rejected" and outcome.progress.payment == refusal
+    assert not outcome.resumed
+    deal.end.assert_awaited_once_with("deal")
+    # The journaled decision stays for diagnosis.
+    assert journal.state("deal").stop is not None
+
+
+@pytest.mark.asyncio
+async def test_a_restart_finding_a_refused_stop_reports_it_rejected_and_sends_nothing():
+    journal = Journal(SETTINGS, stop=WatchdogStop(1060, (ProbeObservation(1000, "x"),)))
+    kept = kept_end(Rejected(reason="account has no entitled stop authority"))
+    deal = lifecycle(kept_end=kept)
+    outcome = await watch_deal(deal, "deal", journal=journal, probe=None, ended=never_ended)
+    assert (outcome.reason, outcome.resumed, outcome.progress) == ("rejected", True, kept.progress)
+    deal.end.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -139,7 +187,7 @@ async def test_a_stop_that_has_not_landed_is_resent_every_interval_until_it_does
     deal.end.side_effect = [progress(Unknown(reason="down")), progress(Unknown(reason="down")),
                             progress(Accepted())]
     outcome = await watch_deal(deal, "deal", journal=journal, probe=probes(False), clock=clock,
-                               sleep=clock.sleep, ended=never_ended)
+                               monotonic=clock.monotonic, sleep=clock.sleep, ended=never_ended)
     assert outcome.progress.payment == Accepted()
     assert deal.end.await_count == 3 and clock.now == 1060
 
@@ -179,7 +227,7 @@ async def test_a_timed_out_probe_is_a_failure():
         raise asyncio.TimeoutError
 
     outcome = await watch_deal(deal, "deal", journal=journal, probe=timed_out, clock=clock,
-                               sleep=clock.sleep, ended=never_ended)
+                               monotonic=clock.monotonic, sleep=clock.sleep, ended=never_ended)
     assert outcome.reason == "stopped"
     assert journal.state("deal").stop.probes[0].detail == "probe timed out"
 
@@ -252,7 +300,7 @@ async def test_the_ended_check_runs_beside_the_probe_never_ahead_of_it():
         started.clear()
         return False
 
-    await watch_deal(deal, "deal", journal=journal, probe=probe, clock=clock, sleep=clock.sleep, ended=ended)
+    await watch_deal(deal, "deal", journal=journal, probe=probe, clock=clock, monotonic=clock.monotonic, sleep=clock.sleep, ended=ended)
     assert overlapped == [True, True, True]
     assert journal.probes == [1000, 1030, 1060]
 
@@ -315,6 +363,16 @@ def test_a_journaled_stop_is_resumed_with_no_probe_and_no_bound():
     assert outcome.reason == "stopped" and outcome.resumed
     deal.end.assert_awaited_once_with("deal")
     assert lines == ["Watchdog's journaled stop carried to the payment authority: accepted."]
+
+    lines.clear()
+    refused = lifecycle(kept_end=kept_end(Rejected(reason="account has no entitled stop authority")))
+    outcome = run_monitor(monitor_target(refused, journal, []), probe=None, echo=lines.append)
+    assert outcome.reason == "rejected" and outcome.resumed
+    (line,) = lines
+    assert line.startswith("Watchdog's stop was refused by the payment authority: "
+                           "account has no entitled stop authority.")
+    assert "billing continues" in line and "'end --end-now-regardless'" in line
+    assert "carried" not in line and "sent the buyer's stop" not in line
 
     lines.clear()
     unopted = Journal(SETTINGS)

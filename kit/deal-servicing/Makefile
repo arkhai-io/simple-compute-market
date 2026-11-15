@@ -4,7 +4,7 @@ DIST_DIR ?= ../../.dist
 
 .PHONY: build reinit first-use typecheck test
 
-test: reinit
+test: reinit typecheck
 	uv run --find-links $(DIST_DIR) pytest -q
 
 build:

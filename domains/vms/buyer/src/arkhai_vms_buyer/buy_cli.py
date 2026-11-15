@@ -10,7 +10,7 @@ CLI process:
     submit to the seller →
     poll until ready/failed →
     with --watchdog, probe the delivered VM's disclosed SSH endpoint in the
-    foreground until the watchdog stops a rate deal, the deal ends, or the
+    foreground until the watchdog's stop of a rate deal is answered, the deal ends, or the
     buyer interrupts it. Only while it runs, if that endpoint stops accepting
     connections, the loss is detected within at most interval x threshold +
     probe timeout; the authority's acknowledgement and any priced notice come
@@ -40,10 +40,12 @@ from market_alkahest.token import TokenResolutionError, resolve_token
 from market_core.schemas import SettlementSelection
 from market_deal_lifecycle_buyer import (
     RUN_SPELLINGS,
+    WATCHDOG_REJECTED_EXIT_CODE,
     EndTarget,
     Probe,
     WaitClock,
     WatchdogJournal,
+    WatchdogOutcome,
     WatchdogSettings,
     run_monitor,
     tcp_reachable,
@@ -185,7 +187,14 @@ def _watch(run_id: str, negotiation_id: str | None, connection_details: Any, con
     except ValueError as exc:
         console.print(f"[yellow]Watchdog not running:[/yellow] {exc}; the deal is unmonitored.")
         return
-    run_monitor(target, probe=probe, clock=wait_clock())
+    _exit_on_refused_stop(run_monitor(target, probe=probe, clock=wait_clock()))
+
+
+def _exit_on_refused_stop(outcome: WatchdogOutcome | None) -> None:
+    # A stop the payment authority refused leaves the deal billing; the command
+    # fails as ``end`` does on a stop it did not accept.
+    if outcome is not None and outcome.reason == "rejected":
+        raise typer.Exit(WATCHDOG_REJECTED_EXIT_CODE)
 
 
 def run_negotiation_id(run_id: str, signer: Any) -> str | None:
@@ -208,7 +217,7 @@ def _carry_journaled_stop(run_id: str, signer: Any) -> bool:
     state = watchdog_journal().state(negotiation_id) if negotiation_id else None
     if state is None or state.stop is None:
         return False
-    run_monitor(watchdog_target(run_id), probe=None, clock=wait_clock())
+    _exit_on_refused_stop(run_monitor(watchdog_target(run_id), probe=None, clock=wait_clock()))
     return True
 
 

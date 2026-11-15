@@ -348,6 +348,8 @@ class SellerServicing:
         refusal = await self.record_operator_end(command, actor=actor, reason=reason)
         if refusal is not None:
             return await self._interrupted(command, refusal)
+        outcome: LifecycleOutcome | BaseException
+        progress: object
         outcome, progress = await asyncio.gather(
             self.submit(command, actor=actor, reason=reason), physical(negotiation_id),
             return_exceptions=True,

@@ -40,6 +40,7 @@ from market_deal_lifecycle.adapters import (
     PaymentSelector,
 )
 from market_deal_lifecycle_buyer import (
+    WATCHDOG_REJECTED_EXIT_CODE,
     BuyerDeal,
     BuyerLifecycle,
     EndDeliveryProgress,
@@ -907,6 +908,42 @@ class TestBuyWatchdog:
         lifecycle.end.assert_awaited_once_with("neg-done")
         assert lifecycle.peer.read.await_count == 0
         assert "carried to the payment authority" in " ".join(result.output.split())
+
+    def test_a_stop_the_authority_refuses_fails_a_fresh_buy_saying_billing_continues(self, runner, monkeypatch):
+        _stub_fresh_alkahest_buy(monkeypatch)
+        _paid_run_buy(monkeypatch, "ready")
+        journal = _Journal()
+        lifecycle, _, _ = _watchdog_seams(monkeypatch, journal)
+        lifecycle.end.return_value = EndDeliveryProgress(
+            negotiation_id="neg-1", observed_at=1, mode="normal_stop",
+            payment=Rejected(reason="account has no entitled stop authority"),
+        )
+        # A threshold of one: the one failed probe decides the stop.
+        result = runner.invoke(app, [*_FRESH, "--watchdog", "--watchdog-interval", "1",
+                                     "--watchdog-threshold", "1"])
+
+        assert result.exit_code == WATCHDOG_REJECTED_EXIT_CODE == 1, result.output
+        output = " ".join(result.output.split())
+        assert "refused by the payment authority" in output and "billing continues" in output
+        lifecycle.end.assert_awaited_once_with("neg-1")
+
+    def test_a_journaled_stop_refused_on_resume_fails_the_command(self, runner, monkeypatch):
+        run_id = _seed_agreed_negotiation("http://seller:8001", "L-1")
+        monkeypatch.setattr(buy_cli, "run_negotiation_id", lambda run, signer: "neg-done")
+        journal = _Journal()
+        journal.opt_in("neg-done", _IMMEDIATE)
+        journal.record_stop("neg-done", WatchdogStop(990, (ProbeObservation(980, "probe timed out"),)))
+        lifecycle, _, probed = _watchdog_seams(monkeypatch, journal, negotiation_id="neg-done")
+        lifecycle.end.return_value = EndDeliveryProgress(
+            negotiation_id="neg-done", observed_at=1, mode="normal_stop",
+            payment=Rejected(reason="account has no entitled stop authority"),
+        )
+
+        result = runner.invoke(app, ["buy", "--from", run_id])
+
+        assert result.exit_code == WATCHDOG_REJECTED_EXIT_CODE, result.output
+        assert probed == []
+        assert "carried to the payment authority" not in " ".join(result.output.split())
 
     def test_the_read_shows_monitored_while_a_resumed_loop_probes_unmonitored_after_a_kill_and_stopped(
         self, runner, monkeypatch,

@@ -241,7 +241,7 @@ def watchdog_interval_option() -> Any:
 
 def watchdog_threshold_option() -> Any:
     return typer.Option(DEFAULT_THRESHOLD, "--watchdog-threshold", min=1,
-                        help="Consecutive failed probes before the watchdog stops the deal.")
+                        help="Consecutive failed probes before the watchdog sends the buyer's stop.")
 
 
 def watchdog_settings(enabled: bool, interval: int, threshold: int) -> WatchdogSettings | None:
@@ -300,7 +300,10 @@ def run_monitor(
     """Run the watchdog over the run's deal in the foreground, when it opted in.
 
     Returns ``None`` when the deal never opted in, is once-only, or the buyer
-    interrupted the loop; the outcome otherwise. A deal whose watchdog already
+    interrupted the loop; the outcome otherwise. A ``rejected`` outcome is
+    reported as billing continuing, and a domain's ``buy`` exits
+    ``WATCHDOG_REJECTED_EXIT_CODE`` on it, as ``end`` exits 1 on a stop the
+    authority did not accept. A deal whose watchdog already
     journaled its stop resumes that stop and sends nothing new; that needs no
     ``probe``, nor the storefront.
     """
@@ -321,7 +324,7 @@ def run_monitor(
             if target.record is not None:
                 target.record("watchdog_started", state.settings.to_json())
             outcome = await watch_deal(lifecycle, target.negotiation_id, journal=journal, probe=probe,
-                                       clock=clock.now, sleep=clock.sleep)
+                                       clock=clock.now, monotonic=clock.monotonic, sleep=clock.sleep)
             if target.record is not None:
                 target.record("watchdog_exited", {
                     "reason": outcome.reason, "resumed": outcome.resumed,
@@ -347,12 +350,25 @@ def run_monitor(
              else "Watchdog stopped by the buyer before deciding to stop; the deal is unmonitored "
              "and nothing was sent.")
         return None
-    if outcome is not None:
+    if outcome is None:
+        return None
+    if outcome.reason == "rejected":
+        refusal = outcome.progress.payment if outcome.progress else None
+        echo(f"Watchdog's stop was refused by the payment authority: {getattr(refusal, 'reason', None)}. "
+             "The deal is not stopped and billing continues; the watchdog sends nothing more. "
+             "'end --end-now-regardless' gives service up and files the buyer's case where the "
+             "Agreement names a dispute authority.")
+    elif outcome.reason == "ended":
+        echo("Watchdog exited: the deal ended by another path.")
+    else:
         payment = outcome.progress.payment.status if outcome.progress else None
-        echo("Watchdog exited: the deal ended by another path." if outcome.reason == "ended"
-             else f"Watchdog's journaled stop carried to the payment authority: {payment}."
+        echo(f"Watchdog's journaled stop carried to the payment authority: {payment}."
              if outcome.resumed else f"Watchdog sent the buyer's stop: {payment}.")
     return outcome
+
+
+#: The exit code of a ``buy`` whose watchdog's stop the payment authority refused.
+WATCHDOG_REJECTED_EXIT_CODE = 1
 
 
 def create_evidence_command_group(

@@ -202,6 +202,40 @@ def test_buy_records_dictionary_terms_when_the_deal_is_agreed(
     assert ended["transaction_id"] == "transaction-1"
 
 
+def test_the_accepted_agreement_is_shown_before_the_payment_is_approved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The accepted Agreement's money rows reach stderr before the settlement stage,
+    which approves the payment, is entered. The lane scenarios assert the rows'
+    content; this is where their order is proved."""
+    seen = _compose(monkeypatch, tmp_path, _PAYMENT,
+                    _payment_outcome(amount=1_000_000, duration_seconds=3600))
+    order: list[str] = []
+    echo, settle = cli.typer.echo, cli.BUYER_STAGES[_PAYMENT.settlement_schema].settle
+
+    def recorded_echo(message: Any = None, *args: Any, **kwargs: Any) -> None:
+        order.append(str(message))
+        echo(message, *args, **kwargs)
+
+    def recorded_settle(**kwargs: Any) -> tuple[str, dict[str, Any]]:
+        order.append("<approval>")
+        return settle(**kwargs)
+
+    monkeypatch.setattr(cli.typer, "echo", recorded_echo)
+    cli.BUYER_STAGES[_PAYMENT.settlement_schema].settle = recorded_settle
+
+    result = _buy(3600)
+
+    assert result.exit_code == 0, result.output
+    assert len(seen["settlements"]) == 1
+    approval = order.index("<approval>")
+    title = order.index("Accepted Agreement: price, horizon and lifecycle terms before approval")
+    assert title < approval
+    shown = order[title:approval]
+    assert any(line.startswith("  Accepted price:") for line in shown), shown
+    assert any(line.startswith("  Initial reserve:") for line in shown), shown
+
+
 def _payment_outcome(
     *, amount: int, duration_seconds: int, option: SettlementOption = _PAYMENT,
 ) -> NegotiationOutcome:
