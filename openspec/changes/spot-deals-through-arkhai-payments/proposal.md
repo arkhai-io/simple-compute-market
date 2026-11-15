@@ -86,8 +86,9 @@ continuation is a separate, dependent change.
   and billing runs until the stop lands. An optional delivery_end case is mechanical with matching receipt concurrence and the foundation guards, otherwise triaged, carrying the signed request, the receipt and the exact Agreement verified
   against the mandate's deal hash; its ruling preserves the payer's notice and
   `partialPeriod`. An opt-in foreground watchdog in the buyer's `buy` command sends
-  the buyer's ordinary stop when the disclosed access fails its configured probes,
-  a bound stated as conditional on the command running. The buyer's read shows it
+  the buyer's ordinary stop when the disclosed SSH endpoint stops accepting
+  connections for its configured number of probes, a bound stated as conditional
+  on the command running and covering that failure only. The buyer's read shows it
   monitored only while its last probe is fresh, a status the buyer half computes
   and no lifecycle wire model carries.
 - A servicing declaration enables rate offers, not their execution: end service
@@ -108,7 +109,8 @@ continuation is a separate, dependent change.
 - A change of the payments receipt identity stays a cutover: open payment deals
   approved under the old identity are drained, or refunded, before it leaves
   configuration, and no running deal is re-anchored to the new key. The shared
-  snapshot verifier is used unchanged.
+  snapshot verifier is used unchanged; its specification's scenario is reworded to
+  what it does, which is no re-anchoring.
 - Mechanics are qualified against published vectors and the in-lane payment and
   mediation doubles, labelled lane-double evidence; live evidence comes only from
   deployed authorities. One recurring-purchase E2E scenario per compute lane runs
@@ -292,8 +294,9 @@ domain or the persistence-owning servicing kit.
   `openspec/specs/settlement-configuration/spec.md`;
   `openspec/specs/settlement-servicing/architecture.md`, "Charge-first payment
   settlement"; `docs/development/DEPLOYMENT_AND_CONFIG.md`, its cutover paragraph.
-- D18: no permanent destination — the shared verifier is used unchanged, and its
-  requirement stays as the foundation left it.
+- D18 the verifier unchanged, its scenario reworded to what it does:
+  `openspec/specs/settlement-servicing/spec.md`, its requirement renamed "Snapshot
+  verification accepts configured identity history", text unchanged.
 - D19: no permanent destination — buyers follow D17's cutover with no behaviour of
   their own.
 - D20: no permanent destination — draining is D17's procedure, already in the
@@ -301,8 +304,8 @@ domain or the persistence-owning servicing kit.
 - D21 convergence's withdrawn rotation work: `openspec/changes/README.md`,
   convergence's notes; its own design amends its documents.
 - D22: no permanent destination — `pinned_snapshot_verifier` honouring
-  `receipt_identities` is what the existing settlement-servicing requirement
-  "Snapshot verification accepts bounded identity history" already requires.
+  `receipt_identities` is what the settlement-servicing requirement "Snapshot
+  verification accepts configured identity history" already requires.
 - D23: no permanent destination — no anchor exists to reach anything.
 - D24 the re-anchoring gap and the roadmap criteria: `openspec/changes/README.md`,
   unowned gaps; `docs/development/ROADMAP.md`.

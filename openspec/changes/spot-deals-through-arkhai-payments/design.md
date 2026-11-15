@@ -500,8 +500,9 @@ opt-in, interval and threshold are persisted per deal in the buyer's profile, so
 `buy --resume` — each domain's resume of a buy run, VM's `market buy --from <run>`,
 with one added where a domain's `buy` has none — re-enters the loop after a restart
 where the deal is still running. The
-deal read shows `monitored`, `stopped` or `unmonitored`, and a deal whose monitor is
-not running is shown as unmonitored, never as protected.
+deal read shows `monitored`, `stopped` or `unmonitored`, and a deal whose monitor has
+not probed within the freshness window below is shown as unmonitored, never as
+protected.
 
 The opt-in says only that the buyer asked for a monitor; a crashed or killed `buy`
 leaves it unchanged, so the status rests on the probes themselves (design review 18
@@ -522,9 +523,19 @@ probes; and a status only the running command prints, which leaves a read from
 anywhere else knowing nothing.
 
 The probe is injected per
-domain — the VM's or bare-metal host's reachability on the disclosed address and
-credential kind — so the kit learns no credential format; what "stops answering"
-means is that access, not the buyer's workload.
+domain — whether the VM's or bare-metal host's disclosed SSH endpoint accepts a
+connection; the probe uses no credential — so the kit learns no credential format;
+what "stops answering" means is that endpoint, not the buyer's workload or its
+login. An endpoint that accepts connections while refusing the buyer's key passes.
+
+Rejected: a probe of authenticated access, with process liveness established
+separately (design review 35 F2). The stop the watchdog sends is irreversible, and an
+authenticating probe turns a key the buyer rotated, an exhausted connection limit or a
+slow login into that stop, and brings the buyer's credential into a loop whose kit
+learns no credential format; process liveness adds nothing the freshness rule does not
+already give. Convergence, which first delivers rate deals and runs the watchdog from
+`available`, plans a stronger probe if authenticated loss behind a reachable endpoint
+proves a common failure of delivered compute.
 
 The deal read that shows the status is each domain's buyer read of a run's deal.
 Bare metal has one, `market bare-metal delivery --run-id`; VM has none, so the read
@@ -536,8 +547,9 @@ access, so this change proves the loop, its stop and its status without a delive
 deal; convergence, which lifts the refusal, runs the watchdog from `available`, the
 buyer's stop landing with the storefront absent among its rows 1 and 2 (D8).
 
-The bound is conditional and stated as one, wherever the watchdog is described:
-detection takes at most `interval × threshold + probe timeout` after the loss, and
+The bound is conditional and stated as one, wherever the watchdog is described: it
+covers one failure, the disclosed SSH endpoint no longer accepting connections;
+detection takes at most `interval × threshold + probe timeout` after that loss, and
 only while the monitor runs; the stop's acknowledgement at the authority and any
 priced notice come after that, and billing runs until the stop lands. A probe failure
 is the buyer's observation (foundation D9), kept with its instants, and the stop it
@@ -916,12 +928,20 @@ Rejected, until a deployed deal outlives a drain (the unowned gap D24 records):
 
 ### D18. The shared verifier is used unchanged
 
-Settlement-servicing's "Snapshot verification accepts bounded identity history" stays
-as the foundation left it, and this change modifies no verifier. The foundation is
+Settlement-servicing's "Snapshot verification accepts bounded identity history" keeps
+its requirement text, and this change modifies no verifier. The foundation is
 archived with its snapshot verification complete, so the verifier is permanent code in
 `kit/arkhai-payments`, consumed here; no foundation round remains to own a change to
-it. Rejected: a MODIFIED delta extending the verifier, which D17 leaves without a
-purpose.
+it. Its one scenario, "Rotation re-anchors an old receipt", is reworded to what the
+verifier does (design review 35 F1): it returns a verdict and supplies no re-anchoring
+evidence, accepting a current-key snapshot that embeds a configured retiring identity's
+receipt only while that identity stays configured. Left as it was, it would contradict
+D17's requirement that the kit re-anchor no running deal. A MODIFIED delta cannot drop a
+scenario the permanent requirement has, so the delta removes the requirement and adds
+it back, its text unchanged, as "Snapshot verification accepts configured identity
+history" with the reworded scenario. Rejected: keeping the old scenario title over a
+reworded body, which leaves the re-anchoring claim in the title; and a MODIFIED delta
+extending the verifier, which D17 leaves without a purpose.
 
 ### D19. Buyers follow the same cutover
 
@@ -980,7 +1000,10 @@ a receipt key change drains every open payment deal, and re-anchoring running de
 across it is not designed, to be revisited when rate deals whose maximum term makes
 draining impractical reach production or when the payments service publishes a
 rotation mechanism. Section 6's qualification task drops rotation-overlap preparation
-and adapter re-anchoring evidence.
+and adapter re-anchoring evidence, and the test-compatibility delta requires no
+re-anchoring evidence. Closeout's promotion drops rate-only rotation from
+settlement-servicing's architecture and identity overlap from the deployment guide,
+which gains the cutover rule instead (design review 35 F1).
 
 ### D25. Implementation cadence
 
@@ -1103,9 +1126,10 @@ Destinations are planned, not claims of implemented behaviour.
 | D6a's end verb | `deal-lifecycle` `spec.md`; `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/test-compatibility/spec.md` for the bare-metal purchase's `end`; `deal-lifecycle` and `buyer-orchestration` `architecture.md`, which still name `market bare-metal teardown` |
 | D7 declarations, the materialization door and the `chosen` presupposition | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/deal-lifecycle/architecture.md`, "External authorities"; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | D17 a receipt identity change is a drained cutover, and why draining suffices | `openspec/specs/settlement-configuration/spec.md` ([delta](specs/settlement-configuration/spec.md)); `openspec/specs/settlement-servicing/architecture.md`, "Charge-first payment settlement", beside its current/retiring pins, for why a key change drains rather than re-anchors; `docs/development/DEPLOYMENT_AND_CONFIG.md`, its cutover paragraph |
-| D18–D20, D23 the verifier unchanged, buyers alike, draining by procedure, no anchor | No permanent destination beyond D17's: each states what the system does not add |
+| D18 the verifier unchanged, its scenario reworded to what it does | `openspec/specs/settlement-servicing/spec.md` ([delta](specs/settlement-servicing/spec.md)), "Snapshot verification accepts configured identity history", replacing "Snapshot verification accepts bounded identity history" |
+| D19–D20, D23 buyers alike, draining by procedure, no anchor | No permanent destination beyond D17's: each states what the system does not add |
 | D21 convergence's withdrawn rotation work | `openspec/changes/README.md`, convergence's notes (its own design amends its documents) |
-| D22 `pinned_snapshot_verifier` honours `receipt_identities` | No new destination: the existing settlement-servicing requirement "Snapshot verification accepts bounded identity history" already requires it |
+| D22 `pinned_snapshot_verifier` honours `receipt_identities` | No new destination: the settlement-servicing requirement "Snapshot verification accepts configured identity history" (D18's rename of "… bounded identity history", text unchanged) already requires it |
 | D24 the re-anchoring gap and roadmap criteria | `openspec/changes/README.md`, unowned gaps; `docs/development/ROADMAP.md` |
 | D26 buyers update their receipt identity before approving after a switch | `docs/development/DEPLOYMENT_AND_CONFIG.md`, its cutover paragraph |
 | Migration and backwards compatibility are engineered only for what has been deployed | `docs/development/RELEASING.md`, its compatibility policy, with a pointer from `docs/development/ARCHITECTURE.md` |

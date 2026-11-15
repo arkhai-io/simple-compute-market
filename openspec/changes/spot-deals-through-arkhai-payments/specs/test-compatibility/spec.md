@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Rate mechanics qualification consumes the shared lane contract
-Rate mechanics qualification MUST follow "External payment qualification names its target" and label each result lane-double evidence or live evidence, as "The in-lane payments double mirrors the service and proves its engine's surface" does. It MUST retain kit/vector and re-anchoring evidence production, while convergence owns rate-lane time and consuming scenarios. It MUST NOT add an evidence label or claim live behavior from a double.
+Rate mechanics qualification MUST follow "External payment qualification names its target" and label each result lane-double evidence or live evidence, as "The in-lane payments double mirrors the service and proves its engine's surface" does. It MUST retain kit/vector evidence production, while convergence owns rate-lane time and consuming scenarios. It MUST NOT add an evidence label or claim live behavior from a double.
 
 #### Scenario: Mechanics run against the lane double
 - **WHEN** rate adapter mechanics pass against contract fakes or the lane double

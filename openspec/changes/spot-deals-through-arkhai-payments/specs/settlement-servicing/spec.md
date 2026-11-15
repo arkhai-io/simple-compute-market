@@ -66,7 +66,24 @@ The mandate MUST be derived only from the exact accepted Agreement, binding its 
 - **WHEN** stored settlement data or a counterparty's mandate carries mandate-level `authorities`, or a part without its own authorities or maximum hold extension
 - **THEN** it is refused before any approval or verification, and the stored Agreement bytes and mandate are left as they are
 
+## REMOVED Requirements
+
+### Requirement: Snapshot verification accepts bounded identity history
+
+**Reason**: Its one scenario promised re-anchoring evidence the verifier does not supply, and a receipt identity change is a cutover that re-anchors no deal. The requirement continues, its text unchanged and its scenario reworded, as "Snapshot verification accepts configured identity history".
+**Migration**: None: the verifier is unchanged.
+
 ## ADDED Requirements
+
+### Requirement: Snapshot verification accepts configured identity history
+
+Hosted snapshot verification MUST accept configured current/retiring identities with validity windows, embedded-receipt attestation and a caller-supplied minimum sequence. It MUST refuse unverified, cross-deal, mode-changed or regressing state. A fresh current-key snapshot MAY attest an embedded old receipt while retaining original bytes; consumers MUST NOT implement a parallel verifier.
+
+#### Scenario: A current-key snapshot attests a retiring identity's receipt
+
+- **WHEN** a snapshot signed by the current identity embeds a receipt that a configured retiring identity signed within its window
+- **THEN** verification checks identity windows, commitment and mode binding and minimum sequence, and accepts the snapshot while that retiring identity stays configured
+- **AND** once that identity leaves configuration the snapshot is refused, as "A receipt identity change is a cutover" requires
 
 ### Requirement: A rate mandate authorizes from the accepted rights
 A `rate` part MUST authorize `start` for the payee alone. Its `stop` entries MUST be exactly one per accepted entitlement, carrying that entitlement's `notice_seconds` and the `partialPeriod` its `settles_through` maps to, followed by the dispute authority's `{account, notice: PT0S, partialPeriod: chosen}`; on-demand has no payee entry. It MUST authorize `reverse` for the payee and the dispute authority, and only the dispute authority under `extend`. A setup part MUST use the `once` permissions. The buyer MUST refuse any authority not derived this way before approval.
