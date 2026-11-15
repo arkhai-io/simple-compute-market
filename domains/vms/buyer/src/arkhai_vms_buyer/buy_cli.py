@@ -9,11 +9,12 @@ CLI process:
     invoke the accepted Agreement's buyer settlement entry →
     submit to the seller →
     poll until ready/failed →
-    with --watchdog, probe the delivered VM in the foreground until the
-    watchdog stops a rate deal, the deal ends, or the buyer interrupts it.
-    Only while it runs, a lost VM is detected within at most interval x
-    threshold + probe timeout; the authority's acknowledgement and any priced
-    notice come after that, and billing continues until the stop lands.
+    with --watchdog, probe the delivered VM's disclosed SSH endpoint in the
+    foreground until the watchdog stops a rate deal, the deal ends, or the
+    buyer interrupts it. Only while it runs, if that endpoint stops accepting
+    connections, the loss is detected within at most interval x threshold +
+    probe timeout; the authority's acknowledgement and any priced notice come
+    after that, and billing continues until the stop lands.
 
 The command composes VM inputs over core buyer orchestration.
 """

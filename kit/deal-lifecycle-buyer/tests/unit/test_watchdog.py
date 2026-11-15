@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from market_deal_lifecycle_buyer import (
-    EndDeliveryProgress, EndTarget, WatchdogSettings, WatchdogState, WatchdogStop, run_monitor, tcp_reachable,
-    watch_deal, watchdog_status,
+    EndDeliveryProgress, EndTarget, WatchdogSettings, WatchdogState, WatchdogStop, bound_notice, run_monitor,
+    tcp_reachable, watch_deal, watchdog_settings, watchdog_status,
 )
 from market_deal_lifecycle_buyer.ending import EndPlan
 from market_deal_lifecycle_buyer.watchdog import GRACE_SECONDS, ProbeObservation, deal_ended
@@ -112,7 +112,8 @@ async def test_a_passing_probe_resets_the_count_so_nothing_is_sent_below_the_thr
     async def ends_after_the_probes():
         return next(ended)
 
-    outcome = await watch_deal(deal, "deal", journal=journal, probe=probes(*answers),
+    # The round that finds the deal ended runs a probe beside the check, discarded.
+    outcome = await watch_deal(deal, "deal", journal=journal, probe=probes(*answers, True),
                                clock=clock, sleep=clock.sleep, ended=ends_after_the_probes)
     assert outcome.reason == "ended" and outcome.progress is None
     deal.end.assert_not_awaited()
@@ -225,6 +226,43 @@ def test_the_bound_is_interval_times_threshold_plus_the_probe_timeout():
     assert WatchdogSettings(60, 5, 10).bound_seconds == 310
     with pytest.raises(ValueError):
         WatchdogSettings(0, 5, 10)
+    # A probe that could outlast the interval would push the next one off schedule.
+    with pytest.raises(ValueError, match="must not exceed its interval"):
+        WatchdogSettings(7, 2, 10)
+
+
+def test_the_opt_in_shortens_the_probe_timeout_to_an_interval_below_it():
+    assert watchdog_settings(True, 60, 5) == WatchdogSettings(60, 5, 10)
+    assert watchdog_settings(True, 7, 2) == WatchdogSettings(7, 2, 7)
+    assert watchdog_settings(False, 60, 5) is None
+
+
+@pytest.mark.asyncio
+async def test_the_ended_check_runs_beside_the_probe_never_ahead_of_it():
+    clock, journal, deal = Clock(), Journal(SETTINGS), lifecycle()
+    started, overlapped = [], []
+
+    async def probe():
+        started.append(True)
+        return False
+
+    async def ended():
+        await asyncio.sleep(0)  # a read in flight: the probe has started meanwhile
+        overlapped.append(bool(started))
+        started.clear()
+        return False
+
+    await watch_deal(deal, "deal", journal=journal, probe=probe, clock=clock, sleep=clock.sleep, ended=ended)
+    assert overlapped == [True, True, True]
+    assert journal.probes == [1000, 1030, 1060]
+
+
+def test_the_stated_bound_covers_the_ssh_endpoint_accepting_connections_only_while_the_command_runs():
+    notice = bound_notice(WatchdogSettings(60, 5, 10))
+    assert "if the deal's disclosed SSH endpoint stops accepting connections" in notice
+    assert "the loss is detected within at most 310 seconds" in notice
+    assert "only while this command runs" in notice
+    assert "lost" not in notice
 
 
 def monitor_target(deal, journal, events):

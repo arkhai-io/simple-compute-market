@@ -1683,6 +1683,9 @@ openspec/changes/README.md (convergence's row).
       Defaults: interval 60 s, threshold 5, probe timeout 10 s (bound 310 s).
       `tcp_reachable` is the shared probe body both domains use (a TCP connect to
       the disclosed SSH endpoint; host and port only, no credential).
+      Correction (4F.7): cutting the ended-check off at the probe timeout did not
+      by itself keep the schedule, since it ran ahead of the probe; it now runs
+      beside the probe, and the probe timeout never exceeds the interval.
 - [x] 4F.2 The commands (D6a): an opt-in flag on both domains' `buy`, which then stays
       in the foreground from `available` until the stop is sent, the deal ends or the
       buyer stops it; bare metal's `buy`, which returns at commit, polls the deal's
@@ -1856,7 +1859,7 @@ openspec/changes/README.md (convergence's row).
       rows 1 and 2. Name them in `converge-ongoing-compute-leases`' row Notes in
       `openspec/changes/README.md`; closeout's 7.8 records the transfer.
       As built: named in that row's Notes.
-- [ ] 4F.7 Narrow the stated bound (D6a, design review 35 F2; deal-lifecycle's
+- [x] 4F.7 Narrow the stated bound (D6a, design review 35 F2; deal-lifecycle's
       watchdog requirement, "the one failure it covers"). Wherever the watchdog's
       bound is stated, it covers one failure, the deal's disclosed SSH endpoint no
       longer accepting connections, and detection runs from that loss, not from a
@@ -1871,8 +1874,86 @@ openspec/changes/README.md (convergence's row).
       connections and states the bound only while the command runs.
       End-to-end: none exercises the watchdog (4F.6 moved the delivered-deal cases to
       convergence). Owed by validation: none.
+      As built: every statement of the bound — `watchdog_option`'s help,
+      `bound_notice`, `watchdog.py`'s module docstring (which also says an endpoint
+      accepting connections while the workload or login fails passes every probe),
+      `WatchdogSettings.bound_seconds`'s docstring, VM `buy_cli.py`'s module
+      docstring and bare metal's `buy` docstring — names the disclosed SSH endpoint
+      ceasing to accept connections and counts detection from that loss.
+      `watch_deal`'s docstring and `Probe`'s comment, which state no bound, now say
+      "SSH endpoint" and "endpoint" for "access". Also, beyond the files the task
+      names, `docs/development/ROADMAP.md`'s accepted-limitations paragraph stated
+      the bound against "the loss" of the resource and now names the endpoint. No
+      "lost resource", "lost VM" or "lost host" remains in a statement of the bound
+      (`buyer_terms.py`'s acknowledgement of the honest-crash exposure states no
+      bound and is unchanged). The wording avoids "no longer", which the history
+      wording check refuses in a docstring.
+      Outside the plan, a defect in 4F.1's loop that made the bound false, found by
+      the compliance check: each round ran the ended-check before the probe, each
+      cut off at the probe timeout, so a hanging storefront read delayed every probe
+      by up to that timeout (detection up to `interval × threshold + 2 × probe
+      timeout`), and an interval shorter than the timeout let rounds run back to
+      back. Now the ended-check runs beside the probe (`asyncio.gather`), so a round
+      whose awaited reads hang ends at the probe timeout; `WatchdogSettings` refuses
+      a probe timeout longer than its interval; and the opt-in (`watchdog_settings`)
+      shortens the 10-second default to an interval below it, which
+      `--watchdog-interval`'s help states. A round in which the deal has ended also
+      runs its probe, whose answer is discarded and not recorded. The rule the
+      bound rests on is added to D6a, to the delta's watchdog requirement (one probe
+      starting every interval, each cut off at a probe timeout no longer than the
+      interval) and to the design promotion record's watchdog row.
+      Unit, `kit/deal-lifecycle-buyer/tests/unit/test_watchdog.py`: new
+      `test_the_stated_bound_covers_the_ssh_endpoint_accepting_connections_only_while_the_command_runs`
+      over `bound_notice` (the endpoint named, the bound's value, "only while this
+      command runs"); `test_the_opt_in_shortens_the_probe_timeout_to_an_interval_below_it`;
+      `test_the_ended_check_runs_beside_the_probe_never_ahead_of_it` (an ended-check
+      that yields once sees the probe already started, every round, where the
+      earlier order would not; no test drives a read to its timeout, so that a
+      hanging read ends at the cutoff is `asyncio.wait_for`'s, not shown here);
+      the bound test also refuses `WatchdogSettings(7, 2, 10)`; the passing-probe
+      case scripts the ended round's discarded probe. VM's
+      `TestBuyWatchdog` fresh opt-in case now expects the persisted (7, 2, 7), "at
+      most 21 seconds", and the ended round's one discarded probe with no probe
+      instant recorded. The domain suites assert only fragments of the notice that
+      survive ("at most N seconds", "only while this command runs"). Buyer half 46
+      passed; after `make dist`, VM buyer 331 and bare-metal buyer 81 passed (unit),
+      against the rebuilt buyer-half wheel.
 
 ## Section 4F notes and handoff
+
+- 4F.7, a third session: the wording correction, and outside the plan the loop fix
+  that makes the corrected bound hold (4F.7's notes): the ended-check beside the
+  probe and the probe timeout no longer than the interval. No probe body or status
+  rule changed. End-to-end scenarios exercising it: none (4F.6). Owed by
+  validation: none.
+- Limits of the bound left as they are, from the second compliance check: where the
+  probe timeout equals the interval (every interval of 10 s or less), a round whose
+  probe times out lasts the interval plus milliseconds of scheduling and the probe
+  instant's SQLite commit, which can accumulate over consecutive timed-out rounds,
+  beneath the whole seconds the bound is stated in. And the loop's synchronous
+  SQLite reads and writes (`deal_ended`'s `end_journal.read`, `record_probe`) are
+  not cut off: a lock another process holds on the buyer's store can delay a
+  probe's start by up to SQLite's 30-second busy timeout. Either errs toward
+  `unmonitored`, never a false `monitored`. Convergence, which first runs the
+  watchdog against delivered deals, is where a tighter schedule would be planned.
+- Pre-commit for 4F.7: the first run, before the second check's fixes, passed
+  after-functional-change and pre-commit-functional (every suite) and failed only
+  history wording ("no longer" in three docstrings), since reworded. The final
+  run, after every fix, passed all three hooks: after-functional-change (`make
+  lock`, which changed no lock), pre-commit-functional (`make dist-clean`, `make
+  check-packaging`, `make test`: every suite, the buyer half 46, VM buyer 331,
+  bare-metal buyer 81, the VM storefront's integration 602 and the bare-metal
+  storefront's 645 passed) and pre-commit (index, tasks, skills, OpenSpec strict,
+  `make check-repository`).
+- Fresh-context checks of 4F.7: the first found the loop defect (fixed, above), two
+  statements of the bound short of "disclosed SSH endpoint" (fixed) and notes
+  claiming no domain test asserted the notice and a pre-commit run not yet made
+  (corrected). The second found the probe-timeout rule without a home (now D6a,
+  the delta and the promotion record), the stale 4F.1 note (amended), a test name
+  and notes overstating what the concurrency test shows (renamed, narrowed), the
+  passing-probe case relying on a swallowed `IndexError` (scripted), and
+  ROADMAP's statement of the bound (fixed). Declined: the millisecond overrun at
+  short intervals and the uncut synchronous SQLite calls (the limits bullet above).
 
 - Implemented after the replan, in a second session; every task is checked. What
   follows this session's bullets is the first session's record, which returned the

@@ -553,11 +553,13 @@ def buy_bare_metal(
     """Approve one exact Arkhai option and provision after its receipt verifies.
 
     With ``--watchdog`` the command stays in the foreground: it waits for the
-    deal to become available, then probes its access and sends the ordinary
-    rate stop after ``--watchdog-threshold`` consecutive failed probes. Only
-    while it runs, a lost host is detected within at most interval x threshold +
-    probe timeout; the authority's acknowledgement and any priced notice come
-    after that, and billing continues until the stop lands. ``--from <run>``
+    deal to become available, then probes whether the host's disclosed SSH
+    endpoint accepts connections and sends the ordinary rate stop after
+    ``--watchdog-threshold`` consecutive failed probes. Only while it runs, if
+    that endpoint stops accepting connections, the loss is detected within at
+    most interval x threshold + probe timeout; the authority's acknowledgement
+    and any priced notice come after that, and billing continues until the stop
+    lands. ``--from <run>``
     resumes that wait and watchdog after a restart.
     """
     waivers = term_waivers(

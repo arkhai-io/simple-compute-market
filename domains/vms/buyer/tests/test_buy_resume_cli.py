@@ -822,20 +822,23 @@ class TestBuyWatchdog:
         _stub_fresh_alkahest_buy(monkeypatch)
         _paid_run_buy(monkeypatch, "ready")
         journal = _Journal()
-        # The deal ends by another path before the first probe.
+        # The deal has ended by another path at the first round; that round's probe,
+        # run beside the ended-check, is discarded.
         lifecycle, opened, probed = _watchdog_seams(monkeypatch, journal, reads=(_ENDED,))
 
         result = runner.invoke(app, [*_FRESH, "--watchdog", "--watchdog-interval", "7",
                                      "--watchdog-threshold", "2"])
 
         assert result.exit_code == 0, result.output
-        assert journal.state("neg-1").settings == WatchdogSettings(7, 2, 10)
+        # The probe timeout shortens to the 7-second interval.
+        assert journal.state("neg-1").settings == WatchdogSettings(7, 2, 7)
         events = [event["event"] for event in read_run(list_runs()[0].run_id, signer=BUYER_SIGNER)]
         assert events.index("watchdog_opted_in") < events.index("run_ended")
         output = " ".join(result.output.split())
-        assert "at most 24 seconds" in output and "only while this command runs" in output
+        assert "at most 21 seconds" in output and "only while this command runs" in output
         assert "the deal ended by another path" in output
-        assert len(opened) == 1 and probed == []
+        assert len(opened) == 1 and len(probed) == 1
+        assert journal.state("neg-1").last_probe_at is None
         lifecycle.end.assert_not_awaited()
 
     def test_a_deal_never_ready_keeps_its_opt_in_and_is_never_watched(self, runner, monkeypatch):

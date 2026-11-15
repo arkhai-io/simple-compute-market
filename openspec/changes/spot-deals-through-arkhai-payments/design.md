@@ -554,8 +554,11 @@ only while the monitor runs; the stop's acknowledgement at the authority and any
 priced notice come after that, and billing runs until the stop lands. A probe failure
 is the buyer's observation (foundation D9), kept with its instants, and the stop it
 triggers is reversible by nothing, so the default interval and threshold are
-conservative. The watchdog sends nothing the buyer could not send by hand and asks
-nothing new of the authority.
+conservative. The bound holds because each probe starts on schedule, one every
+interval: a probe and the loop's check that the deal has ended run side by side,
+each cut off at the probe timeout, and the probe timeout never exceeds the interval
+(the opt-in shortens the default timeout to a shorter interval). The watchdog sends
+nothing the buyer could not send by hand and asks nothing new of the authority.
 
 ### D7. Servicing declarations and identity rotation
 
@@ -1142,7 +1145,7 @@ Destinations are planned, not claims of implemented behaviour.
 | D12–D15 end service's refusal of a rate deal it cannot service, its refusal code and the projection it reads | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md`, "One end instant, transactional admission" (where fails closed is enforced); `openspec/specs/compute-delivery/architecture.md`, "Commit and hold adoption" |
 | D14's repair reason and the site-refusal wording of the undelivered hand-off | `openspec/specs/compute-delivery/spec.md` |
 | D14's deadline barrier for a deal that is not once-only, its `awaiting_observation` admission answer and the payment observation instant | `openspec/specs/deal-lifecycle/spec.md` (with "Admission shares the end-service transaction and revision") and `architecture.md`; the observation table's migration in `docs/development/DEPLOYMENT_AND_CONFIG.md` and `kit/deal-servicing/README.md`, "Schema" (both updated with the code) |
-| D6a's watchdog status: the last-probe freshness rule, buyer-local and off the wire | `openspec/specs/deal-lifecycle/spec.md` (with 4B.6's watchdog requirement); `openspec/specs/buyer-orchestration/architecture.md` |
+| D6a's watchdog status: the last-probe freshness rule, buyer-local and off the wire; the probe schedule and the probe timeout no longer than the interval, which its bound rests on | `openspec/specs/deal-lifecycle/spec.md` (with 4B.6's watchdog requirement); `openspec/specs/buyer-orchestration/architecture.md` |
 | D16 the recurring-purchase scenario's shape | `openspec/specs/test-compatibility/spec.md` |
 | Each change is mergeable to `dev` on its own merits | `openspec/README.md` or `docs/agents/change-workflow.md` |
 | Sibling-domain parity is checked before adding behaviour to one domain | `AGENTS.md`, "Package and dependency discipline" |

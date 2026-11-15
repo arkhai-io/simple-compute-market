@@ -19,8 +19,8 @@ from market_deal_lifecycle_buyer.lifecycle import BuyerLifecycle
 from market_deal_lifecycle_buyer.retention import DealReader, prune_command
 from market_deal_lifecycle_buyer.store import FileEvidenceStore
 from market_deal_lifecycle_buyer.watchdog import (
-    DEFAULT_INTERVAL_SECONDS, DEFAULT_THRESHOLD, Probe, WaitClock, WatchdogJournal, WatchdogOutcome,
-    WatchdogSettings, watch_deal,
+    DEFAULT_INTERVAL_SECONDS, DEFAULT_PROBE_TIMEOUT_SECONDS, DEFAULT_THRESHOLD, Probe, WaitClock,
+    WatchdogJournal, WatchdogOutcome, WatchdogSettings, watch_deal,
 )
 
 T = TypeVar("T")
@@ -224,17 +224,19 @@ def register_read_command(
 def watchdog_option() -> Any:
     return typer.Option(
         False, "--watchdog",
-        help="Stay in the foreground once the deal is available, probing its access, and send the "
-        "ordinary rate stop after --watchdog-threshold consecutive failed probes. Only while this "
-        "command runs, a lost resource is detected within at most interval x threshold + probe "
-        "timeout; the authority's acknowledgement and any priced notice come after that, and "
-        "billing continues until the stop lands.",
+        help="Stay in the foreground once the deal is available, probing whether its disclosed SSH "
+        "endpoint accepts connections, and send the ordinary rate stop after --watchdog-threshold "
+        "consecutive failed probes. Only while this command runs, if that endpoint stops accepting "
+        "connections, the loss is detected within at most interval x threshold + probe timeout; "
+        "the authority's acknowledgement and any priced notice come after that, and billing "
+        "continues until the stop lands.",
     )
 
 
 def watchdog_interval_option() -> Any:
     return typer.Option(DEFAULT_INTERVAL_SECONDS, "--watchdog-interval", min=1,
-                        help="Seconds between the watchdog's probes.")
+                        help="Seconds between the watchdog's probes. Each probe's timeout is "
+                        f"{DEFAULT_PROBE_TIMEOUT_SECONDS} s, or the interval when that is shorter.")
 
 
 def watchdog_threshold_option() -> Any:
@@ -243,15 +245,22 @@ def watchdog_threshold_option() -> Any:
 
 
 def watchdog_settings(enabled: bool, interval: int, threshold: int) -> WatchdogSettings | None:
-    """The settings a ``buy`` opt-in persists, or ``None`` without the opt-in."""
-    return WatchdogSettings(interval_seconds=interval, threshold=threshold) if enabled else None
+    """The settings a ``buy`` opt-in persists, or ``None`` without the opt-in.
+
+    The probe timeout is the default, shortened to an interval shorter than it.
+    """
+    if not enabled:
+        return None
+    return WatchdogSettings(interval_seconds=interval, threshold=threshold,
+                            probe_timeout_seconds=min(DEFAULT_PROBE_TIMEOUT_SECONDS, interval))
 
 
 def bound_notice(settings: WatchdogSettings) -> str:
     """The conditional detection bound, stated only while the monitor runs."""
     return (
-        f"Watchdog running: a lost resource is detected within at most {settings.bound_seconds} seconds "
-        f"(interval {settings.interval_seconds} s x threshold {settings.threshold} + probe timeout "
+        "Watchdog running: if the deal's disclosed SSH endpoint stops accepting connections, the loss "
+        f"is detected within at most {settings.bound_seconds} seconds (interval "
+        f"{settings.interval_seconds} s x threshold {settings.threshold} + probe timeout "
         f"{settings.probe_timeout_seconds} s), only while this command runs. The authority's "
         "acknowledgement of the stop it sends and any priced notice come after that, and billing "
         "continues until the stop lands."

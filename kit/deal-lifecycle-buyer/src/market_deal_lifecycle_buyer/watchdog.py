@@ -1,10 +1,12 @@
 """The buyer's watchdog: a foreground probe loop that sends the ordinary rate stop.
 
 The loop runs only inside the buyer's own command; there is no buyer daemon. Its
-bound is conditional: a lost resource is detected within at most
+bound is conditional and covers one failure, the deal's disclosed SSH endpoint
+ceasing to accept connections: from that loss, detection takes at most
 ``interval × threshold + probe timeout``, and only while the loop runs; the
 authority's acknowledgement of the stop it then sends and any priced notice come
-after that, and billing runs until the stop lands.
+after that, and billing runs until the stop lands. An endpoint that accepts
+connections while the buyer's workload or login fails passes every probe.
 
 The status a buyer read shows rests on the probes themselves, never on the
 opt-in: a killed or hung loop stops recording probes, so its deal reads as
@@ -46,7 +48,7 @@ DEFAULT_PROBE_TIMEOUT_SECONDS = 10
 GRACE_SECONDS = 5
 
 WatchdogStatus = Literal["monitored", "stopped", "unmonitored"]
-#: One probe of the disclosed access: true when the resource answered. An
+#: One probe of the disclosed endpoint: true when it accepted a connection. An
 #: exception or a probe outlasting its timeout is a failed probe.
 Probe = Callable[[], Awaitable[bool]]
 
@@ -60,10 +62,14 @@ class WatchdogSettings:
     def __post_init__(self) -> None:
         if self.interval_seconds < 1 or self.threshold < 1 or self.probe_timeout_seconds < 1:
             raise ValueError("watchdog interval, threshold and probe timeout must each be at least 1")
+        # A probe that may outlast the interval would push the next one off its
+        # schedule, and the bound below would not hold.
+        if self.probe_timeout_seconds > self.interval_seconds:
+            raise ValueError("the watchdog's probe timeout must not exceed its interval")
 
     @property
     def bound_seconds(self) -> int:
-        """The longest a loss goes undetected while the loop runs."""
+        """The longest the disclosed SSH endpoint's loss goes undetected while the loop runs."""
         return self.interval_seconds * self.threshold + self.probe_timeout_seconds
 
     def to_json(self) -> dict[str, int]:
@@ -290,18 +296,29 @@ async def _bounded(check: Callable[[], Awaitable[bool]], seconds: int) -> bool:
         return False
 
 
+async def _probe_once(probe: Probe, seconds: int) -> tuple[bool, str]:
+    """One probe's answer and, for a failure, its detail."""
+    try:
+        answered = await asyncio.wait_for(probe(), seconds)
+    except asyncio.TimeoutError:
+        return False, "probe timed out"
+    except Exception as exc:
+        return False, f"probe failed: {type(exc).__name__}"
+    return answered, "" if answered else "access did not answer"
+
+
 async def watch_deal(
     lifecycle: BuyerLifecycle, negotiation_id: str, *, journal: WatchdogJournal, probe: Probe | None,
     clock: Callable[[], int] = lambda: int(time.time()),
     sleep: Callable[[float], Awaitable[object]] = asyncio.sleep,
     ended: Callable[[], Awaitable[bool]] | None = None,
 ) -> WatchdogOutcome:
-    """Probe the deal's access until ``threshold`` consecutive failures, then stop.
+    """Probe the deal's SSH endpoint until ``threshold`` consecutive failures, then stop.
 
     Probes start on a fixed schedule, one every ``interval`` from the loop's
-    start, and each probe and each ended-check is cut off at the probe timeout,
-    so the detection bound and the status's freshness window both hold while the
-    loop runs. The stop is the buyer's ordinary entitled stop and hint
+    start, and each probe, with the ended-check run beside it, is cut off at the
+    probe timeout, so the detection bound and the status's freshness window both
+    hold while the loop runs. The stop is the buyer's ordinary entitled stop and hint
     (``BuyerLifecycle.end`` for a rate deal), sent after the decision and its
     probe evidence are journaled, and retried until it lands. A loop restarted
     after that decision sends nothing new and needs no probe: it resumes the one
@@ -327,16 +344,18 @@ async def watch_deal(
     failures: list[ProbeObservation] = []
     due = clock()
     while True:
-        if await _bounded(check_ended, settings.probe_timeout_seconds):
-            return WatchdogOutcome("ended")
         at = clock()
-        try:
-            answered = await asyncio.wait_for(probe(), settings.probe_timeout_seconds)
-            detail = "" if answered else "access did not answer"
-        except asyncio.TimeoutError:
-            answered, detail = False, "probe timed out"
-        except Exception as exc:
-            answered, detail = False, f"probe failed: {type(exc).__name__}"
+        # The ended-check runs beside the probe, never ahead of it: each is cut off
+        # at the probe timeout, which never exceeds the interval, so a round ends
+        # within it and every probe starts on schedule, as the detection bound
+        # counts on. Run ahead, a hanging storefront read would add its timeout to
+        # every probe's start.
+        has_ended, (answered, detail) = await asyncio.gather(
+            _bounded(check_ended, settings.probe_timeout_seconds),
+            _probe_once(probe, settings.probe_timeout_seconds),
+        )
+        if has_ended:
+            return WatchdogOutcome("ended")
         journal.record_probe(negotiation_id, at)
         # A passing probe ends the run of failures: only consecutive ones count.
         failures = [] if answered else [*failures, ProbeObservation(at, detail)]
