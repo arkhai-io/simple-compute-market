@@ -163,7 +163,8 @@ Always start a fresh run through its target, never the script directly: the targ
 checks the change, refuses while a round view is open, and passes `SECTIONS`,
 `FRESH`, `SESSION_ID`, and `HELM_ALL_SCENARIOS` on.
 An implementation run's `ARGUMENTS` carries a merge's conflicts to resolve or the
-owner's direction to its sections, in their words, with any routing note beside it
+owner's direction to its sections, and a merge run's (`make merge ARGUMENTS=<text>`)
+the owner's direction to the merge, in their words, with any routing note beside it
 marked as yours (where a stopped session's work waits, the path a granted rule
 names); the same direction goes in the log through `note` as well.
 Each implementation run starts a fresh session unless the owner directs the work to

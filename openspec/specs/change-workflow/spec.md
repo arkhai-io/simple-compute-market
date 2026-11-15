@@ -3294,7 +3294,8 @@ branch the workspace had checked out, or the clone's `--from`, as the branch the
 change lands on, and `find --json` MUST print it as `base`. A merge given no branch
 MUST bring in the branch the change's last finished merge recorded (CW-5vkd), else the
 clone's. An argument MUST override both. A step needing it, with none recorded or
-given, MUST refuse.
+given, MUST refuse. The merge's target MUST pass the owner's direction after the
+branch, as every other step's target passes its own, and the merge MUST follow it.
 
 #### Scenario: Orchestration is run again from another branch
 
@@ -3307,6 +3308,12 @@ given, MUST refuse.
 - **WHEN** a change worked in place, with no clone, reaches the merge, no earlier
   merge recorded `landing`, and no branch is given
 - **THEN** the merge refuses, naming the argument that gives the branch
+
+#### Scenario: The owner briefs the merge
+
+- **WHEN** the owner starts the merge with a direction and no branch
+- **THEN** the merge's invocation names the recorded branch, then the owner's
+  direction in their words
 
 #### Scenario: The merge before closeout is repeated after a review of it
 

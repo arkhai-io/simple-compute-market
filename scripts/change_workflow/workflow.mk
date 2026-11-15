@@ -65,8 +65,8 @@ triage: ## Open a fresh Claude Code session triaging an OpenSpec change's untria
 validate: ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change; ARGUMENTS follows the change in the skill's invocation (CHANGE=<change> [ARGUMENTS=<text>] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start validate "$(CHANGE)"$(CHANGE_WORKFLOW_ARGUMENTS)$(CHANGE_WORKFLOW_RUN)
 
-merge: ## Open a fresh Claude Code session merging the branch an OpenSpec change lands on into its branch once its pre-closeout review is triaged, or again after its archive, resolving the conflicts and repairing what that branch's changes broke (CHANGE=<change> [FROM=<branch>, default the branch the change lands on] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
-	@$(CHANGE_WORKFLOW) start merge "$(CHANGE)"$(if $(strip $(FROM)), --arguments 'from $(subst ','\'',$(strip $(FROM)))')$(CHANGE_WORKFLOW_RUN)
+merge: ## Open a fresh Claude Code session merging the branch an OpenSpec change lands on into its branch once its pre-closeout review is triaged, or again after its archive, resolving the conflicts and repairing what that branch's changes broke; ARGUMENTS follows the branch in the skill's invocation, as the owner's direction to the merge (CHANGE=<change> [FROM=<branch>, default the branch the change lands on] [ARGUMENTS=<text>] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+	@$(CHANGE_WORKFLOW) start merge "$(CHANGE)"$(if $(strip $(FROM)$(ARGUMENTS)), --arguments '$(subst ','\'',$(strip $(if $(strip $(FROM)),from $(strip $(FROM))) $(ARGUMENTS)))')$(CHANGE_WORKFLOW_RUN)
 
 closeout: ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start closeout "$(CHANGE)"$(CHANGE_WORKFLOW_RUN)

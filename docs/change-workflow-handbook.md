@@ -470,7 +470,7 @@ session on purpose.
 | Validation | `change-validate` | `make validate CHANGE=<change>` |
 | Triage | `change-triage` | `make triage CHANGE=<change>` |
 | Pre-closeout review | `change-review` | `make review CHANGE=<change> KIND=pre-closeout` |
-| Merge | `change-merge` | `make merge CHANGE=<change> [FROM=<branch>]` |
+| Merge | `change-merge` | `make merge CHANGE=<change> [FROM=<branch>] [ARGUMENTS=<text>]` |
 | Closeout | `change-closeout` | `make closeout CHANGE=<change>` |
 | Closeout review | `change-review` | `make review CHANGE=<change> KIND=closeout` |
 | Merge review | `change-review` | `make review CHANGE=<change> KIND=merge`, when the merge after the archive names it |
@@ -564,7 +564,8 @@ it asks you to confirm that review. A return it proposes waits for your confirma
 `make merge` merges `FROM=<branch>` when you give one, and otherwise the branch the
 last finished merge recorded, else the one the change's clone recorded; a change with
 none, such as one worked in your workspace with no clone and no merge yet, needs
-`FROM`.
+`FROM`. `ARGUMENTS` hands the merge your direction in your words, such as a brief on what
+the branch brings in.
 
 **Closeout** (`change-closeout`) works through the closeout task's parts in order,
 the workflow's and the repository's own, promotes the change's durable knowledge into
