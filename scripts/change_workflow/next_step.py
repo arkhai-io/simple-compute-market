@@ -1286,8 +1286,11 @@ class Computation:
         review are no evidence that the owner read the round.
         """
         state = self.state
-        mine = [r for r in state.records if r.number > current.get("after", 0)]
-        kinds = {r.review_kind or r.kind for r in mine}
+        own = [r for r in state.records if r.number > current.get("after", 0)]
+        # Notes the round carries are triaged with it but are not its reading.
+        carried = set(current.get("carries") or ())
+        mine = [r for r in state.records if r.number in carried and not r.triaged] + own
+        kinds = {r.review_kind or r.kind for r in own}
         in_clone = state.workspace is not None
         base = again.reviewed_commit if again and self.fixed_since(again) else None
         if again is None:

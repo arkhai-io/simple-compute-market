@@ -263,7 +263,10 @@ For an implementation round, also take:
   saves the notes as the round's record. Otherwise ask for them if the owner has
   not pasted them, naming that command so the owner can read what the notes are
   about, and save them exactly as pasted as the next numbered record,
-  `NN-implementation-owner.md`.
+  `NN-implementation-owner.md`. Notes the owner saved while no review awaited a
+  triage — on an earlier triage's fixes, or on a re-plan — are carried by the next
+  round: its line in the workflow log names them under `carries`, and you triage
+  them with the round's own notes, as points of their own.
   Label the points `O1`, `O2`, … in the order they appear — in the triage file and
   the ledger only, never in the saved notes — and then each commit the owner made
   while reading, which the pull above brought in, as a point after them; and

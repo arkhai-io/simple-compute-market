@@ -616,6 +616,11 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     only the sections left, and the round's reading, validation, and review must
     still cover the sections already done. Such a line keeps the open round's
     `after` and `commit` and names it as `continues`.
+
+    `carries` names the owner records numbered at or below `after` that no triage
+    has read: notes the owner wrote while no review awaited a triage, on a
+    triage's fixes or a re-plan. The round's triage reads them beside its own
+    records; they are never the round's reading.
     """
     if not section_ids(sections):
         raise StepError("a round names one or more sessions, each a non-empty list of "
@@ -632,11 +637,28 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
                                    "after": continued["after"],
                                    **({"commit": continued["commit"]}
                                       if continued.get("commit") else {}),
+                                   **({"carries": continued["carries"]}
+                                      if continued.get("carries") else {}),
                                    "continues": continued["seq"]}, clock)
+    if after is None:
+        after = next_number(path.parent) - 1
+    carries = untriaged_owner_notes(path.parent, after)
     return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
-                               "sections": sections, "by": by,
-                               "after": next_number(path.parent) - 1 if after is None
-                               else after, **({"commit": commit} if commit else {})}, clock)
+                               "sections": sections, "by": by, "after": after,
+                               **({"carries": carries} if carries else {}),
+                               **({"commit": commit} if commit else {})}, clock)
+
+
+def untriaged_owner_notes(reviews: Path, after: int) -> list[int]:
+    """The numbers of the owner records in `reviews` numbered at or below `after`
+    with no triage file beside them."""
+    if not reviews.is_dir():
+        return []
+    return sorted(int(match.group(1)) for entry in reviews.iterdir()
+                  if entry.name.endswith("-implementation-owner.md")
+                  and (match := NUMBERED.match(entry.name))
+                  and int(match.group(1)) <= after
+                  and not entry.with_name(entry.name[:-3] + ".triage.md").is_file())
 
 
 def _open_round(path: Path, sections: Any) -> Entry | None:

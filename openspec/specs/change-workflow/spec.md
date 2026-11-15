@@ -922,7 +922,17 @@ MUST be read as missing evidence, never as a finding.
 The owner's notes MUST be saved verbatim as a review record and triaged like any
 review: the triaging agent MUST state its own position on each point rather than
 carry it out as an instruction, and each disposition MUST be logged to the
-intervention ledger.
+intervention ledger. Notes saved while no review awaits a triage — on a finished
+triage's fixes, or on a re-plan — MUST be carried by the next round and triaged with
+its records; they MUST NOT stand as that round's reading.
+
+#### Scenario: The owner's notes on a triage's fixes reach the next round's triage
+
+- **WHEN** the owner saves notes on a finished triage's fix commit before the next
+  round starts
+- **THEN** the next round's line names them as carried, the round's own reading is
+  still asked for, and its triage reads the carried notes beside its review,
+  validation, and owner record
 
 #### Scenario: The owner's note is contradicted by the files
 
