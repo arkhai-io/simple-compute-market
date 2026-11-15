@@ -9,7 +9,9 @@ with the buyer's configuration; the deal's fulfillment as the seller reports it
 to the buyer; and the lease view, which finds the purchase's hold by its
 negotiation. ``BareMetalPurchaseDriver`` is the lane's, over
 ``BareMetalComputeDealDriver``: a storefront pool override offering the lane's
-whole host in ``arkhai.payments.v1`` alone.
+whole host in ``arkhai.payments.v1`` alone. ``BareMetalRecurringPurchaseDriver``
+is the lane's recurring purchase, whose pool override's one settlement is a
+recurring on-demand option.
 """
 
 from __future__ import annotations
@@ -22,12 +24,15 @@ from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from core_buyer.profile_service import BuyerProfileService
 from core_buyer.run_log import read_run_identity
 from market_core.schemas import SettlementOption, compute_rate_total
+from market_deal_lifecycle_contracts.models import LifecycleRead
 from market_identity import IdentityScheme, ProfileRepository, TrustedIdentitySet, create_signer
 from registry_client import SyncRegistryClient
 from storefront_client import SyncStorefrontClient
 
 from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
+from tests.e2e.roles.helpers.buyer_purchase_stages import PURCHASE_RUN_EXIT_SECONDS
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
+from tests.e2e.roles.helpers.domain_deal import assert_market_run_succeeded, ordered_events
 from tests.e2e.roles.helpers.mediation import (
     buyer_dispute_credential_toml,
     buyer_mediation_environment,
@@ -39,10 +44,15 @@ from tests.e2e.roles.helpers.payments import (
     payment_config_toml,
     payment_setting,
 )
+from tests.e2e.roles.helpers.recurring_purchase_stages import (
+    check_recurring_option,
+    recurring_settlement,
+)
 from tests.e2e.roles.scenarios.bare_metal.conftest import _pinned, lane_setting
 from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import (
     BARE_METAL,
     MACHINE_ADDRESS,
+    WHOLE_HOST_CAPACITY,
     BareMetalComputeDealDriver,
     BareMetalDealLease,
 )
@@ -237,20 +247,25 @@ class BareMetalPurchaseDriver(BareMetalPurchaseParts, BareMetalComputeDealDriver
         self.pool_overrides.put_pool_override({
             "site_id": self.site_id, "pool_id": self.pool_id,
             "offering_mode": BARE_METAL,
-            "settlements": [{
-                "mechanism": "arkhai.payments.v1", "asset": "USD/6",
-                "rate": "1.00", "per": "hour",
-                "mechanism_input": {
-                    "payee_account": self.seller_account,
-                    "asset": "USD/6", "window": self.dispute_window,
-                    "dispute_window_seconds": dispute_window_seconds(
-                        delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
-                    ),
-                    "case_hold_max_seconds": None,
-                    "delivery_deadline_seconds": DELIVERY_DEADLINE_SECONDS,
-                },
-            }],
+            "settlements": [self.pool_settlement()],
         })
+
+    def pool_settlement(self) -> dict[str, Any]:
+        """The pool override's one settlement: an hour of the whole host at
+        USD 1.00, under the seller's dispute window."""
+        return {
+            "mechanism": "arkhai.payments.v1", "asset": "USD/6",
+            "rate": "1.00", "per": "hour",
+            "mechanism_input": {
+                "payee_account": self.seller_account,
+                "asset": "USD/6", "window": self.dispute_window,
+                "dispute_window_seconds": dispute_window_seconds(
+                    delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+                ),
+                "case_hold_max_seconds": None,
+                "delivery_deadline_seconds": DELIVERY_DEADLINE_SECONDS,
+            },
+        }
 
     def remove_pool_override(self) -> None:
         self.pool_overrides.delete_pool_override(self.site_id, self.pool_id, BARE_METAL)
@@ -294,3 +309,41 @@ class BareMetalPurchaseDriver(BareMetalPurchaseParts, BareMetalComputeDealDriver
         row = next(row for row in self.site_capacity.snapshot()
                    if row["resource_id"] == self.reserved_resource_id)
         return int(row["available"]["units"])
+
+
+@dataclass(kw_only=True)
+class BareMetalRecurringPurchaseDriver(BareMetalPurchaseDriver):
+    """Bare metal's ``RecurringPurchaseDriver``, for the lane's purchase of a
+    recurring on-demand option on a whole host through ``market bare-metal
+    buy``, which end service refuses to commit."""
+
+    #: The storefront loop that reads its committed deals' payments and drives
+    #: their delivery.
+    servicing_loop = "delivery-recovery"
+
+    def pool_settlement(self) -> dict[str, Any]:
+        """The pool override's one settlement: a recurring on-demand option on
+        the whole host."""
+        return recurring_settlement(
+            seller_account=self.seller_account,
+            delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS,
+        )
+
+    def check_purchase_option(self, listing: Any, option: SettlementOption) -> None:
+        # The pool override offers the recurring payments option alone.
+        assert len(listing.settlement_options) == 1, listing.settlement_options
+        self.check_payments_listing(listing, option)
+        check_recurring_option(option, delivery_deadline_seconds=DELIVERY_DEADLINE_SECONDS)
+
+    def close_purchase_run(self, run: Any, deal_state: Any) -> None:
+        """``market bare-metal buy`` ends once the seller accepts its commit,
+        recording the deal it committed; nothing it records is delivery."""
+        run.wait(timeout=PURCHASE_RUN_EXIT_SECONDS)
+        assert_market_run_succeeded(run, command=self.buy_command)
+        (ended,) = ordered_events(run.read_events(), "run_ended")
+        self.check_run_ended(ended, deal_state)
+        # The whole machine is still free: nothing was reserved for the deal.
+        assert self.available_units() == WHOLE_HOST_CAPACITY["units"]
+
+    def lifecycle_read(self, negotiation_id: str) -> LifecycleRead:
+        return LifecycleRead.model_validate(self.fulfillment.delivery(negotiation_id))

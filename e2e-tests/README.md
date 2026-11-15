@@ -60,7 +60,8 @@ ACTIVE_PROFILES=staging,staging-secrets
 ### Shared payment-scenario configuration
 
 The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`,
-`e2e_vm_payment_deal` and `e2e_vm_payment_purchase`, and the qualification modules
+`e2e_vm_payment_deal`, `e2e_vm_payment_purchase`, `e2e_vm_recurring_purchase` and
+`e2e_bare_metal_recurring_purchase`, and the qualification modules
 `e2e_vm_qualification`, `e2e_bare_metal_qualification` and
 `e2e_real_provisioning_reapply` — read the `PAYMENTS` section (environment prefix
 `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
@@ -350,6 +351,33 @@ Agreement and the payer's balance drop against its debit, and ends the lease by
 back-dating it and stepping one lease-watchdog cycle. The listing names its own
 resource, host, pool and GPU model, and its payment stays held in the double
 until the lane ends.
+
+### Recurring purchases
+
+`e2e_vm_recurring_purchase` runs in the VM lane and
+`e2e_bare_metal_recurring_purchase` in the bare-metal lane, each as lane-double
+evidence. Each lane's storefront configuration
+(`domains/vms/storefront/storefront.bob.lane.toml`,
+`domains/bare_metal/storefront/storefront.dev.toml`) declares rate servicing for
+`charged` and `returned`, a lane fixture no shipped configuration carries, so the
+seller publishes a recurring on-demand option: VM's on a listing of the
+scenario's own resource, bare metal's through a pool override. A default buyer
+with no wallet buys it through the shipped `market buy` or `market bare-metal
+buy`, which approves the mandate and commits. End service services no rate deal,
+so it refuses the commit and nothing is delivered.
+
+The scenarios run the shared buyer-purchase stages through the buy, then the
+recurring stages (`tests/e2e/roles/helpers/recurring_purchase_stages.py`): the
+mandate is one rate part charging one period's price and the payer's balance fell
+by the receipt's reserve; after one servicing step the storefront's lifecycle
+read shows the deal committed and never active, the site holds no reservation,
+and the payments double records no rate start; the buy's stderr showed the
+per-period price, setup charge, initial reserve and maximum end before approval
+(`market buy`, still polling a delivery that never comes, is stopped first); the
+buyer's own `end` stops the payment, and the storefront records the payer's end
+with no filing; and the payer's balance is restored. The seller's refund refuses
+a rate deal, so a failed run's cleanup ends an approved deal by the buyer's own
+`end` too. Neither waits for the delivery deadline.
 
 ### Real bare-metal provisioning
 

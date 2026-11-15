@@ -218,6 +218,8 @@ def _without_lane_payments(config: dict, settlement: str) -> dict:
     stripped = copy.deepcopy(config)
     table = stripped[settlement]
     table.pop("arkhai_payments", None)
+    # The lane's rate servicing declaration, which only payments reads.
+    table.pop("rate_servicing", None)
     table["priority"] = [item for item in table["priority"] if item != _PAYMENTS]
     stripped.pop("DisputeCredential", None)
     pricing = stripped.get("pricing", {})
@@ -243,6 +245,8 @@ def test_a_lane_storefront_configuration_is_its_stack_profile_plus_payments(
         _toml(profile), settlement
     )
     assert not (_toml(profile)[settlement].get("arkhai_payments") or {}).get("enabled")
+    # Rate servicing is declared in a lane's configuration alone.
+    assert "rate_servicing" not in _toml(profile)[settlement]
 
 
 @pytest.mark.parametrize(("lane", "settlement"), [item[:2] for item in _LANE_STOREFRONTS])

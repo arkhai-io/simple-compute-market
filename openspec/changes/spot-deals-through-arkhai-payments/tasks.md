@@ -1410,7 +1410,7 @@ they reuse; e2e-tests/pyproject.toml
 storefront configuration under e2e-tests/config and the local Helm values that carry
 it; openspec/changes/README.md (the gap row).
 
-- [ ] 4E.1 The lane's recurring offer (D16 step 1): each compute lane's storefront
+- [x] 4E.1 The lane's recurring offer (D16 step 1): each compute lane's storefront
       configuration declares `[Settlement.rate_servicing.arkhai_payments] treatments =
       ["charged", "returned"]`, in the lane's configuration only, with a comment that
       it is a lane fixture and no shipped default. The seller publishes a recurring
@@ -1419,7 +1419,39 @@ it; openspec/changes/README.md (the gap row).
       window leaving runway: approval window + delivery deadline + one period within
       `max_duration_seconds` (VM's purchase helper's `P7D` does not fit a one-hour
       listing). The shipped presets carry no setup charge.
-- [ ] 4E.2 VM scenario, marker `e2e_vm_recurring_purchase`, and bare-metal scenario,
+      As built: the declaration, with its comment, is in
+      `domains/vms/storefront/storefront.bob.lane.toml` (the VM lane's Bob) and
+      `domains/bare_metal/storefront/storefront.dev.toml` (the bare-metal lane's
+      storefront, also the bare-metal development stack's; no other file mounts it).
+      The local Helm values carry nothing: validation's Helm part selects no payment
+      scenario (`HELM_SCENARIOS` in `scripts/validate_slice.py` is `contracts` and
+      the two Alkahest chain scenarios), and `helm/local-values.yaml` states that the
+      release serves no payment scenario. One clause builder serves both domains,
+      `recurring_settlement` in `e2e-tests/tests/e2e/roles/helpers/recurring_purchase_stages.py`:
+      USD 1.00 an hour, `recurring: {period: PT15M, reserve_ahead_seconds: 900}`,
+      `approval_window: PT5M`, the lane's 300-second delivery deadline and the run's
+      dispute coverage, no setup and no payee notice, so the shipped on-demand preset.
+      Runway 300 + 300 + 900 = 1500 seconds, within each listing's maximum duration
+      (VM's listing creation states 3600; bare metal's pool states no bound, so the
+      lane's `default_max_duration_seconds`, 86400, applies) and each buyer's
+      3600-second request. A 900-second reserve ahead
+      of a 900-second period reserves one period, by the double's arithmetic and the
+      buyer's presentation alike, so 250000 USD/6 base units is the receipt's gross,
+      the displayed initial reserve and the payer's drop. `Recurring04` asserts the
+      gross a positive multiple of one period's price and equal to the drop, and
+      `Recurring06` the displayed reserve equal to the gross; neither pins the count
+      of periods itself. VM's `VmRecurringPurchaseDriver.listing_settlement`
+      and bare metal's `BareMetalRecurringPurchaseDriver.pool_settlement` (bare
+      metal's purchase driver now builds its override's settlement in
+      `pool_settlement`, unchanged for the payment deal) return it. VM's listing has
+      its own resource, host, pool and GPU model (`kvm-recurring-purchase`,
+      `compute-e2e-recurring-purchase-pool`, `compute-e2e-recurring-purchase-001`,
+      `RTX 4070`); bare metal's driver makes a per-run pool and machine, as the
+      canonical driver does. `e2e-tests/tests/unit/test_domain_stack_configuration.py`'s
+      lane-versus-profile comparison now strips `rate_servicing` with the lane's
+      other payments additions (the VM lane's copy of Bob's profile differs from it
+      by the declaration too).
+- [x] 4E.2 VM scenario, marker `e2e_vm_recurring_purchase`, and bare-metal scenario,
       marker `e2e_bare_metal_recurring_purchase`, each through the shared purchase
       stages with the shipped `buy` and a default buyer (D16 steps 2–4):
       - asserts the published per-period price; the pre-approval display the buyer
@@ -1439,12 +1471,86 @@ it; openspec/changes/README.md (the gap row).
       - is labelled lane-double evidence in its marker description.
       Register both markers in `e2e-tests/pyproject.toml` and each lane's selection in
       `e2e-tests/Makefile`.
-- [ ] 4E.3 Close the gap row "No end-to-end run produces a per-period Agreement …"
+      As built: the stages are defined once in
+      `e2e-tests/tests/e2e/roles/helpers/recurring_purchase_stages.py`, beside the
+      clause builder, the option check (`check_recurring_option`), the state
+      (`RecurringPurchaseState`), the driver protocol (`RecurringPurchaseDriver`:
+      the purchase driver plus `servicing_loop`, `close_purchase_run` and
+      `lifecycle_read`) and the cleanup steps. Both modules,
+      `scenarios/vms/test_vm_recurring_purchase.py` and
+      `scenarios/bare_metal/test_bare_metal_recurring_purchase.py`, declare the
+      readiness stages, their own listing stage (VM: listing creation; bare metal: a
+      publication pass), `Purchase01`–`Purchase03` and then:
+      - `Recurring04_MandateApproved`: from the run's events, correlated by
+        `accepted_purchase`, the Agreement names the discovered listing and option;
+        the mandate is exactly one `rate` part of
+        250000 USD/6 per `PT15M`; the double's snapshot and receipt verify against
+        the trusted receipt keys bound to that Agreement and mandate; the receipt's
+        one part reserves whole periods of that price; the payer's available fell by
+        exactly the receipt's gross.
+      - `Recurring05_CommitRefused`: after one step of the domain's servicing loop
+        (VM `settlement-servicing`, bare metal `delivery-recovery`), the buyer's
+        lifecycle read names the committed transaction with delivery progress not
+        `active`, no recorded end and no filing; the site lists no reservation for
+        the negotiation; the double's part has no `started` and no `start` event.
+        The repair reason is asserted nowhere: no storefront interface exposes it
+        (both storefronts only log the outcome's reason), so 4C's library tests
+        prove it. Delivery progress, the published per-period price and the rest
+        are read through existing interfaces only.
+      - `Recurring06_PurchaseRunClosed`: the driver ends the purchase command — VM's
+        `market buy`, still polling a delivery that never comes, is asserted to
+        have polled, never read `ready` and recorded no end, then stopped; bare
+        metal's ended at its commit, is asserted successful with `run_ended` agreed
+        and the whole machine still free — then its stderr is asserted to hold the
+        disclosure title and the rows `Accepted price: 250000 minor units of USD/6
+        per_period (PT15M, 900 seconds)`, `Setup once charge: 0 minor units of
+        USD/6`, `Initial reserve: <the receipt's gross> minor units of USD/6;` and
+        `Maximum accepted end: <the Agreement's start plus its duration>`. That the
+        buyer prints them before it approves is the buyers' code; the stage checks
+        only that stderr holds them. `MarketRun.stderr()` reads only an ended
+        process, which is why VM's run is stopped first.
+      - `Recurring07_BuyerEnds`: the domain's canonical `end` (`market end --from`,
+        `market bare-metal end --run-id`) exits 0 with progress `normal_stop` and the
+        payment `accepted`; the double's part is stopped with cause `payer`, never
+        started, nothing held or reserved; the lifecycle read shows the recorded end
+        with cause `payer` and no filing.
+      - `Recurring08_PayerBalanceRestored`: the payer's available equals what
+        `Purchase01` read.
+      The per-period price is asserted on the published option (Purchase02 calls
+      the driver's `check_purchase_option`, which runs `check_recurring_option`:
+      period, reserve, approval window, no setup, `compute_rate_total` over one
+      period equal to 250000, the on-demand entitlements, a positive penalty and the
+      deadline). Cleanup (`recurring_purchase_cleanup`, plus bare metal's pool
+      override removal) stops a running purchase command and, when the run's log
+      records an approved payment and `Recurring07` recorded no end, runs the
+      buyer's `end`, which resumes a stop `Recurring07` journaled, if it got that
+      far. No mock rule is armed;
+      the holds are the lane's module holds, released after the cleanup. Both marker
+      descriptions begin "Lane-double evidence". Markers are registered; VM's joins
+      `E2E_MODULE`, bare metal's `E2E_BARE_METAL_MODULE`. A new unit module,
+      `e2e-tests/tests/unit/test_recurring_purchase_stages.py`, holds both modules
+      to the stage order with empty bodies and checks every field a stage requires
+      or reads is written by an earlier stage and declared (9 cases, unit, read
+      from source). `test_buyer_purchase_stages.py`'s docstring now names it.
+      `docs/development/TESTING.md` (the purchases' subsection) and
+      `e2e-tests/README.md` describe the two scenarios. The run correlation and the
+      balance read are shared with the buyer purchase rather than copied:
+      `buyer_purchase_stages.py` gains `accepted_purchase` (the body `Purchase04`
+      had, which it now calls) and `available_balances` (its private `_available`,
+      renamed). `e2e-tests/pyproject.toml` declares `arkhai-kit-deal-lifecycle-client`
+      and `arkhai-kit-identity`, which the payment scenarios already imported
+      undeclared and these extend.
+      Not run: the lane runs, which are validation's; nothing in this session
+      exercised the scenarios against a stack.
+- [x] 4E.3 Close the gap row "No end-to-end run produces a per-period Agreement …"
       under "Unowned work found by `negotiate-open-ended-compute-terms`" in
       `openspec/changes/README.md`: the scenarios produce a per-period Agreement and
       assert the money a buyer is shown and approves; convergence extends them
       through delivery.
-- [ ] 4E.4 Verify: `make -C e2e-tests test-unit`, collection of each marker in its
+      As built: the row is removed. Its closure rests on validation's lane runs of
+      the two scenarios: until they pass, the gap is closed by code that has not
+      run, and a failing run is the triage's to weigh against reopening it.
+- [x] 4E.4 Verify: `make -C e2e-tests test-unit`, collection of each marker in its
       lane's selection (the harness's collect-only run over `E2E_MODULE`), then
       `scripts/change-workflow run pre-commit`, whose `make check-repository` covers
       the new modules' hygiene. The lane runs are
@@ -1454,6 +1560,77 @@ it; openspec/changes/README.md (the gap row).
       compose lanes, its local Helm part and the pipeline; a lane unrun at closeout is
       a blocker, not a pass (D8).
       Owed by validation: none.
+      As built: `make -C e2e-tests test-unit` 911 passed, 1 skipped; it includes the
+      new module's 9 cases, `test_scenario_cleanup_order.py` and
+      `test_scenario_holds.py` over both new modules, and
+      `test_scenario_lane_holds.py`, whose `--setup-plan` collects each lane's
+      Makefile selection. Collection: `make -C e2e-tests test-module` with
+      `PYTEST_ARGS=--collect-only` selected the VM module's 17 stages under
+      `docker,payments-lane,vms-lane`, and the bare-metal lane's whole selection
+      (115 items, the new module's 17 among them) under
+      `docker,payments-lane,bare-metal-lane`. Pre-commit: the section's notes.
+      End-to-end, corrected: the two markers run in the compose lanes and the
+      pipeline only; the local Helm part selects no payment scenario.
+
+## Section 4E notes and handoff
+
+- Nothing here ran against a stack, so validation's lane runs are the first
+  execution. What the stages assume from reading the code, which a lane failure
+  should be read against first:
+  - VM's listing creation publishes a clause carrying `recurring` through the
+    preset helper (D16 says listing creation goes through
+    `ClausePublication.publish`; no test creates a recurring VM listing through
+    the seller client).
+  - The commit of a refused rate deal is answered `Accepted` in both domains
+    (VM's peer commit returns `Accepted` unless the coordinator reports
+    `pending`; bare metal's unless verification answers 202), so `market buy`
+    records `settlement_submitted` and `market bare-metal buy` records
+    `run_ended` agreed.
+  - VM's settle status for the refused deal is non-terminal (4C.4 saw its
+    delivery record `provisioning`), so `market buy` keeps polling until stopped;
+    a terminal `failed` would end it, which `close_purchase_run` reports.
+  - The buyer's hint makes each storefront read the payment authority (VM's and
+    bare metal's `peer` call `seller.read`), which records the payer's final stop
+    while the loops are held; the double stops an unstarted rate part with zero
+    payer notice at once and credits the whole reservation back
+    (`fixtures/authority.py`, `_stop`).
+- Outside the plan, recorded as an unowned gap row in `openspec/changes/README.md`:
+  a payments purchase that runs out of its wait ends in an uncaught
+  `TimeoutError` with no `run_ended`, in both buyers. It is why VM's scenario
+  stops `market buy` rather than letting a short `--settlement-timeout` end it:
+  that would end in a traceback.
+- Pre-commit, `scripts/change-workflow run pre-commit`, run twice, the second time
+  after the compliance check's fixes: after-functional-change (`make lock`, which
+  relocked `e2e-tests/uv.lock` for the two declared dependencies),
+  pre-commit-functional (`make dist-clean`, `make check-packaging`, `make test`,
+  every suite, the bare-metal chart's render of `storefront.dev.toml` through its
+  values schema among them) and pre-commit (index, tasks, skills, OpenSpec strict,
+  `make check-repository`) all passed. `make -C e2e-tests test-unit` passed 911,
+  1 skipped, after the fixes too.
+- The fresh-context compliance check found no layering or comment-hygiene breach
+  and no assertion the producing code would contradict. Fixed: 4E.2 left
+  unchecked; the pre-commit evidence unrecorded; the VM lane test no longer
+  holding the declaration to the lane (it now asserts Bob's profile carries
+  none); "still" in both configuration comments; `Recurring04` copying
+  `Purchase04`'s correlation and `_available` (now shared helpers); the two
+  imported distributions undeclared; import order in both drivers; notes
+  overstating the Helm part (it selects no payment scenario, not no scenario),
+  4D's coverage, `Recurring06`'s "before approval", the cleanup's "again", the
+  reserved-period count and the gap row's closure. Declined: reusing VM's
+  `payment_deal.lifecycle_read` in `VmRecurringPurchaseDriver`, since it signs
+  with a hard-coded `eip191` where the purchase profile reads the buyer's
+  configured scheme, and importing it would pull a scenario module
+  (`test_full_deal`) into a driver. Left for closeout, from that check:
+  `openspec/specs/test-compatibility/architecture.md` says a purchase checks
+  gross equal to the Agreement's price, which the recurring purchase does not.
+- For convergence, which extends the scenarios through delivery: `Recurring05`
+  then asserts the opposite, and `Recurring06`'s VM branch would see `ready`.
+  The stage set is defined once, so it changes there.
+- End-to-end scenarios exercising this section: `e2e_vm_recurring_purchase` (VM
+  lane) and `e2e_bare_metal_recurring_purchase` (bare-metal lane). They also
+  exercise sections 4A (the composed adapter's rate path, the stop request and
+  final stop), 4B.2 (`bare-metal end`) and 4C (the refusal); none exercises 4D's
+  barrier, since the payer's end precedes the deadline. Owed by validation: none.
 
 ## 4F. The buyer's watchdog
 

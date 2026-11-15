@@ -102,8 +102,10 @@ BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 # has, and runs from the operator's machine through `test-module`. The six
 # `e2e_vm_dispute_*` scenarios each run on a deal of their own, and each removes
 # its rules from the lane's doubles and resets their clocks when it ends, so
-# they need no order among themselves.
-E2E_MODULE ?= e2e_vm_payment_deal or e2e_vm_payment_purchase or e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
+# they need no order among themselves. `e2e_vm_recurring_purchase` ends its
+# deal by the buyer's own stop before the deal's delivery deadline.
+E2E_MODULE ?= e2e_vm_payment_deal or e2e_vm_payment_purchase or e2e_vm_recurring_purchase \
+              or e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_vm_dispute_ruled_end or e2e_vm_dispute_discount or e2e_vm_dispute_lost_filing \
               or e2e_vm_dispute_mediation_unavailable or e2e_vm_dispute_payments_hold \
               or e2e_vm_dispute_hold_passed \
@@ -118,7 +120,7 @@ E2E_APICREDITS_MODULE ?= e2e_credits_deal or e2e_credits_payment_deal
 # needs a real whole host to SSH into, which the pipeline never has.
 E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication or e2e_bare_metal_introduction \
                          or e2e_bare_metal_unbacked_introduction or e2e_bare_metal_mock_deal \
-                         or e2e_bare_metal_payment_deal
+                         or e2e_bare_metal_payment_deal or e2e_bare_metal_recurring_purchase
 
 # The runner's profiles, from config/: each lane target layers the shared
 # payments profile and its own, `docker,payments-lane,<lane>-lane`, so the
