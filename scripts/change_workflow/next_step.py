@@ -1353,7 +1353,11 @@ class Computation:
         if unknown := [s for s in round_sections if s not in by_id]:
             return self.unclassified(f"the agreed round names sections the task list lacks: "
                                      f"{', '.join(unknown)}")
-        if ROUND in members:
+        # A review awaiting its triage is triaged before the round's open sections
+        # are implemented: its findings may change what is left to do.
+        awaiting = any(r.review_kind == "implementation" and not r.triaged
+                       for r in state.records if r.number > current.get("after", 0))
+        if ROUND in members and not awaiting:
             for session in current["sections"]:
                 # The closeout section is closeout's, never a round's to implement.
                 if any(not by_id[str(s)].complete and not by_id[str(s)].closeout

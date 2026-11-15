@@ -512,6 +512,20 @@ def test_a_round_carries_no_owner_notes_a_triage_read(tmp_path: Path) -> None:
     assert "carries" not in read_log(log_path(root, CHANGE))[-1]
 
 
+def test_a_review_awaiting_triage_comes_before_the_rounds_open_sections(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    # Section 2 holds an unchecked task, as when planning amends an open round.
+    _check(root, TASKS)
+    _record(root, "01-validation.md", text=_validation())
+    _review(root, "02-implementation.md")
+    _record(root, "03-implementation-owner.md")
+
+    result = _next(root)
+
+    assert (result["step"], result["kind"]) == ("triage", "implementation")
+
+
 def test_a_rounds_triage_whose_outcome_is_not_recorded_is_in_progress(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
     _round(root, [[2]])

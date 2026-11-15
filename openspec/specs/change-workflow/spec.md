@@ -884,13 +884,22 @@ The implementation review, the validation of the same commit, and the owner's no
 on it MUST be triaged together, in a session that is not the implementing session.
 A review the review tooling publishes MUST name the commit it reviewed, so the
 commits can be compared mechanically; for a pasted review, triage MUST record the
-commit the owner says its reviewer saw.
+commit the owner says its reviewer saw. An implementation review awaiting its triage
+MUST be triaged before the round's unchecked sections are implemented, since its
+findings may change what is left to do.
 
 #### Scenario: A pasted review joins a round
 
 - **WHEN** the owner pastes a review into a round's triage
 - **THEN** triage records the commit the owner says its reviewer saw, and compares
   it with the commit the validation names
+
+#### Scenario: A review awaits triage while the round's sections are open
+
+- **WHEN** an implementation review the owner directed awaits triage, and planning
+  has added unchecked tasks to the round's sections
+- **THEN** the computation names the round's triage, not implementation, and the
+  triage's exit decides what is implemented next
 
 ### Requirement: CW-514y Records of different commits form a round only on the owner's waiver
 
