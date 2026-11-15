@@ -2671,7 +2671,7 @@ hosted-target evidence.
       does not run, and the circular import. Typing: the payments kit's mypy
       covers its examples, clean on 29 files; deal-servicing's typecheck, clean.
       `scripts/change-workflow run pre-commit`, results in the section's notes.
-- [ ] 6.5 Obtain pre-closeout code review. Confirm adapter/servicing ownership and
+- [x] 6.5 Obtain pre-closeout code review. Confirm adapter/servicing ownership and
       that partialPeriod is enforceable at the payment authority, with no local
       correction substituted for the buyer's authority/dispute guarantee. Verify
       the command/preset seams here; consumer-enabled
@@ -2680,6 +2680,18 @@ hosted-target evidence.
       Not an implementation session's: the pre-closeout review is the workflow's
       step after this round's validation, implementation review and triage, and
       its triage checks this task. Section 6's implementation left it unchecked.
+      As reviewed: pre-closeout review 139 at `3ac176071` found nothing. It
+      confirmed that every earlier accepted finding is addressed, that the
+      added scope is recorded, and that comments and imports are ready. It
+      also confirmed the ownership boundary: rate servicing goes to
+      convergence, hosted qualification to activation. Validation 138 passed
+      at the same commit. The review did not take up partialPeriod; the
+      triage checked it in the code. The rate mandate carries the end's
+      partialPeriod and each stop authority's rule as authority terms
+      (`mandates.py`). The adapter forwards a `chosen` stop's treatment and
+      refuses to override a fixed one (`rate_parts.py`). The settled
+      treatment is read from the authority's winning stop, so no local
+      correction stands in for it.
 - [x] 6.6 Before 6.5's review, run the first-use examples no step has run on this
       branch, `make -C kit/arkhai-payments first-use-rate` and `make -C
       kit/deal-servicing first-use`, and record what each shows and any failure's
