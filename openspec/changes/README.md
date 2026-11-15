@@ -507,6 +507,8 @@ The third sequence is the architecture-layer check and the directory moves it ma
 
 `configure-pypi-trusted-publishing` overlaps `publish-wheels-through-a-gate` on the distribution inventory and on proving PyPI-only installation. Reconcile the two before either is archived rather than letting both claim the same acceptance.
 
+**Unowned: whether the published-packages table is kept.** Found by `layer-engineering-guidance` (178 O2). No process reads the table in `docs/guidance/repository/published-packages.md` — each published distribution, its path, and its internal dependencies. Two tests in `scripts/tests/test_publish_matrix.py` only hold it equal to the publish set (the workflow's `PACKAGES` table, or `manifests/release-components.json` where `publish-wheels-through-a-gate` has landed) and to each `pyproject.toml`, and the rule it states, that a published package depends only on published packages, is checked against the publish set directly. Every internal dependency added fails a test until a row is edited by hand. A change of its own decides whether to drop the table and its two equality tests, keeping the rules, or to generate it.
+
 ## Lesser goal — End-to-end harness determinism
 
 **What it adds up to.** End-to-end scenarios assert on internal identifiers and advance by waiting for poll intervals, which makes them slow, timing-sensitive, and expensive to extend to a second domain. These changes align scenarios with the fulfillment lifecycle contract and decide whether the harness becomes an independently consumable project. Not a roadmap goal, but three goal-owned changes each carry a task requiring observable barriers rather than sleeps, and all of them land here.

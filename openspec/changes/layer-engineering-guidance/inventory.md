@@ -1013,7 +1013,8 @@ How to read it:
 | `# Arkhai Market Stack — Architecture Reference`, its purpose line | description | stays, rewritten to say it holds the description and to link the rules and handbooks (13.5) | repository, architecture | the document's opening | |
 | `## Document map` | description | stays; the "Implementation rules" row goes, and the rows for "Package and dependency layers" and "Build, packaging, and initialization" name what stays (13.5) | repository, architecture | the document's own map | |
 | `## System overview` | description | stays | repository, architecture | the system's shape | |
-| `## Composition from above and below` | description | stays | repository, architecture | what core, kit, domain, and composition own, and the instance of composition from one component | "Two hooks remain separate when core-owned machinery or a typed invariant sits between them…" reads as a design rule for work; left with the ownership it qualifies |
+| `## Composition from above and below` | description | stays | repository, architecture | what core, kit, domain, and composition own, and the instance of composition from one component | |
+| `## Composition from above and below`, "Two hooks remain separate when core-owned machinery or a typed invariant sits between them…" | rule | `repository/production-code.md`, "Domain hooks" | repository, implementation | a criterion for a future design choice that nothing holds, not an account of the system (176 F1); the description links it | |
 | `## Package and dependency layers`, the heading | description | stays, opened by a description of the layers, scope, and kind that links `repository/package-layers.md` for their rules | repository, architecture | the heading anchors the description subsections below it | the known case (D34): the section states its rules through a description of the layers, sentence by sentence; the rows below split it where a paragraph is mostly one kind, and the triage reviews each split |
 | `## Package and dependency layers`, its opening (the three questions here, kind, `make check-architecture`, `ARCHITECTURE.toml`) | rule | `repository/package-layers.md`, its opening | repository, architecture, dependencies | this repository's instance of `dependencies.md`'s three questions and the check holding it (D27's sample) | the known case, as the heading's row says |
 | `### Repository layers`, its diagram, "The layer names what a package may do…", and the family vocabulary paragraph | description | stays | repository, architecture | what the four layers are and what the compute family's vocabulary package is | the known case: the vocabulary paragraph states its package's dependency bound inside the description |
@@ -1197,7 +1198,7 @@ Each file under `docs/guidance/repository/`, with its tags (D28) and the rows it
 | `diagrams.md` | repository, diagrams | `openspec/README.md`'s draw.io paragraph (D29) |
 | `package-layers.md` | repository, architecture, dependencies | `ARCHITECTURE.md`'s layer opening, the layer rules, "Scope", "Kind", "Where the current tree diverges"; `TESTING.md`'s boundary-change paragraph |
 | `family-kits.md` | repository, architecture, dependencies | `ARCHITECTURE.md`'s family-kit rules |
-| `production-code.md` | repository, implementation | `ARCHITECTURE.md`'s "Service Architecture", "Route contracts and their HTTP binding", "Implementation rules" |
+| `production-code.md` | repository, implementation | `ARCHITECTURE.md`'s "Service Architecture", "Route contracts and their HTTP binding", "Implementation rules", and the hook-merging criterion (176 F1) |
 | `service-configuration.md` | repository, configuration, kubernetes | `DEPLOYMENT_AND_CONFIG.md`'s configuration rules and "The rule behind the pod rule"; `ARCHITECTURE.md`'s secrets rule, merged |
 | `compose-stacks.md` | repository, configuration, deployment | `DEPLOYMENT_AND_CONFIG.md`'s stack rules; the lane-target rule of both documents, merged; `ARCHITECTURE.md`'s committed-files rule, merged |
 | `helm-charts.md` | repository, helm, kubernetes, deployment | `DEPLOYMENT_AND_CONFIG.md`'s mounted files, no wait on a dependency, a check the chart cannot see, values, test pods |
@@ -1255,3 +1256,66 @@ tags. The shared layers' files were tagged at rounds 3 and 4 by the rows above, 
 the capability configuration files. Whether any shared file's tags misdescribe it —
 `engineering/kubernetes.md`, holding a startup probe and `Recreate`, is the likeliest
 — is open for the round's triage, or for guidance placement at closeout (task 14.10).
+
+## Dev's packaging and release changes, for the merge
+
+Written at round 8's triage (178 O1), for the merge of `dev` before closeout. It
+classifies, by D25's test and this part's "How to read it" above, what
+`publish-wheels-through-a-gate` (archived on `dev` as
+`2026-11-14-publish-wheels-through-a-gate`) wrote in the documents this change splits,
+and names where each goes on this branch. No text moves here: the merge places it. It
+was read from the owner's workspace at `dev` `cd2506b76`, its working tree and that
+change's tasks 13.3 and 13.9, since this clone could not fetch `dev`; the merge checks it
+against the `dev` it fetches and classifies anything later the same way. `dev`'s other
+change since the merge base, `negotiate-open-ended-compute-terms`, is outside this part.
+
+For the merge:
+
+- `docs/development/RELEASING.md` and `docs/development/BUILD_AND_PACKAGING.md` come
+  back as modify/delete conflicts. Keep them deleted; place `dev`'s text by the rows
+  below, never by restoring either document.
+- The rows' last column names what `dev`'s facts overturn here. Each is rewritten to
+  `dev`'s state in the merge: a description or rule left describing CI publication, the
+  `PACKAGES` table, or `release.yml` describes a system the merged tree no longer has.
+- `Candidate` marks a rule that looks portable, a candidate for the engineering layer.
+  The merge writes none of them into `docs/guidance/engineering/`: each is new shared
+  guidance for a later change of its own, recorded where deferred work goes. The
+  merge places only its repository instance.
+- 178 O2's question — whether the published-packages table, which nothing reads, is
+  kept — is the row in `openspec/changes/README.md`'s unowned gaps. The merge carries
+  the table as `dev` holds it, held to the declaration, and does not decide it.
+
+| `dev` source | Kind | Destination here | Tags | Overturns here, or note |
+|---|---|---|---|---|
+| `RELEASING.md`, its opening (CI publishes nothing; a contributor bumps and merges) | description and rule | the release handbook's opening for who reads it; "merging publishes nothing" to `repository/published-packages.md`, its opening; "a contributor bumps where contents change" to `repository/package-versions.md` | repository, packaging, versioning | the handbook's opening, its "setting up a package for PyPI", and its "`publish-pypi.yml` publishes the Python packages to PyPI" |
+| `RELEASING.md`, "Terms" | description | `ARCHITECTURE.md`, "Shared vocabulary and identities", or "Build, packaging, and initialization" beside the release paragraph | repository, architecture | release candidate, marketplace release, release component, and candidate store are cross-system terms (`docs/guidance/workflow/terms.md`) |
+| `RELEASING.md`, "What a release comprises" (the declaration, its keys, its reader's refusals, `check-release-components`, the npm package) | rule | `repository/published-packages.md`, its opening and "Published packages", rewritten to the declaration | repository, packaging, versioning, python | `published-packages.md`'s "defined once, by the `PACKAGES` table in the workflow's `detect-changes` job" and its paragraph on `release.yml`'s wheelhouse archive |
+| `RELEASING.md`, "The release" (its five steps) | procedure | the release handbook, a new opening section before "Cutting a release" | — | the handbook's "How the publish workflow works", which describes a workflow `dev` deleted; that section goes |
+| `RELEASING.md`, "Loading a release candidate" | procedure | the release handbook, a new section "Loading a release candidate" | — | the handbook's "Where artifacts are pushed" (from `DEPLOYMENT_AND_CONFIG.md`'s "Artifact publishing destination", which `dev` amended to name the load) merges into it |
+| `RELEASING.md`, "The version check", what it refuses, its subjects, and the chart digest's computation | rule | `repository/package-versions.md`, a new section "A version changes when its contents change" | repository, versioning | Candidate: a version changes whenever its contents change (`versioning.md`). The digest's computation is what the check must compute, so it is the rule's |
+| `RELEASING.md`, "The version check", the preflight (fetch the tags, confirm the summary) | procedure | the release handbook, under "Loading a release candidate" and "Cutting a release" | — | |
+| `RELEASING.md`, "The deployment's part" | description | the release handbook, a new section "The deployment's part" | — | Ambiguous: it describes another system's duties, which no description document here holds, since each describes this system; the handbook keeps it as what the owner relies on when releasing. Its paragraph on a new distribution's PyPI project overturns the handbook's "One-time setup for a package" (trusted publishing for `publish-pypi.yml`), which goes, with `published-packages.md`'s link to it in "Published packages" |
+| `RELEASING.md`, "The bill of materials" | description | `ARCHITECTURE.md`, "Build, packaging, and initialization", for layout 1 and what it holds; the admission is the row below | repository, architecture | |
+| `AGENTS.md`, "Public repository discipline", the admitted bill of materials | rule | an exception row in `AGENTS.md`'s "Exceptions to shared guidance": `repository-content.md`'s run-artifact line, kind `overrides`, the bill of materials admitted, enforced by `make check-release-record` | repository, repository-content | this branch's `AGENTS.md` holds no "Never enters this repository" list to amend, so `dev`'s paragraph has no place to land as written |
+| `RELEASING.md`, "Running the lanes on a release candidate's images" | procedure | the release handbook, a new section "Running the lanes on a release candidate's images" | — | its refusals are `TESTING.md`'s, the row below |
+| `RELEASING.md`, "Cutting a release", the steps and `make audit-secrets` | procedure | the release handbook, "Cutting a release" | — | the handbook's steps 2–4 (bump, push to `main`, the workflow publishes) and its `workflow_dispatch` paragraph |
+| `RELEASING.md`, "Cutting a release", `make check-release-record`'s six refusals and "A release branch never grows past its record" | rule | `repository/published-packages.md` or a new `repository/release-records.md` | repository, versioning | |
+| `RELEASING.md`, "Cutting a release", the migration floor | procedure | the release handbook, "The migration floor" | — | unchanged but for "an official marketplace release is promoted" becoming "a marketplace release is cut" |
+| `RELEASING.md`, "Published packages" | rule | `repository/published-packages.md`, "Published packages", the table held to `manifests/release-components.json` | repository, packaging, versioning, python | the section's closing paragraph (the `PACKAGES` table, filters, push paths); `test_publish_matrix.py` follows `dev`'s, reading this file |
+| `RELEASING.md`, "Versioning policy", "Compatibility is owed to what a release has shipped" | rule | `repository/package-versions.md` | repository, versioning | Candidate (`versioning.md`), unless it reached `dev` from another change; check its origin at the merge |
+| `RELEASING.md`, "Versioning policy", the pin move | rule | `repository/package-versions.md`, beside the version check | repository, versioning | Candidate: moving a build backend's pin is a release-wide bump (`packaging-python.md` or `versioning-python.md`) |
+| `RELEASING.md`, "Troubleshooting" | procedure | the release handbook, "Troubleshooting" | — | every item there, all of them the deleted workflow's |
+| `ARCHITECTURE.md`, "Build, packaging, and initialization", "Nothing reaches a public channel except bytes a deployment validated…" | description | stays, its link to `RELEASING.md` re-pointed to the release handbook and `published-packages.md` | repository, architecture | Candidate, its rule form: nothing reaches a public channel except bytes a deployment validated (`deployment.md` or `packaging.md`) |
+| `BUILD_AND_PACKAGING.md`, "One Python version", `build-constraints.txt` and `.helm-version` | rule | `repository/python-version.md`; `.helm-version` to `repository/chart-render-tests.md`, "The supported Helm" | repository, packaging, python, uv, docker | Candidate: a wheel's build requirements are pinned (`packaging-python.md`) |
+| `BUILD_AND_PACKAGING.md`, "One Python version", the binary's build image pinned by digest | rule | `repository/python-version.md` | repository, packaging, python, uv, docker | |
+| `BUILD_AND_PACKAGING.md`, "Locks", the first lock by `make lock PROJECTS=` | rule | `repository/locks.md` | repository, packaging, uv | |
+| `BUILD_AND_PACKAGING.md`, "Images", `WHEELHOUSE_DIGEST` and its label | rule | `repository/images.md` | repository, packaging, docker | |
+| `BUILD_AND_PACKAGING.md`, "Images", the `market` binary's locked virtual project | rule | `repository/images.md`, or `repository/project-layout.md` for the project | repository, packaging, docker | |
+| `BUILD_AND_PACKAGING.md`, "Checks", `check-release-components`, `check-build-requirements`, `check-market-binary`, `check-workflow-credentials`, and the amended `check-uv-setup` and `check-python-version` rows | rule | `repository/packaging-checks.md`, "Checks" | repository, packaging | |
+| `TESTING.md`, "Locally verifiable and external-topology scenarios", the release-image mode and its record | description | stays in `TESTING.md`, beside the lanes, as a mode of the lane targets | repository, testing | the refusals are what the targets do; the rule they serve is `repository/compose-stacks.md`'s lane-target rule, whose "its mode" gains the suffix |
+| `TESTING.md`, the lane target's release-image suffix (in the lanes' description) | rule | `repository/compose-stacks.md`, "A lane target names only its files, its project, and its mode" | repository, configuration, deployment | |
+| `TESTING.md`, "Static Configuration Tests" | rule, with its repository instance | its definition — a kind beside the four levels, its cover, and its gate variables — to `repository/test-targets.md` or a new `repository/static-configuration-tests.md`; the examples stay with it | repository, testing | Candidate: the kind itself (`test-levels.md`), which `helm-render-tests.md` and `chart-render-tests.md` here already name without defining |
+| `TESTING.md`, "Chart Render Tests", the Helm pin the chart digest enforces and the two new chart tests | rule | `repository/chart-render-tests.md`, "The supported Helm" and "Where they live and how they run" | repository, testing, helm | |
+| `DEPLOYMENT_AND_CONFIG.md`, "Release topology", the bare tags an upgrade leaves | description | stays | repository, configuration, deployment | |
+| `DEPLOYMENT_AND_CONFIG.md`, "Validation namespaces", the image tags and `-<rev9>` | description | `openspec/specs/market-change-workflow/README.md`, "The change's namespace", "The tags", where this branch keeps the validation namespaces | — | that bullet's "Compose, the pipeline lanes … keep bare tags" and "a bare build still writes `arkhai:<tag>-<sha>`, which `make push-images` reads": `dev` corrected both (its task 13.3), to the release-image mode's suffix and `-<rev9>`, read by `make load-candidate` too |
+| `DEPLOYMENT_AND_CONFIG.md`, "Artifact publishing destination", the load | procedure | the release handbook, merged into "Loading a release candidate" | — | the handbook's "Where artifacts are pushed" |

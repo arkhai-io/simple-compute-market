@@ -78,9 +78,8 @@ VM, API-credit, and bare-metal roots all use this shell. Domain codecs, policy,
 settlement, fulfillment, and publication hooks stay in their injected
 contract; neither the kit nor a route recovers them from a global domain
 resolver. Extracted kit mechanisms have one implementation: domains retain
-only the values and hooks that instantiate them.
-
-Two hooks remain separate when core-owned machinery or a typed invariant sits between them. They may be merged when the core does nothing between them and the split would expose only implementation detail.
+only the values and hooks that instantiate them. When two of a domain's hooks
+stay separate is [`production-code.md`, "Domain hooks"](../guidance/repository/production-code.md#domain-hooks).
 
 VM and bare metal follow [`implementation.md`, "Composition from one component"](../guidance/engineering/implementation.md#composition-from-one-component) through the kit both use: they share the close or hold of a listing left with no settlement option, one site-derivation summary and log, and one answer for a deal settled by introduction, which has no settlement or fulfillment; each keeps only what its market needs, such as its own delivery route surface.
 

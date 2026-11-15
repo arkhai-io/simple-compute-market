@@ -3297,6 +3297,31 @@ D32, D33; D10 as amended). Files: `docs/guidance/engineering/documentation.md`;
   Session: the round ran in one session, as planned; it grew large — the five
   documents' full reads, three moving sections, and four fresh-context checks — and
   did not compact.
+  Round 8's triage (176, 177, 178): `ARCHITECTURE.md`'s hook-merging criterion, which
+  the fresh-context check above had declined, moved to `production-code.md`, "Domain
+  hooks", linking `market-composition`'s "Typed phase boundaries" for why and the
+  storefront-kit passage, which links it back, and its inventory row split (176 F1); `TESTING.md`'s gate passages and `DEPLOYMENT_AND_CONFIG.md`'s
+  release-topology sentences stay declined, each describing behaviour a check or the
+  chart holds, for 14.3 to re-check. The inventory gained "Dev's packaging and release
+  changes, for the merge" (178 O1): what `dev`'s `publish-wheels-through-a-gate` wrote
+  in the documents this change splits, by kind and destination here, what it
+  overturns here, and the portable rules it suggests, which no session of this change
+  writes. The merge places `dev`'s text from it. The published-packages table's
+  future is an unowned row in the change index's package campaign (178 O2).
+  Checks: no suite applies, the fixes changing only documents; `make check-guidance`
+  OK (102 files); `scripts/change-workflow check index` OK; `run pre-commit`, the
+  `pre-commit` hook alone: index, tasks, and skills OK, OpenSpec "is valid", and
+  `check-repository` failed only on the preamble's citations (`docs/agents/`, the two
+  removed documents, from the change's own documents) and the CW-* index entries
+  closeout writes. Fresh-context check of the diff: it found the hook rule sound and
+  its links resolving, and the map's rows true against `dev` where spot-checked.
+  Fixed from it: a row naming no overturned text where `market-change-workflow`'s
+  "The tags" still says lanes keep bare tags and a bare build writes `<tag>-<sha>`;
+  the release handbook's "One-time setup for a package", which `dev`'s new-project
+  paragraph overturns, unnamed; an unusable tag; two rows whose kind disagreed with
+  their destination's; "merging publishes nothing" sent to the versioning file; new
+  headings not marked new; the hook rule's restated framing, replaced by the link to
+  `market-composition`'s companion, which held the reasoning. Declined: none.
 
 ## 14. Closeout
 
