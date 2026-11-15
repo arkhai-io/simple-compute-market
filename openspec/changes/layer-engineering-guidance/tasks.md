@@ -2722,7 +2722,7 @@ the five cross-system documents as they stand, with its kind, destination, and t
 No text moves in this section. Files:
 `openspec/changes/layer-engineering-guidance/inventory.md`.
 
-- [ ] 10.1 Add a part to `inventory.md`, "Cross-system documents by kind", after
+- [x] 10.1 Add a part to `inventory.md`, "Cross-system documents by kind", after
   "Draft classification of the checks", opened by a paragraph saying it was written
   at the return to design, is reviewed with the moves in the round's triage rather
   than before them (D30, D34), and governs sections 11 to 13. One row per section of
@@ -2753,11 +2753,56 @@ No text moves in this section. Files:
   keep. Verify every heading of the five documents outside a fenced block has a row,
   every destination file is in the table, and every tag is in a vocabulary.
   Evidence: inspected; no test applies.
-- [ ] 10.2 Verify the section: `scripts/change-workflow check tasks
+  Done: the part follows "Draft classification of the checks", one table per
+  document and one for `openspec/README.md`'s draw.io paragraph, then "Repository
+  files and their tags" (31 files, `README.md` and `diagrams.md` among them) and
+  "Capability guidance tags". Inspected: every heading the five documents carry
+  (ARCHITECTURE 52, TESTING 21, DEPLOYMENT_AND_CONFIG 10, BUILD_AND_PACKAGING 8,
+  RELEASING 10; none sits in a fenced block) is named by a row; every
+  `repository/<file>` a row names is in the files table; every tag is the
+  engineering table's or the repository's (`repository`, `architecture`), so no
+  repository tag is added. How the test was read, recorded in the part's opening: a
+  passage stating what every instance of a kind here must be — this repository's
+  instance of a shared rule among them (31 O1a) — is a rule; one stating what named
+  components are or do is description, even where it cites the rule applied.
+  Beyond the plan: D28 names the capability configuration files holding startup
+  refusals and the contract's versioning among the rows the inventory decides, so the
+  part has a table re-tagging four of them (`deployment`, `versioning`), by a stated
+  test — a section on the subject, not a sentence; no task names those files, so
+  section 11 applies the table beside the repository layer's tags and records it in
+  its notes. The shared layers' files are not re-read against D28 here; the part
+  leaves that open for the triage. No section of the five documents is an operator's
+  procedure, so the operator handbook gains nothing (task 12.2); the operator steps
+  inside descriptions are listed as overlap in `Ambiguous`, for the triage to move
+  if it reads 141 F1 otherwise.
+  Fresh-context check: it confirmed the heading, destination, and vocabulary checks
+  and found gaps, all fixed but one: the known `Ambiguous` case (`ARCHITECTURE.md`'s
+  package layers) is now marked on its rows; six files' tags were widened to what
+  they cover (`service-configuration.md` `kubernetes`, `helm-charts.md` `deployment`,
+  `service-databases.md` `kubernetes`, `lane-doubles.md` `repository-content`,
+  `python-version.md` `uv` and `docker`, and `python` on `test-placement.md` and
+  `published-packages.md`); `test-layout.md` became `test-placement.md`, taking
+  "Registration and traffic are different proofs" from `deterministic-tests.md`,
+  whose subject it is not; `RELEASING.md`'s opening is a description, and "How the
+  workflow works" carries a note that it describes a component; four rules left in
+  descriptions gained notes; the file count is 31. Declined: moving the operator
+  one-liners out of descriptions, a judgement left to the triage as above; adding
+  `persistence` to `deterministic-tests.md` for its one database-concurrency line,
+  which the stated test does not admit.
+- [x] 10.2 Verify the section: `scripts/change-workflow check tasks
   layer-engineering-guidance` and `scripts/change-workflow run pre-commit
   layer-engineering-guidance`, inert paths only, failing on nothing the preamble
   does not expect. End-to-end: none; no pipeline scenario reads guidance, and none is
   owed.
+  Done: `scripts/change-workflow check tasks` was denied in this unattended run (no
+  rule allows it); `make check-tasks CHANGE=layer-engineering-guidance` and `run
+  pre-commit`'s own tasks check both passed in its place. `run pre-commit`, inert
+  paths only: the index, tasks, skills, and strict OpenSpec checks pass; `make
+  check-repository` fails only on the preamble's two expected checks — the citations
+  of `docs/agents/`, `docs/guidance/repository/README.md` and `diagrams.md`, and
+  `docs/release-handbook.md` from the change's own documents, and the
+  specification index's CW-* entries and CW-pkug's link, which closeout writes.
+  End-to-end: none, and none owed.
 
 ## 11. The repository's rules out of the description documents
 

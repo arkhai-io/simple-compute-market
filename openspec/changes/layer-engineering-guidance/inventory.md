@@ -970,3 +970,288 @@ those `make check-packaging` runs, and those `make pre-push` runs each have a ro
 | `make pre-push` | both checks above, over what a push would send | as the two rows above | the Git pre-push hook (`scripts/hooks/pre-push`) and the guarded push (`[hooks].pre-push`) |
 | `make audit-secrets` | reports every gitleaks finding in the tracked tree, refusing nothing | engineering: `engineering/repository-content.md` | by hand before a release (`RELEASING.md`, "Cutting a release"); it enforces nothing, and is listed so the classification is complete |
 | Guidance check (`make check-guidance`, written in section 8) | tags, the vocabularies, exception tables, the link direction, and anchors into guidance | workflow: CW-g7lt, CW-d2rw, CW-x4ex, MCW-c4ek's guidance conditions; the script is this repository's for now (D13) | `check-repository`, once section 8 adds it |
+
+## Cross-system documents by kind
+
+Written at the return to design, after rounds 1 to 7, and reviewed with the moves in
+the round's triage rather than before them (D30, D34): a row the owner corrects there
+becomes a fix to the move it governs. These rows govern sections 11 to 13 as the rows
+above govern sections 3 to 7. They cover every section of the five cross-system
+documents as they stood when the round began — `docs/development/ARCHITECTURE.md`,
+`TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`, `BUILD_AND_PACKAGING.md`, and `RELEASING.md`
+— and `openspec/README.md`'s draw.io paragraph (D29).
+
+How to read it:
+
+- **Kind**, by D25's test. A `rule` states what a change's work product here must be
+  or do: what every instance of a kind must satisfy, a new one a change adds included,
+  this repository's statement of a shared rule (31 O1a) among them. A `description`
+  states what named components are, do, or are for, and why, even where it cites the
+  rule a component applies. A `procedure` tells the owner or an operator what to do or
+  type. A section whose text holds more than one kind has a row per part, its `Source`
+  naming the part.
+- **Destination.** `stays` keeps a description in its document under the heading it
+  has, or the one the row names. `repository/<file>` abbreviates
+  `docs/guidance/repository/<file>`, the file and, after a comma, the heading the rule
+  takes there. A procedure names the heading it takes in `docs/release-handbook.md`,
+  the owner's handbook (D25). No section of the five documents is an operator's
+  procedure, so none goes to `docs/operator-handbook.md` (141 F1); the operator steps
+  inside descriptions are listed in `Ambiguous` as overlap.
+- **Tags** are the destination file's for a rule (D28), from the repository's table
+  and the engineering table; the three description documents keep theirs (D27). No
+  repository tag is added: every subject a file covers has an engineering topic or
+  tool tag, or `architecture` (D18).
+- **Duplicates** (31 O1b). A rule stated in two documents merges into the file its
+  row names, the row saying "merged"; where the copies differ, the section's notes
+  give both forms and the proposed text.
+- **`Ambiguous`** names what the test did not settle, for the triage.
+
+### `docs/development/ARCHITECTURE.md`
+
+| Source | Kind | Destination | Tags | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Arkhai Market Stack — Architecture Reference`, its purpose line | description | stays, rewritten to say it holds the description and to link the rules and handbooks (13.5) | repository, architecture | the document's opening | |
+| `## Document map` | description | stays; the "Implementation rules" row goes, and the rows for "Package and dependency layers" and "Build, packaging, and initialization" name what stays (13.5) | repository, architecture | the document's own map | |
+| `## System overview` | description | stays | repository, architecture | the system's shape | |
+| `## Composition from above and below` | description | stays | repository, architecture | what core, kit, domain, and composition own, and the instance of composition from one component | "Two hooks remain separate when core-owned machinery or a typed invariant sits between them…" reads as a design rule for work; left with the ownership it qualifies |
+| `## Package and dependency layers`, the heading | description | stays, opened by a description of the layers, scope, and kind that links `repository/package-layers.md` for their rules | repository, architecture | the heading anchors the description subsections below it | the known case (D34): the section states its rules through a description of the layers, sentence by sentence; the rows below split it where a paragraph is mostly one kind, and the triage reviews each split |
+| `## Package and dependency layers`, its opening (the three questions here, kind, `make check-architecture`, `ARCHITECTURE.toml`) | rule | `repository/package-layers.md`, its opening | repository, architecture, dependencies | this repository's instance of `dependencies.md`'s three questions and the check holding it (D27's sample) | the known case, as the heading's row says |
+| `### Repository layers`, its diagram, "The layer names what a package may do…", and the family vocabulary paragraph | description | stays | repository, architecture | what the four layers are and what the compute family's vocabulary package is | the known case: the vocabulary paragraph states its package's dependency bound inside the description |
+| `### Repository layers`, "A package depends only on its own layer or a lower one…" (what "depends on" means, the `dev` group, `importlib`) and "Core carrier packages must not import…" | rule | `repository/package-layers.md`, "Layers" | repository, architecture, dependencies | the layer rule the check holds | the known case: the carrier paragraph describes `market_core.settlement`'s exports while stating what core may import; it moves with its rule |
+| `### Scope` | rule | `repository/package-layers.md`, "Scope" | repository, architecture, dependencies | the scope rule, the check's; its last paragraph a rule review holds | |
+| `### Kind` | rule | `repository/package-layers.md`, "Kind" | repository, architecture, dependencies | the kinds, how the check reads a path, the allowlists, override rows, and the standalone-component boundary | the plugin entry-point groups' list is description, kept with the rule naming them |
+| `### Where the current tree diverges` | rule | `repository/package-layers.md`, "Where the current tree diverges" | repository, architecture, dependencies | override and exception rows, their owners, and no new edge of a divergent shape | its second paragraph lists the divergences the check cannot see, a description of today's tree kept beside the rule it excepts |
+| `### Family kits`, its rules (what a family kit is, when a capability belongs in one, what it may depend on, the placement tests, promotion to a repository-wide kit) | rule | `repository/family-kits.md` | repository, architecture, dependencies | how any family kit a change adds is placed | |
+| `### Family kits`, the compute family's kits (from "In the compute family" to the mock routes) | description | stays, under "Family kits" | repository, architecture | what the compute family's kits are | |
+| `### Kit areas` | description | stays | repository, architecture | the map of the kit layer's areas, which it calls "a map, not a checked rule" | its "a kit-to-kit edge those allow but this order forbids is a review finding", "Dependencies never point upward…", "No new site read of pool state should be added while it stands", and "carrier modules … must not import concrete services" are rules review holds, left with the map; they could join `repository/package-layers.md` |
+| `### Marketplace identity` | description | stays | repository, architecture | a capability's summary, linking its specification | |
+| `### Registry self-description` | description | stays | repository, architecture | as "Marketplace identity" | |
+| `### Capacity publication and multi-domain storefront composition` | description | stays | repository, architecture | cross-system | |
+| `### Settlement configuration` | description | stays | repository, architecture | how settlement is configured and decided | "each party derives for itself" is normative in the specifications and stated here as behaviour |
+| `## Runtime service map` | description | stays | repository, architecture | cross-system | |
+| `## Service Architecture` | rule | `repository/production-code.md`, "Services" | repository, implementation | the instance of `implementation.md`'s thin controllers, and where a service's own layers are described | |
+| `### Route contracts and their HTTP binding` | rule | `repository/production-code.md`, "Route contracts and their HTTP binding" | repository, implementation | where each of the five pieces lives here, a contributed router's factory, the restricted path grammar | its account of the provisioning service's composed route table and unmatched-request answers describes the system, and moves with the rules it explains |
+| `## Authority boundaries` and its table | description | stays | repository, architecture | cross-system | |
+| `### Post-commitment counterparts` | description | stays | repository, architecture | cross-system | |
+| `### Deciding which party is authoritative` | description | stays | repository, architecture | how authority falls across the storefront–site boundary | "A rule that must bind every storefront acting for a site belongs in site admission" is a placement rule, left with the account it concludes |
+| `### Omission states no commitment` | description | stays | repository, architecture | the system's semantics of an omitted term | |
+| `### Holding or closing a listing the storefront cannot fully derive` | description | stays | repository, architecture | normative in storefront publication, stated here as behaviour | |
+| `### Storefront capacity boundary` | description | stays | repository, architecture | cross-system | |
+| `### Site authority`, `### Resource pools` | description | stays | repository, architecture | cross-system | |
+| `## Shared vocabulary and identities`, `### Marketplace principals`, `### Authenticated service boundaries`, `### Identifiers` | description | stays | repository, architecture | the cross-subsystem vocabulary `AGENTS.md`'s "Domain docs" names | |
+| `### Terms` | description | stays | repository, architecture | vocabulary (D25) | "Avoid `SettlementTarget` as a noun" is a naming rule, kept with the vocabulary it governs |
+| `### One name per concept` | description | stays | repository, architecture | vocabulary, the home `AGENTS.md` names for the synonyms ruled out | |
+| `## Major lifecycle flows`, `### Discovery and negotiation` | description | stays | repository, architecture | cross-system | its "Code that makes ordinary fulfillment depend on a physical resource identity … is very likely encoding the wrong unit" is a review heuristic left with the model it follows from |
+| `### Settlement servicing`, `### Capacity reservation`, `#### Layered placement ownership`, `### Fulfillment`, `### Fulfillment status and results`, `### Release` | description | stays | repository, architecture | cross-system flows | |
+| `## Deployment topology`, `### Local development`, its first paragraph | description | stays | repository, architecture | the local stacks | |
+| `### Local development`, "Two rules govern how stacks receive their configuration", the first rule | rule | `repository/compose-stacks.md`, merged | repository, configuration, deployment | the same rule as `DEPLOYMENT_AND_CONFIG.md`'s "A stack's configuration lives in committed files" | |
+| `### Local development`, the second rule | rule | `repository/service-configuration.md`, merged | repository, configuration, kubernetes | the same rule as `DEPLOYMENT_AND_CONFIG.md`'s secrets and trust paragraph | |
+| `### Production and staging` | description | stays | repository, architecture | the deployed topology | |
+| `### Operators`, all but its last sentence | description | stays | repository, architecture | who operates the system, and why pre-1.0 versioning suits it | "Designs record where such ordering would matter" is a rule for a change's design, left with the reason it follows from |
+| `### Operators`, "Until then a package's incompatible change takes a minor version…; the rule lapses at 1.0.0" | rule | `repository/package-versions.md`, merged | repository, versioning | the instance of `versioning.md`'s "Before 1.0.0", also stated by `RELEASING.md` | |
+| `## Build, packaging, and initialization`, its first two paragraphs | description | stays, its pointer to `BUILD_AND_PACKAGING.md` re-pointed to the packaging rule files | repository, architecture | the build flow | they restate the wheelhouse's and the one Python version's rules in summary (31 O1b); kept as the description of the flow those rules produce, citing the rule files |
+| `## Build, packaging, and initialization`, "The aggregate Make targets, `make test` among them, are held to…" | rule | `repository/test-targets.md` | repository, testing | the instance of `test-levels.md`'s aggregate targets | |
+| `### Accepted representations and application views`, its first paragraph | rule | `repository/accepted-representations.md` | repository, persistence | the instance of `persistence.md` | |
+| `### Accepted representations and application views`, its second paragraph | description | stays | repository, architecture | the migration floor as the services have it | a summary of `DEPLOYMENT_AND_CONFIG.md`'s floor paragraph, kept as the cross-system summary |
+| `## Recovery workers` | description | stays | repository, architecture | cross-system | |
+| `## Operator lifecycle controls` | description | stays | repository, architecture | the loop controller and the trading pause, citing `implementation.md` | |
+| `## Implementation rules` | rule | `repository/production-code.md`, "Libraries" | repository, implementation | the instance of `implementation.md`'s preference for an existing library | |
+| `## Testing strategy`, its first paragraph | description | stays | repository, architecture | where the tests are described | |
+| `## Testing strategy`, its last three paragraphs (the scenario kinds, the deterministic sequence, the doubles) | rule | `repository/deal-scenarios.md` and `repository/lane-doubles.md`, merged | repository, testing | summaries of `TESTING.md`'s rules, whose home those files are | |
+| `## Capability documentation index` | description | stays | repository, architecture | the map's link to the capability index | |
+| `## Deterministic database-concurrency tests` | rule | `repository/deterministic-tests.md`, "Database concurrency" | repository, testing | the instance of `concurrency-tests.md` | |
+
+### `docs/development/TESTING.md`
+
+| Source | Kind | Destination | Tags | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Testing Strategy`, its opening | description | stays, rewritten (13.5) | repository, testing | the document's opening | |
+| `## Four-Level Hierarchy`, its opening | description | stays | repository, testing | the levels' pointer | |
+| `### 1. Unit Tests` | rule | `repository/test-placement.md`, "Unit tests" | repository, testing, python | constructor doubles and the command-module seam here | its heading stays as a pointer, so the hierarchy keeps its four levels |
+| `### 2. Integration Tests`, its first paragraph | rule | `repository/test-placement.md`, "Integration tests" | repository, testing, python | where a service's and a kit's integration tests run | its heading stays as a pointer |
+| `### 2. Integration Tests`, "Registration and traffic are different proofs" | rule | `repository/test-placement.md`, "Integration tests" | repository, testing, python | the instance of `testing.md`: what the frp admission plugin's integration tests prove and where they run | |
+| `### 2. Integration Tests`, "Async test discipline — no sleeps", "Tests wait on events, never on durations", "Leave nothing held" | rule | `repository/deterministic-tests.md` | repository, testing | instances of `test-determinism.md` | |
+| `### 2. Integration Tests`, "Pause the loop, then advance it explicitly": the control table, the gates, the kit loop controller, the source-confirmation window, the lane's holds, `buy_to_ready`, the hold helpers and their source checks, and the traps | rule | `repository/deterministic-tests.md`, "Pause the loop, then advance it explicitly" | repository, testing | the hold every compute-lane scenario module takes and the controls it uses | the control table and gate semantics describe the services' test surface; they move with the rule they serve, and could stay in `TESTING.md` |
+| `### 3. Smoke Tests (Deployment Validation)` | description | stays | repository, testing | where the smoke tests are and what they mark | |
+| `### 4. System Integration Tests (End-to-End)`, "Every deployable domain owns one release-qualified complete-deal scenario…" | rule | `repository/deal-scenarios.md`, "A complete deal per domain" | repository, testing | what every domain's scenarios must hold | |
+| `### 4. System Integration Tests (End-to-End)`, the paragraph introducing the diagrams | description | stays, naming two diagrams here and the discipline's beside its rule | repository, testing | the section's map | |
+| `#### The discipline every scenario follows` | rule | `repository/deal-scenarios.md`, "The discipline every scenario follows", its diagram embedded from `docs/development/diagrams/` | repository, testing | the instance of `system-tests.md`'s sequence of state changes | the diagram is description; it moves with the text it draws |
+| `#### The canonical compute deal` | description | stays | repository, testing | the canonical deal, its stages and drivers (D27) | "A shared stage never depends on the mock profile…" is an instance of `test-doubles.md`, kept with the stage set it constrains and the test holding it |
+| `#### One part, zoomed in`, its first paragraph and diagram | description | stays | repository, testing | the settle part drawn open | |
+| `#### One part, zoomed in`, "The e2e test pod reaches services only through their interfaces…" | rule | `repository/deal-scenarios.md`, "Through interfaces" | repository, testing | the instance of `system-tests.md` | |
+| `#### One part, zoomed in`, the lanes, from "The pipeline runs one lane per market domain" through the compute lanes' mock executors | description | stays | repository, testing | the lanes (D27) | |
+| `#### One part, zoomed in`, "A lane target names only its Compose files, its project, and the run's provisioning mode…" | rule | `repository/compose-stacks.md`, merged | repository, configuration, deployment | the same rule as `DEPLOYMENT_AND_CONFIG.md`'s lane targets | |
+| `#### One part, zoomed in`, "A mock's default output is what the shipped configuration prints…" | rule | `repository/lane-doubles.md`, "Mock output" | repository, testing, repository-content | the instance of `test-doubles.md` | |
+| `#### One part, zoomed in`, "`make -C e2e-tests test-e2e` runs the three in turn…" | description | stays | repository, testing | how the full run sequences the lanes | |
+| `#### One part, zoomed in`, "A lane provides its own configuration, so a scenario that finds a lane setting missing fails rather than skipping" | rule | `repository/deal-scenarios.md`, "A lane's configuration" | repository, testing | what every scenario does with a missing lane setting | |
+| `#### One part, zoomed in`, pre-review validation's Helm scenarios and check pods | description | stays | repository, testing | what validation runs against a release | "A scenario on that list reads only what the `e2e-tests` image copies … never a file from the checkout" is a rule on the listed scenarios |
+| `#### One part, zoomed in`, the mock-provisioned deal and the VM multi-registry scenario | description | stays | repository, testing | what the lanes prove and do not | |
+| `#### One part, zoomed in`, "To run the lanes in GitHub Actions…" through the fetched logs | description | stays | repository, testing | what `make run-e2e` and `make fetch-e2e-logs` do | its opening two sentences are a procedure; no handbook of D25's holds a developer's procedure, so it stays beside the targets it describes |
+| `#### Locally verifiable and external-topology scenarios` | rule | `repository/deal-scenarios.md`, "Locally verifiable and external-topology scenarios" | repository, testing | the instance of `system-tests.md`'s two kinds and per-observation outcomes | |
+| `#### The real-provisioning lane` | description | stays | repository, testing | the real lane and the qualification modules | it holds operator steps ("Set the allowance before publishing an offer"), overlapping `e2e-tests/README.md` and the validation runbook, left with the lane they set up |
+| `## Contract Fixtures` | rule | `repository/test-placement.md`, "Contract fixtures" | repository, testing, python | the instance of `contract-fixtures.md` | |
+| `## Test File Layout` | rule | `repository/test-placement.md`, "Test file layout" | repository, testing, python | the instance of `testing-python.md`'s layout | |
+| `## Migration Tests` | rule | `repository/migration-chain-tests.md` | repository, testing, persistence | the instance of `migration-tests.md` | |
+| `## Accepted Arkhai purchase qualification` | rule | `repository/qualification-evidence.md` | repository, testing | what a physical-qualification claim must rest on | its first paragraph instructs the qualifier, overlapping the runbook's section 29, the procedure it cites |
+| `## Boundary-Change Validation`, its first paragraph | rule | `repository/package-layers.md`, "A boundary change" | repository, architecture, dependencies | the instance of `boundary-changes.md`, whose check here is `make check-architecture` | a testing rule placed with the layer rules it validates; it could be a file of its own |
+| `## Boundary-Change Validation`, its CI matrix paragraph | rule | `repository/test-targets.md`, "CI runs `make test`'s targets" | repository, testing | what CI's matrix must match, held by `test_tests_workflow.py` | |
+| `## Ansible Syntax and Native Checks` | rule | `repository/ansible-gates.md` | repository, testing, ansible | the instance of `ansible-checks.md` and the gates' evidence boundaries | |
+| `## Chart Render Tests` | rule | `repository/chart-render-tests.md` | repository, testing, helm | the instance of `helm-render-tests.md` (D27's sample) | "Obtaining Helm where its download host is unreachable" is a procedure for whoever renders charts; no handbook of D25's is a developer's, so it moves with the render tests |
+| `## Cross-Language Contract Conformance` | rule | `repository/contract-conformance.md` | repository, testing | the instance of `conformance-tests.md` | |
+| `## Private Service Dependencies`, its first two paragraphs | rule | `repository/lane-doubles.md` | repository, testing, repository-content | instances of `repository-content.md` and `test-doubles.md` | |
+| `## Private Service Dependencies`, the controls, the payments and mediation targets, the evidence label, the payments helper, and the current example | description | stays | repository, testing | the doubles (D27) | "A scenario installs its rules through the `lane_double_rules` fixture…" and "A control no scenario exercises is proven by its double's own suite" are rules, left with the controls they concern |
+| `## Offline Review Validation`, all but its Makefile sentence | description | stays | repository, testing | what the review wheelhouse is | |
+| `## Offline Review Validation`, "A project's own `Makefile` must keep its interpreter selection configurable…" | rule | `repository/project-environments.md` | repository, packaging, uv | what every project's Makefile must allow | |
+
+### `docs/development/DEPLOYMENT_AND_CONFIG.md`
+
+| Source | Kind | Destination | Tags | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Configuration and Deployment`, its opening | description | stays, rewritten (13.5) | repository, configuration, deployment | the document's opening | |
+| `## Profile-based configuration`, the resolver (the registry's exception, the resolver variables and prefixes, `arkhai-kit-config`'s boundary, dotenv) | description | stays | repository, configuration, deployment | how the services resolve configuration | |
+| `## Profile-based configuration`, from "Application settings stay out of the environment" through "A setting that belongs to one domain is named for it" and its refusals | rule | `repository/service-configuration.md` | repository, configuration, kubernetes | instances of `configuration.md` | the retired-key refusals describe the provisioning service's startup, and move with the naming rule they enforce |
+| `## Profile-based configuration`, "Before a package reaches 1.0.0, the meaning of a configuration key it reads may change…" | rule | `repository/package-versions.md`, merged | repository, versioning | the instance of `versioning.md` for configuration keys | |
+| `## Kubernetes: ConfigMap and Secret mounting`, its opening sentence | rule | `repository/helm-charts.md`, "Configuration through mounted files" | repository, helm, kubernetes, deployment | the instance of `kubernetes.md`, every chart's | |
+| `## Kubernetes: ConfigMap and Secret mounting`, where the charts differ | description | stays, under a lead linking `repository/helm-charts.md` | repository, configuration, deployment | the registry, provisioning, and `configFiles` particulars | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "The rule behind the pod rule" | rule | `repository/service-configuration.md`, "A storefront's configuration" | repository, configuration, kubernetes | the instance of `configuration.md` and `kubernetes.md` for every storefront | |
+| `## Kubernetes: ConfigMap and Secret mounting`, "A deployment does not wait on a service's dependencies" | rule | `repository/helm-charts.md`, "No wait on a dependency" | repository, helm, kubernetes, deployment | the instance of `deployment.md` and `kubernetes.md`, and what the render tests assert | |
+| `## Kubernetes: ConfigMap and Secret mounting`, the `mockMode` sentence and "The umbrella's smoke-test profile" | description | stays | repository, configuration, deployment | one chart's particulars | |
+| `### Storefront agents: pass-through configuration`, all but two sentences | description | stays | repository, configuration, deployment | how the storefront charts render an agent | operator instructions ("To set a value to `None`…", "recover with `helm rollback`") overlap the operator handbook, left with the behaviour they follow from; the retired-keys paragraph says where a change retires a storefront key (the one catalogue), a rule left with the catalogue it describes |
+| `### Storefront agents: pass-through configuration`, "A chart renders a check of a setting it cannot see only where a value names the check's target…" | rule | `repository/helm-charts.md`, "A check of a setting the chart cannot see" | repository, helm, kubernetes, deployment | what every chart's check pod rests on | |
+| `### Storefront agents: pass-through configuration`, "Write an integer above 2^53 in a values file as a string" | rule | `repository/helm-charts.md`, "Values" | repository, helm, kubernetes, deployment | the instance of `helm.md` | |
+| `## Per-domain stack composition`, its stack list | description | stays | repository, configuration, deployment | which stacks there are | |
+| `## Per-domain stack composition`, "A stack's configuration lives in committed files…", the base files' topology-only rule, and the overlays' rule | rule | `repository/compose-stacks.md` | repository, configuration, deployment | the instance of `configuration.md`, every stack's | |
+| `## Per-domain stack composition`, the overlay table, the committed sources, the bare-metal storefront's mounted files, and the full local stack's command | description | stays | repository, configuration, deployment | which overlay binds what | |
+| `## Per-domain stack composition`, "each end-to-end lane's target … names only its compose project and files and the run's mode" | rule | `repository/compose-stacks.md`, merged | repository, configuration, deployment | the same rule as `TESTING.md`'s | |
+| `## Per-domain stack composition`, `PROVISIONING_MODE`, the VM development stack, the bare-metal wrapper | description | stays | repository, configuration, deployment | how the stacks are composed | "chosen per run, not per stack file and never by a storefront" is a rule, left with the mechanism |
+| `## Per-domain stack composition`, "Storefront images install their distributions from the staged `.dist` wheelhouse…" | rule | `repository/images.md`, merged | repository, packaging, docker | the same rule as `BUILD_AND_PACKAGING.md`'s "Images" | |
+| `## Per-domain stack composition`, "Stack files carry public URLs…" and what missing material blocks | rule | `repository/compose-stacks.md`, "No fallback" | repository, configuration, deployment | what every stack file binds and refuses | |
+| `## Per-domain stack composition`, the bare-metal storefront's publication loop | description | stays | repository, configuration, deployment | the bare-metal stack's lane evidence | |
+| `## Stateful service persistence`, "Each service owns its own database…" and its `Recreate` sentence, and the API-credit services' paragraph | rule | `repository/service-databases.md` | repository, persistence, deployment, kubernetes | instances of `kubernetes.md`'s single-writer store and the specification's persistence ownership | "Restart either against its own volume" is an operator step, kept with the rule |
+| `## Stateful service persistence`, the runtime images' `/app/data` and the PVC annotation | description | stays | repository, configuration, deployment | what the images and charts do | |
+| `## Stateful service persistence`, "A local development cluster is deployed with `make -C helm deploy-local`, never…" | rule | `repository/local-clusters.md` | repository, deployment, helm | binds whoever deploys locally, an agent included | it is an operator's practice too; the rule is what work here must follow |
+| `### Release topology`, the supported topology and the two local releases | description | stays | repository, configuration, deployment | release topology (D27) | |
+| `### Release topology`, "A local release configures a service through the values a deployment uses", with its first example sentence | rule | `repository/local-clusters.md`, "The values a deployment uses" | repository, deployment, helm | the instance of `deployment.md` | |
+| `### Release topology`, the doubles in the local release and the topology targets | description | stays | repository, configuration, deployment | what the local release runs and what each target does | the targets' bullets overlap the validation runbook's procedures |
+| `### Release topology`, "An end-to-end scenario that needs release 2 states `make helm-topology-up`…" | rule | `repository/local-clusters.md`, "A scenario needing release 2" | repository, deployment, helm | what such a scenario's target and docstring state | |
+| `### Release topology`, "Helm test pods carry no workload selector label" | rule | `repository/helm-charts.md`, "Test pods" | repository, helm, kubernetes, deployment | the instance of `kubernetes.md`, and the test holding it | |
+| `## Migrations at startup`, its opening, the service table, and the paragraphs on the `migrate` target, the init container and Compose command, the command's configuration, and the read-only open and check mode | rule | `repository/migrations-at-startup.md` | repository, persistence, deployment | instances of `migrations.md` (D27's sample) | the service table describes each service's command, kept with the rule it instantiates |
+| `## Migrations at startup`, the check results table | description | stays | repository, configuration, deployment | what the check mode reports | its Remedy column is an operator's step; the operator handbook's "Upgrading a deployment" is the procedure |
+| `## Migrations at startup`, the floor and adoption, the pointer to the tests, and the later migrations | description | stays | repository, configuration, deployment | what each chain holds | |
+| `## Migrations at startup`, "These migrations are fail-forward… No two versions of a service share a database…" | rule | `repository/migrations-at-startup.md` (fail-forward) and `repository/service-databases.md` (`Recreate`, merged) | repository, persistence, deployment | instances of `migrations.md` | |
+| `## Migrations at startup`, canonical principals and the identity cutover | description | stays | repository, configuration, deployment | what a supported database holds and how a cutover recovers | "operators recover by rolling forward" is an operator's practice, stated as the limit of rollback |
+| `## Bare-metal role configuration` | description | stays | repository, configuration, deployment | the bare-metal roles' configuration | |
+| `## Current limits` | description | stays | repository, configuration, deployment | the pattern's limits | |
+
+### `docs/development/BUILD_AND_PACKAGING.md`
+
+The document is removed once every row has moved (12.3), with its row in `AGENTS.md`'s
+layer table.
+
+| Source | Kind | Destination | Tags | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Build and packaging`, its first paragraph | description | the openings of the packaging rule files, each saying what it holds | repository, packaging | what the document held | |
+| `# Build and packaging`, its second paragraph (the manifest, the one `.python-version`) | rule | `repository/python-version.md`, its opening | repository, packaging, python, uv, docker | the instance of `packaging.md`'s one declaration | |
+| `## Project layout` | rule | `repository/project-layout.md` | repository, packaging, python, hatchling | the instance of `packaging-python.md` and `packaging-hatchling.md` (29 F1) | |
+| `## The wheelhouse` | rule | `repository/wheelhouse.md` | repository, packaging, uv | the instance of `packaging.md`'s built artifacts | |
+| `## One Python version` | rule | `repository/python-version.md` | repository, packaging, python, uv, docker | the instance of `packaging-uv.md` and `packaging-docker.md`'s one runtime version | |
+| `## Project environments` | rule | `repository/project-environments.md` | repository, packaging, uv | the `reinit` target every project with wheelhouse packages has | |
+| `## Locks` | rule | `repository/locks.md` | repository, packaging, uv | the relock and the minimum uv | |
+| `## Images` | rule | `repository/images.md` | repository, packaging, docker | the instance of `packaging-docker.md` | |
+| `## Checks` | rule | `repository/packaging-checks.md` | repository, packaging | what each packaging check fails on (58 O1) | |
+
+### `docs/development/RELEASING.md`
+
+The document is removed once every row has moved (12.3), with its row in `AGENTS.md`'s
+layer table.
+
+| Source | Kind | Destination | Tags | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `# Releasing Python packages`, its first paragraph | description | `docs/release-handbook.md`, its opening, rewritten to say who reads the handbook and what it holds | — | the document's opening | the document dissolves, so its opening has nowhere to stay; the handbook's opening replaces it |
+| `# Releasing Python packages`, what is published and what is not, the release wheelhouse, the `arkhai-` prefix | rule | `repository/published-packages.md`, its opening | repository, packaging, versioning, python | which distributions a change publishes and how they are named | |
+| `## Published packages` | rule | `repository/published-packages.md`, "Published packages" | repository, packaging, versioning, python | the table `scripts/tests/test_publish_matrix.py` holds to the workflow and each `pyproject.toml` | adding a package includes the owner's one-time PyPI setup, a procedure the rule links |
+| `## How the workflow works`, its bullets, `wheel_only`, and the build order | procedure | `docs/release-handbook.md`, "How the publish workflow works" | — | what the owner relies on when publishing, as task 12.2 names it | by the part's own test it describes a named component, the publish workflow; it goes to the handbook as the plan gives it, since `RELEASING.md` dissolves and its owner is the one who runs the workflow |
+| `## How the workflow works`, "No package vendors another's modules…" | rule | `repository/published-packages.md`, "One import package each" | repository, packaging, versioning, python | the instance of `packaging-python.md` for published packages | |
+| `## One-time setup (per package)` | procedure | `docs/release-handbook.md`, "One-time setup for a package" | — | the owner's steps on PyPI and GitHub | |
+| `## Cutting a release`, its steps, the audit paragraph, and `workflow_dispatch` | procedure | `docs/release-handbook.md`, "Cutting a release" | — | the owner's steps | |
+| `## Cutting a release`, the migration-floor decision | procedure | `docs/release-handbook.md`, "The migration floor" | — | the owner's decision at each release | it restates the floor's mechanics, which `DEPLOYMENT_AND_CONFIG.md`'s floor paragraph describes |
+| `## Versioning policy` | rule | `repository/package-versions.md` | repository, versioning | the instance of `versioning.md` and `versioning-python.md` | |
+| `### Import package renames` | procedure | `docs/release-handbook.md`, "Import package renames" | — | what a consumer of the renamed releases changes | a record of published releases, none of D25's kinds exactly; the triage may drop it |
+| `## Local development` | rule | `repository/wheelhouse.md`, merged | repository, packaging, uv | the same rule as `BUILD_AND_PACKAGING.md`'s wheelhouse, with the publish workflow's `--no-sources` | |
+| `## Artifact publishing destination` | procedure | `docs/release-handbook.md`, "Where artifacts are pushed" | — | what the owner supplies to the publishing targets | |
+| `## Troubleshooting` | procedure | `docs/release-handbook.md`, "Troubleshooting" | — | the owner's diagnosis of a failed publish | |
+
+### `openspec/README.md`
+
+| Source | Kind | Destination | Tags | Reason | Ambiguous |
+|---|---|---|---|---|---|
+| `## Documentation placement`, "Diagrams follow `diagrams.md`. Here they are drawn in draw.io…" | rule | `repository/diagrams.md` | repository, diagrams | the repository's drawing tool and its source beside its export (D29) | |
+
+### Repository files and their tags
+
+Each file under `docs/guidance/repository/`, with its tags (D28) and the rows it takes.
+
+| File | Tags | Rows |
+|---|---|---|
+| `README.md` | repository | the layer, its organization, and its tag table, moved from `AGENTS.md`'s "Tags" (D32) |
+| `diagrams.md` | repository, diagrams | `openspec/README.md`'s draw.io paragraph (D29) |
+| `package-layers.md` | repository, architecture, dependencies | `ARCHITECTURE.md`'s layer opening, the layer rules, "Scope", "Kind", "Where the current tree diverges"; `TESTING.md`'s boundary-change paragraph |
+| `family-kits.md` | repository, architecture, dependencies | `ARCHITECTURE.md`'s family-kit rules |
+| `production-code.md` | repository, implementation | `ARCHITECTURE.md`'s "Service Architecture", "Route contracts and their HTTP binding", "Implementation rules" |
+| `service-configuration.md` | repository, configuration, kubernetes | `DEPLOYMENT_AND_CONFIG.md`'s configuration rules and "The rule behind the pod rule"; `ARCHITECTURE.md`'s secrets rule, merged |
+| `compose-stacks.md` | repository, configuration, deployment | `DEPLOYMENT_AND_CONFIG.md`'s stack rules; the lane-target rule of both documents, merged; `ARCHITECTURE.md`'s committed-files rule, merged |
+| `helm-charts.md` | repository, helm, kubernetes, deployment | `DEPLOYMENT_AND_CONFIG.md`'s mounted files, no wait on a dependency, a check the chart cannot see, values, test pods |
+| `local-clusters.md` | repository, deployment, helm | `DEPLOYMENT_AND_CONFIG.md`'s local deploy, a local release's values, a scenario needing release 2 |
+| `service-databases.md` | repository, persistence, deployment, kubernetes | `DEPLOYMENT_AND_CONFIG.md`'s persistence rules and `Recreate`, merged with "No two versions share a database" |
+| `migrations-at-startup.md` | repository, persistence, deployment | `DEPLOYMENT_AND_CONFIG.md`'s migration rules |
+| `accepted-representations.md` | repository, persistence | `ARCHITECTURE.md`'s accepted representations |
+| `test-placement.md` | repository, testing, python | `TESTING.md`'s unit and integration placement, registration and traffic, "Contract Fixtures", "Test File Layout" |
+| `deterministic-tests.md` | repository, testing | `TESTING.md`'s determinism instances and "Pause the loop"; `ARCHITECTURE.md`'s database-concurrency tests |
+| `deal-scenarios.md` | repository, testing | `TESTING.md`'s complete deal per domain, the discipline, through interfaces, a lane's configuration, the two kinds of scenario; `ARCHITECTURE.md`'s testing summaries, merged |
+| `lane-doubles.md` | repository, testing, repository-content | `TESTING.md`'s private dependencies, doubles mirroring producers, mock output; `ARCHITECTURE.md`'s doubles summary, merged |
+| `migration-chain-tests.md` | repository, testing, persistence | `TESTING.md`'s "Migration Tests" |
+| `qualification-evidence.md` | repository, testing | `TESTING.md`'s "Accepted Arkhai purchase qualification" |
+| `test-targets.md` | repository, testing | `TESTING.md`'s CI matrix; `ARCHITECTURE.md`'s aggregate targets |
+| `ansible-gates.md` | repository, testing, ansible | `TESTING.md`'s "Ansible Syntax and Native Checks" |
+| `chart-render-tests.md` | repository, testing, helm | `TESTING.md`'s "Chart Render Tests" |
+| `contract-conformance.md` | repository, testing | `TESTING.md`'s "Cross-Language Contract Conformance" |
+| `project-layout.md` | repository, packaging, python, hatchling | `BUILD_AND_PACKAGING.md`'s "Project layout" |
+| `wheelhouse.md` | repository, packaging, uv | `BUILD_AND_PACKAGING.md`'s "The wheelhouse"; `RELEASING.md`'s "Local development", merged |
+| `python-version.md` | repository, packaging, python, uv, docker | `BUILD_AND_PACKAGING.md`'s manifest sentence and "One Python version" |
+| `project-environments.md` | repository, packaging, uv | `BUILD_AND_PACKAGING.md`'s "Project environments"; `TESTING.md`'s Makefile interpreter rule |
+| `locks.md` | repository, packaging, uv | `BUILD_AND_PACKAGING.md`'s "Locks" |
+| `images.md` | repository, packaging, docker | `BUILD_AND_PACKAGING.md`'s "Images"; `DEPLOYMENT_AND_CONFIG.md`'s storefront images, merged |
+| `packaging-checks.md` | repository, packaging | `BUILD_AND_PACKAGING.md`'s "Checks" |
+| `published-packages.md` | repository, packaging, versioning, python | `RELEASING.md`'s published set, "Published packages", one import package each |
+| `package-versions.md` | repository, versioning | `RELEASING.md`'s "Versioning policy"; `ARCHITECTURE.md`'s pre-1.0 rule and `DEPLOYMENT_AND_CONFIG.md`'s configuration keys, merged |
+
+The description documents keep their tags (D27): `ARCHITECTURE.md` `repository`,
+`architecture`; `TESTING.md` `repository`, `testing`; `DEPLOYMENT_AND_CONFIG.md`
+`repository`, `configuration`, `deployment`. `docs/release-handbook.md` carries no
+frontmatter, outside the guidance set (D25).
+
+### Capability guidance tags
+
+D28 has the round set each file's tags to what it covers, the capability configuration
+files holding startup refusals and the contract's versioning among them. A startup
+refusal is `deployment`'s ("startup refusals"), a versioned contract `versioning`'s. A
+file covers a subject substantially, for its tags, when a section of it — a heading
+and its text — is on that subject; a sentence on it within a section on another does
+not (D28: "content on another subject goes in another file"). So the files below gain
+the tag, and `physical-provisioning`'s, `site-capacity`'s, `introduction-delivery`'s,
+and `contact-exchange-settlement`'s configuration files, each refusing one setting at
+startup within a section on that setting, do not.
+
+| File | Tags as they stand | Tags by D28 | Reason |
+|---|---|---|---|
+| `openspec/specs/compute-provisioning-contract/configuration.md` | repository, configuration | repository, configuration, versioning | it states the contract's major and what a mismatch refuses |
+| `openspec/specs/resource-pool-management/configuration.md` | repository, configuration | repository, configuration, deployment | "A stored pool the service cannot serve refuses startup" |
+| `openspec/specs/settlement-configuration/configuration.md` | repository, configuration | repository, configuration, deployment | its refusals at startup, its readiness, and its cutover |
+| `openspec/specs/storefront-publication/configuration.md` | repository, configuration | repository, configuration, deployment | "A storefront that cannot publish refuses to start" and "A storefront starts with its dependencies unreachable" |
+
+The other capability guidance files were read against the same test and keep their
+tags. The shared layers' files were tagged at rounds 3 and 4 by the rows above, under
+31 O1c's assumption; this part does not re-read them against D28, which only names
+the capability configuration files. Whether any shared file's tags misdescribe it —
+`engineering/kubernetes.md`, holding a startup probe and `Recreate`, is the likeliest
+— is open for the round's triage, or for guidance placement at closeout (task 14.10).
