@@ -1748,8 +1748,9 @@ the change.
 For signing-key rotation, `receipt_identities` in `[Settlement.arkhai_payments]`
 may list current and retiring identity pins. Each entry has `identity`,
 `valid_from` (inclusive Unix seconds, default zero), optional `valid_until`
-(exclusive), and `retiring` (default false). A nonempty list must include the
-current `service_identity` as a non-retiring entry. With no list, that identity
+(exclusive), and `retiring` (default false); a retiring entry's `valid_until` is its
+retirement date. A nonempty list must include the current `service_identity` as its
+only non-retiring entry, and names each identity once. With no list, that identity
 alone remains trusted. Receipt signatures are checked at `approvedAt`; snapshot
 signatures at `observedAt`. A valid current-key snapshot may attest an embedded
 receipt from a configured retiring identity valid at its approval, without

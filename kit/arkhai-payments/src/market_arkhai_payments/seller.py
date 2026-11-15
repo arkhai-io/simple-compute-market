@@ -16,7 +16,7 @@ from market_deal_lifecycle.operations import OperationKeys
 from market_settlement_runtime.rate_servicing import RateServicing
 from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand, Pending, Rejected, Unknown
 
-from market_arkhai_payments.adapter import PaymentAdapter
+from market_arkhai_payments.adapter import PaymentAdapter, pinned_snapshot_verifier
 from market_arkhai_payments.agreement import (
     PaymentSettlementData,
     agreement_from_bytes,
@@ -30,8 +30,9 @@ from market_arkhai_payments.errors import (
     PaymentsTransportError,
     PaymentsUnavailable,
 )
-from market_arkhai_payments.models import SignedReceipt, StoredEvent
-from market_arkhai_payments.receipts import SnapshotVerifier, verify_receipt, verify_snapshot
+from market_arkhai_payments.models import SignedReceipt, SignedTransactionSnapshot, StoredEvent
+from market_arkhai_payments.reanchoring import ReanchoringEvidence, reanchoring_evidence
+from market_arkhai_payments.receipts import SnapshotVerifier, verify_receipt
 from market_arkhai_payments.settlement_config import (
     ArkhaiPaymentsConfig,
     ArkhaiPaymentsConfigurationError,
@@ -178,7 +179,9 @@ class PaymentSellerStage:
         *,
         client_for_owner: ClientForOwner | None = None,
         rate_servicing: RateServicing | None = None,
-        snapshot_verifier: Callable[[Mapping[str, Any], PaymentSettlementData], SnapshotVerifier] | None = None,
+        snapshot_verifier: Callable[
+            [Mapping[str, Any], PaymentSettlementData, SignedTransactionSnapshot | None], SnapshotVerifier,
+        ] | None = None,
     ) -> None:
         if config.service_url is None or config.service_identity is None:
             raise ArkhaiPaymentsConfigurationError(
@@ -193,12 +196,9 @@ class PaymentSellerStage:
 
     def _verifier_for(
         self, agreement: Mapping[str, Any], data: PaymentSettlementData,
+        anchor: SignedTransactionSnapshot | None = None,
     ) -> SnapshotVerifier:
-        return lambda signed, minimum_sequence: verify_snapshot(
-            signed, self.config.receipt_trust, mandate=data.mandate,
-            agreement_json=agreement, livemode=self.config.livemode,
-            minimum_sequence=minimum_sequence,
-        )
+        return pinned_snapshot_verifier(agreement, data, self.config, anchor=anchor)
 
     def settlement_data(self, agreement: Mapping[str, Any]) -> PaymentSettlementData:
         """Derive the acceptance artifact returned to the buyer and stored with the thread."""
@@ -220,18 +220,36 @@ class PaymentSellerStage:
         receipt: SignedReceipt | Mapping[str, Any],
         agreement: Mapping[str, Any],
         data: PaymentSettlementData,
+        *,
+        anchor: SignedTransactionSnapshot | None = None,
     ) -> bool:
+        """Revalidate a stored receipt against the Agreement, mandate and mode.
+
+        A re-anchored deal's receipt also matches through its persisted
+        ``anchor`` once its issuer's pin is removed: the anchor must embed this
+        receipt exactly and itself verify for the deal.
+        """
+
         assert self.config.service_identity is not None
-        return verify_receipt(
+        if verify_receipt(
             receipt,
             self.config.receipt_trust,
             mandate=data.mandate,
             agreement_json=dict(agreement),
             livemode=self.config.livemode,
-        )
+        ):
+            return True
+        if anchor is None:
+            return False
+        try:
+            stored = SignedReceipt.model_validate(receipt)
+        except ValueError:
+            return False
+        return anchor.snapshot.receipt == stored and self._snapshot_verifier(agreement, data, anchor)(anchor, 0)
 
     def check_receipt_now(
-        self, agreement: Mapping[str, Any], data: PaymentSettlementData
+        self, agreement: Mapping[str, Any], data: PaymentSettlementData,
+        *, anchor: SignedTransactionSnapshot | None = None,
     ) -> ReceiptOutcome:
         txid = data.transaction_id
         try:
@@ -251,14 +269,15 @@ class PaymentSellerStage:
         if snapshot.snapshot.transaction.root != txid:
             return ReceiptBlocked(txid, "payments service returned another transaction")
         assert self.config.service_identity is not None
-        if not self._snapshot_verifier(agreement, data)(snapshot, 0):
+        if not self._snapshot_verifier(agreement, data, anchor)(snapshot, 0):
             return ReceiptInvalid(txid, "payments snapshot does not prove the accepted Agreement")
         return ReceiptVerified(txid, snapshot.snapshot.receipt)
 
     async def check_receipt(
-        self, agreement: Mapping[str, Any], data: PaymentSettlementData
+        self, agreement: Mapping[str, Any], data: PaymentSettlementData,
+        *, anchor: SignedTransactionSnapshot | None = None,
     ) -> ReceiptOutcome:
-        return await asyncio.to_thread(self.check_receipt_now, agreement, data)
+        return await asyncio.to_thread(lambda: self.check_receipt_now(agreement, data, anchor=anchor))
 
     def deposit_now(self, agreement: Mapping[str, Any], data: PaymentSettlementData) -> None:
         """Attach the Agreement when the selected option advertises deposit.
@@ -285,13 +304,36 @@ class PaymentSellerStage:
 
     def payment_adapter(
         self, agreement: Mapping[str, Any], data: PaymentSettlementData, *, minimum_sequence: int = 0,
+        anchor: SignedTransactionSnapshot | None = None,
     ) -> PaymentAdapter:
-        """Bind the payee's lifecycle port without taking ownership of its watch cursor."""
+        """Bind the payee's lifecycle port without taking ownership of its watch cursor.
+
+        ``anchor`` is the deal's persisted re-anchoring snapshot, once it has one.
+        """
 
         return PaymentAdapter(
             agreement, data, account=selected_payment_option(agreement).payee_account,
-            client_for_owner=self._client_for_owner, verify_snapshot=self._snapshot_verifier(agreement, data),
+            client_for_owner=self._client_for_owner,
+            verify_snapshot=self._snapshot_verifier(agreement, data, anchor),
             minimum_sequence=minimum_sequence, snapshot_freshness_seconds=self.config.snapshot_freshness_seconds,
+        )
+
+    def reanchoring_evidence_now(
+        self, agreement: Mapping[str, Any], data: PaymentSettlementData, *, receipt: SignedReceipt,
+        minimum_sequence: int = 0, anchor: SignedTransactionSnapshot | None = None,
+    ) -> ReanchoringEvidence:
+        """Read the deal fresh under the payee's credential and verify it as re-anchoring evidence.
+
+        Raises ``ReanchoringRefused`` when the snapshot cannot re-anchor the deal,
+        and the payments client's error when the read fails; nothing is persisted.
+        """
+
+        with self._client_for_owner(selected_payment_option(agreement).payee_account) as client:
+            signed = client.get_transaction(data.transaction_id)
+        return reanchoring_evidence(
+            signed, self.config.receipt_trust, negotiation_id=str(agreement["negotiation_id"]),
+            receipt=receipt, mandate=data.mandate, agreement_json=agreement, livemode=self.config.livemode,
+            minimum_sequence=minimum_sequence, anchor=anchor,
         )
 
     def reverse_now(

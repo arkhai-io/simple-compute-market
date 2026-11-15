@@ -598,6 +598,27 @@ proven against an in-process engine signing under two keys. This change owns
 rotation policy, configuration and the adapter seam, not the cryptographic proof
 implementation.
 
+Proposed by section 5's work in progress, which returned the change to design
+to settle it (the section's notes in tasks.md list the open questions): the shared
+verifier takes the deal's persisted anchor as an optional input: a configured key's earlier attestation of the exact embedded receipt stands
+in for the receipt issuer's pin, so a re-anchored deal keeps verifying once the
+retiring key is removed, and stops verifying once the anchor's own signer is
+removed (a later rotation re-anchors it again). The evidence store holds each
+re-anchoring snapshot as an item of its own beside the original receipt, and the
+deal's anchor is the latest one by sequence, then by the authority's observation
+instant (an idle deal re-anchored at a later rotation keeps its sequence), so a
+stale item never displaces it. The verifier does not re-prove an anchor's origin:
+like the minimum sequence, the anchor is the caller's own durable record of a
+re-anchoring the kit accepted, and only such a record may be supplied. The seller
+stage's receipt checks and stored-receipt revalidation take the same anchor;
+supplying it from the evidence store is convergence's composition. Configuration
+admits exactly one non-retiring identity, the current one, so "signed by a current
+identity" is unambiguous. Rejected: keeping a retired key's pin configured for as
+long as a re-anchored deal runs, which is the forever-pin the overlap replaces; and
+treating every configured key's snapshot as attesting its embedded receipt without a
+re-anchoring record, which would trust a receipt no verifiable issuer was ever seen
+to sign.
+
 ### D8. Vectors, qualification and consumer scenarios
 
 Evidence carries one of two labels, those of test-compatibility's "The in-lane

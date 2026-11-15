@@ -74,6 +74,17 @@ Approval expiry in `arkhai.payments.v1` option parameters MUST be read under eit
 - **WHEN** a storefront publishes a rate option naming `approval_window`
 - **THEN** the registry accepts and returns it unchanged, holding mechanism parameters opaquely
 
+### Requirement: Receipt identity overlap is operator configuration
+`[Settlement.arkhai_payments].receipt_identities` MUST list the current `service_identity`, not retiring, beside any retiring identities, each retiring entry with its retirement date as `valid_until`. It MUST list no other identity as not retiring, and no identity twice. The kit MUST NOT hard-code an overlap: without the list the current identity alone is trusted, and an overlap lasts exactly as long as the operator's retiring entries say.
+
+#### Scenario: An operator rotates the receipt key
+- **WHEN** a configuration names the new key as `service_identity` and lists it beside the old key, retiring at a stated `valid_until`
+- **THEN** both pins verify within their windows, and only the new key counts as current
+
+#### Scenario: A rotation is configured ambiguously
+- **WHEN** `receipt_identities` omits the current identity, lists a second identity as not retiring, lists an identity twice, or lists a retiring identity without `valid_until`
+- **THEN** the configuration is refused, naming the rule it breaks
+
 ### Requirement: Compute buyers select what the payments buyer helper can approve
 Both compute buyers MUST take the lifecycle capabilities of their payments term context — a stoppable rate part and the partial-period treatments the vendored contract encodes — from the payments kit's buyer helper, the same set mandate derivation and seller presets use, rather than declare their own. Other mechanisms keep their own contexts. A buyer whose term validation or dispute-authority acceptance refused every advertised option MUST be told each distinct reason at normal verbosity, and a `buy` that finds nothing for that reason MUST NOT exit as a successful empty search.
 

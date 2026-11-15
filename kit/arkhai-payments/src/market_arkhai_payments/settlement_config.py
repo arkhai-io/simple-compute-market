@@ -112,11 +112,21 @@ class ArkhaiPaymentsConfig(BaseModel):
 
     @model_validator(mode="after")
     def current_receipt_identity(self) -> ArkhaiPaymentsConfig:
-        if self.receipt_identities and not any(
-            item.identity == self.service_identity and not item.retiring
-            for item in self.receipt_identities
-        ):
+        # A rotation's overlap is the operator's configuration: the current
+        # identity beside retiring ones, each retiring entry closing at its own
+        # retirement date (``valid_until``). One current key keeps "signed by a
+        # current identity", which re-anchoring requires, unambiguous.
+        if not self.receipt_identities:
+            return self
+        if not any(item.identity == self.service_identity and not item.retiring
+                   for item in self.receipt_identities):
             raise ValueError("receipt_identities must include the current service_identity")
+        if any(item.identity != self.service_identity and not item.retiring
+               for item in self.receipt_identities):
+            raise ValueError("receipt_identities may list only the current service_identity as not retiring")
+        listed = [(item.identity.scheme, item.identity.identifier) for item in self.receipt_identities]
+        if len(set(listed)) != len(listed):
+            raise ValueError("receipt_identities lists an identity more than once")
         return self
 
     @field_validator("service_url")

@@ -2024,6 +2024,34 @@ convergence persist outputs through their existing ports.
       foundation verifier accepting identity sets with validity windows, embedded
       receipt attestation and a caller-supplied minimum sequence; do not implement
       a parallel proof verifier.
+      As built: the gate held — the foundation's `ReceiptIdentity` (`valid_from`,
+      `valid_until`, `retiring`), `[Settlement.arkhai_payments].receipt_identities`
+      and `verify_snapshot`'s windows, attestation and minimum sequence were already
+      in `receipts.py` and `settlement_config.py`. Configuration now also admits only
+      the current `service_identity` as not retiring and no identity twice
+      (`current_receipt_identity`), so "current" is unambiguous; nothing hard-codes
+      an overlap. The new `market_arkhai_payments.reanchoring.reanchoring_evidence`
+      returns `ReanchoringEvidence` only after `verify_snapshot` accepts the snapshot
+      (mandate, parties, mode, identity windows, sequence floor), the snapshot embeds
+      the deal's original receipt exactly, and a current, not retiring, pin signed it
+      (`receipts.snapshot_signer`); it refuses a once-only mandate and a mode change
+      (`ReanchoringRefused`). `PaymentSellerStage.reanchoring_evidence_now` reads the
+      deal fresh under the payee's credential and calls it. Outside the plan, found
+      on the way: `pinned_snapshot_verifier`, which the kit's examples and several
+      kit and domain tests compose (production goes through the stage's verifier,
+      which already bound every configured pin), bound only `service_identity`; it
+      now binds `config.receipt_trust`, unchanged for a configuration without a
+      list, and the stage's verifier delegates to it.
+      Tests: payments `test_reanchoring.py` (unit, over in-process doubles: the
+      kit's engine signing under two keys and a protocol-faithful in-memory
+      evidence store, not a consumer's): during the overlap the old receipt
+      verifies without an anchor; a snapshot from the not-yet-rotated engine
+      verifies but is refused as evidence (retiring signer); a mode change and a
+      once-only mandate are refused;
+      `test_settlement_config.py`'s
+      `test_receipt_identities_name_one_current_key_beside_dated_retiring_ones` (unit:
+      an overlap's trust order, no list means the current key alone, and each
+      refusal).
 - [ ] 5.3 Integrate durable anchor replacement via the evidence-store port while
       keeping original bytes; expose dependent/unanchored deals for convergence's
       status. Refuse stale-anchor rollback and mode-change re-anchoring. Document
@@ -2034,12 +2062,182 @@ convergence persist outputs through their existing ports.
       ("Snapshot verification accepts bounded identity history"). Record in the
       settlement-configuration and settlement-servicing deltas, and in
       `docs/development/DEPLOYMENT_AND_CONFIG.md` at closeout.
+      As built: `record_reanchoring(store, evidence, recorded_at=)` puts the snapshot
+      through the lifecycle `EvidenceStore` port as an item of its own (kind
+      `arkhai.payments.reanchoring-snapshot.v1`, ID the digest of its wire JSON),
+      beside the untouched original receipt, refusing evidence older than the
+      persisted anchor or attesting another receipt or mode;
+      `reanchored_snapshot(record)` returns the deal's anchor, its latest
+      re-anchoring snapshot by sequence, then by the authority's `observedAt` (an
+      idle deal keeps its sequence across rotations). The shared verifier takes that
+      anchor (`verify_snapshot(..., anchor=)`; `pinned_snapshot_verifier(...,
+      anchor=)`; the stage's `payment_adapter`, `check_receipt(_now)` and
+      `receipt_matches`, each `anchor=`): a configured key's earlier attestation of
+      the exact embedded receipt stands in for the issuer's pin, so a re-anchored
+      deal verifies after the retiring key is removed, and stops once the anchor's
+      own signer is removed too. The verifier does not re-prove the anchor's
+      origin: like the minimum sequence it is the caller's own durable record
+      (design D7, as built; settlement-servicing MODIFIED "Snapshot verification
+      accepts bounded identity history"). One verifier, not a parallel one.
+      `reverse_now` takes no anchor: it refuses a rate deal, the only kind that
+      re-anchors. `retirement_inventory(deals, retiring, livemode=)` over
+      `AnchoredDeal`s lists `reanchor` (rate deals in the configured mode whose trust
+      rests on the key) and `must_drain` (once-only deals, and deals in the other
+      mode); `removable` when both are empty. Which deals are still serviced, when to
+      re-anchor, and the seller read's status are convergence's. Deltas:
+      settlement-configuration ADDED "Receipt identity overlap is operator
+      configuration"; settlement-servicing "Running hosted rate deals can re-anchor
+      during identity overlap" rewritten to the built behaviour, with new scenarios
+      for the anchor outliving the key and a retiring signer. The deployment
+      document's `receipt_identities` paragraph now states the new validation (it
+      would otherwise misdescribe the model); the retirement procedure is closeout's
+      (7.9). The kit README gains "Receipt key rotation and re-anchoring".
+      Tests, payments `test_reanchoring.py` (unit, as above): across a rate deal,
+      billing started under the old key, the engine rotates, the stage produces
+      evidence signed by the new key embedding the old receipt unchanged, it is
+      recorded twice (idempotent) and read back; with the old key removed an
+      adapter, receipt check and receipt revalidation without the anchor fail and
+      with it pass, the anchored adapter sends the payee's stop, and once the
+      anchor's signer is removed too it does not verify; an idle deal re-anchors at
+      a second rotation at the same sequence, the later anchor wins, the first key's
+      inventory is then empty and the deal verifies with only the newest key;
+      another deal's anchor neither verifies nor re-anchors this deal, and a store
+      holding it refuses this deal's evidence; evidence older than the persisted
+      anchor is refused, a stale item put anyway does not displace the anchor, and a
+      stale snapshot is refused against the anchor and against the caller's floor;
+      the retirement inventory over five deals.
+      Not claimed: a consumer's durable persistence or restart, which waits for
+      convergence; the store here is an in-memory fake of the port.
+      `make -C kit/arkhai-payments test`: mypy (30 files), vectors, generated models
+      and 355 passed (9 new re-anchoring cases, 1 new configuration case).
 
 Validation: configuration unit cases for retiring identities, rollback and mode
 change; kit integration with an in-process engine signing under two keys across a
 rate deal.
 Use the foundation's verified-snapshot fixtures. Consumer persistence/restart
 evidence waits for convergence; do not claim it from a stateless adapter test.
+
+## Section 5 notes and handoff
+
+- **Returned to design; work in progress, no task checked.** The task notes above
+  say "As built" for what the work-in-progress commit holds; none of it is
+  accepted. What was found: D7 has a re-anchored deal's fresh current-key snapshot
+  replace its approval evidence "before dependence on the retiring key is
+  removed", and 5.2 gates on the foundation verifier and forbids a parallel one.
+  The foundation verifier (`verify_snapshot` in
+  `kit/arkhai-payments/src/market_arkhai_payments/receipts.py`, as it stood at the
+  section's start) accepts an old receipt only while its issuer is a configured
+  pin: through the receipt's own signature, or as a retiring identity's receipt
+  attested by a current-key snapshot. Once the retiring pin is removed, every
+  later snapshot of a re-anchored deal, which still embeds the old receipt, is
+  refused, as are the seller stage's receipt check and stored-receipt
+  revalidation (`receipt_matches`). So re-anchoring as designed cannot remove the
+  dependence: D7 cannot be met without either changing the shared verifier or
+  redefining removal. Both fresh-context checks raised this as a design decision
+  made in implementation. `proposal.md` keeps "snapshot-proof verification
+  itself" with the foundation, and D7 says this change owns "not the
+  cryptographic proof implementation". What design must decide:
+  1. How a re-anchored deal verifies after its retiring pin is removed:
+     - (a) The shared verifier takes the deal's persisted anchor. A configured
+       key's earlier attestation of the exact receipt stands in for the issuer's
+       pin. The anchor's origin is trusted as the caller's durable record, as the
+       minimum sequence is. This is what the work in progress built:
+       `verify_snapshot(..., anchor=)`, threaded through
+       `pinned_snapshot_verifier`, the stage's `payment_adapter`,
+       `check_receipt(_now)` and `receipt_matches`, with tests. Recommended:
+       it keeps one verifier and gives D7's "dependence removed" a meaning.
+     - (b) Retired pins stay configured, their windows closed, until every
+       dependent deal ends. That makes re-anchoring moot, and it is close to the
+       forever-pin D7 rejects.
+     - (c) The foundation owns the verifier change, and this change consumes it.
+  2. Whether this change may change the shared verifier and the permanent
+     "Snapshot verification accepts bounded identity history". The work in
+     progress adds a MODIFIED delta. Otherwise `proposal.md` and D7's ownership
+     line are amended.
+  3. Buyer-side rotation. Both buyers verify their rate deals under their own pins
+     with no anchor. The options are (a) buyers keep a retiring pin until their
+     rate deals end, bounded by the maximum term, stated in D7 and not called a
+     forever-pin (the work in progress records this as an unowned gap row), or
+     (b) buyers re-anchor too.
+  4. The anchor's reach and convergence's obligation. `reverse_now` takes no
+     anchor, so after removal a re-anchored rate deal's refund answers `NotPaid`
+     where it answered `RefundBlocked` before. Storefronts drop a refund intent
+     on `NotPaid`. If (1a) stands, either `reverse_now` takes the anchor, or a
+     rate deal is refused before the receipt check. Supplying anchors to
+     verification belongs in `converge-ongoing-compute-leases`' tasks and
+     deal-lifecycle delta, which name persisting and reporting only.
+  5. Whether `ReanchoringEvidence` must be constructible only through the
+     verifying function, given that a persisted anchor is trusted without re-proof.
+  Done in the work in progress, for whichever answer keeps it: the
+  one-current-identity configuration validator; `reanchoring_evidence`, refusing
+  once-only, mode change, retiring signer and stale sequence;
+  `record_reanchoring` and `reanchored_snapshot`, ordered by sequence then
+  `observedAt`; `retirement_inventory`; and the deltas, D7 paragraph and README
+  section describing them. `make -C kit/arkhai-payments test` passed 355, and
+  `scripts/change-workflow run pre-commit` passed all three hooks before the last
+  guard fix (`receipt_matches` returning `False` on a malformed receipt with an
+  anchor). Not done: unit cases for `_anchors`' mode and same-transaction checks
+  in `test_receipts.py`; a test of a snapshot not embedding the deal's receipt;
+  sequence-specific assertions in place of the verifier's generic refusal match.
+  The second check found these, and the answer to (1) decides them.
+- No lane configuration changed: with 5.1's proposed declaration dropped, the lane
+  profiles under `e2e-tests/config` carry nothing for rotation, and no lane
+  rotates a key.
+- End-to-end scenarios exercising this section: none rotates a receipt key. Every
+  payments scenario (`e2e_vm_payment_deal`, `e2e_vm_payment_purchase`, the six
+  `e2e_vm_dispute_*`, `e2e_bare_metal_payment_deal`, `e2e_credits_payment_deal` and
+  both recurring purchases) crosses the seller stage's verifier and
+  `verify_snapshot`, which behave as before without an anchor or
+  `receipt_identities`. Owed by validation: none.
+- For convergence: it persists `ReanchoringEvidence` with `record_reanchoring`
+  into its evidence store, supplies `reanchored_snapshot(record)` as `anchor=` to
+  each deal's adapter, receipt check and stored-receipt revalidation (both
+  storefronts' `settlement_stages.py` call `receipt_matches`), builds `AnchoredDeal`s (mandate,
+  original receipt, anchor) for every deal still serviced against the authority,
+  and reports `retirement_inventory`'s lists as its "awaiting re-anchoring" and
+  "must drain" statuses. The kit decides nothing about when: a deal re-anchors
+  when its fresh snapshot is signed by the current key, so convergence asks
+  during the overlap, after the engine has rotated.
+- A re-anchored deal re-anchors again at the next rotation: its trust rests on the
+  anchor's signer, which `AnchoredDeal.trusted_signer` reports, so the inventory
+  lists it once that key retires.
+- The deal-servicing `SQLiteEvidenceStore` would make a real-storage test of
+  `record_reanchoring`, but `kit/deal-servicing` dev-depends on this kit, so the
+  test would belong there; it is left for convergence, whose consumer test it is.
+- Buyers do not re-anchor: both compute buyers verify their rate deals under their
+  own pins with no anchor. Recorded as an unowned gap row under this change in
+  `openspec/changes/README.md`; until it is designed, a buyer keeps a retiring pin
+  until its rate deals end.
+- Left for closeout (7.9, 7.10): `reanchoring.py`'s module docstring cites
+  settlement-servicing's "Running hosted rate deals can re-anchor during identity
+  overlap", which resolves once the delta archives; `DEPLOYMENT_AND_CONFIG.md`'s
+  payments paragraph still calls a receipt identity change a cutover (true of a
+  change without an overlap) and does not yet describe the anchor or the
+  retirement procedure (re-anchor rate deals, drain the rest, then remove the key).
+- The fresh-context compliance check found no layering, packaging or
+  comment-hygiene breach. Fixed: an idle deal re-anchored at a later rotation kept
+  its first anchor, since a same-sequence tie went to the oldest item (now ordered
+  by sequence, then `observedAt`, with a test); the anchor reached only the
+  adapter, not the stage's receipt check or stored-receipt revalidation (both now
+  take it, with tests); the anchor's provenance was not stated (it is the
+  caller's durable record, now said in the verifier, the module, D7 and the
+  delta); the permanent "Snapshot verification accepts bounded identity history"
+  left unmodified (now a MODIFIED delta); untested refusals (another deal's
+  anchor, a store anchored to another receipt); test levels labelled library
+  integration (now unit, over in-process doubles); overstated notes on
+  `pinned_snapshot_verifier`'s reach and the end-to-end crossing; a hard-coded
+  scheme; the stage's duplicate verifier binding. Declined: returning to design
+  over the verifier's extension — D7 has the re-anchored snapshot replace the
+  approval evidence "before dependence on the retiring key is removed", which
+  needs verification to accept it afterwards, and extending the one verifier keeps
+  "no parallel verifier"; the choice is recorded in D7 for the round's review and
+  the owner's reading. Separate unit cases for `_anchors` in `test_receipts.py`:
+  its refusals are exercised through the public verifier in `test_reanchoring.py`.
+  Updating the deployment document's cutover sentence now: closeout's (above).
+- Pre-commit's first run passed after-functional-change (`make lock`) and
+  pre-commit-functional (`make dist-clean`, `make check-packaging`, `make test`,
+  every suite) and failed only history wording on a test docstring ("no longer"),
+  since fixed.
 
 ## 6. Qualification scenarios and pre-closeout review
 

@@ -66,6 +66,21 @@ The mandate MUST be derived only from the exact accepted Agreement, binding its 
 - **WHEN** stored settlement data or a counterparty's mandate carries mandate-level `authorities`, or a part without its own authorities or maximum hold extension
 - **THEN** it is refused before any approval or verification, and the stored Agreement bytes and mandate are left as they are
 
+### Requirement: Snapshot verification accepts bounded identity history
+
+Hosted snapshot verification MUST accept configured current/retiring identities with validity windows, embedded-receipt attestation and a caller-supplied minimum sequence. It MUST refuse unverified, cross-deal, mode-changed or regressing state. A fresh current-key snapshot MAY attest an embedded old receipt while retaining original bytes; consumers MUST NOT implement a parallel verifier. Verification MAY take the deal's persisted re-anchoring snapshot as an anchor: a snapshot embedding exactly the anchor's receipt, for the same transaction and mode, MUST then verify without that receipt's issuer configured, for as long as a configured identity valid at the anchor's observation signed the anchor. The anchor MUST be the caller's own durable record of an accepted re-anchoring; the verifier does not re-prove its origin.
+
+#### Scenario: Rotation re-anchors an old receipt
+
+- **WHEN** a current-key snapshot attests an old receipt during the configured identity overlap
+- **THEN** verification checks identity windows, commitment and mode binding and minimum sequence before supplying re-anchoring evidence
+
+#### Scenario: An anchor stands in for a removed issuer
+
+- **GIVEN** a deal's persisted anchor signed by a configured identity
+- **WHEN** a later snapshot embeds the anchor's receipt and the receipt's issuer is no longer configured
+- **THEN** verification accepts it through the anchor, and refuses it once the anchor's signer is no longer configured
+
 ## ADDED Requirements
 
 ### Requirement: A rate mandate authorizes from the accepted rights
@@ -349,7 +364,7 @@ One payments transaction adapter MUST implement the lifecycle payment-adapter pr
 - **THEN** the adapter sends nothing to the authority and reports a no-op start
 
 ### Requirement: Running hosted rate deals can re-anchor during identity overlap
-SCM MUST provide current-key verified snapshots for rate re-anchoring during bounded identity overlap, preserving original bytes. Verification MUST accept identity validity windows, embedded old-receipt attestation and a caller-supplied minimum sequence. Retirement MUST inventory all hosted deals: rate deals MUST re-anchor or drain; once-only deals MUST drain. Mode changes MUST require draining.
+`kit/arkhai-payments` MUST provide current-key verified snapshots for rate re-anchoring during bounded identity overlap, preserving the original receipt's bytes and proof. Re-anchoring evidence MUST be produced only through the shared snapshot verifier, which binds the mandate, parties, mode and the caller's minimum sequence, from a fresh snapshot that embeds the deal's original receipt exactly and is signed by the current, not a retiring, identity. The kit MUST persist the evidence through the caller's evidence store beside the deal's original evidence, refusing evidence older than the persisted anchor, and the deal's current anchor MUST be its latest re-anchoring snapshot by sequence, then by the authority's observation instant. The shared verifier MUST accept a caller-supplied anchor in place of the original receipt issuer's pin, for as long as the anchor's own signer stays configured, and the seller stage's adapter, receipt check and stored-receipt revalidation MUST take the same anchor. Retirement MUST inventory every hosted deal still serviced against the authority whose trust rests on the retiring key: rate deals in the configured mode MUST re-anchor, and once-only deals and deals in the other mode MUST drain; the key is removable only when none remains. Re-anchoring MUST be refused for once-only deals and across a mode change.
 
 #### Scenario: An old-key receipt is embedded in a new-key snapshot
 - **GIVEN** an old receipt verified during the configured overlap
@@ -357,10 +372,25 @@ SCM MUST provide current-key verified snapshots for rate re-anchoring during bou
 - **THEN** SCM provides that snapshot for durable replacement of the approval trust anchor
 - **AND** the retiring key is removable only after dependent deals re-anchor or drain
 
+#### Scenario: A re-anchored deal outlives the retiring key
+- **GIVEN** a rate deal whose persisted anchor is a current-key snapshot attesting its old receipt
+- **WHEN** the old key is removed from configuration and the deal is read or stopped
+- **THEN** its snapshots verify through the anchor, and a deal without an anchor does not verify
+- **AND** once the anchor's own signer is removed too, the anchor attests nothing
+
+#### Scenario: A retiring key signs the fresh snapshot
+- **WHEN** a fresh snapshot verifies but is signed by a retiring identity
+- **THEN** it is refused as re-anchoring evidence
+
+#### Scenario: An idle deal re-anchors at a later rotation
+- **GIVEN** a deal anchored by one key, with no authority event since
+- **WHEN** the next rotation's fresh snapshot, at the same sequence, re-anchors it
+- **THEN** that snapshot becomes the deal's anchor, and the earlier key's retirement no longer waits on the deal
+
 #### Scenario: A stale snapshot attempts to restore old trust
 - **WHEN** a restart sees evidence below the persisted sequence or signed only by a retired key
 - **THEN** it cannot replace the current approval evidence or revive the retired anchor
 
 #### Scenario: Test mode changes to live
 - **WHEN** payment livemode changes
-- **THEN** the running test-mode deal cannot re-anchor as a live deal
+- **THEN** the running test-mode deal cannot re-anchor as a live deal, and the inventory reports it as one that must drain

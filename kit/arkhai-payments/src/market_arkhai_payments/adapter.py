@@ -44,14 +44,20 @@ RATE_COMMANDS = frozenset({"start", "stop", "notice", "reverse"})
 
 def pinned_snapshot_verifier(
     agreement: Mapping[str, Any], data: PaymentSettlementData, config: ArkhaiPaymentsConfig,
+    *, anchor: SignedTransactionSnapshot | None = None,
 ) -> SnapshotVerifier:
-    """Bind the shared snapshot verifier to the configured current service pin."""
+    """Bind the shared snapshot verifier to the configured receipt identities.
+
+    The current and retiring pins both apply, so a running deal keeps verifying
+    through a rotation's overlap; ``anchor``, the deal's persisted re-anchoring
+    snapshot, keeps it verifying once the retiring pin is removed.
+    """
 
     def verify(signed: SignedTransactionSnapshot, minimum_sequence: int) -> bool:
-        trusted = config.service_identity
-        return trusted is not None and verify_snapshot(
-            signed, trusted, mandate=data.mandate, agreement_json=agreement,
-            livemode=config.livemode, minimum_sequence=minimum_sequence,
+        trust = config.receipt_trust
+        return bool(trust) and verify_snapshot(
+            signed, trust, mandate=data.mandate, agreement_json=agreement,
+            livemode=config.livemode, minimum_sequence=minimum_sequence, anchor=anchor,
         )
 
     return verify
