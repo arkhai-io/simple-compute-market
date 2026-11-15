@@ -674,7 +674,7 @@ satisfy none of them and enable no published production servicing.
 
 Approval expiry has one name, `approval_window`. The released `arkhai.payments.v1`
 option parameter is `window`, and a contract carrying its own version is never
-changed in place (`docs/development/RELEASING.md`), so the rename runs in stages over
+changed in place (`docs/guidance/engineering/versioning.md`), so the rename runs in stages over
 three releases:
 
 1. This change's release: readers of `arkhai.payments.v1` option parameters accept
@@ -690,7 +690,7 @@ three releases:
 Steps 2 and 3, with the `bare-metal teardown` alias's removal (D6a), are one unowned
 gap row in `openspec/changes/README.md`, each step triggered by its release. A
 registry acceptance test proves rate options carrying `approval_window` pass the
-registry, which holds mechanism parameters opaquely. `RELEASING.md` gains the
+registry, which holds mechanism parameters opaquely. The versioning guidance gains the
 staged-rename rule as a path for deprecating a field, not a limit on how a contract
 may change.
 
@@ -981,7 +981,7 @@ holding an anchor of their own, which only D17's rejected anchor would need.
 
 The payments kit carries no retirement inventory. The operator finds a seller's open
 payment deals through the seller read and list that already exist, and follows the
-cutover rule in `docs/development/DEPLOYMENT_AND_CONFIG.md`: drain or refund before the
+cutover rule in `openspec/specs/settlement-configuration/configuration.md`: drain or refund before the
 change. A `livemode` change is the same cutover, as that rule already states. Rejected:
 a kit inventory of the deals resting on a retiring key, which served only re-anchoring.
 
@@ -1006,7 +1006,7 @@ than `service_identity` alone, so it honours the configuration the seller stage'
 verifier already honoured, and the stage delegates to it rather than bind its own
 copy. That is a small, understood defect against "Snapshot verification accepts
 bounded identity history", fixed here
-(`openspec/README.md#defects-found-during-a-change`).
+(`docs/guidance/workflow/changes.md#defects-found-during-a-change`).
 
 ### D23. No anchor reaches the seller's refund
 
@@ -1041,7 +1041,7 @@ Recorded under "Implementation cadence" below.
 The buyer checks the payments receipt only after `approve` has moved funds, so a buyer
 whose configuration still names the old identity after a switch has its funds approved
 and held while its `buy` fails, and never posts settlement. The cutover rule in
-`docs/development/DEPLOYMENT_AND_CONFIG.md` states it: buyers update their receipt
+`openspec/specs/settlement-configuration/configuration.md` states it: buyers update their receipt
 identity before approving after the change. Rejected: checking the service's current
 key before approval, which needs the service to publish its key and is migration
 engineering for a rotation never deployed.
@@ -1149,21 +1149,21 @@ Destinations are planned, not claims of implemented behaviour.
 | D3 external contract context | `openspec/specs/deal-lifecycle/architecture.md`, "External authorities" |
 | D4–D5 pure rate authorization, envelope consumption, operation identity, authority-priced `partialPeriod` and the journaled exceptional-end filing | `openspec/specs/settlement-servicing/spec.md` and `architecture.md` |
 | D6–D6a seller notice, the rate buyer end and the CLI | `deal-lifecycle` `spec.md` (foundation-created; [delta](specs/deal-lifecycle/spec.md)) and `architecture.md`; `docs/development/ARCHITECTURE.md`, "Release" |
-| D4's freshness window | `openspec/specs/settlement-servicing/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` for `snapshot_freshness_seconds` |
+| D4's freshness window | `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/settlement-configuration/configuration.md`, "Settlement consumer configuration and cutover", for `snapshot_freshness_seconds` |
 | D5's approval policy | `openspec/specs/buyer-orchestration/spec.md` |
 | D6's administrator interrupt classification and routes | `deal-lifecycle` `spec.md` and `architecture.md` for the kit classification; `openspec/specs/compute-delivery/spec.md` for both compute storefronts' route, since no bare-metal storefront specification exists and compute-delivery is the capability whose requirements bind both ([delta](specs/compute-delivery/spec.md)) |
 | D6a's end verb | `deal-lifecycle` `spec.md`; `openspec/specs/buyer-orchestration/spec.md`; `openspec/specs/test-compatibility/spec.md` for the bare-metal purchase's `end`; `deal-lifecycle` and `buyer-orchestration` `architecture.md`, which still name `market bare-metal teardown` |
-| D7 declarations, the materialization door and the `chosen` presupposition | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/deal-lifecycle/architecture.md`, "External authorities"; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
-| D17 a receipt identity change is a drained cutover, and why draining suffices | `openspec/specs/settlement-configuration/spec.md` ([delta](specs/settlement-configuration/spec.md)); `openspec/specs/settlement-servicing/architecture.md`, "Charge-first payment settlement", beside its current/retiring pins, for why a key change drains rather than re-anchors; `docs/development/DEPLOYMENT_AND_CONFIG.md`, its cutover paragraph |
+| D7 declarations, the materialization door and the `chosen` presupposition | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/deal-lifecycle/architecture.md`, "External authorities"; `openspec/specs/settlement-configuration/configuration.md` |
+| D17 a receipt identity change is a drained cutover, and why draining suffices | `openspec/specs/settlement-configuration/spec.md` ([delta](specs/settlement-configuration/spec.md)); `openspec/specs/settlement-servicing/architecture.md`, "Charge-first payment settlement", beside its current/retiring pins, for why a key change drains rather than re-anchors; `openspec/specs/settlement-configuration/configuration.md`, its cutover paragraph |
 | D18 the verifier unchanged, its scenario reworded to what it does | `openspec/specs/settlement-servicing/spec.md` ([delta](specs/settlement-servicing/spec.md)), "Snapshot verification accepts configured identity history", replacing "Snapshot verification accepts bounded identity history" |
 | D19–D20, D23 buyers alike, draining by procedure, no anchor | No permanent destination beyond D17's: each states what the system does not add |
 | D21 convergence's withdrawn rotation work | `openspec/changes/README.md`, convergence's notes (its own design amends its documents) |
 | D22 `pinned_snapshot_verifier` honours `receipt_identities` | No new destination: the settlement-servicing requirement "Snapshot verification accepts configured identity history" (D18's rename of "… bounded identity history", text unchanged) already requires it |
 | D24 the re-anchoring gap and roadmap criteria | `openspec/changes/README.md`, unowned gaps; `docs/development/ROADMAP.md` |
-| D26 buyers update their receipt identity before approving after a switch | `docs/development/DEPLOYMENT_AND_CONFIG.md`, its cutover paragraph |
-| Migration and backwards compatibility are engineered only for what has been deployed | `docs/development/RELEASING.md`, its compatibility policy, with a pointer from `docs/development/ARCHITECTURE.md` |
+| D26 buyers update their receipt identity before approving after a switch | `openspec/specs/settlement-configuration/configuration.md`, its cutover paragraph |
+| Migration and backwards compatibility are engineered only for what has been deployed | `docs/guidance/repository/package-versions.md`, "Compatibility is owed to what a release has shipped", with a pointer from `docs/development/ARCHITECTURE.md` |
 | D8 vectors, evidence labels and the recurring-purchase E2E | `openspec/specs/test-compatibility/spec.md` and `architecture.md`; `kit/arkhai-payments/README.md` |
-| D9 the staged `approval_window` rename | `openspec/specs/settlement-configuration/spec.md` (wire field and alias); `docs/development/RELEASING.md` |
+| D9 the staged `approval_window` rename | `openspec/specs/settlement-configuration/spec.md` (wire field and alias); `docs/guidance/engineering/versioning.md`, "A field may be renamed or retired in stages" |
 | D10 stop requests and final stops | `openspec/specs/deal-lifecycle/spec.md`; `openspec/specs/settlement-servicing/spec.md` |
 | D11 the composed transaction adapter | `openspec/specs/settlement-servicing/spec.md` and `architecture.md`; `openspec/specs/deal-lifecycle/spec.md` for the protocol |
 | D12–D15 end service's refusal of a rate deal it cannot service, its refusal code and the projection it reads | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md`, "One end instant, transactional admission" (where fails closed is enforced); `openspec/specs/compute-delivery/architecture.md`, "Commit and hold adoption" |
@@ -1171,9 +1171,9 @@ Destinations are planned, not claims of implemented behaviour.
 | D14's deadline barrier for a deal that is not once-only, its `awaiting_observation` admission answer and the payment observation instant | `openspec/specs/deal-lifecycle/spec.md` (with "Admission shares the end-service transaction and revision") and `architecture.md`; the observation table's migration in `docs/development/DEPLOYMENT_AND_CONFIG.md` and `kit/deal-servicing/README.md`, "Schema" (both updated with the code) |
 | D6a's watchdog status: the last-probe freshness rule, buyer-local and off the wire; the probe schedule on a monotonic clock and the probe timeout no longer than the interval, which its bound rests on; the `rejected` outcome of a refused stop and `buy`'s nonzero exit on it | `openspec/specs/deal-lifecycle/spec.md` (with 4B.6's watchdog requirement); `openspec/specs/buyer-orchestration/architecture.md` |
 | D16 the recurring-purchase scenario's shape | `openspec/specs/test-compatibility/spec.md` |
-| Each change is mergeable to `dev` on its own merits | `openspec/README.md` or `docs/agents/change-workflow.md` |
-| Sibling-domain parity is checked before adding behaviour to one domain | `AGENTS.md`, "Package and dependency discipline" |
-| A versioned contract's field is renamed or retired in stages | `docs/development/RELEASING.md` |
+| Each change is mergeable to `dev` on its own merits | the change workflow's guidance under `docs/guidance/workflow/`, where closeout's guidance placement puts it |
+| Sibling-domain parity is checked before adding behaviour to one domain | the guidance under `docs/guidance/`, where closeout's guidance placement puts it |
+| A versioned contract's field is renamed or retired in stages | `docs/guidance/engineering/versioning.md`, "A field may be renamed or retired in stages" |
 | Contradictory classes do not subclass one another | `docs/development/ARCHITECTURE.md` |
 | A timestamp is its source's claim, never an ordering | `docs/development/ARCHITECTURE.md`, authority boundaries |
 | The adapter and continuation boundary | `docs/development/ARCHITECTURE.md`, "Kit areas" and "Settlement servicing" |

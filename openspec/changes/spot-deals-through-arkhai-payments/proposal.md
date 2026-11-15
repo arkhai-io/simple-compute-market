@@ -228,8 +228,10 @@ domain or the persistence-owning servicing kit.
 - [x] `docs/development/ARCHITECTURE.md` — adapter and servicing ownership, the
   release flow, the subclassing principle and the timestamp principle
 - [x] Existing subsystem specifications — the seven capabilities above
-- [x] `docs/development/RELEASING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`,
-  `AGENTS.md` and the change workflow's guidance
+- [x] The versioning guidance (`docs/guidance/engineering/versioning.md`,
+  `docs/guidance/repository/package-versions.md`),
+  `openspec/specs/settlement-configuration/configuration.md`,
+  `docs/development/DEPLOYMENT_AND_CONFIG.md` and the guidance under `docs/guidance/`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -245,7 +247,7 @@ domain or the persistence-owning servicing kit.
 - D4 adapter commands, descriptor recording through the caller's operation store,
   pure rate authorization and the freshness window:
   `openspec/specs/settlement-servicing/spec.md` and its architecture companion;
-  `docs/development/DEPLOYMENT_AND_CONFIG.md` for the setting.
+  `openspec/specs/settlement-configuration/configuration.md` for the setting.
 - D5 authority-priced treatment and approval under the run's terms policy:
   `openspec/specs/settlement-servicing/spec.md`;
   `openspec/specs/buyer-orchestration/spec.md`.
@@ -261,12 +263,12 @@ domain or the persistence-owning servicing kit.
   presupposition: `openspec/specs/settlement-configuration/spec.md`;
   `openspec/specs/settlement-servicing/spec.md`;
   `openspec/specs/deal-lifecycle/architecture.md`;
-  `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+  `openspec/specs/settlement-configuration/configuration.md`.
 - D8 vectors, the two evidence labels and the recurring-purchase E2E:
   `openspec/specs/test-compatibility/spec.md` and its architecture companion.
 - D9 the staged `approval_window` rename:
   `openspec/specs/settlement-configuration/spec.md`;
-  `docs/development/RELEASING.md`.
+  `docs/guidance/engineering/versioning.md`.
 - D10 stop requests distinct from final stops, wire-compatible for released readers:
   `openspec/specs/deal-lifecycle/spec.md`;
   `openspec/specs/settlement-servicing/spec.md`.
@@ -294,14 +296,15 @@ domain or the persistence-owning servicing kit.
 - D17 a receipt identity change is a drained cutover, and why draining suffices:
   `openspec/specs/settlement-configuration/spec.md`;
   `openspec/specs/settlement-servicing/architecture.md`, "Charge-first payment
-  settlement"; `docs/development/DEPLOYMENT_AND_CONFIG.md`, its cutover paragraph.
+  settlement"; `openspec/specs/settlement-configuration/configuration.md`, its
+  cutover paragraph.
 - D18 the verifier unchanged, its scenario reworded to what it does:
   `openspec/specs/settlement-servicing/spec.md`, its requirement renamed "Snapshot
   verification accepts configured identity history", text unchanged.
 - D19: no permanent destination — buyers follow D17's cutover with no behaviour of
   their own.
 - D20: no permanent destination — draining is D17's procedure, already in the
-  deployment guide's cutover paragraph.
+  settlement configuration's cutover paragraph.
 - D21 convergence's withdrawn rotation work: `openspec/changes/README.md`,
   convergence's notes; its own design amends its documents.
 - D22: no permanent destination — `pinned_snapshot_verifier` honouring
@@ -312,17 +315,18 @@ domain or the persistence-owning servicing kit.
   unowned gaps; `docs/development/ROADMAP.md`.
 - D25: no permanent destination — the implementation cadence is planning's.
 - D26 buyers update their receipt identity before approving after a switch:
-  `docs/development/DEPLOYMENT_AND_CONFIG.md`, its cutover paragraph.
+  `openspec/specs/settlement-configuration/configuration.md`, its cutover paragraph.
 - Migration and backwards compatibility are engineered only for what has been
-  deployed: `docs/development/RELEASING.md`, its compatibility policy, with a
-  pointer from `docs/development/ARCHITECTURE.md`.
-- Each change is mergeable to `dev` on its own merits: `openspec/README.md` or
-  `docs/agents/change-workflow.md`.
+  deployed: `docs/guidance/repository/package-versions.md`, "Compatibility is owed
+  to what a release has shipped", with a pointer from
+  `docs/development/ARCHITECTURE.md`.
+- Each change is mergeable to `dev` on its own merits: the change workflow's
+  guidance under `docs/guidance/workflow/`.
 - Check a sibling domain before adding behaviour to one; a difference needs a
-  reason stated where it lives: `AGENTS.md`, "Package and dependency discipline".
+  reason stated where it lives: the guidance under `docs/guidance/`.
 - A versioned contract's field may be renamed or retired in stages, a path for
   deprecating a field and not a limit on how a contract may change:
-  `docs/development/RELEASING.md`.
+  `docs/guidance/engineering/versioning.md`.
 - Contradictory classes implement a shared interface or a common base rather than
   subclass one another: `docs/development/ARCHITECTURE.md`.
 - A timestamp is its source's claim, never an ordering between parties:

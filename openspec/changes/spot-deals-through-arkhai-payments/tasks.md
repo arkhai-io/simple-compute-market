@@ -382,8 +382,8 @@ Evidence, all at HEAD with the fixes, after `make dist`:
   and `test_settlement_composition.py` 23 passed). Declined: moving the two new
   test files into `unit/`/`integration/` directories, since both packages' test
   roots are flat today.
-- `make test`'s release tooling found `docs/development/RELEASING.md`'s dependency
-  table missing `arkhai-kit-deal-lifecycle-client` for both storefronts, which
+- `make test`'s release tooling found the published packages' dependency table (now
+  `docs/guidance/repository/published-packages.md`) missing `arkhai-kit-deal-lifecycle-client` for both storefronts, which
   section 4 made a runtime dependency; the rows now list it.
 - `scripts/change-workflow run pre-commit`, after the owner restored a build
   environment file outside this checkout that an earlier run had found missing:
@@ -401,7 +401,7 @@ Files: kit/arkhai-payments (adapter.py, rate_adapter.py, operations.py, seller.p
 buyer.py, mandates.py, settlement_config.py, presets.py and their tests);
 kit/deal-lifecycle/src/market_deal_lifecycle/adapters.py (the protocol);
 kit/deal-lifecycle-contracts (models and version); kit/deal-lifecycle-buyer and both
-buyers' adapter construction; docs/development/RELEASING.md;
+buyers' adapter construction; docs/guidance/engineering/versioning.md;
 openspec/changes/README.md (the staged-rename gap row). Owner record points R9, R12,
 R13, R15 and R19.
 
@@ -474,7 +474,8 @@ R13, R15 and R19.
       writing `window`; the `arkhai_payments.approval_window` discovery field replaces
       the duplicate projection, `arkhai_payments.window` kept for once options. The
       alias carries a comment stating its invariant. Add the staged-rename rule to
-      `docs/development/RELEASING.md` in the owner's wording (design.md's promotion
+      the versioning policy in the owner's wording, since moved with that policy to
+      `docs/guidance/engineering/versioning.md` (design.md's promotion
       record), and one unowned gap row in `openspec/changes/README.md` for release
       N+1 (once writers switch) and N+2 (alias removed), joined by task 4B.2's
       `teardown` alias removal. A registry acceptance test proves rate options
@@ -935,7 +936,8 @@ without `once_only` and drives a commit; domains/compute/delivery/src/compute_de
 both storefronts' recurring worlds and settlement tests for the application cases;
 any storefront code matching or serializing `RepairReason`;
 domains/vms/storefront/tests/integration/test_lifecycle_admin.py (`approve_rate`'s
-comment); package versions per `docs/development/RELEASING.md`, "Versioning policy".
+comment); package versions per `docs/guidance/repository/package-versions.md`,
+"Versioning policy".
 
 - [x] 4C.1 The refusal code (D14): `DeliveryAuthorization` gains an optional closed
       `code` (`"rate_servicing_unavailable"`), absent by default. Every existing
@@ -2754,7 +2756,7 @@ that service's own suite establishes its ledger/payout internals.
   bare-metal storefront 646) and pre-commit (index, tasks, skills, OpenSpec
   strict, `make check-repository`: comment hygiene, documentation citations,
   history wording, local imports and the rest) all passed.
-- **Outside the plan, fixed here** (`openspec/README.md#defects-found-during-a-change`):
+- **Outside the plan, fixed here** (`docs/guidance/workflow/changes.md#defects-found-during-a-change`):
   seven deal-servicing first-use examples created no table since the
   stateful-service migration change on `dev`, and the payments kit's once example
   expected one event where the authority now records the once part's terms end
@@ -2853,22 +2855,24 @@ this change to implementation and review.
       architecture.md (evidence labels; "Ordinary Arkhai purchase evidence": the
       recurring purchase through commit), docs/development/ARCHITECTURE.md
       (Kit areas, Settlement servicing and Release, and the two principles below),
-      docs/development/DEPLOYMENT_AND_CONFIG.md (servicing, `snapshot_freshness_seconds`;
-      in the payments paragraph that calls a receipt identity change a cutover: open
-      payment deals drained or refunded before the change, refunds first since a
-      refund afterwards finds no verified payment, `receipt_identities` listing both
-      keys only for the moment of the switch, and buyers updating their receipt
-      identity before approving after it, D17, D26), docs/development/RELEASING.md
-      (the staged rename, and in its compatibility policy that migration and
-      backwards compatibility are engineered only for what has been deployed, with a
-      pointer from docs/development/ARCHITECTURE.md),
+      openspec/specs/settlement-configuration/configuration.md (servicing,
+      `snapshot_freshness_seconds`; in the payments paragraph that calls a receipt
+      identity change a cutover: open payment deals drained or refunded before the
+      change, refunds first since a refund afterwards finds no verified payment,
+      `receipt_identities` listing both keys only for the moment of the switch, and
+      buyers updating their receipt identity before approving after it, D17, D26),
+      docs/guidance/engineering/versioning.md (the staged rename, promoted in
+      implementation) and docs/guidance/repository/package-versions.md (its
+      "Compatibility is owed to what a release has shipped": migration and backwards
+      compatibility are engineered only for what has been deployed, with a pointer
+      from docs/development/ARCHITECTURE.md),
       and openspec/specs/README.md capability index as needed. Promote the owner's
       principles in the wording design.md's promotion record and the owner record's
-      R24 settle: each change mergeable to dev on its own merits (openspec/README.md
-      or docs/agents/change-workflow.md); sibling-domain parity (one line in
-      AGENTS.md, "Package and dependency discipline"); the staged field rename
-      (RELEASING.md); migration and backwards compatibility only for what has been
-      deployed (RELEASING.md, pointer from ARCHITECTURE.md); contradictory classes
+      R24 settle, each where closeout's guidance placement puts it under
+      docs/guidance/: each change mergeable to dev on its own merits (the change
+      workflow's guidance); sibling-domain parity (one line); the staged field rename
+      (versioning.md); migration and backwards compatibility only for what has been
+      deployed (package-versions.md, pointer from ARCHITECTURE.md); contradictory classes
       do not subclass one another, and a
       timestamp is its source's claim (ARCHITECTURE.md). The per-boundary
       compatibility posture is not promoted. Complete this change's design-promotion
