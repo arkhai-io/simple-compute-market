@@ -1495,7 +1495,9 @@ it; openspec/changes/README.md (the gap row).
         (VM `settlement-servicing`, bare metal `delivery-recovery`), the buyer's
         lifecycle read names the committed transaction with delivery progress not
         `active`, no recorded end and no filing; the site lists no reservation for
-        the negotiation; the double's part has no `started` and no `start` event.
+        the negotiation but its acceptance hold, `<negotiation>:hold` and still
+        `reserved` (VM's, where the lane sets a hold TTL; validation 58 V1); the
+        double's part has no `started` and no `start` event.
         The repair reason is asserted nowhere: no storefront interface exposes it
         (both storefronts only log the outcome's reason), so 4C's library tests
         prove it. Delivery progress, the published per-period price and the rest
@@ -1668,6 +1670,36 @@ it; openspec/changes/README.md (the gap row).
   state field's comment claim only what it reads, and `TESTING.md`,
   `e2e-tests/README.md`, both marker descriptions, the test-compatibility delta's
   scenario and D16 now say so.
+- Round 2 fix's triage fix, validation 58 V1: with 45 V1 fixed, the pipeline (run
+  43748946611) took VM's `e2e_vm_recurring_purchase` to `Recurring05`, which
+  failed: the site listed the negotiation's reservation `reserved` under
+  `<negotiation>:hold`. That is VM's acceptance hold, placed at negotiation
+  because the lane's Bob profile sets `capacity.hold_ttl_seconds = 900`; end
+  service refuses the commit before delivery touches capacity, so delivery leaves
+  the hold untouched, as the compute-delivery delta ("no capacity is reserved")
+  and 4C's tests (no site call; VM's acceptance holds unchanged, none leased)
+  specify, and it lapses at its TTL. Bare metal places no acceptance hold and
+  passed. The stage's assertion, written from D16's "the site holds no
+  reservation", was wrong; the owner chose to correct it rather than release the
+  hold on refusal. `Recurring05` asserts every reservation listed for the
+  negotiation is its acceptance hold, still `reserved`, so none was placed under
+  `:settlement`, committed or leased; its docstring, D14, D16 step 3, the
+  test-compatibility delta's scenario, 4E.2's note, VM's marker description,
+  `e2e-tests/README.md` and `TESTING.md` say the same. No production code changed.
+  Not run here: the lane; the fix commit's validation re-runs it.
+  Checks: `make -C e2e-tests test-unit` 911 passed, 1 skipped (unit; holds the
+  stage modules to their order and fields). `scripts/change-workflow run
+  pre-commit`: after-functional-change passed, pre-commit-functional (`make
+  dist-clean`, `make check-packaging`, `make test`, every suite) passed, pre-commit
+  (index, tasks, skills, OpenSpec strict, `make check-repository`) passed. The
+  fresh-context compliance check confirmed the assertion in both lanes — a
+  committed hold keeps its reservation and placement key but turns `leased`, and
+  delivery's own reservation is keyed `:settlement`, so either fails it — and found
+  no comment or leak breach; fixed from it: VM's marker description still saying
+  nothing was reserved, the log line's count wording, an overstatement in this note
+  and two documents' wording. Declined: admitting a hold that lapsed before the
+  stage (`released`, `hold_expired`), since the lane reaches it within seconds of
+  negotiation and the hold's TTL is 900 s.
 
 ## 4F. The buyer's watchdog
 

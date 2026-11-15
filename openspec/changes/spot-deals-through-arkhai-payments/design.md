@@ -786,7 +786,12 @@ behaviour D12 replaces.
 ### D14. A refused rate deal waits in repair until the delivery deadline rule
 
 A refused rate deal is `repair_required(rate_servicing_unavailable)`, a new value in
-the compute delivery path's closed set of repair reasons, with no capacity held. A
+the compute delivery path's closed set of repair reasons, with nothing reserved by
+delivery: end service refuses before delivery touches capacity, so an acceptance hold
+the domain placed at negotiation (VM's, under a positive `hold_ttl_seconds`) is left
+unchanged to lapse at its TTL (validation 58 V1 found the lane scenario expecting it
+gone; the owner chose to keep the refusal free of site writes and correct the
+scenario, rather than release the hold, whose policy is the hold changes'). A
 storefront that gains rate servicing before the deal's delivery deadline delivers it
 on its next drive. Once the deadline passes with nothing available, end service's
 existing admission rule records the `delivery-deadline` end as seller non-delivery and
@@ -878,8 +883,9 @@ scenario runs through both:
    approval is each buyer's own test), and the approved mandate's single rate part
    charging one period's price.
 3. After commit it asserts what existing interfaces show: the deal never becomes
-   available, the site holds no reservation for it, and the payments double records
-   no rate `start`. The repair reason is proven at the lowest level that sees it —
+   available, the site holds no reservation delivery made for it (only VM's
+   acceptance hold, still `reserved`, until its TTL lapses), and the payments double
+   records no rate `start`. The repair reason is proven at the lowest level that sees it —
    library integration in `kit/deal-servicing` and `domains/compute/delivery` — and
    asserted by the scenario only where a storefront interface already exposes it.
 4. Cleanup is the buyer's own `end`, the payer's stop and hint, since the seller's

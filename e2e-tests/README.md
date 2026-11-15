@@ -370,9 +370,9 @@ The scenarios run the shared buyer-purchase stages through the buy, then the
 recurring stages (`tests/e2e/roles/helpers/recurring_purchase_stages.py`): the
 mandate is one rate part charging one period's price and the payer's balance fell
 by the receipt's reserve; after one servicing step the storefront's lifecycle
-read shows the deal committed and never active, the site holds no reservation,
-and the payments double records no rate start; the buy's stderr showed the
-per-period price, setup charge, initial reserve and maximum end (`market buy`,
+read shows the deal committed and never active, delivery reserved nothing at the
+site (VM's acceptance hold stays `reserved` until its TTL lapses), and the
+payments double records no rate start; the buy's stderr showed the per-period price, setup charge, initial reserve and maximum end (`market buy`,
 still polling a delivery that never comes, is stopped first; that they precede
 the settlement stage that approves is proved by each buyer's own tests, not
 here); the

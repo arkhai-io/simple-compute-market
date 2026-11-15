@@ -320,10 +320,15 @@ class Recurring05_CommitRefused:
         first, so what is read follows the storefront's own servicing as well
         as the commit's drive. The lifecycle read names the committed
         transaction, and shows delivery never active, no end and no filing;
-        the site holds no reservation for the negotiation; and the payments
-        double records no rate start, neither the part's start nor a start
-        event. Why end service refused, its repair reason, is read by no
-        storefront interface, so its own tests prove it.
+        delivery reserved nothing at the site; and the payments double
+        records no rate start, neither the part's start nor a start event.
+        End service refuses before delivery touches capacity, so a domain
+        that holds capacity at acceptance (VM, when its lane configures a
+        hold TTL) still lists that hold, under ``<negotiation>:hold`` and
+        ``reserved``, until it lapses; any other reservation for the
+        negotiation was placed, committed or leased by delivery. Why end
+        service refused, its repair reason, is read by no storefront
+        interface, so its own tests prove it.
         """
         require_state(deal_state, "negotiation_id", "settlement_id", "payer_account")
         advance_storefront(storefront_admin_client, deal_driver.servicing_loop)
@@ -333,7 +338,13 @@ class Recurring05_CommitRefused:
         assert read.delivery.recorded_end is None, read.delivery
         assert read.filings == [], read.filings
         held = deal_driver.site_capacity.reservations_for_negotiation(deal_state.negotiation_id)
-        assert held == [], f"the site holds capacity for the refused deal: {held}"
+        acceptance_hold = f"{deal_state.negotiation_id}:hold"
+        delivered = [
+            reservation for reservation in held
+            if (reservation.get("deal_ref") or {}).get("placement_key") != acceptance_hold
+            or reservation.get("state") != "reserved"
+        ]
+        assert delivered == [], f"delivery holds capacity for the refused deal: {delivered}"
 
         snapshot = _snapshot(payments_config, deal_state.payer_account, deal_state.settlement_id)
         (part,) = snapshot["parts"]
@@ -342,8 +353,9 @@ class Recurring05_CommitRefused:
         assert "start" not in kinds, snapshot["events"]
         deal_state._commit_refused = True
         log.info("[r05] Agreement %s committed under transaction %s and not delivered: "
-                 "progress %s, no reservation, no rate start", deal_state.negotiation_id,
-                 deal_state.settlement_id, read.delivery.progress)
+                 "progress %s, no reservation by delivery (acceptance holds: %d), no rate start",
+                 deal_state.negotiation_id, deal_state.settlement_id, read.delivery.progress,
+                 len(held))
 
 
 class Recurring06_PurchaseRunClosed:

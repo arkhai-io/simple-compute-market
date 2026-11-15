@@ -531,7 +531,8 @@ storefront configuration alone declares rate servicing for `charged` and
 The modules run the purchase stages through the buy, then those of
 `e2e-tests/tests/e2e/roles/helpers/recurring_purchase_stages.py`: the approved
 mandate and the payer's reservation, the refused commit with nothing reserved at
-the site or started at the payments double, the per-period price, setup charge,
+the site by delivery or started at the payments double (an acceptance hold the
+domain placed at negotiation lapses at its TTL), the per-period price, setup charge,
 initial reserve and maximum end the buy's stderr shows (that the buyer prints
 them before its settlement stage approves is each buyer's own test, not the
 lane's), the
