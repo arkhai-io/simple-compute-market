@@ -528,6 +528,16 @@ domain — the VM's or bare-metal host's reachability on the disclosed address a
 credential kind — so the kit learns no credential format; what "stops answering"
 means is that access, not the buyer's workload.
 
+The deal read that shows the status is each domain's buyer read of a run's deal.
+Bare metal has one, `market bare-metal delivery --run-id`; VM has none, so the read
+is registered from the buyer half beside `end`, as 4B.2 registered `end` for both
+domains, and VM gains `market delivery` with bare metal's verb moving onto the same
+registration (sibling parity). The watchdog applies to rate deals, and while end
+service refuses every rate deal's commit (D12) none reaches `available` or discloses
+access, so this change proves the loop, its stop and its status without a delivered
+deal; convergence, which lifts the refusal, runs the watchdog from `available`, the
+buyer's stop landing with the storefront absent among its rows 1 and 2 (D8).
+
 The bound is conditional and stated as one, wherever the watchdog is described:
 detection takes at most `interval × threshold + probe timeout` after the loss, and
 only while the monitor runs; the stop's acknowledgement at the authority and any

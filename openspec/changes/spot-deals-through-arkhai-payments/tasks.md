@@ -1636,14 +1636,21 @@ it; openspec/changes/README.md (the gap row).
 
 Delivers D6a's watchdog, its status resting on a fresh last probe (design review 18
 F1). Replans task 4B.6. Requirement: deal-lifecycle's watchdog requirement, added
-here.
+here. Tasks 4F.2 and 4F.5 were replanned after the section's first session found that
+no rate deal reaches `available` while end service refuses its commit (D12, D13; the
+section's notes): the loop is proven without a delivered deal, and the delivered-deal
+cases move to convergence (D6a, D8).
 
 Files: kit/deal-lifecycle-buyer (the probe loop, the per-deal opt-in, interval,
-threshold and last-probe instant in the buyer's store, the status the buyer half
-composes into the buyer's read) and its unit and integration tests; both buyers' `buy`
-commands (domains/vms/buyer/src/arkhai_vms_buyer/buy_cli.py, the bare-metal buyer's
-`cli.py`), their per-domain probes and deal-read display; both domains' application
-tests; openspec/changes/spot-deals-through-arkhai-payments/specs/deal-lifecycle/spec.md.
+threshold and last-probe instant beside `BuyerEndJournal` in `FileEvidenceStore`'s
+SQLite file, `store.py`; the status the buyer half composes beside
+`BuyerLifecycle.read`; the shared deal-read registration in `commands.py`) and its
+unit and integration tests; both buyers' `buy` commands
+(domains/vms/buyer/src/arkhai_vms_buyer/buy_cli.py, the bare-metal buyer's `cli.py`
+and `settlement_stages.py`), their per-domain probes, `end_target` openers and deal
+reads; both buyers' suites; both storefronts' integration suites for the real-`buy`
+cases; openspec/changes/spot-deals-through-arkhai-payments/specs/deal-lifecycle/spec.md;
+openspec/changes/README.md (convergence's row).
 
 - [ ] 4F.1 The loop (D6a): a probe loop in `kit/deal-lifecycle-buyer` with a
       per-domain injected probe (the VM's or host's reachability on the disclosed
@@ -1654,11 +1661,18 @@ tests; openspec/changes/spot-deals-through-arkhai-payments/specs/deal-lifecycle/
       it. Defaults are conservative.
 - [ ] 4F.2 The commands (D6a): an opt-in flag on both domains' `buy`, which then stays
       in the foreground from `available` until the stop is sent, the deal ends or the
-      buyer stops it; the opt-in, interval and threshold persisted per deal in the
-      buyer's store; each domain's resume of a buy run (VM `market buy --from <run>`,
-      one added where bare metal's `buy` has none) re-enters the loop where the deal
-      still runs. The display states the conditional bound `interval × threshold +
-      probe timeout`, only while the monitor runs.
+      buyer stops it; bare metal's `buy`, which returns at commit, polls the deal's
+      delivery read until `available` (or its timeout) when the opt-in is given. The
+      opt-in, interval and threshold are persisted per deal in the buyer's store; each
+      domain's resume of a buy run (VM `market buy --from <run>`, through
+      `_run_resume_from`; one added to bare metal's `buy`, which has none) re-enters
+      the loop where the deal still runs. The display states the conditional bound
+      `interval × threshold + probe timeout`, only while the monitor runs. The deal
+      read (D6a): register a shared read verb from the buyer half beside
+      `register_end_command`, opening the run's deal through the domain's `end_target`
+      seam; VM gains `market delivery --run`, and bare metal's `delivery --run-id`
+      moves onto the registration, keeping its options and output with the status
+      added. Each domain's resume and read accept the run spellings `end` accepts.
 - [ ] 4F.3 The status (D6a, design review 18 F1): every probe, passed or failed,
       records its instant per deal beside the opt-in. The buyer's read shows
       `monitored` while `now − last probe ≤ interval + probe timeout` plus a small
@@ -1669,20 +1683,39 @@ tests; openspec/changes/spot-deals-through-arkhai-payments/specs/deal-lifecycle/
 - [ ] 4F.4 The requirement: add D6a's watchdog, with the status rule, to the
       deal-lifecycle delta as an ADDED requirement with scenarios for the threshold
       stop, the stale last probe and the restart.
-- [ ] 4F.5 Verify: unit, in the buyer half with a clock-injected probe fake —
-      threshold reached, no stop below it, one stop and one journal entry at it,
-      idempotent on restart, and `unmonitored` once the last probe is older than
-      `interval + probe timeout` plus the grace; application integration, one per
-      domain, starting the real `buy` with the opt-in against the composed storefront:
-      access lost with the storefront stopped yields a single buyer stop at the
-      payments engine; killing the command leaves the read `unmonitored` once the last
-      probe goes stale; the resumed run reads `monitored` again. Then both buyers'
-      suites, the buyer half's, typecheck, `scripts/change-workflow run pre-commit`.
-      Convergence's rows 1 and 2 consume the buyer's stop landing with the storefront
-      absent; this change runs no lane qualification of it.
+- [ ] 4F.5 Verify, without a delivered deal (D6a):
+      - unit, in the buyer half with a clock-injected probe fake: threshold reached, no
+        stop below it, one stop and one journal entry at it, idempotent on restart, and
+        `unmonitored` once the last probe is older than `interval + probe timeout` plus
+        the grace;
+      - library integration, one per domain buyer: the domain's real buyer lifecycle
+        composition with the composed payments adapter over the in-process payments
+        engine (`FakePaymentsClient`'s engine) and an approved rate mandate, the
+        storefront peer unreachable and an injected probe failing: exactly one payer
+        stop at the engine, one journaled stop with its probe evidence, and a restarted
+        loop that sends nothing more;
+      - CLI cases in each buyer's suite over the injected lifecycle and probe seams
+        `test_rate_end_cli.py` uses (unit, as 4B.2 levelled those): the opt-in flag,
+        its interval and threshold persisted per deal, the resume re-entering the loop,
+        the bound shown only while the monitor runs, and the read's `monitored`,
+        `unmonitored` and `stopped` after a kill and a resume;
+      - application integration, one per storefront in its integration suite beside
+        the existing real-buyer-CLI test: the real `buy` with the opt-in against the
+        composed storefront on a recurring option, whose commit end service refuses;
+        the opt-in is persisted, no probe runs and no stop is sent, the command exits
+        at its timeout, and the deal read shows `unmonitored` — the opt-in alone never
+        reads as protection.
+      Then both buyers' suites, the buyer half's, typecheck,
+      `scripts/change-workflow run pre-commit`.
       End-to-end: none; no lane scenario runs `buy` with the opt-in, and none is owed
       here.
       Owed by validation: none.
+- [ ] 4F.6 Transfer (D6a, D8): the delivered-deal cases — the real `buy` with the
+      opt-in from `available`, access lost with the storefront stopped yielding a
+      single buyer stop, a killed command reading `unmonitored` once its last probe
+      goes stale, the resumed run reading `monitored` — are convergence's, beside its
+      rows 1 and 2. Name them in `converge-ongoing-compute-leases`' row Notes in
+      `openspec/changes/README.md`; closeout's 7.8 records the transfer.
 
 ## Section 4F notes and handoff
 
@@ -1708,6 +1741,8 @@ tests; openspec/changes/spot-deals-through-arkhai-payments/specs/deal-lifecycle/
   buyer's own stop lands. Its action is "the buyer's ordinary entitled stop and
   `hint` through the flow above", the rate buyer end. So no deal it applies to can
   reach the planned cases' starting condition before convergence lifts the refusal.
+- Planning took option 1 (4F.2, 4F.5 and 4F.6 replanned; design.md D6a records the
+  VM deal read and the transfer). The rest of this note is the session's record.
 - Options, for planning (or design, for option 2):
   1. Recommended, a plan amendment: replace 4F.5's per-domain application cases
      with cases that reach the loop without a delivered rate deal, and move the
@@ -1874,7 +1909,8 @@ change to implementation and review.
       applicable scenarios in section 6, `e2e_vm_recurring_purchase` and
       `e2e_bare_metal_recurring_purchase` among them. Name exact prerequisites/owning changes
       for unrun consumer-enabled or hosted validation; do not mark them passed or
-      substitute unit evidence. The rate-consumer scenarios gate convergence's
+      substitute unit evidence. Record 4F.6's transfer of the delivered-deal watchdog
+      cases to convergence. The rate-consumer scenarios gate convergence's
       acceptance and hosted scenarios gate activation; record their transfer here
       without making this prerequisite wait for a dependent's archival.
 - [ ] 7.9 **Promotion.** Write openspec/specs/settlement-servicing/architecture.md
