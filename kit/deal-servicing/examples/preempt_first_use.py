@@ -33,6 +33,7 @@ from market_arkhai_mediation.contract import INTERFACE
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
 from market_arkhai_payments import PaymentAdapter, PaymentApproval, PaymentSettlementData
 from market_arkhai_payments.adapter import pinned_snapshot_verifier
+from market_arkhai_payments.contracts import get_contract
 from market_arkhai_payments.errors import MandatePolicyError, PaymentsTransportError
 from market_arkhai_payments.fixtures import FakePaymentsClient
 from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_context
@@ -63,15 +64,30 @@ from market_deal_servicing.evidence import transaction
 MECHANISM = "arkhai.payments.v1"
 PAYER = "11111111-1111-4111-8111-111111111111"
 PAYEE = "22222222-2222-4222-8222-222222222222"
+# A fixture asset; production derivation reads the accepted Agreement's asset.
+ASSET = "USD/6"
 
 
 class LossyPayments(FakePaymentsClient):
+    """The product's authority, recording each control applied to it in the run's trace."""
+
     lose = False
+
+    def __init__(self, *, product: str, trace: list[dict[str, Any]], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.product = product
+        self.trace = trace
+
+    def fund(self, account: str, asset: str, amount: int) -> None:
+        self.engine.fund(account, asset, amount)
+        self.trace.append({"control": "fund", "product": self.product, "account": account,
+                           "asset": asset, "amount": amount})
 
     def submit_event(self, transaction, event, *, request_id):
         result = super().submit_event(transaction, event, request_id=request_id)
         if self.lose:
             self.lose = False
+            self.trace.append({"control": "lose_response", "product": self.product, "request_id": request_id})
             raise PaymentsTransportError("fixture response lost after authority recorded stop")
         return result
 
@@ -100,9 +116,13 @@ def main(output: Path | None, profile_path: Path) -> None:
         **profile["payments"],
     )
     stamp = datetime.fromtimestamp(now, timezone.utc).isoformat().replace("+00:00", "Z")
+    # Every control the fixture applies to an authority, in order, so the evidence
+    # says which observations a funding or a lost response produced.
+    control_trace: list[dict[str, Any]] = []
     observations: dict[str, Any] = {
         "evidence_class": "lane-double evidence", "profile": "lane-only", "double_selector": "in-process",
         "declared_treatments": sorted(profile["servicing"]["treatments"]), "setup_amount": None, "livemode": False,
+        "contract": get_contract().metadata, "control_trace": control_trace,
     }
 
     def accepted(name: str, payee_notice: int | None, *, charged: bool = False) -> tuple[dict, Any]:
@@ -110,8 +130,8 @@ def main(output: Path | None, profile_path: Path) -> None:
         if charged:
             recurring |= {"payee_settles_through": "started_period", "settles_through": "started_period"}
         clause = SettlementPublicationClause.model_validate({
-            "mechanism": MECHANISM, "asset": "USD/2", "rate": "60", "per": "hour",
-            "mechanism_input": {"asset": "USD/2", "payee_account": PAYEE,
+            "mechanism": MECHANISM, "asset": ASSET, "rate": "60", "per": "hour",
+            "mechanism_input": {"asset": ASSET, "payee_account": PAYEE,
                                 "approval_window": "PT60S", "dispute_window_seconds": 3600},
             "recurring": recurring,
         })
@@ -126,7 +146,7 @@ def main(output: Path | None, profile_path: Path) -> None:
             "negotiation_id": name, "listing_id": "lane-only", "listing_hash": "a" * 64,
             "buyer": buyer.identity.model_dump(mode="json"), "seller": seller.identity.model_dump(mode="json"),
             "settlement": option, "settlement_params": {"payer_account": PAYER},
-            "amount": 100, "asset": "USD/2", "duration_seconds": 3600,
+            "amount": 1_000_000, "asset": ASSET, "duration_seconds": 3600,
             "accepted_at": stamp, "start_utc": stamp,
             "provision_terms": {"kind": "example.v1", "version": 1, "payload": {}},
         }).model_dump(mode="json", exclude_none=True)
@@ -159,8 +179,8 @@ def main(output: Path | None, profile_path: Path) -> None:
             agreement, data = accepted(product, product_config.get("payee_notice_seconds"))
             # The shipped presets reach a default buyer, with no waiver.
             PaymentApproval(config, PAYER).check(json.dumps(agreement), data.to_wire())
-            fake = LossyPayments(signer=receipt_signer, observed_at=now)
-            fake.engine.fund(PAYER, "USD/2", 1_000_000)
+            fake = LossyPayments(product=product, trace=control_trace, signer=receipt_signer, observed_at=now)
+            fake.fund(PAYER, ASSET, 10_000_000_000)
             fake.receipt = fake.engine.approve(data.mandate, account=PAYER)
             adapter = PaymentAdapter(
                 agreement, data, account=PAYEE, client_for_owner=fake,
@@ -184,7 +204,7 @@ def main(output: Path | None, profile_path: Path) -> None:
                 pass
             else:
                 raise AssertionError("delivery/publication without the installed rate hook must refuse")
-        observations["default_buyer"] = {"approved": sorted(agreements)}
+        observations["default_buyer"] = {"approved": sorted(agreements), "waivers": []}
 
         async def peer(_):
             return SubmitResponse(outcome=Accepted())

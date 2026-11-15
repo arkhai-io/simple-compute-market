@@ -333,4 +333,3 @@ def test_only_the_deadline_waiver_lets_the_codec_admit_a_missing_deadline(waiver
     context = buyer_term_context("arkhai.payments.v1", waivers=waivers)
 
     assert context.allow_missing_delivery_deadline is allowed
-

@@ -2530,18 +2530,74 @@ examples/local_e2e.py; focused lifecycle/CLI integration suites. Convergence own
 consumer scenario files and selectors under each compute lane; activation owns
 hosted-target evidence.
 
-- [ ] 6.1 Update examples/fixtures to USD/6 without hardcoding a production asset.
+- [x] 6.1 Update examples/fixtures to USD/6 without hardcoding a production asset.
       Keep published vectors content-identified and separate from double
       traces. Label evidence with test-compatibility's two labels, lane-double
       evidence and live evidence (D8); add no third.
       Run make -C kit/arkhai-payments check-vectors,
       check-generated, test-unit and typecheck as appropriate to changed seams.
-- [ ] 6.2 Supply evidence metadata at the adapter/command first-use boundary:
+      As built: `kit/arkhai-payments/examples/rate.py`, `examples/lifecycle.py`
+      and `kit/deal-servicing/examples/preempt_first_use.py` name a fixture
+      `ASSET = "USD/6"`, commented that production derivation reads the accepted
+      Agreement's asset; `examples/local_e2e.py` carries the same comment inline.
+      Amounts keep their money: a rate of 60 per hour over a 60-second period is
+      `1000000` per period, setup `250000`; the once example's `100000000` and its
+      reverses and scripted case effects scaled alike; the preemption fixture
+      funds `10000000000`, its former money. The README's local funding request
+      names `USD/6`. The published vectors are unchanged, the producer's bytes
+      (mostly `USD/6`, three `EUR/2` entries); `check-vectors` replays them and
+      prints the contract's identity and hashes, apart from any double trace.
+      The rate example's `"evidence_class": "fixture"`, a third label, is now
+      `lane-double evidence`; the preemption example already was.
+      `make -C kit/arkhai-payments test`: mypy clean on 29 files (the examples
+      included), vectors and generated models current, 353 passed (with 6.6's
+      two example tests). `local_e2e.py` was not run: it needs a local payments
+      service (the README's procedure); its change is two literals,
+      type-checked. Not converted, for the round's review and the owner to
+      weigh: the shipped `recurring_options` test fixture in
+      `market_arkhai_payments.fixtures` (`USD/2`), which eight test modules across
+      both compute domains' buyers and storefronts and this kit consume, so
+      converting it reaches four packages this section does not name; the kit's
+      test term builders `tests/payment_terms.py` and `tests/rate_terms.py`; and
+      the VM storefront's `examples/payment_smoke.py` with its README. Derivation
+      in `USD/6` is exercised by the rate example's test, which asserts its setup
+      and rate parts' amounts.
+- [x] 6.2 Supply evidence metadata at the adapter/command first-use boundary:
       contract revision, target class/mode, hashes and control trace. Readiness
       gates scenario runs, not a claim that the target was prepared here.
       Record each scenario's buyer waivers; a buyer that waived a term is not
       evidence of acceptance by default buyers.
-- [ ] 6.3 Reference convergence's sole consolidated rate qualification matrix
+      As built: the rate first use's JSON and the seller-preemption first use's
+      carry `contract` (`get_contract().metadata`: the published selection, the
+      schema's `$id`, and the schema and vector SHA-256, matching
+      `schema/SOURCE.md`); the vendored contract carries no revision field, so
+      the published selection and its content hashes stand for the revision.
+      Both also carry the target's selector and mode (`double_selector:
+      in-process`, `livemode` false, the rate example reading the fake's) and
+      `control_trace`, each control the fixture applied in order: the rate
+      example's lost start response and its two clock steps (1 s, then 29 s), the
+      preemption example's two fundings and its lost notice response. Waivers:
+      the rate example's default buyer `buyer_waivers: []`; the preemption
+      example's `default_buyer` `waivers: []` beside its approved products, and
+      its charged variant's two waivers by name, observed apart. Readiness: the
+      preemption example refuses any profile but the lane-only, in-process,
+      `livemode = false` one before it runs; the rate example's in-process target
+      needs no gate, and neither claims a target prepared. The waiver lists
+      record the approvals as built, with no terms policy, so their tests check
+      that record rather than read a policy. Tests:
+      `kit/arkhai-payments/tests/test_first_use_examples.py` (kit library
+      integration as D8 names it: the rate example's `main` chaining preset
+      derivation, the buyer's check and the adapter over the clock-injected
+      authority engine behind `FakePaymentsClient`, no storage; in the kit's
+      flat `tests/` root, the departure the unowned gap row under this change
+      records), asserting the label, the
+      contract equal to `get_contract().metadata`, the trace's order, no waivers
+      and the `USD/6` setup and rate parts) and
+      `kit/deal-servicing/tests/integration/test_preempt_first_use.py`, extended
+      (library integration: the example over its own SQLite file and in-process
+      routes, now asserting the contract, the trace and the default buyer's empty
+      waivers); both pass in their kits' suites.
+- [x] 6.3 Reference convergence's sole consolidated rate qualification matrix
       (its design's Scenarios and evidence); do not reproduce it here. Retain
       spot's prepared fixtures and typed entry points for its executor. Activation
       owns hosted qualification. (Replanned against D17, D21 and D24: this change
@@ -2557,7 +2613,30 @@ hosted-target evidence.
       matrix, and report its row 11 (identity rotation overlap) as withdrawn by D21
       if its design has not yet removed it. Require physical release/access closure rather
       than a lease_ended intent report. Promote no unrun consumer requirement here.
-- [ ] 6.4 Check the changed imports, comments and public artifacts before code
+      As built: read convergence's "Scenarios and evidence" as this branch holds
+      it. It consumes the maximum term (row 9) and both self-penalty filings,
+      on-demand and spot (row 10); its rejection of "end intent as release proof"
+      and its two completion facts require physical release and access closure.
+      Row 11 and its D7 overlap paragraph are still there; its index notes
+      already report them withdrawn, citing D17, whose cutover D21 carries into
+      convergence. Reported in its index notes in
+      `openspec/changes/README.md`, not its directory, as D21 does: runs are
+      recorded under three classes where test-compatibility has two labels;
+      rows 7 and 9 still wait on interim charged terms, though the published
+      contract expresses `returned` and this change's fixtures are the shipped
+      presets with default buyers and a separately waived charged variant; and
+      row 10 does not observe the on-demand notice refused naming
+      `delivery_end` before the filing, which only this change's command first
+      use observes. Activation's D1 lists the producer's signed snapshot, start
+      and reversal vectors among the blockers to published qualification, and
+      double traces satisfy none; its row now notes the same stale three classes.
+      Lane time: convergence's lanes run real UTC time with the doubles' clocks
+      never jumped, and this change defines no lane clock; its examples' injected
+      clocks are kit-level, as convergence's library-integration rule allows.
+      Retained for its executor: `examples/rate.py`, `preempt_first_use.py` with
+      `preempt.lane.toml`, the typed notice client and `deals preempt`, and the
+      adapter's `start` and read seams. No consumer requirement is promoted.
+- [x] 6.4 Check the changed imports, comments and public artifacts before code
       review. Move touched local imports to module level where safe, retaining
       only verified circularity or deliberate lazy-load reasons. Run focused
       domain integration and typing, then make check-packaging; fix failures
@@ -2568,25 +2647,125 @@ hosted-target evidence.
       (`e2e_vm_recurring_purchase`, `e2e_bare_metal_recurring_purchase`) cross the
       kit seams this section's examples and evidence metadata touch; validation's
       pipeline run is their evidence. Owed by validation: none.
+      Corrected: no end-to-end scenario exercises this section's changes, which
+      are kit examples, their tests, two READMEs, index notes, a comment and a
+      test file's whitespace; no production code path changed. The scenarios
+      above exercise the change as a whole, and validation's pipeline run is
+      their evidence for it, not for this section. Owed by validation: none.
+      As built: the only import the whole change adds below module level
+      (`git diff 3acfdbf03 -- '*.py'`, the merge base with `dev`) is the
+      watchdog's `TYPE_CHECKING` import of `BuyerLifecycle`. Moving it to module
+      level failed the buyer half's suite on import, `cannot import name
+      'BuyerLifecycle' from partially initialized module`, since `lifecycle.py`
+      imports `watchdog.py`; it stays, now with that reason beside it, and the
+      buyer half's suite passes, 49 (unit). This section's own imports are at
+      module level. `git diff --check` against the merge base: the extra blank
+      line at the end of `domains/bare_metal/buyer/tests/test_buyer_composition.py`
+      (reviews 44 and 63) removed, now clean; that module passes, 17 (unit).
+      Comments added state the fixture asset, the migration bodies a session
+      does not run, and the circular import. Typing: the payments kit's mypy
+      covers its examples, clean on 29 files; deal-servicing's typecheck, clean.
+      `scripts/change-workflow run pre-commit`, results in the section's notes.
 - [ ] 6.5 Obtain pre-closeout code review. Confirm adapter/servicing ownership and
       that partialPeriod is enforceable at the payment authority, with no local
       correction substituted for the buyer's authority/dispute guarantee. Verify
       the command/preset seams here; consumer-enabled
       cross-service acceptance gates convergence and hosted live qualification
       gates activation, not this prerequisite change's archival.
-- [ ] 6.6 Before 6.5's review, run the first-use examples no step has run on this
+      Not an implementation session's: the pre-closeout review is the workflow's
+      step after this round's validation, implementation review and triage, and
+      its triage checks this task. Section 6's implementation left it unchecked.
+- [x] 6.6 Before 6.5's review, run the first-use examples no step has run on this
       branch, `make -C kit/arkhai-payments first-use-rate` and `make -C
       kit/deal-servicing first-use`, and record what each shows and any failure's
       fix (round 2 triage, the orchestrating session's observation 46 R1). The
       implementation step's table allows no `make -C * first-use*`, so this needs
       that allow rule, added by the owner or the orchestrating session, or the owner
       running both commands and recording their output here.
+      As run: both commands were allowed to this session. `make -C
+      kit/arkhai-payments first-use-rate` passed before any edit, and again after
+      6.1 and 6.2: setup and rate derivation in `USD/6`, the default buyer's check,
+      `allow` before activation, the lost start response `unknown` and its
+      same-key retry `accepted`, disclosure `allow`, the seller's notice
+      `accepted` and pending at `+30`, the payer's zero-notice stop `accepted`
+      and controlling (`started_period`, final at `+1`), the read `ended`, now
+      under the lane-double label with the contract hashes and control trace.
+      `make -C kit/deal-servicing first-use` failed at its first example, `no such
+      table: servicing_evidence_deals`: since the stateful-service migration
+      change on `dev`, a storefront chain's migration bodies (`create_schema`,
+      `create_payment_observations`) create the servicing tables and no session
+      does, and only `respondent_first_use.py` was updated. Fixed, outside the
+      plan: `first_use`, `end_first_use`, `watch_first_use`, `seller_first_use`,
+      `ingress_first_use`, `routes_first_use` and `receipt_first_use` apply both
+      bodies in a transaction first, commented. All ten examples then ran: exact
+      evidence bytes kept and pruning after the window, end replay and the
+      earliest end, the watch's ruling replay, bounded seller views, surrender and
+      site evidence, the mounted routes, the budget warnings, respondent answers,
+      both receipt schemes, and the preemption JSON (6.2). So the suite catches
+      the next such break, `kit/deal-servicing/tests/integration/test_first_use_examples.py`
+      (library integration, each example over its own SQLite file) runs the
+      eight that hold a database, and `tests/unit/test_budget_first_use.py`
+      (unit, no database) the budget example; with the preemption test, the
+      suite runs all ten. `make -C kit/deal-servicing test` (typecheck, then the
+      suite): 111 passed. Beyond the two commands: the
+      payments kit's `make -C kit/arkhai-payments first-use` (the once example,
+      `examples/lifecycle.py`) was denied to this session, so it ran through
+      `kit/arkhai-payments/tests/test_first_use_examples.py` instead, and failed:
+      the authority records the once part's terms end as the transaction's first
+      event, so the example's read held two events where it expected one reverse,
+      and its scripted case effects reused sequence 2. Fixed, outside the plan:
+      it counts reverse events, its case effects run 3 to 7 (lift of 3,
+      extension 5), and its engine holds three events; the test passes.
 
 Evidence levels: conformance and kit integration qualify SCM's contract use;
 application integration qualifies both compositions; smoke qualifies wiring/auth;
 lane e2e qualifies cross-service behavior under the declared double contract.
 Only hosted qualification may claim the deployed service revision works, and only
 that service's own suite establishes its ledger/payout internals.
+
+## Section 6 notes and handoff
+
+- **Implemented in one session; 6.1–6.4 and 6.6 checked, 6.5 left.** 6.5, the
+  pre-closeout review, is the workflow's step after this round's validation,
+  implementation review and triage; nothing in this section stands in for it.
+- **End-to-end:** no scenario exercises this section's changes (6.4's
+  correction). Owed by validation: none.
+- **Pre-commit**, `scripts/change-workflow run pre-commit`, over the finished
+  section: after-functional-change (`make lock`, no lock changed),
+  pre-commit-functional (`make dist-clean`, `make check-packaging`, `make test`:
+  every suite, the payments kit 353, deal-servicing 111, the buyer half 49, the
+  bare-metal storefront 646) and pre-commit (index, tasks, skills, OpenSpec
+  strict, `make check-repository`: comment hygiene, documentation citations,
+  history wording, local imports and the rest) all passed.
+- **Outside the plan, fixed here** (`openspec/README.md#defects-found-during-a-change`):
+  seven deal-servicing first-use examples created no table since the
+  stateful-service migration change on `dev`, and the payments kit's once example
+  expected one event where the authority now records the once part's terms end
+  first (6.6). Both were broken because nothing ran them; each kit's suite now
+  runs every example its `first-use` targets run. Also the extra blank line at
+  the end of the bare-metal buyer's composition test (6.4).
+- **Left for the round's review and the owner:** the `USD/2` test fixtures and
+  helpers 6.1's note names, which converting would reach four packages this
+  section does not name.
+- **Denied, with a substitute:** `make -C kit/arkhai-payments first-use` (don't
+  ask mode: no rule allows it, while `first-use-rate` and deal-servicing's
+  `first-use` were allowed). Its example ran through
+  `kit/arkhai-payments/tests/test_first_use_examples.py` instead.
+- **Reported to dependents, not maintained here:** convergence's matrix gaps and
+  activation's stale evidence classes, in their index rows (6.3).
+- **Fresh-context check.** It found no layering, comment or packaging breach.
+  Fixed from it: the preemption fixture's funding, cut a hundredfold by the asset
+  change, restored to its money; the budget example, which holds no database,
+  moved from the integration test to a unit one; 6.1's note now names the `USD/2`
+  fixtures left and the vectors' `EUR/2` entries; 6.2's says the content hashes
+  stand for the contract revision, records the waiver lists as the approvals
+  built, and levels the payments example test as kit library integration, as D8
+  names it, in the flat `tests/` root the unowned gap row records; 6.3's credits
+  the convergence row's withdrawal to D17; 6.4's note, which was missing. An
+  unwrapped README line rewrapped. Declined: nothing.
+- **For the next session:** 6.5 is the pre-closeout review; closeout (section 7)
+  follows its triage. 7.8 records the pipeline run; this section's examples are
+  not part of it.
 
 ## 7. Closeout
 

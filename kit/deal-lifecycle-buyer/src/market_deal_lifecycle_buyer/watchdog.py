@@ -36,6 +36,8 @@ from market_identity import canonical_json
 from .ending import EndDeliveryProgress
 
 if TYPE_CHECKING:
+    # Annotation only: the lifecycle imports this module to compose the buyer's
+    # read, so a runtime import here is circular.
     from .lifecycle import BuyerLifecycle
 
 #: Conservative defaults: the stop a probe failure triggers cannot be undone, so

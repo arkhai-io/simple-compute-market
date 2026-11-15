@@ -203,8 +203,10 @@ make -C kit/deal-servicing typecheck
 
 The example uses only public deterministic development identities and the
 vendored mediation kit's in-process fixture. It creates its own temporary SQLite
-database, verifies and captures opening/counteroffer/admin acceptance messages,
-then displays exact-byte retention, held-money protection, post-window pruning
+database through the storefront chain's migration bodies (`create_schema`,
+`create_payment_observations`), since no session creates a table, verifies and
+captures opening/counteroffer/admin acceptance messages, then displays exact-byte
+retention, held-money protection, post-window pruning
 and restart recovery. It needs no service, credentials, deployment selector or
 resident server. It is a library demonstration, not deployed-domain acceptance.
 
@@ -217,5 +219,13 @@ approved by a default buyer; a charged variant is refused by a default buyer and
 approved only through per-term waivers. It shows a lost notice response read back
 as a pending stop, its same-key retry, the on-demand refusal naming
 `delivery_end`, a changed retry refused, a buyer refused as administrator, and an
-earlier payer stop kept as the winner. No rate delivery is installed.
-`tests/integration/test_preempt_first_use.py` runs it with the kit's suite.
+earlier payer stop kept as the winner. No rate delivery is installed. Its JSON is
+labelled lane-double evidence, never live evidence, with the installed payments
+contract's identity and hashes, the in-process target's mode, the control trace of
+each funding and lost response the fixture applied, and each observation's buyer
+waivers: none for the default buyer, each charged term by name for the charged
+variant. Its fixture asset is `USD/6`.
+`tests/integration/test_preempt_first_use.py` runs it with the kit's suite;
+`tests/integration/test_first_use_examples.py` runs the other examples the
+`first-use` target runs that hold a database, and `tests/unit/test_budget_first_use.py`
+the budget example.

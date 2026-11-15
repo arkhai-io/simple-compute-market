@@ -10,6 +10,8 @@ import json
 import runpy
 from pathlib import Path
 
+from market_arkhai_payments.contracts import get_contract
+
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "preempt_first_use.py"
 
 
@@ -19,7 +21,11 @@ def test_the_preemption_first_use_runs_on_its_lane_profile(tmp_path, capsys):
     example["main"](output, EXAMPLE.with_name("preempt.lane.toml"))
     observations = json.loads(output.read_text())
     assert observations["evidence_class"] == "lane-double evidence"
-    assert observations["default_buyer"] == {"approved": ["on-demand", "spot"]}
+    assert observations["contract"] == get_contract().metadata
+    assert [(step["control"], step["product"]) for step in observations["control_trace"]] == [
+        ("fund", "spot"), ("fund", "on-demand"), ("lose_response", "spot"),
+    ]
+    assert observations["default_buyer"] == {"approved": ["on-demand", "spot"], "waivers": []}
     refusal = observations["charged_default_buyer"]
     assert "payee stop does not return" in refusal and "term end does not return" in refusal
     assert observations["charged_waived_buyer"]["approved"]

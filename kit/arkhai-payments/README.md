@@ -275,6 +275,8 @@ From the repository root, `make dist && make -C kit/arkhai-payments first-use`
 starts an invocation-owned fixture and demonstrates a lost reverse response,
 signed-read recovery and a same-key replay, plus observation-only scripted case
 effects and overlapping extensions. No service, secrets or network are needed.
+`tests/test_first_use_examples.py` runs this example and `examples/rate.py` with
+the kit's unit suite.
 
 ## Testing with the kit
 
@@ -470,9 +472,16 @@ This starts no server and needs no credentials. The invocation owns its determin
 fixture accounts, signer, funding/state and injected clock. It opens the library's
 rate surface directly: setup/rate derivation, buyer check, pure admission,
 activation-bound start with response loss and same-key replay, disclosure, seller
-notice, an earlier payer protection stop and the verified controlling final stop. Its JSON is labelled fixture evidence, not hosted
-qualification. `examples/rate.py` is also the runnable entry point for a fresh
-verifier.
+notice, an earlier payer protection stop and the verified controlling final stop.
+Its JSON is labelled lane-double evidence, never live evidence: it carries the
+installed contract's identity and hashes (`get_contract().metadata`), the target's
+selector and mode (in-process, `livemode` false), the control trace of every lost
+response and clock step the fixture applied, and the buyer's waivers, none for the
+shipped presets' default buyer. It makes no hosted-readiness claim; the published
+conformance vectors stay a separate, content-identified replay
+(`make check-vectors`). Its fixture asset is `USD/6`; production derivation reads
+the accepted Agreement's asset. `examples/rate.py` is also the runnable entry point
+for a fresh verifier.
 
 
 The committed `examples/local_e2e.py` exercises the `PaymentsClient` primitives
@@ -494,7 +503,7 @@ to the same value as the service process:
 curl --fail-with-body http://127.0.0.1:3180/operator/test-funds \
   -H "Authorization: Bearer $DEV_OPERATOR_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"account":"00000000-0000-4000-8000-000000000012","asset":"USD/2","amount":"1","requestId":"arkhai-payments-kit-e2e-payee"}'
+  -d '{"account":"00000000-0000-4000-8000-000000000012","asset":"USD/6","amount":"1","requestId":"arkhai-payments-kit-e2e-payee"}'
 ```
 
 The request ID makes repeating setup idempotent. In the package directory,
