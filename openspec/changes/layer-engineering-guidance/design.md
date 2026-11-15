@@ -4,7 +4,11 @@ Status: design settled and reviewed; design review 19's findings are settled in 
 D21, and D22. Round 1's triage amended D8 and D10 and settled the decisions under
 "Settled at round 1's triage". Round 2's triage amended D3 and settled the decisions
 under "Settled at round 2's triage"; later triages settled theirs under their own
-"Settled at" headings, rounds 4 and 5 sharpening D3 for `AGENTS.md`.
+"Settled at" headings, rounds 4 and 5 sharpening D3 for `AGENTS.md`. The return to
+design before the pre-closeout review settled D24 to D35: the tags stay minimal,
+committing to no selection formula, and the repository's cross-system documents
+divide into description, rules, and procedures, the rules moving into
+`docs/guidance/repository/`, in one more round before closeout.
 
 ## Context
 
@@ -26,6 +30,15 @@ under "Settled at round 2's triage"; later triages settled theirs under their ow
   Every step reads 5,669 lines through `load.common`; design adds `ROADMAP.md`.
   Most of `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md` is market material most steps
   never use.
+- **The repository documents after the capability moves.** Once round 6 moved each
+  capability's sections beside it, the five cross-system documents hold about 3,700
+  lines: `ARCHITECTURE.md` 1,231, `TESTING.md` 1,178, `DEPLOYMENT_AND_CONFIG.md` 839,
+  `RELEASING.md` 262, `BUILD_AND_PACKAGING.md` 212. Each mixes three kinds of
+  material: a description of the system (`ARCHITECTURE.md`'s overview, authority,
+  vocabulary, and flows; `TESTING.md`'s lanes), rules a change must satisfy here
+  (package layers, where tests go, mounting, locks, the published set), and
+  procedures the owner or an operator runs (`RELEASING.md`'s setup, release, and
+  troubleshooting; how an operator supplies settings).
 - **Loading by path already exists.** `[load]` in `.agents/workflow.toml`, printed
   by `config load <step>` (CW-l7hn), lists the documents each step reads. The
   post-compaction hook (`scripts/change_workflow/hook.py`) tells a Claude Code
@@ -145,7 +158,7 @@ Destinations are provisional file names; round 1 confirms them.
 | `DEPLOYMENT_AND_CONFIG.md` "Marketplace identity configuration" | repository, configuration | `openspec/specs/marketplace-identity/configuration.md` | Ambiguous: overlap with the operator handbook |
 | `DEPLOYMENT_AND_CONFIG.md` "Kubernetes: ConfigMap and Secret mounting" | repository, deployment | stays | cross-system |
 | `docs/agents/change-workflow.md` | workflow; its step table's validation parts and links to `market-change-workflow` split out | `docs/agents/change-workflow.md`; `openspec/specs/market-change-workflow/README.md` | the direction rule |
-| `RELEASING.md` | repository, document-level tags | stays whole (D10), but for its versioning policy, which moves to engineering (D10 as amended) | a procedure |
+| `RELEASING.md` | repository: rules and procedures | its versioning policy to engineering (D10 as amended at round 1); its rules to `docs/guidance/repository/` and its procedures to the owner's handbook (D10 as amended at the return to design) | a procedure beside rules |
 | `VALIDATION_RUNBOOK.md` | outside the guidance set: no frontmatter, no layer-table row | stays whole (D10, 48 F1) | a procedure, not guidance |
 | `openspec/config.yaml` | outside the guidance set; its restatements as rows | stays (D23) | |
 | `docs/prompts/` | outside the guidance set | untouched (D12) | |
@@ -167,9 +180,11 @@ Repository guidance sits beside the system it pertains to: a section of
 `TESTING.md` or `DEPLOYMENT_AND_CONFIG.md` that pertains to one capability moves to
 a guidance file in `openspec/specs/<capability>/`, such as
 `openspec/specs/resource-pool-management/testing.md`, whose place gives its
-capability. Guidance spanning several systems stays in this repository's
-cross-system documents. `AGENTS.md` remains the entry: the layers, where each
-lives, this repository's own rules, and its exceptions (D9).
+capability. Repository rules spanning several systems sit in small files under
+`docs/guidance/repository/`, and the description of the system in the cross-system
+documents under `docs/development/` (D25, D27, amended at the return to design).
+`AGENTS.md` remains the entry: the layers, where each lives, this repository's own
+rules, and its exceptions (D9).
 
 Rejected: keeping every document's name and splitting each into layer parts, which
 blocks file-level division for later changes; one file per layer, which defeats
@@ -196,8 +211,11 @@ tags until the loader, which would retag what this change moves.
 `load.common` names `docs/guidance/` as one entry, beside `AGENTS.md`, the
 repository's cross-system documents, and `openspec/README.md`; `config load`
 expands a directory entry into the Markdown files beneath it, in sorted order, and
-the hook and every skill see the expanded list. Shared and cross-system guidance is
-read exactly as before; capability guidance is read with its capability (D22).
+the hook and every skill see the expanded list. Every guidance file under
+`docs/guidance/` is read by every step, the repository's rules under
+`docs/guidance/repository/` included, those `BUILD_AND_PACKAGING.md` and
+`RELEASING.md` held among them, which no step loaded before (D27); the description
+documents stay listed by path; capability guidance is read with its capability (D22).
 Files a reorganization adds or moves within `docs/guidance/` are picked up without
 editing the configuration. The expansion selects nothing, so it decides nothing
 about the loader. It is a compatible change to a public interface (CW-c2tw).
@@ -301,19 +319,24 @@ session loses at compaction.
 
 D1's test and adjacency apply to every section. `DEPLOYMENT_AND_CONFIG.md`'s
 general method moves to engineering with neutral examples, its capability sections
-beside their capabilities, and its cross-system deployment stays; overlap with the
-operator handbook is flagged in the inventory rather than settled by the agent.
-`RELEASING.md` is a procedure and stays whole, with document-level tags; a section
-of a procedure that states policy rather than a step is classified by D1 like any
-other, so `RELEASING.md`'s versioning policy moves to engineering, its repository
-reasons staying and citing it (amended at round 1's triage, 31 O1e). The validation
-runbook is a procedure outside the guidance set: it carries no frontmatter and no
-row in `AGENTS.md`'s layer table, and moves nothing (48 F1).
-`BUILD_AND_PACKAGING.md` stays repository material, any uv convention that holds
-anywhere moving out tagged `tool`.
+beside their capabilities; overlap with the operator handbook is flagged in the
+inventory rather than settled by the agent. A section of a procedure that states
+policy rather than a step is classified by D1 like any other, so `RELEASING.md`'s
+versioning policy moves to engineering, its repository reasons staying and citing it
+(amended at round 1's triage, 31 O1e). The validation runbook is a procedure outside
+the guidance set: it carries no frontmatter and no row in `AGENTS.md`'s layer table,
+and moves nothing (48 F1). Any uv convention of `BUILD_AND_PACKAGING.md` that holds
+anywhere moves out tagged `tool`.
 
-Rejected: extracting procedures too, which scatters runbooks nobody follows in
-pieces.
+What remains of the five cross-system documents divides by D25's kinds (amended at
+the return to design): their description stays in `docs/development/`, their rules
+move to `docs/guidance/repository/` (D27), and their procedures move whole to
+handbooks. `RELEASING.md` and `BUILD_AND_PACKAGING.md`, which hold no description of
+their own once their rules and procedures leave, dissolve.
+
+Rejected: cutting a procedure into pieces filed beside the rules each step touches,
+which scatters runbooks nobody follows in pieces; a procedure moves whole to its
+handbook, and the validation runbook stays as it is.
 
 ### D11 — Skills keep their restatements; the inventory lists them
 
@@ -427,8 +450,10 @@ table, `workflow` of the workflow table, and `repository` of `AGENTS.md`'s. The
 layer model itself — the test and the link direction — is workflow material, stated
 for readers in `docs/guidance/workflow/README.md` and normatively by CW-g7lt and
 CW-d2rw; a row naming another layer's word is not a link, so the engineering table's
-description of its layer may say what it holds without the workflow. This repository's table is a section of
-`AGENTS.md` and lists only tags neither shared layer has; capability tags are not
+description of its layer may say what it holds without the workflow. This
+repository's table sits in `docs/guidance/repository/README.md`, which `AGENTS.md`
+links (D32, amended at the return to design), and lists only tags neither shared
+layer has; capability tags are not
 listed, since a capability's guidance is located by its directory. A file uses tags
 from its layer's table or a lower one. A table reads well to a person and lets a tag
 carry further columns later. Round 1's inventory fixes the initial tags; no tag is
@@ -500,6 +525,198 @@ It is configuration the OpenSpec tool reads as one context block. Round 1's
 inventory lists its restatements as rows; round 2 onward re-points only what would
 go stale.
 
+### D24 — The workflow keeps its tags, minimal and committing to no selection formula
+
+Tags are an expected part of the workflow: CW-g7lt and CW-n6dm stand as written,
+every guidance file carrying one layer tag and tags from the vocabulary tables. Which
+tags exist, what combination of tags a session about to load guidance can express,
+and whether the loader is the workflow's or the repository's, are undecided, and
+belong to the loader change. Until it lands every guidance file the repository can
+identify is loaded (D5, D22), which nothing in the workflow enforces. The tagging
+this change builds is the minimum that keeps the files describable without
+constraining that design (D28).
+
+Rejected: the workflow requiring only that each piece of guidance has one layer and
+can be reached from what a step loads, the tags becoming this repository's
+convention, which makes tags optional for the workflow when they are expected of it;
+removing the layers from the workflow as well; deferring every tag question to the
+loader, which is this decision's own position on selection, not on the tags
+themselves.
+
+### D25 — Repository documents divide into description, rules, and procedures
+
+A document holds one kind of material, placed by the test 58 O5 applies to the
+workflow layer:
+
+- **A description of the system** — what it is and why: its shape, authorities,
+  vocabulary, flows, and topology. Both the owner and agents read it, so it is
+  written once and stays narrative.
+- **Rules for work** — what a change here must produce or satisfy; wrong if a
+  change's work product were otherwise. They are agent guidance.
+- **Procedures** — what the owner or an operator does or types. They live in
+  handbooks in `docs/`, without frontmatter and outside the guidance set, beside the
+  operator handbook and the change workflow's handbook; an operator's procedure goes
+  to the operator handbook (141 F1), the owner's to an owner handbook, provisionally
+  `docs/release-handbook.md`.
+
+The principle holds in any repository, so it is engineering guidance, in
+`docs/guidance/engineering/documentation.md` (D33).
+
+Rejected: leaving the documents as the repository layer, procedures included, which
+keeps the owner reading documents shaped for agents and agents loading the owner's
+procedures; moving only the procedures out, which leaves rules and description
+interleaved and gives D27 no seam; a strict two-way split by reader, which agents
+would have to load whole anyway, since they need the description, and which invites
+a second copy of it.
+
+### D26 — The split joins this change
+
+D25's split is made by this change, before closeout, rather than by a change of its
+own. The anchor check (D15) and the directory entry (D5) it relies on are in place,
+the citations are re-pointed once, and the repository layer is finished in the same
+change that made the shared ones.
+
+Rejected: a change of its own, opened from an unowned gap row citing D24 and D25,
+which would let this change close out and release `add-skill-extension-points` and
+`extract-change-workflow-repository` sooner, neither needing the split; moving only
+the procedures here, which cuts one decision across two changes; deferring with
+nothing recorded but this design.
+
+### D27 — Repository rules are small tagged files under `docs/guidance/repository/`
+
+The repository's cross-system rules become small files, one subject each, under
+`docs/guidance/repository/`, carrying `tags` frontmatter with the `repository` layer
+tag and tags naming what each covers, as the shared layers' files do; a `README.md`
+there describes the layer, how its files are organized, and its tag table (D32). The
+description stays in `docs/development/`, one document per topic: `ARCHITECTURE.md`,
+`TESTING.md` (the lanes, the canonical deal, the doubles), and
+`DEPLOYMENT_AND_CONFIG.md` (the stacks, release topology, persistence), each keeping
+its tags and its row in `AGENTS.md`'s layer table so the guidance check and a later
+loader find it. `BUILD_AND_PACKAGING.md` and `RELEASING.md` dissolve into rule files
+and the owner's handbook (D10 as amended).
+
+```text
+docs/guidance/repository/
+  README.md                  the layer, its organization, its tag table
+  package-layers.md          [repository, architecture, dependencies]
+  chart-render-tests.md      [repository, testing, helm]
+  migrations-at-startup.md   [repository, persistence, deployment]
+  published-packages.md      [repository, packaging, versioning]
+  …                          file names and tags provisional; the round's inventory fixes them
+docs/development/
+  ARCHITECTURE.md            description: overview, authority, vocabulary, flows, topology
+  TESTING.md                 description: the lanes, the canonical deal, the doubles
+  DEPLOYMENT_AND_CONFIG.md   description: stacks, release topology, persistence
+```
+
+Small single-subject files suit whatever selection a loader adopts (D24), and the
+description stays a narrative its readers can follow. Directories carry no meaning
+(CW-n6dm): the directory is navigation, and `load.common`'s one `docs/guidance/`
+entry loads the files without a configuration edit. Every citation of a moved rule
+is re-pointed, skills included, the anchor check failing any missed; changes in
+flight meet the new layout at their merges (D15).
+
+Rejected: keeping the five documents, each divided into a description part and a
+rules part, which leaves whole-document tags no loader can select within; the rule
+files under `docs/development/`, which `load.common` could reach only by a directory
+entry that also loads the roadmap, the runbook, and the issue-discovery guide, or by
+listing each file, which D5 rejected; the description in small files too, which
+cuts up a narrative read top to bottom and loaded whole.
+
+### D28 — Tags name what a file covers
+
+A guidance file's tags name what it substantially covers, and content on another
+subject goes in another file. No selection formula is assumed: 31 O1c's assumption
+that a loader reads a file when a session carries every tag the file carries is
+withdrawn (amended at the return to design), and the workflow README's statement of
+it is reworded to the descriptive rule. No file is split, widened, or narrowed to
+suit a formula; the round's inventory sets each file's tags by this rule, the
+capability configuration files holding startup refusals and the contract's
+versioning among the rows it decides, and D27 absorbs the split of
+`DEPLOYMENT_AND_CONFIG.md` by tag.
+
+Rejected: keeping the conjunctive assumption, which commits the loader's formula
+(D24); withdrawing it but freezing today's tags, which leaves tags misdescribing
+their files.
+
+### D29 — The draw.io rule is repository guidance in `docs/guidance/repository/diagrams.md`
+
+Diagramming with draw.io is a repository concern: the rule that this repository's
+diagrams are drawn in draw.io, the `.drawio` source beside its `.svg` export, moves
+from `openspec/README.md`, where 127 O1 placed it for want of a home, to
+`docs/guidance/repository/diagrams.md`, tagged `[repository, diagrams]` and linking
+the engineering `diagrams.md`. `openspec/specs/change-workflow/diagrams.md` and its
+`overrides` row stay beside their capability. Guidance on using draw.io well, such
+as keeping its exports small, would be engineering guidance tagged with the tool,
+promoted if it is ever written; the repository still states that it draws in
+draw.io.
+
+Rejected: leaving it in the OpenSpec guide, which has nothing to do with diagrams.
+
+### D30 — The split is one implementation round before closeout
+
+The change re-enters planning after its design review: new sections before the
+closeout section, implemented as one round whose inventory (D34) and moves are
+written together and reviewed together. The pre-closeout review and its validation,
+owed when the change returned to design, follow that round.
+
+Rejected: an inventory round corrected before any text moves, then the moves, as
+rounds 1 and 3 did; three rounds, which add a review cycle while two changes wait.
+
+### D31 — `openspec/README.md` stays beside `openspec/`
+
+This repository's OpenSpec guide stays where it is: a guide to the directory it sits
+in, named by `AGENTS.md`'s roles table and the closeout parts' citations. It loses
+the draw.io paragraph (D29), and its placement table names each kind's home (D33).
+
+Rejected: moving it into `docs/guidance/repository/` for uniformity alone.
+
+### D32 — `AGENTS.md` names the repository layer's directory and links its tags
+
+`AGENTS.md`'s layer table names `docs/guidance/repository/` and the description
+documents, in place of the documents whose rules move; "What every session reads"
+gains a repository row beside the engineering and workflow rows (138 O1's pattern);
+its "Tags" section moves into `docs/guidance/repository/README.md`, which `AGENTS.md`
+links, as each shared layer's README holds its own table (amends 127 O1 and D18).
+`load.common` needs no new entry: its `docs/guidance/` entry covers the new files,
+and it keeps the description documents by path.
+
+Rejected: keeping the repository's tag table in `AGENTS.md`, which leaves the
+repository layer unlike the two shared ones.
+
+### D33 — D25's principle is engineering guidance
+
+`docs/guidance/engineering/documentation.md` states the three kinds of D25. The
+workflow README's division between the workflow's specification, guidance, and
+handbook (58 O5) links it as its instance, a workflow file linking an engineering
+one. `openspec/README.md`'s placement table names the description documents,
+`docs/guidance/repository/`, and the handbooks. This is new guidance, reviewed in the
+round's triage (31 O1b).
+
+Rejected: stating the principle only in the workflow README, which D1's test places
+in engineering, since it holds without the workflow.
+
+### D34 — The round inventories what it moves
+
+The round's inventory gives every section of the five cross-system documents its
+kind (D25), destination, and tags (D28), with an `Ambiguous` column for each row the
+test did not decide — `ARCHITECTURE.md`'s package layers, which mix description and
+rules sentence by sentence, the known case. It is written before the text moves and
+reviewed with the moves in the round's triage (D30); a row the owner corrects there
+becomes a fix to the move. Operator procedures go to the operator handbook (141 F1),
+and a non-guidance document contradicting moved guidance is brought in line (31 O1b).
+
+Rejected: moving without an inventory, which leaves the move as the only thing to
+review (D2).
+
+### D35 — No requirement or code changes
+
+CW-g7lt, CW-d2rw, CW-p9sa, CW-n6dm, and MCW-c4ek already cover files under
+`docs/guidance/repository/`. The guidance check finds them by place under
+`docs/guidance/` and reads a vocabulary from the table under a "Tags" heading in any
+guidance file (`scripts/check_guidance.py`, `read_guidance`), so moving the
+repository's table (D32) needs no code change.
+
 ### Settled at round 1's triage
 
 The owner settled these while correcting the inventory; the inventory's "Rules from
@@ -519,13 +736,14 @@ round 1's triage" applies them row by row.
   guidance says is assumed. The operator handbook, the runbook, and other
   non-guidance documents do not move, but are brought in line where the decided
   guidance contradicts them. No change-index row records the pairs.
-- **31 O1c — Tags are atoms, selected conjunctively.** The partition assumes a later
-  loader reads a file when a session carries every tag the file carries; there are
-  no compound tags. A file carries only the tags its content needs, and content
-  needing another tag set goes in another file. A tool a developer, build, or
+- **31 O1c — Tags are atoms.** There are no compound tags. A file's tags name what it
+  covers, and content on another subject goes in another file; the assumption that a
+  later loader reads a file when a session carries every tag the file carries is
+  withdrawn, no selection formula being assumed (D28, amended at the return to
+  design). A tool a developer, build, or
   deployment runs has a tool tag; a library code imports carries its language's tag.
   "This repository uses X" is repository material; how to use X well is engineering
-  tagged X, for any X. The loader change inherits or revises this assumption.
+  tagged X, for any X. The loader change decides how tags select.
 - **31 O1d — Multi-capability sections.** A section goes beside the capability whose
   specification owns what it governs, not the service that reads or enforces it;
   parts with different owners split where they separate cleanly, and otherwise stay
@@ -700,9 +918,9 @@ The owner settled these at the triage of review 109, validation 110, and their n
   compaction.
 - **111 O2 — The cross-system documents are the repository layer, stated so.** Each
   document's opening states what it holds as the repository layer, and each instance
-  links its shared rule without paraphrasing it (O4's rule). The owner revisits,
-  before the pre-closeout review, whether these documents split by reader into
-  owner-facing and agent-facing ones; a refactor decided then joins this change.
+  links its shared rule without paraphrasing it (O4's rule). The owner's revisit
+  before the pre-closeout review divided them by D25's kinds, the rules moving to
+  `docs/guidance/repository/` in this change (D25 to D27).
 - **111 O1 and O3 — No list of guidance files kept by hand.** The assumptions test
   reads a directory the guidance documents' provision names, ending in `/`, as
   providing every Markdown file beneath it, as D5 reads a directory entry, so
@@ -739,11 +957,11 @@ The owner settled these at the triage of review 126, validation 126, and their n
   organized and which tags it defines; the repository's tags and its exceptions
   spanning systems; and its rules for any agent's actions here whatever the task —
   what enters the repository and how it is pushed, where deferred work and terms go.
-  A topic's repository instance is in the repository document for its topic, and a
-  check's scope beside the check: the `deploy-local` rule in
-  `DEPLOYMENT_AND_CONFIG.md`, the packaging checks in `BUILD_AND_PACKAGING.md`, the
-  comment and citation checks' scopes in `market-change-workflow`'s README, draw.io in
-  `openspec/README.md`. The draw.io rule will be declared again by the extracted
+  A topic's repository instance is in the repository's guidance for its topic, and a
+  check's scope beside the check: the `deploy-local` rule, the packaging checks, and
+  draw.io in their files under `docs/guidance/repository/` (D27, D29, amended at the
+  return to design), the comment and citation checks' scopes in
+  `market-change-workflow`'s README. The draw.io rule will be declared again by the extracted
   engine's own repository guidance; it is read once in each repository. Rejected:
   removing only the pure pointers, which leaves the line to judgement.
 - **126 F1 — A chosen list is not a copy.** `packaging.md` forbids what builds,
@@ -763,9 +981,8 @@ The owner settled these at the triage of review 126, validation 126, and their n
   section 25 brought in line with `TESTING.md` on adoption (row 484), which the
   adoption helper confirms; the roles table kept apart from the layer table, since
   the roadmap is no guidance; no `checks` tag, which no file carries.
-- **S6 tag reach.** `RELEASING.md`'s artifact destination is packaging, so its tags
-  stand; whether `DEPLOYMENT_AND_CONFIG.md` splits by tag joins the owner's
-  pre-closeout revisit of the split by reader (111 O2).
+- **S6 tag reach.** `RELEASING.md`'s artifact destination is packaging; the revisit
+  settled tag reach as D28, D27 absorbing the split of `DEPLOYMENT_AND_CONFIG.md`.
 
 ### Settled at round 6's triage
 
@@ -792,8 +1009,8 @@ The owner settled these at the triage of review 141, validation 142, and their n
   handbook's payments step table gains the two conditions it lacked. The API-credit
   services' own state stays in `DEPLOYMENT_AND_CONFIG.md`'s "Stateful service
   persistence". `AGENTS.md`'s sentence on capability guidance, for sessions outside
-  the workflow, stays (127 O1). Wider tags on the configuration files wait for the
-  pre-closeout revisit (task 6.5); `guidance-review` reads no capability guidance,
+  the workflow, stays (127 O1). Wider tags on the configuration files are set by
+  D28's rule in the round D30 adds; `guidance-review` reads no capability guidance,
   being outside D22's seven skills.
 
 ### Implementation cadence
@@ -830,12 +1047,24 @@ against it:
    `docs/guidance/`; and fixes to whatever the check finds in the guidance. One
    session.
 
+7. **The repository documents by kind** (D25 to D34, added at the return to
+   design). One round, after the code and before closeout: the inventory of the five
+   cross-system documents by kind, then the moves it gives — the rule files under
+   `docs/guidance/repository/` with their README and the repository's tag table, the
+   description documents reduced, `BUILD_AND_PACKAGING.md` and `RELEASING.md`
+   dissolved, the owner's handbook and the operator handbook's procedures, the
+   draw.io rule, `documentation.md`'s three kinds and the workflow README's tag
+   wording, `AGENTS.md`, `openspec/README.md`'s placement table, and every citation of
+   what moved, skills included. The inventory and the moves are reviewed together
+   (D30). The pre-closeout review follows.
+
 Until round 6, each round adds the guidance files it creates to `load.common` by
 path, so later sessions on the branch read them. Rounds 2 to 5 follow one another
 directly (D15).
 
 ## Open Questions
 
-None. Loading by tag, removing the skills' restatements, moving a layer out of the
-repository, and citing guidance held outside it are later changes, recorded as the
-lesser goal's unowned gaps.
+None. Loading by tag — which tags a session carries, how they select files, and
+whether the loader is the workflow's or the repository's (D24) — removing the
+skills' restatements, moving a layer out of the repository, and citing guidance held
+outside it are later changes, recorded as the lesser goal's unowned gaps.

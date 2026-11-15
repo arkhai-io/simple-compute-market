@@ -49,9 +49,17 @@ cites guidance held elsewhere.
   people; a file's frontmatter tags carry its layer, topics, and tools, drawn from
   each layer's vocabulary table.
 - **Repository guidance beside its system.** A section that pertains to one
-  capability moves beside it, into `openspec/specs/<capability>/`; guidance spanning
-  several systems stays in the repository's cross-system documents. A step reads a
+  capability moves beside it, into `openspec/specs/<capability>/`. A step reads a
   capability's guidance wherever it reads its specification.
+- **The repository's documents divided by kind.** What spans several systems divides
+  into a description of the system, rules for work, and procedures: the description
+  stays in `docs/development/`, read by the owner and agents alike; the rules become
+  small tagged files under `docs/guidance/repository/`, beside a README holding the
+  repository's tag table; the procedures go to handbooks in `docs/`, the owner's and
+  the operator's. `BUILD_AND_PACKAGING.md` and `RELEASING.md` dissolve, and the
+  draw.io rule leaves the OpenSpec guide for the repository's diagrams file.
+- **Tags that commit to no selection formula.** A file's tags name what it covers;
+  how a later loader selects by them is left to that loader.
 - **Exceptions declared beside what they apply to.** A repository's selection of a
   case shared guidance leaves open, or override of one of its rules, is a row in an
   exceptions table beside the component it applies to, or in `AGENTS.md` when it
@@ -130,7 +138,8 @@ As `openspec/README.md`'s change documentation requirements ask:
   with the owner in the triage of the round making it. A document built on changed
   guidance, such as the operator handbook, is brought in line rather than left
   contradicting it. Engineering guidance's description of what a private repository
-  may hold is new.
+  may hold is new, as is its division of documents into description, rules, and
+  procedures.
 - **Do not touch `docs/prompts/`.** The prompts are deprecated and stay outside the
   guidance set.
 
@@ -143,6 +152,11 @@ As `openspec/README.md`'s change documentation requirements ask:
 - `scripts/change_workflow/next_step.py`'s message naming the guide, and the two
   tests naming its path; the active changes' documents citing it.
 - New guidance files under `docs/guidance/` and under `openspec/specs/<capability>/`.
+- `docs/guidance/repository/`, new; `ARCHITECTURE.md`, `TESTING.md`, and
+  `DEPLOYMENT_AND_CONFIG.md` reduced to their description; `BUILD_AND_PACKAGING.md`
+  and `RELEASING.md` removed once their rules and procedures move; a new owner's
+  handbook in `docs/`, and `docs/operator-handbook.md` gaining the operator's
+  procedures.
 - Every permanent document and skill that cites a moved section, including about 74
   citations of the closeout parts.
 - `.agents/workflow.toml` (`load.common`, and `AGENTS.md` among the inert paths),
@@ -179,7 +193,8 @@ As `openspec/README.md`'s change documentation requirements ask:
 - [ ] No permanent documentation change
 
 `AGENTS.md`, the documents under `docs/development/`, `openspec/README.md`, and
-`docs/agents/` are restructured, and `docs/guidance/` is created.
+`docs/agents/` are restructured, and `docs/guidance/` is created, the repository's
+rules under `docs/guidance/repository/` among it.
 
 The lesser goal's gap "Guidance is not separated into engineering, workflow, and
 repository layers" in `openspec/changes/README.md` is owned by this change for
@@ -213,3 +228,15 @@ changes.
 - 72 F2, the guide's agent rules given homes (kept at round 3's triage): `openspec/specs/change-workflow/spec.md` (CW-s7rq, CW-b5cf, CW-e3gt, CW-o9hd, CW-t2lw, CW-w6vy) and their `index.md` entries; `docs/guidance/workflow/changes.md`, "One change per branch"; `docs/guidance/workflow/working-model.md`, "Plan", the `Owed by validation:` line
 - 71 O1, closeout's rule in inert paths, the archive's own writes exempt (round 3's triage), and the default inert paths: `openspec/specs/change-workflow/spec.md` (CW-pkug, CW-n7ra) and their `index.md` summary lines; `openspec/specs/change-workflow/README.md`, "Closeout and archival" and "A repository's configuration"; `docs/guidance/workflow/closeout.md`; `.agents/workflow.toml`
 - D23: no permanent destination — `openspec/config.yaml` is unchanged in kind
+- D24: no permanent destination — CW-g7lt stands as written, and how tags select is undecided, so nothing about it is promoted until the loader change decides it; D28 carries the descriptive rule
+- D25, description, rules, and procedures: `docs/guidance/engineering/documentation.md`; `docs/guidance/workflow/README.md`, "What the workflow's guidance holds", linking it
+- D26: no permanent destination — whether the split joins this change is its scope
+- D27, the repository's rules under `docs/guidance/repository/`: `docs/guidance/repository/README.md`; `AGENTS.md`'s layer table; `openspec/README.md`, "Documentation placement"; the openings of `ARCHITECTURE.md`, `TESTING.md`, and `DEPLOYMENT_AND_CONFIG.md`
+- D28, tags name what a file covers: `docs/guidance/workflow/README.md`, "The layers of guidance"; `docs/guidance/engineering/README.md`, "Tags"
+- D29, the draw.io rule: `docs/guidance/repository/diagrams.md`
+- D30: no permanent destination — the round's place in the change
+- D31: no permanent destination — `openspec/README.md` stays where it is
+- D32, `AGENTS.md` and the repository's tags: `AGENTS.md`, "What every session reads", "Where the guidance lives", and "Tags"; `docs/guidance/repository/README.md`
+- D33, D25's principle as engineering guidance: `docs/guidance/engineering/documentation.md`; `openspec/README.md`, "Documentation placement"
+- D34: no permanent destination — the round's inventory is change history, as D2's is
+- D35: no permanent destination — no requirement or code changes
