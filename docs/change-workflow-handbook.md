@@ -204,11 +204,13 @@ condition; under orchestration the orchestrating session records it, and otherwi
 you do:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --decision "waive the deployment part of validation for the rest of this change, while nothing it touches affects the services it deploys" --reason "<your words>"
+scripts/change-workflow note <change> orchestrator --by owner --waives deployment --decision "waive the deployment part of validation for the rest of this change, while nothing it touches affects the services it deploys" --reason "<your words>"
 ```
 
-Validation runs a waived part anyway, saying the waiver lapsed, when the commits since
-the last validation that ran it include a merge or the condition no longer holds.
+`--waives` names the parts, which validation's plan then marks as waived. Validation
+runs a waived part anyway, saying the waiver lapsed, when the commits since the last
+validation that ran it include a merge or the condition no longer holds; the engine
+refuses to run a waived part unless validation gives that reason.
 
 **Directing a change.** You can send a change to any step outside the exits its
 steps take — another review, a validation before a step, a step past a guard that is

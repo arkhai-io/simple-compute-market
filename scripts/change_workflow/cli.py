@@ -65,13 +65,13 @@ from . import clone as clones
 from . import (config, cost_report, diagram, find, graph, history, hook, hooks, index,
                next_step, push, round_view, skills, tasks, wait)
 from .clone import clone_of
-from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, StepError, repository_root
+from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, Entry, StepError, repository_root
 from .convert import convert_change
 from .find import ChangeNotFound, change_directory, is_archived
 from .graph import KINDS, STEPS
 from .log import (Checkout, branch_decisions, direction, git_checkout, history_log_path,
                   last_entries, log_path, note_orchestrator, note_round, open_log, read_log,
-                  record_interactive, recorded_landing)
+                  record_interactive, recorded_landing, waived_parts)
 from .records import git_head
 from .review import check_review, review_and_log
 from .running import drop_invocations, invocations_directory, kept_invocations, stop
@@ -328,6 +328,10 @@ def _parser() -> argparse.ArgumentParser:
     decision.add_argument("--resumes", type=int, default=None,
                           help="the owner's direction to revisit the finished triage run at "
                                "this seq, which `resume` then continues with their words")
+    decision.add_argument("--waives", default=None,
+                          help="the parts of validation the owner waives for later "
+                               "validations, ','-separated, on the condition --decision "
+                               "states")
     next_ = commands.add_parser("next", help="compute the change's next step")
     next_.add_argument("change")
     next_.add_argument("--plain", action="store_true",
@@ -392,6 +396,9 @@ def _parser() -> argparse.ArgumentParser:
                       help="validation's part only: run, start, or collect")
     run_.add_argument("--owed", default=None,
                       help="an owed part only: the workflow its run is for")
+    run_.add_argument("--lapsed", default=None,
+                      help="a part the owner waived only: why the waiver's condition no "
+                           "longer holds, so the part runs")
     run_.add_argument("--base", default=None,
                       help="the branch the change lands on, for a command naming {base}; "
                            "the one its clone recorded by default")
@@ -676,9 +683,26 @@ def _config_parts(args: argparse.Namespace, root: Path) -> int:
     except ChangeNotFound as exc:
         raise StepError(str(exc)) from exc
     runs = config.plan(configuration, tasks.owed_lines(directory / next_step.TASKS_FILE))
-    print(config.plan_json(configuration, runs) if args.json
-          else "\n".join(config.plan_lines(configuration, runs)))
+    waived = _waived(root, args.subject)
+    print(config.plan_json(configuration, runs, waived) if args.json
+          else "\n".join(config.plan_lines(configuration, runs, waived)))
     return 0
+
+
+def _parts(root: Path, given: str) -> list[str]:
+    """The parts a waiver names, each one the configuration declares."""
+    names = [name.strip() for name in given.split(",") if name.strip()]
+    declared = {part.name for part in config.load(root).parts or ()}
+    if unknown := [name for name in names if name not in declared]:
+        raise StepError(f"the waiver names parts validation does not declare: "
+                        f"{', '.join(unknown)}; declared: {', '.join(sorted(declared))}")
+    return names
+
+
+def _waived(root: Path, change: str) -> dict[str, Entry]:
+    """The parts of validation the owner waived in the change's log."""
+    path = log_path(root, change)
+    return waived_parts(read_log(path)) if path.exists() else {}
 
 
 def _graph(root: Path) -> int:
@@ -699,14 +723,16 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         if args.hook == hooks.VALIDATION:
             if args.part is None or (args.part == hooks.PREFLIGHT) != (args.phase is None):
                 raise _Usage("run validation takes `preflight`, or a part and its phase")
-        elif (args.part, args.phase, args.owed) != (None, None, None):
+        elif (args.part, args.phase, args.owed, args.lapsed) != (None, None, None, None):
             raise _Usage(f"run {args.hook} takes the change alone")
         # The branch the change lands on, for a command naming `{base}`: the one
         # given, or the one its clone recorded.
         base = args.base or find.landing_branch(root, args.change)
         return hooks.main(args.hook, args.change, root=root, configuration=config.load(root),
                           environ=environ, base=base, part=args.part, phase=args.phase,
-                          owed=args.owed)
+                          owed=args.owed, lapsed=args.lapsed,
+                          waived=(_waived(root, args.change)
+                                  if args.hook == hooks.VALIDATION else None))
     if args.command == "check" and args.check == "change":
         configuration = config.load(root)
         try:
@@ -802,6 +828,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
                                  target=args.target,
                                  branch=args.branch,
                                  resumes=args.resumes,
+                                 waives=(_parts(root, args.waives)
+                                         if args.waives is not None else None),
                                  # A branch decision is about the change whose log
                                  # holds it, which is where steps look.
                                  change=args.decided_change

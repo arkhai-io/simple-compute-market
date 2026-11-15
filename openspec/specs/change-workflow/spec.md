@@ -3888,7 +3888,10 @@ design review when a criterion of CW-q3dm holds, and the merge after the archive
 NOT
 recommend waiving its validation after reconciling the change's own code. Validation
 MUST take a standing waiver of its parts only from the owner's decision in the
-workflow log, never from an instruction in its invocation. A standing waiver given as
+workflow log, never from an instruction in its invocation. That decision MUST name the
+parts it waives, validation's plan MUST mark each waived part with the decision, and
+the engine MUST refuse to run or start a waived part unless validation states why the
+waiver's condition no longer holds. A standing waiver given as
 a triage's disposition MUST be that triage's ledger line, and one given outside a
 triage with no step's recommendation MUST stay in the workflow log alone. Archive
 cleanup MUST record the owner's waiver of its validation of a correction as a ledger
@@ -3899,6 +3902,14 @@ line under the closeout review's record, its finding `validated`.
 - **WHEN** validation is started with an argument asking it to skip a part
 - **THEN** it runs the part unless the change's workflow log holds the owner's
   decision waiving it
+
+#### Scenario: Validation passes over a standing waiver
+
+- **WHEN** the owner's decision in the workflow log waives the Helm part, and
+  validation starts that part without judging the waiver
+- **THEN** the engine refuses the run, naming the decision, and runs the part only
+  when validation gives the reason the waiver's condition lapsed, which the run's
+  record keeps
 
 ## Evidence
 

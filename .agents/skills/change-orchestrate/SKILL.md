@@ -368,7 +368,7 @@ naming the parts and the condition they are waived on, so validation finds it in
 log (`change-workflow`'s CW-e7lm):
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --decision "waive the helm and pipeline parts of validation for the rest of this change, while <the condition>" --reason <the owner's words>
+scripts/change-workflow note <change> orchestrator --by owner --waives helm,pipeline --decision "waive the helm and pipeline parts of validation for the rest of this change, while <the condition>" --reason <the owner's words>
 ```
 
 Never pass a waiver in a validation's `ARGUMENTS`: validation reads waivers only

@@ -657,10 +657,22 @@ def plan(configuration: Configuration, owed: Sequence[tuple[str, str]]) -> list[
     return runs
 
 
-def plan_lines(configuration: Configuration, runs: Sequence[PlannedRun]) -> list[str]:
+def _waiver(waived: Mapping[str, Mapping[str, Any]], part: str) -> str:
+    entry = waived.get(part)
+    return f"waived by the owner at seq {entry['seq']}: {entry['decision']}" if entry else ""
+
+
+def plan_lines(configuration: Configuration, runs: Sequence[PlannedRun],
+               waived: Mapping[str, Mapping[str, Any]] | None = None) -> list[str]:
+    """The plan as lines; a part the owner waived names the decision waiving it,
+    whose condition validation judges before running or skipping it."""
+    waived = waived or {}
     preflight = "; ".join(configuration.preflight) if configuration.preflight else "none"
     lines = [f"{'preflight':<20} {preflight}"]
     for run in runs:
+        if waiver := _waiver(waived, run.part.name):
+            lines.append(f"{run.name:<20} {waiver}")
+            continue
         if run.not_owed:
             lines.append(f"{run.name:<20} not owed")
             continue
@@ -673,10 +685,18 @@ def plan_lines(configuration: Configuration, runs: Sequence[PlannedRun]) -> list
     return lines
 
 
-def plan_json(configuration: Configuration, runs: Sequence[PlannedRun]) -> str:
+def plan_json(configuration: Configuration, runs: Sequence[PlannedRun],
+              waived: Mapping[str, Mapping[str, Any]] | None = None) -> str:
+    waived = waived or {}
+    entries = []
+    for run in runs:
+        entry = run.entry()
+        if (decision := waived.get(run.part.name)) is not None:
+            entry["waived"] = {"seq": decision["seq"], "decision": decision["decision"]}
+        entries.append(entry)
     return json.dumps({"preflight": list(configuration.preflight)
                        if configuration.preflight is not None else None,
-                       "runs": [run.entry() for run in runs]}, ensure_ascii=False)
+                       "runs": entries}, ensure_ascii=False)
 
 
 def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:

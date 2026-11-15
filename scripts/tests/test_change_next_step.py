@@ -515,7 +515,7 @@ def test_a_round_carries_no_owner_notes_a_triage_read(tmp_path: Path) -> None:
 def test_a_review_awaiting_triage_comes_before_the_rounds_open_sections(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
     _round(root, [[2]])
-    # Section 2 holds an unchecked task, as when planning amends an open round.
+    # The round's section holds an unchecked task: it is open again.
     _check(root, TASKS)
     _record(root, "01-validation.md", text=_validation())
     _review(root, "02-implementation.md")

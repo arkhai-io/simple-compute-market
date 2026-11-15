@@ -798,7 +798,8 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
                       sections: list[list[int | str]] | None = None,
                       target: str | None = None,
                       branch: str | None = None, change: str | None = None,
-                      resumes: int | None = None, clock: Clock = utc_now) -> Entry:
+                      resumes: int | None = None, waives: Sequence[str] | None = None,
+                      clock: Clock = utc_now) -> Entry:
     """Record a decision: the orchestrating session's own routing or recovery, or
     the owner's, relayed by it.
 
@@ -832,20 +833,24 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     run, which `Wrapper.resume` then resumes once with the owner's words; it is
     refused unless that run is the latest triage of the reviews it triaged
     (`revisit_refusal`). It routes nothing: the resumed triage's outcome does.
+    `waives` names the parts of validation the owner waives for later validations,
+    on the condition the decision states; it directs nothing, and validation reads
+    it through `waived_parts`, judging whether the condition still holds.
     """
     if next_step is None and (kind, sections, target) != (None, None, None):
         raise StepError("a kind, sections, or target qualify the step a decision directs")
     directed = direction(next_step, kind, sections, target) if next_step is not None else None
     line = decision_line(path, read_log(path), decision, reason, by=by, resolves=resolves,
                          reads=reads, directs=directed, branch=branch, change=change,
-                         resumes=resumes)
+                         resumes=resumes, waives=waives)
     return append_entry(path, line, clock)
 
 
 def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: str, *,
                   by: str, resolves: int | None = None, reads: int | None = None,
                   directs: Entry | None = None, branch: str | None = None,
-                  change: str | None = None, resumes: int | None = None) -> Entry:
+                  change: str | None = None, resumes: int | None = None,
+                  waives: Sequence[str] | None = None) -> Entry:
     """The decision `note_orchestrator` records, checked against `entries`, the lines
     of the log at `path` it would follow, and not yet numbered: `directs` is the
     target of the owner's direction. A line that breaks a rule raises, naming it."""
@@ -884,6 +889,14 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
         if refusal := revisit_refusal(entries, resumes):
             raise StepError(f"the revisit is refused: {refusal}")
         line["resumes"] = resumes
+    if waives is not None:
+        if by != "owner":
+            raise StepError("a waiver of validation's parts is the owner's")
+        if directs is not None:
+            raise StepError("a waiver of validation's parts directs no step")
+        if not waives or not all(isinstance(p, str) and p for p in waives):
+            raise StepError(f"a waiver names one or more parts; got {list(waives)!r}")
+        line["waives"] = list(waives)
     if directs is not None:
         if by != "owner":
             raise StepError("a decision directing a step is the owner's; the orchestrating "
@@ -896,6 +909,16 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
             raise StepError(f"the direction is refused: {refusal}")
         line["next"] = directs
     return line
+
+
+def waived_parts(entries: Sequence[Entry]) -> dict[str, Entry]:
+    """Each part of validation the owner waived, with the latest decision waiving it."""
+    waived: dict[str, Entry] = {}
+    for entry in entries:
+        if entry.get("by") == "owner" and isinstance(entry.get("waives"), list):
+            for part in entry["waives"]:
+                waived[part] = entry
+    return waived
 
 
 def after_cleanup(entry: Entry, entries: Sequence[Entry]) -> bool:

@@ -171,11 +171,13 @@ moves nothing here, and validation runs beside it.
   and the served list together to find which the charts serve now — reaches a
   part's command through the environment; never pass one yourself.
 - **Waivers.** Any part may be waived, and only by the owner. A waiver for later
-  validations is the owner's decision in the change's workflow log — a line
-  `"by": "owner"` in `workflow.jsonl` beside the change's records, which Grep finds
-  — naming the parts and the condition they are waived on, such as "nothing the
-  change touches affects the services the end-to-end tests validate"; an
-  instruction in the invocation is not a waiver. For each part such a decision
+  validations is the owner's decision in the change's workflow log, naming the
+  parts it waives (`waives`) and the condition they are waived on, such as "nothing
+  the change touches affects the services the end-to-end tests validate"; an
+  instruction in the invocation is not a waiver. The plan marks each waived part
+  with the decision's `seq` and words, so read them there. An older decision
+  recorded before waivers named their parts is free text in `workflow.jsonl`:
+  read the log's owner decisions for one too. For each part such a decision
   waives, find the last validation record of the change whose `Parts:` line ran
   that part, and its `Commit:`. The waiver lapses, and the part runs, when the
   commits since then include a merge (`git log --merges <that commit>..HEAD`),
@@ -185,7 +187,8 @@ moves nothing here, and validation runs beside it.
   is `waived`: it is not run, and the record names the decision's `seq`, its
   condition, and what you checked. A lapsed waiver is written in the part's section
   too, naming the decision's `seq` and why it lapsed — the merge, or how the
-  condition broke. A waived part is an omission of evidence, neither passed,
+  condition broke — and the part is run with `--lapsed '<why>'`: the engine refuses
+  to run or start a part the log waives without it. A waived part is an omission of evidence, neither passed,
   failed, nor inconclusive, and the result is judged on the parts that ran. When
   every part is waived there is nothing to validate: write no record, and tell the
   owner that waiving validation entirely is their direction past the guard it

@@ -169,10 +169,13 @@ class Invoked:
     phase: str | None = None
     check: str | None = None
     skipped: str | None = None
+    # Why a waived part ran: its waiver's condition no longer held.
+    lapsed: str | None = None
 
     def entry(self) -> Entry:
         found: Entry = {"hook": self.hook}
-        for key in ("part", "owed", "phase", "check", "command", "exit_status", "skipped"):
+        for key in ("part", "owed", "phase", "lapsed", "check", "command", "exit_status",
+                    "skipped"):
             if (value := getattr(self, key)) is not None:
                 found[key] = value
         return {**found, "started": self.started, "seconds": round(self.seconds, 3)}
@@ -384,13 +387,17 @@ class Hooks:
     # Validation's preflight and parts, and their cleanup.
 
     def validation(self, change: str, base: str | None, part_name: str,
-                   phase: str | None = None, owed: str | None = None) -> bool:
+                   phase: str | None = None, owed: str | None = None,
+                   waived: Mapping[str, Mapping[str, Any]] | None = None,
+                   lapsed: str | None = None) -> bool:
         """`run validation <change> preflight`, or a part's `run`, `start`, or
         `collect`, held to the hook table. An owed part takes the workflow it is
         owed for, and any other refuses one. A `start`'s last line of standard
         output is kept as its marker, for the commit, the part, and the workflow,
         replacing any kept before; the matching `collect` fills `{after}` with it,
-        and refuses with none kept."""
+        and refuses with none kept. A part the owner waived (`waived`, from the
+        log) is refused at `run` and `start` unless `lapsed` says why its waiver's
+        condition no longer holds, so a waiver is never passed over unread."""
         self.allow(VALIDATION)
         commit = self.head(self.root)
         if commit is None:
@@ -408,6 +415,15 @@ class Hooks:
             return self.finish(name, self.run_commands(VALIDATION, commands, values,
                                                        phase=PREFLIGHT))
         part = self.configuration.part(part_name)
+        decision = (waived or {}).get(part.name)
+        if decision is not None and phase in ("run", "start") and not lapsed:
+            raise HookError(f"validation.parts.{part.name} is waived by the owner's decision "
+                            f"at seq {decision['seq']}: {decision['decision']}. Record it "
+                            "`waived`; if its condition no longer holds, run it with "
+                            "--lapsed '<why>'")
+        if lapsed and decision is None:
+            raise HookError(f"--lapsed names a waiver, and no owner's decision waives "
+                            f"validation.parts.{part.name}")
         if phase not in PHASES:
             raise HookError(f"a part is run with one of {', '.join(PHASES)}; got {phase!r}")
         if (phase == "run") != (part.run is not None):
@@ -430,7 +446,8 @@ class Hooks:
             values["after"] = after
         commands = getattr(part, phase)
         self.needs(commands, values, f"validation.parts.{part.name}.{phase}")
-        labels = {"part": part.name, "owed": owed, "phase": phase}
+        labels = {"part": part.name, "owed": owed, "phase": phase,
+                  **({"lapsed": lapsed} if lapsed else {})}
         if phase == "start":
             ran, marker = self._start(commands, values, labels)
             self._keep_marker(change, key, marker if not any(i.failed for i in ran) else None)
@@ -563,6 +580,7 @@ def run_openspec(configuration: Configuration, arguments: Sequence[str], root: P
 def main(hook: str, change: str, *, root: Path, configuration: Configuration,
          environ: Mapping[str, str], base: str | None = None, part: str | None = None,
          phase: str | None = None, owed: str | None = None,
+         waived: Mapping[str, Mapping[str, Any]] | None = None, lapsed: str | None = None,
          hooks: Hooks | None = None) -> int:
     """`run <hook> <change>`, `run validation <change> preflight|<part> <phase>`, or
     `run cleanup <change>`: 0 when it passed, 1 when it failed or was refused, its
@@ -572,7 +590,7 @@ def main(hook: str, change: str, *, root: Path, configuration: Configuration,
     try:
         change_directory(root, change)
         if hook == VALIDATION:
-            passed = runner.validation(change, base, part or "", phase, owed)
+            passed = runner.validation(change, base, part or "", phase, owed, waived, lapsed)
         elif hook == CLEANUP:
             passed = runner.cleanup(change, base)
         else:

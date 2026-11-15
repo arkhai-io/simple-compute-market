@@ -639,6 +639,35 @@ def test_a_part_run_another_way_than_it_declares_is_refused(
     assert shell.commands == []
 
 
+WAIVED = {"helm": {"seq": 7, "decision": "waive helm while no chart changes"}}
+
+
+def test_a_waived_part_is_refused_unread(tmp_path: Path) -> None:
+    shell = Shell()
+    runner = _validating(tmp_path, shell=shell)
+
+    with pytest.raises(hooks.HookError, match="waived by the owner's decision at seq 7"):
+        runner.validation(CHANGE, None, "helm", "run", waived=WAIVED)
+    assert shell.commands == []
+
+
+def test_a_lapsed_waiver_runs_its_part_and_says_why(tmp_path: Path) -> None:
+    shell = Shell()
+    runner = _validating(tmp_path, shell=shell)
+
+    assert runner.validation(CHANGE, None, "helm", "run", waived=WAIVED,
+                             lapsed="the merge brought a chart change")
+
+    assert shell.commands == [f"make validate-helm CHANGE={CHANGE}"]
+    assert runner.invoked[-1].entry()["lapsed"] == "the merge brought a chart change"
+
+
+def test_a_lapse_names_a_waiver(tmp_path: Path) -> None:
+    with pytest.raises(hooks.HookError, match="no owner's decision waives"):
+        _validating(tmp_path).validation(CHANGE, None, "local", "run", waived=WAIVED,
+                                         lapsed="why")
+
+
 def test_only_validation_runs_its_parts(tmp_path: Path) -> None:
     with pytest.raises(hooks.HookError, match="the implement step may not run validation"):
         _validating(tmp_path, step="implement").validation(CHANGE, None, "local", "run")
