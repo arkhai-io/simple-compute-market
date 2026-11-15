@@ -4,21 +4,24 @@ tags: [repository, configuration, deployment]
 
 # Configuration and Deployment
 
-This document holds how services in this repository resolve their
-configuration and are deployed: its stacks, its charts, and its migrations
-at startup, as this repository's instances of the engineering guidance.
+This document describes how services in this repository resolve their
+configuration and are deployed: its stacks, its charts, its release topology, its
+persistence, and its migrations at startup. The rules a change satisfies in them —
+service configuration, the Compose stacks, the charts, local clusters, service
+databases, and migrations at startup — are under
+[`docs/guidance/repository/`](../guidance/repository/README.md), and what an
+operator does is the [operator handbook](../operator-handbook.md).
 It is distinct from `docs/configuration.md`, which documents the
 negotiation/fulfillment *policy plugin* system (how a seller or buyer
 writes a custom pricing or negotiation hook) — a different, unrelated
 meaning of "configuration." This document is about how a service reads
-its own settings at startup and how an operator supplies them. The rules
-it applies are the engineering guidance:
+its own settings at startup and how an operator supplies them. The engineering
+rules those repository rules apply are
 [`configuration.md`](../guidance/engineering/configuration.md),
 [`deployment.md`](../guidance/engineering/deployment.md),
 [`migrations.md`](../guidance/engineering/migrations.md), and their
 forms for Python, Kubernetes, and Helm beside them in
-[`docs/guidance/engineering/`](../guidance/engineering/README.md); this
-document holds this repository's instances of them that span its services.
+[`docs/guidance/engineering/`](../guidance/engineering/README.md).
 One capability's own configuration — its settings, its definition documents, what
 its services refuse at startup — is that capability's `configuration.md`, beside
 its specification under `openspec/specs/`

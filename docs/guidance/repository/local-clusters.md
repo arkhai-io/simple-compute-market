@@ -27,12 +27,11 @@ deployment whose state must survive reinstalling.
 ## A local release configures a service through the values a deployment uses
 
 **A local release configures a service through the values a deployment uses**
-([`deployment.md`](../engineering/deployment.md#a-local-release-configures-a-service-through-the-values-a-deployment-uses)).
-Payments are the example: both
-storefronts settle in `arkhai.payments.v1` against the payments lane double
-through `[Settlement.arkhai_payments]` in their `config`, the `caBundle` option on
-the `payments-ca-bundle` ConfigMap, and the payments `api_key` in their runtime
-Secret's overlay, never `development_auth`.
+([`deployment.md`](../engineering/deployment.md#a-local-release-configures-a-service-through-the-values-a-deployment-uses)):
+the local release's storefronts settle payments through the same configuration, CA
+bundle, and Secret overlay a deployment uses, never `development_auth`, as
+[`DEPLOYMENT_AND_CONFIG.md`, "Release topology"](../../development/DEPLOYMENT_AND_CONFIG.md#release-topology)
+describes.
 
 ## A scenario needing release 2
 

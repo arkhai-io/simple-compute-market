@@ -6,10 +6,11 @@ tags: [repository]
 
 The entry for every agent working in this repository: that it works its changes
 through the change workflow, what every session reads, where each layer of its
-guidance lives, the tags and exceptions to shared guidance that are its own, and the
-rules for any agent's actions here, whatever the task. It holds only what can be
-nowhere else: a topic's repository instance is in this repository's document for
-that topic, and a check's scope sits beside the check.
+guidance lives and where its tags are, the exceptions to shared guidance that span
+its systems, and the rules for any agent's actions here, whatever the task. It holds
+only what can be nowhere else: a topic's repository rules are in its file under
+`docs/guidance/repository/`, its description in `docs/development/`, and a check's
+scope sits beside the check.
 
 ## The change workflow
 
@@ -31,10 +32,11 @@ in `.agents/workflow.toml`.
 | `AGENTS.md` | This entry |
 | [`docs/guidance/engineering/`](docs/guidance/engineering/README.md) | Every Markdown file beneath it: the engineering guidance |
 | [`docs/guidance/workflow/`](docs/guidance/workflow/README.md) | Every Markdown file beneath it: the change workflow's guidance |
+| [`docs/guidance/repository/`](docs/guidance/repository/README.md) | Every Markdown file beneath it: this repository's rules spanning its systems |
 | [`openspec/README.md`](openspec/README.md) | This repository's OpenSpec guide: where each document goes, its closeout parts and their checks |
-| [`docs/development/ARCHITECTURE.md`](docs/development/ARCHITECTURE.md) | The system's shape, its package layers, authorities, vocabulary, and flows |
-| [`docs/development/TESTING.md`](docs/development/TESTING.md) | Where this repository's tests live, its lanes and doubles |
-| [`docs/development/DEPLOYMENT_AND_CONFIG.md`](docs/development/DEPLOYMENT_AND_CONFIG.md) | How its services resolve configuration and are deployed |
+| [`docs/development/ARCHITECTURE.md`](docs/development/ARCHITECTURE.md) | The description of the system: its shape, package layers, authorities, vocabulary, and flows |
+| [`docs/development/TESTING.md`](docs/development/TESTING.md) | The description of its tests: where they run, its lanes, its canonical deal, and its doubles |
+| [`docs/development/DEPLOYMENT_AND_CONFIG.md`](docs/development/DEPLOYMENT_AND_CONFIG.md) | The description of how its services are configured and deployed: its stacks, charts, releases, and migrations |
 
 A session working on a capability reads, beside its specification and companion,
 every other Markdown file in its directory under `openspec/specs/` but its
@@ -45,18 +47,23 @@ every other Markdown file in its directory under `openspec/specs/` but its
 The guidance has three layers — engineering, the change workflow's, and this
 repository's — as
 [`docs/guidance/workflow/README.md`, "The layers of guidance"](docs/guidance/workflow/README.md#the-layers-of-guidance)
-defines them. Each shared layer's README describes the layer, how its files are
-organized, and its tag table; its files sit beside it, each named by its subject and
-carrying its tags in its frontmatter. This repository's guidance is this file and the
-documents the table names, and, beside each capability, the guidance files in its
-directory under `openspec/specs/` other than its `spec.md`, its companion, and its
-`index.md`.
+defines them. Each layer's directory under `docs/guidance/` has a README describing
+the layer, how its files are organized, and its tag table; its files sit beside it,
+each named by its subject and carrying its tags in its frontmatter. This repository's
+guidance is this file, `openspec/README.md`, the rules spanning its systems under
+`docs/guidance/repository/`, the description documents under `docs/development/`,
+and, beside each capability, the guidance files in its directory under
+`openspec/specs/` other than its `spec.md`, its companion, and its `index.md`. What
+the owner or an operator does is in the handbooks, outside the guidance: the
+[operator handbook](docs/operator-handbook.md), the
+[release handbook](docs/release-handbook.md), and the change workflow handbook.
 
 | Layer | Guidance |
 |---|---|
 | engineering | [`docs/guidance/engineering/`](docs/guidance/engineering/README.md) |
 | workflow | [`docs/guidance/workflow/`](docs/guidance/workflow/README.md) |
 | repository | `AGENTS.md` |
+| repository | [`docs/guidance/repository/`](docs/guidance/repository/README.md) |
 | repository | [`openspec/README.md`](openspec/README.md) |
 | repository | [`docs/development/ARCHITECTURE.md`](docs/development/ARCHITECTURE.md) |
 | repository | [`docs/development/TESTING.md`](docs/development/TESTING.md) |

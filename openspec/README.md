@@ -24,18 +24,29 @@ change's documents. This repository's documents beside them:
 
 | Knowledge | Permanent home |
 |---|---|
-| That this repository works its changes through the change workflow, what every session reads, where each layer of the guidance lives, this repository's tags, its exceptions to shared guidance across several systems, and its rules for any agent's actions here | `AGENTS.md` |
+| That this repository works its changes through the change workflow, what every session reads, where each layer of the guidance lives and where its tags are, its exceptions to shared guidance across several systems, and its rules for any agent's actions here | `AGENTS.md` |
 | Guidance that holds in any repository, and the change workflow's guidance | `docs/guidance/engineering/` and `docs/guidance/workflow/` |
+| This repository's rules spanning its systems — package layers, tests, configuration and deployment, packaging and publication — and its tag table: where a change promotes such a rule | `docs/guidance/repository/`, a file per subject |
 | Guidance pertaining to one capability, and an exception to shared guidance that applies to it alone | a guidance file in `openspec/specs/<capability>/`, beside its `spec.md`, carrying `tags` frontmatter |
-| The system's shape, repository-wide dependency layers, authority boundaries, common vocabulary, major flows, and deployment topology, and this repository's own rules spanning its systems | `docs/development/ARCHITECTURE.md` |
-| This repository's tests at each level, its end-to-end lanes and doubles, and its validation conventions | `docs/development/TESTING.md` |
-| How this repository's services resolve configuration, and its Kubernetes deployment conventions | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| The description of the system: its shape, package and dependency layers, authority boundaries, common vocabulary, major flows, and deployment topology | `docs/development/ARCHITECTURE.md` |
+| The description of this repository's tests: where each level runs, its end-to-end lanes, its canonical deal, and its doubles | `docs/development/TESTING.md` |
+| The description of how this repository's services are configured and deployed: its stacks, charts, release topology, persistence, and migrations | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Operating a deployment: document formats, procedures, upgrade and recovery steps | `docs/operator-handbook.md` |
-| Publishing this repository's packages and artifacts: a package's one-time setup, cutting a release, the migration floor, and troubleshooting | `docs/release-handbook.md` |
+| Publishing this repository's packages and artifacts: the publish workflow, a package's one-time setup, cutting a release, the migration floor, and troubleshooting | `docs/release-handbook.md` |
+| Operating the change workflow | `docs/change-workflow-handbook.md` |
 | The roadmap: directional goals, the value each delivers, current state per goal, and which change owns each open gap | `docs/development/ROADMAP.md` |
 | Change provenance and review discussion | Git history and pull requests ([`documentation.md`, "Provenance lives in version control"](../docs/guidance/engineering/documentation.md#provenance-lives-in-version-control)) |
 
-`ARCHITECTURE.md` is a current-state cross-system map. It should link to detailed subsystem specifications rather than duplicate every endpoint and state transition. It is the cross-system document the workflow's guidance means where it says a change promotes cross-system knowledge. Neither it, `DEPLOYMENT_AND_CONFIG.md`, nor the operator handbook replaces a specification's normative requirements.
+The description documents, the repository's rules, and the handbooks each hold one
+kind of material
+([`documentation.md`, "A document holds one kind of material"](../docs/guidance/engineering/documentation.md#a-document-holds-one-kind-of-material)):
+the three documents under `docs/development/` describe the system, the files under
+`docs/guidance/repository/` state the rules a change here satisfies, and the handbooks
+hold what the owner or an operator does. The repository's cross-system documents, as
+the workflow's guidance names them, are those three description documents and
+`docs/guidance/repository/`: a change promotes cross-system knowledge of the system to
+the description, and guidance spanning several systems to the rule file for its
+subject. `ARCHITECTURE.md` is a current-state cross-system map. It should link to detailed subsystem specifications rather than duplicate every endpoint and state transition. Neither it, `DEPLOYMENT_AND_CONFIG.md`, nor the operator handbook replaces a specification's normative requirements.
 
 ## The index check
 

@@ -16,8 +16,9 @@ names and dependencies, and how they are versioned — is the repository's guida
 
 - A push to `main` that touches a package's directory selects the changed
   packages (via `dorny/paths-filter`) and builds a job matrix from them.
-- `workflow_dispatch` considers every package in the table, the published set
-  [`published-packages.md`](guidance/repository/published-packages.md) states.
+- `workflow_dispatch` considers every package in the workflow's `PACKAGES` table,
+  whose set [`published-packages.md`](guidance/repository/published-packages.md)
+  states.
 - Each job checks whether the package's current `version` is already on
   PyPI and skips if so, so a version bump publishes and other commits do
   not.
@@ -25,7 +26,7 @@ names and dependencies, and how they are versioned — is the repository's guida
   trusted publishing.
 
 Most packages publish an sdist and a wheel. Packages marked `wheel_only`
-in the table (the two buyer plugins and the VM storefront) are built with
+in the workflow's table (the two buyer plugins and the VM storefront) are built with
 `uv build --wheel` and publish a wheel only.
 
 Build order is not constrained. `uv build --no-sources` builds in an

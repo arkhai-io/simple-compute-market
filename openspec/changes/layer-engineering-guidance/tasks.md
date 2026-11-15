@@ -2883,6 +2883,18 @@ the repository's tag table, the rule rows of `ARCHITECTURE.md`, `TESTING.md`, an
   file's opening and its list's lead; `chart-render-tests.md`, `ansible-gates.md`,
   and the configuration and chart files — bold lead-ins became headings, their text
   kept; every relative link re-rooted.
+  Correction (section 13's round check): "bold lead-ins became headings, their text
+  kept" is so, but the bold lead-in stays under its heading in `service-configuration.md`,
+  `helm-charts.md`, `local-clusters.md`, `test-placement.md`, `compose-stacks.md`,
+  `deterministic-tests.md`, and `chart-render-tests.md`, repeating the heading's
+  words; and the inventory names some headings other than the files use ("Through
+  interfaces" is "A system test reaches services only through their interfaces", "A
+  lane's configuration" "A lane provides its own configuration", "Mock output" "A
+  mock's default output", "Values" "An integer above 2^53 is a string", "Test pods"
+  "Helm test pods carry no workload selector label", "No wait on a dependency" "A
+  deployment does not wait on a service's dependencies"). `package-layers.md`'s "the
+  third is stated as placement tests" lost its referent with the family-kit tests,
+  and now links `family-kits.md`'s.
 - [x] 11.3 Move the draw.io paragraph from `openspec/README.md`'s "Documentation
   placement" into `docs/guidance/repository/diagrams.md`, `tags: [repository,
   diagrams]`, linking `docs/guidance/engineering/diagrams.md` (D29), and re-point
@@ -3043,7 +3055,12 @@ messages naming `BUILD_AND_PACKAGING.md`; whatever cites either document.
   linked them; then "How the
   publish workflow works", "One-time setup for a package", "Cutting a release", "The
   migration floor", "Import package renames", "Where artifacts are pushed", and
-  "Troubleshooting", each moved whole. The operator handbook gains nothing: the
+  "Troubleshooting", each moved whole but for the rule links and two clauses: the
+  one-time setup's "once it has its row in `published-packages.md`", which that
+  file's own adding-a-package sentence states, and the publish workflow's "the
+  workflow's `PACKAGES` table, whose set `published-packages.md` states", which also
+  says which table `wheel_only` marks (corrected after section 13's round check). The
+  operator handbook gains nothing: the
   inventory finds no operator procedure among the five documents' sections, the
   operator steps inside descriptions listed as overlap for the triage (section 10's
   notes).
@@ -3088,8 +3105,12 @@ messages naming `BUILD_AND_PACKAGING.md`; whatever cites either document.
   these documents, and none is owed. Owed by validation: nothing; the
   `publish-pypi.yml` edit is comments.
   Done. Re-pointed: the six scripts' docstrings and failure messages, each naming
-  the file holding its conventions (`check_uv_setup.py`'s message
-  `packaging-checks.md`, since its conventions span three files);
+  the files holding its conventions and a message naming one, `packaging-checks.md`
+  where they span several (correction, section 13's round check: `check_project_layout.py`
+  named only `project-layout.md`, which holds none of its `find-links`, `cache-keys`,
+  or source-path conventions, and `check_locks.py` and `uv_project.py` each left out
+  a file; their docstrings now name `wheelhouse.md`, and `python-version.md` for
+  `uv_project.py`, and `check_project_layout.py`'s message `packaging-checks.md`);
   `tools/README.md`; `api-credits/architecture.md`, `deployment-state/architecture.md`
   (the floor to the handbook, the conventions to the packaging files), and
   `market-change-workflow/README.md`'s check rows and its uv and audit paragraphs;
@@ -3131,19 +3152,43 @@ D32, D33; D10 as amended). Files: `docs/guidance/engineering/documentation.md`;
 `AGENTS.md`; `openspec/README.md`; the openings and document map of
 `docs/development/ARCHITECTURE.md`, `TESTING.md`, and `DEPLOYMENT_AND_CONFIG.md`.
 
-- [ ] 13.1 Add to `docs/guidance/engineering/documentation.md` a section, "A
+- [x] 13.1 Add to `docs/guidance/engineering/documentation.md` a section, "A
   document holds one kind of material", stating D25's three kinds — a description of
   the system, read by every reader and written once; rules a change must satisfy;
   procedures a person runs, kept in handbooks — with a neutral example (D33). It is
   new guidance: the notes give its text for the triage (31 O1b). The workflow README's
   "What the workflow's guidance holds" links it as the workflow's instance.
-- [ ] 13.2 Reword the workflow README's "The layers of guidance" sentence "A file
+  Done. The section's text, for the triage: "A repository's permanent documents hold
+  three kinds of material, and each document holds one: **A description of the
+  system** — what it is and why: its shape, the authorities over its state, its
+  vocabulary, its flows, and its topology. Everyone who works on the system reads
+  it, so it is written once, as narrative, and the rules and procedures that rest on
+  it link it rather than repeat it. **Rules for work** — what a change must produce
+  or satisfy, wrong if a change's work product were otherwise. Each is stated once,
+  in a document of rules, linking the description it rests on. **Procedures** — what
+  a person does or types: deploying, releasing, recovering. They are kept in
+  handbooks, apart from the description and the rules, each whole, rather than cut
+  into the rules each step touches. For example, 'the billing service owns the
+  ledger, and other services read it through the billing service's API' describes
+  the system; 'a new service reads the ledger only through the billing service's
+  API' is a rule; 'to rebuild the ledger after a restore, stop the billing service
+  and run its replay command' is a procedure, kept in the operator's handbook." The
+  file's opening names the kind of material a document holds, and its definition of
+  a permanent document gains procedures; the engineering table's `documentation` row
+  names "the kind of material each holds". The workflow README closes "What the
+  workflow's guidance holds" with the division as the instance: the specification
+  and companion describe, the guidance states rules, the handbook holds the owner's
+  procedures.
+- [x] 13.2 Reword the workflow README's "The layers of guidance" sentence "A file
   carries the tags its whole content needs and no more, so content needing other
   tags goes in another file" to D28's rule — a file's tags name what it covers, and
   content on another subject goes in another file — and say the same in
   `docs/guidance/engineering/README.md`'s "Tags", assuming no selection formula
   (D28, 31 O1c as amended).
-- [ ] 13.3 Rewrite `AGENTS.md` for the layout (D32): "Where the guidance lives" says
+  Done: both READMEs, and the repository's README written in section 11, say "a
+  file's tags name what it covers, and content on another subject goes in another
+  file"; Grep finds the old wording nowhere outside the change's own documents.
+- [x] 13.3 Rewrite `AGENTS.md` for the layout (D32): "Where the guidance lives" says
   this repository's guidance is this file, `openspec/README.md`,
   `docs/guidance/repository/`, the description documents, and the guidance beside
   each capability; its layer table names `docs/guidance/repository/` (its README) and
@@ -3153,19 +3198,53 @@ D32, D33; D10 as amended). Files: `docs/guidance/engineering/documentation.md`;
   keeps the description documents by path. Verify, as task 9.3: the table's three
   directory rows hold every Markdown file `scripts/change-workflow config load common`
   expands `docs/guidance/` to, and its other rows are `load.common`'s other entries.
-- [ ] 13.4 Rewrite `openspec/README.md`'s "Documentation placement" table and the
+  Done: the opening says where the tags are and that the exceptions it holds span
+  systems, and that a topic's rules are under `docs/guidance/repository/` and its
+  description under `docs/development/`; "What every session reads" gains the
+  repository row, and the three description documents' rows say each is a
+  description; "Where the guidance lives" names this file, `openspec/README.md`,
+  `docs/guidance/repository/`, the description documents, the capability guidance,
+  and, outside the guidance, the handbooks; the layer table gains
+  `docs/guidance/repository/` (its README). Verified: `scripts/change-workflow config
+  load common` expands `docs/guidance/` to exactly the engineering, repository, and
+  workflow files, and the table's other rows are `AGENTS.md`, `openspec/README.md`,
+  and the three description documents, `load.common`'s other entries. No
+  `load.common` edit was needed.
+- [x] 13.4 Rewrite `openspec/README.md`'s "Documentation placement" table and the
   paragraph after it (D31, D33): the description documents' rows say each holds the
   description of its topic; a row for `docs/guidance/repository/`, the rules
   spanning this repository's systems, where a change promotes such a rule; the
   handbooks' rows — the operator handbook, the change workflow's handbook, and
   `docs/release-handbook.md`; and no row for the two removed documents. `AGENTS.md`'s
   sentence pointing here for what each repository document holds stays true.
-- [ ] 13.5 Rewrite the openings of `ARCHITECTURE.md`, `TESTING.md`, and
+  Done: the description rows say each holds the description of its topic; a row
+  for `docs/guidance/repository/`, a file per subject, where a change promotes such
+  a rule, its tag table with it; the operator, release, and change workflow
+  handbooks' rows; no row for the two removed documents (section 12 dropped them).
+  The paragraph after names D25's principle, linking `documentation.md`, and says
+  the repository's cross-system documents, as the workflow's guidance names the
+  role, are the three description documents and `docs/guidance/repository/` — the
+  description for knowledge of the system, the rule file for guidance spanning
+  systems — so closeout's promotion and guidance placement find both homes
+  (added after the round check found nothing mapped the role to the rules).
+- [x] 13.5 Rewrite the openings of `ARCHITECTURE.md`, `TESTING.md`, and
   `DEPLOYMENT_AND_CONFIG.md`, and `ARCHITECTURE.md`'s purpose line and document map,
   to say each holds the description of its topic and to link the repository rules
   and the handbooks for the rest; a document-map row for a section that left goes
   with it (D27, D10 as amended).
-- [ ] 13.6 Verify the round: `make check-guidance`; `make check-doc-citations
+  Done: `ARCHITECTURE.md`'s purpose line is the description and links
+  `docs/guidance/repository/` and the operator and release handbooks; its map's
+  "Implementation rules" row went in section 11, the "Package and dependency
+  layers", "Build, packaging, and initialization", and "Testing strategy" rows name
+  what stays, and a missing "Operator lifecycle controls" row was added.
+  `TESTING.md`'s and `DEPLOYMENT_AND_CONFIG.md`'s openings say each describes its
+  topic and link the repository rules, `DEPLOYMENT_AND_CONFIG.md`'s the operator
+  handbook too. `TESTING.md` links no handbook: its one procedure, running the lanes
+  in GitHub Actions, stays beside the targets it describes, as the inventory's
+  `Ambiguous` cell says. `ARCHITECTURE.md`'s "Production and staging" sentence that
+  the configuration, mounting, persistence, and migration conventions were covered
+  in `DEPLOYMENT_AND_CONFIG.md` now names the rule files that state them.
+- [x] 13.6 Verify the round: `make check-guidance`; `make check-doc-citations
   CHANGE=layer-engineering-guidance` and unscoped, reporting only what the preamble
   expects; `make check-agent-skills`; `scripts/change-workflow config load common`
   listing the repository files; `scripts/change-workflow run pre-commit
@@ -3173,6 +3252,51 @@ D32, D33; D10 as amended). Files: `docs/guidance/engineering/documentation.md`;
   fresh-context check of sections 10 to 13 against D24 to D35 and the inventory.
   End-to-end: none; no pipeline scenario reads guidance, and none is owed. Owed by
   validation: nothing.
+  Done. `make check-guidance` OK (102 files); `make check-agent-skills` OK; `make
+  check-doc-citations CHANGE=layer-engineering-guidance` reports only the preamble's
+  expected citations (`docs/agents/`, and the two removed documents from the
+  change's own documents); unscoped (`CHANGE=`) it adds only other changes'
+  citations of removed scripts and of `change-workflow/architecture.md`, untouched
+  by the round; `scripts/change-workflow config load common` lists every file under
+  `docs/guidance/repository/`. `run pre-commit`, functional for three scripts'
+  docstrings: after-functional-change (relock, no lock changed) passed;
+  pre-commit-functional's `make test` failed twice in
+  `domains/apicredits/tests/test_distribution_install.py`
+  (`test_domain_contract_imports_from_built_wheel` and
+  `test_storefront_domain_imports_resolve_without_a_raw_source_copy`: an
+  `ImportError` from `market_core.schemas` inside the throwaway venv the tests build
+  with `uv pip install --find-links`, which can resolve beyond the wheelhouse), a
+  package this round does not touch and whose suites passed in the round's two
+  earlier full runs; `make -C domains/apicredits test` run again passed whole (41,
+  then every sub-package). `pre-commit` itself failed only on the preamble's
+  citations and specification index.
+  Fresh-context check of sections 10 to 13 against D24 to D35 and the inventory: it
+  found 13.1 to 13.5 meeting their tasks and decisions, no layering, link-direction,
+  test-level, or packaging break, and no rule text lost (its helpers compared the
+  moved text against the inventory). Fixed from it: `openspec/README.md`'s "each of
+  these documents" sentence, which took in the roadmap and Git history; the
+  cross-system documents role mapped to the rules as well as the description;
+  `ARCHITECTURE.md`'s stale "covered in `DEPLOYMENT_AND_CONFIG.md`"; the release
+  handbook's `wheel_only` table; `package-layers.md`'s orphaned "placement tests";
+  `local-clusters.md`'s payments example, which repeated the description;
+  `documentation.md`'s opening and definition, and the `documentation` tag's
+  description; `AGENTS.md`'s opening sentence on where a topic's repository material
+  is; three scripts' docstrings and one message (12.5's correction); and the
+  overstated evidence in 11.2, 12.2, and 12.5's notes, each corrected in place.
+  Declined, for the triage: pointer sentences in the description documents that it
+  reads as restating a rule (`TESTING.md`'s lane-doubles lead, several
+  `DEPLOYMENT_AND_CONFIG.md` pointers) — each names a component's behaviour and
+  links its rule; rule sentences left in descriptions beyond those the inventory's
+  `Ambiguous` column lists (`ARCHITECTURE.md`'s hook merging, `TESTING.md`'s gate
+  semantics and stage notes, `DEPLOYMENT_AND_CONFIG.md`'s two release-topology
+  sentences); `helm-charts.md`'s integer section, the repository's statement of
+  `helm.md`'s rule; the bold lead-ins repeating their headings; the workflow README
+  calling the specification a description; `scripts/architecture.py`'s message, a
+  code edit beyond D35's list recorded in 11.5; and the placement table having no
+  row for `openspec/README.md` itself, which predates the round.
+  Session: the round ran in one session, as planned; it grew large — the five
+  documents' full reads, three moving sections, and four fresh-context checks — and
+  did not compact.
 
 ## 14. Closeout
 

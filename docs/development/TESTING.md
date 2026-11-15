@@ -4,12 +4,15 @@ tags: [repository, testing]
 
 # Testing Strategy
 
-This document holds where this repository's tests at each level live, its end-to-end
-lanes and their doubles, and its instances of the engineering testing rules. The
-levels, what each may prove, and the rules for writing tests are the engineering
-guidance: [`test-levels.md`](../guidance/engineering/test-levels.md),
+This document describes this repository's tests: where each level runs, its
+end-to-end lanes, the canonical compute deal they run, and the doubles they run
+against. The levels, what each may prove, and the rules for writing tests are the
+engineering guidance: [`test-levels.md`](../guidance/engineering/test-levels.md),
 [`testing.md`](../guidance/engineering/testing.md), and the files beside them in
-[`docs/guidance/engineering/`](../guidance/engineering/README.md).
+[`docs/guidance/engineering/`](../guidance/engineering/README.md); what a test here
+must hold — its placement, its determinism, what a deal scenario proves, its
+doubles, its gates and render tests — is the testing guidance under
+[`docs/guidance/repository/`](../guidance/repository/README.md).
 How one capability's tests divide its behaviour between the levels is that
 capability's `testing.md`, beside its specification under `openspec/specs/`
 ([`openspec/README.md`, "Documentation placement"](../../openspec/README.md#documentation-placement)).

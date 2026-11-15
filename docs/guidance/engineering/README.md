@@ -26,14 +26,15 @@ of the files within.
 ## Tags
 
 Every file carries YAML frontmatter whose `tags` hold `engineering` and only tags
-from this table. A `topic` tag names a subject of the work;
+from this table. A file's tags name what it covers, and content on another subject
+goes in another file. A `topic` tag names a subject of the work;
 a `tool` tag names a tool a developer, a build, or a deployment runs, and a library
 the code imports carries its language's tag.
 
 | Tag | Kind | Description |
 |---|---|---|
 | `engineering` | layer | Holds in a repository that uses neither the change workflow nor OpenSpec |
-| `documentation` | topic | Permanent documents: current state, provenance, citations, maintaining written rules |
+| `documentation` | topic | Permanent documents: the kind of material each holds, current state, provenance, citations, maintaining written rules |
 | `comments` | topic | Comments and docstrings: what they say and what they never say |
 | `diagrams` | topic | Diagrams, their sources, and what holds them to what they draw |
 | `dependencies` | topic | Imports and declared dependencies, and where a package belongs |

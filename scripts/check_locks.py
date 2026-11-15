@@ -39,7 +39,7 @@ direction only. A same-version wheel that changes only a marker is not seen
 here; `make lock` followed by an unchanged tree covers it.
 
 Rules: docs/guidance/engineering/packaging-uv.md and packaging.md beside it.
-Conventions: docs/guidance/repository/locks.md.
+Conventions: docs/guidance/repository/locks.md and wheelhouse.md beside it.
 """
 
 from __future__ import annotations

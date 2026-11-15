@@ -28,7 +28,11 @@ specification's; one that would be wrong if a change's work product were otherwi
 is guidance; one that tells the owner what to do or type is the handbook's. That
 archival is closeout's last step, so the closeout review reads the archived change,
 is the engine's order, and the specification's; that narrative compression shortens
-completed task notes to final behaviour constrains the work, and is guidance.
+completed task notes to final behaviour constrains the work, and is guidance. The
+division is the workflow's instance of
+[`documentation.md`, "A document holds one kind of material"](../engineering/documentation.md#a-document-holds-one-kind-of-material):
+the specification and its companion describe the workflow, the guidance states its
+rules for work, and the handbook holds the owner's procedures.
 
 ## The layers of guidance
 
@@ -60,8 +64,8 @@ files make resolves without a higher layer.
 
 Every guidance file carries YAML frontmatter whose `tags` hold exactly one layer
 tag, `engineering`, `workflow`, or `repository`, and otherwise only tags from its
-layer's vocabulary table or a lower layer's. A file carries the tags its whole
-content needs and no more, so content needing other tags goes in another file. The
+layer's vocabulary table or a lower layer's. A file's tags name what it covers, and
+content on another subject goes in another file. The
 layer model is `change-workflow`'s requirements CW-g7lt, on the layer tag, and
 CW-d2rw, on the link direction.
 

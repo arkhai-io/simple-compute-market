@@ -4,7 +4,7 @@ tags: [repository, architecture]
 
 # Arkhai Market Stack — Architecture Reference
 
-> **Purpose:** This system's cross-system description — what the system is and why its major boundaries exist — and the rules of this repository's own that span its systems: its package layers, scope, and kinds, and its instances of the engineering guidance it applies across them. Detailed normative subsystem contracts live in [`openspec/specs/`](../../openspec/specs/); proposed transitions live in [`openspec/changes/`](../../openspec/changes/). It is not a backlog or changelog: the goals being pursued and the value each delivers belong to [`ROADMAP.md`](ROADMAP.md), and delivery readiness belongs to [`openspec/changes/README.md`](../../openspec/changes/README.md).
+> **Purpose:** This system's cross-system description — what the system is and why its major boundaries exist. The rules a change here satisfies across systems — its package layers, scope, and kinds among them — are [`docs/guidance/repository/`](../guidance/repository/README.md), and what the owner or an operator does is in the handbooks: the [operator handbook](../operator-handbook.md) and the [release handbook](../release-handbook.md). Detailed normative subsystem contracts live in [`openspec/specs/`](../../openspec/specs/); proposed transitions live in [`openspec/changes/`](../../openspec/changes/). It is not a backlog or changelog: the goals being pursued and the value each delivers belong to [`ROADMAP.md`](ROADMAP.md), and delivery readiness belongs to [`openspec/changes/README.md`](../../openspec/changes/README.md).
 
 ## Document map
 
@@ -18,9 +18,10 @@ tags: [repository, architecture]
 | [Shared vocabulary and identities](#shared-vocabulary-and-identities) | Official cross-service terms and identifiers |
 | [Major lifecycle flows](#major-lifecycle-flows) | Negotiation, settlement servicing, capacity, and fulfillment |
 | [Deployment topology](#deployment-topology) | Local and deployed structure, and who operates it |
-| [Build, packaging, and initialization](#build-packaging-and-initialization) | Internal wheels, images, migrations, and reinit rules |
+| [Build, packaging, and initialization](#build-packaging-and-initialization) | The build flow from internal wheels to images, and the migration baseline |
 | [Recovery workers](#recovery-workers) | Timer-driven durable recovery: capacity, fulfillment convergence, lease expiry |
-| [Testing strategy](#testing-strategy) | How this repository's tests apply the engineering testing guidance; see `TESTING.md` |
+| [Operator lifecycle controls](#operator-lifecycle-controls) | The storefront loop controller and the trading pause |
+| [Testing strategy](#testing-strategy) | Where the tests are described; see `TESTING.md` |
 | [Capability documentation index](#capability-documentation-index) | Permanent detailed contracts and rationale |
 
 Directional context — which goals are being pursued, the value each delivers, and which change owns each open gap — lives in [`ROADMAP.md`](ROADMAP.md). This document states what is true now; the roadmap states where it is going.
@@ -1034,7 +1035,7 @@ The deployment surfaces support independently selectable registries, VM and bare
 
 The supported topology is several storefronts per registry, each storefront in its own release of the umbrella with its own provisioning service, publishing to one release's registry. A provisioning service trusts one storefront principal and calls back one storefront, so several storefronts per site is not supported yet, and the umbrella refuses a release that runs both compute storefronts on its own provisioning service. Several sites per storefront are served by each storefront's per-site projection state and per-site trust. Locally, release 1 is `deploy-local`'s umbrella (registry, Bob's VM storefront, provisioning, and the development chain) and release 2 is the same chart with `helm/bare-metal-release-values.yaml` layered: the bare-metal storefront and its own provisioning service, on release 1's registry and chain. See [`DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md#release-topology).
 
-Configuration resolution, ConfigMap/Secret mounting, stateful-service persistence strategy, and migration-at-startup conventions are this repository's application of the engineering guidance ([`configuration.md`](../guidance/engineering/configuration.md), [`kubernetes.md`](../guidance/engineering/kubernetes.md), [`deployment.md`](../guidance/engineering/deployment.md), [`migrations.md`](../guidance/engineering/migrations.md)), covered in [`docs/development/DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md) and [the deployment and state specification](../../openspec/specs/deployment-state/spec.md).
+Configuration resolution, ConfigMap/Secret mounting, stateful-service persistence strategy, and migration-at-startup conventions are this repository's application of the engineering guidance ([`configuration.md`](../guidance/engineering/configuration.md), [`kubernetes.md`](../guidance/engineering/kubernetes.md), [`deployment.md`](../guidance/engineering/deployment.md), [`migrations.md`](../guidance/engineering/migrations.md)), stated in [`service-configuration.md`](../guidance/repository/service-configuration.md), [`helm-charts.md`](../guidance/repository/helm-charts.md), [`service-databases.md`](../guidance/repository/service-databases.md), and [`migrations-at-startup.md`](../guidance/repository/migrations-at-startup.md), described in [`docs/development/DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md), and required by [the deployment and state specification](../../openspec/specs/deployment-state/spec.md).
 
 ### Operators
 
