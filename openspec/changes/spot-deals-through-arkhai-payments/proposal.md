@@ -225,13 +225,17 @@ domain or the persistence-owning servicing kit.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — adapter and servicing ownership, the
-  release flow, the subclassing principle and the timestamp principle
+- [x] `docs/development/ARCHITECTURE.md` — adapter and servicing ownership and the
+  release flow
 - [x] Existing subsystem specifications — the seven capabilities above
 - [x] The versioning guidance (`docs/guidance/engineering/versioning.md`,
   `docs/guidance/repository/package-versions.md`),
   `openspec/specs/settlement-configuration/configuration.md`,
-  `docs/development/DEPLOYMENT_AND_CONFIG.md` and the guidance under `docs/guidance/`
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, and the guidance files
+  `docs/guidance/engineering/implementation.md` (the sibling check, the subclassing
+  and timestamp principles), `docs/guidance/engineering/README.md` (its
+  `implementation` tag row), `docs/guidance/workflow/changes.md` (mergeability) and
+  `docs/guidance/repository/family-kits.md` (its link to the sibling check)
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -320,14 +324,18 @@ domain or the persistence-owning servicing kit.
   deployed: `docs/guidance/repository/package-versions.md`, "Compatibility is owed
   to what a release has shipped", with a pointer from
   `docs/development/ARCHITECTURE.md`.
-- Each change is mergeable to `dev` on its own merits: the change workflow's
-  guidance under `docs/guidance/workflow/`.
-- Check a sibling domain before adding behaviour to one; a difference needs a
-  reason stated where it lives: the guidance under `docs/guidance/`.
+- Each change is mergeable on its own merits into the branch it lands on:
+  `docs/guidance/workflow/changes.md`, "One change per branch".
+- Before adding behaviour to one of two parts that handle one concern, check
+  whether the other has it or needs it: `docs/guidance/engineering/implementation.md`,
+  "Composition from one component", linked from
+  `docs/guidance/repository/family-kits.md`, "Sibling domains behave alike".
 - A versioned contract's field may be renamed or retired in stages, a path for
   deprecating a field and not a limit on how a contract may change:
   `docs/guidance/engineering/versioning.md`.
 - Contradictory classes implement a shared interface or a common base rather than
-  subclass one another: `docs/development/ARCHITECTURE.md`.
+  subclass one another: `docs/guidance/engineering/implementation.md`, a section of
+  its own beside "Composition from one component".
 - A timestamp is its source's claim, never an ordering between parties:
-  `docs/development/ARCHITECTURE.md`, authority boundaries.
+  `docs/guidance/engineering/implementation.md`, "Deciding which party is
+  authoritative".

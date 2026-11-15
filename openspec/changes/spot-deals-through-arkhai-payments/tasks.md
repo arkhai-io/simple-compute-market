@@ -2467,7 +2467,7 @@ docs/development/DEPLOYMENT_AND_CONFIG.md.
   own pins with no anchor. Recorded as an unowned gap row under this change in
   `openspec/changes/README.md`; until it is designed, a buyer keeps a retiring pin
   until its rate deals end.
-- Left for closeout (7.9, 7.10): `reanchoring.py`'s module docstring cites
+- Left for closeout (7.9, 7.11): `reanchoring.py`'s module docstring cites
   settlement-servicing's "Running hosted rate deals can re-anchor during identity
   overlap", which resolves once the delta archives; `DEPLOYMENT_AND_CONFIG.md`'s
   payments paragraph still calls a receipt identity change a cutover (true of a
@@ -2854,7 +2854,7 @@ this change to implementation and review.
       buyer-local and off the wire), test-compatibility/
       architecture.md (evidence labels; "Ordinary Arkhai purchase evidence": the
       recurring purchase through commit), docs/development/ARCHITECTURE.md
-      (Kit areas, Settlement servicing and Release, and the two principles below),
+      (Kit areas, Settlement servicing and Release),
       openspec/specs/settlement-configuration/configuration.md (servicing,
       `snapshot_freshness_seconds`; in the payments paragraph that calls a receipt
       identity change a cutover: open payment deals drained or refunded before the
@@ -2868,25 +2868,42 @@ this change to implementation and review.
       from docs/development/ARCHITECTURE.md),
       and openspec/specs/README.md capability index as needed. Promote the owner's
       principles in the wording design.md's promotion record and the owner record's
-      R24 settle, each where closeout's guidance placement puts it under
-      docs/guidance/: each change mergeable to dev on its own merits (the change
-      workflow's guidance); sibling-domain parity (one line); the staged field rename
-      (versioning.md); migration and backwards compatibility only for what has been
-      deployed (package-versions.md, pointer from ARCHITECTURE.md); contradictory classes
-      do not subclass one another, and a
-      timestamp is its source's claim (ARCHITECTURE.md). The per-boundary
+      R24 settle, at these destinations (review 142 F1): each change mergeable on its
+      own merits into the branch it lands on (docs/guidance/workflow/changes.md, "One
+      change per branch"; the role names the branch, so no `dev` mapping is written);
+      before adding behaviour to one of two parts that handle one concern, check
+      whether the other has it or needs it (one sentence in
+      docs/guidance/engineering/implementation.md, "Composition from one component",
+      and a link to it from docs/guidance/repository/family-kits.md, "Sibling domains
+      behave alike", which is not restated); the staged field rename (versioning.md,
+      done); migration and backwards compatibility only for what has been deployed
+      (package-versions.md, pointer from ARCHITECTURE.md); contradictory classes do
+      not subclass one another (implementation.md, a section of its own beside
+      "Composition from one component", widening the `implementation` row of
+      docs/guidance/engineering/README.md's tag table to name class hierarchies); a
+      timestamp is its source's claim (implementation.md, "Deciding which party is
+      authoritative"; no ARCHITECTURE.md pointer). The per-boundary
       compatibility posture is not promoted. Complete this change's design-promotion
       record. Preserve the shared mandate requirement's once clauses and archive
       after the foundation; promote rate buyer-end only in deal-lifecycle,
       referenced by buyer-orchestration. Archive writes delta-covered spec.md files
       for settlement-servicing, settlement-configuration, storefront-publication,
       deal-lifecycle, buyer-orchestration, test-compatibility and compute-delivery.
-- [ ] 7.10 **Documentation citations.** Run
+- [ ] 7.10 **Guidance placement.** Read each guidance section this branch added,
+      moved or rewrote since it branched against the layer test, adjacency and
+      exception placement (docs/guidance/workflow/README.md#the-layers-of-guidance;
+      here, openspec/README.md#documentation-placement): versioning.md's "A field may
+      be renamed or retired in stages", test-placement.md's bare-metal buyer CLI
+      factory list, the two rewritten rows of published-packages.md's dependency
+      table, and every guidance section 7.9 writes or links. Move what is misplaced
+      within the inert paths, report a misplacement needing a decision for the
+      closeout review, and run make check-guidance (review 142 F2).
+- [ ] 7.11 **Documentation citations.** Run
       make check-doc-citations CHANGE=spot-deals-through-arkhai-payments after
       promotion and resolve every match; run
       openspec validate spot-deals-through-arkhai-payments --strict with the
       repository-pinned validator.
-- [ ] 7.11 **Archival.** Run openspec archive spot-deals-through-arkhai-payments -y
+- [ ] 7.12 **Archival.** Run openspec archive spot-deals-through-arkhai-payments -y
       last, merging deltas; update the campaign row to the archive. Closeout
       review/triage reads the archived change and promoted permanent documents.
 
