@@ -19,7 +19,9 @@ explicitly, and this check rejects:
   `ARG PYTHON_VERSION` default before the first `FROM`, or a default other
   than the declared version.
 
-Conventions: docs/development/BUILD_AND_PACKAGING.md.
+Rules: docs/guidance/engineering/packaging.md, with packaging-uv.md and
+packaging-docker.md beside it.
+Conventions: docs/guidance/repository/python-version.md.
 """
 
 from __future__ import annotations
@@ -183,7 +185,7 @@ def main() -> int:
     for problem in found:
         print(problem)
     if found:
-        print(f"\n{len(found)} Python version problem(s). See docs/development/BUILD_AND_PACKAGING.md.")
+        print(f"\n{len(found)} Python version problem(s). See docs/guidance/repository/python-version.md.")
         return 1
     print("OK: every Python version selection reads the root declaration.")
     return 0

@@ -5,7 +5,7 @@
 # declared path.
 #
 # The environment is this directory's locked project, installed as every image
-# installs its lock (docs/development/BUILD_AND_PACKAGING.md, "Images"): every
+# installs its lock (docs/guidance/repository/images.md, "Images"): every
 # repository distribution from the wheelhouse, every other version as the lock
 # records it, PyInstaller included. The build image is pinned by digest so the
 # binary's Linux floor does not move between builds. PyInstaller output is not

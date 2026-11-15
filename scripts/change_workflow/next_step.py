@@ -364,9 +364,10 @@ def _merging(root: Path) -> bool:
     return merge.returncode == 0
 
 
-def _inert_paths(root: Path) -> tuple[str, ...] | None:
-    """The repository's inert paths, from its workflow configuration."""
-    return config.load(root).inert_paths
+def _inert_paths(root: Path) -> tuple[str, ...]:
+    """The repository's inert paths, from its workflow configuration: the workflow's
+    default where it declares none."""
+    return config.load(root).repository_inert_paths()
 
 
 def _uncommitted(root: Path, path: Path) -> bool:
@@ -608,7 +609,7 @@ class Computation:
                  bootstrap: Callable[[Path], Bootstrap] = bootstrap_state,
                  merging: Callable[[Path], bool] = _merging,
                  join: Join = ROUND_JOIN,
-                 inert_paths: Callable[[Path], Sequence[str] | None] = _inert_paths) -> None:
+                 inert_paths: Callable[[Path], Sequence[str]] = _inert_paths) -> None:
         self.root = root
         self.state = State(change)
         # Read once, and checked whole as the configuration always is: a malformed
@@ -845,7 +846,7 @@ class Computation:
                 f"{state.change}'s branch is not checked out here, but its records are in "
                 "this workspace's reviews/, which a clone would start without: check out "
                 f"its branch here and go on in the workspace, or move it into a clone by "
-                "hand as docs/agents/change-workflow.md describes",
+                "hand as docs/change-workflow-handbook.md describes",
                 routes=["work it in the workspace", "move it into a clone by hand"])
         return self.clone_step(
             f"{state.change}'s branch is checked out neither here nor in a clone of its own",

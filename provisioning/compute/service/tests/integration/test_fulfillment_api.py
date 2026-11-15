@@ -107,7 +107,9 @@ class FulfillmentApi:
     Every request below goes through the client production code uses. That is
     the point: a helper that built its own request bodies would prove the
     server accepts *those* bodies, and could then drift from the shipped client
-    indefinitely while staying green — the failure `TESTING.md` names.
+    indefinitely while staying green — the failure
+    `docs/guidance/engineering/integration-tests.md`, "No raw calls: the typed
+    client is the contract", names.
 
     What remains here is argument shape and unwrapping. A refused request
     raises ``ComputeProvisioningError`` carrying the HTTP status, so rejection

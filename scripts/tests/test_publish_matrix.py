@@ -13,7 +13,7 @@ import pytest
 from release_components import Distribution, load, normalise_distribution
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-RELEASING = REPO_ROOT / "docs" / "development" / "RELEASING.md"
+PUBLISHED_PACKAGES = REPO_ROOT / "docs" / "guidance" / "repository" / "published-packages.md"
 _SKIPPED_DIRS = {".git", ".venv", "node_modules", "openspec", "__pycache__", ".dist"}
 _REQUIREMENT_NAME = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
@@ -79,10 +79,10 @@ def _internal_dependencies(project: dict, repository: dict[str, dict]) -> dict[s
     return found
 
 
-def _releasing_rows() -> dict[str, tuple[str, str]]:
-    """RELEASING.md's published-package table: dist -> (path, internal deps cell)."""
+def _published_rows() -> dict[str, tuple[str, str]]:
+    """published-packages.md's table: dist -> (path, internal deps cell)."""
 
-    section = RELEASING.read_text(encoding="utf-8").split("## Published packages", 1)[1]
+    section = PUBLISHED_PACKAGES.read_text(encoding="utf-8").split("## Published packages", 1)[1]
     section = section.split("\n## ", 1)[0]
     return {
         dist: (path.rstrip("/"), cell)
@@ -147,24 +147,24 @@ def test_each_declared_distribution_is_the_one_at_its_path() -> None:
         assert normalise_distribution(declared) in repository
 
 
-def test_the_release_guide_lists_exactly_the_declared_distributions() -> None:
-    """The guide's table is documentation held equal to the declaration, not a
-    second list anything reads."""
-    rows = _releasing_rows()
+def test_the_published_package_table_lists_exactly_the_declared_distributions() -> None:
+    """The table is documentation held equal to the declaration, not a second
+    list anything reads."""
+    rows = _published_rows()
     table = {entry.dist: entry.path for entry in _distributions()}
     assert {dist: path for dist, (path, _) in rows.items()} == table
 
 
 @pytest.mark.parametrize("package", _distributions(), ids=lambda entry: entry.key)
-def test_the_release_guide_states_each_package_internal_deps(package: Distribution) -> None:
-    rows = _releasing_rows()
+def test_the_published_package_table_states_each_package_internal_deps(package: Distribution) -> None:
+    rows = _published_rows()
     if package.dist not in rows:
-        pytest.fail(f"{package.dist} has no row in {RELEASING.name}")
+        pytest.fail(f"{package.dist} has no row in {PUBLISHED_PACKAGES.name}")
     repository = _repository_distributions()
     _, cell = rows[package.dist]
     stated = {normalise_distribution(name) for name in re.findall(r"`([^`]+)`", cell)} & set(repository)
     declared = set(_internal_dependencies(repository[normalise_distribution(package.dist)], repository))
     assert stated == declared, (
-        f"{RELEASING.name} states {sorted(stated)} for {package.dist}; "
+        f"{PUBLISHED_PACKAGES.name} states {sorted(stated)} for {package.dist}; "
         f"its pyproject declares {sorted(declared)}"
     )

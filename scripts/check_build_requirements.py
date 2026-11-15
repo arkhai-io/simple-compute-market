@@ -21,7 +21,8 @@ This check refuses:
 
 It pins direct build requirements only, not the backend's own dependencies.
 Moving a pin changes every wheel, so it bumps every declared distribution's
-version (`docs/development/RELEASING.md`, "Versioning policy").
+version (`docs/guidance/repository/package-versions.md`, "A version changes
+when its contents change").
 """
 
 from __future__ import annotations
@@ -128,7 +129,7 @@ def main(root: Path = ROOT) -> int:
         print(problem)
     if found:
         print(f"\n{len(found)} build requirement problem(s). "
-              "See docs/development/BUILD_AND_PACKAGING.md.")
+              "See docs/guidance/repository/python-version.md, \"Build requirements\".")
         return 1
     print(f"OK: every build requirement is pinned in {DECLARATION}, and every uv build applies it.")
     return 0

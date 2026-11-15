@@ -84,8 +84,7 @@ def initialise_database(engine: Engine) -> None:
     it, naming the migration command. The ``default`` pool every quota resource
     registers into is seeded here rather than by a migration: no schema
     constraint requires it, so it is runtime initialization
-    (``docs/development/ARCHITECTURE.md``, "Build, packaging, and
-    initialization").
+    (``docs/guidance/engineering/persistence.md``, "Schema changes").
     """
     result = check_database(engine)
     if not result.compatible:

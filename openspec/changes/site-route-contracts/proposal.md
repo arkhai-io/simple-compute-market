@@ -1,6 +1,6 @@
 ## Why
 
-`ARCHITECTURE.md`'s "Route contracts and their HTTP binding" splits a capability's HTTP
+`docs/guidance/repository/production-code.md`'s "Route contracts and their HTTP binding" splits a capability's HTTP
 surface into a typed client, route contracts, wire models, an HTTP binding, and a
 framework-free route service, and says `kit/site` "predates the pattern and ships its own
 FastAPI router". Split from `resolve-compute-family-findings` by its design (decision D1,
@@ -29,7 +29,7 @@ Proposed; design not started. The design decides:
 - whether `kit/site` gains a framework-free route service, and whether the router factory
   stays as the one binding both composition roots mount, as a capability contributed to a
   service it does not compose supplies its router as a factory, or each root binds it;
-- what `ARCHITECTURE.md`'s route-contract section then says of `kit/site`.
+- what `production-code.md`'s route-contract section then says of `kit/site`.
 
 ## Capabilities
 
@@ -57,11 +57,11 @@ None expected.
 
 `kit/site`, `kit/site-client`, a possible `kit/site-contracts`, the compute provisioning
 service's and the API-credits service's composition, the publish workflow, and
-`docs/development/ARCHITECTURE.md`.
+`docs/guidance/repository/production-code.md`.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md`
+- [x] `docs/guidance/repository/production-code.md`
 - [x] Existing subsystem specification: `site-capacity`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change

@@ -1,8 +1,10 @@
 """Reject a documentation citation whose target is absent or tombstoned.
 
-`AGENTS.md` requires that every `openspec/`, `docs/`, `tools/`, `scripts/`,
-`e2e-tests/` and `.agents/` path cited by a document resolve on the branch, and
-treats an unresolvable citation as a blocking defect rather than a stale link.
+A document's citations resolve (docs/guidance/engineering/documentation.md,
+"Citations resolve"). Here that holds for every `openspec/`, `docs/`, `tools/`,
+`scripts/`, `e2e-tests/` and `.agents/` path a document cites, on the branch
+(openspec/specs/market-change-workflow/README.md, "The closing checks"), and an
+unresolvable citation is a blocking defect rather than a stale link.
 `.agents/` holds the shared skills and the files they cite, such as the outcome
 schema; the harness skill directories mirror it through links, so it alone is
 checked.
@@ -40,7 +42,7 @@ from check_spec_index import read_deltas  # noqa: E402
 from tombstones import is_tombstone  # noqa: E402
 from workflow_command import WorkflowRefused, found_change  # noqa: E402
 
-#: Directories whose paths `AGENTS.md` requires to resolve when cited.
+#: Directories whose paths must resolve when cited.
 CITED_ROOTS = ("openspec", "docs", "tools", "scripts", "e2e-tests", ".agents")
 
 #: Suffixes worth checking. A citation without one is usually a directory or
@@ -165,8 +167,8 @@ def main() -> int:
                 % (cited, document)
             )
     print(
-        "\n%d unresolvable citation(s). `AGENTS.md` treats these as blocking "
-        "defects rather than stale links." % len(problems)
+        "\n%d unresolvable citation(s): each is a blocking defect, not a stale "
+        "link." % len(problems)
     )
     return 1
 

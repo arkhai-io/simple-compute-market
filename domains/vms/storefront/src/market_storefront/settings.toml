@@ -88,12 +88,15 @@ priority = []
 # never published. A [Delivery] section sends each revealed buyer contact to
 # the seller's own sinks, routed per site by [Delivery.origins] when the
 # storefront has more than one; sink credentials belong in
-# storefront.secrets.toml. See DEPLOYMENT_AND_CONFIG.md. Generated
+# storefront.secrets.toml. See "Settlement consumer configuration and
+# cutover", "Contact-exchange contacts", and "Introduction delivery" in the
+# configuration.md beside the settlement-configuration,
+# contact-exchange-settlement, and introduction-delivery specifications under
+# openspec/specs/. Generated
 # role configuration supplies every typed field and the exact capability pins.
-# Provider, webhook, database, migration, EAS, and RPC service configuration is
 
 # [Wallet] and [Chains.<name>] are optional EVM resources supplied by operator
-# Private wallet material belongs only in storefront.secrets.toml. Alkahest
+# overlays. Private wallet material belongs only in storefront.secrets.toml. Alkahest
 # requires Wallet.private_key plus a selected Chains entry with rpc_url and
 # chain_id; Wallet.address, when stated, must be the account the key signs as,
 # and when omitted is that account. A chain on a deployment's own Alkahest

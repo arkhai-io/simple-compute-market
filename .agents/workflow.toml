@@ -10,7 +10,7 @@ protected-branches = ["main", "dev"]
 # these paths or a change's records needs no new validation. Engine, `run
 # pre-commit`: a commit changing only these runs only `pre-commit`. An entry with a
 # glob character is a pattern over the whole path; `**` spans directories.
-inert-paths = ["openspec/", "docs/", "**/README.md"]
+inert-paths = ["openspec/", "docs/", "**/README.md", "AGENTS.md"]
 
 [hooks]
 # Engine, `run pre-commit` and `run after-functional-change`, for change-implement,
@@ -45,9 +45,13 @@ command = "scripts/openspec"
 
 [load]
 # Engine, `config load <step>`: the documents every step's skill reads as it
-# starts; the engine's post-compaction hook re-reads them.
-common = ["AGENTS.md", "docs/development/ARCHITECTURE.md", "docs/development/TESTING.md",
-          "docs/development/DEPLOYMENT_AND_CONFIG.md", "openspec/README.md"]
+# starts; the engine's post-compaction hook re-reads them. The root guidance, then
+# `docs/guidance/`, a directory entry standing for every Markdown file beneath it,
+# so a guidance file added or moved there is read without editing this list, then
+# the repository's cross-system documents and its OpenSpec guide, each a file.
+common = ["AGENTS.md", "docs/guidance/", "docs/development/ARCHITECTURE.md",
+          "docs/development/TESTING.md", "docs/development/DEPLOYMENT_AND_CONFIG.md",
+          "openspec/README.md"]
 # Engine, `config load design`: change-design's own addition.
 design = ["docs/development/ROADMAP.md"]
 

@@ -44,7 +44,7 @@ The registry keeps Alembic, its route to PostgreSQL, and maps its revision onto 
 
 The check compares the recorded IDs with the chain, and only equality is *compatible*. Fewer is *behind*, listing what is pending. An ID the chain does not list makes the database *ahead*, listing the unknown IDs and any pending ones: this image cannot vouch for such a database, and the remedy is the backup or the image that wrote it, so the command refuses it and applies nothing, rather than deepening the divergence. No file, or no table but an empty ledger, is *absent*. Anything else holding tables — tables with no ledger, records of part of the floor, records a floorless chain does not know — is *unsupported*. An image rolled back over a migrated database is therefore refused, and recovery is restoring the pre-upgrade backup or rolling forward. A last-ID check, which this replaces, let an older image serve a database a newer release had changed, and passed a table added without a migration.
 
-Shape is held by tests rather than at startup: each service's chain run on a fresh database reproduces its committed floor fixture with its later migrations applied, and opening every store of a migrated storefront leaves its schema unchanged ([`TESTING.md`, "Migration Tests"](../../../docs/development/TESTING.md#migration-tests)). Nothing issues DDL outside a chain: constructing a database client, opening a store, or starting an application changes no schema, so a table a store needs is created by a migration.
+Shape is held by tests rather than at startup: each service's chain run on a fresh database reproduces its committed floor fixture with its later migrations applied, and opening every store of a migrated storefront leaves its schema unchanged ([`migration-chain-tests.md`](../../../docs/guidance/repository/migration-chain-tests.md)). Nothing issues DDL outside a chain: constructing a database client, opening a store, or starting an application changes no schema, so a table a store needs is created by a migration.
 
 ### The baseline and adoption
 
@@ -54,7 +54,7 @@ A database recording every migration ID the v0.3.0 chain recorded — or, for th
 
 Recorded IDs prove a chain ran, not what a release created outside it. A v0.3.0 storefront created some tables when a store first opened — deal servicing's journal tables first appear at a deal's delivery, and the bare-metal lifecycle cursor when its lifecycle store opens — so an adopted database may lack them. One migration after each storefront's baseline creates those tables and their indexes with `IF NOT EXISTS`, the only migration that tolerates objects already present; on a fresh database it simply creates them. Data a supported database holds that the release cannot serve is likewise repaired by an ordinary migration after the baseline: compute provisioning's rewrites every host's `ssh` connection stored at version 1, which the v0.3.0 chain wrote and v0.3.0 refuses, to version 2 ([physical provisioning](../physical-provisioning/architecture.md#the-host-registry-owns-the-connection)). The tables v0.3.0 kept frozen for extraction — VM's earlier inventory tables and bare metal's accepted site generations — are dropped by a migration after the baseline. Migrations a later change adds go after the baseline too.
 
-The floor is a release-time decision: whether a later release becomes a new floor is weighed when it is promoted ([`RELEASING.md`](../../../docs/development/RELEASING.md#cutting-a-release)).
+The floor is a release-time decision: whether a later release becomes a new floor is weighed when it is promoted ([the release handbook, "The migration floor"](../../../docs/release-handbook.md#the-migration-floor)).
 
 ## Artifact and package boundary
 
@@ -64,7 +64,7 @@ The refreshed set is derived from each project's lock when the operation runs, n
 
 Images install that committed lock unchanged, with `--locked`, from a layout that mirrors the project's depth below the repository root; the same derivation reinstalls internal packages so a persistent build cache cannot reuse a same-version build. An image therefore contains what the project's tests ran against. Because `--locked` cannot see a same-version wheel's changed requirements either, the guarantee rests on the lock-currency check comparing each lock's records with the wheels' metadata, not on the build.
 
-One root `.python-version` fixes the interpreter: uv does not read it from a nested project, so every Makefile, CI job, and image reads it explicitly. The conventions and their checks are described in [`BUILD_AND_PACKAGING.md`](../../../docs/development/BUILD_AND_PACKAGING.md).
+One root `.python-version` fixes the interpreter: uv does not read it from a nested project, so every Makefile, CI job, and image reads it explicitly. The conventions are [`python-version.md`](../../../docs/guidance/repository/python-version.md) and the packaging files beside it, and their checks [`packaging-checks.md`](../../../docs/guidance/repository/packaging-checks.md).
 
 The architectural purpose is reproducibility: package metadata and wheel contents, not checkout-relative imports, determine what a consumer receives. Pure-Python wheel checks prevent a host-built native artifact from being mistaken for a target-platform image dependency.
 
@@ -194,7 +194,7 @@ Payment receipt pins support bounded current/retiring identity windows. Dispute
 origin/record-key pins do not: accepted deals remain bound to the old origin/key,
 including unbounded case life. Public renderings contain public trust projections,
 not credential references or resolved secrets. See
-[operator authority configuration](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences).
+[operator authority configuration](../settlement-configuration/configuration.md#dispute-authority-preferences).
 
 ## Current limits
 

@@ -329,13 +329,7 @@ SCM is released under the [MIT License](./LICENSE).
 
 ## Development
 
-Before making a non-trivial change, read:
-
-1. [`AGENTS.md`](./AGENTS.md)
-2. [OpenSpec contributor workflow](./openspec/README.md)
-3. [Architecture](./docs/development/ARCHITECTURE.md)
-4. The applicable [capability specification](./openspec/specs/README.md)
-5. The applicable [active change](./openspec/changes/README.md)
+Before making a non-trivial change, read [`AGENTS.md`](./AGENTS.md), which names the guidance a change reads and where each layer of it lives.
 
 Run the code-level test suites:
 
@@ -352,7 +346,7 @@ make check-comment-hygiene
 Validate OpenSpec documents:
 
 ```bash
-bunx @fission-ai/openspec@latest validate --all --strict
+scripts/openspec validate --all --strict
 ```
 
 Relevant documentation:
@@ -371,7 +365,7 @@ SCM handles signing credentials, payment state, provisioned infrastructure, and 
 - Never place signing secrets, wallet keys, payment credentials, action URLs, provider payloads, or issued API credentials in public configuration.
 - Pin the exact registries, authorities, environments, settlement mechanisms, and releases you trust.
 - Treat local fixtures and development payment runs as development evidence.
-- Review the [deployment model](./docs/development/DEPLOYMENT_AND_CONFIG.md) and [testing boundaries](./docs/development/TESTING.md) before production use.
+- Review the [deployment model](./docs/development/DEPLOYMENT_AND_CONFIG.md) and [testing boundaries](./docs/guidance/engineering/test-levels.md) before production use.
 
 ## License
 

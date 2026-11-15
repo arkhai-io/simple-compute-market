@@ -73,7 +73,7 @@
 
 ## 10. Plan closeout
 
-Per `openspec/README.md#plan-closeout-requirements`.
+Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 
 - [ ] 10.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
       the comments this change added for any that narrate the review or migration that

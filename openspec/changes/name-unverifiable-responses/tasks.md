@@ -92,9 +92,9 @@
 
 ## 4. Closeout
 
-Per `openspec/README.md#plan-closeout-requirements`.
+Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 
-Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/closeout.md`'s order.
 
 - [x] 4.1 Hygiene clean, strict validation, lint clean on every touched file
       (five pre-existing errors remain in files this change does not touch).

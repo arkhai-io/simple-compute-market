@@ -465,13 +465,32 @@ def test_functional_checks_declared_empty_run_nothing(repository: Path) -> None:
     assert shell.commands == ["make lock", "make check-repository"]
 
 
-def test_with_no_inert_path_every_change_is_functional(repository: Path) -> None:
-    (repository / "docs/guide.md").write_text("fixed\n", "utf-8")
+def test_a_repository_declares_no_inert_paths(repository: Path) -> None:
+    """CW-n7ra's scenario: the workflow's default makes a Markdown file and a path
+    under `openspec/` inert, so `pre-commit` runs alone."""
+    (repository / "guides").mkdir()
+    (repository / "guides/setup.md").write_text("set up\n", "utf-8")
+    (repository / "openspec/specs/x").mkdir(parents=True)
+    (repository / "openspec/specs/x/spec.md").write_text("spec\n", "utf-8")
     text = TIERED.replace('inert-paths = ["docs/", "openspec/"]', "")
+
+    passed, shell = _pre_commit(repository, text)
+
+    assert passed
+    assert shell.commands == ["make check-repository"]
+
+
+def test_a_repository_declares_an_empty_list(repository: Path) -> None:
+    """CW-n7ra's scenario: an empty declaration replaces the default, so a Markdown
+    file runs the functional hooks before `pre-commit`."""
+    (repository / "guides").mkdir()
+    (repository / "guides/setup.md").write_text("set up\n", "utf-8")
+    text = TIERED.replace('inert-paths = ["docs/", "openspec/"]', "inert-paths = []")
 
     _, shell = _pre_commit(repository, text)
 
-    assert shell.commands[0] == "make lock"
+    assert shell.commands == ["make lock", "make check-packaging", "make test",
+                              "make check-repository"]
 
 
 # pre-archive and after-functional-change by name; an absent hook skipped.

@@ -32,12 +32,11 @@ Highest priority wins.
 
 | Priority | Source | Example |
 |----------|--------|---------|
-| 1 | `ARKHAI_*` environment variables | `ARKHAI_RPC__URL=https://…` |
+| 1 | `ARKHAI_*` environment variables, including those the project's `.env` file supplies (a variable already set wins over the file's) | `ARKHAI_RPC__URL=https://…` |
 | 2 | `config-<profile>.yml` files (secrets injected here) |
 | 3 | `config.yml` (in `CONFIG_DIRECTORY`) | base env config |
-| 4 | `.env` file | local development overrides |
-| 5 | `.secrets.toml` | local secrets (gitignored) |
-| 6 | `settings.toml` | project defaults / schema |
+| 4 | `.secrets.toml` | local secrets (gitignored) |
+| 5 | `settings.toml` | project defaults / schema |
 
 ### Config directory and profiles
 
@@ -250,6 +249,15 @@ services run the mock profile unless `PROVISIONING_MODE=real`. Every lane runs
 the payments and mediation lane doubles, and the VM lane's scenarios include the
 six [VM dispute controls](#vm-dispute-controls) modules.
 
+To run the lanes in GitHub Actions, push the current branch and run `make run-e2e`
+from the repository's root with an authenticated `gh` CLI on PATH, then run `make
+fetch-e2e-logs` there to wait for
+the run and download its diagnostics. When the commit already has a run, pass the
+newest run ID seen before dispatching as `E2E_AFTER_RUN`, so the earlier run is not
+taken while the new one is still unlisted. How the fetch selects its run, and where
+the logs land, is
+[`TESTING.md`'s "System Integration Tests"](../docs/development/TESTING.md#4-system-integration-tests-end-to-end).
+
 ### Hosted VM servicing
 
 `e2e_vm_payment_deal` runs in the VM lane. It publishes a hosted-only one-hour VM
@@ -400,8 +408,11 @@ dedicated to the run. The VM host's listing, which the VM module creates unless
 an earlier module did, states `PAYMENTS.DISPUTE_WINDOW_SECONDS` as its payments
 option's dispute coverage, so a target whose dispute authority advertises a short
 minimum filing window can be bought under a short hold; the bare-metal machine's
-listing states the coverage its storefront's own configuration gives. Run each
-through `test-module`, observation 6 after the other two on the same stack:
+listing states the coverage its storefront's own configuration gives. Set the VM
+listing's delivery allowance, `PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS`, before the
+offer is published, with `PAYMENTS.DISPUTE_WINDOW_SECONDS` covering it plus the
+authority's minimum filing window. Run each through `test-module`, observation 6
+after the other two on the same stack:
 
 ```bash
 make test-module MODULE=e2e_vm_qualification ACTIVE_PROFILES=local,real-provisioning-target
@@ -596,9 +607,8 @@ Alkahest mock-deal scenario remains selected unchanged.
 ## CI/CD
 
 The repository's [`E2E` workflow](../.github/workflows/e2e.yml) runs the three
-lanes, each as its own job, nightly and on demand. See "System Integration Tests"
-in [`TESTING.md`](../docs/development/TESTING.md#4-system-integration-tests-end-to-end)
-for dispatching it on a branch and fetching its logs.
+lanes, each as its own job, nightly and on demand. [End-to-end lanes](#end-to-end-lanes)
+gives dispatching it on a branch and fetching its logs.
 
 ---
 

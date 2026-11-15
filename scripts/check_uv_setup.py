@@ -27,7 +27,9 @@ Makefiles are read with Make's rules: backslash-newline joins lines, and a
 comment on a rule line runs to the end of the joined line, so text continued
 after a help comment is not recipe text.
 
-Conventions: docs/development/BUILD_AND_PACKAGING.md.
+Rules: docs/guidance/engineering/packaging.md and packaging-uv.md beside it.
+Conventions: docs/guidance/repository/wheelhouse.md, project-environments.md, and
+images.md beside them.
 """
 
 from __future__ import annotations
@@ -251,7 +253,7 @@ def main() -> int:
     for problem in found:
         print(problem)
     if found:
-        print(f"\n{len(found)} uv setup problem(s). See docs/development/BUILD_AND_PACKAGING.md.")
+        print(f"\n{len(found)} uv setup problem(s). See docs/guidance/repository/packaging-checks.md.")
         return 1
     print("OK: every environment and image install derives its internal packages from its lock.")
     return 0

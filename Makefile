@@ -26,7 +26,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: build-market-binary build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
+.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index check-guidance record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -497,7 +497,7 @@ deploy-compose:
 # document, which names keys by path and carries none, is the provisioning
 # chart's `definitions.hosts` value. It keeps the release's volumes on
 # uninstall; a local development cluster is deployed with
-# `make -C helm deploy-local` instead (docs/development/DEPLOYMENT_AND_CONFIG.md).
+# `make -C helm deploy-local` instead (docs/guidance/repository/local-clusters.md).
 deploy: deploy-helm
 
 deploy-helm:
@@ -620,8 +620,9 @@ load-candidate: _require-ar-project ## Load HEAD as a release candidate: store e
 # Reviw and agent targets
 
 # ---------------------------------------------------------------------------
-# check-comment-hygiene — mechanical sweep for AGENTS.md's "Python comments and
-# docstrings" rule: change IDs, section/task numbers, change-document filenames,
+# check-comment-hygiene — mechanical sweep for the change-references rule
+# (docs/guidance/workflow/change-references.md, with market-change-workflow's
+# README, "The closing checks", naming the file types): change IDs, section/task numbers, change-document filenames,
 # and OpenSpec change names must never appear in code outside openspec/. The
 # scans, their file types, exclusions, and the one exemption are
 # scripts/check_comment_hygiene.py's, with their reasons.
@@ -630,9 +631,10 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 	@python3 scripts/check_comment_hygiene.py
 
 # ---------------------------------------------------------------------------
-# check-doc-citations — AGENTS.md's cross-reference rule: every openspec/,
-# docs/, tools/, scripts/, e2e-tests/, and .agents/ path cited by a document
-# must resolve on this branch, and an unresolvable one is a blocking defect
+# check-doc-citations — citations resolve (docs/guidance/engineering/documentation.md),
+# here every openspec/, docs/, tools/, scripts/, e2e-tests/, and .agents/ path
+# cited by a document (market-change-workflow's README, "The closing checks"):
+# each must resolve on this branch, and an unresolvable one is a blocking defect
 # rather than a stale link.
 #
 # Rejects a tombstoned target as well as an absent one. The existence test
@@ -654,7 +656,7 @@ check-doc-citations: ## Fail if a document cites a path that is absent or tombst
 	@python3 scripts/check_doc_citations.py "$(CHANGE)"
 
 # An indexed capability's spec.md held to its index.md
-# (openspec/README.md#capability-documentation-pattern). With CHANGE=<name> that
+# (openspec/README.md#the-index-check). With CHANGE=<name> that
 # change's deltas count as its archive will leave them, since closeout writes the
 # index before the archive merges them.
 check-spec-index: ## Fail if an indexed capability's spec.md and index.md disagree on its requirement ids (CHANGE=<name> counts its deltas)
@@ -717,7 +719,7 @@ check-project-layout: ## Fail if a distribution is not one package under src/ or
 	@python3 scripts/check_project_layout.py
 
 # check-architecture -- the package layer, scope, and kind rules of
-# docs/development/ARCHITECTURE.md, over every import and every declared
+# docs/guidance/repository/package-layers.md, over every import and every declared
 # internal dependency, against docs/development/ARCHITECTURE.toml. Each part
 # runs alone; any part failing fails the whole. It reads only the tree, so it
 # needs no wheelhouse and no project environment.
@@ -808,7 +810,7 @@ include scripts/change_workflow/workflow.mk
 check-change: ## Run the change workflow's pre-commit for a change: its default checks — the change index, the task list, the agent skills, the strict OpenSpec validation — then check-repository; when the worktree changes a path outside the inert paths, relocking, the packaging check, and every suite first (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
 	@scripts/change-workflow run pre-commit "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
 
-check-repository: ## Run this repository's own closing checks of a change — comment hygiene, its citations, the indexed capabilities' specifications, decision destinations, history wording, version bumps, local imports, and the capability index — printing only failures and one pass line; the workflow's pre-commit hook (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
+check-repository: ## Run this repository's own closing checks of a change — comment hygiene, its citations, the indexed capabilities' specifications, decision destinations, history wording, version bumps, local imports, the capability index, and the guidance's layering — printing only failures and one pass line; the workflow's pre-commit hook (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
 	@python3 scripts/check_change.py "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
 
 check-decision-destinations: ## Fail if a `### D<n>` decision of a change's design has no bullet starting `D<n>` in its proposal's "Knowledge to promote" (CHANGE=<change>)
@@ -825,6 +827,12 @@ check-local-imports: ## Fail if an import added inside a function since the merg
 
 check-capability-index: ## Fail if a capability with a spec.md has no row in openspec/specs/README.md, or a row links nothing
 	@python3 scripts/check_capability_index.py
+
+# The guidance's layering (docs/guidance/workflow/README.md, "The layers of
+# guidance"); `scripts/check_guidance.py --list [--tag <tag>]` and
+# `--list-exceptions` print the guidance set and its exception rows.
+check-guidance: ## Fail if a guidance file lacks one layer tag, carries a tag no vocabulary of its layer or a lower one defines, a vocabulary row is carried by no file, a vocabulary or exception table is malformed, an exception row cites no guidance file or names a kind other than selects or overrides, guidance links to a higher layer, or a citation of a guidance file names an anchor no heading of it has
+	@python3 scripts/check_guidance.py
 
 record-capacity: ## Record in helm/validation-capacity.toml the memory a change's latest validation measured, with when and from which change; when it measured none, leave the file as it is and say so; run by archive cleanup (CHANGE=<change>)
 	@python3 scripts/validate_slice.py capacity --change "$(CHANGE)"

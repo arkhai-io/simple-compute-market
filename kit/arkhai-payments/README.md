@@ -41,7 +41,7 @@ an attacker. Keep `fee_bps` in the caller's trusted service policy. The dispute
 authority comes from the selected option's `lifecycle.adjudication.dispute`;
 `[Settlement.arkhai_payments].dispute_authority` is rejected with a diagnostic
 naming root `[[Dispute]]` preferences. See
-[dispute authority preferences](../../docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences)
+[dispute authority preferences](../../openspec/specs/settlement-configuration/configuration.md#dispute-authority-preferences)
 for local preferences, registry recommendations and identity-bound credentials.
 Authorities are explicit per-part permissions; the service has no implicit
 privileged dispute account.
