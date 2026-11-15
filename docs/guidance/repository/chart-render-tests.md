@@ -21,6 +21,10 @@ chart's content digest does enforce it: `.helm-version` names the Helm the diges
 computed with, the digest refuses any other
 ([`package-versions.md`, "A version changes when its contents change"](package-versions.md#a-version-changes-when-its-contents-change)),
 and a test holds `.helm-version` equal to `tests.yml`'s pin, so a Helm bump edits both.
+A Helm binary taken from a redistribution, where `get.helm.sh` is unreachable, is
+kept out of the repository
+([the validation runbook's "Optional Environment-Dependent Local Tests"](../../development/VALIDATION_RUNBOOK.md#5-optional-environment-dependent-local-tests)
+gives obtaining one).
 
 ## Where they live and how they run
 
@@ -144,13 +148,3 @@ when a model or settlement registration changes without regenerating; it runs in
 the storefront's environment because the definition is built from the storefront's
 models and installed sinks. The render tests then assert what the schema refuses
 and accepts.
-
-## Obtaining Helm where its download host is unreachable
-
-Helm's official
-binaries are served from `get.helm.sh`. An environment that cannot reach it can
-use a redistribution such as the npm package `helm-binary-linux`, which ships
-one binary with no install scripts. Such a copy is unverified and may be an
-older release: inspect the package before running it and keep it out of the
-repository. The supported release is the one CI pins above; the render log
-records whichever version actually ran.

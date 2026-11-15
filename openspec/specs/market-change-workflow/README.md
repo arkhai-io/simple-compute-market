@@ -296,7 +296,7 @@ no check runs twice and the familiar target is never partial.
 (`scripts/check_change.py`) prints only failures and one pass line. It runs comment
 hygiene, the change's documentation citations, and each indexed capability's
 `spec.md` against its `index.md` with the change's deltas counted (`make
-check-spec-index`), and holds five of the rules beside them (MCW-c4ek):
+check-spec-index`), and holds six of the rules beside them (MCW-c4ek):
 
 - each `### D<n>` decision under `design.md`'s `## Decisions` has a bullet starting
   `D<n>` in `proposal.md`'s "Knowledge to promote", `D<n>: no permanent destination
@@ -310,7 +310,26 @@ check-spec-index`), and holds five of the rules beside them (MCW-c4ek):
 - each import the diff adds inside a function has a comment giving its reason
   (`make check-local-imports`);
 - every capability with a `spec.md` has a row in `openspec/specs/README.md`, and
-  every row links one (`make check-capability-index`).
+  every row links one (`make check-capability-index`);
+- the guidance is layered as
+  [`docs/guidance/workflow/README.md`, "The layers of guidance"](../../../docs/guidance/workflow/README.md#the-layers-of-guidance)
+  says (`make check-guidance`, `scripts/check_guidance.py`): every guidance file
+  carries one layer tag and other tags its layer's vocabulary or a lower one's
+  defines, every vocabulary row is carried, every vocabulary and exception table is
+  well formed and every exception row cites a guidance file and names `selects` or
+  `overrides`, no guidance file links to one of a higher layer, and every citation of
+  a guidance file in any tracked Markdown file outside the archived changes and
+  `docs/prompts/` names an anchor the file has.
+
+The guidance check reads the whole tree, not the change's diff. Its guidance set is
+every Markdown file under `docs/guidance/`; every Markdown file in a capability's
+directory under `openspec/specs/` but its `spec.md`, its companion, and its
+`index.md`, found by place so an untagged guide fails rather than escaping; every
+other Markdown file outside `openspec/changes/` that carries `tags`; and the
+documents `AGENTS.md`'s layer table names. A directory carries no meaning to it: a
+file's layer is its tag. `scripts/check_guidance.py --list [--tag <tag>]` prints the
+guidance set with each file's tags, and `--list-exceptions` every exception row, for
+whatever reads the set.
 
 Three of them read the change's diff from its merge-base with the branch it lands
 on — the clone's recorded branch, `find --json`'s `base`, unless `CHANGE_BASE` names

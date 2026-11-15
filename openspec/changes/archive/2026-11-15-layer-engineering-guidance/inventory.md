@@ -8,6 +8,11 @@ corrected govern every later section of `tasks.md`: a destination named in a tas
 in `design.md`'s hard-case sample, gives way to the corrected row (D2). A row showing
 a rule of the design is wrong returns the change to design.
 
+The documents the change removed are named by their former paths without the leading
+`docs/`: `agents/change-workflow.md` (moved to `docs/change-workflow-handbook.md`),
+`agents/domain.md`, `development/BUILD_AND_PACKAGING.md`, and
+`development/RELEASING.md`.
+
 The rows below are as round 1's triage corrected them. The owner settled the
 `Ambiguous` cells by type, each type by one rule, stated under "Rules from round 1's
 triage" below; a row's `Reason` names the rule that decided it.
@@ -41,7 +46,7 @@ How to read it:
 - **`grep -n '^#'` hits inside fenced blocks.** `AGENTS.md`'s lines 98–100 and 106
   are comment examples in code blocks, covered by the rows of "Python comments and
   docstrings". `openspec/README.md`'s lines 80, 87, and 130 are template headings
-  inside fenced blocks, as is `docs/agents/change-workflow.md`'s line 837; each has
+  inside fenced blocks, as is `agents/change-workflow.md`'s line 837; each has
   a row of its own, beside its section's. `DEPLOYMENT_AND_CONFIG.md`'s lines 1773,
   1960, 1968, 2015, and 2020 are TOML comments, and `VALIDATION_RUNBOOK.md`'s lines
   852 and 1035 shell comments, inside fenced blocks; each has a row naming the
@@ -104,7 +109,7 @@ How to read it:
   that other repositories change makes exceptions expected; its wording is reviewed
   in section 4's triage. The hand-laid change-workflow graph is a temporary
   exception until its generator exists, its row in a new guidance file beside the
-  capability, `openspec/specs/change-workflow/diagrams.md` (CW-x4ex, 48 F2). `docs/agents/domain.md`
+  capability, `openspec/specs/change-workflow/diagrams.md` (CW-x4ex, 48 F2). `agents/domain.md`
   is removed once its rows move. D10 is amended: a procedure stays whole, but a
   section of one stating policy rather than a step is classified by D1, so
   `RELEASING.md`'s versioning policy moves to engineering. The validation runbook is
@@ -183,13 +188,13 @@ How to read it:
 | `### Cross-references must resolve`, the cited paths it covers (`openspec/`, `docs/`, `tools/`, `scripts/`, `e2e-tests/`, `.agents/`) | repository | repository, documentation, checks | `AGENTS.md`, this repository's own rules; the citation check's row in "What each check enforces" (D13); corrected at round 5's triage (127 O1): `market-change-workflow`'s README, "The closing checks", beside the check | names this repository's directories | |
 | `### Cross-references must resolve`, the promotion story (a closeout commit promoted a section from another plan epoch; path permissions cannot detect it; run a cross-reference check before promoting) | workflow | workflow, closeout | `workflow/closeout.md`, "Promotion" and "Documentation citations" | D6, D8; its `dev`, this repository's integration branch, is neutralized to "the branch the change lands on" | |
 | `## Agent skills` (no text of its own) | repository | repository, skills | `AGENTS.md`, its layer table; corrected at round 5's triage (127 O1): the heading goes | the root's pointer to the workflow's guidance | |
-| `### Change workflow`, the pointer (each step a leaf skill under `.agents/skills/`, started through make, a slash command, or `make orchestrate`; see `docs/agents/change-workflow.md`) | repository | repository, skills | `AGENTS.md`, its layer table; corrected at round 5's triage (127 O1): `AGENTS.md`'s first section, "The change workflow", saying where the workflow is, how steps run being the handbook's | the root entry naming where the workflow's guidance lives (D3) | |
-| `### Change workflow`, a change's records kept in its clone until archive cleanup copies them; `scripts/change-workflow find --records` | workflow | workflow, engine, records | `docs/agents/change-workflow.md`, the paragraph "History and removal" under "A change in its own clone", which states it | the workflow's records; a duplicate of the guide, which is its one home, so it is removed from `AGENTS.md`, the layer table naming the guide (31 O1b) | Duplicate (31 O1b): where the two differ, the forms are reviewed in section 3's triage |
+| `### Change workflow`, the pointer (each step a leaf skill under `.agents/skills/`, started through make, a slash command, or `make orchestrate`; see `agents/change-workflow.md`) | repository | repository, skills | `AGENTS.md`, its layer table; corrected at round 5's triage (127 O1): `AGENTS.md`'s first section, "The change workflow", saying where the workflow is, how steps run being the handbook's | the root entry naming where the workflow's guidance lives (D3) | |
+| `### Change workflow`, a change's records kept in its clone until archive cleanup copies them; `scripts/change-workflow find --records` | workflow | workflow, engine, records | `agents/change-workflow.md`, the paragraph "History and removal" under "A change in its own clone", which states it | the workflow's records; a duplicate of the guide, which is its one home, so it is removed from `AGENTS.md`, the layer table naming the guide (31 O1b) | Duplicate (31 O1b): where the two differ, the forms are reviewed in section 3's triage |
 | `### Deferred work`, recorded in the open change owning its area, a new change, or an unowned gap in `openspec/changes/README.md` | workflow | workflow, plan | `workflow/working-model.md` | the change index's gaps are the workflow's | |
 | `### Deferred work`, the roadmap as a home for unowned gaps, beside the change index | workflow | workflow, plan | `workflow/working-model.md` | every adopting repository keeps the roadmap this repository uses, so its role is the workflow's (31 O1f) | |
 | `### Deferred work`, the roadmap's path `docs/development/ROADMAP.md`; no GitHub Issues; the issue-discovery harness (`docs/development/ISSUE_DISCOVERY.md`) | repository | repository, plan | `AGENTS.md`, this repository's own rules | names this repository's documents and practice; the roadmap's path is this repository's, its role the workflow's (31 O1f) | |
-| `### Domain docs`, a subsystem's terms in its specification, and the workflow's in its specification's "Terms" | workflow | workflow, terms | `workflow/terms.md` | the documentation model's home for a subsystem's terms, and the workflow's own vocabulary (as `docs/agents/domain.md`'s rows) | |
-| `### Domain docs`, the market's terms in `ARCHITECTURE.md`, and the pointer to `docs/agents/domain.md` | repository | repository, terms | `AGENTS.md`, this repository's own rules | names this repository's homes; the pointer goes, since `docs/agents/domain.md` is removed once its rows move (31 O1e) | |
+| `### Domain docs`, a subsystem's terms in its specification, and the workflow's in its specification's "Terms" | workflow | workflow, terms | `workflow/terms.md` | the documentation model's home for a subsystem's terms, and the workflow's own vocabulary (as `agents/domain.md`'s rows) | |
+| `### Domain docs`, the market's terms in `ARCHITECTURE.md`, and the pointer to `agents/domain.md` | repository | repository, terms | `AGENTS.md`, this repository's own rules | names this repository's homes; the pointer goes, since `agents/domain.md` is removed once its rows move (31 O1e) | |
 
 ### `openspec/README.md`
 
@@ -239,7 +244,7 @@ How to read it:
 | `## Current capability documentation` | repository | repository, openspec | stays | points to this repository's capability index | |
 | `## Contributor workflow` | workflow | workflow, design, plan, implement | `workflow/working-model.md` | the workflow's sequence; it duplicates "Working model", merged into it (31 O1b); its first step's `AGENTS.md` and `ARCHITECTURE.md` are neutralized to "the repository's root guidance and architecture", and its sixth step's kinds of check ("package, typing") to "the checks the plan names", as Implement's row (31 O1g) | Duplicate (31 O1b): where it and "Working model" differ, the forms are reviewed in section 3's triage |
 
-### `docs/agents/domain.md`
+### `agents/domain.md`
 
 | Source | Layer | Tags | Destination | Reason | Ambiguous |
 |---|---|---|---|---|---|
@@ -251,7 +256,7 @@ How to read it:
 | `## The rule for terms`, a term that stays is added to its home in the same change; answering the owner's question in established terms and correcting the description or proposing the entry | workflow | workflow, terms, owner | `workflow/terms.md` | names the change and the owner | |
 | `## The rule for terms`, "a synonym `ARCHITECTURE.md`'s 'One name per concept' rules out" | repository | repository, terms | `AGENTS.md`, with the market's homes | names this repository's rule | |
 
-### `docs/agents/change-workflow.md`
+### `agents/change-workflow.md`
 
 Reclassified at section 3's re-run (task 3.11) by 58 O5's test, since the guide
 becomes the change workflow's operator handbook, `docs/change-workflow-handbook.md`
@@ -587,9 +592,9 @@ below as change history:
 | `### Contact-exchange retention` | repository | repository, configuration | `specs/contact-exchange-settlement/configuration.md` | one capability | |
 | `### Bare-metal role configuration` | repository | repository, configuration, deployment | stays | cross-system: the bare-metal buyer and storefront, their chart and Compose; no capability is the bare-metal domain's alone (31 O1d) | |
 | `## Current limits` | repository | repository, deployment | stays | the document's own limits | |
-| `### Artifact publishing destination` | repository | repository, deployment | `docs/development/RELEASING.md`, when section 5 tags the documents | names this repository's publishing targets, a release target (31 O1g) | |
+| `### Artifact publishing destination` | repository | repository, deployment | `development/RELEASING.md`, when section 5 tags the documents | names this repository's publishing targets, a release target (31 O1g) | |
 
-### `docs/development/BUILD_AND_PACKAGING.md`
+### `development/BUILD_AND_PACKAGING.md`
 
 | Source | Layer | Tags | Destination | Reason | Ambiguous |
 |---|---|---|---|---|---|
@@ -666,7 +671,7 @@ below as change history:
 | `### Observations the qualification owes`, the method (an observation is never inferred from another; failed and unproven are recorded as such and their check stays open; a failed or unproven outcome is sorted by its cause; the candidate is frozen and every observation made again on a new one) | repository | repository, testing | stays | the runbook is not guidance and does not move (31 O1e); `engineering/system-tests.md` states the same rule from `TESTING.md`'s per-observation outcome | Duplicate (31 O1b): section 4's triage reviews the runbook's form beside `system-tests.md`'s, and the runbook is brought in line where the decided rule contradicts it |
 | `### Observations the qualification owes`, the six observations and the offers kept closed until each passes | repository | repository, testing | stays | procedure (D10) | |
 
-### `docs/development/RELEASING.md`
+### `development/RELEASING.md`
 
 | Source | Layer | Tags | Destination | Reason | Ambiguous |
 |---|---|---|---|---|---|
@@ -689,7 +694,7 @@ restates or cites a guidance rule (D11, D23): the file and its section, what it
 restates or cites, the rule's source today, and where the rule moves. The skills
 keep their restatements (D11); sections 3 to 6 re-point each citation, by heading
 and never by part number (D8), and the loader change inherits this list. A
-`docs/agents/change-workflow.md` heading stays where it is (section 1), so its
+`agents/change-workflow.md` heading stays where it is (section 1), so its
 citations need no re-pointing; they are listed so the list is complete. Correction,
 task 3.14: the guide became the owner's handbook, and its citations below were
 re-pointed to the requirements stating each rule — the "Waivers" criteria to CW-q3dm,
@@ -721,7 +726,7 @@ skill's loading and checking steps.
 | `change-review`, "Closeout review", question 1 | each part of `#plan-closeout-requirements` | `openspec/README.md`, "Plan closeout requirements" | `workflow/closeout.md` and `openspec/README.md`'s "This repository's closeout parts" |
 | `change-review`, "4. Classify every finding", basis `guidance` | a written rule "in `AGENTS.md`, `docs/development/`, or `openspec/README.md`" | the guidance documents as they stand | the guidance set: `docs/guidance/`, the capability guidance files, and the documents `AGENTS.md`'s layer table names |
 | `change-plan`, "2. Load what the plan needs" | `#plan-closeout-requirements` and `openspec/config.yaml`'s task rules | `openspec/README.md`, "Plan closeout requirements" | `workflow/closeout.md` and `openspec/README.md`'s "This repository's closeout parts"; `openspec/config.yaml` stays |
-| `change-plan`, "3. Record the conversation before planning from it"; `change-design`, "7. Hand off to design review"; `change-triage`, "1. Find the review and load the context"; `change-archive-cleanup`, "1. Check that cleanup may start"; `change-merge`, "After the archive"; `change-validate`, "5. Settle environmental failures with the owner"; `guidance-review`, "2. Report the figures" | `docs/agents/change-workflow.md`'s "Waivers" | `docs/agents/change-workflow.md`, "Waivers" | `change-workflow`'s CW-q3dm, which states the criteria (task 3.14) |
+| `change-plan`, "3. Record the conversation before planning from it"; `change-design`, "7. Hand off to design review"; `change-triage`, "1. Find the review and load the context"; `change-archive-cleanup`, "1. Check that cleanup may start"; `change-merge`, "After the archive"; `change-validate`, "5. Settle environmental failures with the owner"; `guidance-review`, "2. Report the figures" | `agents/change-workflow.md`'s "Waivers" | `agents/change-workflow.md`, "Waivers" | `change-workflow`'s CW-q3dm, which states the criteria (task 3.14) |
 | `change-plan`, "4. Write the plan", "Sections are slices" | test levels "as `docs/development/TESTING.md` defines them (unit, library integration, application integration through the typed client, system)"; the lowest level that can prove the behaviour | `TESTING.md`, "Four-Level Hierarchy"; `AGENTS.md`, "Tests and diagnostics" | `engineering/test-levels.md`, `engineering/testing.md`. The four names differ from `TESTING.md`'s (unit, integration, smoke, system); section 4 reconciles them in `test-levels.md` |
 | `change-plan`, "4. Write the plan", "Order by real dependencies, then by the cadence" | lower layers before the layers composing them — "foundation kit before kit before domain before composition root" — and verification before documentation, "per the task rules in `openspec/config.yaml`" | `ARCHITECTURE.md`, "Package and dependency layers"; `openspec/config.yaml`, `rules.tasks` | `ARCHITECTURE.md` stays; the layer names are this repository's in a workflow skill, which keeps its restatement (D11), the neutral form ("lower layers first") being `engineering/dependencies.md`'s |
 | `change-plan`, "4. Write the plan", "Every task is traceable" | the verification, packaging, promotion, and closeout work "`openspec/README.md` and `openspec/config.yaml` require" | `openspec/README.md`, "Change documentation requirements" and "Plan closeout requirements" | `workflow/changes.md`, `workflow/closeout.md`, `openspec/README.md`'s "This repository's closeout parts"; `openspec/config.yaml` stays |
@@ -732,7 +737,7 @@ skill's loading and checking steps.
 | `change-design`, "Classify each decision", its closing paragraph | the test level "from `TESTING.md`", stated provisionally | `TESTING.md` | `engineering/test-levels.md` |
 | `change-design`, "Do not argue from absence of a caller alone" | `docs/development/ROADMAP.md` | `openspec/README.md`, "Documentation placement" | the roadmap's role to `workflow/openspec-documentation.md` (31 O1f); the path stays in this repository's placement table, and the skill keeps its restatement (D11) |
 | `change-design`, "4. Iterate" and "5. Check the whole before recording" | principles the owner states that no document records are candidates for `ARCHITECTURE.md` | `ARCHITECTURE.md` | stays; recommend the skill name `docs/guidance/engineering/` too, for a principle holding in any repository, when section 4 re-points it |
-| `change-design`, "When the design needs another change first" | one change per branch; a prerequisite proposed from `dev` | `docs/agents/change-workflow.md`, "Skills" | the guide's neutralized statement ("the branch the change lands on", section 1's row); `dev` named in `market-change-workflow`'s README. The skill names `dev` itself, a repository name in a workflow skill; it keeps its restatement (D11). One change per branch is now `workflow/changes.md`, "One change per branch" (task 3.12) |
+| `change-design`, "When the design needs another change first" | one change per branch; a prerequisite proposed from `dev` | `agents/change-workflow.md`, "Skills" | the guide's neutralized statement ("the branch the change lands on", section 1's row); `dev` named in `market-change-workflow`'s README. The skill names `dev` itself, a repository name in a workflow skill; it keeps its restatement (D11). One change per branch is now `workflow/changes.md`, "One change per branch" (task 3.12) |
 | `change-design`, "6. Record the settled design" | the proposal's "Permanent documentation impact" and "Knowledge to promote", a `D<n>` bullet per decision | `openspec/README.md`, "Change documentation requirements" | `workflow/changes.md` |
 | `change-implement`, "3. Implement the section", the defect bullet | "`AGENTS.md`'s 'Deferred work'" and `#defects-found-during-a-change` | `AGENTS.md`, "Deferred work"; `openspec/README.md`, "Defects found during a change" | `workflow/working-model.md`, `workflow/changes.md` |
 | `change-implement`, "3. Implement the section", the test-level bullet | the lowest test level that can prove it (`TESTING.md`); seams and injected dependencies over patching | `AGENTS.md`, "Tests and diagnostics"; `TESTING.md` | `engineering/testing.md`, `engineering/test-levels.md`, `engineering/test-seams.md` |
@@ -742,10 +747,10 @@ skill's loading and checking steps.
 | `change-implement`, "3. Implement the section", the evidence bullet; `change-triage`, "5. Carry out the accepted outcomes", fix | each suite's level "as `TESTING.md` defines them" (unit, library integration, application integration, system) | `TESTING.md`, "Four-Level Hierarchy" | `engineering/test-levels.md`; the names differ from `TESTING.md`'s, as under `change-plan` |
 | `change-implement`, "5. Check before committing", the fresh-context check | the guidance the diff must keep: layering, comments, test level, documentation placement, packaging | the documents `config load implement` prints | the layers' files `load.common` lists (section 3 onward) |
 | `change-triage`, "2. Check every finding", the disposition of an out-of-scope defect; "5. Carry out the accepted outcomes", none | "`AGENTS.md`'s 'Deferred work'" and `#defects-found-during-a-change` | `AGENTS.md`, "Deferred work"; `openspec/README.md`, "Defects found during a change" | `workflow/working-model.md`, `workflow/changes.md` |
-| `change-triage`, "2. Check every finding", "3. Present every discussed finding", "6. Choose the exit", "7. A revisit after the triage finished"; `guidance-review`, its opening; `change-orchestrate`, "Interrupting and revisiting" | "Default acceptance", "Revisiting a default acceptance", "Interrupting a running step" | `docs/agents/change-workflow.md` | `change-workflow`'s CW-d5ac, CW-t9bx, CW-9pbk, CW-r8vz, and CW-k2rv (task 3.14) |
-| `change-triage`, "3. Present every discussed finding", the example table of default acceptances, and "4. Record the dispositions", the example ledger line | a finding citing a renamed `ROADMAP` heading (`#goal-8-post-commitment-lifecycle`), and the owner's redirection to "the goal's row in ROADMAP's table" | `docs/agents/change-workflow.md`, "Default acceptance" and "The ledger", whose examples section 1 gives neutral replacements | the guide's neutral examples (section 1's rows); the skill names this repository's roadmap and one of its goals, and keeps its restatement (D11) |
+| `change-triage`, "2. Check every finding", "3. Present every discussed finding", "6. Choose the exit", "7. A revisit after the triage finished"; `guidance-review`, its opening; `change-orchestrate`, "Interrupting and revisiting" | "Default acceptance", "Revisiting a default acceptance", "Interrupting a running step" | `agents/change-workflow.md` | `change-workflow`'s CW-d5ac, CW-t9bx, CW-9pbk, CW-r8vz, and CW-k2rv (task 3.14) |
+| `change-triage`, "3. Present every discussed finding", the example table of default acceptances, and "4. Record the dispositions", the example ledger line | a finding citing a renamed `ROADMAP` heading (`#goal-8-post-commitment-lifecycle`), and the owner's redirection to "the goal's row in ROADMAP's table" | `agents/change-workflow.md`, "Default acceptance" and "The ledger", whose examples section 1 gives neutral replacements | the guide's neutral examples (section 1's rows); the skill names this repository's roadmap and one of its goals, and keeps its restatement (D11) |
 | `change-triage`, "5. Carry out the accepted outcomes", fix | the lowest test level that proves the fix; comments describing the current system | `AGENTS.md`, "Tests and diagnostics" and "Python comments and docstrings" | `engineering/testing.md`, `engineering/comments.md` |
-| `guidance-review`, its opening | "History and removal" | `docs/agents/change-workflow.md`, "A change in its own clone" | `change-workflow`'s CW-hak6 (task 3.14) |
+| `guidance-review`, its opening | "History and removal" | `agents/change-workflow.md`, "A change in its own clone" | `change-workflow`'s CW-hak6 (task 3.14) |
 | `guidance-review`, "What reaches the repository"; `change-archive-cleanup`, "6. Draft the merge" | `AGENTS.md`'s "Public repository discipline" (`#public-repository-discipline`) | `AGENTS.md`, "Public repository discipline" | `engineering/repository-content.md`, and `AGENTS.md`'s exception row selecting the public case |
 | `guidance-review`, "2. Report the figures", terms the owner asked about | the homes "`AGENTS.md`'s 'Domain docs' names" | `AGENTS.md`, "Domain docs" | `workflow/terms.md`, with the market's homes in `AGENTS.md` |
 | `guidance-review`, "3. Cluster the owner's corrections" | the guidance as the documents `config load common` prints, the workflow guide, and the skills | `[load]` in `.agents/workflow.toml` | unchanged in form: `load.common` lists the layers' files (section 3 onward) |
@@ -753,7 +758,7 @@ skill's loading and checking steps.
 | `guidance-review`, "5. Write the proposal, on the owner's word" | a proposal "as `openspec/README.md` asks" | `openspec/README.md`, "Change documentation requirements" | `workflow/changes.md` |
 | `change-archive-cleanup`, "2. Load the context" | `#plan-closeout-requirements`, "part 6 states the dependent rules" | `openspec/README.md`, "Plan closeout requirements" part 6 | `workflow/closeout.md`, "Campaign index currency" |
 | `change-orchestrate`, "Recover from the files" | evidence and options brought to the owner in prose | `AGENTS.md`, "Asking the owner" | `workflow/working-model.md` |
-| `change-orchestrate`, "Where the change is worked" | moving a change into a clone "as `docs/agents/change-workflow.md` describes" | `docs/agents/change-workflow.md`, "A change in its own clone" | the handbook, `docs/change-workflow-handbook.md`, an owner's procedure (task 3.14) |
+| `change-orchestrate`, "Where the change is worked" | moving a change into a clone "as `agents/change-workflow.md` describes" | `agents/change-workflow.md`, "A change in its own clone" | the handbook, `docs/change-workflow-handbook.md`, an owner's procedure (task 3.14) |
 | `openspec/config.yaml`, `context`, its first paragraph | core never imports domain implementations; kit and domain never depend up into composition roots | `ARCHITECTURE.md`, "Package and dependency layers" | stays |
 | `openspec/config.yaml`, `context`, its second paragraph; `rules.specs`, the vocabulary rule | the official vocabulary | `ARCHITECTURE.md`, "Shared vocabulary and identities" | stays |
 | `openspec/config.yaml`, `context`, its third paragraph | uv and bun; minimal changes; wire and persistence compatibility preserved explicitly; the narrowest focused test; behaviour and deltas in OpenSpec, ordinary documents explanatory | `BUILD_AND_PACKAGING.md`; `RELEASING.md`, "Versioning policy", and `ARCHITECTURE.md`, "Accepted representations and application views"; `AGENTS.md`, "Tests and diagnostics" and "Documentation ownership" | `engineering/testing.md`, `engineering/persistence.md`, `workflow/openspec-documentation.md`; `engineering/versioning.md` for the versioning policy (31 O1e); uv stays with `BUILD_AND_PACKAGING.md` |
@@ -1087,17 +1092,17 @@ How to read it:
 | `#### One part, zoomed in`, "A lane provides its own configuration, so a scenario that finds a lane setting missing fails rather than skipping" | rule | `repository/deal-scenarios.md`, "A lane's configuration" | repository, testing | what every scenario does with a missing lane setting | |
 | `#### One part, zoomed in`, pre-review validation's Helm scenarios and check pods | description | stays | repository, testing | what validation runs against a release | "A scenario on that list reads only what the `e2e-tests` image copies … never a file from the checkout" is a rule on the listed scenarios |
 | `#### One part, zoomed in`, the mock-provisioned deal and the VM multi-registry scenario | description | stays | repository, testing | what the lanes prove and do not | |
-| `#### One part, zoomed in`, "To run the lanes in GitHub Actions…" through the fetched logs | description | stays | repository, testing | what `make run-e2e` and `make fetch-e2e-logs` do | its opening two sentences are a procedure; no handbook of D25's holds a developer's procedure, so it stays beside the targets it describes |
+| `#### One part, zoomed in`, "To run the lanes in GitHub Actions…" through the fetched logs | description | stays | repository, testing | what `make run-e2e` and `make fetch-e2e-logs` do | its opening two sentences, a procedure, went to `e2e-tests/README.md`'s "End-to-end lanes" at closeout (184 F1, D25 as amended), the targets' behaviour staying |
 | `#### Locally verifiable and external-topology scenarios` | rule | `repository/deal-scenarios.md`, "Locally verifiable and external-topology scenarios" | repository, testing | the instance of `system-tests.md`'s two kinds and per-observation outcomes | |
-| `#### The real-provisioning lane` | description | stays | repository, testing | the real lane and the qualification modules | it holds operator steps ("Set the allowance before publishing an offer"), overlapping `e2e-tests/README.md` and the validation runbook, left with the lane they set up |
+| `#### The real-provisioning lane` | description | stays | repository, testing | the real lane and the qualification modules | its step "Set the allowance before publishing an offer" went to `e2e-tests/README.md`'s "Real-provisioning qualification" at closeout (184 F1), the dispute window's constraint staying |
 | `## Contract Fixtures` | rule | `repository/test-placement.md`, "Contract fixtures" | repository, testing, python | the instance of `contract-fixtures.md` | |
 | `## Test File Layout` | rule | `repository/test-placement.md`, "Test file layout" | repository, testing, python | the instance of `testing-python.md`'s layout | |
 | `## Migration Tests` | rule | `repository/migration-chain-tests.md` | repository, testing, persistence | the instance of `migration-tests.md` | |
-| `## Accepted Arkhai purchase qualification` | rule | `repository/qualification-evidence.md` | repository, testing | what a physical-qualification claim must rest on | its first paragraph instructs the qualifier, overlapping the runbook's section 29, the procedure it cites |
+| `## Accepted Arkhai purchase qualification` | rule | `repository/qualification-evidence.md` | repository, testing | what a physical-qualification claim must rest on | its first paragraph's steps went to the runbook's section 29 at closeout (184 F1), the paragraph reworded as the rules they rest on |
 | `## Boundary-Change Validation`, its first paragraph | rule | `repository/package-layers.md`, "A boundary change" | repository, architecture, dependencies | the instance of `boundary-changes.md`, whose check here is `make check-architecture` | a testing rule placed with the layer rules it validates; it could be a file of its own |
 | `## Boundary-Change Validation`, its CI matrix paragraph | rule | `repository/test-targets.md`, "CI runs `make test`'s targets" | repository, testing | what CI's matrix must match, held by `test_tests_workflow.py` | |
 | `## Ansible Syntax and Native Checks` | rule | `repository/ansible-gates.md` | repository, testing, ansible | the instance of `ansible-checks.md` and the gates' evidence boundaries | |
-| `## Chart Render Tests` | rule | `repository/chart-render-tests.md` | repository, testing, helm | the instance of `helm-render-tests.md` (D27's sample) | "Obtaining Helm where its download host is unreachable" is a procedure for whoever renders charts; no handbook of D25's is a developer's, so it moves with the render tests |
+| `## Chart Render Tests` | rule | `repository/chart-render-tests.md` | repository, testing, helm | the instance of `helm-render-tests.md` (D27's sample) | "Obtaining Helm where its download host is unreachable", a developer's procedure, went to the runbook's section 5 at closeout (184 F1), its rule (keep the copy out of the repository) staying under "The supported Helm" |
 | `## Cross-Language Contract Conformance` | rule | `repository/contract-conformance.md` | repository, testing | the instance of `conformance-tests.md` | |
 | `## Private Service Dependencies`, its first two paragraphs | rule | `repository/lane-doubles.md` | repository, testing, repository-content | instances of `repository-content.md` and `test-doubles.md` | |
 | `## Private Service Dependencies`, the controls, the payments and mediation targets, the evidence label, the payments helper, and the current example | description | stays | repository, testing | the doubles (D27) | "A scenario installs its rules through the `lane_double_rules` fixture…" and "A control no scenario exercises is proven by its double's own suite" are rules, left with the controls they concern |
@@ -1117,7 +1122,7 @@ How to read it:
 | `## Kubernetes: ConfigMap and Secret mounting`, "The rule behind the pod rule" | rule | `repository/service-configuration.md`, "A storefront's configuration" | repository, configuration, kubernetes | the instance of `configuration.md` and `kubernetes.md` for every storefront | |
 | `## Kubernetes: ConfigMap and Secret mounting`, "A deployment does not wait on a service's dependencies" | rule | `repository/helm-charts.md`, "No wait on a dependency" | repository, helm, kubernetes, deployment | the instance of `deployment.md` and `kubernetes.md`, and what the render tests assert | |
 | `## Kubernetes: ConfigMap and Secret mounting`, the `mockMode` sentence and "The umbrella's smoke-test profile" | description | stays | repository, configuration, deployment | one chart's particulars | |
-| `### Storefront agents: pass-through configuration`, all but two sentences | description | stays | repository, configuration, deployment | how the storefront charts render an agent | operator instructions ("To set a value to `None`…", "recover with `helm rollback`") overlap the operator handbook, left with the behaviour they follow from; the retired-keys paragraph says where a change retires a storefront key (the one catalogue), a rule left with the catalogue it describes |
+| `### Storefront agents: pass-through configuration`, all but two sentences | description | stays | repository, configuration, deployment | how the storefront charts render an agent | its operator instructions ("To set a value to `None`…", "recover with `helm rollback`") went to the operator handbook's "Storefront configuration under Helm" at closeout (184 F1, D34), the behaviour they follow from staying; the retired-keys paragraph says where a change retires a storefront key (the one catalogue), a rule left with the catalogue it describes |
 | `### Storefront agents: pass-through configuration`, "A chart renders a check of a setting it cannot see only where a value names the check's target…" | rule | `repository/helm-charts.md`, "A check of a setting the chart cannot see" | repository, helm, kubernetes, deployment | what every chart's check pod rests on | |
 | `### Storefront agents: pass-through configuration`, "Write an integer above 2^53 in a values file as a string" | rule | `repository/helm-charts.md`, "Values" | repository, helm, kubernetes, deployment | the instance of `helm.md` | |
 | `## Per-domain stack composition`, its stack list | description | stays | repository, configuration, deployment | which stacks there are | |
@@ -1144,7 +1149,7 @@ How to read it:
 | `## Bare-metal role configuration` | description | stays | repository, configuration, deployment | the bare-metal roles' configuration | |
 | `## Current limits` | description | stays | repository, configuration, deployment | the pattern's limits | |
 
-### `docs/development/BUILD_AND_PACKAGING.md`
+### `development/BUILD_AND_PACKAGING.md`
 
 The document is removed once every row has moved (12.3), with its row in `AGENTS.md`'s
 layer table.
@@ -1161,7 +1166,7 @@ layer table.
 | `## Images` | rule | `repository/images.md` | repository, packaging, docker | the instance of `packaging-docker.md` | |
 | `## Checks` | rule | `repository/packaging-checks.md` | repository, packaging | what each packaging check fails on (58 O1) | |
 
-### `docs/development/RELEASING.md`
+### `development/RELEASING.md`
 
 The document is removed once every row has moved (12.3), with its row in `AGENTS.md`'s
 layer table.
@@ -1271,7 +1276,7 @@ change since the merge base, `negotiate-open-ended-compute-terms`, is outside th
 
 For the merge:
 
-- `docs/development/RELEASING.md` and `docs/development/BUILD_AND_PACKAGING.md` come
+- `development/RELEASING.md` and `development/BUILD_AND_PACKAGING.md` come
   back as modify/delete conflicts. Keep them deleted; place `dev`'s text by the rows
   below, never by restoring either document.
 - The rows' last column names what `dev`'s facts overturn here. Each is rewritten to

@@ -49,7 +49,8 @@ piece of guidance belonging to one:
   deployment, documents, or targets.
 
 The test is what a piece of guidance depends on. A rule that would hold without the
-workflow is engineering, even when it is written with one repository's example; it moves with a neutral example, and the repository's statement stays as
+workflow is engineering, even when it is written with one repository's example; it
+is stated as engineering with a neutral example, the repository's statement being
 its instance. A rule that presupposes changes, steps, or OpenSpec's documents is the
 workflow's. A rule that names something only one repository has is that
 repository's.

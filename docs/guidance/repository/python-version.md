@@ -34,9 +34,9 @@ each consumer reads it explicitly
 - Every Dockerfile declares `ARG PYTHON_VERSION=<declared>` before its first `FROM` and
   uses it in each `FROM`.
 
-To change the version, edit `.python-version` and the Dockerfile defaults, then run
-`make check-python-version`. The `market` binary's build image is pinned by digest, so a
-Python bump also pins a new digest for it
+A change of the version edits `.python-version` and the Dockerfile defaults together,
+and `make check-python-version` holds every consumer to the declaration. The `market`
+binary's build image is pinned by digest, so a Python bump also pins a new digest for it
 ([`images.md`, "The `market` binary"](images.md#the-market-binary)).
 
 ## Build requirements

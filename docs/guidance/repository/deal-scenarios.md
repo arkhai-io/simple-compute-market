@@ -31,13 +31,13 @@ initializes what the deal needs. It previews each move through the route's
 evaluate twin or the loop's dry run. The instants a stage may wait for are those
 the deal's Agreement fixes, such as its start, since no control moves the
 storefronts', sites' or buyer's clock (`wait_until` in
-`e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`). Today only the lane
+`e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`). Only the lane
 doubles have a perceived clock a control moves: each reads wall time plus an
 offset that a control moves forward, a scenario advances both doubles together
 through the `lane_double_clock` fixture
 (`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`), whose finaliser resets
 both to wall time whatever the module's outcome, and no storefront step follows
-an advance within its module, since the storefront still reads wall time. What a
+an advance within its module, since the storefront reads wall time. What a
 stage produced goes into the shared deal state for the stages that depend on
 it, and whatever happened, the fixture's finaliser resumes the loops.
 

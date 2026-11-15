@@ -10,6 +10,11 @@ committing to no selection formula, and the repository's cross-system documents
 divide into description, rules, and procedures, the rules moving into
 `docs/guidance/repository/`, in one more round before closeout.
 
+The documents the change removed are named by their former paths without the leading
+`docs/`: `agents/change-workflow.md` (moved to `docs/change-workflow-handbook.md`),
+`agents/domain.md`, `development/BUILD_AND_PACKAGING.md`, and
+`development/RELEASING.md`.
+
 ## Context
 
 - **The documents and their size.** About 8,900 lines:
@@ -21,9 +26,9 @@ divide into description, rules, and procedures, the rules moving into
   | `docs/development/TESTING.md` | 1,793 | yes |
   | `docs/development/DEPLOYMENT_AND_CONFIG.md` | 2,148 | yes |
   | `openspec/README.md` | 171 | yes |
-  | `docs/development/BUILD_AND_PACKAGING.md` | 216 | no |
+  | `development/BUILD_AND_PACKAGING.md` | 216 | no |
   | `docs/development/VALIDATION_RUNBOOK.md` | 1,557 | no |
-  | `docs/development/RELEASING.md` | 281 | no |
+  | `development/RELEASING.md` | 281 | no |
   | `docs/agents/` (`change-workflow.md`, `domain.md`) | 1,024 | no |
   | `docs/prompts/` (five files) | 172 | no |
 
@@ -63,7 +68,7 @@ divide into description, rules, and procedures, the rules moving into
   indexes, citations, public content and secrets, the pre-push check, the
   architecture and packaging checks, and the workflow's default checks.
 - **Restatement.** Skills restate guidance where a step applies it, never stricter
-  than its source (`docs/agents/change-workflow.md`, "Skills"); the skills cite the
+  than its source (`agents/change-workflow.md`, "Skills"); the skills cite the
   main guidance documents about 40 times.
 - **`docs/prompts/`** holds chat-session prompts that the change skills superseded;
   nothing cites them.
@@ -132,7 +137,7 @@ Destinations are provisional file names; round 1 confirms them.
 | `AGENTS.md` "Public repository discipline" and its three first subsections | engineering, repository-content (D6), with this repository's choice of the public case at the root (D9) | `engineering/repository-content.md`; `AGENTS.md` | the workflow runs in private repositories too |
 | `AGENTS.md` "Cross-references must resolve" | split: engineering, documentation (citations resolve); workflow, closeout (the promotion story; check before promoting) | `engineering/documentation.md`; `workflow/closeout.md` | |
 | `AGENTS.md` "Deferred work" | split: workflow, planning (owning change, unowned gap in the index, the roadmap's role, 31 O1f); repository (the `ROADMAP.md` path, no GitHub Issues, the discovery harness) | `working-model.md`; `AGENTS.md` | |
-| `AGENTS.md` "Domain docs", `docs/agents/domain.md` | split: workflow (the workflow's terms in its specification); repository (the market's homes) | `workflow/terms.md`; `AGENTS.md` | Ambiguous: whether "one home per term" is engineering |
+| `AGENTS.md` "Domain docs", `agents/domain.md` | split: workflow (the workflow's terms in its specification); repository (the market's homes) | `workflow/terms.md`; `AGENTS.md` | Ambiguous: whether "one home per term" is engineering |
 | `openspec/README.md` introduction and validator pin | split: workflow, documentation (the OpenSpec layout); repository (the pin and its command) | `openspec-documentation.md`; `openspec/README.md` | |
 | `openspec/README.md` "Documentation placement" | split: workflow (spec, companion, change rows); repository (rows naming `docs/development/`) | both | |
 | `openspec/README.md` "Capability documentation pattern", "A capability organized by an index" | workflow, documentation; repository (`make check-spec-index`) | `openspec-documentation.md` | |
@@ -157,7 +162,7 @@ Destinations are provisional file names; round 1 confirms them.
 | `DEPLOYMENT_AND_CONFIG.md` "The method a document kind follows" and its siblings | engineering, configuration | `engineering/definition-documents.md` | |
 | `DEPLOYMENT_AND_CONFIG.md` "Marketplace identity configuration" | repository, configuration | `openspec/specs/marketplace-identity/configuration.md` | Ambiguous: overlap with the operator handbook |
 | `DEPLOYMENT_AND_CONFIG.md` "Kubernetes: ConfigMap and Secret mounting" | repository, deployment | stays | cross-system |
-| `docs/agents/change-workflow.md` | workflow; its step table's validation parts and links to `market-change-workflow` split out | `docs/agents/change-workflow.md`; `openspec/specs/market-change-workflow/README.md` | the direction rule |
+| `agents/change-workflow.md` | workflow; its step table's validation parts and links to `market-change-workflow` split out | `agents/change-workflow.md`; `openspec/specs/market-change-workflow/README.md` | the direction rule |
 | `RELEASING.md` | repository: rules and procedures | its versioning policy to engineering (D10 as amended at round 1); its rules to `docs/guidance/repository/` and its procedures to the owner's handbook (D10 as amended at the return to design) | a procedure beside rules |
 | `VALIDATION_RUNBOOK.md` | outside the guidance set: no frontmatter, no layer-table row | stays whole (D10, 48 F1) | a procedure, not guidance |
 | `openspec/config.yaml` | outside the guidance set; its restatements as rows | stays (D23) | |
@@ -170,7 +175,7 @@ The initial migration organizes shared guidance as `docs/guidance/engineering/` 
 organization is for people navigating the tree, and may change: the tag defines a
 file's layer, the workflow attaches no meaning to directories, and a lift-out
 selects files by layer tag, which the direction rule keeps cheap.
-The workflow's guide, `docs/agents/change-workflow.md`, is not guidance: it becomes
+The workflow's guide, `agents/change-workflow.md`, is not guidance: it becomes
 the change workflow's operator handbook, holding only what the owner needs to know,
 beside the other handbooks in `docs/`, with no frontmatter; what agents need of it
 moves out by the rule under "Settled at round 2's triage" (amended at round 2's
@@ -774,7 +779,7 @@ round 1's triage" applies them row by row.
   bullet on generating it closes; the row sits beside the capability it applies to,
   in a new guidance file `openspec/specs/change-workflow/diagrams.md`, as CW-x4ex
   requires (48 F2).
-  `docs/agents/domain.md` is removed once its rows move.
+  `agents/domain.md` is removed once its rows move.
 - **31 O1f — The roadmap and the capability index.** Every adopting repository keeps
   the roadmap and the OpenSpec change organization this repository uses, so the
   roadmap's role, the capability index's role, and what goes to each are workflow
@@ -918,6 +923,17 @@ The owner settled these at the triage of review 86, validation 87, and their not
   and exits; the state written to disk, for intervening by hand; the engine, with
   its parts diagram; and customization. Fixed in the triage session, on the owner's
   word, rather than by re-running section 3.
+- **100 F1 (round 3's repeat pass) — The handbook's opening states where the workflow
+  stops.** By the owner's choice it describes the whole lifecycle through the merge:
+  archive cleanup ends the workflow, drafting the merge commit message and pull
+  request description and then copying the history; the orchestrating session opens
+  the pull request; its review and merge are the owner's; validation runs wherever a
+  later step relies on the change's commits. Replaced: an opening saying validation
+  runs before every review and that the workflow reaches a merged pull request,
+  neither true.
+- **98 R1 — Validation starting waived parts before finding the waiver.** Deferred by
+  the owner, with 73 R1, to workflow maintenance after this change merges; validation
+  158 met the same case (the seq 113 waiver held, the parts ran needlessly).
 
 ### Settled at round 4's triage
 
@@ -1030,6 +1046,49 @@ The owner settled these at the triage of review 141, validation 142, and their n
   D28's rule in the round D30 adds; `guidance-review` reads no capability guidance,
   being outside D22's seven skills.
 
+### Settled in implementation
+
+The owner settled these at the triages of round 7 (review 157, validation 158, notes
+159, on sections 8 and 9) and round 8 (review 176, validation 177, notes 178, on
+sections 10 to 13), or let them stand when presented.
+
+- **157 F1 — The guidance check excludes only the capability's companion.** The
+  companion is `README.md` beside an `index.md` and `architecture.md` otherwise, as
+  CW-r8cg and D21 say, so an indexed capability's `architecture.md` is guidance and is
+  checked. Rejected: a shared capability-document helper, since no other code
+  classifies the companion.
+- **The guidance check's and the loader's limits, presented at round 7 and kept.** The
+  check reads no setext headings, block quotes, or HTML comments, which no guidance
+  file uses; an exception row may cite any guidance file, as MCW-c4ek words it,
+  CW-x4ex's "shared guidance" left to the owner; and a `[load]` directory entry
+  resolving outside the repository has no guard, since none is named and CW-l7hn asks
+  nothing of it. The owner raised none.
+- **Section 11's differing pair — a locally verifiable scenario.**
+  `docs/guidance/repository/deal-scenarios.md` takes `ARCHITECTURE.md`'s form over
+  `TESTING.md`'s: the payments service and the dispute authority are both replaced by
+  the in-lane doubles, and an external-topology scenario making a deal extends a
+  locally verifiable one, since every lane runs the mediation double. No finding at
+  round 8 raised it.
+- **176 F1 — The hook-merging criterion is a repository rule.** `ARCHITECTURE.md`'s
+  criterion for when domain hooks may be merged states a rule for a future design
+  choice, so it moved to `production-code.md`, "Domain hooks", linking
+  `market-composition`'s "Typed phase boundaries" for the reasoning. Rejected:
+  generalizing it into `implementation.md`, new shared guidance needing its own
+  review. `TESTING.md`'s gate passages and `DEPLOYMENT_AND_CONFIG.md`'s
+  release-topology sentences stay as description, each describing behaviour a check
+  or the chart holds; closeout's documentation compliance re-checks them.
+- **178 O1 — `dev`'s packaging and release changes mapped, not moved.** The inventory's
+  "Dev's packaging and release changes, for the merge" classifies what `dev`'s
+  `publish-wheels-through-a-gate` wrote in the documents this change splits, by kind
+  and destination here, what it overturns here, and the portable rules it suggests;
+  the merge places `dev`'s text from it. Rejected: leaving the whole placement to the
+  merge; writing the portable rules into the engineering layer now, which would
+  contradict this branch's CI publishing until the merge.
+- **178 O2 — The published-packages table's future is outside this change.** No process
+  reads it: two tests hold it equal to the workflow's table and the manifests.
+  Dropping it and its tests is code beyond D35, so it is an unowned row under the
+  package and release readiness campaign in `openspec/changes/README.md`.
+
 ### Implementation cadence
 
 A review round per layer, so each layer is reviewed by itself, and the code last,
@@ -1044,7 +1103,7 @@ against it:
    and the skills' restatements.
 2. **The workflow layer.** `docs/guidance/workflow/` with its table, `closeout.md`
    with the guidance placement part, workflow material out of `AGENTS.md`,
-   `openspec/README.md`, and `docs/agents/change-workflow.md`, and every citation
+   `openspec/README.md`, and `agents/change-workflow.md`, and every citation
    of what moved, skills included. One session.
 3. **The engineering layer.** `docs/guidance/engineering/` with its table and
    neutral examples, engineering material out of `AGENTS.md`, `ARCHITECTURE.md`,
@@ -1078,6 +1137,51 @@ against it:
 Until round 6, each round adds the guidance files it creates to `load.common` by
 path, so later sessions on the branch read them. Rounds 2 to 5 follow one another
 directly (D15).
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1, the layers, their test, and the link direction | `openspec/specs/change-workflow/spec.md`, CW-g7lt and CW-d2rw; `openspec/specs/change-workflow/README.md#the-repositorys-guidance-is-layered`; `docs/guidance/workflow/README.md#the-layers-of-guidance` |
+| D2, the inventory | none: change history (`inventory.md`) |
+| D3, shared guidance under `docs/guidance/`, repository guidance beside its system, the workflow's guide as its handbook | `openspec/specs/change-workflow/spec.md`, CW-p9sa; `openspec/specs/change-workflow/README.md#the-repositorys-guidance-is-layered`; `openspec/README.md#documentation-placement`; `AGENTS.md#where-the-guidance-lives`; `docs/guidance/workflow/README.md#what-the-workflows-guidance-holds`; `docs/change-workflow-handbook.md` |
+| D4, frontmatter tags | `openspec/specs/change-workflow/spec.md`, CW-g7lt; `openspec/specs/change-workflow/README.md#the-repositorys-guidance-is-layered` |
+| D5, `[load]` directory entries | `openspec/specs/change-workflow/spec.md`, CW-l7hn; `openspec/specs/change-workflow/README.md#inert-paths-and-the-documents-a-step-loads` and its "Current limits" bullet on `[load]`; `.agents/workflow.toml` |
+| D6, private and public repositories | `docs/guidance/engineering/repository-content.md`; `AGENTS.md#exceptions-to-shared-guidance`; `openspec/specs/change-workflow/README.md#the-repositorys-guidance-is-layered` |
+| D7, tool tags | `docs/guidance/engineering/README.md#tags` |
+| D8, the closeout parts by layer | `docs/guidance/workflow/closeout.md`; `openspec/README.md#this-repositorys-closeout-parts`; `AGENTS.md#where-the-guidance-lives`; `openspec/specs/planning-governance/spec.md#evidence`; `openspec/specs/change-workflow/README.md#closeout-and-archival`; `.agents/skills/change-closeout/SKILL.md` |
+| D9, exceptions | `openspec/specs/change-workflow/spec.md`, CW-x4ex; `openspec/specs/change-workflow/README.md#the-repositorys-guidance-is-layered`; `AGENTS.md#exceptions-to-shared-guidance`; `docs/guidance/engineering/rules.md#when-an-exception-is-expected` |
+| D10, the documents section by section | none: the documents themselves |
+| D11, the skills' restatements | none: the inventory's restatements table, for the loader change; CW-s7rq holds the restatement rule |
+| D12, `docs/prompts/` | none: left as it is |
+| D13, the checks' classification | `openspec/specs/market-change-workflow/README.md#what-each-check-enforces` |
+| D14, the capability deltas | `openspec/specs/change-workflow/spec.md` and `index.md`, "The repository's guidance" under "5. The public surface", CW-l7hn's and CW-n7ra's summary lines; `openspec/specs/market-change-workflow/spec.md` and `index.md`, MCW-c4ek's summary line |
+| D15, the anchor check | `openspec/specs/market-change-workflow/spec.md`, MCW-c4ek; `openspec/specs/market-change-workflow/README.md#the-closing-checks` |
+| D16, the guidance placement part | `docs/guidance/workflow/closeout.md#guidance-placement`; `.agents/skills/change-closeout/SKILL.md`; `openspec/specs/change-workflow/README.md#closeout-and-archival`; MCW-c4ek for its mechanical rule |
+| D17, the frontmatter | `openspec/specs/change-workflow/spec.md`, CW-g7lt; `docs/guidance/engineering/README.md` |
+| D18, the vocabulary tables | `docs/guidance/engineering/README.md#tags`; `docs/guidance/workflow/README.md#tags`; `docs/guidance/repository/README.md#tags` |
+| D19, flat files | `openspec/specs/change-workflow/spec.md`, CW-n6dm; `openspec/specs/change-workflow/README.md#the-repositorys-guidance-is-layered`; `docs/guidance/workflow/README.md#how-the-files-are-organized` |
+| D20 | none: superseded by D3 |
+| D21, `make check-guidance` | `openspec/specs/market-change-workflow/spec.md`, MCW-c4ek; `openspec/specs/market-change-workflow/README.md#the-closing-checks` and `#what-each-check-enforces`; `openspec/README.md#the-checks-the-workflows-parts-run-here` |
+| D22, capability guidance read with its capability | `openspec/specs/change-workflow/spec.md`, CW-r8cg; `openspec/specs/change-workflow/README.md#the-repositorys-guidance-is-layered`; the seven skills that read a capability's specification |
+| D23, `openspec/config.yaml` | none: unchanged in kind |
+| D24, tags committing to no selection formula | none: CW-g7lt stands; the open loader question is `openspec/specs/change-workflow/README.md#current-limits` and the lesser goal's gap row in `openspec/changes/README.md` |
+| D25, description, rules, and procedures | `docs/guidance/engineering/documentation.md#a-document-holds-one-kind-of-material`; `docs/guidance/workflow/README.md#what-the-workflows-guidance-holds`; `openspec/README.md#documentation-placement`, its developer's-procedures row (184 F1) |
+| D26, the split in this change | none: scope |
+| D27, the repository's rules under `docs/guidance/repository/` | `docs/guidance/repository/README.md`; `AGENTS.md#where-the-guidance-lives`; `openspec/README.md#documentation-placement`; the openings of `docs/development/ARCHITECTURE.md`, `TESTING.md`, and `DEPLOYMENT_AND_CONFIG.md` |
+| D28, tags name what a file covers | `docs/guidance/workflow/README.md#the-layers-of-guidance`; `docs/guidance/engineering/README.md#tags`; `openspec/specs/change-workflow/README.md#the-repositorys-guidance-is-layered` |
+| D29, the draw.io rule | `docs/guidance/repository/diagrams.md` |
+| D30 | none: the round's place in the change |
+| D31 | none: `openspec/README.md` stays where it is |
+| D32, `AGENTS.md` and the repository's tags | `AGENTS.md#what-every-session-reads` and `#where-the-guidance-lives`; `docs/guidance/repository/README.md#tags` |
+| D33, D25's principle as engineering guidance | `docs/guidance/engineering/documentation.md#a-document-holds-one-kind-of-material`; `openspec/README.md#documentation-placement` |
+| D34 | none: the round's inventory is change history |
+| D35 | none: no requirement or code changes |
+| 72 F2, the guide's agent rules given homes | `openspec/specs/change-workflow/spec.md`, CW-s7rq, CW-b5cf, CW-e3gt, CW-o9hd, CW-t2lw, CW-w6vy, and their `index.md` entries; `docs/guidance/workflow/changes.md#one-change-per-branch`; `docs/guidance/workflow/working-model.md#plan` |
+| 71 O1, closeout in inert paths and the default inert paths | `openspec/specs/change-workflow/spec.md`, CW-pkug and CW-n7ra, and their `index.md` lines; `openspec/specs/change-workflow/README.md#closeout-and-archival` and `#inert-paths-and-the-documents-a-step-loads`; `docs/guidance/workflow/closeout.md`; `.agents/workflow.toml` |
+| 184 F1, a developer's procedures in the runbook or a project's README | `openspec/README.md#documentation-placement`; the moved steps in `e2e-tests/README.md`, `docs/development/VALIDATION_RUNBOOK.md`, and `docs/operator-handbook.md#storefront-configuration-under-helm` |
+| Roadmap currency | none owed: `docs/development/ROADMAP.md` names no goal or gap this change touches; the lesser goal lives in the change index |
+| Campaign index currency | `openspec/changes/README.md`: this change's row; the lesser goal's current-state paragraph rewritten for the layered guidance, and its gap row narrowed to loading by tag, the skills' restatements, moving a layer out, and citing guidance held elsewhere, each unowned |
 
 ## Open Questions
 

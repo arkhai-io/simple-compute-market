@@ -158,11 +158,13 @@ setting to `None`. Null list elements keep their item schema's meaning.
 A removed key renders as if it had never been stated: the storefront applies
 its default, or the chart adds a release-derived value where it normally would.
 A required service setting the chart does not derive remains absent, and the
-storefront refuses it at startup. To set a value to `None` where the storefront
-accepts it, use the storefront's own file or the Secret overlay instead.
+storefront refuses it at startup. A values file therefore cannot set a setting to
+`None`; the storefront's own file and the Secret overlay can, where the storefront
+accepts it (the operator handbook's
+["Storefront configuration under Helm"](../operator-handbook.md#storefront-configuration-under-helm)).
 
-Removing every agent is refused at render; set `storefront.enabled: false` to
-run none. Removing an agent's `port` or `identity` is also refused, naming the
+Removing every agent is refused at render; `storefront.enabled: false` runs
+none. Removing an agent's `port` or `identity` is also refused, naming the
 agent and missing value, since the chart has neither to default to. Removing
 `component` or `configMapName` uses the chart's default; removing a runtime
 `secret` or address book mounts none, as does removing its Secret or ConfigMap
@@ -267,7 +269,8 @@ payment deals `repair_required`. It needs `[registry.auth]` only for a registry
 that requires write keys, which the local registry does not. The storefront validates its typed sections at startup; untyped
 sections are not checked key by key (see below). Because the Deployment uses
 the `Recreate` strategy, a configuration the storefront refuses leaves no
-running pod; recover with `helm rollback`.
+running pod until the release is rolled back (the operator handbook's
+["Storefront configuration under Helm"](../operator-handbook.md#storefront-configuration-under-helm)).
 
 `config` is public: it renders into a ConfigMap. The values schema carries one
 definition generated from the storefront's typed configuration models

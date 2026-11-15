@@ -285,13 +285,39 @@ land rather than inferring them from the delta. The steps after the archive find
 change by name under its dated directory; design, planning, and implementation have
 nothing to do with an archived change and refuse it.
 
-Closeout changes documentation only. The code was last reviewed at pre-closeout and
-the closeout review reads documentation, so a closeout code edit would go unreviewed
-as code; comment hygiene and import placement are therefore done before the
-pre-closeout review and only confirmed at closeout. A code defect a closeout review
-does find stops for the owner, who directs the correction and decides whether it
-needs another reader; reopening the change for a full round is not required for what
-is expected to be rare.
+Closeout changes only the repository's inert paths, changes' records, and the
+archive's own writes — the change's own documents and their move into the archive,
+its row of the change index, and its deltas merged into the specifications
+(CW-pkug). The code was last reviewed at pre-closeout and the closeout review reads
+documentation, so a closeout code edit would go unreviewed as code; comment hygiene
+and import placement are therefore done before the pre-closeout review and only
+confirmed at closeout, and a part that would change any other path, a citation inside
+a skill included, returns the change to implementation. The rule is stated in the
+inert paths, the set archive cleanup exempts from validation, rather than as
+"documentation", which the workflow never defined, so closeout's own commit is never
+one validation would have proved anything about. The archive's own writes are exempt
+whatever the declaration: under an empty one no path is inert, and an archive that
+returned to implementation could never archive. The merge transcribes delta text
+already validated and reviewed with the change's commits; promotion elsewhere follows
+the declaration. A code defect a closeout review does find stops for the owner, who
+directs the correction and decides whether it needs another reader; reopening the
+change for a full round is not required for what is expected to be rare.
+
+What closeout works through is the workflow's guidance
+([`closeout.md`](../../../docs/guidance/workflow/closeout.md)): the workflow's parts in
+order, archival last, with the repository's own parts — the checks and evidence that
+depend on how the repository builds, packages, deploys, or runs its system — at the
+position the list gives them, defined where the repository's root guidance names.
+Every part is the workflow's, since closeout exists only in the workflow; what a part
+confirms may be a rule of any layer, and the command it runs is the repository's, so
+the workflow's list names checks by role and names no repository path. A plan, a
+skill, or a review cites a part by its heading, never its number, so a part added,
+removed, or reordered breaks no citation. Its guidance placement part reads what the
+change added, moved, or rewrote in the guidance against the layer test, adjacency,
+and exception placement ([The repository's guidance is
+layered](#the-repositorys-guidance-is-layered)), after promotion and before the
+citations are checked: the mechanical check catches a link to a higher layer, but not
+a general rule written with one repository's example.
 
 Archive cleanup follows the closeout review's advancing triage as a step of its own,
 with its own entry checks, rather than as the end of triage: it releases the
@@ -1874,16 +1900,87 @@ where the closing checks cover what it can break. A document a test checks for
 currency, such as the run instructions `e2e-tests/README.md` must name, stays inert:
 a commit to it alone skips `make test`, and the next full run of the suites catches
 what it broke. With none
-declared, no path is inert, and only changes' records are exempt where a requirement
-exempts them.
+declared, the workflow's default applies: `openspec/` and every Markdown file,
+`**/*.md`, whose changes alter nothing validation or a code check would prove but a
+test of a document's currency. A declaration, an empty one included, replaces the
+default; with an empty one no path is inert, and only changes' records and the
+archive's own writes are exempt, where a requirement exempts them (CW-n7ra). A
+repository that declares nothing has its documents exempt, as almost every adopter
+would want; one that wants none exempt says so by declaring an empty list, a visible
+act rather than an omission.
 
 `load.common` lists the documents every step's skill reads as it starts, and
 `load.<step>` a step's additions; `config load <step>` prints the two together, so no
 skill merges them, and `config load common` prints the first alone for a session no
 step runs, the orchestrating session or a guidance review. The post-compaction hook,
-not knowing the session's step, re-reads `load.common`. The entries are paths; a
-single list for every step was rejected, since steps already read different
-documents.
+not knowing the session's step, re-reads `load.common`. A single list for every step
+was rejected, since steps already read different documents.
+
+An entry is a path. One ending in `/` names a directory and stands for every
+Markdown file beneath it, in sorted path order, each printed once, so a guidance file
+added or moved within it is read without editing the configuration. The trailing `/` tells a missing directory from a missing
+file, and a directory entry fails closed: `config load` refuses, naming the entry,
+one that is missing, unreadable, or holds no Markdown file, rather than reading it as
+nothing, and the post-compaction hook then tells the session its documents are
+unknown. A literal entry is not checked for its file, so an adopting repository's
+existing configuration means what it meant, and an absent or empty list still means no
+documents. The expansion selects nothing by tag: listing every file was rejected,
+since a forgotten entry is silently unread, and loading by tag is a loader of its own.
+
+### The repository's guidance is layered
+
+What a repository adopting the workflow tells its agents divides into three layers,
+by what each piece of guidance depends on: **engineering**, which holds in a
+repository using neither the workflow nor OpenSpec; **workflow**, which holds in any
+adopting repository, OpenSpec included, and names nothing of one; and **repository**,
+which names the adopting repository's own packages, services, tools, documents, or
+targets (CW-g7lt). A rule that would hold without the workflow is engineering even
+when written with one repository's example, and is stated with a neutral one, the
+repository's statement being its instance. OpenSpec's documentation model is
+workflow material, since the workflow requires OpenSpec and an adopter takes both. A
+lower layer never links to a higher one (CW-d2rw) — the package direction rule applied
+to documents — so lifting a layer out of a repository is a move rather than a rewrite,
+and where workflow guidance needs something a repository supplies it names it by role.
+The workflow's guidance states the layers for whoever works a change
+([`docs/guidance/workflow/README.md`, "The layers of guidance"](../../../docs/guidance/workflow/README.md#the-layers-of-guidance)).
+Within the workflow, a statement is placed by what it constrains: the
+specification what the engine and skills do, the guidance what a change's work must
+produce, and the handbook what the owner does.
+
+Each guidance file states its layer in YAML frontmatter, its `tags` holding exactly
+one layer tag and otherwise only tags from its layer's vocabulary table or a lower
+layer's, so a file can carry a topic, a tool, and its layer at once, which no
+directory structure allows. A file's tags name what it covers, and content on another
+subject goes in another file; no selection formula is assumed, since how a loader
+selects by tag is undecided ([Current limits](#current-limits)). The vocabularies are
+Markdown tables, each layer's in its own README, its layer tag the first row, and a
+tag no file carries is not kept. Directories carry no meaning (CW-n6dm): they organize
+guidance for people, start flat with each file named by its subject, and may nest once
+a layer grows too large to navigate; the frontmatter alone states the layer, so a
+lift-out selects files by tag and a reorganization changes nothing the workflow does.
+Tags were preferred to the path as the tag, which forces every section into one
+place, and to a marker beside each heading, which needs a section extractor in any
+loader.
+
+Repository guidance sits beside the system it pertains to (CW-p9sa): what pertains to
+one capability is a guidance file in its directory under `openspec/specs/`, read
+wherever its specification and companion are read (CW-r8cg), and what spans several
+systems sits in the repository's cross-system documents. A capability's guidance is
+found by its place — every Markdown file in its directory but its specification, its
+companion, and its index — so an untagged guide is still read and still checked.
+Naming capability files in the configuration's load lists was rejected, since it
+would reload every capability's guidance into every step.
+
+A repository's exception to shared guidance — selecting a case the guidance leaves
+open, or overriding one of its rules — is a row of a table headed "Exceptions to
+shared guidance", beside the component it applies to, or in the root guidance when it
+spans several systems (CW-x4ex). An inline note beside each affected rule cannot
+survive a lift-out and cannot be audited, and one root table for every exception would
+load every capability's exceptions into every step. Narrowing a shared rule is an
+ordinary repository rule, and work not yet meeting a shared rule is deferred work,
+not an exception. Engineering guidance describes what may enter a private repository
+as well as a public one, because the workflow runs in both; a repository's root
+guidance selects its case as an exception row.
 
 ### What an adopting repository provides
 
@@ -2019,9 +2116,14 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
   that impossible needs credentials the step does not hold, which
   [`sandbox-unattended-workflow-steps`](../../changes/sandbox-unattended-workflow-steps/proposal.md)
   owns, as it owns checking after each step that the configuration is unchanged.
-- `[load]` lists paths; loading guidance by tag waits on
-  [`layer-engineering-guidance`](../../changes/layer-engineering-guidance/proposal.md)'s
-  vocabulary.
+- `[load]` lists paths and directories, and selects nothing by tag: every step reads
+  every guidance file under a directory entry, and a capability's guidance with its
+  specification. Which tags a session carries, how they select files, and whether the
+  loader is the workflow's or a repository's are undecided, and no change owns them
+  yet; until one does, the skills keep restating the guidance they apply, since only
+  such a loader can promise a harness without a post-compaction hook the rule again.
+  Moving the shared layers out of the repository, and how a permanent document cites
+  guidance held elsewhere, are likewise unowned.
 - Decision destinations and the specification index are this repository's checks,
   not the workflow's defaults; whether they move into the engine is
   [`extract-change-workflow-repository`'s](../../changes/extract-change-workflow-repository/proposal.md)

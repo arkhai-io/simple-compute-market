@@ -34,6 +34,7 @@ change's documents. This repository's documents beside them:
 | Operating a deployment: document formats, procedures, upgrade and recovery steps | `docs/operator-handbook.md` |
 | Releasing this repository's packages and artifacts: loading a release candidate, the deployment's part, running the lanes on its images, cutting a release, the migration floor, and troubleshooting | `docs/release-handbook.md` |
 | Operating the change workflow | `docs/change-workflow-handbook.md` |
+| A developer's procedures: running the lanes and the full validation, rendering the charts, qualifying a purchase; and running one project's own tests | `docs/development/VALIDATION_RUNBOOK.md`; that project's `README.md` |
 | The roadmap: directional goals, the value each delivers, current state per goal, and which change owns each open gap | `docs/development/ROADMAP.md` |
 | Change provenance and review discussion | Git history and pull requests ([`documentation.md`, "Provenance lives in version control"](../docs/guidance/engineering/documentation.md#provenance-lives-in-version-control)) |
 
@@ -42,7 +43,8 @@ kind of material
 ([`documentation.md`, "A document holds one kind of material"](../docs/guidance/engineering/documentation.md#a-document-holds-one-kind-of-material)):
 the three documents under `docs/development/` describe the system, the files under
 `docs/guidance/repository/` state the rules a change here satisfies, and the handbooks
-hold what the owner or an operator does. The repository's cross-system documents, as
+hold what the owner or an operator does, as the validation runbook and each project's
+`README.md` hold what a developer does. The repository's cross-system documents, as
 the workflow's guidance names them, are those three description documents and
 `docs/guidance/repository/`: a change promotes cross-system knowledge of the system to
 the description, and guidance spanning several systems to the rule file for its

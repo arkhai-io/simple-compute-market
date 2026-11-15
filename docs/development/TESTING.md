@@ -355,17 +355,18 @@ use the typed registry client; the scenario does not establish that multiple
 storefronts can share a site authority. Resource-query and explain preparation
 have separate fail-closed behavior.
 
-To run the lanes in GitHub Actions, push the current branch and run
-`make run-e2e` with an authenticated `gh` CLI on PATH. Then run
-`make fetch-e2e-logs` to wait for the run and download its diagnostics. Without
-`E2E_RUN_ID`, it selects the newest run on the current branch whose head commit is
-local `HEAD` (or `E2E_COMMIT`), among the 100 most recent workflow runs, and waits
-up to three minutes for a just-dispatched run to be listed. Matching the commit is
-what makes it safe straight after `make run-e2e`: the new run may not be listed
-yet, and the branch's previous run tested a different commit. `E2E_COMMIT` may be
-a short ID or a ref. When the commit already has a run, pass the newest run ID seen
-before dispatching as `E2E_AFTER_RUN`, so the earlier run is not taken while the
-new one is still unlisted. Logs live under `.snapshot/e2e-logs/<run-id>/`:
+`make run-e2e` dispatches the lanes in GitHub Actions on the current branch
+through an authenticated `gh` CLI, and `make fetch-e2e-logs` waits for the run and
+downloads its diagnostics
+([`e2e-tests/README.md`, "End-to-end lanes"](../../e2e-tests/README.md#end-to-end-lanes)
+gives the steps). Without `E2E_RUN_ID`, `make fetch-e2e-logs` selects the newest
+run on the current branch whose head commit is local `HEAD` (or `E2E_COMMIT`),
+among the 100 most recent workflow runs, and waits up to three minutes for a
+just-dispatched run to be listed. Matching the commit is what makes it safe
+straight after `make run-e2e`: the new run may not be listed yet, and the branch's
+previous run tested a different commit. `E2E_COMMIT` may be a short ID or a ref.
+With `E2E_AFTER_RUN` naming a run ID, it takes only a later run, so a commit's
+earlier run is not taken while its new one is still unlisted. Logs live under `.snapshot/e2e-logs/<run-id>/`:
 `actions.log`, `e2e-vm-logs/compose-logs.txt`,
 `e2e-bare-metal-logs/compose-logs.txt`, and
 `e2e-apicredits-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root
@@ -539,9 +540,10 @@ VM payments listings take their declared delivery allowance from
 `PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS`, a positive integer number of seconds
 (or a decimal integer string), defaulting to 300. Listing composition and the
 purchase's option check use the same value; the buyer CLI waits at least that
-long. Set the allowance before publishing an offer, with
-`PAYMENTS.DISPUTE_WINDOW_SECONDS` covering it plus the authority's minimum filing
-window. Existing immutable terms must match the run's inputs. This does not
+long. The dispute window, `PAYMENTS.DISPUTE_WINDOW_SECONDS`, covers the allowance
+plus the authority's minimum filing window
+([`e2e-tests/README.md`, "Real-provisioning qualification"](../../e2e-tests/README.md#real-provisioning-qualification)
+gives setting both). Existing immutable terms must match the run's inputs. This does not
 extend an accepted Agreement, move a clock, or accept late delivery.
 
 - `e2e_vm_qualification` (observation 2) buys two CPU-only guests through

@@ -211,6 +211,14 @@ make test-render
 cd ..
 ```
 
+Helm's official binaries are served from `get.helm.sh`. An environment that cannot
+reach it can use a redistribution such as the npm package `helm-binary-linux`, which
+ships one binary with no install scripts. Such a copy is unverified and may be an
+older release: inspect the package before running it, and keep it out of the
+repository. The supported release is the one CI pins
+([`chart-render-tests.md`, "The supported Helm"](../guidance/repository/chart-render-tests.md#the-supported-helm));
+the render log records whichever version actually ran.
+
 Policy training/RL dependencies are not part of the standard local validation.
 The old `domains/vms/tests` integration suite was removed in the latest pull;
 future training or RL validation should be documented separately when runnable
@@ -1498,7 +1506,7 @@ claims are sender-controlled; do not treat them as authenticated identities.
 
 ## 29. Qualify an ordinary Arkhai purchase
 
-Keep buyer and operator identities separate. Use the shipped buyer CLI for every customer action and the signed typed compute-provisioning client for independent host, job, lease, and reservation observations. The operator client takes a base URL, signer, caller role, and expected authority; keep its credential material outside the buyer configuration. Bind the frozen source, selected artifacts, and public configuration identity to each run in restricted evidence.
+Keep buyer and operator identities separate. Use the shipped buyer CLI for every customer action and the signed typed compute-provisioning client for independent host, job, lease, and reservation observations. The operator client takes a base URL, signer, caller role, and expected authority; keep its credential material outside the buyer configuration. Do not import a payment-specific full-deal driver merely to obtain operator visibility. Bind the frozen source, selected artifacts, and public configuration identity to each run in restricted evidence, and correlate there the accepted Agreement, funding evidence, receipt, rental debit, reservation, fulfillment, jobs, delivered access, and teardown observations; leave credentials, private service records, and raw deployment data out of any public summary. What the evidence must rest on is [`qualification-evidence.md`](../guidance/repository/qualification-evidence.md).
 
 Before rollout, check the rebuilt consumer against both the currently deployed payment authority responses and the selected publication. If one check is reused for both, establish that the contracts are identical; if they differ, record a compatible rollout order before making a change. Separately verify retained historical signed bytes. Do not deploy or downgrade the authority to match the consumer.
 

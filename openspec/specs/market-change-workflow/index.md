@@ -49,7 +49,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ## 5. This repository's checks
 
-- [MCW-c4ek](spec.md#requirement-mcw-c4ek-a-changes-closing-checks-enforce-written-rules) — the closing checks fail on a decision with no destination, history wording, a double version bump, an unexplained local import, or a capability index gap.
+- [MCW-c4ek](spec.md#requirement-mcw-c4ek-a-changes-closing-checks-enforce-written-rules) — the closing checks fail on a decision with no destination, history wording, a double version bump, an unexplained local import, a capability index gap, or the guidance check, which holds the tags, vocabularies, exception tables, link direction, and cited anchors of the guidance.
 - [MCW-s8gk](spec.md#requirement-mcw-s8gk-the-public-content-checks-refuse-private-keys-and-provider-credentials) — the public-content checks refuse private keys and provider-format credentials through a pinned scanner, passing development fixtures.
 - [MCW-u2dt](spec.md#requirement-mcw-u2dt-an-audit-reports-every-scanner-rule-and-gates-nothing) — an on-demand audit reports what every scanner rule but the default key rule finds in the tracked tree, gating nothing.
 - [MCW-l5rv](spec.md#requirement-mcw-l5rv-every-lock-carries-the-lock-revision-the-minimum-uv-writes) — every committed lock carries the minimum uv's lock revision, and the repository's relock and refresh commands refuse an older uv.

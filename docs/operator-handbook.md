@@ -590,6 +590,21 @@ at render, naming `secretProfile`. To move off them:
 A bootstrap key seeds a key only into an empty table, so moving an existing
 registry changes no key it already holds.
 
+## Storefront configuration under Helm
+
+How the VM and bare-metal storefront charts render an agent's configuration is
+[`DEPLOYMENT_AND_CONFIG.md`, "Storefront agents: pass-through configuration"](development/DEPLOYMENT_AND_CONFIG.md#storefront-agents-pass-through-configuration).
+
+- **Setting a value to `None`.** A `null` in a values file removes the key rather
+  than setting it to `None`. Where the storefront accepts `None` for a setting,
+  state it in the storefront's own file, `storefront.toml`, or in the Secret
+  overlay, `storefront.secrets.toml`.
+- **A refused configuration.** The storefront Deployment uses the `Recreate`
+  strategy, so a release whose configuration the storefront refuses at startup
+  leaves no running pod. Recover with `helm rollback` to the previous release,
+  which restores that release's own values, then correct the values before
+  upgrading again.
+
 ## Upgrading a deployment
 
 Every stateful service — compute provisioning, the VM, bare-metal and API-credit
@@ -686,7 +701,8 @@ sequence:
 4. Repeat `--check` for every file and render the Helm or Compose deployment.
    Do not proceed if a migration, typed configuration validation, generated
    schema check or image/config schema check fails.
-   `config migrate` reads: rendering applies the values schema, and at startup
+   Validation reaches beyond what `config migrate` reads: rendering applies the
+   values schema, and at startup
    the storefront applies its typed validation — refusing, for example, a
    settlement schema version other than its own. Untyped settings are not
    checked key by key.
