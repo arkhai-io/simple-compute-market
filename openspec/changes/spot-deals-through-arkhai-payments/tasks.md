@@ -2125,7 +2125,7 @@ docs/development/DEPLOYMENT_AND_CONFIG.md.
 
 - 5.1 The lane-only proposed declaration is dropped: the servicing declaration is
       treatments and a setup flag (D7), and identity is the receipt verifier's.
-- [ ] 5.4 Withdraw the work in progress (D17, D18, D19, D20, D22, D23). Restore to
+- [x] 5.4 Withdraw the work in progress (D17, D18, D19, D20, D22, D23). Restore to
       their content at `a547604e7`: `receipts.py` (no `anchor`, `_anchors` or
       `snapshot_signer`), `settlement_config.py` (the foundation's validation only:
       the current `service_identity` listed, retiring entries dated; no
@@ -2145,7 +2145,30 @@ docs/development/DEPLOYMENT_AND_CONFIG.md.
       Verify: `git diff a547604e7 -- kit/arkhai-payments docs/development/DEPLOYMENT_AND_CONFIG.md`
       shows only the D22 binding and the tests of 5.5; `make -C kit/arkhai-payments test`
       (mypy, vectors, generated models and the unit suite) passes.
-- [ ] 5.5 Prove the kept binding and the cutover at the kit (D18, D22, D17).
+      As built: `receipts.py`, `settlement_config.py`, `test_settlement_config.py`,
+      `__init__.py` and `DEPLOYMENT_AND_CONFIG.md` show no difference from
+      `a547604e7`; `reanchoring.py` and `test_reanchoring.py` are removed with `git
+      rm`. The restores were made with the Edit tool reversing the work in
+      progress's diff, since `git checkout <commit> -- <paths>` was refused and
+      `git restore --source` is not allowed; each file was then checked empty
+      against `a547604e7` with `git diff`. `seller.py` differs from `a547604e7`
+      only by `_verifier_for` returning `pinned_snapshot_verifier(agreement, data,
+      self.config)` (and its import, `verify_snapshot`'s dropped); `adapter.py`
+      only by `pinned_snapshot_verifier` binding `config.receipt_trust`, its
+      docstring naming the configured current and retiring identities and that a
+      deal approved under an identity absent from the configuration does not
+      verify. The README differs in two sentences beyond the removed section, both
+      describing D22's binding where the section-start text would now be false:
+      `stage.payment_adapter` verifies "under the configured receipt identities;
+      its verifier factory can be injected" (no longer "for key rotation", which is
+      a cutover), and `pinned_snapshot_verifier(agreement, data, config)` binds the
+      configured current and retiring identities, a deal approved under an
+      unlisted identity stops verifying, so a key change drains open deals first,
+      pointing to the deployment guide. `openspec/changes/README.md` holds no
+      section-5 reference to remove (D24's gap row and convergence's note are the
+      design's). `make -C kit/arkhai-payments test`: mypy clean on 29 files,
+      vectors and generated models current, 348 passed (unit, with 5.5's three).
+- [x] 5.5 Prove the kept binding and the cutover at the kit (D18, D22, D17).
       `test_receipt_identity_cutover.py` (unit, over the kit's clock-injected
       `PaymentsAuthority` engine signing under two keys through `FakePaymentsClient`,
       receipts from `build_signed_receipt`, deterministic development keys commented
@@ -2160,7 +2183,24 @@ docs/development/DEPLOYMENT_AND_CONFIG.md.
       identity"); a configuration without `receipt_identities` trusts
       `service_identity` alone, as before.
       Verify: `make -C kit/arkhai-payments test`.
-- [ ] 5.6 Prove the cutover in a running storefront (D17). In
+      As built: `kit/arkhai-payments/tests/test_receipt_identity_cutover.py`, three
+      unit cases over `approved()`'s engine (`FakePaymentsClient`, approving under
+      `SERVICE`, then `engine.signer` switched to a second development key at
+      `NOW + 20`): (1) with the overlap configuration (new identity current from
+      `NOW + 10`, the old retiring until `NOW + 600`), `pinned_snapshot_verifier`
+      accepts the new-key snapshot embedding the old receipt, and the stage, whose
+      verifier is that binding, answers `check_receipt_now` `ReceiptVerified`, its
+      adapter's `read` `Accepted`, and `receipt_matches` true; under
+      `a547604e7`'s binding (`service_identity` alone) the first assertion would
+      fail, by reading that code (only the new key pinned, so the old receipt's
+      issuer is untrusted), not by a run;
+      (2) with only the new identity configured, `pinned_snapshot_verifier`,
+      `check_receipt_now` (`ReceiptInvalid`), the adapter's `read` and
+      `receipt_matches` (the engine's receipt and a `build_signed_receipt` one)
+      each refuse; (3) with no `receipt_identities`, `receipt_trust` is
+      `service_identity` alone, a `SERVICE` snapshot and receipt verify, a receipt
+      or snapshot under the other key does not. 348 passed.
+- [x] 5.6 Prove the cutover in a running storefront (D17). In
       `domains/bare_metal/storefront/tests/test_http_settlement.py` (integration: the
       storefront's settlement and fulfillment services over its real SQLite database,
       with `FakePaymentsClient` at the payments boundary), beside
@@ -2177,8 +2217,57 @@ docs/development/DEPLOYMENT_AND_CONFIG.md.
       purchases) crosses the stage's verifier and `verify_snapshot`, which behave as
       at `a547604e7` but for `pinned_snapshot_verifier`'s binding, unchanged for a
       configuration without `receipt_identities`. Owed by validation: none.
+      As built: `test_a_receipt_identity_cutover_refuses_a_deal_the_removed_identity_approved`,
+      beside the restart test, integration as the plan levels it (the storefront's
+      settlement and fulfillment services over its migrated SQLite file, the
+      capacity and provisioning clients doubled, `FakePaymentsClient` serving the
+      old-key receipt): the deal verifies (200) and reads `active` with one
+      reservation and one provisioning call; the runtime is then rebuilt over a
+      new `SQLiteClient` on the same file with a composition trusting only a new
+      development identity (`_payment_composition`, extracted from
+      `_payment_deal`, which now uses it): the fulfillment status raises
+      "stored payment receipt is invalid", a repeated settle request raises
+      `SettlementRequestError` "stored payment receipt does not prove this
+      Agreement", and the counts stay at one. The rebuild is in-process, not a
+      process restart; the services are called directly, as the restart test
+      beside it does, not through the app's typed client. Ran first with `uv run
+      pytest -k` in the storefront (2 passed), then the whole bare-metal storefront
+      suite, 646 passed, in the pre-commit run recorded in the section's notes.
 
 ## Section 5 notes and handoff
+
+- **Implemented as replanned (5.4–5.6), every task checked.** What follows the next
+  bullet is the record of the withdrawn work and the replan. No permanent spec or
+  architecture document changed: the deltas already carry D17 and D18 (planning),
+  and the deployment guide's cutover paragraph and settlement-servicing's
+  architecture are closeout's promotion (7.9). End-to-end scenarios exercising the
+  section: the payments scenarios 5.6 names cross the stage's verifier and
+  `verify_snapshot`, which behave as at `a547604e7` for every lane configuration,
+  none of which lists `receipt_identities`; none rotates a key. Owed by
+  validation: none.
+- Pre-commit, `scripts/change-workflow run pre-commit`, at the section's end: all
+  three hooks passed — after-functional-change (`make lock`, no lock changed),
+  pre-commit-functional (`make dist-clean`, `make check-packaging`, `make test`:
+  every suite, the payments kit 348 and the bare-metal storefront 646 with the
+  cutover case) and pre-commit (index, tasks, skills, OpenSpec strict, `make
+  check-repository`: comment hygiene, documentation citations, history wording,
+  local imports and the rest).
+- The fresh-context check found no layering, packaging, comment or import breach,
+  and the withdrawal complete with only D22's binding surviving. Corrected: 5.6's
+  note pointing to a pre-commit record not yet written (now above) and 5.5's
+  counterfactual about the section-start binding, which is reasoned from
+  `a547604e7`'s code, not run. Declined, for the round's review to weigh:
+  rewording `receipts.py`'s module docstring ("retiring keys may verify historical
+  receipts but cannot re-anchor them"), which 5.4 restores verbatim and which still
+  holds (a retiring key's snapshot attests no embedded receipt); and tests of the
+  configuration rules D22 keeps (the current identity listed, retiring entries
+  dated), which `a547604e7` had none of and 5.4 restores as it was.
+- For the next session (section 6): 6.3's rotation-free qualification wording and
+  7.9's cutover promotion stand as planned; nothing here changes them. The
+  deployment guide's `receipt_identities` paragraph is the foundation's, and its
+  payments paragraph already calls a receipt identity change a cutover; draining or
+  refunding first (D17) and buyers updating before approving (D26) are written at
+  closeout (7.9).
 
 - **Replanned; what follows this bullet is the withdrawn first session's record.**
   That session built re-anchoring (`9a3e6cbb3`) and returned the change to design,

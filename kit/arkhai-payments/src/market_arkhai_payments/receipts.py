@@ -73,47 +73,17 @@ def _snapshot_signature(signed: SignedTransactionSnapshot, pin: ReceiptIdentity)
     )
 
 
-def snapshot_signer(
-    signed: SignedTransactionSnapshot, pins: Sequence[ReceiptIdentity],
-) -> ReceiptIdentity | None:
-    """The configured pin, valid at the snapshot's ``observedAt``, that signed it."""
-
-    return next((item for item in pins if item.valid_at(signed.snapshot.observedAt)
-                 and _snapshot_signature(signed, item)), None)
-
-
-def _anchors(
-    anchor: SignedTransactionSnapshot, signed: SignedTransactionSnapshot, pins: Sequence[ReceiptIdentity],
-) -> bool:
-    # A persisted re-anchoring snapshot is a configured key's attestation of the
-    # exact embedded receipt, made while that receipt's issuer was still
-    # verifiable. It keeps attesting that receipt after the issuer's pin is
-    # removed, for as long as the anchor's own signer stays configured. Nothing
-    # here re-proves that the issuer was verifiable then: like the minimum
-    # sequence, the anchor is the caller's own durable record, of a re-anchoring
-    # the re-anchoring check accepted, and no other snapshot may be passed as one.
-    held = anchor.snapshot
-    return (held.transaction == signed.snapshot.transaction
-            and held.livemode is signed.snapshot.livemode
-            and held.receipt == signed.snapshot.receipt
-            and snapshot_signer(anchor, pins) is not None)
-
-
 def verify_snapshot(
     signed_snapshot: SignedTransactionSnapshot | Mapping[str, Any],
     trusted_service_identities: MarketplaceIdentity | Sequence[ReceiptIdentity],
     *, mandate: Mandate | Mapping[str, Any], agreement_json: Mapping[str, Any],
     livemode: bool, minimum_sequence: int = 0,
-    anchor: SignedTransactionSnapshot | None = None,
 ) -> bool:
     """Verify authority state before use, binding deal, mode and cursor.
 
     Attestation binds the embedded receipt as signed, including its original
     proof. It never rewrites or replaces the receipt with a current-key one.
-    The caller owns freshness by supplying its durable minimum sequence, and
-    supplies ``anchor``, the deal's persisted re-anchoring snapshot, once it
-    has one: the anchor attests the embedded receipt in place of its issuer's
-    pin, which may then be removed from configuration.
+    The caller owns freshness by supplying its durable minimum sequence.
     """
     try:
         if type(minimum_sequence) is not int or minimum_sequence < 0:
@@ -128,7 +98,8 @@ def verify_snapshot(
                 if isinstance(trusted_service_identities, MarketplaceIdentity)
                 else tuple(trusted_service_identities))
         snapshot = signed.snapshot
-        pin = snapshot_signer(signed, pins)
+        pin = next((item for item in pins if item.valid_at(snapshot.observedAt)
+                    and _snapshot_signature(signed, item)), None)
         if pin is None:
             return False
         receipt = snapshot.receipt.receipt
@@ -151,8 +122,7 @@ def verify_snapshot(
             and receipt.issuer.scheme == item.identity.scheme.value
             and receipt.issuer.identifier == item.identity.identifier for item in pins
         )
-        return (receipt_verified or (not pin.retiring and historical_issuer)
-                or (anchor is not None and _anchors(SignedTransactionSnapshot.model_validate(anchor), signed, pins)))
+        return receipt_verified or (not pin.retiring and historical_issuer)
     except (KeyError, TypeError, ValueError, ValidationError):
         return False
 

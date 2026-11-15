@@ -70,34 +70,6 @@ def test_config_requires_tls_for_non_loopback_and_pins_ed25519_identity() -> Non
         _config(service_identity=Eip191Signer("0x" + "01" * 32).identity)
 
 
-def test_receipt_identities_name_one_current_key_beside_dated_retiring_ones() -> None:
-    # Public deterministic development keys; never use them on a public network.
-    current = Ed25519Signer(bytes(range(32))).identity
-    old = Ed25519Signer(bytes([9]) * 32).identity
-    other = Ed25519Signer(bytes([10]) * 32).identity
-    overlap = _config(receipt_identities=[
-        {"identity": current.model_dump(mode="json"), "valid_from": 1_800_000_010},
-        {"identity": old.model_dump(mode="json"), "valid_until": 1_800_003_600, "retiring": True},
-    ])
-    assert [(pin.identity, pin.retiring, pin.valid_until) for pin in overlap.receipt_trust] == [
-        (current, False, None), (old, True, 1_800_003_600)]
-    # Without a list, the current identity alone is trusted, with no overlap.
-    assert [pin.identity for pin in _config().receipt_trust] == [current]
-    with pytest.raises(ValueError, match="retiring receipt identities require valid_until"):
-        _config(receipt_identities=[{"identity": current.model_dump(mode="json")},
-                                    {"identity": old.model_dump(mode="json"), "retiring": True}])
-    with pytest.raises(ValueError, match="must include the current service_identity"):
-        _config(receipt_identities=[
-            {"identity": old.model_dump(mode="json"), "valid_until": 1_800_003_600, "retiring": True}])
-    with pytest.raises(ValueError, match="only the current service_identity as not retiring"):
-        _config(receipt_identities=[{"identity": current.model_dump(mode="json")},
-                                    {"identity": other.model_dump(mode="json")}])
-    with pytest.raises(ValueError, match="more than once"):
-        _config(receipt_identities=[
-            {"identity": current.model_dump(mode="json")},
-            {"identity": current.model_dump(mode="json"), "valid_until": 1_800_003_600, "retiring": True}])
-
-
 def test_development_auth_is_explicit_and_loopback_only() -> None:
     with pytest.raises(ValueError, match="loopback"):
         _config(

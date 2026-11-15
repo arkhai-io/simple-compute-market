@@ -218,8 +218,7 @@ state, then translates each remaining held part into a voluntary lifecycle
 response is recovered by verified read and same-key retry. It does not send an
 exceptional-end claim or compute a dispute remedy. `stage.payment_adapter`
 exposes the same payee adapter for lifecycle composition, verifying under the
-configured receipt identities and, once the deal has one, its persisted
-re-anchoring snapshot (`anchor=`).
+configured receipt identities; its verifier factory can be injected.
 
 `reconcile_accepted_payments` still advances every domain-supplied accepted
 candidate, including a buyer that approved and never sent commit. The domain's
@@ -246,9 +245,12 @@ payment adapter.
 
 Construction takes the acting account, `client_for_owner`, a required
 `verify_snapshot(signed, minimum_sequence) -> bool`, and an optional durable
-`minimum_sequence` floor. The composition owns cursor storage and the persisted
-anchor; `pinned_snapshot_verifier(agreement, data, config, anchor=None)` binds the
-configured current and retiring receipt identities and the deal's anchor. Reads reject unverified,
+`minimum_sequence` floor. The composition owns cursor storage;
+`pinned_snapshot_verifier(agreement, data, config)` binds the configured current
+and retiring receipt identities (`receipt_identities`, or `service_identity` alone
+without one). A deal approved under an identity the configuration does not list
+stops verifying, so a receipt identity change drains open deals first
+(`docs/development/DEPLOYMENT_AND_CONFIG.md`). Reads reject unverified,
 cross-commitment, incomplete or regressing authority records. They return all
 per-part events for the seller watch to replay, and open extensions independently
 by ref and case. Partial refunds never imply a delivery end. Once-only delivery
@@ -273,29 +275,6 @@ From the repository root, `make dist && make -C kit/arkhai-payments first-use`
 starts an invocation-owned fixture and demonstrates a lost reverse response,
 signed-read recovery and a same-key replay, plus observation-only scripted case
 effects and overlapping extensions. No service, secrets or network are needed.
-
-## Receipt key rotation and re-anchoring
-
-During a receipt identity overlap (`receipt_identities`, see
-`docs/development/DEPLOYMENT_AND_CONFIG.md`), a running rate deal moves its
-approval trust off the retiring key. `stage.reanchoring_evidence_now(agreement,
-data, receipt=..., minimum_sequence=..., anchor=...)` reads the deal fresh under
-the payee's credential and returns `ReanchoringEvidence` only when the shared
-verifier accepts the snapshot for the deal's mandate, parties, mode and sequence
-floor, it embeds the original receipt exactly, and the current, not a retiring,
-identity signed it; otherwise it raises `ReanchoringRefused`. Once-only deals and
-a changed `livemode` never re-anchor: they drain.
-
-`record_reanchoring(store, evidence, recorded_at=...)` puts the snapshot into the
-caller's evidence store as an item of its own, beside the original receipt, and
-refuses evidence older than the persisted anchor; `reanchored_snapshot(record)`
-reads the deal's anchor back, the highest-sequence one, which the composition
-passes to `stage.payment_adapter(..., anchor=...)` so the deal keeps verifying
-after the retiring key is removed. `retirement_inventory(deals, retiring,
-livemode=...)` lists every deal whose trust still rests on a retiring key, rate
-deals to re-anchor and the rest to drain; the key is removable when both lists are
-empty. The kit persists nothing itself and runs no loop: the composition owns
-when to re-anchor and where the deals come from.
 
 ## Testing with the kit
 
