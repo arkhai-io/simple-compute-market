@@ -552,6 +552,7 @@ HOOK_STEPS: dict[str, frozenset[str]] = {
     "pre-archive": frozenset({"closeout"}),
     "validation": frozenset({"validate"}),
     "cleanup": frozenset({"archive-cleanup"}),
+    "test-before": frozenset({"implement", "triage"}),
 }
 
 

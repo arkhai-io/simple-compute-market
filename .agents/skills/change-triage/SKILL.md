@@ -263,7 +263,10 @@ For an implementation round, also take:
   saves the notes as the round's record. Otherwise ask for them if the owner has
   not pasted them, naming that command so the owner can read what the notes are
   about, and save them exactly as pasted as the next numbered record,
-  `NN-implementation-owner.md`.
+  `NN-implementation-owner.md`. Notes the owner saved while no review awaited a
+  triage — on an earlier triage's fixes, or on a re-plan — are carried by the next
+  round: its line in the workflow log names them under `carries`, and you triage
+  them with the round's own notes, as points of their own.
   Label the points `O1`, `O2`, … in the order they appear — in the triage file and
   the ledger only, never in the saved notes — and then each commit the owner made
   while reading, which the pull above brought in, as a point after them; and
@@ -587,7 +590,9 @@ acceptances' outcomes are carried out with the rest.
   commit it with the round's fixes. Record each in the task notes of the section it
   concerns, naming the finding; a fix that concerns no section goes in a note
   under the last implemented section. Then run `change-implement`'s checks before
-  committing (its step 5): the focused suites, `scripts/change-workflow run
+  committing (its step 5): the focused suites, a fix's new test run against the
+  commit before it with `scripts/change-workflow run test-before` where it should
+  fail there, `scripts/change-workflow run
   pre-commit <change>`, whose hooks follow from the paths the fixes change — a fix
   only under the repository's inert paths runs `pre-commit` alone — staging what
   the hooks rebuilt (before closeout its citations check may report only files the

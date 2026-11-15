@@ -595,6 +595,36 @@ def test_the_plan_reads_as_lines(tmp_path: Path, capsys: pytest.CaptureFixture[s
     ]
 
 
+def test_the_plan_names_the_owners_waivers(tmp_path: Path,
+                                           capsys: pytest.CaptureFixture[str]) -> None:
+    """A part the owner waived names the decision, whose condition validation judges."""
+    configured(tmp_path, PARTS)
+    _change(tmp_path, TASKS)
+    assert main(["note", CHANGE, "orchestrator", "--by", "owner", "--waives", "helm,pipeline",
+                 "--decision", "waive helm and the pipeline while no chart changes",
+                 "--reason", "the owner's words"], root=tmp_path) == 0
+    capsys.readouterr()
+
+    assert main(["config", "parts", CHANGE], root=tmp_path) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert main(["config", "parts", CHANGE, "--json"], root=tmp_path) == 0
+    runs = json.loads(capsys.readouterr().out)["runs"]
+
+    assert lines[1].split()[:7] == ["pipeline", "waived", "by", "the", "owner", "at", "seq"]
+    assert lines[-1].startswith("helm") and "no chart changes" in lines[-1]
+    assert [run["name"] for run in runs if "waived" in run] == ["pipeline", "helm"]
+
+
+def test_a_waiver_names_declared_parts(tmp_path: Path,
+                                       capsys: pytest.CaptureFixture[str]) -> None:
+    configured(tmp_path, PARTS)
+    _change(tmp_path, TASKS)
+
+    assert main(["note", CHANGE, "orchestrator", "--by", "owner", "--waives", "smoke",
+                 "--decision", "d", "--reason", "r"], root=tmp_path) != 0
+    assert "does not declare: smoke" in capsys.readouterr().err
+
+
 def test_no_section_owes_ci_evidence(tmp_path: Path,
                                      capsys: pytest.CaptureFixture[str]) -> None:
     """CW-g4oz: an owed part with no owing complete section is listed not owed."""

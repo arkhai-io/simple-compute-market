@@ -481,6 +481,51 @@ def test_reviews_and_validation_await_triage(tmp_path: Path) -> None:
                                 "03-implementation-owner.md have no triage"}
 
 
+def test_a_round_carries_owner_notes_no_triage_read(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    # Notes on a finished triage's fixes, saved while no review awaited a triage.
+    _record(root, "01-implementation-owner.md")
+    _round(root, [[2]])
+    _check(root, SECOND_DONE)
+    _record(root, "02-validation.md", text=_validation())
+    _review(root, "03-implementation.md")
+
+    unread = _next(root)
+    _record(root, "04-implementation-owner.md")
+    result = _next(root)
+
+    rounds = [e for e in read_log(log_path(root, CHANGE)) if e.get("outcome") == "round"]
+    assert rounds[-1]["carries"] == [1]
+    # The carried notes are not the round's reading.
+    assert unread["step"] == "round-view"
+    assert result == {"step": "triage", "kind": "implementation",
+                      "reason": "01-implementation-owner.md, 02-validation.md, "
+                                "03-implementation.md, 04-implementation-owner.md "
+                                "have no triage"}
+
+
+def test_a_round_carries_no_owner_notes_a_triage_read(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _record(root, "01-implementation-owner.md", triage="Read with round 1.")
+    _round(root, [[2]])
+
+    assert "carries" not in read_log(log_path(root, CHANGE))[-1]
+
+
+def test_a_review_awaiting_triage_comes_before_the_rounds_open_sections(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    # The round's section holds an unchecked task: it is open again.
+    _check(root, TASKS)
+    _record(root, "01-validation.md", text=_validation())
+    _review(root, "02-implementation.md")
+    _record(root, "03-implementation-owner.md")
+
+    result = _next(root)
+
+    assert (result["step"], result["kind"]) == ("triage", "implementation")
+
+
 def test_a_rounds_triage_whose_outcome_is_not_recorded_is_in_progress(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
     _round(root, [[2]])

@@ -1377,6 +1377,7 @@ the graph, and no repository changes it:
 | `pre-archive` | closeout |
 | validation's preflight and parts | validate |
 | `cleanup`, every part's cleanup as one list | archive cleanup |
+| `test-before`, a test file run against an earlier commit in a throwaway worktree | implement, triage |
 
 `pre-push` and `post-clone` are run by no step, only by the engine's own `push` and
 `clone`. The unattended-run marker the wrapper sets names the run's step, and `run`

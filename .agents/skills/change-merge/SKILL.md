@@ -20,7 +20,10 @@ after the change: `<change> from <branch>`. The engine names the branch the owne
 gives it (`make merge FROM=<branch>`), else the branch the change's last finished
 merge recorded in its outcome's `landing`, else the branch the change's clone
 recorded as the one it lands on, and refuses to start with none. Invoked with no
-branch, ask the owner which branch the change will land on; never assume one.
+branch, ask the owner which branch the change will land on; never assume one. Words
+after the branch (`make merge ARGUMENTS=<text>`) are the owner's direction to this
+merge — a brief on what the branch brings in, or how to place it — which you follow
+as you would the owner's answer.
 
 **Every finished outcome records what you fetched**, as `landing`: `{"remote":
 <the remote you fetched from, as this checkout names it>, "branch": <the base>,

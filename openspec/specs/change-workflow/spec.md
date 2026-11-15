@@ -884,13 +884,22 @@ The implementation review, the validation of the same commit, and the owner's no
 on it MUST be triaged together, in a session that is not the implementing session.
 A review the review tooling publishes MUST name the commit it reviewed, so the
 commits can be compared mechanically; for a pasted review, triage MUST record the
-commit the owner says its reviewer saw.
+commit the owner says its reviewer saw. An implementation review awaiting its triage
+MUST be triaged before the round's unchecked sections are implemented, since its
+findings may change what is left to do.
 
 #### Scenario: A pasted review joins a round
 
 - **WHEN** the owner pastes a review into a round's triage
 - **THEN** triage records the commit the owner says its reviewer saw, and compares
   it with the commit the validation names
+
+#### Scenario: A review awaits triage while the round's sections are open
+
+- **WHEN** an implementation review the owner directed awaits triage, and planning
+  has added unchecked tasks to the round's sections
+- **THEN** the computation names the round's triage, not implementation, and the
+  triage's exit decides what is implemented next
 
 ### Requirement: CW-514y Records of different commits form a round only on the owner's waiver
 
@@ -922,7 +931,17 @@ MUST be read as missing evidence, never as a finding.
 The owner's notes MUST be saved verbatim as a review record and triaged like any
 review: the triaging agent MUST state its own position on each point rather than
 carry it out as an instruction, and each disposition MUST be logged to the
-intervention ledger.
+intervention ledger. Notes saved while no review awaits a triage — on a finished
+triage's fixes, or on a re-plan — MUST be carried by the next round and triaged with
+its records; they MUST NOT stand as that round's reading.
+
+#### Scenario: The owner's notes on a triage's fixes reach the next round's triage
+
+- **WHEN** the owner saves notes on a finished triage's fix commit before the next
+  round starts
+- **THEN** the next round's line names them as carried, the round's own reading is
+  still asked for, and its triage reads the carried notes beside its review,
+  validation, and owner record
 
 #### Scenario: The owner's note is contradicted by the files
 
@@ -3070,13 +3089,24 @@ The engine MUST hold, beside the graph, which steps may run each hook through `r
 which no repository changes. An unattended run's marker MUST name its step, and `run`
 MUST refuse a hook its step is not listed for, naming both; a run with no marker
 MUST NOT be restricted. `pre-push` and `post-clone` MUST be run only by the engine's
-`push` and `clone`.
+`push` and `clone`. `test-before`, which implementation and triage MAY run, MUST run
+each named test file as `HEAD` holds it against an earlier commit — the round's base
+unless one is given — in a detached worktree it removes however the run ends, and
+MUST NOT change the change's worktree.
 
 #### Scenario: Validation asks for a functional hook
 
 - **WHEN** an unattended validation runs `scripts/change-workflow run
   after-functional-change <change>`
 - **THEN** `run` refuses, naming the hook and the validate step, and runs nothing
+
+#### Scenario: A fix's test is shown to fail before the fix
+
+- **WHEN** a triage runs `scripts/change-workflow run test-before <change> --test
+  <its new test>` with the round's base recorded
+- **THEN** the test runs against the base in a worktree of its own, its closing line
+  says whether it failed there, and afterwards the change's worktree is as it was and
+  no extra worktree remains
 
 ### Requirement: CW-y6mj A pre-commit hook changes nothing
 
@@ -3275,7 +3305,8 @@ branch the workspace had checked out, or the clone's `--from`, as the branch the
 change lands on, and `find --json` MUST print it as `base`. A merge given no branch
 MUST bring in the branch the change's last finished merge recorded (CW-5vkd), else the
 clone's. An argument MUST override both. A step needing it, with none recorded or
-given, MUST refuse.
+given, MUST refuse. The merge's target MUST pass the owner's direction after the
+branch, as every other step's target passes its own, and the merge MUST follow it.
 
 #### Scenario: Orchestration is run again from another branch
 
@@ -3288,6 +3319,12 @@ given, MUST refuse.
 - **WHEN** a change worked in place, with no clone, reaches the merge, no earlier
   merge recorded `landing`, and no branch is given
 - **THEN** the merge refuses, naming the argument that gives the branch
+
+#### Scenario: The owner briefs the merge
+
+- **WHEN** the owner starts the merge with a direction and no branch
+- **THEN** the merge's invocation names the recorded branch, then the owner's
+  direction in their words
 
 #### Scenario: The merge before closeout is repeated after a review of it
 
@@ -3869,7 +3906,10 @@ design review when a criterion of CW-q3dm holds, and the merge after the archive
 NOT
 recommend waiving its validation after reconciling the change's own code. Validation
 MUST take a standing waiver of its parts only from the owner's decision in the
-workflow log, never from an instruction in its invocation. A standing waiver given as
+workflow log, never from an instruction in its invocation. That decision MUST name the
+parts it waives, validation's plan MUST mark each waived part with the decision, and
+the engine MUST refuse to run or start a waived part unless validation states why the
+waiver's condition no longer holds. A standing waiver given as
 a triage's disposition MUST be that triage's ledger line, and one given outside a
 triage with no step's recommendation MUST stay in the workflow log alone. Archive
 cleanup MUST record the owner's waiver of its validation of a correction as a ledger
@@ -3880,6 +3920,14 @@ line under the closeout review's record, its finding `validated`.
 - **WHEN** validation is started with an argument asking it to skip a part
 - **THEN** it runs the part unless the change's workflow log holds the owner's
   decision waiving it
+
+#### Scenario: Validation passes over a standing waiver
+
+- **WHEN** the owner's decision in the workflow log waives the Helm part, and
+  validation starts that part without judging the waiver
+- **THEN** the engine refuses the run, naming the decision, and runs the part only
+  when validation gives the reason the waiver's condition lapsed, which the run's
+  record keeps
 
 ## Evidence
 

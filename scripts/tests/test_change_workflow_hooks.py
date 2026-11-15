@@ -639,6 +639,35 @@ def test_a_part_run_another_way_than_it_declares_is_refused(
     assert shell.commands == []
 
 
+WAIVED = {"helm": {"seq": 7, "decision": "waive helm while no chart changes"}}
+
+
+def test_a_waived_part_is_refused_unread(tmp_path: Path) -> None:
+    shell = Shell()
+    runner = _validating(tmp_path, shell=shell)
+
+    with pytest.raises(hooks.HookError, match="waived by the owner's decision at seq 7"):
+        runner.validation(CHANGE, None, "helm", "run", waived=WAIVED)
+    assert shell.commands == []
+
+
+def test_a_lapsed_waiver_runs_its_part_and_says_why(tmp_path: Path) -> None:
+    shell = Shell()
+    runner = _validating(tmp_path, shell=shell)
+
+    assert runner.validation(CHANGE, None, "helm", "run", waived=WAIVED,
+                             lapsed="the merge brought a chart change")
+
+    assert shell.commands == [f"make validate-helm CHANGE={CHANGE}"]
+    assert runner.invoked[-1].entry()["lapsed"] == "the merge brought a chart change"
+
+
+def test_a_lapse_names_a_waiver(tmp_path: Path) -> None:
+    with pytest.raises(hooks.HookError, match="no owner's decision waives"):
+        _validating(tmp_path).validation(CHANGE, None, "local", "run", waived=WAIVED,
+                                         lapsed="why")
+
+
 def test_only_validation_runs_its_parts(tmp_path: Path) -> None:
     with pytest.raises(hooks.HookError, match="the implement step may not run validation"):
         _validating(tmp_path, step="implement").validation(CHANGE, None, "local", "run")
@@ -1035,3 +1064,88 @@ def test_run_cleanup_through_the_command(repository: Path) -> None:
 def test_a_session_id_naming_another_place_is_refused(tmp_path: Path) -> None:
     with pytest.raises(StepError, match="no session id"):
         keep_invocations(tmp_path, "../elsewhere", [{"n": 1}])
+
+
+# Running a test as HEAD holds it against an earlier commit.
+
+BEFORE = 'test-before = "python3 {test}"\n'
+
+
+def _git(root: Path, *arguments: str) -> str:
+    return subprocess.run(["git", "-C", str(root), *arguments], check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def _fixed_repository(root: Path) -> str:
+    """A repository whose first commit holds a broken module and whose second fixes
+    it and adds the test proving the fix; the first commit's name."""
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@example.invalid")
+    _git(root, "config", "user.name", "t")
+    (root / "module.py").write_text("def answer():\n    return 41\n", "utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "broken")
+    broken = _git(root, "rev-parse", "HEAD")
+    (root / "module.py").write_text("def answer():\n    return 42\n", "utf-8")
+    (root / "tests").mkdir()
+    (root / "tests/check.py").write_text(
+        "import sys\nsys.path.insert(0, '.')\nfrom module import answer\n"
+        "assert answer() == 42\n", "utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "fixed")
+    return broken
+
+
+def _before(root: Path, echoed: list[str], step: str | None = "triage") -> Hooks:
+    runner = _hooks(root, f"[hooks]\n{BEFORE}", environ={UNATTENDED: step} if step else {},
+                    shell=hooks.shell, echoed=echoed)
+    return runner
+
+
+def test_a_test_written_with_the_fix_fails_before_it(tmp_path: Path) -> None:
+    broken = _fixed_repository(tmp_path)
+    echoed: list[str] = []
+    runner = _before(tmp_path, echoed)
+    status = _git(tmp_path, "status", "--porcelain")
+
+    assert runner.test_before(CHANGE, None, broken, ["tests/check.py"])
+    assert runner.test_before(CHANGE, None, _git(tmp_path, "rev-parse", "HEAD"),
+                              ["tests/check.py"])
+
+    assert echoed[0].startswith(f"[change-workflow] test-before tests/check.py at {broken}: "
+                                "failed, exit 1")
+    assert echoed[1].endswith("passed, exit 0")
+    # The scratch worktree is gone, and the change's own is untouched.
+    assert _git(tmp_path, "worktree", "list").count("\n") == 0
+    assert _git(tmp_path, "status", "--porcelain") == status
+
+
+def test_test_before_refuses_a_commit_that_does_not_exist(tmp_path: Path) -> None:
+    _fixed_repository(tmp_path)
+    runner = _before(tmp_path, [])
+
+    with pytest.raises(hooks.HookError, match="no worktree at nothing-here"):
+        runner.test_before(CHANGE, None, "nothing-here", ["tests/check.py"])
+    assert _git(tmp_path, "worktree", "list").count("\n") == 0
+
+
+@pytest.mark.parametrize("tests,commit,refused", [
+    ([], "HEAD", "names the test files"),
+    (["tests/missing.py"], "HEAD", "is no file of this checkout"),
+    (["../escape.py"], "HEAD", "is no file of this checkout"),
+    (["tests/check.py"], None, "give it with --at"),
+])
+def test_test_before_refuses_what_it_cannot_run(tmp_path: Path, tests: list[str],
+                                                commit: str | None, refused: str) -> None:
+    _fixed_repository(tmp_path)
+
+    with pytest.raises(hooks.HookError, match=refused):
+        _before(tmp_path, []).test_before(CHANGE, None, commit, tests)
+
+
+def test_only_implementation_and_triage_run_tests_before(tmp_path: Path) -> None:
+    _fixed_repository(tmp_path)
+
+    with pytest.raises(hooks.HookError, match="the validate step may not run test-before"):
+        _before(tmp_path, [], step="validate").test_before(CHANGE, None, "HEAD",
+                                                           ["tests/check.py"])
