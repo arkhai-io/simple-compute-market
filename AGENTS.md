@@ -61,8 +61,6 @@ directory under `openspec/specs/` other than its `spec.md`, its companion, and i
 | repository | [`docs/development/ARCHITECTURE.md`](docs/development/ARCHITECTURE.md) |
 | repository | [`docs/development/TESTING.md`](docs/development/TESTING.md) |
 | repository | [`docs/development/DEPLOYMENT_AND_CONFIG.md`](docs/development/DEPLOYMENT_AND_CONFIG.md) |
-| repository | [`docs/development/BUILD_AND_PACKAGING.md`](docs/development/BUILD_AND_PACKAGING.md) |
-| repository | [`docs/development/RELEASING.md`](docs/development/RELEASING.md) |
 
 What each repository document holds is
 [`openspec/README.md`, "Documentation placement"](openspec/README.md#documentation-placement).

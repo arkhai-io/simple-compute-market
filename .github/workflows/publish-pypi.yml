@@ -31,7 +31,7 @@ permissions:
 #   Workflow    = publish-pypi.yml
 #   Environment = pypi-<dist>            (matches `environment.name` below)
 # and create the matching repo environment under Settings -> Environments.
-# See docs/development/RELEASING.md for the full package table.
+# See docs/guidance/repository/published-packages.md for the full package table.
 #
 # Distribution names keep the `arkhai-` prefix: PyPI organizations group
 # projects at the account level but do NOT namespace distribution names,
@@ -46,7 +46,7 @@ permissions:
 # A published package installs only from PyPI, so every repository
 # distribution it depends on, including through an extra, is in the table
 # too; scripts/tests/test_publish_matrix.py fails when one is missing, when
-# a package lacks its path filter, or when RELEASING.md's table disagrees.
+# a package lacks its path filter, or when published-packages.md's table disagrees.
 #
 # Internal build order does not matter: each wheel is built with
 # `uv build --no-sources` in an isolated build env that installs only the

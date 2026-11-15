@@ -14,7 +14,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = REPO_ROOT / "manifests" / "published-distributions.json"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "publish-pypi.yml"
-RELEASING = REPO_ROOT / "docs" / "development" / "RELEASING.md"
+PUBLISHED_PACKAGES = REPO_ROOT / "docs" / "guidance" / "repository" / "published-packages.md"
 _SKIPPED_DIRS = {".git", ".venv", "node_modules", "openspec", "__pycache__", ".dist"}
 _REQUIREMENT_NAME = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
@@ -180,10 +180,10 @@ def _internal_dependencies(project: dict, repository: dict[str, dict]) -> dict[s
     return found
 
 
-def _releasing_rows() -> dict[str, tuple[str, str]]:
-    """RELEASING.md's published-package table: dist -> (path, internal deps cell)."""
+def _published_rows() -> dict[str, tuple[str, str]]:
+    """published-packages.md's table: dist -> (path, internal deps cell)."""
 
-    section = RELEASING.read_text(encoding="utf-8").split("## Published packages", 1)[1]
+    section = PUBLISHED_PACKAGES.read_text(encoding="utf-8").split("## Published packages", 1)[1]
     section = section.split("\n## ", 1)[0]
     return {
         dist: (path.rstrip("/"), cell)
@@ -297,22 +297,24 @@ def test_every_published_package_is_watched_by_its_filter_and_the_push_trigger()
         )
 
 
-def test_the_release_guide_lists_exactly_the_published_packages() -> None:
-    rows = _releasing_rows()
+def test_the_published_package_table_lists_exactly_the_published_packages() -> None:
+    rows = _published_rows()
     table = {str(entry["dist"]): str(entry["path"]) for entry in _workflow_packages()}
     assert {dist: path for dist, (path, _) in rows.items()} == table
 
 
 @pytest.mark.parametrize("package", _workflow_packages(), ids=lambda entry: str(entry["key"]))
-def test_the_release_guide_states_each_package_internal_deps(package: dict[str, object]) -> None:
-    rows = _releasing_rows()
+def test_the_published_package_table_states_each_package_internal_deps(
+    package: dict[str, object],
+) -> None:
+    rows = _published_rows()
     if str(package["dist"]) not in rows:
-        pytest.fail(f"{package['dist']} has no row in {RELEASING.name}")
+        pytest.fail(f"{package['dist']} has no row in {PUBLISHED_PACKAGES.name}")
     repository = _repository_distributions()
     _, cell = rows[str(package["dist"])]
     stated = {_normalise(name) for name in re.findall(r"`([^`]+)`", cell)} & set(repository)
     declared = set(_internal_dependencies(repository[_normalise(str(package["dist"]))], repository))
     assert stated == declared, (
-        f"{RELEASING.name} states {sorted(stated)} for {package['dist']}; "
+        f"{PUBLISHED_PACKAGES.name} states {sorted(stated)} for {package['dist']}; "
         f"its pyproject declares {sorted(declared)}"
     )

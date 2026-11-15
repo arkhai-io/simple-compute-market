@@ -135,5 +135,5 @@ None.
   placement decided here — `docs/guidance/repository/package-layers.md`, and the
   vocabulary package's description in `docs/development/ARCHITECTURE.md`'s "Package
   and dependency layers".
-- `docs/development/BUILD_AND_PACKAGING.md`, and the domain docs (since removed),
-  for the new layout.
+- `docs/guidance/repository/project-layout.md` and `images.md`, and the domain docs
+  (since removed), for the new layout.

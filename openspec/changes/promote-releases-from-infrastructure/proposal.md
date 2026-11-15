@@ -45,7 +45,7 @@ repository's CI.
   also moves the bare `arkhai:<service>` tags, which shared releases pull, and omits
   the bare-metal storefront; the publish targets become the one way a release is
   loaded into a development registry.
-- **`docs/development/RELEASING.md` describes the release as built, loaded and promoted**:
+- **`docs/guidance/repository/published-packages.md` and `docs/release-handbook.md` describe the release as built, loaded and promoted**:
   what this repository produces (a tagged release, its wheelhouse, its publish
   targets), and that public channels are reached only by an external promotion that
   copies those artifacts without rebuilding them, into PyPI projects the organization
@@ -73,7 +73,7 @@ None.
   needed. **Design question:** fold this change into it (adding the ghcr, contract,
   tagging and documentation work, and dropping Section 4), or keep this change for
   that work and narrow the other to Sections 1–3. Recommended: fold, since both
-  retire the same CI publication path and share `RELEASING.md`.
+  retire the same CI publication path and share the release handbook.
 - `configure-pypi-trusted-publishing` (ready for design) configures trusted publishers
   for every distribution so CI can publish each release. Publishing each release is no
   longer CI's; its pending publishers remain needed only to create new projects. Its
@@ -92,6 +92,6 @@ None.
 `.github/workflows/publish-pypi.yml`, `.github/workflows/release.yml`,
 `scripts/verify-marketplace-release.py` and its tests, `scripts/publish_artifacts.py` and
 the `push-images` target, `scripts/tests/test_publish_matrix.py` and
-`test_image_publication_contract.py`, `docs/development/RELEASING.md`, and the
+`test_image_publication_contract.py`, `docs/release-handbook.md`, and the
 `deployment-state` specification. External: the GitHub `pypi-*` environments and the
 organization's pending publishers stay, used only for a new project's first version. No runtime behavior changes.

@@ -22,7 +22,7 @@ real SQLite files
   commits that release's schema under its `tests/fixtures/v0_3_0_floor/`:
   `schema.json` (the snapshot), the release's recorded IDs or revision, and
   `ddl.sql`, as each fixture's README states. A new floor is a release's decision
-  ([`RELEASING.md`](../../development/RELEASING.md#cutting-a-release)).
+  ([the release handbook, "The migration floor"](../../release-handbook.md#the-migration-floor)).
 - **The chain.** Each service's `tests/integration/test_migration_chain.py` (the
   registry's `test_migrations.py`), its later-migration tests starting from a
   `ddl.sql` database.

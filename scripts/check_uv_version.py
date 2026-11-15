@@ -17,7 +17,7 @@ another revision is caught by the revision check too.
 
 Rules: docs/guidance/engineering/packaging-uv.md, "Locks are written by a stated
 minimum uv".
-Conventions: docs/development/BUILD_AND_PACKAGING.md.
+Conventions: docs/guidance/repository/locks.md.
 """
 
 from __future__ import annotations

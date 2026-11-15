@@ -31,8 +31,7 @@ change's documents. This repository's documents beside them:
 | This repository's tests at each level, its end-to-end lanes and doubles, and its validation conventions | `docs/development/TESTING.md` |
 | How this repository's services resolve configuration, and its Kubernetes deployment conventions | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Operating a deployment: document formats, procedures, upgrade and recovery steps | `docs/operator-handbook.md` |
-| Build, packaging, environment, lock, and image conventions, and the checks enforcing them | `docs/development/BUILD_AND_PACKAGING.md` |
-| Publishing this repository's packages, its published set, and where its other artifacts are pushed | `docs/development/RELEASING.md` |
+| Publishing this repository's packages and artifacts: a package's one-time setup, cutting a release, the migration floor, and troubleshooting | `docs/release-handbook.md` |
 | The roadmap: directional goals, the value each delivers, current state per goal, and which change owns each open gap | `docs/development/ROADMAP.md` |
 | Change provenance and review discussion | Git history and pull requests ([`documentation.md`, "Provenance lives in version control"](../docs/guidance/engineering/documentation.md#provenance-lives-in-version-control)) |
 
@@ -65,7 +64,7 @@ The workflow's parts name the checks they run by role. Here they are:
 
 ### Packaging
 
-This repository's closeout runs `make check-packaging` and resolves every failure it reports; then `make check-architecture-change CHANGE=<change-name>`, which refuses a change that still owns an architecture exception or override row, so each is deleted with its edge or reassigned to the open change that owns the divergence; and `make check-agent-skills` when the change touched `.agents/`, `.claude/`, or `.codex/`. What each packaging check enforces is [`docs/development/BUILD_AND_PACKAGING.md`, "Checks"](../docs/development/BUILD_AND_PACKAGING.md#checks), and why they run though the suites pass is [`packaging.md`, "Packaging checks run before a commit"](../docs/guidance/engineering/packaging.md#packaging-checks-run-before-a-commit).
+This repository's closeout runs `make check-packaging` and resolves every failure it reports; then `make check-architecture-change CHANGE=<change-name>`, which refuses a change that still owns an architecture exception or override row, so each is deleted with its edge or reassigned to the open change that owns the divergence; and `make check-agent-skills` when the change touched `.agents/`, `.claude/`, or `.codex/`. What each packaging check enforces is [`docs/guidance/repository/packaging-checks.md`](../docs/guidance/repository/packaging-checks.md#checks), and why they run though the suites pass is [`packaging.md`, "Packaging checks run before a commit"](../docs/guidance/engineering/packaging.md#packaging-checks-run-before-a-commit).
 
 ### End-to-end pipeline
 

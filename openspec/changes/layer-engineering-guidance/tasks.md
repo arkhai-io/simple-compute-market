@@ -2994,13 +2994,38 @@ table); `scripts/tests/test_publish_matrix.py`; `.github/workflows/publish-pypi.
 (comments); the `scripts/check_*.py` and `scripts/uv_project.py` docstrings and
 messages naming `BUILD_AND_PACKAGING.md`; whatever cites either document.
 
-- [ ] 12.1 Move each `rule` row of `BUILD_AND_PACKAGING.md` and `RELEASING.md` into
+- [x] 12.1 Move each `rule` row of `BUILD_AND_PACKAGING.md` and `RELEASING.md` into
   its file under `docs/guidance/repository/`, as task 11.2 moves rules — the
   published-package table into the file the inventory names for it, and the
   packaging checks' descriptions into theirs; `openspec/README.md`'s "Packaging" part
   cites the checks' new home for what each enforces (58 O1). Verify each row sits in
   its destination.
-- [ ] 12.2 Write `docs/release-handbook.md`, with no frontmatter and outside the
+  Done: `project-layout.md`, `wheelhouse.md`, `python-version.md`, `locks.md`,
+  `images.md`, and `packaging-checks.md` are written, and `project-environments.md`
+  gains "Project environments" beside section 11's interpreter rule; from
+  `RELEASING.md`, `published-packages.md` holds the published set, the table under
+  "Published packages" (the heading `test_publish_matrix.py` reads up to the next
+  `## `), and "One import package each", and `package-versions.md` gains
+  "Versioning policy". `openspec/README.md`'s "Packaging" cites
+  `packaging-checks.md#checks`. Inspected row by row against the inventory. Merged
+  (31 O1b), the copies agreeing: `RELEASING.md`'s "Local development" into
+  `wheelhouse.md`'s one section, keeping what it added — the `tool.uv.sources` path
+  it refuses, now linking `packaging-uv.md`'s "No source path to a sibling", `make
+  reinit`'s refresh without a publish, and the publish workflow's `--no-sources`;
+  `DEPLOYMENT_AND_CONFIG.md`'s storefront images into `images.md`,
+  whose builder-and-runtime bullet gains its clause "so a runtime image never
+  resolves editable sibling source". Wording changed in the moves: each file gains
+  an opening and keeps its source heading as a section; `BUILD_AND_PACKAGING.md`'s
+  opening manifest sentence opens `python-version.md`; "Checks" below → links to
+  `packaging-checks.md`; `RELEASING.md` and `BUILD_AND_PACKAGING.md` links became
+  `published-packages.md`, `project-environments.md`, and `project-layout.md`; "the
+  one-time PyPI setup below" became the owner's setup in the handbook, linked;
+  "Why the pre-1.0 rules suit this repository is `ARCHITECTURE.md`, 'Operators'"
+  moved to `package-versions.md`'s opening, which already said it;
+  `packaging-checks.md`'s sentence naming the packaging checks moved from "Checks"
+  to the file's opening; `python-version.md`'s parenthetical "'One Python version'
+  below" went, the section following directly.
+- [x] 12.2 Write `docs/release-handbook.md`, with no frontmatter and outside the
   guidance set (D25): opened by who reads it and what it holds, beside the operator
   handbook and the change workflow's handbook, then `RELEASING.md`'s `procedure` rows
   moved whole under the headings the inventory gives — the one-time setup, cutting a
@@ -3009,17 +3034,40 @@ messages naming `BUILD_AND_PACKAGING.md`; whatever cites either document.
   applies. Move every operator `procedure` row of the five documents into
   `docs/operator-handbook.md` under the heading the inventory gives (141 F1). Verify
   each `procedure` row sits in its handbook.
-- [ ] 12.3 Remove `BUILD_AND_PACKAGING.md` and `RELEASING.md` once every row of
+  Done: the handbook opens with its reader and every part it holds, beside the
+  operator and change workflow handbooks, and links the two rule files it applies;
+  each procedure links the rule it applies where it applies one (the published set
+  in "How the publish workflow works" and the one-time setup, `package-versions.md`
+  at the version bump, `migration-chain-tests.md` and the floor's description at the
+  migration floor), added after the fresh-context check found only the opening
+  linked them; then "How the
+  publish workflow works", "One-time setup for a package", "Cutting a release", "The
+  migration floor", "Import package renames", "Where artifacts are pushed", and
+  "Troubleshooting", each moved whole. The operator handbook gains nothing: the
+  inventory finds no operator procedure among the five documents' sections, the
+  operator steps inside descriptions listed as overlap for the triage (section 10's
+  notes).
+- [x] 12.3 Remove `BUILD_AND_PACKAGING.md` and `RELEASING.md` once every row of
   theirs has moved, and remove their rows from `AGENTS.md`'s layer table, which the
   guidance check refuses for a missing file. Verify neither file exists and every
   row of theirs in the inventory names a destination that holds it.
-- [ ] 12.4 Point `scripts/tests/test_publish_matrix.py` at the published-package
+  Done: removed with `git rm`, and their rows with them; `make check-guidance` OK
+  (102 files). Every row of the two documents' inventory tables names a file that
+  holds it, inspected.
+- [x] 12.4 Point `scripts/tests/test_publish_matrix.py` at the published-package
   table's new file, its module constant, docstrings, and failure messages naming it;
   `.github/workflows/publish-pypi.yml`'s two comments name the same file. Verify
   `pytest -q scripts/tests/test_publish_matrix.py` (unit) passes against the moved
   table, its existing cases still failing a package with no row or a row stating
   other dependencies.
-- [ ] 12.5 Re-point every citation of the two removed documents and of what this
+  Done: the constant is `PUBLISHED_PACKAGES`, the reader `_published_rows`, and the
+  two tests reading the table are named for "the published package table"; their
+  `pytest.fail` and assertion messages name `published-packages.md`, their logic
+  unchanged. `publish-pypi.yml`'s two comments name the file. Unit, through `make
+  test-release-tooling` (the suite runs all of `scripts/tests`): passes against the
+  moved table. The failure paths for a missing row and for differing internal deps
+  are the unchanged `pytest.fail` and `assert`; no negative run was made.
+- [x] 12.5 Re-point every citation of the two removed documents and of what this
   section moved, outside the archive and `docs/prompts/`, as task 11.5 does: the
   docstrings and messages of `scripts/check_locks.py`, `check_project_layout.py`,
   `check_python_version.py`, `check_uv_setup.py`, `check_uv_version.py`, and
@@ -3039,6 +3087,40 @@ messages naming `BUILD_AND_PACKAGING.md`; whatever cites either document.
   the moves against the inventory. End-to-end: none; no pipeline scenario reads
   these documents, and none is owed. Owed by validation: nothing; the
   `publish-pypi.yml` edit is comments.
+  Done. Re-pointed: the six scripts' docstrings and failure messages, each naming
+  the file holding its conventions (`check_uv_setup.py`'s message
+  `packaging-checks.md`, since its conventions span three files);
+  `tools/README.md`; `api-credits/architecture.md`, `deployment-state/architecture.md`
+  (the floor to the handbook, the conventions to the packaging files), and
+  `market-change-workflow/README.md`'s check rows and its uv and audit paragraphs;
+  `ARCHITECTURE.md`'s build paragraph, `DEPLOYMENT_AND_CONFIG.md`'s images pointer,
+  and `migration-chain-tests.md`'s floor pointer; and the active changes citing either
+  file — `publish-wheels-through-a-gate`, `promote-releases-from-infrastructure`,
+  `configure-pypi-trusted-publishing`, `align-package-paths-with-layers`,
+  `check-storefront-environment-reads`, `repair-rl-training-tooling`, and two active
+  rows of the change index, each placed by D25: a rule to `published-packages.md` or
+  the packaging files, the owner's steps to the handbook (the first, mechanical pass
+  sent rules to the handbook; the fresh-context check found it, now fixed). The
+  archived rows of the change index keep the names they recorded, one row's paths
+  reduced to bare names so they cite nothing. `openspec/README.md`'s placement table
+  loses its two rows here rather than in task 13.4, since their paths would fail the
+  citation check, and gains the handbook's row; 13.4 rewrites the rest. Checks:
+  `make check-guidance` OK (102 files); `make check-doc-citations CHANGE=`
+  (unscoped) names the removed files only from this change's own `design.md`,
+  `inventory.md`, and `tasks.md`; `run pre-commit`: after-functional-change (relock,
+  no lock changed) and pre-commit-functional (`make check-packaging` all OK, `make
+  test` with `make test-release-tooling`, 2943 passed, among them every
+  `scripts/tests` suite the task lists) passed, and `pre-commit` failed only on the
+  preamble's citations and specification index. No test asserts the scripts'
+  changed "See docs/…" messages, so their suites passing shows the scripts run, not
+  that the messages name the right file; that was inspected. The fixes after the
+  fresh-context check touch inert paths only (`docs/`, `openspec/`), so the
+  functional run stands; `make check-guidance` and the scoped citation check were run
+  again over them. Fresh-context check: found the handbook's procedures unlinked to
+  their rules, rules re-pointed into the handbook in other changes, the wheelhouse
+  copies appended rather than merged, `DEPLOYMENT_AND_CONFIG.md`'s images sentence
+  still restating the rule, a vague name in `repair-rl-training-tooling`, and
+  unlisted wording; all fixed.
 
 ## 13. The documents naming the layout, and the three kinds
 

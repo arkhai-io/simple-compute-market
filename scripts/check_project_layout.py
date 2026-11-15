@@ -18,7 +18,7 @@ installs its project's own wheel, which is not an editable install.
 
 Rules: docs/guidance/engineering/packaging-python.md, with packaging-uv.md and
 packaging-hatchling.md beside it.
-Conventions: docs/development/BUILD_AND_PACKAGING.md.
+Conventions: docs/guidance/repository/project-layout.md.
 """
 
 from __future__ import annotations
@@ -116,7 +116,7 @@ def main() -> int:
     for problem in found:
         print(problem)
     if found:
-        print(f"\n{len(found)} project layout problem(s). See docs/development/BUILD_AND_PACKAGING.md.")
+        print(f"\n{len(found)} project layout problem(s). See docs/guidance/repository/project-layout.md.")
         return 1
     print("OK: every distribution is one package under src/ and installs editable.")
     return 0

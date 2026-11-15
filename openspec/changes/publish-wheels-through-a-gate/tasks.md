@@ -92,7 +92,7 @@ publication running for longer than necessary.
   than leaving a job whose only consumer is gone.
 - [x] 2.2 Rename the workflow if it no longer publishes to PyPI. A file
   named for what it used to do is the same defect as a stale comment.
-- [ ] 2.3 Record in `docs/development/RELEASING.md` that merging no longer
+- [ ] 2.3 Record in `docs/release-handbook.md` that merging no longer
   publishes, and what to do instead. This is a contributor-workflow break and
   the first person it surprises should find the answer where they look.
 - [x] 2.4 Verified: `make test-release-tooling` passes, and no workflow path
@@ -269,7 +269,8 @@ Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `opens
   naming its cause and the change that owns it, with the validations it gates
   treated as unrun.
 - [ ] 7.9 **Promotion.** Write the permanent documents this change owes —
-  `docs/development/RELEASING.md` — and complete the design-promotion record below. A
+  `docs/guidance/repository/published-packages.md` and `docs/release-handbook.md` —
+  and complete the design-promotion record below. A
   `spec.md` the deltas cover — here `openspec/specs/deployment-state/spec.md` — is
   written by the archive in 7.11, not by hand; the record names it all the same.
 - [ ] 7.10 **Documentation citations.** After promotion, run
@@ -284,9 +285,9 @@ Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `opens
 
 | Accepted decision | Permanent location | State |
 |---|---|---|
-| Public publication is a deliberate promotion of artifacts already in the development registry, never a merge side effect | `docs/development/RELEASING.md` | Pending |
+| Public publication is a deliberate promotion of artifacts already in the development registry, never a merge side effect | `docs/guidance/repository/published-packages.md` | Pending |
 | Promotion copies bytes and never rebuilds; a distribution's version cannot change at the gate | `openspec/specs/deployment-state/spec.md` | Pending |
-| A version present on the public index with differing bytes fails the whole promotion before anything is uploaded | `docs/development/RELEASING.md` | Pending |
+| A version present on the public index with differing bytes fails the whole promotion before anything is uploaded | `docs/guidance/repository/published-packages.md` | Pending |
 | One enumeration of published distributions, read by every publication path | `openspec/specs/deployment-state/spec.md` | Pending |
 | A product version is distinct from a distribution version; images retag, wheels and archives copy at their built version | `openspec/specs/deployment-state/spec.md` | Pending |
-| The interim publication mechanism is described by its condition, and deleted rather than adapted when a promotion pipeline consumes these artifacts | `docs/development/RELEASING.md` | Pending |
+| The interim publication mechanism is described by its condition, and deleted rather than adapted when a promotion pipeline consumes these artifacts | `docs/guidance/repository/published-packages.md` | Pending |

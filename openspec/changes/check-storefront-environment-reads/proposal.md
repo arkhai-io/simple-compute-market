@@ -46,8 +46,8 @@ None.
 - A check script and its unit tests under `scripts/`, a root `Makefile` target, and its wiring
   into `make check-packaging` and CI.
 - One declaration table in each storefront package's `pyproject.toml` that has an allowed read.
-- `docs/development/DEPLOYMENT_AND_CONFIG.md` and `docs/development/BUILD_AND_PACKAGING.md`
-  name the check.
+- `docs/guidance/repository/service-configuration.md` and
+  `docs/guidance/repository/packaging-checks.md` name the check.
 
 ## Permanent documentation impact
 
@@ -59,8 +59,8 @@ None.
 ### Knowledge to promote
 
 - The environment-read rule is enforced mechanically, with allowed reads declared per package —
-  `openspec/specs/deployment-state/spec.md`, `DEPLOYMENT_AND_CONFIG.md`, and
-  `BUILD_AND_PACKAGING.md`'s table of checks.
+  `openspec/specs/deployment-state/spec.md`, `service-configuration.md`, and
+  `packaging-checks.md`'s table of checks.
 
 ## Dependencies
 

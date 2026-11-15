@@ -29,8 +29,8 @@ relock and environment refresh go through here. `image` syncs a committed lock
 under `--locked` and `install-wheel` reads no lock, so neither writes one, and
 both skip the check.
 
-Conventions and the checks that enforce them:
-docs/development/BUILD_AND_PACKAGING.md.
+Conventions and the checks that enforce them: docs/guidance/repository/wheelhouse.md,
+project-environments.md, locks.md, images.md, and packaging-checks.md beside them.
 """
 
 from __future__ import annotations

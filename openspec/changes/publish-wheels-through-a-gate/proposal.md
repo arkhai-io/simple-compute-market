@@ -99,7 +99,7 @@ None.
 Touches `push-wheels` and `push-runtime-artifacts` in the root `Makefile`, a new
 promotion script under `scripts/`, `.github/workflows/publish-pypi.yml`
 (publication removed), a merge-to-`main` workflow publishing to Artifact
-Registry, and `docs/development/RELEASING.md`.
+Registry, and `docs/release-handbook.md`.
 
 **Contributor-workflow break:** merging no longer publishes to PyPI. Anyone
 depending on that behaviour must invoke promotion deliberately.

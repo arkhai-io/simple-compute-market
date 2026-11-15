@@ -416,8 +416,8 @@ those services use. Service extension preserves the domain file's relative mount
 paths. An `include` cannot be used to import a service and redefine it in the same
 wrapper.
 
-Storefront images install their distributions from the staged `.dist`
-wheelhouse ([`BUILD_AND_PACKAGING.md`, "Images"](BUILD_AND_PACKAGING.md#images)). API-credit
+How the storefront images install their distributions is
+[`images.md`](../guidance/repository/images.md). API-credit
 and bare-metal SQLite/queue/registry stores occupy separate named volumes. What a
 stack file binds, and that missing material blocks startup rather than taking a
 fallback, are [`compose-stacks.md`, "No fallback"](../guidance/repository/compose-stacks.md#no-fallback).

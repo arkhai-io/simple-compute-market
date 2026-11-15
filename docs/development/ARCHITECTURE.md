@@ -1065,7 +1065,7 @@ run focused tests
 image build                    install the committed lock unchanged, same internal packages
 ```
 
-One root `.python-version` fixes the interpreter for every environment and image. Docker builds copy `.dist` from the build context into builder stages; runtime stages receive only the finished environment. [`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md) owns the mechanics — `scripts/uv_project.py`, `make lock`, the image layout — and the `make check-packaging` checks that enforce them.
+One root `.python-version` fixes the interpreter for every environment and image. Docker builds copy `.dist` from the build context into builder stages; runtime stages receive only the finished environment. The rules of the mechanics — [`wheelhouse.md`](../guidance/repository/wheelhouse.md), [`python-version.md`](../guidance/repository/python-version.md), [`project-environments.md`](../guidance/repository/project-environments.md), [`locks.md`](../guidance/repository/locks.md), [`images.md`](../guidance/repository/images.md) — and the `make check-packaging` checks that enforce them, [`packaging-checks.md`](../guidance/repository/packaging-checks.md), are the repository's guidance.
 
 The aggregate Make targets, `make test` among them, run as [`test-targets.md`](../guidance/repository/test-targets.md) says.
 

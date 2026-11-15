@@ -1,13 +1,12 @@
 ---
-tags: [repository, packaging]
+tags: [repository, packaging, versioning, python]
 ---
 
-# Releasing Python packages
+# Published packages
 
-The procedure that publishes this repository's Python packages, the set it
-publishes, and where its other artifacts are pushed.
-`.github/workflows/publish-pypi.yml` publishes the project's Python
-packages to PyPI.
+Which of this repository's Python distributions are published to PyPI, how they are
+named, and what each depends on. How the owner publishes them is
+[the release handbook](../../release-handbook.md).
 
 Registries, storefronts, provisioning, buyers, and the metering
 middleware are services and tools that operators, sellers, and buyers
@@ -105,8 +104,9 @@ the one its `pyproject.toml` declares.
 
 This set is defined once, by the `PACKAGES` table in the workflow's
 `detect-changes` job and the per-package path filters beside it. Adding a
-package means one table row, one filter, a row here, and the one-time PyPI
-setup below; a package outside every directory the workflow's `push.paths`
+package means one table row, one filter, a row here, and the owner's one-time PyPI
+setup ([the release handbook, "One-time setup for a package"](../../release-handbook.md#one-time-setup-for-a-package));
+a package outside every directory the workflow's `push.paths`
 names needs an entry there too. `scripts/tests/test_publish_matrix.py` (run by
 `make test-release-tooling`; it reads only the tree) fails when a
 published package depends on a repository distribution the table omits, when a
@@ -114,149 +114,12 @@ package has no filter or push trigger watching its `pyproject.toml`, or when
 this table's packages, paths, or internal deps disagree with the workflow and
 each `pyproject.toml`.
 
-## How the workflow works
-
-- A push to `main` that touches a package's directory selects the changed
-  packages (via `dorny/paths-filter`) and builds a job matrix from them.
-- `workflow_dispatch` considers every package in the table.
-- Each job checks whether the package's current `version` is already on
-  PyPI and skips if so, so a version bump publishes and other commits do
-  not.
-- Each job builds with `uv build --no-sources` and publishes via OIDC
-  trusted publishing.
-
-Most packages publish an sdist and a wheel. Packages marked `wheel_only`
-in the table (the two buyer plugins and the VM storefront) are built with
-`uv build --wheel` and publish a wheel only.
+## One import package each
 
 No package vendors another's modules: each publishes its one import package
-([`packaging-python.md`, "One import package per distribution"](../guidance/engineering/packaging-python.md#one-import-package-per-distribution);
+([`packaging-python.md`, "One import package per distribution"](../engineering/packaging-python.md#one-import-package-per-distribution);
 this repository's layout in
-[`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md#project-layout)). Code
+[`project-layout.md`](project-layout.md)). Code
 another package needs is its own wheel and a declared dependency: the VM storefront and buyer depend on
 `arkhai-vms-listings`, `arkhai-vms-negotiation`, and `arkhai-vms-settlement`
 rather than carrying their sources.
-
-Build order is not constrained. `uv build --no-sources` builds in an
-isolated environment that installs only the build backend, never the
-package's own `arkhai-*` dependencies, so no sibling needs to be on PyPI
-first. A `workflow_dispatch` run publishes the whole set together; any
-brief interval where a dependent wheel is published ahead of its
-dependency closes once the run completes, and dependencies use lower
-bounds so installs resolve normally afterward.
-
-## One-time setup (per package)
-
-Each package needs a trusted-publishing configuration before its first
-release:
-
-1. Create the project on PyPI (first publish requires the name to exist).
-   Either configure a
-   [pending publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
-   (trusted publishing creates the project on the first run), or run
-   `uv build --no-sources` locally and `uv publish --token <TOKEN>` once
-   with a manually issued token, then switch to trusted publishing.
-2. At `https://pypi.org/manage/project/<dist>/settings/publishing/`, add a
-   "GitHub Actions" trusted publisher with:
-   - **Owner**: `arkhai-io`
-   - **Repository**: `simple-compute-market`
-   - **Workflow**: `publish-pypi.yml`
-   - **Environment**: `pypi-<dist>` — e.g. `pypi-arkhai-core-storefront-client`,
-     matching `environment.name` in the workflow (`pypi-${{ matrix.dist }}`).
-3. Create the matching environment under the repository's
-   Settings → Environments. Default settings are sufficient.
-
-## Cutting a release
-
-1. Run `make audit-secrets` on the commit to be released, and remove — and
-   rotate wherever it was used — any credential it lists that is not a
-   development fixture.
-2. Bump the package's `version` field in its `pyproject.toml`.
-3. Commit and push to `main` (or merge a PR that touches the package).
-4. The workflow detects the path change, rebuilds, and publishes via OIDC
-   trusted publishing.
-
-When an official marketplace release is promoted, weigh whether it becomes a
-new migration floor: each stateful service's chain begins at baselines
-reproducing the schema of the floor release, adopts a database that release's
-chain built, and refuses an older one
-([`DEPLOYMENT_AND_CONFIG.md`, "Migrations at startup"](DEPLOYMENT_AND_CONFIG.md#migrations-at-startup)).
-A new floor replaces each chain's baselines and floor IDs with the new release's,
-deletes the migrations it absorbs, regenerates each service's floor fixture from
-the release's published packages as the fixtures' READMEs describe, and leaves
-deployments older than the new floor to start from a fresh database. Moving the
-floor is a decision about which deployments stay upgradeable, so it is made for
-each release, not by default.
-
-`make audit-secrets` reports what gitleaks' rules find in the tracked tree,
-including the rules the public-content checks turn off, and refuses
-nothing; most of what it lists is the repository's development fixtures
-([`market-change-workflow`'s "Public repository content checks"](../../openspec/specs/market-change-workflow/README.md#public-repository-content-checks)).
-
-`workflow_dispatch` forces a publish attempt for every package whose
-current version is not yet on PyPI — useful for bringing up the whole set
-at once.
-
-## Versioning policy
-
-This repository's packages follow
-[`versioning.md`](../guidance/engineering/versioning.md), and `make
-check-version-bumps` holds its one bump per change against the branch the change
-merges into. A `VersionedEnvelope`'s `(kind, schema_version)` is a versioned
-contract. Why the pre-1.0 rules suit this repository is
-[`ARCHITECTURE.md`, "Operators"](ARCHITECTURE.md#operators). Dependencies
-between its packages declare lower bounds in `pyproject.toml`
-([`versioning-python.md`](../guidance/engineering/versioning-python.md)).
-
-### Import package renames
-
-These releases moved each package to one import package under `src/`. The old
-import paths were removed without an alias; consumers change their imports and
-raise their lower bound to the version shown.
-
-| Package | Release | Import package before | Import package after |
-|---|---|---|---|
-| `arkhai-vms-buyer` | 0.4.0 | `domains.vms.buyer` | `arkhai_vms_buyer` |
-| `arkhai-vms-listings` | 0.4.0 | `domains.vms.listings` | `arkhai_vms_listings` |
-| `arkhai-vms-negotiation` | 0.2.0 | `domains.vms.negotiation` | `arkhai_vms_negotiation` |
-| `arkhai-vms-settlement` | 0.2.0 | `domains.vms.settlement` | `arkhai_vms_settlement` |
-| `arkhai-apicredits-buyer` | 0.4.0 | `domains.apicredits.buyer` | `arkhai_apicredits_buyer` |
-| `arkhai-apicredits-domain` | 0.4.0 | `domains.apicredits` | `arkhai_apicredits` |
-| `arkhai-core-registry` | 0.3.0 | top-level `api`, `db`, `services`, `types` | `core_registry` |
-| `arkhai-apicredits-service` | 0.4.0 | top-level `controllers`, `db`, `middleware`, `models`, `services` | `apicredits_service` |
-
-`arkhai-vms-storefront` 0.8.0 and `arkhai-apicredits-storefront` 0.5.0 import the
-renamed packages and require the releases above. The entry-point group
-`domains.vms.buyer.aggregation_policies` keeps its name, so installed plugin
-packages continue to register without change.
-
-## Local development
-
-Projects consume sibling packages as wheels from the repository wheelhouse,
-never through `tool.uv.sources` path overrides; `make dist` builds the wheels
-and `make reinit` refreshes a project's environment from them without a
-publish round-trip ([`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md)). The
-publish workflow passes `--no-sources`, so the only sources a published wheel
-could record are index pins, such as the PyTorch CPU index.
-
-## Artifact publishing destination
-
-Root publishing targets require explicit `AR_PROJECT` and `AR_LOCATION`, supplied
-on the make command line or in the environment. `AR_PREFIX` defaults to
-`AR_PROJECT`; it selects the repository-name prefix. For example,
-`make push-images AR_PROJECT=<project> AR_LOCATION=<region>`.
-
-## Troubleshooting
-
-- **403 from PyPI** — trusted publishing is not configured for the
-  package, or the environment name does not match. Check both
-  `pypi.org/manage/project/<dist>/settings/publishing` and the workflow's
-  `environment.name` (`pypi-<dist>`).
-- **400 "version already exists"** — the version-skip check should have
-  prevented this. If the PyPI cache was stale, the next push retries.
-- **Workflow runs but nothing publishes** — confirm the path filter
-  matched, or use `workflow_dispatch`. Files outside `<path>/**` do not
-  trigger a publish for that package.
-- **Wheel records a workspace path** — `uv build` ran without
-  `--no-sources`. The workflow always passes it; locally, run
-  `uv build --no-sources` to reproduce the published wheel.

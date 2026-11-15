@@ -337,7 +337,7 @@ training = [
 ]
 ````
 
-## `docs/development/RELEASING.md` (the console-script example)
+## The release document's console-script example (now `docs/guidance/repository/published-packages.md`)
 
 ````markdown
 Distribution names are prefixed `arkhai-`. PyPI does not namespace

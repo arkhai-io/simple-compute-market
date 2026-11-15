@@ -109,7 +109,7 @@ consuming these artifacts are entitled to rely on.
 - **[The interim mechanism outlives its condition]** → The condition is
   checkable and named. It is also cheap: a script and a target.
 - **[Contributors expect merge to publish]** → An intended break. Announce it
-  in `RELEASING.md` rather than leaving it to be discovered.
+  in the release handbook rather than leaving it to be discovered.
 - **[Two enumerations reappear because the inventory is late]** → The interim
   manifest is a single file both paths read from day one. Do not ship the
   registry path with its own list.
@@ -128,7 +128,8 @@ consuming these artifacts are entitled to rely on.
 ## Permanent Documentation Promotion
 
 The publication and promotion model, the byte-conflict rule, and the removal
-condition belong in `docs/development/RELEASING.md`. The distinction between a
+condition belong in `docs/guidance/repository/published-packages.md`, and the
+owner's promotion steps in `docs/release-handbook.md`. The distinction between a
 product version and a distribution version belongs in
 `openspec/specs/deployment-state/spec.md`; its cross-repository half belongs
 with whatever owns promotion and is not this repository's to place. Registry
