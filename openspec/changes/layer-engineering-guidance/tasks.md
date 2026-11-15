@@ -3347,6 +3347,35 @@ and amended for D24 to D35; nothing in it had started.
   `openspec/README.md`'s "Documentation placement", CW-p9sa, and
   `documentation.md`'s "A document holds one kind of material" (D25) — directly, not
   by waiting for the closeout review.
+  This part also moves the procedures left in a description or rules file (184 F1,
+    D25 as amended there), against the text the merge of `dev` leaves. Move each step a
+    person performs to the procedure document for its reader, and leave the
+    description or rule it rests on in place, worded declaratively:
+    - `TESTING.md`'s "To run the lanes in GitHub Actions…": its opening two
+      sentences (push, `make run-e2e`, then `make fetch-e2e-logs`) go to
+      `e2e-tests/README.md`'s "End-to-end lanes". What the two targets do — the
+      run's selection, the logs' layout, the ZIP — stays as description.
+    - `TESTING.md`'s "Set the allowance before publishing an offer…": the step goes
+      to `e2e-tests/README.md`'s "Real-provisioning qualification", which already
+      sets `PAYMENTS.DISPUTE_WINDOW_SECONDS`. The constraint stays in `TESTING.md`:
+      the dispute window covers the allowance plus the authority's minimum filing
+      window.
+    - `chart-render-tests.md`'s "Obtaining Helm where its download host is
+      unreachable" goes to `VALIDATION_RUNBOOK.md`'s Helm render prerequisites.
+      Any rule in it ("keep it out of the repository") stays, unless shared
+      guidance already states it.
+    - The same class among the inventory's `Ambiguous` notes:
+      - the first paragraph of `qualification-evidence.md` (row 1096), which
+        instructs the qualifier, goes to the runbook's section 29;
+      - `DEPLOYMENT_AND_CONFIG.md`'s "To set a value to `None`… use…" and
+        "recover with `helm rollback`" (row 1120), which are operator steps (D34),
+        go to the operator handbook.
+    - `openspec/README.md`'s "Documentation placement" gains a row naming the
+      validation runbook and a project's `README.md` as the homes of a developer's
+      procedures. Its paragraph on the three kinds names them beside the
+      handbooks.
+    - Update the inventory rows 1090, 1092, 1096, 1100, and 1120 to the new
+      destinations.
 - [ ] 14.4 Narrative compression. Shorten the completed task notes to final
   behaviour, material evidence, deferred work, and destinations, moving any
   alternatives or review rationale into `design.md` first. `inventory.md` stays as

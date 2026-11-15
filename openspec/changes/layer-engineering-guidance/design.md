@@ -559,7 +559,13 @@ workflow layer:
   operator handbook and the change workflow's handbook; an operator's procedure goes
   to the operator handbook (141 F1), the owner's to the owner's handbook,
   `docs/release-handbook.md`, which holds the procedures that publish this
-  repository's packages and artifacts.
+  repository's packages and artifacts. A developer's procedure — running the
+  lanes, rendering the charts, qualifying a purchase — goes to the validation
+  runbook, `docs/development/VALIDATION_RUNBOOK.md`, already a procedure kept whole
+  outside the guidance set (48 F1), or, for running a project's own tests, to that
+  project's `README.md`; `openspec/README.md`'s placement table names both
+  (amended at 184 F1, which found three such procedures left in a description and
+  a rules file for want of a home).
 
 The principle holds in any repository, so it is engineering guidance, in
 `docs/guidance/engineering/documentation.md` (D33).
