@@ -1,11 +1,28 @@
 import asyncio
+from collections.abc import Iterator
 from datetime import datetime, timezone
+
+import injected_time
+import pytest
+from injected_time import InjectedTime
 
 from core_storefront.site_projections import (
     ProjectionCache,
     ProjectionIdentity,
     ProjectionState,
 )
+
+INSTANT = 1794821400
+
+
+@pytest.fixture
+def source() -> Iterator[InjectedTime]:
+    """The process time source, injected, so a test moves it rather than waiting."""
+    before = injected_time.installed()
+    installed = InjectedTime(start=INSTANT)
+    injected_time.install(installed)
+    yield installed
+    injected_time.install(before)
 
 
 class FakeClient:
@@ -119,18 +136,16 @@ def test_fetched_at_is_none_before_any_successful_load():
     asyncio.run(run())
 
 
-def test_fetched_at_set_on_successful_load():
+def test_fetched_at_set_on_successful_load(source):
     async def run():
         client = FakeClient()
         cache = ProjectionCache(client)
-        before = datetime.now(timezone.utc)
         view = await cache.load()
-        assert view.fetched_at is not None
-        assert before <= view.fetched_at
+        assert view.fetched_at == datetime.fromtimestamp(INSTANT, timezone.utc)
     asyncio.run(run())
 
 
-def test_fetched_at_advances_on_unchanged_poll_confirmation():
+def test_fetched_at_advances_on_unchanged_poll_confirmation(source):
     """An unchanged poll_once() is still a successful confirmation -- the
     operator-visible 'last confirmed' time should advance even when the
     generation itself didn't change."""
@@ -138,22 +153,24 @@ def test_fetched_at_advances_on_unchanged_poll_confirmation():
         client = FakeClient()
         cache = ProjectionCache(client)
         first = (await cache.load()).fetched_at
-        await asyncio.sleep(0.01)
+        source.set(INSTANT + 30)
         second = (await cache.poll_once()).fetched_at
         assert second is not None and second > first
     asyncio.run(run())
 
 
-def test_fetched_at_unchanged_on_failed_poll():
+def test_fetched_at_unchanged_on_failed_poll(source):
     """A failed poll must not advance fetched_at -- it did not confirm anything."""
     async def run():
         client = FakeClient()
         cache = ProjectionCache(client)
         loaded_at = (await cache.load()).fetched_at
         client.fail_version = True
+        source.set(INSTANT + 30)
         view = await cache.poll_once()
         assert view.state == ProjectionState.stale
         assert view.fetched_at == loaded_at
+    asyncio.run(run())
 
 
 async def _let_new_tasks_reach_their_wait() -> None:
@@ -270,13 +287,14 @@ def test_concurrent_polls_check_the_version_once():
     asyncio.run(run())
 
 
-def test_a_failing_version_check_never_replaces_a_later_confirmation():
+def test_a_failing_version_check_never_replaces_a_later_confirmation(source):
     """A version check that began before a successful refresh completed fails
     first, and the refresh requested after it then confirms the generation."""
     async def run():
         client = GatedClient()
         cache = ProjectionCache(client)
         loaded_at = (await cache.load()).fetched_at
+        source.set(INSTANT + 30)
         client.version_gate = asyncio.Event()
         client.fail_version = True
         poll = asyncio.create_task(cache.poll_once())

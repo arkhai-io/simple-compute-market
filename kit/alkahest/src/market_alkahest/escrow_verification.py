@@ -35,9 +35,9 @@ caller passes it.
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
+import injected_time
 from market_alkahest import alkahest as _codecs
 from market_alkahest.plans import (
     ALKAHEST_MECHANISM,
@@ -271,7 +271,7 @@ async def _match_on_chain(
             f"Escrow {escrow_uid} is revoked (revocation_time={att.revocation_time})"
         )
 
-    now = int(now_unix) if now_unix is not None else int(time.time())
+    now = int(now_unix) if now_unix is not None else injected_time.now()
     if att.expiration_time and int(att.expiration_time) <= now:
         raise EscrowVerificationError(
             f"Escrow {escrow_uid} expired at {att.expiration_time} (now={now})"

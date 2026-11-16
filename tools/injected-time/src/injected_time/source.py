@@ -20,6 +20,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Final, Literal, Protocol
 
 from injected_time.value import check_instant
@@ -148,3 +149,11 @@ def installed() -> TimeSource:
 def now() -> int:
     """The current instant of the process's source, in Unix seconds."""
     return _installed.now()
+
+
+def now_datetime() -> datetime:
+    """The current instant of the process's source, as an aware UTC `datetime`.
+
+    Whole seconds, as `now()` is: its microsecond is always 0.
+    """
+    return datetime.fromtimestamp(_installed.now(), timezone.utc)

@@ -19,6 +19,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+import injected_time
 from market_resource_pools import (
     HostRequirement,
     ResourcePoolService,
@@ -201,7 +202,7 @@ class PhysicalSettlementScheduler:
             expiry = datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
             if expiry.tzinfo is None:
                 expiry = expiry.replace(tzinfo=timezone.utc)
-            if expiry <= datetime.now(timezone.utc):
+            if expiry <= injected_time.now_datetime():
                 raise CapacityReservationExpiredError(
                     f"capacity reservation '{request.capacity_reservation_id}' has expired"
                 )

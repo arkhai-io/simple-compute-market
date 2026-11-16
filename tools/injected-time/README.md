@@ -7,7 +7,7 @@ one source its composition root installs, and from no other read. Several
 processes set to one injected instant then agree on the time exactly, and a test
 reaches any later instant by setting it, never by waiting for it.
 
-The component depends on the standard library alone, Python 3.11 or later. This
+The component depends on the standard library alone, Python 3.10 or later. This
 README is its interface: the value, the sources, the time file, and the route
 service a process's HTTP binding wraps.
 
@@ -48,8 +48,9 @@ stamped_at = injected_time.now()
 
 `source_for` accepts exactly `"wall"` and `"injected"`; any other value is refused
 (`InvalidTimeSource`), naming the setting and the value. Until a root installs a
-source, `now()` reads wall time. A function that takes a clock keeps it injectable
-by defaulting it to `injected_time.now`.
+source, `now()` reads wall time. `now_datetime()` is the same instant as an aware
+UTC `datetime`, its microsecond 0. A function that takes a clock keeps it
+injectable by defaulting it to `injected_time.now`.
 
 A duration of the process's own activity — a timeout, a poll budget, a backoff, an
 interval — is not the time of the world. Measure it on `time.monotonic()`, which

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from typing import Any, Awaitable, Callable, Generic, Mapping, Protocol, TypeVar
+
+import injected_time
 
 T = TypeVar("T")
 
@@ -145,7 +147,7 @@ class ProjectionCache(Generic[T]):
         if self._identity is not None and remote == self._identity:
             self._last_error = None
             self._state = ProjectionState.loaded
-            self._fetched_at = datetime.now(timezone.utc)
+            self._fetched_at = injected_time.now_datetime()
             return self.view()
         return await self._refresh_locked()
 
@@ -161,5 +163,5 @@ class ProjectionCache(Generic[T]):
         self._value = value
         self._last_error = None
         self._state = ProjectionState.loaded
-        self._fetched_at = datetime.now(timezone.utc)
+        self._fetched_at = injected_time.now_datetime()
         return self.view()

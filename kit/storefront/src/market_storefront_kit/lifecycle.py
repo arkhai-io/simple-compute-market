@@ -49,10 +49,11 @@ import math
 import os
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from functools import partial
 from typing import Any
 
+import injected_time
 from core_storefront.app_startup import (
     StorefrontBackgroundTask,
     start_storefront_background_task,
@@ -240,7 +241,7 @@ class StorefrontLoopController:
         self._quiescence_timeout = quiescence_timeout
         self._logger = logger or logging.getLogger(__name__)
         self._disclosed_errors = tuple(disclosed_errors)
-        self._clock = clock or (lambda: datetime.now(UTC))
+        self._clock = clock or injected_time.now_datetime
         self._cycle_lock_factory = cycle_lock_factory or (lambda _name: asyncio.Lock())
         #: Handles are kept for status reporting only. Nothing cancels them: a
         #: paused loop is a live task doing nothing, which is what makes the

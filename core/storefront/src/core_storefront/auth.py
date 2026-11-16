@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from market_identity import EnvelopeCapture, capture_envelope
 
-import time
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
+import injected_time
 from market_identity import (
     EMPTY_BODY,
     REQUEST_PROTOCOL,
@@ -208,7 +208,7 @@ async def authenticate_request(
     signature_result = verify_request(
         envelope,
         body=body,
-        now=int(time.time()) if now is None else now,
+        now=injected_time.now() if now is None else now,
         max_skew=max_timestamp_skew,
         expected_role=expected_role,
         expected_method=method,
@@ -231,7 +231,7 @@ async def authenticate_request(
         )
     claim = await replay_store.claim_replay(
         reservation,
-        now=int(time.time()) if now is None else now,
+        now=injected_time.now() if now is None else now,
         lease_seconds=replay_lease_seconds,
     )
     if claim.state == "changed":
@@ -240,7 +240,7 @@ async def authenticate_request(
             status_code=409,
         )
     capture_envelope(capture, envelope=envelope, raw_body=raw_body, headers=headers,
-                     verified_at=int(time.time()) if now is None else now,
+                     verified_at=injected_time.now() if now is None else now,
                      expected_principals=expected_principals)
     exact_retry = claim.state in {"pending", "completed"}
     recorded_outcome = claim.recorded_outcome
@@ -278,7 +278,7 @@ def signed_response_headers(
         operation=operation,
         resource=resource,
         request_id=request_id,
-        timestamp=int(time.time()) if timestamp is None else timestamp,
+        timestamp=injected_time.now() if timestamp is None else timestamp,
         status=status,
         body_hash=canonical_body_hash(body),
     )
@@ -334,7 +334,7 @@ def verify_authenticated_response(
     result = verify_response(
         envelope,
         body=body,
-        now=int(time.time()) if now is None else now,
+        now=injected_time.now() if now is None else now,
         max_skew=max_timestamp_skew,
         expected_role=expected_role,
         expected_principals=expected_principals,

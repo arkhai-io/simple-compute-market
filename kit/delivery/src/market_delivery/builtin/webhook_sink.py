@@ -14,13 +14,13 @@ bytes the signature's body hash covers.
 from __future__ import annotations
 
 import json
-import time
 import urllib.error
 import urllib.request
 import uuid
 from collections.abc import Mapping
 from typing import Any
 
+import injected_time
 from market_identity import (
     RequestEnvelope,
     Signer,
@@ -74,7 +74,7 @@ def _signed_request(
             operation=SIGNED_DELIVERY_OPERATION,
             resource=resource,
             request_id=uuid.uuid4().hex,
-            timestamp=int(time.time()),
+            timestamp=injected_time.now(),
             body_hash=canonical_body_hash(body),
         ),
     )

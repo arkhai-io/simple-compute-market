@@ -6,6 +6,7 @@ description = "Mechanism-neutral commercial settlement lifecycle, durable servic
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "arkhai-core==0.6.0",
+    "arkhai-injected-time>=0.1.0",
     "arkhai-kit-identity==0.4.0",
     "arkhai-kit-deal-lifecycle>=0.1.0",
     "arkhai-kit-schema-migrations>=0.1.0",
@@ -34,4 +35,8 @@ dev = [
 # beyond the standard library, because its lightness is part of its contract.
 # make check-architecture holds it; see docs/guidance/repository/package-layers.md, "Kind".
 [tool.arkhai.architecture]
-allowed-dependencies = ["arkhai-core", "arkhai-kit-identity", "arkhai-kit-deal-lifecycle", "arkhai-kit-schema-migrations", "pydantic"]
+allowed-dependencies = ["arkhai-core", "arkhai-injected-time", "arkhai-kit-identity", "arkhai-kit-deal-lifecycle", "arkhai-kit-schema-migrations", "pydantic"]
+
+# The time component's import name differs from its distribution's.
+[tool.arkhai.architecture.import-roots]
+injected_time = "arkhai-injected-time"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -148,6 +149,17 @@ def test_the_installed_source_answers_every_read(restored_source: None) -> None:
     assert injected_time.now() == 1794821400
     source.set(1794822300)
     assert injected_time.now() == 1794822300
+
+
+def test_the_installed_instant_reads_as_an_aware_utc_datetime(restored_source: None) -> None:
+    source = install(InjectedTime(start=1794821400))
+
+    assert injected_time.now_datetime() == datetime(2026, 11, 16, 9, 30, tzinfo=timezone.utc)
+    source.set(1794822300)
+    read = injected_time.now_datetime()
+    assert read.timestamp() == 1794822300
+    assert read.utcoffset() == timedelta(0)
+    assert read.microsecond == 0
 
 
 def test_installing_from_a_configured_value(restored_source: None) -> None:

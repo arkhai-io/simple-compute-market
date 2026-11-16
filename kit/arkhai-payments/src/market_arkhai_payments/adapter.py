@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping
-import time
 from typing import Any, cast
 
+import injected_time
 from market_deal_lifecycle.delivery import (
     BillingStartResult, DeliveryAuthorization, DeliveryEvidence, DeliveryPhase, JournaledBillingStart,
     OnceDeliveryPolicy,
@@ -77,7 +77,7 @@ class PaymentAdapter:
     def __init__(
         self, agreement: Mapping[str, Any], data: PaymentSettlementData, *,
         account: str, client_for_owner: ClientForAccount, verify_snapshot: SnapshotVerifier,
-        minimum_sequence: int = 0, clock: Callable[[], int] = lambda: int(time.time()),
+        minimum_sequence: int = 0, clock: Callable[[], int] = injected_time.now,
         snapshot_freshness_seconds: int = DEFAULT_SNAPSHOT_FRESHNESS_SECONDS,
     ) -> None:
         data.require_bound_to(agreement)

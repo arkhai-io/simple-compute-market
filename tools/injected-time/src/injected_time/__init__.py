@@ -22,6 +22,7 @@ from injected_time.source import (
     install,
     installed,
     now,
+    now_datetime,
     source_for,
 )
 from injected_time.time_file import TimeFile, TimeFileError
@@ -56,6 +57,7 @@ __all__ = [
     "install",
     "installed",
     "now",
+    "now_datetime",
     "parse_time",
     "read_time",
     "source_for",

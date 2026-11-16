@@ -43,6 +43,12 @@ the world from one source". Touches a new project, `tools/injected-time/`
     check-packaging`, printed `cd tools/injected-time && make build
     DIST_DIR=…/.dist` and built `arkhai_injected_time-0.1.0-py3-none-any.whl`. The
     default `dist/` output, with no `DIST_DIR`, was not exercised.
+  - Correction (section 3): `requires-python` is now `>=3.10`. `kit/identity`,
+    `kit/settlement-runtime`, `kit/policy`, `kit/alkahest` and `kit/arkhai-payments`
+    declare `>=3.10`, and a dependency must admit a dependent's whole range; the
+    package's source uses nothing 3.11 added (read, not run on 3.10). Its own
+    structure test reads `pyproject.toml` with `tomllib`, so the suite needs 3.11,
+    as the repository's 3.13 gives it. The README says 3.10.
 - [x] 1.2 The process source: `now()` returning Unix seconds; wall by default; an
   injected form frozen at the instant last set, starting at the wall instant it was
   installed; installation from a configured source value, `"wall"` or `"injected"`,
@@ -63,6 +69,12 @@ the world from one source". Touches a new project, `tools/injected-time/`
     instant it started at or was last set to, while a wall source follows every
     move in whole seconds; the real wall instant a default source starts at is
     bracketed by two real wall reads.
+  - Amendment (section 3): `now_datetime()` joins the module, the installed
+    source's instant as an aware UTC `datetime` (microsecond 0), since the aware
+    form replaces dozens of `datetime.now(timezone.utc)` reads across sections
+    3–7; README and a unit
+    test (`test_the_installed_instant_reads_as_an_aware_utc_datetime`) with it.
+    `make -C tools/injected-time test`: 81 passed, mypy clean.
 - [x] 1.3 The value rule: one parser for `{"now": <value>}` — a JSON integer from 0 to
   253402300799, never a boolean, float or string, no missing `now`, no other member —
   reporting `invalid_time` (D11).
@@ -317,27 +329,161 @@ scheduler, repository and database defaults), `kit/alkahest`, `kit/arkhai-paymen
 (the adapter's clock default), `kit/identity` (`profiles.py`), and
 `domains/compute/delivery` (its clock default).
 
-- [ ] 3.1 Each package declares `arkhai-injected-time` and is relocked; each clock
+- [x] 3.1 Each package declares `arkhai-injected-time` and is relocked; each clock
   default (`lambda: int(time.time())` and its kind) becomes the process source, so a
   unit test injecting its own clock keeps working (D3).
   - Verify: each package's unit suite passes unchanged.
-- [ ] 3.2 Convert every direct read 2.1 lists in these packages: time-of-the-world
+  - Done: twelve packages import the component and declare `arkhai-injected-time>=0.1.0`:
+    `core/storefront`, `kit/storefront`, `kit/settlement-runtime`,
+    `kit/negotiation-runtime`, `kit/policy`, `kit/delivery`, `kit/contact-exchange`,
+    `kit/fulfillment`, `kit/alkahest`, `kit/arkhai-payments`, `kit/arkhai-mediation`,
+    `kit/identity`; the three with `allowed-dependencies` (`kit/identity`,
+    `kit/settlement-runtime`, `kit/contact-exchange`) list it and map its import
+    name to it under `[tool.arkhai.architecture.import-roots]` (`injected_time =
+    "arkhai-injected-time"`; without it `make check-architecture` reads the import
+    as a distribution `injected-time` the allowlist does not name), and every
+    `published-packages.md` row names it. `kit/identity`, whose lock now installs
+    a wheelhouse package, gains the `reinit` target `make check-uv-setup` requires
+    (`project-environments.md`). The API-credits domain's wheel-install tests
+    build their own wheel set (`domains/apicredits/tests/conftest_wheels.py`), which
+    now builds the component too. Relocked with `make lock` (full). Defaults
+    now the source: `SettlementRuntime`'s and `AlkahestConditionalEscrowClient`'s
+    `clock` (`injected_time.now`), `ClausePublication.clock`, `NegotiationRuntime`'s
+    `now`, `IntroductionRetentionService`'s and `AlkahestChainProbe`'s `clock`,
+    `StorefrontLoopController`'s outcome stamp (`now_datetime`),
+    `ServicePeerTrust`'s `clock`, the payments adapter's `clock` (the one `RateParts`
+    is given) and the mediation adapter's `clock`.
+  - Correction to the plan: `kit/deal-servicing` and `domains/compute/delivery` are
+    untouched and declare nothing. Their `EndService`, `DealWatch`,
+    `DeliveryIngress`, `SellerServicing`, `RespondentPoller` and the delivery path
+    take `clock` with no default (2.1's note), so their reads are their
+    compositions' (section 4 converts the VM ones); `diagnostics.py` already
+    measures a step on `time.monotonic`. `kit/arkhai-payments`' `client.py` holds no
+    wall read (its poll deadline is already monotonic).
+  - "Unchanged" does not hold for eight tests, each of which compared a whole-second
+    source read with a sub-second wall read, or relied on real time passing between
+    two stamps: in `core/storefront`'s `test_site_projections.py`, three take an
+    injected source (`test_fetched_at_set_on_successful_load` asserts the source's
+    instant; the advance and failing-version-check tests move it between loads);
+    `kit/settlement-runtime`'s `test_servicing.py`, four, unit and integration
+    (`before = int(time.time())`); and `kit/fulfillment`'s
+    `test_recovery_diagnostics_reports_per_state_counts_and_ages`, a real-database
+    test that sat under `unit/`, so touching it moved it (`test-levels.md`,
+    "Integration tests"): it is now
+    `tests/integration/test_injected_time.py::test_recovery_diagnostics_count_claims_and_age_rows_against_the_source`,
+    on the baseline schema and driven by the source. A ninth, outside the plan:
+    `test_fetched_at_unchanged_on_failed_poll` never ran its coroutine; it now does,
+    with the source moved before the failed poll. Two storefront tests broke on
+    core's whole-second `fetched_at`, each expecting a projection poll's stamp to grow
+    between two polls without time moving: the VM storefront's
+    `test_a_round_past_the_window_is_retryable_until_the_projection_is_stepped` and
+    the bare-metal `test_an_expired_confirmation_refuses_until_a_poll_confirms_the_site`.
+    Both take an `injected_source` fixture, in a new `tests/conftest.py` of each
+    storefront (120 s behind the wall clock: the canonical client still signs on the
+    wall clock, and a signed hop allows 300 s), and set it a second past the first
+    poll before stepping. `kit/fulfillment`'s import-boundary
+    test admits `injected_time` in `scheduler.py`, `db.py` and
+    `settlement_repository.py`.
+  - Versions, outside the plan: `kit/delivery` 0.2.2 and `kit/delivery-apprise` 0.1.2
+    (its exact pin moved), with their exact pins in `core/buyer` and the VM and
+    bare-metal storefronts; every other package here was already bumped on `dev`
+    since `marketplace-v0.3.0`, the newest release. `kit/identity` (0.4.0) and
+    `kit/storefront` (0.10.0) carry released versions and are owed one bump each by
+    this change: section 8's freshness exemption changes `kit/identity`'s API and
+    section 9 adds `kit/storefront`'s time route service, so each takes its minor
+    bump there and moves its exact pins once (`versioning.md`, "One bump per unit of
+    work").
+- [x] 3.2 Convert every direct read 2.1 lists in these packages: time-of-the-world
   reads to the process source, elapsed-work reads to `time.monotonic()` (D20). Record
   each elapsed-work conversion in the task note.
   - Verify: `make check-time-reads` reports none of these packages.
-- [ ] 3.3 Supply the read database times in `kit/fulfillment` and in
+  - Done: all 53 reads in these packages were the time of the world (stamped,
+    signed, or compared with another party's instant, or stored and compared
+    later), so none became monotonic. Aware UTC reads use `now_datetime()` (the
+    component's, see 1.2's amendment). `core/storefront`'s store stamps its text
+    columns through `store_timestamp()`, public so the storefronts' stores share it
+    (section 4): UTC with no offset, which is what the stale-negotiation sweep
+    (`parse_timestamp`) already read it as, where the old `datetime.now()` wrote
+    local time. `kit/policy`'s message timestamp takes the same form. Stored leases
+    count as lane time by D20's rule (stored, compared later): the fulfillment
+    convergence claim and its poll interval (`claim_expires_at`), settlement
+    servicing's retry schedule, the storefront's escrow and delivery convergence
+    leases.
+  - Outside the plan, ties: the source is whole seconds and, injected, holds one
+    instant across many writes, so every query here that orders by a timestamp the
+    store writes breaks ties by insertion: `core/storefront`'s escrow, credential,
+    listing and thread lists (`rowid`) and a negotiation's stage events (`id`).
+    `kit/fulfillment`'s claim order ties as it did under `CURRENT_TIMESTAMP`, which
+    was whole seconds already.
+  - Evidence: `make check-time-reads` lists none of these packages (154 findings
+    left, all in later sections' packages).
+- [x] 3.3 Supply the read database times in `kit/fulfillment` and in
   `core/storefront`'s `sqlite_client.py` from the process source: ORM `func.now()`
   defaults on read columns become Python `default=`/`onupdate=` callables, raw SQL
   passes the time (D13).
   - Verify: library integration tests, one per store, with an injected source set to
     1794821400: every read column holds that instant, never the database's clock
     (`injected-time`'s "A row is written under injected time").
-- [ ] 3.4 Section verification.
+  - Columns judged read: `kit/fulfillment`'s `settlement_records.created_at`
+    (recovery claims oldest first; diagnostics age the oldest row) and
+    `provisioned_resources.created_at` (listed in creation order) now default to
+    `now_datetime`, beside their kept `server_default`; `claim_expires_at` was
+    already supplied by the repository, now from the source. Audit-only, keeping
+    `func.now()`: every `updated_at` there and `scheduling_cursors.created_at`.
+    `core/storefront`'s store had no SQL time default; its read columns —
+    `escrows.created_at`/`updated_at`, `negotiation_threads.created_at`/`updated_at`
+    (the sweep compares the latter), `credentials.created_at`,
+    `stage_events.ts`, the replay reservation's `lease_until` and a publication's
+    `published_at` — are passed by the application, now from the source.
+  - Evidence, library integration, both at 1794821400:
+    `kit/fulfillment/tests/integration/test_injected_time.py` (2 tests on the
+    baseline migration's schema, fixtures in that directory's `conftest.py`: both
+    `created_at` columns and the claim and progress leases hold the injected
+    instant; diagnostics count active and lapsed claims and age the oldest row
+    against the source as it is set forward an hour — the expiry the spec's scenario
+    names) and `core/storefront/tests/integration/test_injected_time.py` (four tests
+    over the migrated database — an escrow's `created_at` and `updated_at`, a thread's
+    `updated_at` after a terminal update, a credential's `created_at`, three stage
+    events' `ts` — and one that checks the stored text form denotes the instant).
+    Not asserted under injected time: `negotiation_threads.created_at` (written only
+    when a thread is created, which needs a domain binding the test does not build),
+    the replay reservation's `lease_until` (the caller's `now` plus the lease; the
+    storefront's authentication now passes the source) and a publication's
+    `published_at` (the source when the caller gives none). `make -C kit/fulfillment
+    test` 212 passed; `make -C core/storefront test` 232 passed. Against the round's
+    base the core test fails at collection (`ModuleNotFoundError: injected_time`,
+    `run test-before`), which shows less than a behavioural failure; the fulfillment
+    test likewise imports only what the change adds.
+- [x] 3.4 Section verification.
   - Unit and library integration: `make test-kits`, `make test-core`, and
     `domains/compute/delivery`'s suite.
   - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`.
   - End-to-end: the three lanes' existing scenarios run these libraries at wall time,
     unchanged in behaviour; no new scenario is owed.
+  - Evidence: `make test-kits` passes (every kit, `kit/settlement-runtime` 302 among
+    them; `kit/fulfillment` 212 after its moved test). `scripts/change-workflow run
+    pre-commit drive-the-storefront-clock-in-lanes`, run once over sections 3 and 4
+    together before they were committed apart: `after-functional-change` (`make
+    lock`) and `pre-commit-functional` (`make dist-clean`, `make check-packaging`,
+    `make test` — every suite, `make test-core`, `make test-domains` and
+    `domains/compute/delivery`'s among them) passed; of `pre-commit`, only the
+    citations check failed, on `openspec/specs/injected-time/architecture.md`, which
+    closeout's promotion writes (18.9). The first two runs failed on what this
+    section then fixed: `check-uv-setup` (`kit/identity`'s `reinit`),
+    `check-architecture` (the `import-roots` entries) and the API-credits domain's
+    wheel-install tests (their wheel set).
+  - Confirmed: no new end-to-end marker; every lane module runs these libraries,
+    still at wall time. No owed CI evidence: the suites run in the workflows' existing
+    jobs.
+  - Handoff. The process source returns whole seconds, so a test comparing a source
+    read with `time.time()` or expecting two stamps to differ without moving time
+    fails; drive an injected source instead (`InjectedTime(start=…)`, installed and
+    restored by a fixture). A signed test through a client still on wall time
+    (sections 7's clients) must inject an instant within 300 s of the wall clock.
+    Stored leases on lane time — fulfillment convergence's claim and poll interval,
+    settlement servicing's retry, the storefronts' convergence leases — do not lapse
+    while injected time is held: section 16's lanes may need a stage to set time past
+    a retry or a step through the loop's control (D13, D20 classify them so).
 
 ## 4. The storefronts read the process source
 

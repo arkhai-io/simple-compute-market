@@ -118,6 +118,12 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             REPO / "kit" / "schema-migrations",
             "arkhai_kit_schema_migrations-*.whl",
         ),
+        # The process time source, which the identity kit and every package
+        # stamping or comparing an instant import.
+        "injected_time": (
+            REPO / "tools" / "injected-time",
+            "arkhai_injected_time-*.whl",
+        ),
     }
     built: dict[str, Path] = {}
     for name, (project, pattern) in projects.items():

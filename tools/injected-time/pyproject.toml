@@ -4,7 +4,7 @@ version = "0.1.0"
 license = "MIT"
 description = "One source of the time of the world per process: wall time, or an injected instant a test sets and moves forward"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = []
 
 [dependency-groups]
