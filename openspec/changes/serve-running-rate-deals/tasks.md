@@ -448,6 +448,52 @@ Touches `e2e-tests`.
 - [ ] 2B.3 Verification point: the `e2e-tests` unit suite and both lane runs pass.
       End-to-end: `e2e_vm_recurring_purchase`, `e2e_bare_metal_recurring_purchase`.
 
+Section 2B handoff (not started; no code written, no task checked), from reading the
+stages after sections 2 and 2A were committed:
+
+- Delivering the recurring deal in a lane is more than the refusal's removal. Every
+  compute-lane module holds fulfillment convergence and the lease watchdog
+  (`docs/guidance/repository/deterministic-tests.md`), so delivery needs the stages the
+  payment purchases already compose (`test_vm_payment_purchase.py`,
+  `test_bare_metal_payment_deal.py`): `Stage07a_ArmCreateGate` before `Purchase03_Bought`;
+  `Purchase04_PurchaseCorrelated` (it writes the `fulfillment_id`, `expected_host_id` and
+  Agreement window the later shared stages require) and `Stage08b2_ReleaseCreateGateAndDrain`
+  after it; `Stage09a_FulfillmentConvergesToActive`, `Stage09b_SettlementReadyAndCredentials`
+  and `Stage09c_LeaseRecorded`; then `Purchase09_PurchaseRunEnded` in place of the drivers'
+  `close_purchase_run`, since the buy now runs to ready (VM's `check_run_ended` expects
+  `ready`; bare metal's `agreed`).
+- A new recurring stage in place of `Recurring05_CommitRefused` asserts the delivery
+  itself: the site's activation, the payments double's rate `start` after it (the
+  snapshot's part `started` and its start event), and the lifecycle read's progress.
+- The buyer's `end` of a delivered deal ends a lease, so after it the teardown the payment
+  purchases stage is needed: `Stage09c2_ArmTeardownGate` before the end,
+  `Recurring07_BuyerEnds` carrying `Purchase10_BuyerTeardown`'s lease checks (the lease
+  `releasing`, one convergence advance to `tearing_down`) beside its own (the payer's stop
+  accepted with `settles_through=started_period`, the seller's read showing the payer's
+  end and no filing), then `Stage11a2_ReleaseTeardownGateAndDrain` and
+  `Stage11b_TeardownCompletion`. Without them the lane leaves a held mock job and a
+  leased resource, which 2B.2's "no mock rule or held loop" forbids.
+- `Recurring08` becomes the payer's available balance down by exactly one period's price
+  (`PERIOD_GROSS`) from `Purchase01`'s, the reservation's remainder returned.
+- Each module's `purchase_cleanup` gains the payment purchase's gate cleanup (open the
+  gates, then delete the create and teardown rules) beside `recurring_purchase_cleanup`;
+  `VmRecurringPurchaseDriver.close_purchase_run` and its bare-metal twin go;
+  `RecurringPurchaseState._commit_refused` goes; `recurring_purchase_stages.py`'s and the
+  two modules' docstrings, `purchase_driver.py`'s refusal docstrings, and
+  `e2e-tests/README.md`'s recurring-purchase paragraph are rewritten.
+- `e2e-tests/tests/unit/test_recurring_purchase_stages.py`'s `EXPECTED_ORDER` takes the
+  composed order, and its module docstring ("Nothing is delivered ... no mock gate") is
+  rewritten; its `handoff_faults` check will name any field a reused shared stage reads
+  that no earlier stage writes.
+- 2B.2's lane runs are reachable from an implement session: `make -C e2e-tests
+  test-e2e-vm E2E_MODULE=e2e_vm_recurring_purchase` and `make -C e2e-tests
+  test-e2e-bare-metal E2E_BARE_METAL_MODULE=e2e_bare_metal_recurring_purchase` match the
+  step's `make -C * test*` rule, each building its lane's images and bringing up its
+  Compose project, and `make -C e2e-tests e2e-<lane>-down` takes it down. Validation's
+  pipeline (`make run-e2e`) also runs both markers.
+- Until 2B lands, both recurring purchases fail in their lanes: their `Recurring05`
+  asserts the refusal sections 2 and 2A removed.
+
 ## 3. Every payment stop is classified
 
 Delivers lawful classification of payment stops in both domains. Implements D2, D3;
