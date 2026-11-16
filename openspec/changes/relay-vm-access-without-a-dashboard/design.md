@@ -91,15 +91,24 @@ only — `serverAddr`, `auth`, and `transport` are not hot-reloadable — which 
 acceptable because those are written once at initialization and never change
 afterward.
 
-**This claim needs live proof before it is relied on.** It is documented frp
+**This claim needed live proof before it was relied on.** It is documented frp
 behaviour and it is the reason the admin API exists, but "an established SSH
 session survives a reload that adds an unrelated proxy" is exactly the kind of
-assumption that should be tested rather than reasoned about. The test is small:
-open a session through a tunnel, append a proxy, reload, and check the session.
-It belongs in the plan as an explicit gate, and its outcome decides whether the
-fallback below is needed.
+assumption that should be tested rather than reasoned about. The plan made it
+an explicit gate (section 6), and its outcome decided whether the fallback below
+is needed.
 
-**Fallback if reload does not preserve sessions:** one `frpc` process per VM,
+**Decided: reload preserves sessions, so the fallback is not built.** On a real
+KVM host behind a deployed buyer relay, the VM real-provisioning lane held one
+SSH heartbeat open to the first guest while a second guest's create appended its
+proxy and reloaded the buyer client through `/api/reload`, and again while that
+guest's teardown removed the proxy and reloaded. The session survived both, with
+a longest gap of about one to two seconds (tasks 6.1 and 8.3). The client
+topology in section 5 stands. Because the fallback is not taken, relay
+uniformity on a host also remains a limit, as stated under the relay decision
+below.
+
+**Fallback, had reload not preserved sessions:** one `frpc` process per VM,
 each with its own unit and configuration, so a reconfiguration affects exactly
 one buyer. It is not free — a unit to create and reap per VM, a control
 connection each, and the template's `transport.poolCount = 5` means five idle
@@ -484,10 +493,10 @@ because the lease is what recorded where the port was actually bound.
 *Relay uniformity on a host is an implementation limit, not a model limit.* One
 `frpc` process carries one `serverAddr` and one token, so a host can serve only
 VMs whose leases name the relay its client dials. The model already permits a
-per-VM relay; the current client topology is what does not. If the reload gate
-in section 6 fails, its recorded fallback — one client per VM — removes that
-limit for free and without a schema change, since the lease already carries the
-relay. Building per-VM clients *for* relay heterogeneity is not worth a unit, a
+per-VM relay; the current client topology is what does not. Had the reload gate
+in section 6 failed, its recorded fallback — one client per VM — would have
+removed that limit for free and without a schema change, since the lease already
+carries the relay. The gate passed, so the limit stands. Building per-VM clients *for* relay heterogeneity is not worth a unit, a
 control connection, and `poolCount` idle connections per VM to buy something
 nothing currently needs.
 
