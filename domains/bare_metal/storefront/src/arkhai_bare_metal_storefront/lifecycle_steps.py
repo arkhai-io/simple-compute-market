@@ -47,6 +47,7 @@ from market_storefront_kit import (
 from pydantic_core import to_jsonable_python
 
 from .config import BareMetalConfigurationError
+from .delivery_recovery import recover_bare_metal_deliveries
 from .publication import BareMetalPublicationError
 
 if TYPE_CHECKING:
@@ -273,7 +274,13 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
         )
 
     async def delivery_recovery_step() -> Mapping[str, Any]:
-        return {"loop": "delivery_recovery", "processed": await runtime.lifecycle.cycle()}
+        # The servicing cycle runs whether or not the re-drive could list its
+        # deals; a re-drive failure is still the step's.
+        try:
+            redriven = await recover_bare_metal_deliveries(runtime)
+        finally:
+            processed = await runtime.lifecycle.cycle()
+        return {"loop": "delivery_recovery", "redriven": redriven, "processed": processed}
 
     composed.append(_Loop(
         "delivery_recovery", "delivery-recovery", delivery_recovery_step,

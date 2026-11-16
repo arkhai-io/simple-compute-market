@@ -1,17 +1,25 @@
 """The resume pass drives each unfinished VM delivery through the delivery path.
 
 Real SQLite persistence and the real path, end service and deal lifecycle;
-the site and provisioning service are the fakes at the storefront's aggregate
-clients, and the Alkahest stage's chain reads are replaced at the stage.
+the pass is called directly with the site and provisioning fakes at the
+storefront's aggregate clients, which the loop's own step would build from the
+configured sites. The Alkahest deal's stage
+has its chain reads replaced at the stage; the payment deal is settled through
+the typed buyer client against the payment rig's app, with the payments kit's
+fake behind ``PaymentsClient``, and is re-checked by the real payments stage.
 """
 
+import logging
 import sqlite3
+import time
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from compute_provisioning_contracts import FulfillmentStatusResponse
+from market_arkhai_payments import PaymentSellerStage
 from market_capacity_publication import CapacityEffects
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 
@@ -20,6 +28,8 @@ from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.services.fulfillment_resume_runtime import resume_incomplete_fulfillments_once
 from tests.delivery_fakes import DeliveryProvisioning, DeliverySite
 from tests.fulfillment_fixtures import SELLER_PRINCIPAL, make_vm_lifecycle_fixture
+from tests.integration.test_payment_settlement import IMPOSTOR, NEGOTIATION, _config
+from tests.integration.test_vm_delivery_path import _row, payment_rig  # noqa: F401 - the rig's fixture
 
 _SELLER = SimpleNamespace(identity=SELLER_PRINCIPAL)
 
@@ -133,3 +143,115 @@ async def test_a_phase_this_storefront_never_writes_is_unreadable(tmp_path):
     assert persisted["status"] == "provisioning"
     assert site.rows["reservation-1"]["activated_at_utc"] is None
     await composition.lifecycle.close()
+
+
+class _RecordedStage:
+    """A seller stage as composed, its evidence re-checks recorded."""
+
+    def __init__(self, stage, rechecks: list[str]) -> None:
+        self._stage = stage
+        self._rechecks = rechecks
+
+    async def recover_evidence(self, *, evidence, **kwargs):
+        self._rechecks.append(evidence.negotiation_id)
+        return await self._stage.recover_evidence(evidence=evidence, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._stage, name)
+
+
+async def _waiting_payment_deal(payment_rig):
+    """A payment deal settled an hour before its Agreement start, committed and waiting.
+
+    The lifecycle's clock runs an hour behind wall time until ``offset`` is set
+    to zero, which brings the deal to its start; the site stamps activation in
+    wall time, so the start is never after it.
+    """
+    offset = [-3600]
+    start = datetime.now(timezone.utc).replace(microsecond=0)
+    rig = await payment_rig(start=start, clock=lambda: int(time.time()) + offset[0])
+    rechecks: list[str] = []
+    rig.composition.seller_stages = {
+        mechanism: _RecordedStage(stage, rechecks)
+        for mechanism, stage in rig.composition.seller_stages.items()
+    }
+    await rig.settle()
+    await rig.delivered()
+    row = _row(rig.db, NEGOTIATION)
+    assert row["status"] == "provisioning" and row["capacity_reservation_id"] is not None
+    assert rig.provisioning.begins == [] and row["processing_owner"] is None
+    return rig, offset, rechecks
+
+
+async def _resume_payment(rig):
+    return await resume_incomplete_fulfillments_once(
+        sqlite_client=rig.db, capacity=CapacityEffects(rig.site), fulfillment_client=rig.provisioning,
+        composition=rig.composition, owner="resume-pass",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_deal_waiting_for_its_start_is_claimed_re_checked_and_driven_at_its_start(payment_rig):
+    rig, offset, rechecks = await _waiting_payment_deal(payment_rig)
+    owners_at_begin: list[str | None] = []
+    begin = rig.provisioning.begin_fulfillment
+
+    async def observed_begin(body, *args, **kwargs):
+        owners_at_begin.append(_row(rig.db, NEGOTIATION)["processing_owner"])
+        return await begin(body, *args, **kwargs)
+
+    rig.provisioning.begin_fulfillment = observed_begin
+    offset[0] = 0
+
+    assert await _resume_payment(rig) == 1
+
+    assert rechecks == [NEGOTIATION]
+    # The pass held the deal's claim while it drove, and released it after.
+    assert owners_at_begin == ["resume-pass"]
+    row = _row(rig.db, NEGOTIATION)
+    assert row["processing_owner"] is None
+    assert row["status"] == "ready"
+    assert rig.site.rows[row["capacity_reservation_id"]]["activated_at_utc"] is not None
+
+
+@pytest.mark.asyncio
+async def test_a_deal_another_worker_holds_is_skipped(payment_rig):
+    rig, offset, rechecks = await _waiting_payment_deal(payment_rig)
+    offset[0] = 0
+    assert await rig.db.claim_vm_delivery(
+        negotiation_id=NEGOTIATION, owner="another-worker",
+        lease_until=(datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+    )
+
+    assert await _resume_payment(rig) == 0
+
+    assert rechecks == []
+    assert rig.provisioning.begins == []
+    row = _row(rig.db, NEGOTIATION)
+    assert row["processing_owner"] == "another-worker"
+    assert row["status"] == "provisioning"
+
+
+@pytest.mark.asyncio
+async def test_a_deal_whose_evidence_fails_its_re_check_is_not_driven(payment_rig, caplog):
+    rig, offset, rechecks = await _waiting_payment_deal(payment_rig)
+    offset[0] = 0
+    # The receipt identity pin has moved: the stored receipt does not verify under it.
+    rig.composition.arkhai_payments_stage = PaymentSellerStage(_config(service_identity=IMPOSTOR.identity))
+
+    with caplog.at_level(logging.WARNING):
+        assert await _resume_payment(rig) == 0
+
+    assert rechecks == [NEGOTIATION]
+    assert [
+        record.getMessage() for record in caplog.records
+        if record.name == "market_storefront.services.fulfillment_resume_runtime"
+    ] == [
+        f"[DELIVERY] {NEGOTIATION} does not re-check for recovery: "
+        "payment evidence does not match accepted Agreement",
+    ]
+    assert not [record for record in caplog.records if record.name == "compute_delivery.recovery"]
+    assert rig.provisioning.begins == []
+    row = _row(rig.db, NEGOTIATION)
+    assert row["processing_owner"] is None
+    assert row["status"] == "provisioning"

@@ -325,38 +325,6 @@ class BareMetalLifecycle:
             actor=event.caller or report.signer, cause=event.cause, controlling_source_ref=controlling,
         )
 
-    async def recover_delivery(self, deal):
-        """Drive a started delivery that has not finished, through the fulfillment hook.
-
-        A deal waiting for its Agreement start, one whose fulfillment is still
-        settling, and one available whose result is not yet recorded are each
-        driven again; the path rechecks admission, so an end recorded meanwhile
-        stops it. A delivery not yet started is started by its settlement: the
-        payment reconciliation loop or the servicing worker.
-        """
-        row = await self.runtime.db.load_bare_metal_fulfillment_lifecycle(
-            negotiation_id=deal.negotiation_id,
-        )
-        if row is None or row.get("state") == "released":
-            return
-        record = await in_transaction(
-            self.path, lambda conn: EndSession(conn).read(deal.negotiation_id),
-        )
-        if record.progress not in ("unstarted", "active"):
-            return
-        if record.available_at is not None:
-            result = await self.runtime.db.load_bare_metal_result(
-                negotiation_id=deal.negotiation_id,
-            )
-            receipt = await self.runtime.db.load_bare_metal_receipt(
-                negotiation_id=deal.negotiation_id,
-            )
-            if result is not None and receipt is not None:
-                return
-        await self.runtime.fulfillment_service().deliver(
-            negotiation_id=deal.negotiation_id, buyer_principal=deal.buyer,
-        )
-
     async def recover_site(self, negotiation_id):
         row = await self.runtime.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
         if row is None or not row.get("capacity_reservation_id"):
@@ -465,16 +433,15 @@ class BareMetalLifecycle:
     def servicing(self):
         """The kit's servicing order over this lifecycle.
 
-        The lifecycle is its own respondent port. Its recovery steps re-drive an
-        unfinished delivery, which no other loop of this storefront does, then
-        read the site's lease; its site-report correction applies the compute
-        family's site classifier.
+        The lifecycle is its own respondent port. Its recovery step reads the
+        site's lease; its site-report correction applies the compute family's
+        site classifier. Unfinished deliveries are re-driven by the family's
+        re-drive routine, never by this cycle.
         """
         return ServicingCycle(
             self.path, domain="bare-metal", loop=SERVICING_LOOP, seller=self.seller, end=self.end,
             respondents=self, signer=self.runtime.marketplace_signer, clock=lambda: self.clock(),
             recovery=[
-                ("delivery re-drive", self.recover_delivery),
                 ("site-report recovery", lambda deal: self.recover_site(deal.negotiation_id)),
             ],
             resolve_site_corrections=lambda session, negotiation_id, now: self.resolve_site_corrections(

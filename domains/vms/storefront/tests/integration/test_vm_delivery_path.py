@@ -113,7 +113,8 @@ class PaymentRig(SimpleNamespace):
 async def payment_rig(tmp_path):
     rigs = []
 
-    async def build(*, start: datetime | None = None, hold: bool = False):
+    async def build(*, start: datetime | None = None, hold: bool = False, clock=None):
+        """``clock`` is the deal lifecycle's, by default wall time in seconds."""
         domain = build_vm_storefront_domain()
         registry = build_vm_storefront_registry(domain)
         migrate_storefront_database(tmp_path / "storefront.db")
@@ -128,6 +129,7 @@ async def payment_rig(tmp_path):
         )
         lifecycle = VmDealLifecycle(
             db, SELLER, coordinator, RegistryDisputePolicy.from_document({}), fulfillment=provisioning,
+            **({} if clock is None else {"clock": clock}),
         )
         coordinator.lifecycle = lifecycle
         composition = SimpleNamespace(

@@ -1,24 +1,29 @@
 """Restart-safe convergence for accepted VM storefront deliveries.
 
 Every unfinished delivery is driven again through the compute family's
-delivery path, which reconciles the deal's records and recovers each step
-against the same resource: a reservation through its placement key, a
-dispatch through its recorded fulfillment, activation and billing start by
-repeating them. A deal that waits for its Agreement start is brought back
-here until it starts, and an available deal whose continuation is pending is
-driven until it converges. See openspec/specs/compute-delivery/spec.md.
+re-drive routine, which claims it, has its settlement stage re-check its
+evidence and drives it through the delivery path; the path reconciles the
+deal's records and recovers each step against the same resource: a
+reservation through its placement key, a dispatch through its recorded
+fulfillment, activation and billing start by repeating them. A deal that
+waits for its Agreement start is brought back here until it starts, and an
+available deal whose continuation is pending is driven until it converges.
+See openspec/specs/compute-delivery/spec.md, "Unfinished deliveries are
+re-driven by one routine".
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import uuid
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Any
 
+from compute_delivery import ComputeDeliveryPath, DeliveryOutcome, recover_deliveries
 from market_core.schemas import settlement_option_schema
 
 from market_storefront import container as _container
@@ -27,6 +32,102 @@ from market_storefront.services.vm_fulfillment_planner import VERIFIED_EVIDENCE_
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
+
+
+async def _accepted_stage(db: Any, composition: Any, negotiation_id: str) -> tuple[Any, Any, Any] | None:
+    """The deal's verified evidence, its thread and its selected seller stage.
+
+    ``None`` when the evidence is not in a verified state: refund states retain
+    verified facts for recovery, and admission still prevents further delivery
+    after their durable final request.
+    """
+    evidence = await db.load_vm_settlement_evidence(negotiation_id=negotiation_id)
+    thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+    if evidence is None or evidence.status not in VERIFIED_EVIDENCE_STATUSES or thread is None:
+        return None
+    agreement = json.loads(thread["agreement_bytes"])
+    return evidence, thread, composition.seller_stages[settlement_option_schema(agreement["settlement"])]
+
+
+class VmDeliveryRecovery:
+    """VM's ports for the family's re-drive: its incomplete deliveries, its
+    durable claim lease and its stage's evidence re-check."""
+
+    def __init__(self, db: Any, composition: Any, *, owner: str, lease_seconds: int) -> None:
+        self._db = db
+        self._composition = composition
+        self._owner = owner
+        self._lease_seconds = lease_seconds
+
+    async def unfinished_deliveries(self, *, limit: int) -> list[str]:
+        rows = await self._db.list_incomplete_vm_deliveries(limit=limit)
+        return [row["negotiation_id"] for row in rows]
+
+    @asynccontextmanager
+    async def claim(self, negotiation_id: str) -> AsyncIterator[bool]:
+        """The deal's convergence lease, held by this pass's owner until it is released.
+
+        A lease another owner holds and has not let expire answers ``False``.
+        """
+        claimed = await self._db.claim_vm_delivery(
+            negotiation_id=negotiation_id,
+            owner=self._owner,
+            lease_until=(datetime.now(timezone.utc) + timedelta(seconds=self._lease_seconds)).isoformat(),
+        )
+        try:
+            yield claimed
+        finally:
+            if claimed:
+                await self._db.release_vm_delivery(negotiation_id=negotiation_id, owner=self._owner)
+
+    async def revalidate(self, negotiation_id: str) -> bool:
+        """Whether the selected stage re-checks the deal's evidence now, before
+        any protected effect: an Alkahest escrow is read from the chain again, a
+        payments receipt verified again. A stage refuses evidence it cannot
+        re-check with ``ValueError``, an unreachable chain included, which
+        answers ``False``."""
+        accepted = await _accepted_stage(self._db, self._composition, negotiation_id)
+        if accepted is None:
+            logger.warning(
+                "[DELIVERY] %s does not re-check for recovery: its settlement evidence is not verified",
+                negotiation_id,
+            )
+            return False
+        evidence, thread, stage = accepted
+        try:
+            await stage.recover_evidence(
+                evidence=evidence, thread=thread, composition=self._composition, db=self._db,
+            )
+        except ValueError as exc:
+            logger.warning("[DELIVERY] %s does not re-check for recovery: %s", negotiation_id, exc)
+            return False
+        return True
+
+
+class VmRecoveryDrive:
+    """A recovery drive through VM's delivery entry, which records the outcome
+    in its delivery record and runs the stage's failure policy once.
+
+    The path is built at the first drive: it needs the composition's deal
+    lifecycle, which a pass with nothing to resume does not.
+    """
+
+    def __init__(self, build_path: Callable[[], ComputeDeliveryPath], db: Any, composition: Any) -> None:
+        self._build_path = build_path
+        self._path: ComputeDeliveryPath | None = None
+        self._db = db
+        self._composition = composition
+
+    async def drive(self, negotiation_id: str) -> DeliveryOutcome | None:
+        if self._path is None:
+            self._path = self._build_path()
+        accepted = await _accepted_stage(self._db, self._composition, negotiation_id)
+        failure_policy = (
+            partial(accepted[2].delivery_failed, evidence=accepted[0], db=self._db)
+            if accepted is not None
+            else None
+        )
+        return await drive_vm_delivery(self._path, self._db, negotiation_id, failure_policy=failure_policy)
 
 
 async def resume_incomplete_fulfillments_once(
@@ -39,70 +140,25 @@ async def resume_incomplete_fulfillments_once(
     lease_seconds: int = 60,
     composition: Any | None = None,
 ) -> int:
-    """Revalidate each unfinished delivery's settlement and drive it once.
+    """Re-drive each unfinished delivery this pass can claim and re-check.
 
     ``capacity`` is the guarded capacity effects and ``fulfillment_client``
     the per-site fulfillment client; each is built from the storefront's
-    runtime when absent. Returns how many deliveries the pass drove to an
-    outcome.
+    runtime when first used, so a pass with nothing to resume needs neither.
+    Returns how many deliveries the pass drove.
     """
     db = sqlite_client
     composition = composition or _container.resolved_settlement_composition
     if composition is None:
         raise RuntimeError("settlement composition was not initialized")
-    deliveries = await db.list_incomplete_vm_deliveries(limit=limit)
-    if not deliveries:
-        # Nothing to resume needs no site or provisioning client.
-        return 0
-    path = vm_delivery_path(
-        db, capacity=capacity, fulfillment=fulfillment_client, composition=composition,
+    drive = VmRecoveryDrive(
+        lambda: vm_delivery_path(db, capacity=capacity, fulfillment=fulfillment_client, composition=composition),
+        db, composition,
     )
-    worker = owner or f"fulfillment-resume:{uuid.uuid4()}"
-    progressed = 0
-    for delivery in deliveries:
-        negotiation_id = delivery["negotiation_id"]
-        claimed = await db.claim_vm_delivery(
-            negotiation_id=negotiation_id,
-            owner=worker,
-            lease_until=(
-                datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
-            ).isoformat(),
-        )
-        if not claimed:
-            continue
-        try:
-            evidence = await db.load_vm_settlement_evidence(negotiation_id=negotiation_id)
-            thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
-            # Refund states retain verified facts for recovery; admission still
-            # prevents further delivery after their durable final request.
-            if (
-                evidence is None
-                or evidence.status not in VERIFIED_EVIDENCE_STATUSES
-                or thread is None
-            ):
-                continue
-            agreement = json.loads(thread["agreement_bytes"])
-            stage = composition.seller_stages[settlement_option_schema(agreement["settlement"])]
-            # The selected stage revalidates its evidence before any protected
-            # effect: an Alkahest escrow is read from the chain again.
-            await stage.recover_evidence(
-                evidence=evidence, thread=thread, composition=composition, db=db
-            )
-            outcome = await drive_vm_delivery(
-                path, db, negotiation_id,
-                failure_policy=partial(stage.delivery_failed, evidence=evidence, db=db),
-            )
-            if outcome is not None:
-                progressed += 1
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception(
-                "[FULFILLMENT_RESUME] Failed to converge negotiation %s", negotiation_id
-            )
-        finally:
-            await db.release_vm_delivery(negotiation_id=negotiation_id, owner=worker)
-    return progressed
+    recovery = VmDeliveryRecovery(
+        db, composition, owner=owner or f"fulfillment-resume:{uuid.uuid4()}", lease_seconds=lease_seconds,
+    )
+    return await recover_deliveries(drive, recovery, limit=limit)
 
 
 async def _reconcile_payment_deals() -> None:
@@ -118,9 +174,9 @@ async def fulfillment_resume_cycle_once(*, sqlite_client: SQLiteClient) -> None:
     accepted VM delivery, then advance accepted payment deals.
 
     The loop's timer and an operator's step both run exactly this. A failure
-    of one delivery is contained inside the sweep; a failure outside it --
-    listing the incomplete deliveries, or building a client -- fails the cycle,
-    which the loop controller records, and the timer carries on.
+    of one delivery is contained inside the re-drive; a failure outside it --
+    listing the incomplete deliveries -- fails the cycle, which the loop
+    controller records, and the timer carries on.
     """
     await resume_incomplete_fulfillments_once(sqlite_client=sqlite_client)
     await _reconcile_payment_deals()

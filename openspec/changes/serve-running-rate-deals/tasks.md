@@ -1272,13 +1272,28 @@ Delivers D5's shared re-drive; requirement "Unfinished deliveries are re-driven 
 routine" (`compute-delivery`). Touches `domains/compute/delivery`, both storefronts'
 delivery ports.
 
-- [ ] 8.1 `domains/compute/delivery/src/compute_delivery/recovery.py`:
+- [x] 8.1 `domains/compute/delivery/src/compute_delivery/recovery.py`:
       `recover_deliveries(path, domain, *, limit)` over a `DeliveryRecovery` port of
       `unfinished_deliveries`, `claim` (an async context answering whether it claimed) and
       `revalidate`, exported from the package (D5). Verify (library integration, new
       `tests/integration/test_recover_deliveries.py`): a claimed, revalidated deal is
       driven; an unclaimed or unrevalidated one is not.
-- [ ] 8.2 VM fills the port with `list_incomplete_vm_deliveries`, its claim lease and its
+      Done: `recover_deliveries` lists, then per deal claims, re-checks and drives,
+      returning how many it drove; each deal runs in its own error handler, logged
+      `[DELIVERY_RECOVERY] <id> was not re-driven`, so one deal's failure leaves the next
+      recovered. `path` is a `DeliveryDrive` protocol (`drive(negotiation_id)`), which
+      `ComputeDeliveryPath` satisfies, so a domain may pass its own entry around the
+      path (VM's records the outcome, below). `DeliveryDrive`, `DeliveryRecovery` and
+      `recover_deliveries` are exported. Library integration
+      (`test_recover_deliveries.py`, the rig's SQLite and end service, the real path,
+      the port a recording double): the rig's deal committed and waiting, at its start,
+      is claimed, re-checked and driven to `converged` inside the claim (call order
+      claim, revalidate, drive, release; the limit passed to the listing); a deal
+      another worker holds is claimed-and-released with no re-check or drive; one that
+      does not re-check is released undriven; a re-check raising for one listed deal is
+      logged once and the next deal is driven (4 passed; the package 134). The package
+      stays 0.2.0, the bump this change already took.
+- [x] 8.2 VM fills the port with `list_incomplete_vm_deliveries`, its claim lease and its
       stage's `recover_evidence`, replacing `resume_incomplete_fulfillments_once`'s loop
       (`fulfillment_resume_runtime.py`); bare metal fills it with its lifecycle-row query,
       its lock and its settlement service's `verified_evidence`, replacing
@@ -1286,9 +1301,145 @@ delivery ports.
       `test_fulfillment_resume_runtime.py` in VM, `test_restart_recovery.py` in bare
       metal): a deal waiting for its start is claimed, revalidated and driven at the start;
       a deal another worker holds is skipped; a deal whose evidence fails is not driven.
-- [ ] 8.3 Verification point: `domains/compute/delivery` and both storefronts' suites pass.
+      Done, differing from the plan in each domain's drive, in bare metal's claim, in
+      bare metal's test file and in VM's test level. Both domains' `revalidate` answers
+      `False` when the evidence does not re-check — an unreachable chain included, since
+      each stage reports that as a refusal — logging the reason at warning (`[DELIVERY]
+      <id> does not re-check for recovery: …`); only an unexpected error raises, which
+      the routine logs. Both list at most 50 deals a pass, VM's existing limit. VM:
+      `VmDeliveryRecovery` (the incomplete-deliveries query, the `claim_vm_delivery`
+      lease released after the drive, the selected stage's `recover_evidence`, whose
+      `ValueError` answers `False`, as does evidence not in a verified state) and
+      `VmRecoveryDrive`, which drives through `drive_vm_delivery` so the outcome is
+      recorded in the delivery record and the stage's failure policy runs once,
+      building the path at its first drive (a composition with no deal lifecycle and
+      nothing to resume needs none); `resume_incomplete_fulfillments_once` keeps its
+      signature over them, and now counts every drive it made, a drive
+      `drive_vm_delivery` deferred on an exception included, where it counted only
+      drives that reached an outcome; a failure building the path is now one deal's,
+      logged, not the cycle's. Bare metal's step reports `redriven`; VM's
+      `fulfillment-resume` step reports only its loop until section 9 splits it. Bare
+      metal (`delivery_recovery.py`):
+      `BareMetalDeliveryRecovery` lists the deals whose lifecycle row is not released
+      (`list_unreleased_bare_metal_fulfillments`, new), whose end-service progress is
+      `unstarted` or `active`, and which are not available with their result and
+      receipt recorded — `recover_delivery`'s filter, applied before the limit; its
+      claim answers whether the deal's lock is free; it re-checks through the new
+      `BareMetalFulfillmentService.revalidate` (`deliver`'s own gate: owned context,
+      then `_verified_evidence`, which runs the settlement's recovery gate, for the
+      buyer recorded at acceptance). Its drive is `BareMetalFulfillmentService.redeliver`,
+      `deliver` for that buyer, so every bare-metal delivery still enters through core's
+      fulfillment hook (`physical-provisioning`, "Bare-metal delivery enters through the
+      core fulfillment hook"): the hook takes the deal's lock for the drive and drives
+      its physical end in its `finally`. That is why the claim only answers whether the
+      lock is free rather than holding it — an `asyncio.Lock` is not re-entrant — and
+      why `deliver`'s gate re-checks the evidence a second time before the hook; a drive
+      that takes the lock between the claim and the hook is waited for, never
+      overlapped. `recover_delivery` is gone from the lifecycle and its servicing steps.
+      Until section 9 splits the loops, bare metal's `delivery-recovery` step runs the
+      re-drive, then the servicing cycle (in a `finally`, so a re-drive that cannot list
+      its deals still services them), and reports `redriven` beside `processed`; VM's
+      `fulfillment-resume` step is unchanged in shape. Evidence — VM
+      (`test_fulfillment_resume_runtime.py`, the pass called directly, with the rig's
+      site and provisioning fakes the loop's own step would build from the configured
+      sites, over the payment rig's real database, path, end service and lifecycle, the
+      deal settled through the typed buyer client against the rig's app — narrower than
+      the application integration the plan names, since the step cannot reach the
+      fakes): a payment deal settled an hour before its start (the lifecycle clock an
+      hour behind wall time, then set to it) is re-checked by the real payments stage
+      once, driven to `ready` and activated, the row's claim held by the pass at
+      `begin_fulfillment` and released after; with the claim held by another worker the
+      pass drives nothing and re-checks nothing, the other worker's claim intact; with
+      the receipt identity pin moved (the composition's payments stage built for
+      another service identity) the re-check answers `False` with its warning naming
+      the mismatch, the routine logs nothing, nothing is begun and the claim is
+      released. Bare metal, in `integration/test_delivery_path.py` rather than
+      `test_restart_recovery.py`, where the waiting Alkahest deal's setup already is
+      (application integration: the served app's `delivery-recovery` loop stepped
+      through the typed admin client, its timers held): at its start the waiting deal is
+      driven (`redriven` 1), the escrow read from the chain twice before
+      `begin_fulfillment` (the routine's re-check and `deliver`'s gate), the deal's lock
+      held by the drive at `begin_fulfillment` and released after, activated and
+      available; with the lock held by the test the step re-drives nothing; with the
+      escrow verifier raising the re-check answers `False` — its warning names the
+      gate's refusal, the routine logs nothing — and nothing is begun; and a deal whose
+      end was recorded while it waited is listed no more (`progress` `end_recorded`,
+      `redriven` 0). The four `test_lifecycle_dispatch.py` readiness-adoption cases now
+      step `delivery-recovery` through the typed admin client, every loop held, rather
+      than calling the servicing cycle; three are renamed `recovery_…`. Not exercised:
+      an end recorded while the re-drive's drive holds the lock (the hook's `finally`
+      physical end, unchanged). The VM test level's cause — the re-drive's capacity
+      effects built from the configured sites, with no seam for a test's site — is a
+      row under "Unowned work found by `serve-running-rate-deals`" in
+      `openspec/changes/README.md`. Also in this section, from its compliance checks:
+      `e2e-tests/tests/e2e/roles/scenarios/bare_metal/recovery_stages.py`'s docstrings
+      name the re-drive, not the lifecycle's cycle.
+- [x] 8.3 Verification point: `domains/compute/delivery` and both storefronts' suites pass.
       End-to-end: every scenario that re-drives a delivery, among them
       `e2e_vm_payment_purchase`, `e2e_bare_metal_mock_deal` and the recurring purchases.
+      Done: `make -C domains/compute/delivery test` (134), `make -C domains/vms/storefront
+      test-unit` (1194, 1 skipped) and `test-integration` (617), `make -C
+      domains/bare_metal/storefront test` (657). End-to-end corrected: VM's
+      `fulfillment-resume` and bare metal's `delivery-recovery` loops now run the shared
+      re-drive, so the scenarios that re-drive a delivery through them are pipeline
+      evidence for it: `e2e_deal` (VM's delivery-timing phase steps `fulfillment-resume`
+      before and after the start) and `e2e_bare_metal_mock_deal` (its recovery stages).
+      `e2e_bare_metal_recurring_purchase` steps `delivery-recovery` only once its deal is
+      delivered, so it shows the step runs with nothing to re-drive;
+      `e2e_bare_metal_payment_deal` re-drives through the lifecycle `commit`, and
+      `e2e_vm_payment_purchase` and `e2e_vm_recurring_purchase` deliver through the settle
+      task, so none of those is evidence for the routine. None asserts the routine's own
+      order. Owed by validation: none. `run
+      test-before` on `test_recover_deliveries.py` exits at collection (no
+      `compute_provisioning_contracts` in its environment), showing nothing; at the base
+      `recover_deliveries` does not exist. `scripts/change-workflow run pre-commit`
+      passed with every functional hook, after the fresh-context fixes.
+      Fresh-context checks (two): fixed — bare metal's re-drive drove the path directly,
+      skipping the fulfillment hook and so core's identity check, which
+      `physical-provisioning` gives every bare-metal delivery (now `redeliver` through
+      `deliver`, the claim answering whether the lock is free); the hook's
+      repair-required log copied into the re-drive (gone with it); the claim's physical
+      end missing after a failed drive (now the hook's `finally`); the two domains'
+      re-checks differing (VM raised, bare metal answered `False`; both now answer
+      `False` with a warning, and VM's silent refusal of unverified evidence logs too)
+      and their limits (both 50); the port contract and VM's docstring saying an
+      unreachable authority raises, which neither stage does; the routine's docstring
+      naming a `delivery-recovery` loop VM does not yet run and saying a deal is driven
+      only while held; VM's cycle docstring naming client builds as cycle failures; the
+      fulfillment service's module docstring; `test_lifecycle_dispatch.py`'s fourth
+      readiness case still calling the servicing cycle, and its step helper not holding
+      the loops; bare metal's interim step skipping the servicing cycle when the
+      re-drive's listing fails (now a `finally`); the bare-metal escrow case not showing
+      how the re-check answered, and the first case not showing the re-check ran;
+      `recovery_stages.py`'s docstrings; 12.9's D5 list missing passages of
+      `compute-delivery/architecture.md` and `physical-provisioning/architecture.md`;
+      the VM test level recorded as an unowned row; a guard on a lifecycle row with no
+      servicing record, removed (the path creates the row under admission); and these
+      notes' VM-level, physical-end and end-to-end claims. Declined: VM's step reporting
+      `redriven` before section 9 splits its loop.
+
+Section 8 handoff:
+
+- Bare metal's `delivery-recovery` step is interim: the re-drive, then the servicing
+  cycle in a `finally`, reporting `redriven` and `processed`. Section 9.1 makes it the
+  re-drive alone and registers `deal-servicing` over `lifecycle.cycle()`; VM's
+  `fulfillment-resume` (the re-drive, then `_reconcile_payment_deals`) splits into
+  `delivery-recovery` (`resume_incomplete_fulfillments_once`) and
+  `payment-reconciliation`, and its `settlement-servicing` stops calling
+  `lifecycle.cycle()`.
+- Tests stepping bare metal's `delivery-recovery` for the servicing half will need
+  `deal-servicing` after 9.1: `test_lifecycle_dispatch.py`'s
+  `test_failed_readiness_observation_retries_without_starving_site_recovery` (its
+  `lease_reads == 1` is site recovery, a servicing step) and
+  `test_recovery_never_adopts_readiness_after_buyer_end` (its teardown is the servicing
+  cycle's physical end); `test_lifecycle_ends.py` and `test_servicing_composition.py`
+  step `delivery-recovery` through the recurring world for the payment watch.
+- Bare metal's claim answers whether the deal's lock is free and the drive takes it in
+  the hook; VM's claim holds its lease across the re-check and drive. Both re-checks
+  answer `False` with a warning; the routine logs only what raises.
+- The lane's `recovery_stages.py` steps `delivery-recovery` for re-drives, which stays
+  right after 9.1; the purchase drivers' `servicing_loop` names and the other loop
+  names are 9.2's.
 
 ## 9. One loop layout, and restart recovery proven
 
@@ -1432,8 +1583,17 @@ campaign index currency.
         fresh-context check);
         `openspec/specs/settlement-servicing/architecture.md`, "Current limits" (its
         respondent and term-end clause).
-      - D5: `compute-delivery/architecture.md`, "Dispatch and recovery" and "Domain
-        compositions" (the shared re-drive and its ports);
+      - D5: `compute-delivery/architecture.md`, "Dispatch and recovery", "The Agreement
+        window and the future-start wait" ("VM's periodic resume pass, bare metal's
+        lifecycle cycle") and "Domain compositions" (the shared re-drive and its ports;
+        the table's VM entry, which names the resume pass among the hook's callers
+        though it drives through `drive_vm_delivery`, bare metal's entry, whose callers
+        now include the re-drive, and both recovery-worker rows);
+        `openspec/specs/physical-provisioning/architecture.md`, its sentence naming
+        payment settle and the Alkahest ready step as the callers that build a
+        `StorefrontFulfillmentContext` (the re-drive's `redeliver` is one more) and "The
+        lifecycle cycle drives waiting and pending deals" (now the re-drive's, through
+        `deliver`), found by section 8's fresh-context checks;
         `openspec/specs/market-composition/architecture.md`, "Storefront composition kit"
         (the four loops); `docs/development/ARCHITECTURE.md`, "Operator lifecycle
         controls" (the loop layout); `openspec/specs/storefront-publication/configuration.md`,

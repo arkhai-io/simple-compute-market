@@ -1,12 +1,12 @@
 """Bare metal's re-drives of its mock-provisioned deals.
 
-The lifecycle's cycle (`delivery-recovery`) is what a restarted bare-metal
-storefront runs first: it drives every started, unfinished delivery from what
-its records hold. Bare metal's settlement drives the deal once and returns, so a
-step of the cycle meets the deal as a restart would, owning it alone. VM's resume
-pass would skip a deal its settlement call is still driving, so VM's recovery is
-exercised by a deal that waits for its start instead
-(`vms/delivery_timing_deal.py`).
+The compute family's delivery re-drive, which bare metal's `delivery-recovery`
+loop runs, is what a restarted bare-metal storefront runs first: it drives every
+started, unfinished delivery from what its records hold. Bare metal's settlement
+drives the deal once and returns, so a step of the loop meets the deal as a
+restart would, owning it alone. VM's re-drive would skip a deal its settlement
+call is still driving, so VM's recovery is exercised by a deal that waits for its
+start instead (`vms/delivery_timing_deal.py`).
 
 Two stages re-drive the canonical deal between the shared stages, before and
 after its fulfillment is ready; a third, after the second deal, follows a deal
@@ -40,9 +40,9 @@ def _reservation_ids(deal_driver, deal_state) -> list[str]:
 
 
 def _step_recovery(storefront_admin_client) -> None:
-    """One step of the cycle. It drives every started delivery that is not yet
-    available or has no recorded result, which the canonical deal is at both
-    re-drives; its report counts the deals it read, not those it drove."""
+    """One step of the loop. It re-drives every started delivery that is not
+    yet available or has no recorded result, which the canonical deal is at
+    both re-drives."""
     advance_storefront(storefront_admin_client, RECOVERY)
 
 
@@ -52,7 +52,7 @@ class BareMetalRecoveryBeforeReadiness:
     ):
         """A re-drive between dispatch and readiness adopts what was dispatched.
 
-        Stepped after settlement dispatched the fulfillment, the cycle meets the
+        Stepped after settlement dispatched the fulfillment, the re-drive meets the
         deal where a restart after dispatch would: the reservation committed, the
         fulfillment recorded and not yet ready, since fulfillment convergence is
         held for the module and only 09a's advance observes the provider's
@@ -83,7 +83,7 @@ class BareMetalRecoveryActivatesTheReadyDelivery:
     ):
         """Once the fulfillment is ready, a re-drive carries delivery to activation.
 
-        The cycle re-drives the deal from its records, as after a restart
+        The loop re-drives the deal from its records, as after a restart
         between readiness and activation. The lease is unactivated before the
         step, and nothing else drives the deal meanwhile (settlement's drive has
         returned, and the stage reads the lease at the site rather than through
@@ -122,7 +122,7 @@ class BareMetalSettlementFindsNoCapacity:
         Settlement's placement under the deal's ``:settlement`` key finds no
         capacity, and delivery records the end as the seller's, with nothing
         reserved for the deal and nothing dispatched. A step of the recovery
-        cycle, which drives no ended delivery, leaves all of it as it was.
+        loop, which re-drives no ended delivery, leaves all of it as it was.
         """
         require_state(deal_state, "_second_deal_released", "seller_listing_id")
         listing_id = deal_state.seller_listing_id

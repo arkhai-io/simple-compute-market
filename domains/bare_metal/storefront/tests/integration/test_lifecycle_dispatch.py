@@ -56,6 +56,18 @@ def peer(h, signer=BUYER):
     )
 
 
+async def step(h, loop):
+    """One cycle of the storefront's ``loop``, stepped through the typed admin
+    client with every loop held, so no timer races the step."""
+    async with StorefrontClient(
+        "http://test", signer=ADMIN, caller_role="admin",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER.identity,)),
+        transport=httpx.ASGITransport(app=h.app),
+    ) as admin:
+        await admin.admin_pause_lifecycle_loops()
+        return await admin.admin_run_lifecycle_cycle(loop)
+
+
 class ReadyProvisioning(Provisioning):
     """The external site completes the already dispatched physical grant, once
     ``state`` says so."""
@@ -125,7 +137,7 @@ class DelayedResultProvisioning(ReadyProvisioning):
 
 
 @pytest.mark.asyncio
-async def test_servicing_adopts_ready_fulfillment_without_buyer_status_poll(harness):
+async def test_recovery_adopts_ready_fulfillment_without_buyer_status_poll(harness):
     h = harness
     provisioning = ReadyProvisioning(state="dispatching")
     object.__setattr__(h.runtime, "fulfillment_client", provisioning)
@@ -138,12 +150,12 @@ async def test_servicing_adopts_ready_fulfillment_without_buyer_status_poll(harn
         assert committed.outcome.status == "accepted"
         assert (await buyer.read(h.negotiation_id)).delivery.progress == "unstarted"
         provisioning.state = "active"
-        await h.runtime.lifecycle.cycle()
+        await step(h, "delivery-recovery")
         assert (await buyer.read(h.negotiation_id)).delivery.progress == "active"
         with transaction(h.runtime.db.db_path) as conn:
             available_at = EndSession(conn).read(h.negotiation_id).available_at
         assert available_at is not None
-        await h.runtime.lifecycle.cycle()
+        await step(h, "delivery-recovery")
         with transaction(h.runtime.db.db_path) as conn:
             assert EndSession(conn).read(h.negotiation_id).available_at == available_at
     assert len(provisioning.begin_calls) == 1
@@ -151,7 +163,7 @@ async def test_servicing_adopts_ready_fulfillment_without_buyer_status_poll(harn
 
 
 @pytest.mark.asyncio
-async def test_servicing_finishes_receipt_after_availability_was_recorded(harness):
+async def test_recovery_finishes_receipt_after_availability_was_recorded(harness):
     h = harness
     provisioning = ReadyProvisioning(state="dispatching")
     db = InterruptedReceiptStore(h.runtime.db.db_path, domain=h.runtime.domain)
@@ -164,14 +176,14 @@ async def test_servicing_finishes_receipt_after_availability_was_recorded(harnes
             operation_key="commit",
         ))
         provisioning.state = "active"
-        await h.runtime.lifecycle.cycle()
+        await step(h, "delivery-recovery")
         assert db.interrupted
         assert await db.load_bare_metal_result(negotiation_id=h.negotiation_id) is not None
         assert await db.load_bare_metal_receipt(negotiation_id=h.negotiation_id) is None
         with transaction(db.db_path) as conn:
             first = EndSession(conn).read(h.negotiation_id).available_at
         assert first is not None
-        await h.runtime.lifecycle.cycle()
+        await step(h, "delivery-recovery")
         assert await db.load_bare_metal_receipt(negotiation_id=h.negotiation_id) is not None
         with transaction(db.db_path) as conn:
             assert EndSession(conn).read(h.negotiation_id).available_at == first
@@ -179,7 +191,7 @@ async def test_servicing_finishes_receipt_after_availability_was_recorded(harnes
 
 
 @pytest.mark.asyncio
-async def test_servicing_never_adopts_readiness_after_buyer_end(harness):
+async def test_recovery_never_adopts_readiness_after_buyer_end(harness):
     h = harness
     provisioning = ReadyProvisioning(state="dispatching")
     object.__setattr__(h.runtime, "fulfillment_client", provisioning)
@@ -191,7 +203,7 @@ async def test_servicing_never_adopts_readiness_after_buyer_end(harness):
         ))
         await buyer.end_delivery(h.negotiation_id, operation_key="end")
         provisioning.state = "active"
-        await h.runtime.lifecycle.cycle()
+        await step(h, "delivery-recovery")
         assert (await buyer.read(h.negotiation_id)).delivery.progress == "tearing_down"
         with transaction(h.runtime.db.db_path) as conn:
             assert EndSession(conn).read(h.negotiation_id).available_at is None
@@ -210,10 +222,10 @@ async def test_failed_readiness_observation_retries_without_starving_site_recove
             operation_key="commit",
         ))
         provisioning.state = "active"
-        await h.runtime.lifecycle.cycle()
+        await step(h, "delivery-recovery")
         assert provisioning.lease_reads == 1
         assert (await buyer.read(h.negotiation_id)).delivery.progress == "unstarted"
-        await h.runtime.lifecycle.cycle()
+        await step(h, "delivery-recovery")
         assert (await buyer.read(h.negotiation_id)).delivery.progress == "active"
     assert len(provisioning.begin_calls) == 1
 
