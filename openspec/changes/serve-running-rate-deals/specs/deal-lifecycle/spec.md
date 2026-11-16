@@ -6,7 +6,29 @@
 
 **Migration**: "Delivery authorization delegates payment interpretation" keeps the protocol, the deadline barrier and the remaining scenarios, drops the refusal and its code, and adds the changed-answer rule. No released storefront made the refusal (`marketplace-v0.3.0`), so no refused deal is recovered.
 
+### Requirement: Stop requests are distinct from final stops, readable by released clients
+
+**Reason**: Its omission of an empty `parts` and a null `settles_through` from the lifecycle read and list, and its scenario of a contracts 0.1.0 client validating a once-only deal, end with this change: a client released earlier is not owed reading a later storefront, and the lifecycle contracts take an incompatible version.
+
+**Migration**: "Stop requests are distinct from final stops" keeps the rule and its two remaining scenarios. The client shipped with the storefront reads every deal shape ("The seller half lists deals"); a 0.1.0 client upgrades with the storefront.
+
 ## ADDED Requirements
+
+### Requirement: Stop requests are distinct from final stops
+
+A raw stop request MUST NOT end delivery. The lifecycle contracts MUST carry each part's verified rate bounds and its pending and final stops (`PaymentPartObservation`, `AuthorityView.parts`) and a payment event's treatment (`PaymentEvent.settles_through`). Because notice maturity can carry no new event sequence, the watch MUST read each part's final stop outside its event cursor and record it once by authority record, refusing a replay that changes the recorded end. The lifecycle read and list MUST carry every field of their models, defaults included.
+
+#### Scenario: A stop request is pending
+
+- **WHEN** the authority records a stop request effective in the future
+- **THEN** the watch records no end, and read exposes the pending stop
+
+#### Scenario: Notice matures without a new event
+
+- **GIVEN** the watch consumed a stop request's event in an earlier poll
+- **WHEN** the authority's final stop appears with no new event sequence
+- **THEN** the watch records the end once, by the stop's authority record
+- **AND** a later read changing that stop's end is refused
 
 ### Requirement: Delivery authorization delegates payment interpretation
 
@@ -64,7 +86,7 @@ For a deal whose committed seller projection is not once-only, end service's adm
 
 ### Requirement: Each deal's servicing steps run in one kit-owned order
 
-kit/deal-servicing MUST own the order in which a storefront services a page of deals, and each compute storefront's `deal-servicing` loop MUST run it, contributing only its domain's steps. Each cycle MUST first discover counterparty cases, once per dispute authority and payee account, then run for each deal: the authorities read, the domain's recovery steps, the physical end, local reconciliation, site-report correction, filing dispatch and the physical end again. Every step MUST run in its own error isolation, so a failed step does not skip the steps after it. A cycle MUST page every registered deal, reading the payment and dispute authorities only for committed deals and dispatching filings only in its filing step, and MUST keep its page position durably in kit-owned servicing state. Local reconciliation MUST admit a missed delivery deadline and, once admission allows, record the deal's own term-end final request at the Agreement's end, classified as the term end, in every compute domain.
+kit/deal-servicing MUST own the order in which a storefront services a page of deals, and each compute storefront's `deal-servicing` loop MUST run it, contributing only its domain's steps and a respondent port that answers whether an authority's credential is usable and builds a deal's dispute adapter from its binding. Each cycle MUST first discover counterparty cases, once per dispute authority, resolving each listed case to its local deal itself, then run for each deal: the authorities read, the domain's recovery steps, the physical end, local reconciliation, site-report correction, filing dispatch and the physical end again. Every step MUST run in its own error isolation, so a failed step does not skip the steps after it, and a failed discovery at one authority MUST NOT skip another authority's discovery or any deal's steps. A deal with no dispute authority, or whose authority's credential is unusable, MUST be left out of discovery. A cycle MUST page every registered deal, reading the payment and dispute authorities only for committed deals and dispatching filings only in its filing step, and MUST keep its page position durably in kit-owned servicing state. Local reconciliation MUST admit a missed delivery deadline and, once admission allows, record the deal's own term-end final request at the Agreement's end, classified as the term end, in every compute domain.
 
 #### Scenario: A physical failure does not skip filings
 
@@ -82,10 +104,21 @@ kit/deal-servicing MUST own the order in which a storefront services a page of d
 - **WHEN** a storefront restarts between two cycles of its `deal-servicing` loop
 - **THEN** the next cycle resumes from the durable page position
 
-#### Scenario: Counterparty cases are discovered per authority and account
+#### Scenario: Counterparty cases are discovered per authority
 
-- **WHEN** a page holds deals under one dispute authority and one payee account
-- **THEN** the cycle runs one respondent discovery for that pair before the per-deal steps
+- **WHEN** a page holds several deals under one dispute authority, some paid through Arkhai payments and one through Alkahest
+- **THEN** the cycle runs one respondent discovery for that authority before the per-deal steps, whichever deal comes first on the page
+
+#### Scenario: One authority's discovery fails
+
+- **GIVEN** a page holding deals under two dispute authorities
+- **WHEN** the first authority's respondent listing cannot be read
+- **THEN** the failure is logged naming the authority, the second authority's discovery still runs, and every deal's steps still run
+
+#### Scenario: An authority's credential is unusable
+
+- **WHEN** a page holds a deal whose dispute authority's credential cannot build a client
+- **THEN** the deal is left out of respondent discovery, shows repair required for its missing credential, and its other steps still run
 
 ## MODIFIED Requirements
 

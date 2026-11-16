@@ -150,15 +150,36 @@ not carried by the stop the classifier receives.
 A `kit/deal-servicing` helper runs one page of deals in a fixed order, each step in
 its own error handler, logged with the domain, step and deal:
 
-1. respondent discovery, a page-level step keyed by dispute authority and payee
-   account;
+1. respondent discovery, a page-level step keyed by dispute authority;
 2. per deal, in order: the authorities read, the domain's recovery steps, the
    physical end, local reconciliation, site-report correction, filing dispatch, and
    the physical end again.
 
-Each domain contributes only its steps: its site-report recovery and its site-report
-classifier. A physical failure no longer skips reconciliation, correction or filing,
-which closes bare metal's defect. The unexplained differences between the two
+Each domain contributes only its steps — its site-report recovery and its site-report
+classifier — and a respondent port of two operations each domain already has:
+`credential_available(authority)`, whether the authority's credential is usable, and
+`dispute_adapter(binding)`, the deal's dispute adapter over its accepted Agreement
+(VM's `dispute_adapter`, bare metal's `dispute`). The helper takes the signer and the
+clock beside them. The kit groups the page's deals by dispute authority, since the
+respondent listing is scoped by the authority's one credential and a payee account
+only keyed a poller's cursor, and owns the one `resolve` from a listed case to its
+local deal and adapter, replacing the domains' two near copies; a case whose
+Agreement digest differs raises, so it lands in the respondent repairs naming the
+mismatch. Its failures:
+
+- a deal with no dispute authority, or whose authority's credential is unusable, is
+  left out of discovery; the existing credential repair already shows the deal;
+- a failed discovery for one authority is logged, naming the domain, the step and the
+  authority, and every other authority and every per-deal step still runs;
+- a listed case naming no local deal is skipped, and a local deal that cannot be
+  resolved is a repair row, as `RespondentPoller` does today.
+
+Keying by authority changes the poller's cursor record, so each authority's listing
+restarts from its beginning once after upgrade; answers are idempotent by case, and no
+migration is needed.
+
+A physical failure no longer skips reconciliation, correction or filing, which closes
+bare metal's defect. The unexplained differences between the two
 cycles are unified, following `docs/guidance/repository/family-kits.md`, "Sibling
 domains behave alike":
 
@@ -166,9 +187,10 @@ domains behave alike":
   `terms`, once deadline admission allows it, as bare metal does today; VM no longer
   relies on the site's lease expiry for it. For a rate deal it falls at the same
   instant as the payments service's `terms` stop, which sorts first.
-- **Respondent discovery.** One poller per (authority, payee account), built per
-  cycle over its durable cursor, replaces VM's cached pollers and bare metal's
-  per-authority poller taking the first deal's account. Planning confirms the poller
+- **Respondent discovery.** One poller per dispute authority, built per cycle over
+  its durable cursor, replaces VM's cached pollers per authority and account and bare
+  metal's per-authority poller taking the first deal's account, which failed the
+  whole authority's discovery when that deal named no account (an Alkahest deal). Planning confirms the poller
   holds no state beyond its tables, and caches it if it does.
 - **The authorities read and paging.** Every registered deal is paged, so an
   uncommitted surrender still gets its physical end; the payments service and
@@ -215,11 +237,10 @@ async def recover_deliveries(path, domain, *, limit):
 
 VM supplies its incomplete-deliveries query, its claim lease and its settlement
 stage's evidence re-check; bare metal supplies its lifecycle-row query, its lock and
-a re-check through its settlement stage, which it lacks today. Each domain keeps its
-own serialization, as compute delivery already admits. If bare metal's re-check
-cannot be made through its settlement stage without new authority reads, the routine
-still unifies the listing and the claim, and that re-check is recorded as the
-remaining difference with its reason.
+its settlement service's `verified_evidence`, the accepted entry's recovery gate,
+which runs its stage's `revalidate` (`revalidate_payment`, `revalidate_alkahest`) and
+which its fulfillment's `deliver` already runs before every drive. Each domain keeps
+its own serialization, as compute delivery already admits.
 
 Rejected: the same layout with each domain's re-drive unchanged, which leaves the
 listing and re-check different; putting the re-drive inside the kit servicing cycle,
@@ -265,11 +286,14 @@ ending:
 words and a new code arrives with its text. It takes a version marking the change
 incompatible for older readers: the seller client and both storefront CLIs in the
 same release read every deal shape, and a client released earlier is not owed
-reading a later storefront. For the same reason the models this change touches stop
-omitting their newer fields at their defaults (`ReleasedReadShape`), which existed
-only so 0.1.0 clients could read once-only deals; spot's released-reads test becomes a
-test that the client shipped with the storefront reads once-only, rate, ending and
-ended deals. The single-deal `read` keeps its shape.
+reading a later storefront. For the same reason the lifecycle read and list stop
+omitting their newer fields at their defaults: `ReleasedReadShape`, which existed only
+so 0.1.0 clients could read once-only deals, goes from `PaymentEvent`, `AuthorityView`
+and `DealSummary`, and `deal-lifecycle`'s "Stop requests are distinct from final
+stops, readable by released clients" is removed and added back without the omission
+and its 0.1.0 scenario. Spot's released-reads test becomes a test that the client
+shipped with the storefront reads once-only, rate, ending and ended deals. The
+single-deal `read` gains no `ending`.
 
 Rejected: a free-text reason, which carries one reason and invites matching on
 wording; no new field, which makes triage a read per deal; and staging the field's

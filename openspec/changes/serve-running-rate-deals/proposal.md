@@ -42,9 +42,9 @@ it. It takes the servicing slice of `converge-ongoing-compute-leases`.
   is funds running out. Earlier pending payment stops are resolved when next read.
 - **One servicing step order, and the cycles unified** (D4, D6). A `kit/deal-servicing`
   helper runs respondent discovery, then each deal's steps in a fixed order, each
-  isolated. Both domains record their own term end, discover respondents per authority
-  and payee account, page every registered deal, and keep the page position in a
-  kit-owned table.
+  isolated. Both domains record their own term end, discover respondents once per
+  dispute authority through a respondent port they fill, page every registered deal,
+  and keep the page position in a kit-owned table.
 - **One loop layout and one delivery re-drive** (D5). Both storefronts run
   `deal-servicing`, `delivery-recovery`, `payment-reconciliation` and
   `settlement-servicing`, one job each; the re-drive is one routine in
@@ -52,8 +52,8 @@ it. It takes the servicing slice of `converge-ongoing-compute-leases`.
 - **What *ended* means, and why a deal is ending** (D7). *Ended* requires physical
   release, every payment part stopped or ended at the payments service, and no open
   case; the seller list's `ending` codes say what is outstanding. The lifecycle
-  contracts take an incompatible version, and the models touched stop omitting newer
-  fields for 0.1.0 clients.
+  contracts take an incompatible version, and the lifecycle read and list stop omitting
+  newer fields for 0.1.0 clients.
 - **A storefront that cannot service its deals reports them** (D8). It starts, shows
   them repair required and reports them at startup; withdrawing a treatment keeps
   servicing existing deals.
@@ -128,7 +128,7 @@ None.
 - D4: `deal-lifecycle`'s spec and architecture companion — the kit-owned servicing step order and the unified term end, respondent discovery and paging; `deal-lifecycle`'s and `vm-storefront-fulfillment`'s architecture "Current limits" lose the respondent and term-end differences; `docs/development/ROADMAP.md`'s Goal 8 current state likewise.
 - D5: `compute-delivery`'s spec and architecture companion — the shared re-drive; `market-composition`'s spec — the four-loop layout; `storefront-publication`'s configuration companion — the interval keys; `docs/development/ARCHITECTURE.md` — the loop layout both storefronts share.
 - D6: `deal-lifecycle`'s architecture companion — the kit-owned page position.
-- D7: `deal-lifecycle`'s spec ("The seller half lists deals") — what *ended* means and the `ending` codes.
+- D7: `deal-lifecycle`'s spec ("The seller half lists deals", "Stop requests are distinct from final stops") — what *ended* means, the `ending` codes, and the read and list carrying every field; `deal-lifecycle`'s architecture companion loses the routes' omission of once-only deals' empty fields.
 - D8: `market-composition`'s spec — the startup report and withdrawal.
 - D9: `test-compatibility`'s spec and `docs/development/TESTING.md` — the rate lane rows on lane time.
 - D10: `test-compatibility`'s spec and `docs/development/TESTING.md` — the watchdog's delivered-deal cases.
