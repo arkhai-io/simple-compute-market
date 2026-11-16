@@ -7,8 +7,8 @@ since a run lives only as long as its lane.
 
 Beside the API it serves the lane doubles' control routes under ``/test/``,
 authenticated by the fixture control token: rules programming refusals and
-transport faults, the perceived clock the engine reads, funding, signer rotation
-and status. The transport-fault middleware wraps the whole app and leaves the
+transport faults, the time the engine reads, funding, signer rotation and
+status. The transport-fault middleware wraps the whole app and leaves the
 control and health routes alone.
 """
 
@@ -20,17 +20,16 @@ import threading
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
+import injected_time
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from injected_time import TimeSource
 from pydantic import BaseModel, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from lane_double_controls import routes as controls
-from lane_double_controls.clock import PerceivedClock, WallClock, wall_clock
 from lane_double_controls.middleware import FaultRequest, TransportFaultMiddleware
 from lane_double_controls.models import (
-    ClockAdvance,
-    ClockView,
     ControlError,
     Funded,
     Funding,
@@ -38,6 +37,7 @@ from lane_double_controls.models import (
     SignerIdentity,
     Status,
 )
+from lane_double_controls.time_control import TimeControl
 from market_arkhai_payments.canonical import jcs_sha256, wire_json
 from market_arkhai_payments.contracts import get_contract
 from market_arkhai_payments.errors import PaymentsAPIError
@@ -71,7 +71,7 @@ class PaymentsDouble:
     One lock serialises every call, as the engine is not safe to enter twice.
     """
 
-    def __init__(self, directory: AccountDirectory, *, clock: Clock = wall_clock) -> None:
+    def __init__(self, directory: AccountDirectory, *, clock: Clock = injected_time.now) -> None:
         self.directory = directory
         # Receipts are always signed in test mode, so a live-configured role
         # refuses every receipt the double signs.
@@ -223,19 +223,20 @@ async def _control_body(request: Request, model: type[BaseModel]) -> Any:
         raise ControlError(422, "invalid_request", str(error)) from None
 
 
-def create_app(directory: AccountDirectory, *, clock: WallClock = wall_clock) -> FastAPI:
+def create_app(directory: AccountDirectory, *, source: TimeSource | None = None) -> FastAPI:
     """The double's ASGI app over a fresh engine funded from ``directory``.
 
-    ``clock`` is the wall clock the perceived clock adds its offset to.
+    ``source`` is the time the double reads, the process's installed source unless
+    given; the time route is served only when it is injected.
     """
 
-    perceived = PerceivedClock(clock)
-    double = PaymentsDouble(directory, clock=perceived)
+    time_control = TimeControl(source or injected_time.installed())
+    double = PaymentsDouble(directory, clock=time_control.source.now)
     rules = RuleBook(directory)
     app = FastAPI(title="payments lane double", docs_url=None, redoc_url=None,
                   openapi_url=None)
     app.state.double = double
-    app.state.clock = perceived
+    app.state.time_control = time_control
     app.state.rules = rules
     app.add_middleware(TransportFaultMiddleware, classify=rules.fault_for)
 
@@ -309,16 +310,13 @@ def create_app(directory: AccountDirectory, *, clock: WallClock = wall_clock) ->
             raise PaymentsAPIError(400, "invalid_request") from None
         return double.balance(authenticated, identifier)
 
-    _add_controls(app, directory, double, perceived, rules)
+    _add_controls(app, directory, double, time_control, rules)
     return app
 
 
 def _add_controls(app: FastAPI, directory: AccountDirectory, double: PaymentsDouble,
-                  perceived: PerceivedClock, rules: RuleBook) -> None:
+                  time_control: TimeControl, rules: RuleBook) -> None:
     """Register a handler for each control route the payments double serves."""
-
-    def clock_view() -> ClockView:
-        return ClockView(perceived_now=perceived(), offset_seconds=perceived.offset)
 
     async def install(request: Request) -> Response:
         view = rules.install(await _control_body(request, Rule))
@@ -331,19 +329,15 @@ def _add_controls(app: FastAPI, directory: AccountDirectory, double: PaymentsDou
         rules.delete(request.path_params["rule_id"])
         return Response(status_code=204)
 
-    async def advance(request: Request) -> Any:
-        perceived.advance((await _control_body(request, ClockAdvance)).seconds)
-        return clock_view().model_dump(mode="json")
-
-    async def reset(request: Request) -> Any:
-        perceived.reset()
-        return clock_view().model_dump(mode="json")
+    async def set_time(request: Request) -> Any:
+        answer = time_control.set_time(await request.body())
+        return answer.model_dump(mode="json", exclude_none=True)
 
     async def status(request: Request) -> Any:
         metadata = get_contract().metadata
-        return Status(perceived_now=perceived(), offset_seconds=perceived.offset, contracts={
+        return Status(time=time_control.view(), contracts={
             _SCHEMA: metadata["schema_sha256"], _VECTORS: metadata["vectors_sha256"],
-        }).model_dump(mode="json")
+        }).model_dump(mode="json", exclude_none=True)
 
     async def fund(request: Request) -> Any:
         return double.fund(await _control_body(request, Funding)).model_dump(mode="json")
@@ -353,12 +347,14 @@ def _add_controls(app: FastAPI, directory: AccountDirectory, double: PaymentsDou
 
     handlers: dict[controls.ControlRoute, Callable[[Request], Awaitable[Any]]] = {
         controls.RULES: install, controls.RULE_LIST: listing, controls.RULE_DELETE: delete,
-        controls.CLOCK_ADVANCE: advance, controls.CLOCK_RESET: reset, controls.STATUS: status,
-        controls.FUNDING: fund, controls.SIGNER_ROTATE: rotate,
+        controls.STATUS: status, controls.FUNDING: fund, controls.SIGNER_ROTATE: rotate,
     }
+    if time_control.settable:
+        handlers[controls.TIME] = set_time
     # Every control route the contract gives the payments double has its handler,
     # so a route the contract adds cannot go unserved.
-    if set(handlers) != set(controls.routes_for("payments")):
+    if set(handlers) != set(controls.routes_for("payments",
+                                                time_settable=time_control.settable)):
         raise RuntimeError("the payments double serves a different set of control routes "
                            "than the control contract gives it")
 

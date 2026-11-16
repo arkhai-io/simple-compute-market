@@ -42,8 +42,8 @@ vendored contract:
   filing, so its retry re-sends the same extends and another filing under the key
   is a conflict.
 
-Records are signed with the fixture's record key and dated by the double's
-perceived clock.
+Records are signed with the fixture's record key and dated by the double's time
+(see "Controls and time").
 
 ## What a rule decides
 
@@ -133,14 +133,24 @@ reaching payments. It establishes nothing about a remedy's arithmetic, which sta
 qualified by the producer's ruling traces, nor about a hosted authority's
 availability or policy.
 
-## Controls and clock
+## Controls and time
 
 The lane doubles' control routes, from `tools/lane-double-controls`, under
 `/test/` on the API port and authenticated by the fixture's control token: rules
 with their matched and waiting counts, resume, decide, close, the case listing by
-transaction, the perceived clock's advance and reset, and status, which reports
-the perceived now and the SHA-256 of each installed contract resource. Control
-routes and `/health` are never faulted.
+transaction, the time control, and status, which reports the time and the
+SHA-256 of each installed contract resource. Control routes and `/health` are
+never faulted.
+
+The double reads one time source, the time component's
+([`tools/injected-time`](../injected-time/README.md)), installed from
+`MEDIATION_LANE_DOUBLE_TIME_SOURCE`: `"wall"` by default, `"injected"` in a lane
+whose every party shares one time the scenario sets; any other value refuses
+startup, naming it. Under injected time the instant holds until
+`POST /test/time {"now": <Unix seconds>}` sets it forward, refusing an earlier
+instant `409 time_moves_forward` and any other body `422 invalid_time`; status
+reports `{"source": "injected", "now": …}`, or `{"source": "wall"}` for a
+wall-time double, which serves no time route.
 
 ## Fixtures
 
@@ -161,9 +171,10 @@ the lane CA. Outside the image, `MEDIATION_LANE_DOUBLE_FIXTURES`,
 `MEDIATION_LANE_DOUBLE_TLS` (a directory holding `double.pem`, `double.key.pem` and
 `lane-ca.pem`), `MEDIATION_LANE_DOUBLE_PAYMENTS_URL`, `MEDIATION_LANE_DOUBLE_HOST`
 and `MEDIATION_LANE_DOUBLE_PORT` say where to find them; then
-`python -m mediation_lane_double`.
+`python -m mediation_lane_double`. The image reads
+`MEDIATION_LANE_DOUBLE_TIME_SOURCE` too.
 
 `make test` runs the unit and application integration suite: the kit's real
 `MediationClient` against the app in process, with the payments kit's
-`FakePaymentsClient` over its shared engine as the payments peer and one clock for
-both, and the transport faults under uvicorn on loopback.
+`FakePaymentsClient` over its shared engine as the payments peer and one injected
+time for both, and the transport faults under uvicorn on loopback.

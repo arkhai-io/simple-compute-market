@@ -222,10 +222,11 @@ from its producer, and what its results establish.
 
 ### `lane-double-controls/`
 
-The doubles' control contract (import `lane_double_controls`): the rule, fault,
-clock, funding, rotation and ruling models, the control route declarations, the
-typed `ControlClient`, the transport-fault middleware, the perceived clock both
-doubles read, and the lane CA generator and certificates for both doubles. Its
+The doubles' control contract (import `lane_double_controls`), which the
+API-credit sample app serves too: the rule, fault, time, funding, rotation and
+ruling models, the control route declarations, the typed `ControlClient`, the
+transport-fault middleware, the time control over a party's injected time, and
+the lane CA generator and certificates for both doubles. Its
 [README](lane-double-controls/README.md) lists the controls and their refusals.
 
 - `make test` (in its directory) checks the committed certificates, type-checks

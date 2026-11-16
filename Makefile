@@ -49,8 +49,8 @@ dist-release-set:dist-injected-time dist-storefront-client dist-identity dist-co
 
 # The release set and the two wheels only tests depend on, which the lanes'
 # images install from .dist: the lane doubles' control contract, for the e2e
-# runner image and both lane doubles' images, and the API-credit sample app, for
-# its image in the API-credit lane.
+# runner image, both lane doubles' images and the sample app's, and the
+# API-credit sample app, for its image in the API-credit lane.
 dist: dist-release-set dist-lane-double-controls dist-apicredits-sample-app
 
 dist-ci: dist-injected-time dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client dist-lane-double-controls dist-apicredits-sample-app ## Build repository-owned Python wheels without fetching separately released artifacts.

@@ -1,9 +1,10 @@
 """The wire models of the lane doubles' controls.
 
 A scenario programs a double through when→then rules and moves it through a few
-direct controls: the perceived clock, funding and signer rotation at payments,
-and an operator's decision or close at mediation. Every refusal a control gives
-has one body, ``{"code", "message"}``, and is raised and carried as one error,
+direct controls: its injected time, funding and signer rotation at payments, and
+an operator's decision or close at mediation. The API-credits lane's sample app
+serves the time control and the status alone. Every refusal a control gives has
+one body, ``{"code", "message"}``, and is raised and carried as one error,
 ``ControlError``, on both sides of the wire.
 
 A rule always states its ``match``: ``{}`` is a stated scope, every call of its
@@ -17,11 +18,22 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from jsonschema import ValidationError as SchemaValidationError
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
+from injected_time import check_instant
 from market_arkhai_mediation import contract
 
 Double = Literal["payments", "mediation"]
+#: Every party serving control routes: the two doubles, and the API-credits lane's
+#: sample app, which serves only the time control and the status.
+ControlParty = Literal["payments", "mediation", "sample-app"]
 
 #: The request properties each double's rules may match on. Payments matches its
 #: API route (``transactions``, ``snapshot``, ``mandate``, ``attachments``,
@@ -56,6 +68,10 @@ ControlCode = Literal[
     # A control that must reach payments and could not, such as closing a
     # mediation case whose extensions payments did not lift.
     "payments_unavailable",
+    # The time control's refusals, the time component's own: a body that is not
+    # exactly {"now": <instant>}, and an instant earlier than the party's.
+    "invalid_time",
+    "time_moves_forward",
 ]
 
 # A rule id sits in a control route's path, so it is restricted to characters
@@ -213,15 +229,24 @@ class RuleList(_Model):
     rules: list[RuleView]
 
 
-class ClockAdvance(_Model):
-    seconds: Annotated[int, Field(gt=0)]
+class TimeView(_Model):
+    """A party's time: ``{"source": "injected", "now": <instant>}``, or ``{"source": "wall"}``.
 
+    The answer to a time setting, and the time section of a status, as the time
+    component's route service shapes both. ``now`` is Unix seconds, stated for
+    an injected source alone; a boolean is never an instant.
+    """
 
-class ClockView(_Model):
-    """A double's perceived now, in Unix seconds, and its offset from wall time."""
+    source: Literal["wall", "injected"]
+    # Strict, so a string, a float or a boolean is never taken for an instant;
+    # the component's one rule then refuses a value out of range.
+    now: Annotated[int, Field(strict=True), AfterValidator(check_instant)] | None = None
 
-    perceived_now: int
-    offset_seconds: Annotated[int, Field(ge=0)]
+    @model_validator(mode="after")
+    def _now_with_injected_time(self) -> TimeView:
+        if (self.source == "injected") != (self.now is not None):
+            raise ValueError("an injected time states its now, and a wall time none")
+        return self
 
 
 class Funding(_Model):
@@ -260,14 +285,14 @@ class CaseList(_Model):
 
 
 class Status(_Model):
-    """A double's perceived clock and the contract resources it serves.
+    """A party's time and the contract resources it serves.
 
     ``contracts`` maps each installed contract resource to its SHA-256, read from
-    the kit wheel the double runs, for a run's record; nothing compares them.
+    the kit wheel the double runs, for a run's record; nothing compares them. The
+    sample app serves no contract, so its mapping is empty.
     """
 
-    perceived_now: int
-    offset_seconds: Annotated[int, Field(ge=0)]
+    time: TimeView
     contracts: dict[str, str]
 
 
@@ -282,11 +307,10 @@ __all__ = [
     "ACTIONS",
     "CaseList",
     "CaseView",
-    "ClockAdvance",
-    "ClockView",
     "ControlCode",
     "ControlError",
     "ControlErrorBody",
+    "ControlParty",
     "Double",
     "FilingAnswer",
     "Funded",
@@ -299,4 +323,5 @@ __all__ = [
     "Ruling",
     "SignerIdentity",
     "Status",
+    "TimeView",
 ]

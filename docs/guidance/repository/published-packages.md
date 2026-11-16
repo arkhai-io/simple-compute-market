@@ -54,7 +54,8 @@ them is published, along with the libraries and SDK clients they build on. Four 
 projects are not: the end-to-end test harness (`arkhai-e2e-tests`), the demo API it
 drives (`arkhai-apicredits-sample-app`), the issue-discovery development tool
 (`scm-issue-discovery`), and the lane doubles' control contract
-(`lane-double-controls`), which only the end-to-end harness and the lane doubles import.
+(`lane-double-controls`), which only the end-to-end harness, the lane doubles and the
+sample app import.
 
 `make dist-release` builds the release's wheel set. It carries no distribution only tests
 depend on: `make dist` adds `lane-double-controls` and `arkhai-apicredits-sample-app` for

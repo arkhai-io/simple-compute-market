@@ -979,7 +979,7 @@ doubles' direct reads with their behaviour unchanged, and switches the check on
 `negotiate_cli.py`, `buy_cli.py`), the signing clients (`core/storefront-client`'s
 `auth.py`, `client.py`; `core/registry-client`'s `auth.py`, `client.py`;
 `kit/deal-lifecycle-client`'s `client.py`),
-`tools/lane-double-controls/src/lane_double_controls/clock.py`,
+`tools/lane-double-controls`' `lane_double_controls.clock` (removed by section 13),
 the doubles' direct reads, the root `Makefile`, and
 `docs/guidance/repository/packaging-checks.md`.
 
@@ -1090,7 +1090,7 @@ the doubles' direct reads, the root `Makefile`, and
     existing `tests/integration` suite (one test, passing) never ran; the Makefile and
     `pytest`'s `testpaths` now name both directories.
 - [x] 7.4 The doubles' direct reads go through the component's wall source:
-  `lane_double_controls/clock.py`'s `wall_clock` and any direct read in the two
+  `lane_double_controls.clock`'s `wall_clock` and any direct read in the two
   doubles; their offset clocks stay until section 13.
   - Verify: `make test-lane-double-controls`, `make test-payments-lane-double` and
     `make test-mediation-lane-double` pass unchanged.
@@ -1959,19 +1959,79 @@ the scenario advances". Touches `tools/lane-double-controls` (`clock.py`,
 (`app.py`), `tools/mediation-lane-double` (`app.py`), and
 `domains/apicredits/sample-app` (`app.py`).
 
-- [ ] 13.1 `lane-double-controls`: `PerceivedClock`, `CLOCK_ADVANCE` and `CLOCK_RESET`
+- [x] 13.1 `lane-double-controls`: `PerceivedClock`, `CLOCK_ADVANCE` and `CLOCK_RESET`
   give way to the component's injected source and one `TIME` route,
   `POST /test/time {"now"}`, answering as D5 does with the same refusals; the status
   reports `{"source", "now"}`; the typed client gains `set_time` and loses
   `advance_clock` and `reset_clock` (D18).
   - Verify: `make test-lane-double-controls`.
-- [ ] 13.2 Both doubles read the shared injected source, install it from a time-source
+  - Done: `clock.py` (`PerceivedClock`, `wall_clock`) and its test are removed; a
+    new `time_control.TimeControl(source)` wraps the component's
+    `TimeRouteService` for a party's handlers — `settable`, `view()` and
+    `set_time(raw body)`, the component's refusals raised as `ControlError`
+    (`409 time_moves_forward`, `422 invalid_time`, both new `ControlCode`s, the
+    message the component's detail); it is served only where `settable` holds.
+    Models: `ClockAdvance`/`ClockView` give way to `TimeView`
+    (`source` `wall`|`injected`, `now` a strict integer read by the component's
+    `check_instant`, stated exactly when injected); `Status` is `{"time": TimeView, "contracts"}`,
+    the services' status shape, so the fixture reads every party's `time` alike.
+    Routes: `TIME = POST /test/time` replaces the two clock routes; a route's
+    `doubles` is now `parties: frozenset[ControlParty]`, `ControlParty` adding
+    `"sample-app"`, which serves `TIME` and `STATUS` alone;
+    `routes_for(party, *, time_settable)` leaves `TIME` out for a wall-time party.
+    The client gains `set_time(now)`, which sends `{"now": now}` as given (so a
+    test can send a boolean), and loses the two clock methods. README updated:
+    the parties, the time control, its refusals.
+  - Evidence, unit and library integration: `make test-lane-double-controls`,
+    133 passed, mypy strict clean — `test_time_control.py` (unit: injected
+    viewed and set; wall viewed without an instant and not settable; each refusal
+    changes nothing), `test_models.py` (`TimeView`'s two forms and seven refused
+    ones), `test_routes.py` (each party's routes; no `TIME` for a wall-time
+    party), and `test_client.py` (the stand-in surface: `set_time` sends
+    `POST /test/time {"now"}`, status parses the time section, the new codes
+    raise as `ControlError`).
+- [x] 13.2 Both doubles read the shared injected source, install it from a time-source
   setting in their configuration (`"injected"` in every lane), and serve the new route
   and status behind their control bearer token (D18).
   - Verify: `make test-payments-lane-double` and `make test-mediation-lane-double`,
     including: a once part's hold pays out at the next read after time is set past its
     release instant, with no background work.
-- [ ] 13.3 The sample app installs its source from `APICREDITS_SAMPLE_APP_TIME_SOURCE`
+  - Done: each double's `create_app(..., source=None)` reads the given source or
+    the process's installed one, gives its engine or service `source.now`, and
+    registers `TIME` only while the source is settable (the handler-set check
+    takes `routes_for(..., time_settable=...)`); status reports `time` beside the
+    contract hashes. The setting is an environment variable, the doubles'
+    configuration form: `PAYMENTS_LANE_DOUBLE_TIME_SOURCE`,
+    `MEDIATION_LANE_DOUBLE_TIME_SOURCE`, `"wall"` by default (the local Helm
+    release runs both doubles and stays on wall time, D17); `Settings` refuses any
+    other value through the component's `source_for`, naming the variable, and
+    `settings.install_time_source(settings)`, which `__main__` calls before
+    building the app, installs the source process-wide (so the payments kit's own
+    `injected_time.now` defaults read it too) and logs an injected one at INFO;
+    `__main__` configures logging first so the line shows. Section 16 sets
+    `"injected"` in the lanes. Both declare `arkhai-injected-time` and are
+    relocked; READMEs updated. `PaymentsDouble`'s clock default is
+    `injected_time.now`.
+  - Evidence, unit and application integration (the doubles' apps in process
+    through the typed control client and the kits' real clients):
+    `make test-payments-lane-double` 93 passed — `test_controls.py` (status at
+    the injected instant; a set held, a repeat of the instant accepted; 409 and
+    422 change nothing; a wall-time double reports `wall` and answers the route
+    404; admission refuses a mandate expired at the set instant),
+    `test_double.py::test_a_once_hold_pays_out_at_the_next_read_once_time_is_set_to_its_release`
+    (held a second before the release, released at the first read after the
+    set; the double has no background work to do it otherwise), the rate cases
+    now set time through the control, and `tests/unit/test_settings.py` (the
+    variable: unset → wall, `injected`, `injectd` refused naming it; the install
+    helper installs and announces injected time and installs wall time
+    silently); `make test-mediation-lane-double` 78 passed —
+    `test_controls.py::test_the_time_and_status` (set, status, 409, 422), records
+    dated at the set instant, `test_mechanics.py`'s once hold reported `paid_out`
+    after a set, and its own `test_settings.py`, the same cases. The mediation
+    suite shares one `InjectedTime` between the double and the payments engine it
+    calls, as one lane time. `__main__` itself (uvicorn serving) is run by no
+    test; its install is the helper above.
+- [x] 13.3 The sample app installs its source from `APICREDITS_SAMPLE_APP_TIME_SOURCE`
   and, under injected time, serves `POST /test/time` and its status behind a control
   bearer token from its environment, through `lane-double-controls`' models and client,
   excluded from the metering gate (D18).
@@ -1979,7 +2039,53 @@ the scenario advances". Touches `tools/lane-double-controls` (`clock.py`,
     the app's instant and is neither charged nor refused by the gate; after a set 3600 s
     forward with the credits service set alike, a metered call's consume request is
     accepted (`test-compatibility`'s "Metered calls continue after an advance").
-- [ ] 13.4 Section verification.
+  - Done: `configured_app()` installs the source from
+    `APICREDITS_SAMPLE_APP_TIME_SOURCE` (`"wall"` by default, any other value
+    refused naming it), logs an injected one at INFO, and builds the app; the
+    console script serves it through uvicorn's factory form after configuring
+    logging, so the module no longer builds an app at import (nothing else
+    imported `apicredits_sample_app.app:app`);
+    `create_app(..., source=None, control_token=None)` serves `TIME` and `STATUS`
+    through `TimeControl` only when the source is injected, behind
+    `APICREDITS_SAMPLE_APP_CONTROL_TOKEN` (`lane_double_controls.routes.authorize`),
+    and adds both paths to the gate's `exclude_paths`; an injected app with no
+    token refuses to build, naming the variable. A wall-time app serves neither
+    route. The app declares `arkhai-injected-time` and `lane-double-controls`
+    (both in the wheelhouse `make dist` builds, which the sample app's image
+    installs from), and `arkhai-kit-identity` in its dev group for the suite's
+    stand-in, and is relocked. Section 16 sets both variables in the lane. The
+    control token is an environment variable, as D18 states: like the doubles'
+    control tokens, committed in their fixture files, it is a public development
+    value guarding a control only an injected app serves, not a credential, so
+    `configuration.md`'s secret-file rule does not bear on it.
+  - Evidence, application integration, `domains/apicredits/sample-app/tests/test_time_control.py`
+    (the real app in process; the control through `ControlClient`; the gate
+    signing with `AuthoritySigning` to a stand-in credits service holding one
+    key, which verifies each signed call with `market_identity.verify_request` at
+    a time of its own and signs its answers): the control sets the app's instant
+    and status follows, with no call reaching the credits service; 409 and 422
+    and a wrong token change nothing; with the stand-in an hour ahead, a metered
+    call is refused 401 because the gate's verification is refused
+    `TIMESTAMP_SKEW` and the call answers 401 (whose answer the gate then
+    refuses too, signed an hour ahead), and after the control sets the app an
+    hour forward the call answers 200, its verification and consume both
+    `VERIFIED` and one credit spent; on a wall-time app (gate and stand-in both on
+    wall time) the typed client's `set_time` meets the gate, not a control — a
+    401 that is no control error — the stand-in having verified the gate's call
+    and answered the control token 404 as an unknown key, nothing spent; an
+    injected app without a token refuses to build. `configured_app()`, in process
+    with its environment patched: injected installs a new source, logs the
+    announcement and mounts the route; unset installs wall time, logs nothing and
+    mounts neither control route; `injectd` is refused naming the variable and
+    installs nothing. `make -C domains/apicredits/sample-app test` 11 passed. The
+    new file sits flat in `tests/` beside the suite's one existing file; moving
+    both into `unit/`/`integration/` is outside this change, and is a row under
+    "Unowned work found by `drive-the-storefront-clock-in-lanes`" in
+    `openspec/changes/README.md`, with section 7's `kit/deal-lifecycle-client`. Correction to the
+    plan's wording: the credits service is a verifying stand-in, not the real
+    service; the real service against the same middleware signing at an
+    injected instant is section 6's `test_signed_authority.py` test.
+- [x] 13.4 Section verification.
   - Unit and application integration: `make test-lane-double-controls`,
     `make test-payments-lane-double`, `make test-mediation-lane-double`,
     `make test-domains` (the sample app).
@@ -1988,6 +2094,89 @@ the scenario advances". Touches `tools/lane-double-controls` (`clock.py`,
   - Owed by validation: `tests.yml`, jobs `test · test-lane-double-controls`,
     `test · test-payments-lane-double` and `test · test-mediation-lane-double` — each
     passes with the new route.
+  - Outside the plan, pulled forward because this section removes the routes it
+    called: the e2e harness's doubles' clock half — `LaneDoubleClock`,
+    `clocks_reset_after` and the `lane_double_clock` fixture in
+    `e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`, its re-export in
+    `roles/conftest.py`, and their three unit tests in
+    `tests/unit/test_lane_doubles_fixtures.py` — is removed (15.5's removal);
+    `test_lane_doubles_evidence.py` builds the new `Status`; and
+    `test_hold_passed.py` is bridged — `tests/unit/test_scenario_cleanup_order.py`
+    plans every scenario's fixtures, so a module naming a removed fixture fails
+    the unit suite — with a module fixture of both doubles' control clients
+    setting each double's time past the terms end and the release (16.2 moves it
+    to the lane-time fixture). Until section 16 sets the doubles' time source in
+    the lanes, that module fails in a lane run: the doubles start on wall time and
+    serve no time route. `e2e-tests/README.md`'s hold-passed row and module-order
+    paragraph say what the module now does. `docs/guidance/repository/deal-scenarios.md`
+    and `docs/guidance/engineering/system-tests.md` still name `lane_double_clock`
+    until section 17 restates them.
+  - Outside the plan, found by the fresh-context check: section 12's static
+    check (`scripts/tests/test_committed_time_sources.py`) matched `TIME_SOURCE`
+    and `*_TIME__SOURCE` only, missing this section's
+    `PAYMENTS_LANE_DOUBLE_TIME_SOURCE`, `MEDIATION_LANE_DOUBLE_TIME_SOURCE` and
+    `APICREDITS_SAMPLE_APP_TIME_SOURCE`; it now matches `*_TIME_SOURCE` too, a
+    planted mapping value of the double's variable refused and a stated `wall`
+    passed. That shows the name is matched in a mapping or a Compose `KEY=VALUE`
+    list; neither double's chart takes environment values today, and a
+    Kubernetes `name:`/`value:` list is not read. The stale descriptions of the
+    controls package — `published-packages.md`'s unpublished projects, the root
+    `Makefile`'s `dist` comment, `tools/README.md`'s entry (18.9 adds the
+    component's own entry), `TESTING.md`'s controls paragraph and the package's
+    `pyproject.toml` — name the sample app and the time control.
+  - Citations: design.md's Context and tasks 7's plan and 7.4 cited the removed
+    clock module by its file path; they now name the module,
+    `lane_double_controls.clock`, which the citation check does not read as a
+    path, their meaning unchanged.
+  - Evidence: `make test-lane-double-controls` 133, `make test-payments-lane-double`
+    93, `make test-mediation-lane-double` 78, `make -C domains/apicredits/sample-app
+    test` 11, `make test-release-tooling` 3184 (the static check among them),
+    each after the fresh-context fixes; `make test-e2e-unit` 908 passed (1
+    skipped) before them. `scripts/change-workflow run pre-commit
+    drive-the-storefront-clock-in-lanes` before the fixes:
+    `after-functional-change` and `pre-commit-functional` (every suite) passed;
+    of `pre-commit`, the citations check failed on closeout's
+    `openspec/specs/injected-time/architecture.md` (18.9) and on the removed clock
+    module (resolved above). On the fixed tree: `after-functional-change` (`make
+    lock`) and `pre-commit-functional` (`make dist-clean`, `make
+    check-packaging`, `make test`, every suite, `make test-e2e-unit` among them)
+    passed; of `pre-commit`, the citations check failed on closeout's document
+    and on this note's own citation of the removed path, since reworded. On the
+    final tree, after the second check's fixes: `after-functional-change` and
+    `pre-commit-functional` (every suite) passed, and of `pre-commit` only the
+    citations check failed, on closeout's
+    `openspec/specs/injected-time/architecture.md` (18.9).
+  - Each new test imports what only this change adds (`injected_time`,
+    `TimeView`, `TimeControl`), so against the round's base each fails at
+    collection, which shows less than a behavioural failure.
+  - End-to-end scenarios covering the section, none run by it: once section 16
+    puts the lanes on injected time, `e2e_vm_dispute_hold_passed` sets the
+    doubles' time, every lane module runs both doubles, and the API-credits
+    lane's modules the sample app. The owed jobs are right: each runs in
+    `tests.yml`'s matrix, a workflow `scripts/ci_evidence.py` lists.
+  - Fresh-context check: it found the e2e work and its broken module
+    unrecorded (recorded above), no startup announcement in the doubles or the
+    sample app (added, with tests), the sample app's wall-time test passing only
+    because the wall clock was far from its fixed instant and asserting a raw
+    call's body (the stand-in now holds one key and runs on wall time with the
+    gate, and the test asserts the status and the stand-in's record), "no lane
+    publishes its port" untrue of the sample app (reworded in `routes.py` and the
+    README), the static check missing the new settings (fixed), `TimeView`
+    restating the value rule (it now calls `check_instant`), the stale package
+    descriptions (fixed), the undeclared `market_identity` test import (added to
+    the dev group), a subprocess test where an in-process call proves the same
+    (now in process), an unreachable guard in `TimeControl.set_time` (removed),
+    a misnamed token test (renamed), and three overstated claims (reworded).
+    Declined: moving the sample app's tests into `integration/` (above), and the
+    control token's environment variable (D18 states it; above). A second check,
+    over the fixes, found the wall-time test still sending a raw call (it now
+    uses the typed client), a comment on `TimeView`'s strict mode and a client
+    message naming only the doubles (fixed), a docstring claiming an injected
+    source (fixed), no test of a wall-time app leaving the route unmounted
+    (added), two unwrapped docstrings (wrapped), and three claims broader than
+    their tests (the static check, the skewed and wall-time cases, the
+    end-to-end line; reworded). It repeated the flat layout, now recorded as a
+    change-index row, and the control token, declined for the reason above.
 
 ## 14. The buyer's injected time
 

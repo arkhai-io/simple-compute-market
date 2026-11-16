@@ -11,7 +11,7 @@ from collections.abc import Callable
 
 import pytest
 
-from lane_double_controls import ControlError, Rule, Ruling
+from lane_double_controls import ControlError, Rule, Ruling, TimeView
 from market_arkhai_mediation.client import MediationAPIError
 from market_arkhai_mediation.contract import resource_bytes, wire
 from market_arkhai_mediation.models import ReadAfter
@@ -176,26 +176,27 @@ def test_the_case_listing_is_by_transaction() -> None:
     assert controls.cases("0" * 64).cases == []
 
 
-def test_the_clock_and_status() -> None:
+def test_the_time_and_status() -> None:
     lane = Lane()
     controls = lane.controls()
 
-    advanced = controls.advance_clock(DAY)
+    answer = controls.set_time(T0 + DAY)
     status = controls.status()
-    reset = controls.reset_clock()
 
-    assert (advanced.perceived_now, advanced.offset_seconds) == (T0 + DAY, DAY)
-    assert (status.perceived_now, status.offset_seconds) == (T0 + DAY, DAY)
-    assert (reset.perceived_now, reset.offset_seconds) == (T0, 0)
+    assert answer == TimeView(source="injected", now=T0 + DAY)
+    assert status.time == TimeView(source="injected", now=T0 + DAY)
+    assert _refused(controls.set_time, T0) == (409, "time_moves_forward")
+    assert _refused(controls.set_time, True) == (422, "invalid_time")
+    assert lane.time.now() == T0 + DAY
     assert status.contracts == {
         f"contract_data/{name}": hashlib.sha256(resource_bytes(name)).hexdigest()
         for name in ("mediation.schema.json", "mediation.vectors.json", "publication.json")}
 
 
-def test_records_are_dated_by_the_perceived_clock() -> None:
+def test_records_are_dated_by_the_injected_time() -> None:
     lane = Lane()
     transaction = lane.approve()
-    lane.controls().advance_clock(3_600)
+    lane.controls().set_time(T0 + 3_600)
 
     _file(lane, transaction)
 

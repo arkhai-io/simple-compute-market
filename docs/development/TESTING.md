@@ -621,8 +621,9 @@ doubles mirror their producers, as
 two: the payments double and the mediation double.
 
 **The lane doubles' controls.** Both lane doubles serve one typed control
-contract, `tools/lane-double-controls`, which the doubles and the end-to-end
-harness import; its [README](../../tools/lane-double-controls/README.md) lists
+contract, `tools/lane-double-controls`, which the doubles, the API-credit sample
+app's time control and the end-to-end harness import; its
+[README](../../tools/lane-double-controls/README.md) lists
 the rules, routes and refusals. Its controls are deterministic steps
 ([`test-doubles.md`, "Controls are deterministic steps"](../guidance/engineering/test-doubles.md#controls-are-deterministic-steps)).
 A transport fault abandons a started response, so SCM's clients see a transport

@@ -17,7 +17,8 @@ What exists:
 
 - Only the lane doubles have a movable clock: wall time plus an offset, moved by
   `POST /test/clock/advance` and reset by `POST /test/clock/reset`
-  (`tools/lane-double-controls/src/lane_double_controls/clock.py`, `routes.py`), and
+  (`tools/lane-double-controls`, its modules `lane_double_controls.clock` and
+  `lane_double_controls.routes`), and
   the harness advances both and resets them at each module's end
   (`e2e-tests/tests/e2e/roles/helpers/lane_doubles.py`, `lane_double_clock`).
 - Every other party reads wall time directly: about 221 reads across 99 production

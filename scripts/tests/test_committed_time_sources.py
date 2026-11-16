@@ -21,7 +21,8 @@ here:
 Each file is parsed as its consumer parses it — YAML, TOML, or ``KEY=VALUE``
 lines — with keys in any case, and its tree searched for a setting choosing
 injected time: ``time.source`` under any spelling of its section (``[Time]
-source`` for a storefront), ``TIME_SOURCE`` (the registry's), or an override
+source`` for a storefront), ``TIME_SOURCE`` (the registry's), a variable ending
+``_TIME_SOURCE`` (the lane doubles' and the sample app's), or an override
 variable ending ``_TIME__SOURCE`` (a Dynaconf service's). A refusal names the
 file and the setting's path, which names the party. The search reads the files,
 not what Helm or Compose would render from them, so it refuses a setting even
@@ -107,7 +108,7 @@ def _read(path: Path) -> Any:
 
 def _chooses_injected(name: str, value: Any) -> bool:
     upper = name.upper()
-    return (upper == "TIME_SOURCE" or upper.endswith("_TIME__SOURCE")) and (
+    return (upper == "TIME_SOURCE" or upper.endswith(("_TIME_SOURCE", "_TIME__SOURCE"))) and (
         str(value).strip().strip("\"'") == "injected"
     )
 
@@ -187,7 +188,9 @@ def test_a_production_example_setting_injected_time_is_refused_naming_it(tmp_pat
     ]
 
 
-def test_a_packaged_profile_compose_service_or_env_file_injecting_time_is_refused(tmp_path):
+def test_a_packaged_profile_compose_service_env_file_or_double_injecting_time_is_refused(
+    tmp_path,
+):
     profile = _copy(tmp_path, f"{PACKAGED_PROFILES}/config-seller.yml")
     profile.write_text(
         profile.read_text(encoding="utf-8") + "\ntime:\n  source: injected\n", encoding="utf-8"
@@ -200,11 +203,20 @@ def test_a_packaged_profile_compose_service_or_env_file_injecting_time_is_refuse
     )
     env = tmp_path / "config.registry.env.example"
     env.write_text("# development values\nTIME_SOURCE=injected\nLOG_LEVEL=info\n", encoding="utf-8")
+    doubles = tmp_path / "values.yaml"
+    doubles.write_text(
+        "payments-lane-double:\n  env:\n    PAYMENTS_LANE_DOUBLE_TIME_SOURCE: injected\n",
+        encoding="utf-8",
+    )
     wall = tmp_path / "wall.yaml"
-    wall.write_text("config:\n  Time:\n    source: wall\n", encoding="utf-8")
+    wall.write_text(
+        "config:\n  Time:\n    source: wall\nenv:\n  MEDIATION_LANE_DOUBLE_TIME_SOURCE: wall\n",
+        encoding="utf-8",
+    )
 
-    assert refusals([profile, compose, env, wall], root=tmp_path) == [
+    assert refusals([profile, compose, env, doubles, wall], root=tmp_path) == [
         f"{PACKAGED_PROFILES}/config-seller.yml: time.source is {SUFFIX}",
         f"seller.yml: services.provisioning.environment.PROVISIONING_TIME__SOURCE is {SUFFIX}",
         f"config.registry.env.example: TIME_SOURCE is {SUFFIX}",
+        f"values.yaml: payments-lane-double.env.PAYMENTS_LANE_DOUBLE_TIME_SOURCE is {SUFFIX}",
     ]

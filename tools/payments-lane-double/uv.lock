@@ -721,6 +721,7 @@ name = "payments-lane-double"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-arkhai-payments" },
     { name = "arkhai-kit-identity" },
     { name = "cryptography" },
@@ -740,6 +741,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.6.0" },
     { name = "arkhai-kit-identity", specifier = ">=0.4.0" },
     { name = "cryptography", specifier = ">=43" },
