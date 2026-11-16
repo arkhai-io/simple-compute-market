@@ -547,12 +547,13 @@ class TestBuyFrom:
         [
             (["--allow-no-penalty", "--allow-charged-term-end"],
              ["--allow-no-penalty", "--allow-charged-term-end"]),
+            (["--allow-charged-preemption"], ["--allow-charged-preemption"]),
             (["--allow-unprotected-terms"], [
                 "--allow-no-delivery-deadline", "--allow-no-penalty",
                 "--allow-charged-preemption", "--allow-charged-term-end",
             ]),
         ],
-        ids=["two-waivers", "the-shorthand"],
+        ids=["two-waivers", "charged-preemption", "the-shorthand"],
     )
     def test_buy_fresh_records_and_names_each_waiver_and_a_duration_in_seconds(
         self, runner, monkeypatch, flags, recorded,

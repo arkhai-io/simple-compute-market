@@ -264,10 +264,13 @@ def lifecycle_disclosure(
             ("Notice enforcement", "The payment authority hosts pending stops and enforces the priced notice, "
              "not a local seller stop schedule. An unentitled loss of service is handled by adjudication."),
             ("Premature-stop penalty", f"Up to {early.penalty} minor units of {option.price_asset}; "
-             "for an unentitled seller end (including spot without notice), not an entitled notice stop; "
-             "taken from what the seller has earned and not yet been paid, after refunds. "
-             "At the start, only an earned setup charge may be available. "
-             "Nothing earned and held means nothing taken. This is a ceiling, not a guaranteed payment."),
+             "for an unentitled seller end (including spot without notice), not an entitled notice stop. "
+             "It is collectible only from the seller's earnings still held: under this option's holds, "
+             "what the deal has earned so far and not yet been paid, after refunds; "
+             + ("in its first period, only the earned setup charge. "
+                if option.settlement.get("setup_amount") is not None else
+                "nothing in its first period, since it has no setup charge. ")
+             + "Nothing earned and held means nothing taken. This is a ceiling, not a guaranteed payment."),
             ("Rate start", "Billing starts as a journaled effect after lease activation, "
              "not when buyer credentials are disclosed."),
             ("Reserve protection", "Reserve-ahead is not spend and is not a loss cap. "

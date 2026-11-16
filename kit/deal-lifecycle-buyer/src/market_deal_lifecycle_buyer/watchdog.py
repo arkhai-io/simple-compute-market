@@ -198,12 +198,14 @@ class WatchdogOutcome:
     stop: no retry under its operation key can change it, the deal is not
     stopped, and billing continues, so it is never reported as ``stopped``.
     ``resumed`` marks a stop journaled by an earlier run, which this run only
-    carried to the authority or found already there.
+    carried to the authority or found already there. ``funding_stop`` marks a
+    deal that ended because its funds ran out, so no top-up revives it.
     """
 
     reason: Literal["stopped", "rejected", "ended"]
     progress: EndDeliveryProgress | None = None
     resumed: bool = False
+    funding_stop: bool = False
 
     @classmethod
     def of_stop(cls, progress: EndDeliveryProgress, *, resumed: bool = False) -> WatchdogOutcome:
@@ -258,6 +260,20 @@ async def deal_ended(lifecycle: BuyerLifecycle, negotiation_id: str) -> bool:
     except Exception:
         return False
     return delivery.recorded_end is not None or delivery.progress in {"end_recorded", "tearing_down", "released"}
+
+
+async def funding_stopped(lifecycle: BuyerLifecycle, negotiation_id: str, *, seconds: int) -> bool:
+    """Whether the deal's payment authority shows a final stop that is funds
+    running out; an unreadable authority, or one unanswered within ``seconds``,
+    shows none, so the loop's exit never waits on it."""
+    payment = lifecycle.payments.resolve(lifecycle._deal(negotiation_id).payment)
+    if payment is None or lifecycle.classify_payment_stop is None:
+        return False
+    try:
+        view = await asyncio.wait_for(payment.read(), seconds)
+    except Exception:
+        return False
+    return lifecycle.funding_stopped(view)
 
 
 async def _keep_evidence(lifecycle: BuyerLifecycle, negotiation_id: str, stop: WatchdogStop,
@@ -374,7 +390,9 @@ async def watch_deal(
             _probe_once(probe, settings.probe_timeout_seconds),
         )
         if has_ended:
-            return WatchdogOutcome("ended")
+            return WatchdogOutcome("ended", funding_stop=await funding_stopped(
+                lifecycle, negotiation_id, seconds=settings.probe_timeout_seconds,
+            ))
         journal.record_probe(negotiation_id, at)
         # A passing probe ends the run of failures: only consecutive ones count.
         failures = [] if answered else [*failures, ProbeObservation(at, detail)]

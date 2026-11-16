@@ -866,12 +866,24 @@ collectible bound and why a funding stop is final" and "The buyer refuses seller
 keep the started period" (`buyer-orchestration`). Touches `kit/settlement-runtime`,
 `kit/deal-lifecycle-buyer`, `domains/vms/buyer`, `domains/bare_metal/buyer`.
 
-- [ ] 5.1 `kit/settlement-runtime/src/market_settlement_runtime/buyer_terms.py`: the
+- [x] 5.1 `kit/settlement-runtime/src/market_settlement_runtime/buyer_terms.py`: the
       on-demand premature-stop penalty row states the penalty is collectible only from the
       seller's earnings still held, nothing in the first period without a setup charge
       (D13). Verify (unit, the buyer-terms suite): the row's text for an on-demand option
       with and without a setup charge.
-- [ ] 5.2 `kit/deal-lifecycle-buyer` (`lifecycle.py`, `watchdog.py`): take a payment-stop
+      Done: the row (shown for any option with early termination, spot included) says
+      the penalty "is collectible only from the seller's earnings still held: under this
+      option's holds, what the deal has earned so far and not yet been paid, after
+      refunds;" then "nothing in its first period, since it has no setup charge" or, for
+      an option carrying `setup_amount`, "in its first period, only the earned setup
+      charge". Unit (`kit/settlement-runtime/tests/unit/test_buyer_presentation.py`, a
+      new case for an on-demand option without and with a setup charge; the suite 304
+      passed). `kit/settlement-runtime` 0.8.1 (wording, no API); its six exact pins
+      moved with it, so `kit/arkhai-payments` 0.8.1, `kit/contact-exchange` 0.5.1,
+      `kit/config` 0.6.1 and `core/buyer` 0.7.1 each take a patch bump for the pin, and
+      their own exact pins moved (both storefronts' `contact-exchange`, bare metal's
+      `arkhai-payments`, bare metal buyer's `core-buyer`); `make lock` run.
+- [x] 5.2 `kit/deal-lifecycle-buyer` (`lifecycle.py`, `watchdog.py`): take a payment-stop
       classifier slot; when a rate part's final stop classifies as exhaustion, the read
       composition and the watchdog's exit say the balance could not reserve the next
       period, a top-up cannot revive the deal, and a new deal is needed. Both buyers fill
@@ -879,13 +891,89 @@ keep the started period" (`buyer-orchestration`). Touches `kit/settlement-runtim
       `kit/deal-lifecycle-buyer/tests/unit/`; application integration, each buyer's
       `test_watchdog_rate_stop.py`): an exhaustion stop shows the message; a term-end stop
       does not.
-- [ ] 5.3 D14's rewording is delta-only: confirm each buyer's existing waiver tests cover
+      Done: `BuyerLifecycle(classify_payment_stop=...)` (`PaymentStopClassifier`, a kind
+      or `None`) and `funding_stopped(view)`; `buyer_read` adds `funding_stop`, the
+      exported `FUNDING_STOP` text or `None`, beside `watchdog` and outside the wire read;
+      `WatchdogOutcome` gains `funding_stop`, set when the loop exits on a deal ended by
+      another path whose authority view, read within the probe timeout, shows a
+      funds-running-out stop, and `run_monitor` appends the text to its exit line. Each
+      buyer's `buyer_lifecycle` binds `classify_payment_stop` to the Agreement's
+      entitlements and its start (whole seconds) plus duration, and declares
+      `arkhai-compute>=0.3.0`. The buyer's delivery output is `buyer_read` itself
+      (`market delivery`, `market bare-metal delivery`, the kit's `register_read_command`,
+      whose help and docstrings now name `funding_stop`), so the read, the delivery output
+      and the watchdog's exit say it; `buy`'s own progress lines do not. `published-packages.md`'s
+      table names `arkhai-compute` among both buyers' internal dependencies.
+      `kit/deal-lifecycle-buyer` 0.3.0; VM buyer
+      0.13.0 and bare metal buyer 0.9.0, each taking it `>=0.3.0`. Unit
+      (`tests/unit/test_funding_stop.py`, a real `BuyerLifecycle` over mocked ports with
+      an injected classifier): a read of a deal whose part stopped under `terms` before
+      the term end carries the text; one stopped at the term end, one with no
+      classifier, and one with no final stop carry `None`; `run_monitor`'s exit line
+      carries the text for the early stop and not for the term end, the outcome's
+      `funding_stop` likewise; `kit/deal-lifecycle-buyer` 55 passed
+      (`test_watchdog_journal.py` now leaves `funding_stop` out with `watchdog` before
+      validating the wire read). Each buyer (`test_watchdog_rate_stop.py`): the lifecycle
+      the buyer's own `buyer_lifecycle` composes, over the approved rate mandate, reads a
+      `terms` stop one period before the Agreement's end as funds running out and one at
+      its end as not — a unit-level check of the term-end binding inside that module's
+      fixture, not application integration as the plan says: it reads views built in the
+      test, asserts neither the read's nor the exit's text (the kit cases do), and
+      exercises neither the entitlements binding (a `terms` stop reads none) nor the
+      whole-second truncation (the fixture's start is whole). The engine is not driven to
+      exhaust a balance. VM buyer 336 and bare metal buyer 86 passed.
+- [x] 5.3 D14's rewording is delta-only: confirm each buyer's existing waiver tests cover
       `--allow-charged-preemption` and `--allow-charged-term-end` as the reworded
       requirement states, adding a case where one is missing. Verify (unit): those suites
       pass.
-- [ ] 5.4 Verification point: `kit/settlement-runtime`, `kit/deal-lifecycle-buyer` and both
+      Done: the policy the reworded requirement states is the kit's
+      (`kit/settlement-runtime/tests/unit/test_buyer_terms.py`: each refusal named,
+      `test_each_flag_waives_exactly_its_refusal` showing `charged_preemption` admits its
+      option while a charged term end is still refused). Each buyer named
+      `--allow-charged-preemption` only through `--allow-unprotected-terms`, so VM's
+      `test_buy_resume_cli.py` gains a case recording it alone, and bare metal's
+      `test_cli_completion.py` a case recording it beside the deadline waiver its fixture
+      option needs and carrying it to the approval policy's waivers;
+      `--allow-charged-term-end` is recorded by its own flag in each already (unit,
+      passed with the suites).
+- [x] 5.4 Verification point: `kit/settlement-runtime`, `kit/deal-lifecycle-buyer` and both
       buyers' suites pass. End-to-end: the recurring purchases display the disclosure; no
       scenario asserts the new lines.
+      Done: `make -C kit/settlement-runtime test` (304), `make -C kit/deal-lifecycle-buyer
+      test` (55), `make -C domains/vms/buyer test` (336), `make -C domains/bare_metal/buyer
+      test` (86). End-to-end confirmed: the recurring purchases' buy runs print the
+      disclosure, the penalty row included, and no scenario asserts its new words or the
+      funding-stop text, so none is evidence for this section. Owed by validation: none.
+      Fresh-context check: fixed — the note claiming no delivery output says it (the
+      delivery command prints `buyer_read`); the read command's docstrings and help, and
+      the buyers' test module docstrings, which did not name the new content; the
+      watchdog's exit reading the authority with no bound (now cut off at the probe
+      timeout, as every other read in the loop is); bare metal's waiver coverage, which,
+      like VM's, named `--allow-charged-preemption` only through the shorthand; the
+      buyer cases' level and what they leave unexercised; and `published-packages.md`'s
+      buyer rows, refused by `make test`'s publish-matrix check. Declined: the
+      `"exhaustion"` literal in the buyer kit, which cannot import the servicing kit's
+      `ClassificationKind` and names the classifier's own word; the term-end and
+      entitlements binding stated in both buyers beside the storefronts' (section 3's
+      decline applies); untested `funding_stopped` branches for no classifier and an
+      unreadable authority, each answering the same `False` the tested term-end case
+      shows; and checking rate parts only, since a once-only part's end is the
+      Agreement's end, so its `terms` stop never reads as funds running out.
+
+Section 5 handoff:
+
+- `BuyerLifecycle.classify_payment_stop` is the buyer's slot; each buyer binds it in its
+  `buyer_lifecycle`. Section 10's funds-running-out lane row asserts "the buyer's
+  message": it is `buyer_read`'s `funding_stop` (`market delivery`) and the watchdog's
+  exit line, `FUNDING_STOP` in `market_deal_lifecycle_buyer`.
+- `kit/settlement-runtime` is exactly pinned by six packages; any later edit to it moves
+  them all, and through them the storefronts' and bare metal buyer's pins on
+  `contact-exchange`, `arkhai-payments` and `core-buyer`. This change has bumped each of
+  them once already, so a later edit in this change moves no version again unless it
+  needs a larger bump.
+- `published-packages.md` holds each published package's internal dependencies, checked
+  by `scripts/tests/test_publish_matrix.py` in `make test`; a dependency added to a
+  published package goes there too.
 
 ## 6. The kit's servicing step order, respondent port and page position
 

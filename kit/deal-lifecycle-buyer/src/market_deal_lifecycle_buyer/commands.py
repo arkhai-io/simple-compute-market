@@ -15,7 +15,7 @@ import typer
 from market_deal_lifecycle.terms import LifecycleTerms
 from market_deal_lifecycle_contracts.models import Accepted
 from market_deal_lifecycle_buyer.export import export_case
-from market_deal_lifecycle_buyer.lifecycle import BuyerLifecycle
+from market_deal_lifecycle_buyer.lifecycle import FUNDING_STOP, BuyerLifecycle
 from market_deal_lifecycle_buyer.retention import DealReader, prune_command
 from market_deal_lifecycle_buyer.store import FileEvidenceStore
 from market_deal_lifecycle_buyer.watchdog import (
@@ -185,7 +185,7 @@ RUN_SPELLINGS = ("--from", "--run", "--run-id", "-r")
 
 
 async def read_deal(target: EndTarget) -> dict[str, Any]:
-    """The buyer's read of the run's deal, with the watchdog's status."""
+    """The buyer's read of the run's deal, with the watchdog's status and any funding stop."""
     async with target.lifecycle as lifecycle:
         return await lifecycle.buyer_read(target.negotiation_id)
 
@@ -199,7 +199,8 @@ def register_read_command(
     ``open_target`` is the domain's ``end`` seam, called as ``register_end_command``
     calls it. The output is the lifecycle read with the watchdog's status beside it:
     ``monitored`` only while a probe ran recently, ``stopped`` once the watchdog
-    journaled its stop, and ``unmonitored`` otherwise.
+    journaled its stop, and ``unmonitored`` otherwise; and ``funding_stop``, why
+    the deal's stop is final when its funds ran out, or ``null``.
     """
 
     def run(run_id: str, config: str | None) -> None:
@@ -217,7 +218,10 @@ def register_read_command(
         def command(run_id: str = run_option) -> None:  # type: ignore[misc]
             run(run_id, None)
 
-    command.__doc__ = "Read delivery, site reports, authority progress and the watchdog's status independently."
+    command.__doc__ = (
+        "Read delivery, site reports, authority progress and the watchdog's status independently, "
+        "and say when a stop is final because the deal's funds ran out."
+    )
     app.command(name)(command)
 
 
@@ -359,7 +363,8 @@ def run_monitor(
              "'end --end-now-regardless' gives service up and files the buyer's case where the "
              "Agreement names a dispute authority.")
     elif outcome.reason == "ended":
-        echo("Watchdog exited: the deal ended by another path.")
+        echo("Watchdog exited: the deal ended by another path."
+             + (" " + FUNDING_STOP if outcome.funding_stop else ""))
     else:
         payment = outcome.progress.payment.status if outcome.progress else None
         echo(f"Watchdog's journaled stop carried to the payment authority: {payment}."
