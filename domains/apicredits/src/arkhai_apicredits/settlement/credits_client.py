@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-import time
 import uuid
 from collections.abc import Mapping
 from typing import Any, Literal, Self
 
 import httpx
+import injected_time
 from market_identity import (
     EMPTY_BODY,
     RESPONSE_PROTOCOL,
@@ -392,7 +392,7 @@ class CreditsServiceClient:
                 operation=operation,
                 resource=resource,
                 request_id=request_id,
-                timestamp=int(time.time()),
+                timestamp=injected_time.now(),
                 body_hash=canonical_body_hash(envelope_body),
             ),
         )
@@ -493,7 +493,7 @@ class CreditsServiceClient:
         result = verify_response(
             authenticated,
             body=body,
-            now=int(time.time()),
+            now=injected_time.now(),
             max_skew=self._max_response_skew,
             expected_role=AUTHORITY_RESPONSE_ROLE,
             expected_principals=self._expected_authorities,

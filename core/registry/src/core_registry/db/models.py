@@ -1,4 +1,6 @@
 from datetime import datetime
+
+import injected_time
 from sqlalchemy import (
     Column,
     String,
@@ -20,6 +22,14 @@ import enum
 Base = declarative_base()
 
 
+def utcnow() -> datetime:
+    """The process time source's instant as the model defaults and the stored
+    deadlines take it: UTC with no zone. Stored times are compared later — a
+    replay lease's expiry, a rotation's overlap deadline — and listings are
+    ordered by them. An API key's times are written aware by its store."""
+    return injected_time.now_datetime().replace(tzinfo=None)
+
+
 class Publisher(Base):
     """A stable subject that owns listings through principal bindings."""
 
@@ -30,13 +40,13 @@ class Publisher(Base):
     # the publish payload on first sighting.
     storefront_url = Column(Text, nullable=True)
     created_at = Column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=utcnow
     )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     identities = relationship(
@@ -70,7 +80,7 @@ class PublisherIdentity(Base):
     retired_at = Column(DateTime(timezone=True), nullable=True)
     disabled_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=utcnow
     )
 
     publisher = relationship("Publisher", back_populates="identities")
@@ -103,7 +113,7 @@ class PublisherReplayReservation(Base):
     lease_owner = Column(String, nullable=True)
     lease_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=utcnow
     )
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -140,7 +150,7 @@ class PublisherIdentityRotation(Base):
     expires_at = Column(Integer, nullable=False)
     status = Column(String, nullable=False)
     applied_at = Column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=utcnow
     )
     retire_at = Column(DateTime(timezone=True), nullable=True)
     retired_at = Column(DateTime(timezone=True), nullable=True)
@@ -198,13 +208,13 @@ class Listing(Base):
         default=OrderStatusEnum.open,
     )
     created_at = Column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=utcnow
     )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     publisher = relationship("Publisher", back_populates="listings")
@@ -245,7 +255,7 @@ class ApiKey(Base):
     key_hash = Column(String, nullable=False, unique=True)  # sha256(raw_key)
     scope = Column(String, nullable=False, server_default="read")  # "read" | "write"
     created_at = Column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=utcnow
     )
     revoked_at = Column(DateTime(timezone=True), nullable=True)
 

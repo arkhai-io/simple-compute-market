@@ -72,7 +72,8 @@ def create_api_key(
 def list_api_keys(db: Session = Depends(get_db)) -> List[ApiKeyListItem]:
     """List every key (including revoked) for audit. Raw values are
     not stored and therefore not returned."""
-    rows = db.query(ApiKey).order_by(ApiKey.created_at.desc()).all()
+    # Whole-second times tie; the key id is insertion order.
+    rows = db.query(ApiKey).order_by(ApiKey.created_at.desc(), ApiKey.id.desc()).all()
     return [
         ApiKeyListItem(
             id=r.id, name=r.name, scope=r.scope,

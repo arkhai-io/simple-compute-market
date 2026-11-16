@@ -6,6 +6,7 @@ description = "Shared API-credit domain models, policies, and market-domain cont
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-core>=0.4.0",
+    "arkhai-injected-time>=0.1.0",
     "arkhai-kit-policy>=0.6.0",
     "arkhai-kit-alkahest>=0.7.0",
     "arkhai-kit-identity==0.4.0",

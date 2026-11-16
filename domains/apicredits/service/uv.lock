@@ -142,6 +142,7 @@ version = "0.9.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-payments" },
     { name = "arkhai-kit-identity" },
@@ -156,13 +157,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-middleware"
-version = "0.1.1"
+version = "0.1.2"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_middleware-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_apicredits_middleware-0.1.2-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
@@ -175,6 +177,7 @@ name = "arkhai-apicredits-service"
 version = "0.8.0"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-resource-pools-contracts" },
@@ -199,6 +202,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.10.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },

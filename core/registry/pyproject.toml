@@ -18,6 +18,7 @@ dependencies = [
     "jsonschema>=4.20",
     "jsonpath-ng>=1.6",
     "arkhai-core==0.6.0",
+    "arkhai-injected-time>=0.1.0",
     "arkhai-kit-identity==0.4.0",
     "arkhai-kit-deal-lifecycle>=0.1.0",
     "arkhai-kit-schema-migrations>=0.1.0",

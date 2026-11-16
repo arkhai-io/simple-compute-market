@@ -565,7 +565,12 @@ class KeysService:
                 q = q.filter(ApiKey.status == status)
             if owner_id is not None:
                 q = q.filter(ApiKey.owner_id == owner_id)
-            return [self._key_payload(k) for k in q.order_by(ApiKey.created_at.asc())]
+            # Times are whole seconds, so keys created in one second tie on
+            # ``created_at``; the key id keeps their order stable between reads.
+            return [
+                self._key_payload(k)
+                for k in q.order_by(ApiKey.created_at.asc(), ApiKey.key_id.asc())
+            ]
 
     def revoke(self, key_id: str) -> Optional[dict[str, Any]]:
         """Idempotent: revoking a revoked key returns it unchanged."""

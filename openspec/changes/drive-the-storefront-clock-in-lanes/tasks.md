@@ -714,6 +714,9 @@ through the ORM only), `kit/resource-pools` (`db.py`), `kit/site-client`,
     claimed deadline are the stored end, whatever clock is read. Run against the
     pre-change wheels, before the wheelhouse was rebuilt, it failed as it should:
     the wall clock is past 1794822300, so the first cycle released the lease.
+    `run test-before` of `kit/site`'s new test at the section's starting commit
+    fails at collection (`injected_time` is absent from that environment), which
+    shows less than a behavioural failure.
   - Evidence for the provisioning stores, library integration, each with the source
     injected and held: `provisioning/compute`'s
     `test_job_authority.py::test_a_job_s_creation_and_retry_are_the_process_source_s_instants`
@@ -778,22 +781,114 @@ metering middleware. Touches `core/registry` (`api/listing_routes.py`,
 ledger it hosts), `domains/apicredits/src/arkhai_apicredits/settlement/credits_client.py`,
 and `domains/apicredits/middleware/python` (`signing.py`, `gate.py`).
 
-- [ ] 6.1 Each package declares `arkhai-injected-time`, relocked; every direct read
+- [x] 6.1 Each package declares `arkhai-injected-time`, relocked; every direct read
   converted as 3.2; the middleware reads the process source its host installs for
   every timestamp it signs and every response it verifies, with no control of its own
   (D18).
   - Verify: `make check-time-reads` reports none of these packages; their suites pass.
-- [ ] 6.2 Supply the read database times in the registry and the credits service from
+  - Done: four packages declare `arkhai-injected-time>=0.1.0`, with their
+    `published-packages.md` rows: `core/registry`, `domains/apicredits` (the
+    credits client's package), `domains/apicredits/service`, and the Python
+    middleware, as a base dependency: its signing module is imported on every path,
+    and the component is standard library only, so an unsigned deployment's set
+    stays light (its `pyproject.toml` and module docstring say so). Relocked with
+    `make lock` (full). 31 reads converted, all the time of the world, none elapsed
+    work (the gate's batching interval was already monotonic): the registry's 26 —
+    request verification and the response stamp, the replay lease and its
+    completion, rotation-proof verification, an overlap's deadline and the
+    retirement stamps, the identity and rotation status comparisons, API keys'
+    creation and revocation (aware, the form that store already wrote), a listing's
+    `updated_at`, and every model default, now `core_registry.db.models.utcnow`
+    (naive UTC, the form the defaults and deadlines take); the
+    credits client's and the middleware's request timestamp and response
+    freshness reference, two each; the credits service's model default. The
+    registry's status comparisons go through `api/utils.py`'s
+    `instant_comparable_with`, which keeps the stored deadline's form (naive as
+    SQLite returns it, aware if the database returns it so), as the code it
+    replaces did. The credits service's hosted site ledger reads the source
+    through `kit/site` (section 5).
+  - Outside the plan, ties: a list ordered newest or oldest first by a whole-second
+    stamp now breaks ties — the registry's listings by `listing_id`, its
+    publishers by `publisher_id` and its API keys by `id` (both autoincrement,
+    insertion order), the credits service's keys by `key_id`.
+  - Versions: the middleware 0.1.2 (a patch: a new runtime dependency, no API
+    change; it carried the `marketplace-v0.3.0` version, and nothing pins it
+    exactly); `domains/apicredits` (0.9.0, released) is left for section 11, whose
+    credits client gains its setting call and takes the minor bump; the registry
+    and the credits service were already bumped on `dev` since that release.
+  - Evidence: `make check-time-reads` lists none of these packages (30 findings
+    left, all section 7's but `domains/vms/negotiation`'s, 5.3's handoff).
+- [x] 6.2 Supply the read database times in the registry and the credits service from
   the process source (D13).
   - Verify: an application-integration test in each, with the source injected: a
     listing the registry stores, and a grant the credits service issues, hold the
     injected instant in every read column.
-- [ ] 6.3 Section verification.
+  - Columns: neither store has an SQL time default; every time was already written
+    by the application, and now comes from the source. Read: the registry's
+    `listings.created_at` (listings are ordered by it), `publishers.created_at`
+    (likewise), `identities.created_at` (active principals sorted by it), a replay
+    reservation's `lease_expires_at` (compared), a rotation's `retire_at` and an
+    identity's `active_until` (compared), `api_keys.created_at` (ordered); the
+    credits service's `api_keys.created_at` (ordered). Reported or audit, supplied
+    alike: the registry's `updated_at`s, `completed_at`, `applied_at`,
+    `retired_at`, `revoked_at`; the credits service's `updated_at`, `granted_at`
+    and `occurred_at`.
+  - Evidence, application integration. `core/registry/tests/integration/test_injected_time.py`,
+    the running registry through `RegistryClient`, the source 120 s behind the wall
+    clock (the client still signs on it, 4.2's correction), on the suite's shared
+    database fixture, whose schema comes from the ORM metadata, not the migration
+    chain (the application supplies every time, so no SQL default is in play): a
+    published listing's `created_at` and `updated_at`, its new publisher's and
+    identity binding's `created_at`, and the replay reservation's `created_at` and
+    `completed_at` hold the injected instant; republished 60 s later, the listing
+    keeps its `created_at` and its `updated_at` moves. A rotation through the client
+    stores `applied_at` at the source's instant and `retire_at` and the outgoing
+    identity's `active_until` 300 s later, and that identity reads as in overlap a
+    second before the deadline and retired at it. An API key minted and revoked
+    through its store's functions (no client route reaches them here) holds the
+    source's instants. Not asserted: the replay lease, which a completed request
+    clears. `domains/apicredits/service`'s
+    `test_signed_authority.py::test_a_grant_and_its_spending_hold_the_injected_instant`,
+    the real application through the seller's `CreditsServiceClient` and the gated
+    app's `TokensClient`, at 1794821400: a grant's `granted_at` and its key's
+    `created_at`/`updated_at` hold the instant; a consumption 60 s later stamps
+    `occurred_at` and moves `updated_at`. Every party in that process reads the
+    source, hours from the wall clock, so the test also shows the credits client and
+    the middleware sign and verify by the source: on the wall clock every hop would
+    fail the 300 s skew.
+- [x] 6.3 Section verification.
   - Unit and application integration: `make test-registry`, and `make test-domains`
     (the API-credits service and the Python middleware).
   - `scripts/change-workflow run pre-commit drive-the-storefront-clock-in-lanes`.
   - End-to-end: the API-credits lane's purchase runs this code at wall time; no new
     scenario is owed.
+  - Evidence: `make -C core/registry test` 153 unit and 164 integration passed;
+    `make -C domains/apicredits test` — the domain 41, the service 81, the
+    storefront 276, the buyer 35, the sample app 1, the Python middleware 8, the
+    TypeScript port 5 and the Rust port 6. `scripts/change-workflow run pre-commit
+    drive-the-storefront-clock-in-lanes` on the final tree:
+    `after-functional-change` (`make lock`) and `pre-commit-functional`
+    (`make check-packaging` and `make test`, every suite, `make test-registry` and
+    `make test-domains` among them) passed; of `pre-commit`, only the citations
+    check failed, on closeout's `openspec/specs/injected-time/architecture.md`
+    (18.9).
+  - Both new tests import `injected_time`, which `run test-before`'s environment
+    lacks, so against the section's starting commit they would fail at collection,
+    as 5.2's did; not run, since that shows nothing about the change.
+  - Fresh-context check: it found registry read columns no test held (the rotation
+    and API-key tests above were added), a placeholder for this evidence, a claim
+    broader than its assertion and two docstrings naming one stored form where API
+    keys keep another (all corrected), and the ORM-built schema (now stated above).
+    Declined: bumping `domains/apicredits` now, which section 11's minor bump
+    covers, as section 3 left `kit/identity` and `kit/storefront` for their later
+    sections.
+  - Confirmed: no new end-to-end marker; the API-credits lane runs this code at wall
+    time. No owed CI evidence.
+  - Handoff for section 7: the registry's signed hops are converted on the server
+    side only; until `core/registry-client` reads the source, a registry test through
+    the client injects an instant within 300 s of the wall clock, as
+    `test_injected_time.py` does. The credits client and the middleware already read
+    the source, so the credits service's tests may inject any instant.
 
 ## 7. The buyer side and the signing clients read the process source; the check is on
 
