@@ -1,15 +1,19 @@
-"""A recurring payments deal is settled but not delivered while rate servicing is not composed.
+"""A recurring payments deal is delivered, and an undelivered one meets its deadline.
 
 Application integration: the running bare-metal app, its typed clients and
 SQLite persistence, with the installed recurring wiring under a declaration
 listing ``charged`` and ``returned`` (``recurring_world``). The buyer negotiates
 the published on-demand option, approves its mandate at the in-process payments
 engine and settles through the typed client; the settle path starts delivery
-through the real delivery path and end service.
+through the real delivery path and end service, with the site and provisioning
+service replaced at the clients the storefront wraps them in. A deal is left
+undelivered by an unreachable site, so its commit is allowed and nothing is
+placed.
 """
 
 import json
 import time
+from datetime import datetime
 
 from market_arkhai_payments import PaymentSettlementData
 from market_arkhai_payments.fixtures import FakePaymentsClient
@@ -61,53 +65,69 @@ def approve(payments: FakePaymentsClient, data: PaymentSettlementData) -> None:
     payments.receipt = payments.engine.approve(data.mandate, account=PAYER)
 
 
-async def test_a_settled_recurring_deal_is_not_delivered_while_rate_servicing_is_not_composed(tmp_path):
+async def test_a_settled_recurring_deal_is_activated_then_billed_and_made_available(tmp_path):
     payments = FakePaymentsClient(signer=PAYMENTS_SERVICE)
     async with recurring_world(tmp_path, payments=payments) as world:
         negotiation_id, data = await accepted_recurring_deal(world)
         assert any(part.root.kind == "rate" for part in data.mandate.parts)
         approve(payments, data)
 
-        settled = await world.buyer.settle_agreement(negotiation_id)
-
-        # The settle answers the deal's deferred delivery: still planning, with
-        # no reservation or fulfillment.
-        assert settled.status == "planning"
-        assert settled.extra["capacity_reservation_id"] is None
-        assert settled.extra.get("fulfillment_id") is None
+        await world.buyer.settle_agreement(negotiation_id)
 
         with transaction(world.db.db_path) as conn:
             session = EndSession(conn)
             record = session.read(negotiation_id)
             intents = session.intents(negotiation_id)
             lifecycle = conn.execute(
-                """SELECT state, capacity_reservation_id, fulfillment_id FROM bare_metal_fulfillment_lifecycle
+                """SELECT state, capacity_reservation_id, activated_at_utc FROM bare_metal_fulfillment_lifecycle
                    WHERE negotiation_id=?""",
                 (negotiation_id,),
             ).fetchone()
-    # The receipt verified and the deal's servicing record exists, as a rate deal.
-    assert record.commitment_ref == data.transaction_id and record.committed_at is not None
-    assert record.available_at is None
-    # End service refused the commit with its code, before any capacity,
-    # fulfillment or billing.
-    [authorization] = [intent for intent in intents if intent.kind == "authorization"]
-    answer = DeliveryAuthorization.model_validate(authorization.result)
-    assert answer.status == "refuse" and answer.code == "rate_servicing_unavailable"
-    assert not [intent for intent in intents if intent.kind == "billing"]
-    # The deal's delivery holds no reservation and began no fulfillment.
-    assert lifecycle == ("planning", None, None)
-    # The payments engine records no rate start: nothing was submitted.
-    assert payments.count("submit_event") == 0
+        capacity, provisioning = world.capacity, world.provisioning
+    snapshot = payments.engine.snapshot(data.transaction_id).snapshot
+
+    # Committed, placed and activated at the site, its fulfillment begun, and
+    # available. The row keeps the fulfillment state recorded at dispatch until
+    # a status read refreshes it from provisioning.
+    _, reservation, recorded_activation = lifecycle
+    assert reservation == "reservation-a"
+    assert len(capacity.commit_calls) >= 1 and len(provisioning.begin_calls) == 1
+    activated_at = int(datetime.fromisoformat(capacity.activated_at).timestamp())
+    assert recorded_activation == activated_at
+    assert record.available_at is not None and record.available_at >= activated_at
+    # The commit was allowed by the payment authority, not refused.
+    commit = next(
+        DeliveryAuthorization.model_validate(intent.result) for intent in intents
+        if intent.kind == "authorization" and intent.payload["phase"] == "commit"
+    )
+    assert commit.status == "allow"
+    # Billing started once, from the site's activation: the journaled billing
+    # start names that activation, and the payments engine holds the started rate.
+    [billing] = [intent for intent in intents if intent.kind == "billing"]
+    assert billing.state == "done"
+    activated = billing.payload["activated_delivery"]
+    assert (activated["record_ref"], activated["activated_at"]) == (reservation, activated_at)
+    assert payments.count("submit_event") == 1
+    assert [part.started is not None for part in snapshot.parts] == [True]
 
 
-async def settled_refused_deal(tmp_path, payments) -> tuple[str, PaymentSettlementData, DeliveryRecord]:
-    """A recurring deal settled and refused at commit by an app that then stops."""
+async def settled_undelivered_deal(tmp_path, payments) -> tuple[str, PaymentSettlementData, DeliveryRecord]:
+    """A recurring deal settled while its site is unreachable, by an app that
+    then stops: its commit is allowed and nothing is placed."""
     async with recurring_world(tmp_path, payments=payments) as world:
         negotiation_id, data = await accepted_recurring_deal(world)
         approve(payments, data)
+        world.capacity.unreachable = True
         await world.buyer.settle_agreement(negotiation_id)
         with transaction(world.db.db_path) as conn:
-            record = EndSession(conn).read(negotiation_id)
+            session = EndSession(conn)
+            record = session.read(negotiation_id)
+            intents = session.intents(negotiation_id)
+        assert world.capacity.reservation_sites == {} and world.capacity.commit_calls == []
+        assert world.provisioning.begin_calls == [] and record.available_at is None
+        assert [DeliveryAuthorization.model_validate(intent.result).status for intent in intents
+                if intent.kind == "authorization"] == ["allow"]
+        assert not [intent for intent in intents if intent.kind == "billing"]
     return negotiation_id, data, record
 
 
@@ -129,7 +149,7 @@ async def recovered(tmp_path, payments, negotiation_id, *, at: int) -> Lifecycle
 
 async def test_a_buyer_stop_while_the_storefront_is_down_wins_over_the_deadline_at_recovery(tmp_path):
     payments = FakePaymentsClient(signer=PAYMENTS_SERVICE)
-    negotiation_id, data, record = await settled_refused_deal(tmp_path, payments)
+    negotiation_id, data, record = await settled_undelivered_deal(tmp_path, payments)
 
     # With the app stopped, the buyer stops at the payment authority before
     # the delivery deadline; no hint reaches the storefront.
@@ -149,14 +169,45 @@ async def test_a_buyer_stop_while_the_storefront_is_down_wins_over_the_deadline_
     assert read.filings == []
 
 
-async def test_recovery_after_the_deadline_records_seller_non_delivery_for_a_refused_rate_deal(tmp_path):
+async def test_recovery_after_the_deadline_records_seller_non_delivery_for_an_undelivered_rate_deal(tmp_path):
     payments = FakePaymentsClient(signer=PAYMENTS_SERVICE)
-    negotiation_id, _, record = await settled_refused_deal(tmp_path, payments)
+    negotiation_id, _, record = await settled_undelivered_deal(tmp_path, payments)
 
     read = await recovered(tmp_path, payments, negotiation_id, at=record.deadline + 60)
 
     # The buyer never stopped: recovery reads the authority first, so its one
     # cycle records the deadline as seller non-delivery and journals the filing.
+    assert read.delivery.recorded_end is not None
+    assert (read.delivery.recorded_end.cause, read.delivery.recorded_end.ended_at) == (
+        "non_delivery", record.deadline,
+    )
+    assert len(read.filings) == 1
+
+
+async def test_an_unreadable_authority_at_the_deadline_records_nothing_until_a_later_read(tmp_path):
+    payments = FakePaymentsClient(signer=PAYMENTS_SERVICE)
+    negotiation_id, _, record = await settled_undelivered_deal(tmp_path, payments)
+
+    # The payments service cannot be read at recovery past the deadline: the
+    # deadline awaits an observation of the authority, so nothing is recorded
+    # and no filing is journaled.
+    payments.unavailable = True
+    payments.observed_at = record.deadline + 60
+    reads = payments.count("get_transaction")
+    async with recurring_world(tmp_path, payments=payments, clock=lambda: record.deadline + 60) as world:
+        await world.admin.admin_run_lifecycle_cycle("delivery-recovery")
+        # The cycle asked the authority for the deal, and the read failed.
+        assert payments.count("get_transaction") > reads
+        with transaction(world.db.db_path) as conn:
+            session = EndSession(conn)
+            requests = session.requests(negotiation_id)
+            filings = [intent for intent in session.intents(negotiation_id) if intent.kind == "filing"]
+    assert requests == [] and filings == []
+
+    # Once the authority is read again, the next recovery admits the deadline.
+    payments.unavailable = False
+    read = await recovered(tmp_path, payments, negotiation_id, at=record.deadline + 120)
+
     assert read.delivery.recorded_end is not None
     assert (read.delivery.recorded_end.cause, read.delivery.recorded_end.ended_at) == (
         "non_delivery", record.deadline,

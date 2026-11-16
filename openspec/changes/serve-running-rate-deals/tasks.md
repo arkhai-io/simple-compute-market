@@ -269,20 +269,53 @@ integration; requirements "Delivery authorization delegates payment interpretati
 (`domains/vms/storefront/tests/`, `domains/bare_metal/storefront/tests/`). Sections 3.3
 and 9.3 build their delivered rate deals on these worlds.
 
-- [ ] 2A.1 VM: make `domains/vms/storefront/tests/recurring_world.py`'s `settlement`
+- [x] 2A.1 VM: make `domains/vms/storefront/tests/recurring_world.py`'s `settlement`
       deliver a rate deal — its fake site places and commits the deal's capacity, and the
       storefront's capacity runtime, which the end hand-off and the failure policy also
       use, resolves the world's site authority — so a committed recurring deal reaches
       activation, the payments fake's rate `start` and availability. Verify (application
       integration): a new case drives a recurring deal to `available` with its billing
       start journaled after the site's activation.
-- [ ] 2A.2 Bare metal: give `domains/bare_metal/storefront/tests/recurring_world.py`'s
+      Done, differing from the plan in which site: the world's site for delivery is
+      `tests.delivery_fakes.DeliverySite`, the fake `test_vm_delivery_path.py` already
+      delivers against, composed as the one site of a real `CapacityRuntime`
+      (`delivery_capacity`, resolving the publication harness's `SITE`) whose site client
+      factory returns it; the publication harness's `FakeSite` serves projections only and
+      has no activation route. The coordinator takes that runtime's effects, and the
+      lifecycle's end service has its physical collaborator replaced after construction
+      by a `VmPhysicalEnd` over the same runtime and provisioning
+      (`lifecycle.end.physical`, as `test_payment_settlement.py`,
+      `test_lifecycle_failures.py` and `test_lifecycle_admin.py` replace it; `VmDealLifecycle`
+      takes no constructor parameter for it), so the end hand-off reaches the world's
+      site instead of building a runtime from the storefront's configured sites. The
+      failure policy still builds its own runtime; no 2A case fails a delivery, so none
+      reaches it. `DeliverySite` gains `list_reservations`, filtered by state and escrow
+      as the site client's is, which `VmPhysicalEnd` reads, and an `unreachable` switch, a
+      reserve failing before its effect. Application integration
+      (`test_rate_delivery.py`, the case named below in 2A.3): a settled recurring deal's
+      commit is allowed, its reservation committed and activated at the site, billing
+      journaled once naming that activation, the payments engine holding the started rate
+      (one `submit_event`), and the deal available no earlier than the activation; passed.
+- [x] 2A.2 Bare metal: give `domains/bare_metal/storefront/tests/recurring_world.py`'s
       `_OneSite` capacity client what `fulfillment_service.py`'s `fulfill_bare_metal` needs
       (`site_names`, then whatever its dispatch needs, found by running it), so settle no
       longer answers 500 and a committed recurring deal reaches activation, the payments
       fake's rate `start` and availability. Verify (application integration): as 2A.1, in
       bare metal.
-- [ ] 2A.3 In each storefront, rewrite `tests/integration/test_rate_delivery_refusal.py` as
+      Done: `_OneSite` became `WorldSite`, a subclass of `test_http_settlement.py`'s
+      `_CapacityClient` (site names, reserve, commit, activation) that still serves the
+      projection site to the pool overrides and has the same `unreachable` switch. What
+      dispatch needed, found by running it, was a fulfillment client: the world's runtime
+      had `object()`. It now has `WorldProvisioning`, a subclass of `_ProvisioningClient`
+      scheduling the pool member's machine (`machine-r1`, `physical-r1`) in the world's
+      pool (`pool-1`), since delivery refuses a scheduled resource whose pool or host
+      differs. `RecurringWorld` exposes both as `capacity` and `provisioning`. Application
+      integration (`test_rate_delivery.py`): as 2A.1, with the reservation committed and
+      activated, fulfillment begun once, billing naming the activation, one
+      `submit_event`, and the deal available; passed. The lifecycle row's `state` keeps
+      the provisioning state recorded at dispatch until a status read refreshes it, so the
+      case asserts availability from end service, not that column.
+- [x] 2A.3 In each storefront, rewrite `tests/integration/test_rate_delivery_refusal.py` as
       `test_rate_delivery.py`: its refused-commit test becomes a rate deal delivered, with
       billing starting after activation; its three deadline-recovery tests keep their
       scenarios on a rate deal left undelivered (the storefront's evidence for the
@@ -293,10 +326,102 @@ and 9.3 build their delivered rate deals on these worlds.
       for the delivered deal: the watched purchase is monitored from `available` (D1;
       the watchdog requirement, `deal-lifecycle`). Verify (application integration): the
       rewritten tests pass in both storefronts.
-- [ ] 2A.4 Verification point: both storefronts' suites (application integration) pass,
+      Done, correcting the plan's count: each file held two deadline-recovery tests, not
+      three — a buyer's stop while the storefront was down winning over the deadline, and
+      recovery after the deadline recording seller non-delivery (the deadline admitted
+      after the payment observation). Both are kept on a rate deal left undelivered by an
+      unreachable site (`unreachable`: a reserve fails before its effect, which the path
+      leaves pending), whose commit is allowed and journaled and nothing placed — VM
+      asserts the site holds no reservation, bare metal that the site recorded no
+      reservation or commit and provisioning began nothing. The third scenario the plan
+      names, the delta's "The payment authority is unreadable at the deadline", existed
+      only in the kit's `test_deadline_barrier.py`; each file adds it whole: with the
+      payments service unavailable at recovery past the deadline, the cycle asks the
+      authority (a further `get_transaction`, failing) and journals no end request and no
+      filing intent, and once the authority is readable the next recovery records seller
+      non-delivery at the deadline with its one filing. In each storefront
+      `test_rate_delivery.py` (the delivered case of 2A.1/2A.2 and the three deadline
+      cases) and `test_watchdog_buy.py::test_a_watched_purchase_is_monitored_from_available`
+      pass (application integration). The watchdog case runs the production buyer `buy
+      --watchdog --watchdog-interval 1 --watchdog-threshold 2` against the served
+      storefront; the buy commands' own factories are its seam for the probe and the clock
+      (`watchdog_probe` answering `[True, False, False]` from a script, `wait_clock`'s
+      waits returning at once). The watchdog states its bound, probes, journals its last
+      probe and, after two failures, its stop resting on them, which the payments engine
+      accepts (two `submit_event` calls in all; VM's shows the rate start's before the
+      resumed run and the stop's after it, bare metal's only the total), and the buyer's
+      read shows it `stopped`. In bare metal the buy's availability wait, in fake time, answers
+      `available` before the CLI builds the probe, as its output shows. VM's buy CLI polls
+      the settle status in real time with no clock seam, so its case does not let it wait:
+      the buy runs with the site unreachable and `--settlement-timeout 0`, reads the
+      status once and exits 4 with the opt-in journaled and nothing probed; the test then
+      re-settles through the
+      typed client with the site answering, waits on that delivery task, checks the deal
+      available and billed, and resumes the run (`buy --from`, timeout 0), which reads it
+      ready and re-enters the watchdog. VM's checks that the probe was built from the
+      endpoint the delivery disclosed (`203.0.113.10:2222`); bare metal's factory is given
+      the run, its own input.
+- [x] 2A.4 Verification point: both storefronts' suites (application integration) pass,
       among them `test_rate_delivery.py`, `test_watchdog_buy.py` and the
       `test_lifecycle_*.py` modules; `scripts/change-workflow run pre-commit` passes.
       End-to-end: section 2B.
+      Done: `make -C domains/vms/storefront test` (unit 1194 passed, 1 skipped;
+      integration passed) and `make -C domains/bare_metal/storefront test` (passed), and
+      `scripts/change-workflow run pre-commit` passed with every functional hook. End-to-end,
+      corrected: no scenario is evidence for this section until section 2B rewrites the
+      recurring purchases' stages to assert delivery; until then they assert the refusal
+      and fail in the lanes. Owed by validation: none. Also in this commit, outside the plan and found by section 2's
+      fresh-context check: the comments in `domains/bare_metal/storefront/storefront.dev.toml`
+      and `domains/vms/storefront/storefront.bob.lane.toml` saying end service refuses
+      to commit a rate deal, and `domains/compute/delivery/pyproject.toml`'s
+      version-history comment on its servicing bound, now describe the current system.
+      `scripts/change-workflow run test-before` was not run: it runs without the
+      storefronts' environments, so the rewritten modules would fail at collection there,
+      showing nothing. At the round's base end service refused the commit the delivered
+      cases assert allowed, which is the reasoning, not a run, that they fail there.
+      Fresh-context check: fixed — VM's watchdog case waited on real-time settle polls
+      (now the resume flow above); the unreadable-authority cases covered only the first
+      half of their scenario; "a site that answers no reservation" described the
+      opposite path outcome (it is an unreachable site); `DeliverySite`'s docstring said
+      the unreachable site answers nothing, where only a reserve fails;
+      `list_reservations` took none of the site client's filters; the watchdog comments
+      claimed the first probe was journaled; bare metal's undelivered helper asserted
+      nothing at the site; and these notes' overstatements. Declined: the two lane
+      configurations' comments saying the lane delivers a per-period Agreement before a
+      lane run shows it — they describe what the configuration admits, which the code now
+      delivers, and section 2B runs the lanes; `TESTING.md`'s recurring-purchase
+      paragraph is 12.9's. A second check after those fixes found no determinism or
+      comment break; it asked for the unreadable-authority cases to show the cycle read
+      the authority, the VM watchdog case to assert the opt-in after the first buy, two
+      note phrasings narrowed, and the two seam gaps recorded as deferred work, all done.
+
+Section 2A handoff:
+
+- The worlds sections 3.3 and 9.3 build on: VM's `settlement(world)` yields `site` (the
+  `DeliverySite` delivery and the physical end share) beside `provisioning`; bare metal's
+  `RecurringWorld` carries `capacity` (`WorldSite`) and `provisioning`
+  (`WorldProvisioning`). Each `recurring_world`/`settlement` builds fresh fakes, so a
+  restarted storefront meets a site holding no reservation; a test needing the site to
+  outlive a restart must pass it in, which neither world takes yet.
+- VM's failure policy (`market_storefront.failure_actions`) still builds its capacity
+  runtime from the storefront's configured sites, so a VM case that fails a delivered
+  rate deal (3.3's provisioning failure after a buyer stop) reaches "No capacity site
+  authority configured" in the policy unless the world supplies that runtime too; the
+  end hand-off itself already reaches the world's site.
+- VM's buy CLI waits for settlement with `time.sleep` (`core_buyer.orchestration`'s
+  `wait_for_settlement`, reached with no sleep seam from `arkhai_payments.py`), so a VM
+  buy case cannot wait for delivery in fake time; bare metal's `wait_clock` covers its
+  waits. This gap, and `VmDealLifecycle` taking no physical-end or failure-policy
+  capacity collaborator, are rows under "Unowned work found by
+  `serve-running-rate-deals`" in `openspec/changes/README.md`.
+- The second fresh-context check also noted that no 2A case asserts D1's held answer
+  itself (the journaled commit `allow` unchanged while a later drive answers
+  `pending`); that is section 2's library-integration evidence
+  (`test_changed_answer.py`), and 2A's cases show only delivery and the deadline
+  barrier through the application.
+- In bare metal, the lifecycle row's `state` is provisioning's state as last read; the
+  settle-driven delivery leaves it `dispatch_pending` while end service records the deal
+  available.
 
 ## 2B. The recurring purchases are delivered in both lanes
 

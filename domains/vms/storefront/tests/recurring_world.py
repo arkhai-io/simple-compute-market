@@ -25,9 +25,11 @@ from typing import Any
 from unittest.mock import patch
 
 import httpx
+from core_storefront.aggregation import fill_first
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
 from market_arkhai_payments.seller import servicing_stage
+from market_capacity_publication import CapacityRuntime, CapacitySite
 from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
 from market_deal_lifecycle_client import LifecycleClient
 from market_deal_servicing import create_lifecycle_router
@@ -43,6 +45,7 @@ import market_storefront.container as container
 from market_storefront.controllers.settle_controller import router as settle_router
 from market_storefront.controllers.settle_controller import settlements_router
 from market_storefront.deal_lifecycle import VmDealLifecycle
+from market_storefront.delivery_lifecycle import VmPhysicalEnd
 from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.settlement_composition import (
@@ -52,7 +55,7 @@ from market_storefront.settlement_composition import (
 from market_storefront.utils import config as storefront_config
 from tests._settings_overrides import replaced_setting
 from tests.delivery_fakes import DeliveryProvisioning, DeliverySite
-from tests.fake_site import TEST_MARKETPLACE_SIGNER
+from tests.fake_site import TEST_MARKETPLACE_SIGNER, TEST_SITE_AUTHORITIES
 from tests.publication_app import (
     ADMIN_SIGNER,
     BUYER_SIGNER,
@@ -196,9 +199,9 @@ class RecurringSettlement:
 
     ``payments`` plays the payments service through the in-process engine, so
     a buyer approval there is what the stage's receipt check reads.
-    ``provisioning`` is the provisioning service's fulfillment surface; the
-    site's capacity is the world's own fake site, through the storefront's
-    capacity runtime.
+    ``provisioning`` is the provisioning service's fulfillment surface, and
+    ``site`` the site whose capacity a deal is placed, committed and activated
+    at, through the capacity runtime delivery and the physical end share.
     """
 
     payments: FakePaymentsClient
@@ -207,6 +210,7 @@ class RecurringSettlement:
     provisioning: DeliveryProvisioning
     #: The buyer's typed client of the storefront's lifecycle routes.
     buyer_lifecycle: LifecycleClient
+    site: DeliverySite
 
     async def delivered(self, negotiation_id: str) -> None:
         """Wait for the delivery drive the settlement started to return."""
@@ -227,6 +231,27 @@ class _NoSettlementJobs:
         return 0
 
 
+async def _no_reconciliation(_context: object) -> None:
+    """Delivery's site publishes nothing: the world's listings come from the
+    publication harness's own site."""
+
+
+def delivery_capacity(site: DeliverySite) -> CapacityRuntime:
+    """The capacity runtime over ``site`` alone, as the storefront composes one.
+
+    It resolves the world's site authority by the listing's binding, so the
+    delivery path's capacity effects and the physical end's reservation
+    listing, release and truncation reach the same site.
+    """
+    return CapacityRuntime(
+        sites=(CapacitySite(SITE, "http://delivery-site.invalid", TEST_SITE_AUTHORITIES),),
+        signer=TEST_MARKETPLACE_SIGNER,
+        placement=fill_first,
+        reconcile=_no_reconciliation,
+        site_client_factory=lambda _site, _signer: site,
+    )
+
+
 @contextlib.asynccontextmanager
 async def settlement(
     world: RecurringWorld,
@@ -241,11 +266,14 @@ async def settlement(
     declaration, with the stage's payments client the in-process engine. The
     settle routes are mounted on the world's app, so a buyer settles through
     the typed client and delivery runs through the real delivery path and end
-    service. ``payments`` is the payments service, a fresh engine unless a test
-    passes the one an earlier storefront used, since the service outlives a
-    storefront restart; ``clock`` is the deal lifecycle's, wall time unless
-    given. The settlement-servicing loop runs the lifecycle's recovery cycle,
-    and the lifecycle routes are mounted for the buyer's lifecycle client.
+    service: the site places, commits and activates the deal's capacity, and
+    provisioning reports its fulfillment active, so a committed deal starts
+    billing at the payments engine and becomes available. ``payments`` is the
+    payments service, a fresh engine unless a test passes the one an earlier
+    storefront used, since the service outlives a storefront restart; ``clock``
+    is the deal lifecycle's, wall time unless given. The settlement-servicing
+    loop runs the lifecycle's recovery cycle, and the lifecycle routes are
+    mounted for the buyer's lifecycle client.
     """
     composition = world.app.composition
     domain = world.app.db.domain_registry.resolve_mode("vm").contract
@@ -254,15 +282,19 @@ async def settlement(
         composition.settlement_config.mechanism_config("arkhai_payments"),
         client_for_owner=payments, rate_servicing=composition.rate_servicing,
     )
-    provisioning = DeliveryProvisioning(DeliverySite(SITE))
+    site = DeliverySite(SITE)
+    capacity = delivery_capacity(site)
+    provisioning = DeliveryProvisioning(site)
     coordinator = VmPaymentsCoordinator(
-        domain=domain, db=world.app.db, stage=stage,
-        capacity=container.resolved_capacity_runtime.effects(), fulfillment=provisioning,
+        domain=domain, db=world.app.db, stage=stage, capacity=capacity.effects(), fulfillment=provisioning,
     )
     lifecycle = VmDealLifecycle(
         world.app.db, TEST_MARKETPLACE_SIGNER, coordinator, composition.disputes, fulfillment=provisioning,
         **({"clock": clock} if clock is not None else {}),
     )
+    # The end service's physical end, over the same site as delivery, rather
+    # than the runtime the storefront's configured sites would build.
+    lifecycle.end.physical = VmPhysicalEnd(world.app.db, capacity=capacity, fulfillment=provisioning)
     coordinator.lifecycle = lifecycle
     previous = container.resolved_settlement_composition
     container.resolved_settlement_composition = replace(
@@ -279,7 +311,7 @@ async def settlement(
             "http://test", BUYER_SIGNER, TrustedIdentitySet(identities=(TEST_MARKETPLACE_SIGNER.identity,)),
             transport=httpx.ASGITransport(app=world.app.app),
         ) as buyer_lifecycle:
-            yield RecurringSettlement(payments, coordinator, lifecycle, provisioning, buyer_lifecycle)
+            yield RecurringSettlement(payments, coordinator, lifecycle, provisioning, buyer_lifecycle, site)
     finally:
         await coordinator.stop()
         await lifecycle.close()

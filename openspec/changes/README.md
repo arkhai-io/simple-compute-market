@@ -357,6 +357,13 @@ Deliberately outside the goal: postpaid monthly invoicing and on-chain open-ende
 | The two `test_a_cached_rate_option_whose_treatment_is_withdrawn_is_refused_through_the_app` tests, one per compute storefront, keep their database-seeded option, though each now duplicates a restored cached-recurring case at the same level and door that publishes the option, and `docs/development/TESTING.md` prefers service-internal setup only where the state is unreachable through an API | `spot-deals-through-arkhai-payments` task 4B.4, left for a triage that never took it up; recorded at closeout |
 | A receipt key change drains every open payment deal: buyers and storefronts move to the new identity, and deals approved under the old one are drained or refunded first. Re-anchoring running deals across the change is not designed; the design to resume from is a retired identity that verifies receipts approved in its window and no snapshot. Revisit when rate deals whose maximum term makes draining impractical reach production, or when the hosted payments service publishes a rotation mechanism | `spot-deals-through-arkhai-payments` D17 and D24 |
 
+### Unowned work found by `serve-running-rate-deals`
+
+| Item | Origin |
+|---|---|
+| The VM buyer's settlement wait has no clock seam: `buy` reaches `core_buyer.orchestration.wait_for_settlement` through `arkhai_vms_buyer/arkhai_payments.py` without its `sleep=`, so the wait spends wall time, and the buy command defines no factory for it as it does for the watchdog's (`wait_clock`). The VM storefront's `test_watchdog_buy.py` therefore never lets a fresh buy wait for delivery and reaches the watchdog through `buy --from`. Passing the command's `wait_clock` through to the settlement wait is a production change to the VM buyer | `serve-running-rate-deals` section 2A, its compliance check |
+| `VmDealLifecycle` builds its end service's physical end (`VmPhysicalEnd(db)`) itself and takes no constructor parameter for it or its capacity runtime, so VM storefront tests replace `lifecycle.end.physical` after construction (`tests/recurring_world.py`, `test_payment_settlement.py`, `test_lifecycle_failures.py`, `test_lifecycle_admin.py`), and its failure policy builds its capacity runtime from the configured sites (`failure_actions.build_capacity_runtime`), which tests reach only by patching. Injecting both through the constructor is a production change | `serve-running-rate-deals` section 2A, its compliance check |
+
 ## Unblocking work — the local end-to-end stack
 
 ```text

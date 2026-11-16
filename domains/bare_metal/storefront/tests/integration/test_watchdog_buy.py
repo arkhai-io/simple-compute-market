@@ -4,11 +4,11 @@ Application integration: the production buyer commands (``buyer_commands``) run
 against the bare-metal app served over loopback with the installed recurring
 wiring under a declaration listing ``charged`` and ``returned``
 (``recurring_world``); beyond ``buyer_commands``' doubles, the buyer CLI's
-``wait_clock`` factory runs its waits in fake time. The buyer approves the on-demand option's mandate at the
-in-process payments engine, which both sides read, and commits; end service
-refuses the commit of a rate deal while rate servicing is not composed, so the
-deal never becomes available. The watchdog's opt-in alone must never read as
-protection.
+``wait_clock`` factory runs its waits in fake time, and its ``watchdog_probe``
+factory answers from a script rather than a socket. The buyer approves the
+on-demand option's mandate at the in-process payments engine, which both sides
+read, and commits; the deal is delivered, and the watchdog the buyer opted into
+probes it from the moment it is available.
 
 Every account, key and address here is a deterministic development value; none
 may be used on a public network.
@@ -87,7 +87,25 @@ def buyer_settings() -> str:
     )
 
 
-async def test_a_watched_purchase_whose_commit_is_refused_is_never_watched(tmp_path, monkeypatch):
+def scripted_probe(monkeypatch, answers: list[bool]) -> list[str]:
+    """Replace the buyer CLI's probe factory with ``answers``, one per probe;
+    return the run each built probe was for."""
+    built: list[str] = []
+
+    def watchdog_probe(run_id: str, _config: str | None):
+        built.append(run_id)
+        remaining = iter(answers)
+
+        async def probe() -> bool:
+            return next(remaining)
+
+        return probe
+
+    monkeypatch.setattr(buyer_cli, "watchdog_probe", watchdog_probe)
+    return built
+
+
+async def test_a_watched_purchase_is_monitored_from_available(tmp_path, monkeypatch):
     payments = WallClockPayments(signer=PAYMENTS_SERVICE)
     async with recurring_world(tmp_path, payments=payments, serve=True) as world:
         report = await world.publish()
@@ -112,31 +130,34 @@ async def test_a_watched_purchase_whose_commit_is_refused_is_never_watched(tmp_p
 
         waits = FakeWaits()
         monkeypatch.setattr(buyer_cli, "wait_clock", waits.clock)
+        # The endpoint answers once, then stops answering for the threshold.
+        probed = scripted_probe(monkeypatch, [True, False, False])
 
         bought = buyer.invoke(
             "buy", listing_id, "--option-id", on_demand["option_id"], "--ssh-public-key", SSH_KEY,
-            "--duration-seconds", "3600", "--watchdog",
+            "--duration-seconds", "3600",
+            "--watchdog", "--watchdog-interval", "1", "--watchdog-threshold", "2",
             "--delivery-timeout-seconds", "10", "--poll-interval", "5",
         )
 
-        # The commit is accepted and the deal refused before any capacity, so
-        # it never becomes available: the command exits at its timeout, which
-        # it waited out in fake time, reading the deal's delivery each poll.
-        assert bought.exit_code == 4, bought.output
-        assert waits.now == 1010
+        assert bought.exit_code == 0, bought.output
         purchase, watched = (json.loads(line) for line in bought.stdout.strip().splitlines()[-2:])
-        assert purchase["fulfillment"]["status"] == "committed"
         negotiation_id = purchase["fulfillment"]["negotiation_id"]
+        # The availability wait that precedes the watchdog answered available;
+        # the watchdog stated its bound, probed the run's deal and, after the
+        # threshold of failures, sent the buyer's stop, which the payments
+        # engine accepted.
         assert watched == {"run_id": purchase["run_id"], "negotiation_id": negotiation_id,
-                           "available": False, "watchdog": None}
-        # No probe ran: the bound is never stated, and no stop reached the engine.
-        assert "Watchdog running" not in bought.stderr
-        assert payments.count("approve") == 1 and payments.count("submit_event") == 0
+                           "available": True, "watchdog": "stopped"}
+        assert probed == [purchase["run_id"]]
+        assert "Watchdog running" in bought.stderr
+        assert payments.count("approve") == 1 and payments.count("submit_event") == 2
 
         read = buyer.run("delivery", "--run-id", purchase["run_id"])
 
-    # The opt-in is persisted, yet the deal reads unmonitored, never as protected.
+    # The last probe is journaled, and the stop with the two failures it rests on.
     state = FileEvidenceStore(tmp_path / "buyer" / "evidence").watchdog.state(negotiation_id)
-    assert state is not None and state.last_probe_at is None and state.stop is None
-    assert read["watchdog"] == {"status": "unmonitored", "last_probe_at": None}
-    assert read["delivery"]["progress"] != "active" and read["delivery"]["recorded_end"] is None
+    assert state is not None and state.stop is not None
+    assert [probe.detail for probe in state.stop.probes] == ["access did not answer"] * 2
+    assert state.last_probe_at == state.stop.probes[-1].at
+    assert read["watchdog"]["status"] == "stopped"

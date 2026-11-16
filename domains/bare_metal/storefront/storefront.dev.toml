@@ -120,9 +120,9 @@ ca_bundle_path = "/run/lane-doubles/lane-ca.pem"
 # rate servicing, which is declared only once qualified against the deployed
 # payment authority. It lets publication and acceptance admit the shipped
 # recurring presets on a pool whose override selects one, as the recurring
-# purchase scenario's does, so the lane reaches approval and commit of a
-# per-period Agreement; the clauses below select none. It services nothing:
-# end service services no rate deal and refuses to commit one.
+# purchase scenario's does, so the lane approves, commits and delivers a
+# per-period Agreement against the payments double; the clauses below select
+# none.
 [Settlement.rate_servicing.arkhai_payments]
 treatments = ["charged", "returned"]
 

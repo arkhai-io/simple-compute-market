@@ -6,11 +6,19 @@ recurring wiring under a declaration listing ``charged`` and ``returned``
 (``tests.recurring_world``), its payments settle path and lifecycle routes
 mounted (``settlement``). The buyer negotiates the published on-demand option,
 approves its mandate at the in-process payments engine, which both sides read,
-and commits; end service refuses the commit of a rate deal while rate servicing
-is not composed, so the deal never becomes available. The watchdog's opt-in
-alone must never read as protection.
+and commits; the deal is delivered, and the watchdog the buyer opted into
+probes the endpoint its delivery disclosed once the deal is available. The VM
+buy waits for settlement on the wall clock, with no seam to drive that wait,
+so the test never lets it wait: the buy runs while the site is unreachable,
+reads the settle status once with the deal not yet available and exits at its
+timeout; the test then settles again with the site answering, waits on that
+delivery, and resumes the run, which reads the deal ready and re-enters the
+watchdog.
 
-The buyer CLI's collaborators are replaced at the names it resolves them
+The buy command's own factories are its seam for the watchdog's probe and
+clock (``buy_cli.watchdog_probe``, ``buy_cli.wait_clock``): the probe answers
+from a script rather than a socket, and the clock's waits return at once. The
+buyer CLI's other collaborators are replaced at the names it resolves them
 through, some of them imported names and one inside core, as the VM buyer CLI's
 tests do until its command modules own factory seams (``docs/development/ROADMAP.md``
 records that gap):
@@ -43,6 +51,7 @@ import json
 import time
 import uuid
 
+from arkhai_vms import VmConnectionDetails
 from arkhai_vms_buyer import arkhai_payments, buy_cli, common, settlement_stages
 from arkhai_vms_buyer.cli import app as buyer_app
 from arkhai_vms_buyer.run_log import list_runs, read_run
@@ -54,7 +63,9 @@ from market_arkhai_payments import ArkhaiPaymentsConfig, PaymentApproval
 from market_arkhai_payments.fixtures import FakePaymentsClient
 from market_arkhai_payments.models import AccountId
 from market_config.config_loader import load_user_config
-from market_deal_lifecycle_buyer import FileEvidenceStore
+from market_deal_lifecycle_buyer import FileEvidenceStore, WaitClock
+from market_deal_servicing import EndSession
+from market_deal_servicing.evidence import transaction
 from market_identity import TrustedIdentitySet
 from typer.testing import CliRunner
 
@@ -185,48 +196,110 @@ def _on_demand(listing: dict) -> dict:
     )
 
 
-async def test_a_watched_purchase_whose_commit_is_refused_is_never_watched(tmp_path, monkeypatch):
+def _scripted_probe(monkeypatch, answers: list[bool]) -> list:
+    """Replace the buy command's probe factory with ``answers``, one per probe,
+    and its clock's waits with ones that return at once; return the connection
+    details each built probe was given."""
+    built: list = []
+
+    def watchdog_probe(connection_details):
+        built.append(connection_details)
+        remaining = iter(answers)
+
+        async def probe() -> bool:
+            return next(remaining)
+
+        return probe
+
+    async def no_wait(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(buy_cli, "watchdog_probe", watchdog_probe)
+    monkeypatch.setattr(buy_cli, "wait_clock", lambda: WaitClock(sleep=no_wait))
+    return built
+
+
+def _events(run_id: str) -> list[dict]:
+    return list(read_run(run_id, signer=BUYER_SIGNER))
+
+
+async def test_a_watched_purchase_is_monitored_from_available(tmp_path, monkeypatch):
     payments = WallClockPayments(signer=PAYMENTS_SERVICE)
     runner = CliRunner()
-    async with recurring_world(tmp_path) as world, settlement(world, payments=payments), \
+    async with recurring_world(tmp_path) as world, settlement(world, payments=payments) as settled, \
             served(world.app.app) as url:
         await world.publish()
         (summary,) = (await world.app.client.list_listings(status="open")).listings
         listing = _registry_listing(world, summary.listing_id, url)
         _buyer(tmp_path, monkeypatch, listing, payments)
+        # The endpoint answers once, then stops answering for the threshold.
+        probed = _scripted_probe(monkeypatch, [True, False, False])
+        # The site is unreachable while the buy runs, so its delivery waits.
+        settled.site.unreachable = True
 
         bought = await asyncio.to_thread(runner.invoke, buyer_app, [
             "buy", "--yes", "--ssh-public-key", SSH_KEY, "--duration-seconds", "3600",
             # The option's hourly 2.5, in base units: the seller's ask, which
             # the buyer prices per fifteen-minute period.
             "--initial-price", "2500000", "--max-price", "2500000",
-            "--registry-urls", REGISTRY_URL, "--watchdog",
+            "--registry-urls", REGISTRY_URL,
+            "--watchdog", "--watchdog-interval", "1", "--watchdog-threshold", "2",
             # A deadline of now: the settle status is read once, then the
             # wait has run out, as it would after any longer timeout.
             "--settlement-timeout", "0", "--poll-interval", "0.2",
         ])
 
-        # The commit is accepted and the deal refused before any capacity, so
-        # it never becomes available: the command exits at its timeout.
+        # The commit is accepted and the deal is not yet available, so the
+        # command exits at its timeout with the opt-in kept and nothing probed.
         assert bought.exit_code == 4, bought.output
         (run,) = list_runs()
-        events = {event["event"]: event for event in read_run(run.run_id, signer=BUYER_SIGNER)}
-        assert "payment_approved" in events, (bought.output, events)
+        first = _events(run.run_id)
+        events = {event["event"]: event for event in first}
         negotiation_id = events["payment_approved"]["negotiation_id"]
         assert events["settlement_submitted"]["body"]["status"] == "committed"
-        # The refused deal's delivery stays deferred, so settlement never ends.
-        assert events["settlement_poll"]["body"]["status"] == "provisioning"
-        assert events["run_ended"]["status"] == "timeout"
-        # No probe ran: the bound is never stated, and no stop reached the engine.
-        assert "Watchdog running" not in bought.output
-        assert payments.count("approve") == 1 and payments.count("submit_event") == 0
+        assert "Watchdog running" not in bought.output and probed == []
+        opted_in = FileEvidenceStore(tmp_path / "buyer" / "evidence").watchdog.state(negotiation_id)
+        assert opted_in is not None and opted_in.last_probe_at is None
+        await settled.delivered(negotiation_id)
+
+        # The site answers again and a settle drives the delivery to its end:
+        # the deal is available and billing started.
+        settled.site.unreachable = False
+        await world.app.buyer.settle_agreement(negotiation_id)
+        await settled.delivered(negotiation_id)
+        with transaction(world.app.db.db_path) as conn:
+            assert EndSession(conn).read(negotiation_id).available_at is not None
+        assert payments.count("submit_event") == 1
+
+        # Resumed, the buy reads the deal ready and re-enters the watchdog it
+        # opted into: it states its bound and probes the endpoint the delivery
+        # disclosed, and after the threshold of failures sends the buyer's stop.
+        resumed = await asyncio.to_thread(runner.invoke, buyer_app, [
+            "buy", "--from", run.run_id, "--settlement-timeout", "0", "--poll-interval", "0.2",
+        ])
+
+        assert resumed.exit_code == 0, resumed.output
+        assert "Watchdog running" in resumed.output
+        [details] = probed
+        endpoint = (VmConnectionDetails.model_validate_json(details) if isinstance(details, str)
+                    else VmConnectionDetails.model_validate(details))
+        # The endpoint ``vm_fulfillment_result`` delivers by default.
+        assert (endpoint.host, endpoint.port) == ("203.0.113.10", 2222)
+        resumed_events = _events(run.run_id)[len(first):]
+        polls = [event for event in resumed_events if event["event"] == "settlement_poll"]
+        assert polls and polls[-1]["body"]["status"] == "ready"
+        [exited] = [event for event in resumed_events if event["event"] == "watchdog_exited"]
+        assert exited["reason"] == "stopped"
+        # The rate start, then the watchdog's stop.
+        assert payments.count("submit_event") == 2
 
         read = await asyncio.to_thread(runner.invoke, buyer_app, ["delivery", "--run", run.run_id])
         assert read.exit_code == 0, read.output
 
-    # The opt-in is persisted, yet the deal reads unmonitored, never as protected.
+    # The last probe is journaled, and the stop with the two failures it rests on.
     state = FileEvidenceStore(tmp_path / "buyer" / "evidence").watchdog.state(negotiation_id)
-    assert state is not None and state.last_probe_at is None and state.stop is None
+    assert state is not None and state.stop is not None
+    assert [probe.detail for probe in state.stop.probes] == ["access did not answer"] * 2
+    assert state.last_probe_at == state.stop.probes[-1].at
     view = json.loads(read.stdout.strip().splitlines()[-1])
-    assert view["watchdog"] == {"status": "unmonitored", "last_probe_at": None}
-    assert view["delivery"]["progress"] != "active" and view["delivery"]["recorded_end"] is None
+    assert view["watchdog"]["status"] == "stopped"

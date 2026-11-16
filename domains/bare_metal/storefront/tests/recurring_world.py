@@ -32,6 +32,7 @@ from market_settlement_runtime.rate_servicing import (
     RateServicing,
     RateServicingDeclaration,
 )
+from market_site_client import SiteCapacityClientError
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from pytest import MonkeyPatch
 from storefront_client import StorefrontClient
@@ -40,6 +41,7 @@ from arkhai_bare_metal_storefront.settlement_composition import (
     build_bare_metal_settlement_registry,
 )
 from loopback import serving
+from test_http_settlement import _CapacityClient, _ProvisioningClient
 from test_http_system import ADMIN_SIGNER, SELLER_SIGNER, _admin_client, _app, _derivation_runtime
 from test_publication_cycle import Site, member, pool
 
@@ -131,15 +133,40 @@ def _settlement_root(alkahest: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-class _OneSite:
-    """The capacity client over the world's one site."""
+class WorldSite(_CapacityClient):
+    """The capacity client over the world's one site.
+
+    It serves the site's projection to the pool overrides, and places, commits
+    and activates a deal's reservation at that site; while ``unreachable`` a
+    reserve fails before its effect, as an unreachable site's does.
+    """
 
     def __init__(self, site: Site) -> None:
+        super().__init__()
         self._site = site
+        self.unreachable = False
 
     def site(self, site_id: str) -> Site:
         assert site_id == SITE
         return self._site
+
+    async def reserve(self, **request: Any) -> dict[str, Any]:
+        if self.unreachable:
+            raise SiteCapacityClientError("site unreachable")
+        return await super().reserve(**request)
+
+
+class WorldProvisioning(_ProvisioningClient):
+    """Provisioning at the world's site: it schedules the machine the pool's one
+    member publishes, in that pool, and reports its fulfillment active with an
+    SSH endpoint."""
+
+    def __init__(self) -> None:
+        super().__init__(scheduled_host_id="machine-r1", scheduled_physical_host_id="physical-r1")
+
+    async def schedule_resource(self, request: Any) -> Any:
+        scheduled = await super().schedule_resource(request)
+        return scheduled.model_copy(update={"pool_id": POOL_ID})
 
 
 @dataclass
@@ -154,6 +181,10 @@ class RecurringWorld:
     declarations: dict[str, RateServicingDeclaration]
     #: The buyer's typed client of the app's lifecycle routes.
     buyer_lifecycle: LifecycleClient
+    #: The site's capacity, where a deal's reservation is placed and activated.
+    capacity: WorldSite
+    #: The provisioning service's fulfillment surface at the site.
+    provisioning: WorldProvisioning
     #: The app's loopback base URL when it is served, for a buyer's own commands.
     url: str | None = None
 
@@ -201,7 +232,11 @@ async def recurring_world(
     payments service outlives a storefront restart. ``clock`` is the runtime's
     lifecycle clock, wall time unless given. ``serve`` runs the app on a
     loopback port, its lifespan uvicorn's, so a buyer's own commands reach it
-    over HTTP; the world's clients then use that port too.
+    over HTTP; the world's clients then use that port too. A settled deal is
+    delivered through the real delivery path: the world's site places,
+    commits and activates its reservation, and provisioning reports its
+    fulfillment active, so billing starts at the payments engine and the deal
+    becomes available.
     """
     declarations: dict[str, RateServicingDeclaration] = {}
     site = Site(pool(POOL_ID, member("r1", POOL_ID), policy_tags={"capacity_bounds": {
@@ -210,8 +245,12 @@ async def recurring_world(
             "available_until_utc": AVAILABLE_UNTIL,
         },
     }}))
+    capacity = WorldSite(site)
+    provisioning = WorldProvisioning()
     with MonkeyPatch.context() as patches:
-        runtime = _derivation_runtime(tmp_path, patches, {SITE: site}, capacity_client=_OneSite(site))
+        runtime = _derivation_runtime(
+            tmp_path, patches, {SITE: site}, capacity_client=capacity, fulfillment_client=provisioning,
+        )
         configured = runtime.settlement_composition
         registry = build_bare_metal_settlement_registry()
         root = _settlement_root(configured.config.mechanisms["alkahest"].model_dump(mode="json"))
@@ -252,7 +291,9 @@ async def recurring_world(
                 ) as admin, StorefrontClient(
                     url, signer=BUYER_SIGNER, caller_role="buyer", expected_publishers=publisher,
                 ) as buyer, LifecycleClient(url, BUYER_SIGNER, publisher) as buyer_lifecycle:
-                    world = RecurringWorld(admin, buyer, runtime.db, declarations, buyer_lifecycle, url)
+                    world = RecurringWorld(
+                        admin, buyer, runtime.db, declarations, buyer_lifecycle, capacity, provisioning, url,
+                    )
                     world.declare(treatments)
                     yield world
             return
@@ -267,6 +308,8 @@ async def recurring_world(
                 "http://seller", BUYER_SIGNER, publisher,
                 transport=httpx.ASGITransport(app=app),
             ) as buyer_lifecycle:
-                world = RecurringWorld(admin, buyer, runtime.db, declarations, buyer_lifecycle)
+                world = RecurringWorld(
+                    admin, buyer, runtime.db, declarations, buyer_lifecycle, capacity, provisioning,
+                )
                 world.declare(treatments)
                 yield world

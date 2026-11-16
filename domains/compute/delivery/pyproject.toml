@@ -13,8 +13,9 @@ dependencies = [
     # Delivery phases, evidence and the payment-adapter protocol.
     "arkhai-kit-deal-lifecycle>=0.5.0",
     "arkhai-kit-deal-lifecycle-contracts>=0.1.0",
-    # End service, admission, the end journal and seller evidence; from 0.4.0
-    # it asks the payment adapter for every deal and holds a changed answer.
+    # End service, admission, the end journal and seller evidence: the path
+    # relies on end service asking the payment adapter for every deal and
+    # holding back an answer that changed at an unchanged revision.
     "arkhai-kit-deal-servicing>=0.4.0",
     # CapacityEffects and the listing's durable capacity binding.
     "arkhai-kit-capacity-publication>=0.11.0",
